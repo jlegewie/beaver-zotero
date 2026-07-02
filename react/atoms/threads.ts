@@ -24,6 +24,7 @@ import {
     undoAgentActionAtom,
     clearAllPendingApprovalsAtom,
 } from "../agents/agentActions";
+import { clearAllPendingQuestionsAtom } from "../agents/pendingQuestions";
 import { processToolReturnResults } from "../agents/toolResultProcessing";
 import { upgradeToolReturn } from "../compat/legacyToolResults";
 import { loadItemDataForAgentActions } from "../utils/agentActionUtils";
@@ -192,6 +193,22 @@ export const windowScrollPositionAtom = atom(
 export const recentThreadsAtom = atom<ThreadData[]>([]);
 
 /**
+ * Ask the user to confirm interrupting the currently streaming run.
+ * Returns true if the user confirmed (or there was nothing to confirm).
+ */
+function confirmInterruptActiveRun(title: string, text: string, confirmLabel: string): boolean {
+    const buttonIndex = Zotero.Prompt.confirm({
+        window: Zotero.getMainWindow(),
+        title,
+        text,
+        button0: confirmLabel,
+        button1: Zotero.Prompt.BUTTON_TITLE_CANCEL,
+        defaultButton: 1,
+    });
+    return buttonIndex === 0;
+}
+
+/**
  * Cancel any active run when switching threads.
  * This ensures the WebSocket connection is closed and UI state is consistent.
  */
@@ -229,13 +246,20 @@ async function cancelActiveRunIfNeeded(get: (atom: any) => any, set: (atom: any,
  */
 export const newThreadAtom = atom(
     null,
-    async (get, set, options?: { skipAutoPopulate?: boolean }) => {
+    async (get, set, options?: { skipAutoPopulate?: boolean; skipActiveRunConfirm?: boolean }) => {
         // Show loading state immediately if there's an active run to cancel
         const hasActiveWork = get(isWSChatPendingAtom) || get(activeRunAtom);
         if (hasActiveWork) {
+            if (!options?.skipActiveRunConfirm && !confirmInterruptActiveRun(
+                'Start new chat?',
+                'Beaver is still generating a response in this chat. Starting a new chat will stop it.',
+                'Start New Chat',
+            )) {
+                return;
+            }
             set(isLoadingThreadAtom, true);
         }
-        
+
         try {
             // Cancel any active run before switching threads
             await cancelActiveRunIfNeeded(get, set);
@@ -254,6 +278,7 @@ export const newThreadAtom = atom(
             set(activeRunAtom, null);
             set(threadAgentActionsAtom, []);
             set(clearAllPendingApprovalsAtom);
+            set(clearAllPendingQuestionsAtom);
             
             set(isWebSearchEnabledAtom, false);
             
@@ -298,9 +323,19 @@ export const isLoadingThreadAtom = atom<boolean>(false);
 export const loadThreadAtom = atom(
     null,
     async (get, set, { user_id, threadId, threadName }: { user_id: string; threadId: string; threadName?: string }) => {
+        // Confirm before interrupting a run that's actively streaming in the current thread
+        const hasActiveWork = get(isWSChatPendingAtom) || get(activeRunAtom);
+        if (hasActiveWork && !confirmInterruptActiveRun(
+            'Switch chat?',
+            'Beaver is still generating a response in this chat. Switching chats will stop it.',
+            'Switch Chat',
+        )) {
+            return;
+        }
+
         // Show loading state immediately for instant UI feedback
         set(isLoadingThreadAtom, true);
-        
+
         try {
             // Cancel any active run before loading a different thread
             await cancelActiveRunIfNeeded(get, set);
@@ -319,8 +354,9 @@ export const loadThreadAtom = atom(
             set(isWebSearchEnabledAtom, false);
             set(resetCitationMarkersAtom);
 
-            // Clear all pending approvals when loading a different thread
+            // Clear all pending approvals/questions when loading a different thread
             set(clearAllPendingApprovalsAtom);
+            set(clearAllPendingQuestionsAtom);
 
             // Fetch thread name if not provided (e.g., from protocol handler deep links).
             // Check cached recentThreadsAtom first to avoid a network/DB round-trip.

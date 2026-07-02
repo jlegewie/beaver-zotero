@@ -2,7 +2,8 @@
  * Agent-facing item support predicates.
  *
  * These predicates decide which items the Beaver agent and frontend UI treat
- * as supported sources (regular items plus PDF/EPUB/plain-text/image attachments).
+ * as supported sources (regular items plus PDF/EPUB/plain-text/web-snapshot/image
+ * attachments).
  * They are intentionally separate from the sync predicates in `./sync` — the
  * backend sync/upload path remains PDF-only, while frontend access supports
  * every content kind the local pipeline can handle (including images via `view`).
@@ -13,7 +14,7 @@
  */
 
 import { getReadableContentKind } from '../services/documentExtraction/attachmentResolution';
-import { safeFileExists } from './attachmentFiles';
+import { isLinkedUrlAttachment, safeFileExists } from './attachmentFiles';
 import { safeIsInTrash } from './zoteroItemUtils';
 import { isAttachmentOnServer, isAttachmentAvailableRemotely } from './webAPI';
 import { getPref } from './prefs';
@@ -21,14 +22,18 @@ import { logger } from './logger';
 
 /**
  * True when the item is a kind the agent can work with: a regular item or an
- * attachment whose content the agent can access (PDF/EPUB/plain text via `read`,
- * or image via the `view` tool).
+ * attachment whose content the agent can access (PDF/EPUB/plain text/web
+ * snapshot via `read`, or image via the `view` tool).
  */
 export const isAgentSupportedItem = (item: Zotero.Item | false): boolean => {
     if (!item) return false;
     if (item.isRegularItem()) return true;
+    // Linked URLs are web links with no local file, even when they carry a
+    // readable content type (e.g. a text/html web link classifies as `snapshot`).
+    // They are never an accessible source, so exclude them before the kind check.
+    if (isLinkedUrlAttachment(item)) return false;
     const kind = getReadableContentKind(item);
-    return kind === 'pdf' || kind === 'epub' || kind === 'text' || kind === 'image';
+    return kind === 'pdf' || kind === 'epub' || kind === 'text' || kind === 'snapshot' || kind === 'image';
 };
 
 /**

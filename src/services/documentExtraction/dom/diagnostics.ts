@@ -1,13 +1,28 @@
-import { visibleTextContent } from "./domWalk";
+import { NON_CONTENT_SELECTOR, normalizeText } from "./domWalk";
 import type { DomExtractionDiagnostics, DomSection } from "./schema";
+
+// NodeFilter.SHOW_TEXT; headless DOMParser documents may lack the global.
+const SHOW_TEXT = 0x4;
 
 /**
  * Visible-text character count of a parsed section body (whitespace-normalized,
  * excluding non-content subtrees like style/script that the walk never emits).
+ *
+ * Uses a tree walk instead of cloning the body, avoiding an extra full-DOM copy.
  */
 export function measureSectionSourceText(doc: XMLDocument | Document): number {
     const body = doc.body ?? doc.querySelector("body");
-    return body ? visibleTextContent(body).length : 0;
+    if (!body) return 0;
+    const walker = body.ownerDocument.createTreeWalker(body, SHOW_TEXT);
+    let buffer = "";
+    let node = walker.nextNode();
+    while (node) {
+        if (!(node as Text).parentElement?.closest(NON_CONTENT_SELECTOR)) {
+            buffer += (node as Text).nodeValue ?? "";
+        }
+        node = walker.nextNode();
+    }
+    return normalizeText(buffer).length;
 }
 
 /** Total characters across all extracted item text in the given sections. */

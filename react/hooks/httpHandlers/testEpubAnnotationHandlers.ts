@@ -19,7 +19,7 @@ import type { EpubDocument } from '../../../src/services/documentExtraction/epub
 import {
     citationSearchTextCandidates,
     normalizeHrefBasename,
-} from '../../../src/services/documentExtraction/epub/epubTextRange';
+} from '../../../src/services/documentExtraction/dom/textRange';
 import { normalizeText, type DomItem } from '../../../src/services/documentExtraction/dom';
 import { resolveEpubCitationRange } from '../../utils/epubVisualizer/epubRangeResolver';
 import {

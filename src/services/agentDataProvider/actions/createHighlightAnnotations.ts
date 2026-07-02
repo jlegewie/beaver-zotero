@@ -7,8 +7,11 @@ import {
 import {
     EpubAnnotationError,
     MissingPageGeometryError,
+    SnapshotAnnotationError,
     createEpubHighlightAnnotation,
     createHighlightAnnotation,
+    createSnapshotHighlightAnnotation,
+    prepareSnapshotAnnotationDocument,
 } from '../../annotations/createAnnotation';
 import { getReadableContentKind } from '../../documentExtraction/attachmentResolution';
 import { getAttachmentFileStatus, getDeferredToolPreference, validateLibraryAccess } from '../utils';
@@ -31,16 +34,16 @@ function mapAnnotationErrorCode(error: unknown): string {
             ? 'page_extraction_failed'
             : 'page_geometry_unavailable';
     }
-    if (error instanceof EpubAnnotationError) {
+    if (error instanceof EpubAnnotationError || error instanceof SnapshotAnnotationError) {
         return error.code;
     }
     return 'apply_failed';
 }
 
-/** PDF and EPUB are the supported annotation targets; everything else is rejected. */
-function getAnnotationContentKind(attachment: Zotero.Item): 'pdf' | 'epub' | null {
+/** PDF, EPUB, and snapshots are the supported annotation targets; else rejected. */
+function getAnnotationContentKind(attachment: Zotero.Item): 'pdf' | 'epub' | 'snapshot' | null {
     const kind = getReadableContentKind(attachment);
-    return kind === 'pdf' || kind === 'epub' ? kind : null;
+    return kind === 'pdf' || kind === 'epub' || kind === 'snapshot' ? kind : null;
 }
 
 /** A numeric page_label doubles as the 1-based EPUB section ordinal fallback. */
@@ -243,6 +246,12 @@ export async function executeCreateHighlightAnnotationsAction(
         const created: CreatedAnnotationResult[] = [];
         const failed: FailedAnnotationResult[] = [];
 
+        // Snapshots: parse the HTML once for the whole batch so each item resolves
+        // against the shared Document instead of re-reading + re-parsing the file.
+        const snapshotDoc = contentKind === 'snapshot'
+            ? await prepareSnapshotAnnotationDocument(attachment)
+            : undefined;
+
         for (const item of items) {
             checkAborted(ctx, `create_highlight_annotations:item_${item.index}`);
 
@@ -258,6 +267,34 @@ export async function executeCreateHighlightAnnotationsAction(
                         pageLabel: item.page_label ?? null,
                         tags,
                     });
+                    created.push({
+                        client_item_id: item.client_item_id,
+                        index: item.index,
+                        loc_raw: item.loc_raw,
+                        library_id: ref.library_id,
+                        zotero_key: ref.zotero_key,
+                    });
+                } catch (error: any) {
+                    failed.push({
+                        client_item_id: item.client_item_id,
+                        index: item.index,
+                        loc_raw: item.loc_raw,
+                        error: error?.message ?? String(error),
+                        error_code: mapAnnotationErrorCode(error),
+                    });
+                }
+                continue;
+            }
+
+            if (contentKind === 'snapshot') {
+                try {
+                    const ref = await createSnapshotHighlightAnnotation(attachment, {
+                        anchorId: item.anchor_id ?? undefined,
+                        text: item.text ?? '',
+                        color: item.color,
+                        comment: item.comment ?? item.title,
+                        tags,
+                    }, snapshotDoc);
                     created.push({
                         client_item_id: item.client_item_id,
                         index: item.index,

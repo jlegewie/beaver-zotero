@@ -116,7 +116,7 @@ const ItemRow: React.FC<{ row: ItemRowView } & RowEventProps> = ({
                     <div className="truncate font-color-primary" style={{ fontSize: '0.925rem' }}>
                         {row.display_name}
                     </div>
-                    {row.location_label && (
+                    {row.location_label && row.content_kind !== 'snapshot' && (
                         <>
                             <div className="flex-1" />
                             <div className="text-sm font-color-tertiary" style={{ flexShrink: 0, whiteSpace: 'nowrap' }}>

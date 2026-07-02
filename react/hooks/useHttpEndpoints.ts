@@ -107,8 +107,14 @@ import {
     handleTestEpubExtractHttpRequest,
 } from './httpHandlers/testEpubHandlers';
 import {
+    handleTestSnapshotExtractHttpRequest,
+} from './httpHandlers/testSnapshotHandlers';
+import {
     handleTestEpubAnnotationParityHttpRequest,
 } from './httpHandlers/testEpubAnnotationHandlers';
+import {
+    handleTestSnapshotAnnotationParityHttpRequest,
+} from './httpHandlers/testSnapshotAnnotationHandlers';
 import {
     handleTestReaderStateHttpRequest,
     handleTestEpubCitationNavigateHttpRequest,
@@ -247,8 +253,11 @@ const ENDPOINT_PATHS = [
     '/beaver/test/pdf-analyze-layout',
     // EPUB extraction over a raw file path or attachment (corpus triage)
     '/beaver/test/epub-extract',
+    '/beaver/test/snapshot-extract',
     // EPUB annotation CFI/sortIndex parity (headless resolver vs reader)
     '/beaver/test/epub-annotation-parity',
+    // Snapshot annotation selector/sortIndex parity (headless resolver vs reader)
+    '/beaver/test/snapshot-annotation-parity',
     // Reader position / EPUB citation-navigation verification (dev-only)
     '/beaver/test/reader-state',
     '/beaver/test/epub-citation-navigate',
@@ -961,10 +970,18 @@ function registerEndpoints(): boolean {
         Zotero.Server.Endpoints['/beaver/test/epub-extract'] =
             createEndpoint(handleTestEpubExtractHttpRequest);
 
+        // Snapshot extraction over a raw HTML file path / attachment
+        Zotero.Server.Endpoints['/beaver/test/snapshot-extract'] =
+            createEndpoint(handleTestSnapshotExtractHttpRequest);
+
         // EPUB annotation CFI/sortIndex parity: headless resolver vs the reader's
         // own getAnnotationFromRange for the same target.
         Zotero.Server.Endpoints['/beaver/test/epub-annotation-parity'] =
             createEndpoint(handleTestEpubAnnotationParityHttpRequest);
+
+        // Snapshot annotation selector/sortIndex parity.
+        Zotero.Server.Endpoints['/beaver/test/snapshot-annotation-parity'] =
+            createEndpoint(handleTestSnapshotAnnotationParityHttpRequest);
 
         // Reader position (`getCurrentPage` / `content_kind`) and the EPUB
         // citation-navigation path against the live reader.

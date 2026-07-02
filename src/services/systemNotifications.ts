@@ -2,11 +2,14 @@
  * OS-native system notifications for events the user may miss while working
  * outside the Beaver UI.
  *
- * Two events are surfaced:
+ * Three events are surfaced:
  *   - Deferred approval requests (note edit, metadata change, cost
  *     confirmation, ...): the approval UI only renders inside the Beaver
  *     sidebar, so if the user is elsewhere the task stalls waiting for a
  *     decision (see notifyApprovalRequest).
+ *   - User questions (ask_user_question tool): the question panel only renders
+ *     inside the sidebar, so the run stalls until the user answers and a user
+ *     working elsewhere has no signal it is waiting (see notifyUserQuestion).
  *   - Completed responses: the reply only renders inside the sidebar, so a
  *     user working elsewhere has no signal it is ready (see notifyRunComplete).
  *
@@ -29,7 +32,7 @@ import { getPref } from "../utils/prefs";
 import { store } from "../../react/store";
 import { isSidebarVisibleAtom } from "../../react/atoms/ui";
 import { BeaverUIFactory } from "../ui/ui";
-import { WSDeferredApprovalRequest } from "./agentProtocol";
+import { WSAskUserQuestionRequest, WSDeferredApprovalRequest } from "./agentProtocol";
 
 type BeaverVisibility = "beaver-visible" | "zotero-focused" | "zotero-unfocused";
 
@@ -40,6 +43,7 @@ const NOTIFICATION_ICON = `chrome://${config.addonRef}/content/icons/beaver.png`
 // responses) never pile up. Separate names keep approval and response-ready
 // notifications from replacing each other.
 const APPROVAL_NOTIFICATION_NAME = "beaver-approval";
+const QUESTION_NOTIFICATION_NAME = "beaver-question";
 const RUN_COMPLETE_NOTIFICATION_NAME = "beaver-run-complete";
 
 // Parallel tool calls can queue several approvals in the same tick. Collect
@@ -240,6 +244,57 @@ export function notifyApprovalRequest(event: WSDeferredApprovalRequest): void {
     if (coalesceTimer === null) {
         coalesceTimer = setTimeout(flushQueuedApprovals, COALESCE_WINDOW_MS);
     }
+}
+
+/**
+ * Notification text for a pending user question. A single question shows its
+ * text directly; a burst of questions collapses into a count.
+ */
+function describeQuestions(event: WSAskUserQuestionRequest): { title: string; body: string } {
+    const title = "Beaver has a question";
+    const questions = event.questions ?? [];
+    if (questions.length <= 1) {
+        const question = questions[0]?.question?.trim();
+        return {
+            title,
+            body: question && question.length > 0
+                ? question
+                : "Answer a question to let the task continue.",
+        };
+    }
+    return {
+        title,
+        body: `${questions.length} questions are waiting for your answer.`,
+    };
+}
+
+/**
+ * Surface a system notification when the agent asks the user a question
+ * and the user can't currently see the Beaver UI.
+ */
+export function notifyUserQuestion(event: WSAskUserQuestionRequest): void {
+    if (getPref("enableSystemNotifications") !== true) {
+        return;
+    }
+
+    const visibility = getBeaverVisibility();
+
+    switch (visibility) {
+        case "beaver-visible":
+            // Scenario A: the question is already on screen — nothing to do.
+            return;
+        case "zotero-focused":
+            // SCENARIO B: Zotero is focused but Beaver is not visible.
+            // TODO: when an in-app Zotero notification exists, route this case
+            // there instead of falling through to a system notification.
+            break;
+        case "zotero-unfocused":
+            // Scenario C: Zotero is in the background.
+            break;
+    }
+
+    const { title, body } = describeQuestions(event);
+    showNotification(title, body, QUESTION_NOTIFICATION_NAME);
 }
 
 /**

@@ -11,7 +11,7 @@ import { pageLabelsByAttachmentIdAtom, externalFileLocalPathsAtom } from '../../
 import { useCitationMarker } from '../../hooks/useCitationMarker';
 import { getHost } from '../../host';
 import { useCitationViewModel } from './useCitationViewModel';
-import { Icon, LibraryIcon, PdfIcon, GlobalSearchIcon, NoteIcon, HighlighterIcon, TextAlignLeftIcon, ExternalLinkIcon } from '../icons/icons';
+import { Icon, LibraryIcon, PdfIcon, FileIcon, GlobalSearchIcon, NoteIcon, HighlighterIcon, TextAlignLeftIcon, ExternalLinkIcon } from '../icons/icons';
 const TOOLTIP_WIDTH = '250px';
 
 /**
@@ -218,15 +218,24 @@ const Citation: React.FC<CitationProps> = (props) => {
     const hasEpubSymbolicLocator = isEpubCitation
         && getSymbolicLocation(citationMetadata)?.content_kind === 'epub';
     const isTextCitation = getContentKind(citationMetadata) === 'text';
+    const isSnapshotCitation = getContentKind(citationMetadata) === 'snapshot';
     const symbolicLocationForDisplay = getSymbolicLocation(citationMetadata);
     const textLineLocation = isTextCitation && symbolicLocationForDisplay?.content_kind === 'text'
         ? symbolicLocationForDisplay
         : undefined;
+    // Snapshots resolve a cited passage from the symbolic anchor/text, not pages
+    // (the reader is a continuous scroll view); any synthetic page on the wire is
+    // a coarse navigation hint only and is never shown.
+    const hasSnapshotSymbolicLocator = isSnapshotCitation
+        && symbolicLocationForDisplay?.content_kind === 'snapshot';
     const hasBoundingBoxes = !isNoteCitation && !isAnnotationCitation && !!citationMetadata && getCitationBoundingBoxes(citationMetadata).length > 0;
-    const hasLocator = !isNoteCitation && !isAnnotationCitation && (pages.length > 0 || hasBoundingBoxes || hasEpubSymbolicLocator);
+    // PDF/EPUB page-or-box locator. Snapshots are excluded here: they carry a
+    // synthetic page that must not be presented as a PDF page locator.
+    const hasLocator = !isNoteCitation && !isAnnotationCitation && !isSnapshotCitation
+        && (pages.length > 0 || hasBoundingBoxes || hasEpubSymbolicLocator);
     const citationClassBase = isExternal && !mappedZoteroItem
         ? "zotero-citation external-citation"
-        : (hasLocator || isAnnotationCitation) && !isExternalFile
+        : (hasLocator || isAnnotationCitation || hasSnapshotSymbolicLocator) && !isExternalFile
         ? "zotero-citation with-locator"
         : "zotero-citation";
     const citationClass = isStreaming
@@ -319,7 +328,7 @@ const Citation: React.FC<CitationProps> = (props) => {
                         <Icon icon={PdfIcon} className="font-color-secondary" />
                         <span className="text-sm font-color-secondary">
                             {isEpubCitation
-                                ? (hasLocatorDisplay ? `Opens EPUB at page ${pagesDisplay}` : 'Opens EPUB at cited passage')
+                                ? (hasLocatorDisplay ? `Opens EPUB at page ${pagesDisplay}` : 'Opens EPUB at location')
                                 : hasBoundingBoxes
                                     ? (hasLocatorDisplay ? `Highlights passage on page ${pagesDisplay}` : 'Highlights passage in PDF')
                                     : (hasLocatorDisplay ? `Opens PDF on page ${pagesDisplay}` : 'Opens PDF at location')}
@@ -337,7 +346,17 @@ const Citation: React.FC<CitationProps> = (props) => {
                     </span>
                 </span>
             )}
-            {!hasLocator && !isExternalFile && !isTextCitation && !isNoteCitation && !isAnnotationCitation && (!isExternal || !!mappedZoteroItem) && (
+            {isSnapshotCitation && !isExternalFile && !isNoteCitation && !isAnnotationCitation && (!isExternal || !!mappedZoteroItem) && (
+                <span className={`px-3 py-15 block ${showPreviewText ? 'border-top-quinary' : ''}`}>
+                    <span className="display-flex flex-row items-center gap-15">
+                        <Icon icon={FileIcon} className="font-color-secondary" />
+                        <span className="text-sm font-color-secondary">
+                            {hasSnapshotSymbolicLocator ? 'Opens Snapshot at location' : 'Opens Snapshot'}
+                        </span>
+                    </span>
+                </span>
+            )}
+            {!hasLocator && !isSnapshotCitation && !isExternalFile && !isTextCitation && !isNoteCitation && !isAnnotationCitation && (!isExternal || !!mappedZoteroItem) && (
                 <span className={`px-3 py-15 block ${showPreviewText ? 'border-top-quinary' : ''}`}>
                     <span className="display-flex flex-row items-center gap-15">
                         <Icon icon={LibraryIcon} className="font-color-secondary" />

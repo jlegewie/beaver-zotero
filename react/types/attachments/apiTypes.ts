@@ -107,8 +107,9 @@ export interface ReaderState {
     library_id: number;
     zotero_key: string;
     current_page: number | null;
-    /** Reader type. Omitted for reader types without page semantics (e.g. snapshots). */
-    content_kind?: 'pdf' | 'epub';
+    /** Reader type. Lets the backend route the active reader's selection to the
+     *  correct locator model. Omitted only for unrecognized reader types. */
+    content_kind?: 'pdf' | 'epub' | 'snapshot';
     text_selection?: TextSelection;
     annotations?: Annotation[];
 }

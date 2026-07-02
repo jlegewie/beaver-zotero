@@ -2,12 +2,12 @@
  * MCP `read_attachment` EPUB live suite (`/beaver/test/read-attachment`).
  *
  * Covers the EPUB branch of the MCP `read_attachment` tool handler, which
- * converts an extracted EPUB document into per-section markdown "pages":
- *   - whole-document read: header reports the section count as the total page
- *     count and each section is wrapped in `<pageN>` tags
- *   - section-window slicing via `start_page`/`end_page` (1-based ordinals)
+ * groups extracted EPUB items by their stamped page number:
+ *   - read header reports the extracted page count and wraps requested pages in
+ *     `<pageN>` tags
+ *   - page-window slicing via `start_page`/`end_page` (1-based ordinals)
  *   - markdown rendering: section headers become `#` heading lines
- *   - out-of-range start section → MCP error naming the section count
+ *   - out-of-range start page → MCP error naming the extracted page count
  *   - text attachments (content_kind `text`) are rejected as an unsupported
  *     document format
  *
@@ -61,67 +61,70 @@ function expectErrorMessage(result: ReadAttachmentResult): string {
     return result.content[0]?.text ?? '';
 }
 
-/** Section count of the EPUB fixture, resolved once through the document path. */
-let sectionCountPromise: Promise<number> | null = null;
-function getSectionCount(): Promise<number> {
-    sectionCountPromise ??= (async () => {
+/** Page count of the EPUB fixture, resolved once through the document path. */
+let pageCountPromise: Promise<number> | null = null;
+function getPageCount(): Promise<number> {
+    pageCountPromise ??= (async () => {
         const res = await fetchDocument(NON_PDF, { mode: 'markdown' }, { timeout: EXTRACT_TIMEOUT });
-        const count = (res.result as any)?.sectionCount;
-        if (typeof count !== 'number' || count < 4) {
-            throw new Error(`EPUB fixture must extract to >= 4 sections, got ${count}`);
+        const count = (res.result as any)?.pageCount;
+        if (typeof count !== 'number' || count < 1) {
+            throw new Error(`EPUB fixture must extract to at least 1 page, got ${count}`);
         }
         return count;
     })();
-    return sectionCountPromise;
+    return pageCountPromise;
 }
 
 describe('MCP read_attachment over an EPUB', () => {
     beforeEach((ctx) => skipIfNoZotero(ctx, available));
 
-    it('returns EPUB sections wrapped in <pageN> tags with a section-count header', async () => {
+    it('returns EPUB pages wrapped in <pageN> tags with an extracted page-count header', async () => {
         await invalidateCache(NON_PDF.library_id, NON_PDF.zotero_key);
-        sectionCountPromise = null;
-        const sectionCount = await getSectionCount();
+        pageCountPromise = null;
+        const pageCount = await getPageCount();
+        const endPage = Math.min(pageCount, 2);
 
         const result = await readAttachment({
             attachment_id: attachmentId(NON_PDF),
             start_page: 1,
-            end_page: sectionCount,
+            end_page: endPage,
         });
         const text = expectText(result);
 
         expect(text).toContain(`Attachment: ${attachmentId(NON_PDF)}`);
-        expect(text).toContain(`Total pages: ${sectionCount}`);
-        expect(text).toContain(`Showing pages 1-${sectionCount}`);
+        expect(text).toContain(`Total pages: ${pageCount}`);
+        expect(text).toContain(`Showing pages 1-${endPage}`);
         expect(text).toContain('<page1>');
         expect(text).toContain('</page1>');
-        expect(text).toContain(`<page${sectionCount}>`);
+        expect(text).toContain(`<page${endPage}>`);
     }, EXTRACT_TIMEOUT);
 
-    it('slices to the requested section window', async () => {
-        await getSectionCount();
+    it('slices to the requested page window', async () => {
+        const pageCount = await getPageCount();
+        const startPage = Math.min(4, pageCount);
+        const endPage = Math.min(startPage + 1, pageCount);
 
         const result = await readAttachment({
             attachment_id: attachmentId(NON_PDF),
-            start_page: 4,
-            end_page: 5,
+            start_page: startPage,
+            end_page: endPage,
         });
         const text = expectText(result);
 
-        expect(text).toContain('Showing pages 4-5');
-        expect(text).toContain('<page4>');
-        expect(text).toContain('<page5>');
-        expect(text).not.toContain('<page3>');
-        expect(text).not.toContain('<page6>');
+        expect(text).toContain(`Showing pages ${startPage}-${endPage}`);
+        expect(text).toContain(`<page${startPage}>`);
+        expect(text).toContain(`<page${endPage}>`);
+        if (startPage > 1) expect(text).not.toContain(`<page${startPage - 1}>`);
+        if (endPage < pageCount) expect(text).not.toContain(`<page${endPage + 1}>`);
     }, EXTRACT_TIMEOUT);
 
     it('renders section headers as markdown headings', async () => {
-        const sectionCount = await getSectionCount();
+        const pageCount = await getPageCount();
 
         const result = await readAttachment({
             attachment_id: attachmentId(NON_PDF),
             start_page: 1,
-            end_page: sectionCount,
+            end_page: pageCount,
         });
         const text = expectText(result);
 
@@ -130,16 +133,16 @@ describe('MCP read_attachment over an EPUB', () => {
         expect(text).toMatch(/^#{1,6} \S/m);
     }, EXTRACT_TIMEOUT);
 
-    it('reports an out-of-range start section', async () => {
-        const sectionCount = await getSectionCount();
+    it('reports an out-of-range start page', async () => {
+        const pageCount = await getPageCount();
 
         const result = await readAttachment({
             attachment_id: attachmentId(NON_PDF),
-            start_page: sectionCount + 100,
+            start_page: pageCount + 100,
         });
         const message = expectErrorMessage(result);
         expect(message).toMatch(/out of range/i);
-        expect(message).toContain(`attachment has ${sectionCount} pages`);
+        expect(message).toContain(`attachment has ${pageCount} pages`);
     }, EXTRACT_TIMEOUT);
 
     it('rejects a text attachment as an unsupported document format', async () => {

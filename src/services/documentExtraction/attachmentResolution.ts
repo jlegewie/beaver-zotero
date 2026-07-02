@@ -19,6 +19,13 @@ export function getReadableContentKind(item: Zotero.Item): ReadableContentKind |
     if (!item.isAttachment()) {
         return null;
     }
+    // Linked URLs are web links with no local file. They can still carry a
+    // readable content type (e.g. a text/html web link would otherwise classify
+    // as `snapshot`), so exclude them here to keep this the single source of
+    // truth: an item with no readable file always returns null.
+    if (isLinkedUrlAttachment(item)) {
+        return null;
+    }
     if (item.isPDFAttachment()) {
         return 'pdf';
     }
@@ -121,13 +128,6 @@ export function liveAttachmentContentKind(item: Zotero.Item): ExtractContentKind
  */
 export function isAgentReadableAttachment(item: Zotero.Item): boolean {
     return getReadableContentKind(item) !== null && !isLinkedUrlAttachment(item);
-}
-
-/**
- * Check whether an attachment has a readable content kind.
- */
-export function isReadableAttachment(item: Zotero.Item): boolean {
-    return getReadableContentKind(item) !== null;
 }
 
 /**

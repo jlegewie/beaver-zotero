@@ -985,7 +985,7 @@ describe('handleZoteroDocumentRequest document cache integration', () => {
             error_code: 'unsupported_type',
         });
         expect(response).not.toHaveProperty('content_kind');
-        expect(response.error).toContain('PDF, EPUB, and plain text only');
+        expect(response.error).toContain('PDF, EPUB, snapshots, and plain text only');
         expect(response.result).toBeUndefined();
     });
 });

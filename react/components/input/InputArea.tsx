@@ -97,6 +97,9 @@ const InputArea: React.FC<InputAreaProps> = ({
     const sendApprovalResponse = useSetAtom(sendApprovalResponseAtom);
     const removePendingApproval = useSetAtom(removePendingApprovalAtom);
     const isAwaitingApproval = pendingApprovalsMap.size > 0;
+    // Note: while an ask_user_question request is pending (and no approval is),
+    // Sidebar renders AskUserQuestionPanel INSTEAD of this component, so no
+    // question-mode handling is needed here.
 
     const lastRun = allRuns.length > 0 ? allRuns[allRuns.length - 1] : null;
     const lastRunUsage = lastRun?.total_usage;

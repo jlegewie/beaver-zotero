@@ -507,9 +507,9 @@ const LIST_TAGS_TOOL = {
     description:
         "List tags in the user's Zotero library. " +
         'Tags are user-defined labels attached to references (e.g., "to-read", "methods", "key-paper"). ' +
-        'Returns tag names and how many items use each tag. ' +
+        'Returns tag names with per-type counts: item_count (regular items), attachment_count, note_count, and annotation_count. ' +
         'Use this to discover available tags before using them as filters in `search_by_topic` or `search_by_metadata` (`tags_filter`). ' +
-        'Set `min_item_count` to filter out rarely-used tags.',
+        'Set `min_item_count` to filter out rarely-used tags (counts all tagged objects, not just regular items).',
     inputSchema: {
         type: 'object' as const,
         properties: {
@@ -878,15 +878,15 @@ export async function handleReadAttachment(args: any): Promise<any> {
         return mcpError(response.error ?? 'Failed to read attachment');
     }
     const result = response.result;
-    const markdownDocument = result.content_kind === 'epub'
-        ? epubDocumentToMarkdownPages(result)
+    const markdownDocument = result.content_kind === 'epub' || result.content_kind === 'snapshot'
+        ? domDocumentToMarkdownPages(result)
         : result.content_kind === 'text'
             ? null
             : result.mode === 'markdown'
                 ? {
                     pageCount: result.document.pageCount,
                     pages: result.document.pages.map((page) => ({
-                        index: page.index,
+                        pageNumber: page.index + 1,
                         markdown: page.markdown ?? '',
                     })),
                 }
@@ -901,7 +901,7 @@ export async function handleReadAttachment(args: any): Promise<any> {
     }
 
     const requestedPages = markdownDocument.pages.filter(
-        (page) => page.index + 1 >= startPage && page.index + 1 <= endPage,
+        (page) => page.pageNumber >= startPage && page.pageNumber <= endPage,
     );
     if (requestedPages.length === 0) {
         return mcpError(`Requested page window ${startPage}-${endPage} is out of range or contains no extractable pages.`);
@@ -909,37 +909,78 @@ export async function handleReadAttachment(args: any): Promise<any> {
 
     // Build plain text response with <pageN> tags
     const actualEnd = requestedPages.length > 0
-        ? requestedPages[requestedPages.length - 1].index + 1
+        ? requestedPages[requestedPages.length - 1].pageNumber
         : startPage;
     const header = `Attachment: ${args.attachment_id} | Total pages: ${markdownDocument.pageCount ?? 'unknown'} | Showing pages ${startPage}-${actualEnd}`;
     const pageTexts = requestedPages.map(
-        (p) => `<page${p.index + 1}>\n${p.markdown}\n</page${p.index + 1}>`,
+        (p) => `<page${p.pageNumber}>\n${p.markdown}\n</page${p.pageNumber}>`,
     );
 
     return [header, '', ...pageTexts].join('\n');
 }
 
 interface AttachmentMarkdownPage {
-    index: number;
+    pageNumber: number;
     markdown: string;
 }
 
-function epubDocumentToMarkdownPages(
-    document: Extract<NonNullable<WSZoteroDocumentResponse['result']>, { content_kind: 'epub' }>,
+type DomReadItem = {
+    kind: string;
+    sectionIndex: number;
+    order: number;
+    text?: string;
+    level?: number;
+    sentences?: Array<{ text: string }>;
+    pageNumber?: number;
+};
+
+// EPUB and snapshot both carry stamped per-item page numbers. Grouping items by
+// that coordinate keeps MCP reads aligned with backend read pagination.
+function domDocumentToMarkdownPages(
+    document: Extract<NonNullable<WSZoteroDocumentResponse['result']>, { content_kind: 'epub' | 'snapshot' }>,
 ): { pageCount: number; pages: AttachmentMarkdownPage[] } {
-    return {
-        pageCount: document.sectionCount,
-        pages: document.sections.map((section) => ({
-            index: section.index,
-            markdown: section.items
-                .map(epubItemToMarkdown)
+    const pagesByNumber = new Map<number, DomReadItem[]>();
+    const orderedItems = document.sections
+        .slice()
+        .sort((a, b) => a.index - b.index)
+        .flatMap((section) => section.items
+            .slice()
+            .sort((a, b) => a.order - b.order)
+            .map((item) => ({
+                ...item,
+                pageNumber: item.pageNumber ?? section.index + 1,
+            })));
+
+    for (const item of orderedItems) {
+        const pageNumber = item.pageNumber ?? 1;
+        const pageItems = pagesByNumber.get(pageNumber);
+        if (pageItems) {
+            pageItems.push(item);
+        } else {
+            pagesByNumber.set(pageNumber, [item]);
+        }
+    }
+
+    // An item is stamped with the page of its first text node, so a single item
+    // longer than the synthetic page interval (a long <p>/<pre> or a linearized
+    // table) spans interior pages that no item is stamped to.
+    const observedPageCount = Math.max(0, ...Array.from(pagesByNumber.keys()));
+    const pageCount = Math.max(document.pageCount ?? observedPageCount, observedPageCount);
+    const pages: AttachmentMarkdownPage[] = [];
+    for (let pageNumber = 1; pageNumber <= pageCount; pageNumber++) {
+        const items = pagesByNumber.get(pageNumber) ?? [];
+        pages.push({
+            pageNumber,
+            markdown: items
+                .map(domItemToMarkdown)
                 .filter((text) => text.length > 0)
                 .join('\n\n'),
-        })),
-    };
+        });
+    }
+    return { pageCount, pages };
 }
 
-function epubItemToMarkdown(item: { kind: string; text?: string; level?: number; sentences?: Array<{ text: string }> }): string {
+function domItemToMarkdown(item: { kind: string; text?: string; level?: number; sentences?: Array<{ text: string }> }): string {
     const text = normalizeMarkdownText(
         item.text ?? item.sentences?.map((sentence) => sentence.text).join(' ') ?? '',
     );
@@ -1255,7 +1296,13 @@ async function handleListTags(args: any): Promise<any> {
         has_more: hasMore,
         next_offset: hasMore ? offset + limit : null,
         tags: response.tags.map((t) => {
-            const tag: any = { name: t.name, item_count: t.item_count };
+            const tag: any = {
+                name: t.name,
+                item_count: t.item_count,
+                attachment_count: t.attachment_count ?? 0,
+                note_count: t.note_count ?? 0,
+                annotation_count: t.annotation_count ?? 0,
+            };
             if (t.color) tag.color = t.color;
             return tag;
         }),

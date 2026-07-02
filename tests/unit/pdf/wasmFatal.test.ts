@@ -57,6 +57,12 @@ describe('isRecoverablePageError', () => {
         expect(isRecoverablePageError(new Error('cycle in page tree'))).toBe(true);
     });
 
+    it('treats out-of-range "invalid page number" errors as recoverable', () => {
+        // Page counts can be corrected while iterating malformed page trees.
+        expect(isRecoverablePageError(new Error('invalid page number: 8'))).toBe(true);
+        expect(isRecoverablePageError(new Error('invalid page number 8'))).toBe(true);
+    });
+
     it('treats WASM traps as non-recoverable (must abort)', () => {
         expect(isRecoverablePageError(new RuntimeErrorLike('memory access out of bounds'))).toBe(false);
         expect(isRecoverablePageError(new Error('call stack exhausted'))).toBe(false);

@@ -1,5 +1,6 @@
 import { SCHEMA_VERSION } from '../../../beaver-extract/schema/schema';
 import { EPUB_SCHEMA_VERSION } from '../epub/schema';
+import { SNAPSHOT_SCHEMA_VERSION } from '../snapshot/schema';
 import type { ExtractContentKind } from './contentKinds';
 
 export type { ExtractContentKind } from './contentKinds';
@@ -14,8 +15,9 @@ export function expectedExtractionSchemaVersion(kind: ExtractContentKind): strin
             return SCHEMA_VERSION;
         case 'epub':
             return EPUB_SCHEMA_VERSION;
-        case 'text':
         case 'snapshot':
+            return SNAPSHOT_SCHEMA_VERSION;
+        case 'text':
             return null;
     }
 }

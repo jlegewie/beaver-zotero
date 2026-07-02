@@ -90,7 +90,10 @@ export function getViewDisplayName(
 function getViewLocationLabel(view: ToolResultView | null | undefined, toolName: string): string | null {
     if (!view || view.view_type !== 'item_list' || !SINGLE_ITEM_NAME_TOOLS.has(toolName)) return null;
     const row = view.items[0];
-    return row && isItemRow(row) ? (row.location_label ?? null) : null;
+    if (!row || !isItemRow(row)) return null;
+    // Snapshot attachments have no meaningful location label.
+    if (row.content_kind === 'snapshot') return null;
+    return row.location_label ?? null;
 }
 
 /**
@@ -136,6 +139,13 @@ export function getToolResultLabelSuffix(
             }
             const n = view.references.length;
             return n ? ` (${plural(n, 'result')})` : null;
+        }
+        case 'user_question': {
+            // The backend omits the default status — treat absent as answered.
+            const status = view.status ?? 'answered';
+            if (status === 'cancelled') return ' (skipped)';
+            if (status === 'no_response') return ' (no response)';
+            return ' (answered)';
         }
         default:
             return null;

@@ -1,9 +1,10 @@
-import { BeaverExtractor, ExtractionError, ExtractionErrorCode } from '../../beaver-extract';
+import { BeaverExtractor, ExtractionError, ExtractionErrorCode, isTransientWorkerError } from '../../beaver-extract';
 import { logger } from '../../utils/logger';
 import { getPref } from '../../utils/prefs';
 import { isAttachmentAvailableRemotely } from '../../utils/webAPI';
 import { effectiveMaxFileSizeMB } from '../attachmentLimits';
 import { isRemoteFilePath, makeRemoteFilePath } from '../documentFileIdentity';
+import type { DocumentCacheMetadata } from '../documentCache';
 import { getContentKind } from './attachmentResolution';
 import { isReadableContentKind, type AttachmentInfo, type ContentKind } from './shared/contentKinds';
 import { getPDFPageCountFromFulltext, getPDFPageCountFromWorker } from './shared/pageCount';
@@ -16,10 +17,8 @@ export interface AttachmentInfoOptions {
     skipWorkerFallback?: boolean;
     nonPdfReadableEnabled?: boolean;
     /**
-     * PDF analysis depth. 'full' (default) reads the file and runs OCR
-     * detection on a cache miss; 'lightweight' only probes cheap page-count
-     * sources (fulltext index, optionally the PDF worker) and reports
-     * optimistically — used by batch/lookup paths that must not read files.
+     * PDF analysis depth. 'full' reads file bytes and checks OCR needs on a
+     * cache miss; 'lightweight' uses cheap page-count probes only.
      */
     pdfAnalysis?: 'full' | 'lightweight';
     timing?: TimingAccumulator;
@@ -62,9 +61,6 @@ function unreadableTypeReason(kind: ContentKind): string {
     }
     if (kind === 'image') {
         return 'Image attachments cannot be read as text.';
-    }
-    if (kind === 'snapshot') {
-        return 'Beaver cannot read web page snapshots yet.';
     }
     if (isReadableContentKind(kind)) {
         return `Beaver cannot yet read ${contentKindLabel(kind)} attachments.`;
@@ -161,6 +157,24 @@ async function getCheapPdfPageCount(
     return pageCount;
 }
 
+/**
+ * Retry limits for transient PDF analysis failures. Heap exhaustion gets fewer
+ * attempts because each retry starts with a fresh worker but remains expensive.
+ */
+const PDF_ANALYSIS_MAX_ATTEMPTS = 3;
+const PDF_HEAP_EXHAUSTION_MAX_ATTEMPTS = 2;
+const PDF_ANALYSIS_RETRY_BACKOFF_MS = [400, 1200];
+const PDF_ANALYSIS_TOTAL_BUDGET_MS = 8000;
+
+function delay(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isHeapExhaustion(error: unknown): boolean {
+    return error instanceof ExtractionError
+        && error.code === ExtractionErrorCode.HEAP_EXHAUSTION;
+}
+
 async function resolvePdfInfo(
     attachment: Zotero.Item,
     availability: Extract<AttachmentAvailabilityResult, { available: true }>,
@@ -208,49 +222,25 @@ async function resolvePdfInfo(
         return { page_count: pageCount, status: 'readable' };
     }
 
+    // Full analysis reads bytes once and reuses them across bounded worker
+    // retries; worker posts copy the data without detaching it.
+    const isRemote = isRemoteFilePath(availability.filePath);
+    let sourceSizeBytes = 0;
+    let pdfData: Uint8Array;
     try {
-        const isRemote = isRemoteFilePath(availability.filePath);
-        let sourceSizeBytes = 0;
-        let pdfData: Uint8Array;
-        try {
-            pdfData = isRemote
-                ? await loadRemoteData(attachment, availability.filePath)
-                : await IOUtils.read(availability.filePath);
-            sourceSizeBytes = isRemote ? pdfData.byteLength : 0;
-        } catch (error) {
-            logger(`getAttachmentInfo: failed to load PDF data: ${error}`, 1);
-            return { page_count: null, status: 'unreadable', status_reason: 'Failed to load attachment file.' };
-        }
+        pdfData = isRemote
+            ? await loadRemoteData(attachment, availability.filePath)
+            : await IOUtils.read(availability.filePath);
+        sourceSizeBytes = isRemote ? pdfData.byteLength : 0;
+    } catch (error) {
+        logger(`getAttachmentInfo: failed to load PDF data: ${error}`, 1);
+        return { page_count: null, status: 'unreadable', status_reason: 'Failed to load attachment file.' };
+    }
 
+    // One worker analysis attempt. The retry loop classifies any thrown error.
+    const runAnalysis = async (): Promise<Pick<AttachmentInfo, 'status' | 'status_code' | 'status_reason' | 'page_count'>> => {
         const extractor = new BeaverExtractor();
-        let metadata: Awaited<ReturnType<BeaverExtractor['getMetadata']>>;
-        try {
-            metadata = await extractor.getMetadata(pdfData);
-        } catch (error) {
-            if (error instanceof ExtractionError) {
-                if (error.code === ExtractionErrorCode.ENCRYPTED) {
-                    await cache?.putErrorMetadata({ item: attachment, filePath: availability.filePath, sourceSizeBytes, contentType: availability.contentType, errorCode: 'encrypted', pageCount: null, pageLabels: null, pages: null });
-                    return { page_count: null, status: 'unreadable', status_code: 'pdf_encrypted' };
-                }
-                if (error.code === ExtractionErrorCode.INVALID_PDF) {
-                    await cache?.putErrorMetadata({ item: attachment, filePath: availability.filePath, sourceSizeBytes, contentType: availability.contentType, errorCode: 'invalid_pdf', pageCount: null, pageLabels: null, pages: null });
-                    return { page_count: null, status: 'unreadable', status_code: 'pdf_invalid' };
-                }
-                if (error.code === ExtractionErrorCode.WASM_ERROR) {
-                    return {
-                        page_count: null,
-                        status: 'unreadable',
-                        status_code: 'pdf_parser_crash',
-                        status_reason: 'PDF crashes the local PDF parser',
-                    };
-                }
-                if (error.code === ExtractionErrorCode.EMPTY_DOCUMENT) {
-                    return { page_count: 0, status: 'unreadable', status_code: 'pdf_invalid' };
-                }
-            }
-            throw error;
-        }
-
+        const metadata = await extractor.getMetadata(pdfData);
         const { pageCount, pageLabels, pages } = metadata;
         if (pageCount === 0) {
             return { page_count: 0, status: 'unreadable', status_code: 'pdf_invalid' };
@@ -270,33 +260,102 @@ async function resolvePdfInfo(
             metadata: { pageCount, pageLabels, pages: pages ?? null, errorCode: null },
         });
         return { page_count: pageCount, status: 'readable' };
-    } catch (error) {
-        if (error instanceof ExtractionError && error.code === ExtractionErrorCode.WASM_ERROR) {
-            return {
-                page_count: null,
-                status: 'unreadable',
-                status_code: 'pdf_parser_crash',
-                status_reason: 'PDF crashes the local PDF parser',
-            };
+    };
+
+    let lastTransientError: unknown;
+    const analysisStart = Date.now();
+    for (let attempt = 0; attempt < PDF_ANALYSIS_MAX_ATTEMPTS; attempt++) {
+        if (attempt > 0) {
+            // Give the worker host a short window to settle before respawning.
+            await delay(PDF_ANALYSIS_RETRY_BACKOFF_MS[Math.min(attempt - 1, PDF_ANALYSIS_RETRY_BACKOFF_MS.length - 1)]);
         }
-        logger(`getAttachmentInfo: Error analyzing PDF: ${error}`, 1);
-        return { page_count: null, status: 'unreadable', status_code: 'pdf_analysis_error' };
+        try {
+            return await runAnalysis();
+        } catch (error) {
+            // Deterministic content verdicts are not retried. Permanent ones
+            // are cached so future reads skip analysis.
+            if (error instanceof ExtractionError) {
+                if (error.code === ExtractionErrorCode.ENCRYPTED) {
+                    await cache?.putErrorMetadata({ item: attachment, filePath: availability.filePath, sourceSizeBytes, contentType: availability.contentType, errorCode: 'encrypted', pageCount: null, pageLabels: null, pages: null });
+                    return { page_count: null, status: 'unreadable', status_code: 'pdf_encrypted' };
+                }
+                if (error.code === ExtractionErrorCode.INVALID_PDF) {
+                    await cache?.putErrorMetadata({ item: attachment, filePath: availability.filePath, sourceSizeBytes, contentType: availability.contentType, errorCode: 'invalid_pdf', pageCount: null, pageLabels: null, pages: null });
+                    return { page_count: null, status: 'unreadable', status_code: 'pdf_invalid' };
+                }
+                if (error.code === ExtractionErrorCode.EMPTY_DOCUMENT) {
+                    return { page_count: 0, status: 'unreadable', status_code: 'pdf_invalid' };
+                }
+                if (error.code === ExtractionErrorCode.WASM_ERROR) {
+                    return {
+                        page_count: null,
+                        status: 'unreadable',
+                        status_code: 'pdf_parser_crash',
+                        status_reason: 'PDF crashes the local PDF parser',
+                    };
+                }
+            }
+
+            // Retry transient worker failures while attempts and time remain.
+            if (isTransientWorkerError(error)) {
+                lastTransientError = error;
+                const heap = isHeapExhaustion(error);
+                const maxAttempts = heap ? PDF_HEAP_EXHAUSTION_MAX_ATTEMPTS : PDF_ANALYSIS_MAX_ATTEMPTS;
+                const hasMoreAttempts = attempt < maxAttempts - 1;
+                const withinBudget = Date.now() - analysisStart < PDF_ANALYSIS_TOTAL_BUDGET_MS;
+                if (hasMoreAttempts && withinBudget) {
+                    logger(`getAttachmentInfo: transient worker error analyzing PDF (attempt ${attempt + 1}/${maxAttempts}), retrying: ${error}`, 2);
+                    continue;
+                }
+                if (heap) {
+                    // Repeated heap exhaustion means this file cannot be
+                    // analyzed under current local parser limits.
+                    logger(`getAttachmentInfo: PDF exhausts the local parser's memory after ${attempt + 1} attempt(s): ${error}`, 1);
+                    return {
+                        page_count: null,
+                        status: 'unreadable',
+                        status_code: 'pdf_parser_crash',
+                        status_reason: 'PDF is too large for the local PDF parser to process.',
+                    };
+                }
+                // Worker analysis is unavailable, but the file exists and has
+                // already passed attachment availability checks.
+                logger(`getAttachmentInfo: PDF analysis unavailable after ${attempt + 1} attempt(s); treating as readable: ${error}`, 1);
+                return { page_count: null, status: 'readable' };
+            }
+
+            // Unknown, non-transient failure.
+            logger(`getAttachmentInfo: Error analyzing PDF: ${error}`, 1);
+            return { page_count: null, status: 'unreadable', status_code: 'pdf_analysis_error' };
+        }
     }
+
+    // Defensive fallback; the final transient attempt normally returns above.
+    logger(`getAttachmentInfo: PDF analysis unavailable; treating as readable: ${lastTransientError}`, 1);
+    return { page_count: null, status: 'readable' };
 }
 
 /**
  * Resolve readability info for an EPUB attachment.
  *
  * EPUB extraction requires the full DOM pipeline, so this never extracts on
- * the hot path. A cached extraction supplies the section count (the EPUB
- * analogue of a page count); a cold cache simply reports the attachment as
- * readable — file existence and size were already checked by
- * `checkAttachmentAvailability`.
+ * the hot path. A cached extraction supplies the stamped page count when
+ * available, falling back to section count for older cache rows; a cold cache
+ * simply reports the attachment as readable — file existence and size were
+ * already checked by `checkAttachmentAvailability`.
  */
-async function resolveEpubInfo(
+type DomDocumentInfo = Pick<AttachmentInfo, 'status' | 'status_code' | 'status_reason' | 'page_count'>;
+
+/**
+ * Read the cached extraction metadata for a DOM-document (EPUB / snapshot)
+ * attachment and let the caller derive its readability status.
+ */
+async function resolveDomDocumentInfo(
     attachment: Zotero.Item,
     availability: Extract<AttachmentAvailabilityResult, { available: true }>,
-): Promise<Pick<AttachmentInfo, 'status' | 'status_code' | 'status_reason' | 'page_count'>> {
+    kind: 'epub' | 'snapshot',
+    classify: (cached: DocumentCacheMetadata) => DomDocumentInfo,
+): Promise<DomDocumentInfo> {
     const cache = Zotero.Beaver?.documentCache;
     if (cache) {
         try {
@@ -304,49 +363,89 @@ async function resolveEpubInfo(
                 libraryId: attachment.libraryID,
                 zoteroKey: attachment.key,
             }, availability.filePath);
-            if (cached && cached.contentKind === 'epub') {
-                if (cached.errorCode) {
-                    return {
-                        page_count: null,
-                        status: 'unreadable',
-                        status_code: 'epub_invalid',
-                        status_reason: 'EPUB could not be read by the local extractor.',
-                    };
-                }
-                const meta = cached.documentMetadata;
-                const epubMeta = meta?.content_kind === 'epub' ? meta : null;
-                const sectionCount = epubMeta?.sectionCount ?? null;
-                // The extraction path rejects section-less EPUBs as having no
-                // extractable text, so don't advertise them as readable.
-                if (sectionCount === 0) {
-                    return {
-                        page_count: 0,
-                        status: 'unreadable',
-                        status_code: 'epub_invalid',
-                        status_reason: 'EPUB has no readable sections.',
-                    };
-                }
-                // Image-only/scanned EPUBs have sections but zero extracted
-                // text; the read path rejects them as no_text_layer, so the
-                // status must agree. Absent diagnostics (older cache rows)
-                // stay readable — unknown is not zero.
-                if (epubMeta?.extractedTextChars === 0) {
-                    return {
-                        page_count: sectionCount,
-                        status: 'unreadable',
-                        status_code: 'epub_no_text',
-                        status_reason: 'EPUB contains no extractable text (image-only or scanned book).',
-                    };
-                }
-                // Use the cached page count when available; otherwise report
-                // the section count as the best available EPUB extent.
-                return { page_count: epubMeta?.pageCount ?? sectionCount, status: 'readable' };
+            if (cached && cached.contentKind === kind) {
+                return classify(cached);
             }
         } catch (error) {
             logger(`getAttachmentInfo: cache read error: ${error}`, 1);
         }
     }
     return { page_count: null, status: 'readable' };
+}
+
+function resolveEpubInfo(
+    attachment: Zotero.Item,
+    availability: Extract<AttachmentAvailabilityResult, { available: true }>,
+): Promise<DomDocumentInfo> {
+    return resolveDomDocumentInfo(attachment, availability, 'epub', (cached) => {
+        if (cached.errorCode) {
+            return {
+                page_count: null,
+                status: 'unreadable',
+                status_code: 'epub_invalid',
+                status_reason: 'EPUB could not be read by the local extractor.',
+            };
+        }
+        const meta = cached.documentMetadata;
+        const epubMeta = meta?.content_kind === 'epub' ? meta : null;
+        const sectionCount = epubMeta?.sectionCount ?? null;
+        // The extraction path rejects section-less EPUBs as having no
+        // extractable text, so don't advertise them as readable.
+        if (sectionCount === 0) {
+            return {
+                page_count: 0,
+                status: 'unreadable',
+                status_code: 'epub_invalid',
+                status_reason: 'EPUB has no readable sections.',
+            };
+        }
+        // Image-only/scanned EPUBs have sections but zero extracted text; the
+        // read path rejects them as no_text_layer, so the status must agree.
+        // Missing diagnostics stay readable because unknown is not zero.
+        if (epubMeta?.extractedTextChars === 0) {
+            return {
+                page_count: sectionCount,
+                status: 'unreadable',
+                status_code: 'epub_no_text',
+                status_reason: 'EPUB contains no extractable text (image-only or scanned book).',
+            };
+        }
+        // Use the cached page count when available; otherwise report the
+        // section count as the best available EPUB extent.
+        return { page_count: epubMeta?.pageCount ?? sectionCount, status: 'readable' };
+    });
+}
+
+function resolveSnapshotInfo(
+    attachment: Zotero.Item,
+    availability: Extract<AttachmentAvailabilityResult, { available: true }>,
+): Promise<DomDocumentInfo> {
+    return resolveDomDocumentInfo(attachment, availability, 'snapshot', (cached) => {
+        if (cached.errorCode) {
+            return {
+                page_count: null,
+                status: 'unreadable',
+                status_code: 'snapshot_invalid',
+                status_reason: 'Snapshot could not be read by the local extractor.',
+            };
+        }
+        const meta = cached.documentMetadata;
+        const snapshotMeta = meta?.content_kind === 'snapshot' ? meta : null;
+        // Text-empty snapshots are rejected as no_text_layer by the read path,
+        // so the status must agree. Missing diagnostics stay readable because
+        // unknown is not zero.
+        if (snapshotMeta?.extractedTextChars === 0) {
+            return {
+                page_count: snapshotMeta?.pageCount ?? null,
+                status: 'unreadable',
+                status_code: 'snapshot_no_text',
+                status_reason: 'Snapshot contains no extractable text.',
+            };
+        }
+        // Snapshot reads use the same stamped synthetic page coordinate as
+        // citations, so attachment metadata must report that count.
+        return { page_count: snapshotMeta?.pageCount ?? null, status: 'readable' };
+    });
 }
 
 async function loadRemoteData(attachment: Zotero.Item, filePath: string): Promise<Uint8Array> {
@@ -397,18 +496,16 @@ export async function getAttachmentInfo(
         base.annotations_count = item.isFileAttachment?.() ? item.getAnnotations().length : 0;
     }
 
-    // Linked URLs are web links, not files. Snapshots are a recognized content
-    // kind but not agent-readable yet, so they are surfaced as unreadable here
-    // (revisit when end-to-end snapshot support lands).
-    if (contentKind === 'linked_url' || contentKind === 'snapshot') {
+    // Linked URLs are web links, not files Beaver can read.
+    if (contentKind === 'linked_url') {
         return { ...base, status_reason: unreadableTypeReason(contentKind) };
     }
 
-    // PDF, EPUB, and plain text are always readable (text via the line-based
-    // `read` tool); image stays behind the nonPdfReadableEnabled option until
-    // extraction supports it.
+    // PDF, EPUB, and plain text are readable by default. Other readable kinds
+    // remain behind the nonPdfReadableEnabled option until extraction supports them.
     const isUnconditionallyReadable =
-        contentKind === 'pdf' || contentKind === 'epub' || contentKind === 'text';
+        contentKind === 'pdf' || contentKind === 'epub'
+        || contentKind === 'snapshot' || contentKind === 'text';
     if (!isReadableContentKind(contentKind) || (!isUnconditionallyReadable && !options.nonPdfReadableEnabled)) {
         return { ...base, status_reason: unreadableTypeReason(contentKind) };
     }
@@ -429,9 +526,7 @@ export async function getAttachmentInfo(
     }
 
     if (contentKind === 'epub') {
-        // EPUB extraction requires a local file (the zip reader cannot consume
-        // downloaded bytes, and the extractor never downloads remote files), so
-        // a remote-only EPUB is unreadable even with remote access enabled.
+        // EPUB extraction requires a local file path.
         if (isRemoteFilePath(availability.filePath)) {
             return {
                 ...base,
@@ -442,6 +537,22 @@ export async function getAttachmentInfo(
         }
         const epubInfo = await resolveEpubInfo(item, availability);
         return { ...base, ...epubInfo };
+    }
+
+    if (contentKind === 'snapshot') {
+        // Snapshot extraction reads the local HTML file directly and never
+        // downloads remote bytes, so a remote-only snapshot is unreadable even
+        // with remote access enabled.
+        if (isRemoteFilePath(availability.filePath)) {
+            return {
+                ...base,
+                status: 'unreadable',
+                status_code: 'file_not_local_remote',
+                status_reason: 'The snapshot file is available remotely but is not synced locally. Sync it in Zotero so Beaver can read it.',
+            };
+        }
+        const snapshotInfo = await resolveSnapshotInfo(item, availability);
+        return { ...base, ...snapshotInfo };
     }
 
     return { ...base, status: 'readable' };

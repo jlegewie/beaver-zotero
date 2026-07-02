@@ -1,10 +1,29 @@
 import React from 'react';
-import { TagListView } from '../../../types/toolResultViews';
+import { TagListView, TagRowView } from '../../../types/toolResultViews';
+
+const plural = (n: number, noun: string) => `${n} ${noun}${n !== 1 ? 's' : ''}`;
+
+/** Total number of objects (across all types) carrying the tag. */
+const tagTotal = (tag: TagRowView): number =>
+    (tag.item_count ?? 0) + (tag.attachment_count ?? 0) + (tag.note_count ?? 0) + (tag.annotation_count ?? 0);
+
+/** Human-readable breakdown, e.g. "5 items, 2 attachments, 1 annotation". */
+const tagTooltip = (tag: TagRowView): string => {
+    const parts: string[] = [];
+    if (tag.item_count) parts.push(plural(tag.item_count, 'item'));
+    if (tag.attachment_count) parts.push(plural(tag.attachment_count, 'attachment'));
+    if (tag.note_count) parts.push(plural(tag.note_count, 'note'));
+    if (tag.annotation_count) parts.push(plural(tag.annotation_count, 'annotation'));
+    // Fall back to the total when every category is zero (keeps "0 items").
+    return parts.length > 0 ? parts.join(', ') : plural(tagTotal(tag), 'item');
+};
 
 /**
  * Shared renderer for the {@link TagListView} view model (list_tags).
  *
- * Renders non-interactive tag chips with item counts.
+ * Renders non-interactive tag chips with a total tagged-object count. The
+ * tooltip breaks the total down by object type (items, attachments, notes,
+ * annotations) when that detail is available.
  */
 export const TagListResultView: React.FC<{ view: TagListView }> = ({ view }) => {
     const tags = view.tags;
@@ -24,12 +43,12 @@ export const TagListResultView: React.FC<{ view: TagListView }> = ({ view }) => 
                     <div
                         key={tag.name}
                         className="display-flex flex-row items-center min-w-0 px-2 py-05 rounded-md whitespace-nowrap bg-quaternary"
-                        title={`${tag.item_count} item${tag.item_count !== 1 ? 's' : ''}`}
+                        title={tagTooltip(tag)}
                     >
                         <span className="text-sm font-color-primary truncate min-w-0">
                             {tag.name}
                             <span className="text-xs font-color-tertiary ml-1">
-                                ({tag.item_count})
+                                ({tagTotal(tag)})
                             </span>
                         </span>
                     </div>

@@ -35,6 +35,7 @@ import {
     TagIcon,
     PropertyEditIcon,
     HighlighterIcon,
+    ChattingIcon,
 } from '../icons/icons';
 import { toolExpandedAtom, toggleToolExpandedAtom, setToolExpandedAtom } from '../../atoms/messageUIState';
 
@@ -107,6 +108,9 @@ const TOOL_ICONS: Record<string, IconComponent> = {
     // Progressive disclosure tools
     load_capability: PuzzleIcon,
     search_tools: PuzzleIcon,
+
+    // User interaction
+    ask_user_question: ChattingIcon,
 };
 
 /** Progressive disclosure tools whose returns are framework-internal and shouldn't be expandable. */
@@ -263,7 +267,7 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
     const getPendingApproval = useAtomValue(getPendingApprovalForToolcallAtom);
     const pendingApproval = getPendingApproval(part.tool_call_id);
     const isAwaitingApproval = pendingApproval !== null;
-    
+
     // Check for agent actions associated with this tool call
     const getAgentActionsByToolcall = useAtomValue(getAgentActionsByToolcallAtom);
     const agentActions = getAgentActionsByToolcall(part.tool_call_id);
@@ -368,6 +372,11 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
     const streamingArgs = part.streaming_args;
     const showStreamingPreview = !!streamingArgs && runStatus === 'in_progress'
         && STREAMING_PREVIEW_TOOLS.has(part.tool_name) && !showAgentActionView && !hasError;
+
+    // Note: a pending ask_user_question renders as the composer-takeover panel
+    // (AskUserQuestionPanel, swapped in by Sidebar) — here the call stays a
+    // normal passive row (in-progress spinner, not expandable until the tool
+    // return arrives with the answered view).
 
     // Agent-action UI (incl. streaming preview) is host-injected; non-Zotero
     // clients fall back to a request-side summary.

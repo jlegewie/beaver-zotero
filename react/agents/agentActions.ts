@@ -1018,6 +1018,10 @@ export const clearAllPendingApprovalsAtom = atom(
     }
 );
 
+// Note: the run-blocking ask_user_question state (PendingQuestion,
+// pendingQuestionsAtom, ...) lives in `./pendingQuestions.ts` — questions are
+// deliberately NOT agent actions (no apply/undo/validate lifecycle).
+
 /**
  * Get pending approval for a specific toolcall_id.
  * Searches the map for an approval matching the toolcall_id.

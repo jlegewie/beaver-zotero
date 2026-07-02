@@ -7,7 +7,7 @@
  *     flag required)
  *   - cold document cache → `page_count: null`
  *   - after a document extraction populates the cache, `page_count` equals the
- *     extracted section count (the EPUB "page" coordinate)
+ *     extracted page count
  *
  * Prerequisites (per tests/README.md):
  *   - Dev build of Beaver loaded in a running Zotero (NODE_ENV=development).
@@ -83,14 +83,14 @@ describe('EPUB readability via get-metadata', () => {
         expect(info.status_code ?? null).toBeNull();
     });
 
-    it('reports the extracted section count as page_count once cached', async () => {
+    it('reports the extracted page count as page_count once cached', async () => {
         await invalidateCache(EPUB_WITH_PARENT.library_id, EPUB_WITH_PARENT.zotero_key);
 
         // Populate the document cache through the hot extraction path.
         const docRes = await fetchDocument(EPUB_WITH_PARENT, { mode: 'markdown' }, EXTRACT_OPTS);
         expect(docRes.content_kind).toBe('epub');
-        const sectionCount = (docRes.result as any)?.sectionCount;
-        expect(sectionCount).toBeGreaterThan(0);
+        const pageCount = (docRes.result as any)?.pageCount;
+        expect(pageCount).toBeGreaterThan(0);
 
         const parentItem = await fetchParentMetadataWithAttachments();
         const info = findEpubAttachmentInfo(parentItem);
@@ -98,7 +98,7 @@ describe('EPUB readability via get-metadata', () => {
         expect(info).toMatchObject({
             content_kind: 'epub',
             status: 'readable',
-            page_count: sectionCount,
+            page_count: pageCount,
         });
     });
 });
