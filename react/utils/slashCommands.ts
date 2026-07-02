@@ -51,6 +51,46 @@ const buildTokenRegex = (commands: string[]): RegExp => {
     return new RegExp(`(?<=^|[\\s([{])\\/(${alternatives})(?![\\w-])`, 'g');
 };
 
+export interface CommandTokenSegment<T> {
+    /** Literal text of this segment. For token segments, exactly `/command`. */
+    text: string;
+    /** Set when this segment is a recognized slash-command token. */
+    match?: T;
+}
+
+/**
+ * Split message content into plain-text and slash-token segments against any
+ * command-carrying items (send-time `PromptAction`s, editor pill descriptors).
+ * Boundary characters stay in the surrounding text segments; token segments
+ * carry exactly `/command` plus the matching item.
+ */
+export function splitContentByCommandTokens<T>(
+    content: string,
+    items: T[],
+    getCommand: (item: T) => string,
+): CommandTokenSegment<T>[] {
+    if (!content || items.length === 0) {
+        return [{ text: content }];
+    }
+    const byCommand = new Map(items.map(item => [getCommand(item), item]));
+    const regex = buildTokenRegex([...byCommand.keys()]);
+
+    const segments: CommandTokenSegment<T>[] = [];
+    let cursor = 0;
+    for (const match of content.matchAll(regex)) {
+        const index = match.index ?? 0;
+        if (index > cursor) {
+            segments.push({ text: content.slice(cursor, index) });
+        }
+        segments.push({ text: match[0], match: byCommand.get(match[1]) });
+        cursor = index + match[0].length;
+    }
+    if (cursor < content.length || segments.length === 0) {
+        segments.push({ text: content.slice(cursor) });
+    }
+    return segments;
+}
+
 export interface SlashContentSegment {
     /** Literal text of this segment. For token segments, exactly `/command`. */
     text: string;
@@ -67,26 +107,21 @@ export function splitContentBySlashTokens(
     content: string,
     actions: PromptAction[],
 ): SlashContentSegment[] {
-    if (!content || actions.length === 0) {
-        return [{ text: content }];
-    }
-    const byCommand = new Map(actions.map(a => [a.command, a]));
-    const regex = buildTokenRegex([...byCommand.keys()]);
+    return splitContentByCommandTokens(content, actions, a => a.command)
+        .map(s => ({ text: s.text, action: s.match }));
+}
 
-    const segments: SlashContentSegment[] = [];
-    let cursor = 0;
-    for (const match of content.matchAll(regex)) {
-        const index = match.index ?? 0;
-        if (index > cursor) {
-            segments.push({ text: content.slice(cursor, index) });
-        }
-        segments.push({ text: match[0], action: byCommand.get(match[1]) });
-        cursor = index + match[0].length;
-    }
-    if (cursor < content.length || segments.length === 0) {
-        segments.push({ text: content.slice(cursor) });
-    }
-    return segments;
+/** Value equality for pill descriptor lists (used to avoid state echo loops). */
+export function slashDescriptorsEqual(
+    a: SlashCommandDescriptor[],
+    b: SlashCommandDescriptor[],
+): boolean {
+    return a.length === b.length && a.every((p, i) =>
+        p.commandName === b[i].commandName &&
+        p.actionId === b[i].actionId &&
+        p.targetType === b[i].targetType &&
+        p.title === b[i].title
+    );
 }
 
 /** Whether `content` contains `/command` as a properly bounded token. */

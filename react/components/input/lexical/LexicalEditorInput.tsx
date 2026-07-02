@@ -30,9 +30,50 @@ import {
     SlashCommandNode,
 } from './SlashCommandNode';
 
-import type { SlashCommandDescriptor } from '../../../utils/slashCommands';
+import {
+    splitContentByCommandTokens,
+    slashDescriptorsEqual,
+    type SlashCommandDescriptor,
+} from '../../../utils/slashCommands';
 
 export type { SlashCommandDescriptor };
+
+/** Collect the /command pills in the current editor state, in document order.
+ *  Must be called inside an editor read/update context. */
+function $collectSlashCommandDescriptors(): SlashCommandDescriptor[] {
+    const result: SlashCommandDescriptor[] = [];
+    const visit = (node: LexicalNode) => {
+        if ($isSlashCommandNode(node)) {
+            result.push({
+                commandName: node.getCommandName(),
+                actionId: node.getActionId(),
+                targetType: node.getTargetType(),
+                title: node.getTitle(),
+            });
+        } else if ($isElementNode(node)) {
+            node.getChildren().forEach(visit);
+        }
+    };
+    $getRoot().getChildren().forEach(visit);
+    return result;
+}
+
+/** Build editor nodes for `text`, materializing known `/command` tokens as
+ *  pill nodes (used when syncing the shared content string into this editor —
+ *  the pill identity travels via the shared pill descriptors, so pills stay
+ *  real in every mounted editor). Must be called inside an update context. */
+function $buildContentNodes(text: string, pills: SlashCommandDescriptor[]): LexicalNode[] {
+    return splitContentByCommandTokens(text, pills, p => p.commandName)
+        .filter(segment => segment.text.length > 0)
+        .map(segment => segment.match
+            ? $createSlashCommandNode(
+                segment.match.commandName,
+                segment.match.actionId,
+                segment.match.targetType,
+                segment.match.title,
+            )
+            : $createTextNode(segment.text));
+}
 
 export type LexicalEditorInputHandle = {
     focus: () => void;
@@ -57,6 +98,15 @@ export type LexicalEditorInputHandle = {
 export interface LexicalEditorInputProps {
     value: string;
     onChange: (text: string) => void;
+    /**
+     * Shared /command pill descriptors for the message (in document order).
+     * Used to rebuild real pill nodes when syncing an external `value` into
+     * this editor; `onPillsChange` reports this editor's pills after local
+     * edits. Together they keep pills consistent across multiple mounted
+     * editors (main-window sidebar + separate Beaver window).
+     */
+    pills?: SlashCommandDescriptor[];
+    onPillsChange?: (pills: SlashCommandDescriptor[]) => void;
     onSubmit: () => void;
     placeholder?: string;
     ariaLabel?: string;
@@ -221,19 +271,11 @@ const EditorApi = forwardRef<LexicalEditorInputHandle>(
                         // token (and the wire `command` derived from it) stays
                         // unambiguous. Repeated pills of the SAME action keep
                         // the same token (deduped at send).
-                        const existingPills: SlashCommandNode[] = [];
-                        const collectPills = (node: LexicalNode) => {
-                            if ($isSlashCommandNode(node)) {
-                                existingPills.push(node);
-                            } else if ($isElementNode(node)) {
-                                node.getChildren().forEach(collectPills);
-                            }
-                        };
-                        root.getChildren().forEach(collectPills);
+                        const existingPills = $collectSlashCommandDescriptors();
                         let commandName = descriptor.commandName;
                         let suffix = 2;
                         while (existingPills.some(p =>
-                            p.getCommandName() === commandName && p.getActionId() !== descriptor.actionId
+                            p.commandName === commandName && p.actionId !== descriptor.actionId
                         )) {
                             commandName = `${descriptor.commandName}-${suffix++}`;
                         }
@@ -274,21 +316,9 @@ const EditorApi = forwardRef<LexicalEditorInputHandle>(
                     editor.focus(() => { /* noop */ }, { defaultSelection: 'rootEnd' });
                 },
                 getSlashCommands: () => {
-                    const result: SlashCommandDescriptor[] = [];
+                    let result: SlashCommandDescriptor[] = [];
                     editor.getEditorState().read(() => {
-                        const visit = (node: LexicalNode) => {
-                            if ($isSlashCommandNode(node)) {
-                                result.push({
-                                    commandName: node.getCommandName(),
-                                    actionId: node.getActionId(),
-                                    targetType: node.getTargetType(),
-                                    title: node.getTitle(),
-                                });
-                            } else if ($isElementNode(node)) {
-                                node.getChildren().forEach(visit);
-                            }
-                        };
-                        $getRoot().getChildren().forEach(visit);
+                        result = $collectSlashCommandDescriptors();
                     });
                     return result;
                 },
@@ -300,17 +330,32 @@ const EditorApi = forwardRef<LexicalEditorInputHandle>(
 );
 
 /**
- * Propagates the editor's plain text to the parent when it changes, and syncs
- * external `value` changes back into the editor when they drift (e.g. parent
- * clears `messageContent` after sending).
+ * Propagates the editor's plain text (and its /command pills) to the parent
+ * when it changes, and syncs external `value` changes back into the editor
+ * when they drift (e.g. parent clears `messageContent` after sending, or
+ * another mounted editor — main sidebar vs separate Beaver window — edited
+ * the shared content).
+ *
+ * On external rebuilds, known `/command` tokens are materialized as real pill
+ * nodes from the shared `pills` descriptors, so a pill staged in one editor
+ * renders (and submits) as a pill in every other mounted editor.
  */
 const PlainTextSync: React.FC<{
     value: string;
     onChange: (text: string) => void;
-}> = ({ value, onChange }) => {
+    pills?: SlashCommandDescriptor[];
+    onPillsChange?: (pills: SlashCommandDescriptor[]) => void;
+}> = ({ value, onChange, pills, onPillsChange }) => {
     const [editor] = useLexicalComposerContext();
-    // Tracks the last text value we emitted upward to avoid echoes.
+    // Tracks the last values we emitted upward to avoid echoes.
     const lastEmitted = useRef<string>('');
+    const lastEmittedPills = useRef<SlashCommandDescriptor[] | null>(null);
+
+    // Latest shared pill descriptors, readable from the value-sync effect
+    // without retriggering it on descriptor identity churn. Assigned in
+    // render so the sync effect below always sees the same-commit value.
+    const pillsRef = useRef<SlashCommandDescriptor[]>([]);
+    pillsRef.current = pills ?? [];
 
     // Sync external value -> editor (e.g. when parent clears after send)
     useEffect(() => {
@@ -320,7 +365,7 @@ const PlainTextSync: React.FC<{
             if (root.getTextContent() === value) return;
             root.clear();
             const p = $createParagraphNode();
-            if (value.length > 0) p.append($createTextNode(value));
+            $buildContentNodes(value, pillsRef.current).forEach(node => p.append(node));
             root.append(p);
         });
         lastEmitted.current = value;
@@ -328,13 +373,24 @@ const PlainTextSync: React.FC<{
 
     const handleChange = useCallback(() => {
         let text = '';
+        let currentPills: SlashCommandDescriptor[] = [];
         editor.getEditorState().read(() => {
             text = $getRoot().getTextContent();
+            currentPills = $collectSlashCommandDescriptors();
         });
+        // Pills can only change together with the text (they ARE text), so a
+        // single text-echo guard covers both emissions.
         if (text === lastEmitted.current) return;
         lastEmitted.current = text;
         onChange(text);
-    }, [editor, onChange]);
+        if (onPillsChange && (
+            lastEmittedPills.current === null ||
+            !slashDescriptorsEqual(currentPills, lastEmittedPills.current)
+        )) {
+            lastEmittedPills.current = currentPills;
+            onPillsChange(currentPills);
+        }
+    }, [editor, onChange, onPillsChange]);
 
     return <OnChangePlugin onChange={handleChange} ignoreSelectionChange />;
 };
@@ -547,7 +603,7 @@ const editorConfig = {
 
 export const LexicalEditorInput = forwardRef<LexicalEditorInputHandle, LexicalEditorInputProps>(
     function LexicalEditorInput(
-        { value, onChange, onSubmit, placeholder, ariaLabel, disabled = false, onKeyDown, suspendKeyboardNavigation = false, onContentEditableRef },
+        { value, onChange, pills, onPillsChange, onSubmit, placeholder, ariaLabel, disabled = false, onKeyDown, suspendKeyboardNavigation = false, onContentEditableRef },
         ref,
     ) {
         const contentEditableRef = useRef<HTMLDivElement | null>(null);
@@ -604,7 +660,7 @@ export const LexicalEditorInput = forwardRef<LexicalEditorInputHandle, LexicalEd
                         />
                     </div>
                     <HistoryPlugin />
-                    <PlainTextSync value={value} onChange={onChange} />
+                    <PlainTextSync value={value} onChange={onChange} pills={pills} onPillsChange={onPillsChange} />
                     <SlashCommandRevertPlugin />
                     <CaretNavigationPlugin suspendedRef={suspendNavRef} />
                     <SubmitOnEnterPlugin onSubmit={onSubmit} />

@@ -158,6 +158,16 @@ export const pendingPillInsertAtom = atom<{
 } | null>(null);
 
 /**
+ * The /command pills currently in the message, in document order — the shared
+ * companion to `currentMessageContentAtom` (which only carries plain text).
+ * The editor the user edits in pushes its pills here; other mounted editors
+ * (main sidebar vs separate Beaver window) use it to rebuild real pill nodes
+ * when they sync the shared content string, so pills render and submit
+ * correctly from every surface.
+ */
+export const currentMessagePillsAtom = atom<SlashCommandDescriptor[]>([]);
+
+/**
 * Current reader attachment
 */
 export const currentReaderAttachmentAtom = atom<Zotero.Item | null>(null);

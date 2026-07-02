@@ -1,5 +1,5 @@
 import { atom } from "jotai";
-import { currentMessageItemsAtom, currentMessageContentAtom, currentMessageCollectionsAtom, currentMessageExternalFilesAtom, updateMessageItemsFromZoteroSelectionAtom, updateReaderAttachmentAtom } from "./messageComposition";
+import { currentMessageItemsAtom, currentMessageContentAtom, currentMessagePillsAtom, currentMessageCollectionsAtom, currentMessageExternalFilesAtom, updateMessageItemsFromZoteroSelectionAtom, updateReaderAttachmentAtom } from "./messageComposition";
 import { isLibraryTabAtom, isWebSearchEnabledAtom, removePopupMessagesByTypeAtom, userScrolledAtom, windowUserScrolledAtom } from "./ui";
 
 import { citationsAtom, citationMapAtom, processCitationsAtom, resetCitationMarkersAtom, mergePageLabelsByAttachmentIdAtom } from "./citations";
@@ -289,6 +289,7 @@ export const newThreadAtom = atom(
             set(citationsAtom, []);
             set(resetCitationMarkersAtom);
             set(currentMessageContentAtom, '');
+            set(currentMessagePillsAtom, []);
             set(resetMessageUIStateAtom);
             set(clearExternalReferenceCacheAtom);
             // Update message items from Zotero selection or reader
@@ -578,5 +579,6 @@ export const loadThreadAtom = atom(
         set(currentMessageExternalFilesAtom, []);
         set(removePopupMessagesByTypeAtom, ['items_summary']);
         set(currentMessageContentAtom, '');
+        set(currentMessagePillsAtom, []);
     }
 );

@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { StopIcon, GlobalSearchIcon } from '../icons/icons';
 import { useAtom, useSetAtom, useAtomValue, useStore } from 'jotai';
 import { newThreadAtom, currentThreadIdAtom } from '../../atoms/threads';
-import { currentMessageContentAtom, pendingPillInsertAtom } from '../../atoms/messageComposition';
+import { currentMessageContentAtom, currentMessagePillsAtom, pendingPillInsertAtom } from '../../atoms/messageComposition';
 import { sendWSMessageAtom, isWSChatPendingAtom, closeWSConnectionAtom, sendApprovalResponseAtom } from '../../atoms/agentRunAtoms';
 import { pendingApprovalsAtom, removePendingApprovalAtom } from '../../agents/agentActions';
 import Button from '../ui/Button';
@@ -50,6 +50,7 @@ const InputArea: React.FC<InputAreaProps> = ({
     hideAttachmentMenu = false,
 }) => {
     const [messageContent, setMessageContent] = useAtom(currentMessageContentAtom);
+    const [messagePills, setMessagePills] = useAtom(currentMessagePillsAtom);
     const selectedModel = useAtomValue(selectedModelAtom);
     const isUsingBeaverCredits = useAtomValue(isUsingBeaverCreditsAtom);
     const newThread = useSetAtom(newThreadAtom);
@@ -525,6 +526,8 @@ const InputArea: React.FC<InputAreaProps> = ({
                         ref={editorHandleRef}
                         value={messageContent}
                         onChange={handleEditorChange}
+                        pills={messagePills}
+                        onPillsChange={setMessagePills}
                         onSubmit={handleEditorSubmit}
                         placeholder={getPlaceholderText()}
                         ariaLabel="Message Beaver"

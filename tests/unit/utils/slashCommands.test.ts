@@ -2,8 +2,11 @@ import { describe, it, expect } from 'vitest';
 import {
     toSlashToken,
     splitContentBySlashTokens,
+    splitContentByCommandTokens,
+    slashDescriptorsEqual,
     hasSlashToken,
     filterPromptActionsForContent,
+    type SlashCommandDescriptor,
 } from '../../../react/utils/slashCommands';
 import type { PromptAction } from '../../../react/agents/types';
 
@@ -82,6 +85,40 @@ describe('splitContentBySlashTokens', () => {
         // The "." must not act as a wildcard
         const noMatch = splitContentBySlashTokens('/aXb c', [action('a.b')]);
         expect(noMatch.every(s => !s.action)).toBe(true);
+    });
+});
+
+describe('splitContentByCommandTokens', () => {
+    const pill = (commandName: string): SlashCommandDescriptor => ({
+        commandName,
+        actionId: `id-${commandName}`,
+        title: commandName,
+    });
+
+    it('matches pill descriptors by commandName', () => {
+        const segments = splitContentByCommandTokens('/summarize now', [pill('summarize')], p => p.commandName);
+        expect(segments[0].match?.actionId).toBe('id-summarize');
+        expect(segments[1]).toEqual({ text: ' now' });
+    });
+
+    it('materializes every occurrence of a repeated token', () => {
+        const segments = splitContentByCommandTokens('/a and /a', [pill('a')], p => p.commandName);
+        expect(segments.filter(s => s.match)).toHaveLength(2);
+    });
+});
+
+describe('slashDescriptorsEqual', () => {
+    const d = (commandName: string, actionId = 'a1'): SlashCommandDescriptor => ({
+        commandName, actionId, targetType: 'items', title: 'T',
+    });
+
+    it('compares by value in order', () => {
+        expect(slashDescriptorsEqual([d('x')], [d('x')])).toBe(true);
+        expect(slashDescriptorsEqual([d('x')], [d('y')])).toBe(false);
+        expect(slashDescriptorsEqual([d('x')], [d('x', 'other')])).toBe(false);
+        expect(slashDescriptorsEqual([d('x')], [])).toBe(false);
+        expect(slashDescriptorsEqual([], [])).toBe(true);
+        expect(slashDescriptorsEqual([d('x'), d('y')], [d('y'), d('x')])).toBe(false);
     });
 });
 
