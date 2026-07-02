@@ -1,11 +1,13 @@
-import React, { useState } from "react";
+import React from "react";
+import { useAtom } from "jotai";
 import Button from "./ui/Button";
 import Tooltip from "./ui/Tooltip";
 import { QuillWriteIcon, BookSearchIcon, LayersIcon, HighlighterIcon } from "./icons/icons";
 import CategoryPanel from "./CategoryPanel";
 import { ActionCategory } from "../types/actions";
+import { homeLauncherCategoryAtom, HomeLauncherCategoryId } from "../atoms/ui";
 
-type CategoryId = "research" | "write" | "organize" | "annotate";
+type CategoryId = HomeLauncherCategoryId;
 
 interface CategoryDef {
     id: CategoryId;
@@ -50,8 +52,9 @@ const CATEGORIES: CategoryDef[] = [
  * CategoryPanel), but never switches the tab.
  */
 const HomeLauncher: React.FC<{ style?: React.CSSProperties }> = ({ style }) => {
-    // Sticky tab — only the user changes it. `null` = collapsed.
-    const [expanded, setExpanded] = useState<CategoryId | null>("research");
+    // Sticky tab — only the user changes it. `null` = collapsed. Shared atom so
+    // the selection persists across the library and reader sidebars.
+    const [expanded, setExpanded] = useAtom(homeLauncherCategoryAtom);
 
     const toggle = (id: CategoryId) => setExpanded((prev) => (prev === id ? null : id));
     const activeCategory = CATEGORIES.find((c) => c.id === expanded)?.category ?? null;

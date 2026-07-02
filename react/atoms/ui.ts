@@ -46,6 +46,12 @@ export const isWebSearchAllowedAtom = atom((get) => Boolean(get(isUsingBeaverCre
 export const showFileStatusDetailsAtom = atom(false);
 export const isThreadListViewAtom = atom(false);
 
+/**
+ * HomeLauncher — the sticky selected category (`null` = collapsed)
+ */
+export type HomeLauncherCategoryId = 'research' | 'write' | 'organize' | 'annotate';
+export const homeLauncherCategoryAtom = atom<HomeLauncherCategoryId | null>('research');
+
 // Error Report Dialog
 export const isErrorReportDialogVisibleAtom = atom(false);
 export const errorReportTextAtom = atom('');
