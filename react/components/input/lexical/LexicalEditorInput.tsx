@@ -1119,7 +1119,6 @@ const editorConfig = {
     // Plain text editors still need a theme object; we leave it empty.
     theme: {},
     onError(error: Error) {
-        // eslint-disable-next-line no-console
         console.error('[LexicalEditorInput]', error);
     },
 };
