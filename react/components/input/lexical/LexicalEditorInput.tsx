@@ -19,6 +19,7 @@ import {
     $getSelection,
     $isElementNode,
     $isRangeSelection,
+    $setSelection,
     COMMAND_PRIORITY_HIGH,
     KEY_ENTER_COMMAND,
     LexicalNode,
@@ -74,6 +75,50 @@ function $buildContentNodes(text: string, pills: SlashCommandDescriptor[]): Lexi
                 segment.match.title,
             )
             : $createTextNode(segment.text));
+}
+
+/** A raw DOM selection (nodes + offsets), captured to re-assert a
+ *  user-placed caret that Lexical has not adopted yet. */
+type DomSelectionSnapshot = {
+    anchorNode: Node;
+    anchorOffset: number;
+    focusNode: Node;
+    focusOffset: number;
+};
+
+/** Snapshot the DOM selection if both of its ends are inside `root`. */
+function captureDomSelection(sel: Selection, root: HTMLElement): DomSelectionSnapshot | null {
+    const { anchorNode, focusNode } = sel;
+    if (!anchorNode || !focusNode) return null;
+    if (!root.contains(anchorNode) || !root.contains(focusNode)) return null;
+    return {
+        anchorNode,
+        anchorOffset: sel.anchorOffset,
+        focusNode,
+        focusOffset: sel.focusOffset,
+    };
+}
+
+/** Flattened plain-text offsets of the live DOM selection within `root`, or
+ *  null when the selection is not a text-to-text range inside it. Mirrors
+ *  $getFlatSelectionOffsets so the two sides can be compared. */
+function getDomFlatSelectionOffsets(root: HTMLElement, sel: Selection): { anchor: number; focus: number } | null {
+    const { anchorNode, focusNode } = sel;
+    if (!anchorNode || !focusNode) return null;
+    if (anchorNode.nodeType !== Node.TEXT_NODE || focusNode.nodeType !== Node.TEXT_NODE) return null;
+    if (!root.contains(anchorNode) || !root.contains(focusNode)) return null;
+    let anchor: number | null = null;
+    let focus: number | null = null;
+    let running = 0;
+    const walker = root.ownerDocument.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    let node: Node | null;
+    while ((node = walker.nextNode())) {
+        if (node === anchorNode) anchor = running + sel.anchorOffset;
+        if (node === focusNode) focus = running + sel.focusOffset;
+        running += (node as Text).length;
+    }
+    if (anchor === null || focus === null) return null;
+    return { anchor, focus };
 }
 
 /** Flattened plain-text offsets of the current selection's anchor and focus
@@ -502,7 +547,10 @@ const SubmitOnEnterPlugin: React.FC<{ onSubmit: () => void }> = ({ onSubmit }) =
  * done by hand because Gecko's Selection.modify() silently ignores the
  * 'documentboundary' and 'paragraph' granularities.
  */
-const CaretNavigationPlugin: React.FC<{ suspendedRef: React.MutableRefObject<boolean> }> = ({ suspendedRef }) => {
+const CaretNavigationPlugin: React.FC<{
+    suspendedRef: React.MutableRefObject<boolean>;
+    pendingDomSelectionRef: React.MutableRefObject<DomSelectionSnapshot | null>;
+}> = ({ suspendedRef, pendingDomSelectionRef }) => {
     const [editor] = useLexicalComposerContext();
     useEffect(() => {
         const handler = (e: KeyboardEvent) => {
@@ -621,6 +669,11 @@ const CaretNavigationPlugin: React.FC<{ suspendedRef: React.MutableRefObject<boo
                     docEdge(true);
                     break;
             }
+            // Lexical only adopts this native caret move on the next (async)
+            // selectionchange. Snapshot it so SelectionGuardPlugin re-asserts
+            // THIS position - not the stale editor-state one - if a document
+            // mutation clobbers the selection in the meantime.
+            pendingDomSelectionRef.current = captureDomSelection(sel, root);
             e.preventDefault();
         };
 
@@ -628,7 +681,147 @@ const CaretNavigationPlugin: React.FC<{ suspendedRef: React.MutableRefObject<boo
             if (prevRootElement) prevRootElement.removeEventListener('keydown', handler, true);
             if (rootElement) rootElement.addEventListener('keydown', handler, true);
         });
-    }, [editor, suspendedRef]);
+    }, [editor, suspendedRef, pendingDomSelectionRef]);
+    return null;
+};
+
+/**
+ * Guards the caret against Zotero's chrome-document selection resets.
+ *
+ * In Zotero's main window (a chrome document), any childList or characterData
+ * DOM mutation ANYWHERE in the document synchronously resets the document
+ * selection's offsets to 0 (the anchor/focus nodes are kept; attribute/style
+ * mutations are harmless). Ordinary web documents preserve the selection;
+ * Zotero's own note editor avoids the issue by living in an iframe with its
+ * own document, but Beaver's editor sits directly in the chrome document. So
+ * a tooltip mounting, a menu re-rendering while the user types, or streaming
+ * output re-rendering the thread all clobber the caret - Lexical then adopts
+ * the collapsed selection on the next selectionchange and the caret visibly
+ * jumps to the start.
+ *
+ * The repair runs in a MutationObserver callback: observer callbacks are
+ * microtasks, so they fire after the mutation but BEFORE the queued
+ * selectionchange task - restoring here means Lexical never sees the bogus
+ * selection at all.
+ *
+ * Restore target, in priority order:
+ * 1. A pending user-placed DOM selection (mouse release / caret-nav key) that
+ *    Lexical has not adopted yet - re-asserted verbatim. Cleared on the next
+ *    selectionchange (which runs after Lexical's own listener has adopted it).
+ * 2. The editor state's selection, re-applied through the reconciler when the
+ *    live DOM selection no longer matches it.
+ *
+ * Skipped while: the mutation batch touches the editor's own subtree (the
+ * reconciler manages those), a pointer is down (don't fight an in-progress
+ * click/drag), IME composition is active, or the editor is not the active
+ * element (re-asserting a DOM selection while a menu input has focus would
+ * trigger the XUL focus manager's selection-based focus theft).
+ */
+const SelectionGuardPlugin: React.FC<{
+    pendingDomSelectionRef: React.MutableRefObject<DomSelectionSnapshot | null>;
+}> = ({ pendingDomSelectionRef }) => {
+    const [editor] = useLexicalComposerContext();
+    useEffect(() => {
+        let pointerDown = false;
+
+        const setup = (root: HTMLElement): (() => void) => {
+            const doc = root.ownerDocument;
+            const win = doc.defaultView;
+            if (!win) return () => {};
+
+            const onPointerDown = () => {
+                pointerDown = true;
+            };
+            const onPointerUp = () => {
+                pointerDown = false;
+                const sel = win.getSelection();
+                pendingDomSelectionRef.current = sel ? captureDomSelection(sel, root) : null;
+            };
+            // Runs after Lexical's own selectionchange listener (registered at
+            // editor creation, so earlier), i.e. once Lexical has adopted the
+            // current DOM selection and the snapshot is no longer needed.
+            const onSelectionChange = () => {
+                pendingDomSelectionRef.current = null;
+            };
+
+            const onMutations = (records: MutationRecord[]) => {
+                for (const record of records) {
+                    // Editor-internal (or mixed) batch: Lexical's reconciler
+                    // sets the selection itself after its own mutations.
+                    if (root.contains(record.target)) return;
+                }
+                if (pointerDown) return;
+                if (editor.isComposing()) return;
+                if (doc.activeElement !== root) return;
+                const sel = win.getSelection();
+                if (!sel) return;
+
+                const pending = pendingDomSelectionRef.current;
+                if (pending && root.contains(pending.anchorNode) && root.contains(pending.focusNode)) {
+                    const unchanged =
+                        sel.anchorNode === pending.anchorNode &&
+                        sel.anchorOffset === pending.anchorOffset &&
+                        sel.focusNode === pending.focusNode &&
+                        sel.focusOffset === pending.focusOffset;
+                    if (!unchanged) {
+                        try {
+                            sel.setBaseAndExtent(
+                                pending.anchorNode,
+                                pending.anchorOffset,
+                                pending.focusNode,
+                                pending.focusOffset,
+                            );
+                        } catch { /* nodes may have become unresolvable */ }
+                    }
+                    return;
+                }
+
+                const live = getDomFlatSelectionOffsets(root, sel);
+                if (!live) return;
+                let state: { anchor: number; focus: number } | null = null;
+                editor.getEditorState().read(() => {
+                    state = $getFlatSelectionOffsets();
+                });
+                if (!state) return;
+                const stateOffsets = state as { anchor: number; focus: number };
+                if (live.anchor === stateOffsets.anchor && live.focus === stateOffsets.focus) return;
+                // Discrete update: the reconciler re-applies the state
+                // selection to the DOM synchronously, still ahead of the
+                // queued selectionchange task.
+                editor.update(() => {
+                    const s = $getSelection();
+                    if ($isRangeSelection(s)) {
+                        const clone = s.clone();
+                        clone.dirty = true;
+                        $setSelection(clone);
+                    }
+                }, { discrete: true });
+            };
+
+            const observer = new (win as typeof globalThis & Window).MutationObserver(onMutations);
+            observer.observe(doc.documentElement, { childList: true, subtree: true, characterData: true });
+            doc.addEventListener('pointerdown', onPointerDown, true);
+            doc.addEventListener('pointerup', onPointerUp, true);
+            doc.addEventListener('selectionchange', onSelectionChange);
+            return () => {
+                observer.disconnect();
+                doc.removeEventListener('pointerdown', onPointerDown, true);
+                doc.removeEventListener('pointerup', onPointerUp, true);
+                doc.removeEventListener('selectionchange', onSelectionChange);
+            };
+        };
+
+        let cleanupDom: (() => void) | null = null;
+        const unregister = editor.registerRootListener((rootElement) => {
+            cleanupDom?.();
+            cleanupDom = rootElement ? setup(rootElement) : null;
+        });
+        return () => {
+            unregister();
+            cleanupDom?.();
+            cleanupDom = null;
+        };
+    }, [editor, pendingDomSelectionRef]);
     return null;
 };
 
@@ -741,6 +934,12 @@ export const LexicalEditorInput = forwardRef<LexicalEditorInputHandle, LexicalEd
         const suspendNavRef = useRef(false);
         suspendNavRef.current = suspendKeyboardNavigation;
 
+        // A user-placed DOM selection Lexical hasn't adopted yet, shared between
+        // CaretNavigationPlugin (writes after nav-key moves) and
+        // SelectionGuardPlugin (writes on pointer-up, clears on selectionchange,
+        // reads when repairing chrome-document selection resets).
+        const pendingDomSelectionRef = useRef<DomSelectionSnapshot | null>(null);
+
         // The ContentEditable ref callback MUST keep a stable identity across
         // renders. Lexical memoizes its root-element ref on this callback, so a
         // changing identity makes it re-run editor.setRootElement() on every
@@ -790,7 +989,8 @@ export const LexicalEditorInput = forwardRef<LexicalEditorInputHandle, LexicalEd
                     <HistoryPlugin />
                     <PlainTextSync value={value} onChange={onChange} pills={pills} onPillsChange={onPillsChange} />
                     <SlashCommandRevertPlugin />
-                    <CaretNavigationPlugin suspendedRef={suspendNavRef} />
+                    <CaretNavigationPlugin suspendedRef={suspendNavRef} pendingDomSelectionRef={pendingDomSelectionRef} />
+                    <SelectionGuardPlugin pendingDomSelectionRef={pendingDomSelectionRef} />
                     <SelectionPersistencePlugin />
                     <SlashCommandClickPlugin />
                     <SubmitOnEnterPlugin onSubmit={onSubmit} />
