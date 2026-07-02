@@ -559,7 +559,7 @@
 [id^="beaver-pane-"] .beaver-slash-command {
     display: inline;
     padding: 2px 4px;
-    margin: 0 1px;
+    /* margin: 0 1px; */
     border-radius: 6px;
     background-color: var(--tag-blue-quarternary);
     color: var(--tag-blue-primary);
@@ -793,6 +793,12 @@
     background-color: var(--tag-purple-quinary);
     color: var(--tag-purple-secondary);
     border-color: var(--tag-purple-tertiary);
+}
+/* Notice badge for prompts that still contain [[ ]] placeholders */
+[id^="beaver-pane-"] .action-target-badge[data-type="placeholder"] {
+    background-color: var(--tag-yellow-quinary);
+    color: var(--tag-yellow-secondary);
+    border-color: var(--tag-yellow-tertiary);
 }
 
 
