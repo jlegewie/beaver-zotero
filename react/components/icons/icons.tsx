@@ -52,6 +52,7 @@ export { default as AuthorGroupIcon } from './AuthorGroupIcon';
 export { default as AuthorIcon } from './AuthorIcon';
 export { default as BookmarkIcon } from './BookmarkIcon';
 export { default as CheckmarkCircleIcon } from './CheckmarkCircleIcon';
+export { default as CheckmarkCircleSolidIcon } from './CheckmarkCircleSolidIcon';
 export { default as CancelCircleIcon } from './CancelCircleIcon';
 export { default as LogoutIcon } from './LogoutIcon';
 export { default as LibraryIcon } from './LibraryIcon';

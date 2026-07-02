@@ -15,7 +15,7 @@ import Tooltip from '../ui/Tooltip';
 import {
     ArrowLeftIcon,
     ArrowRightIcon,
-    CheckmarkCircleIcon,
+    CheckmarkCircleSolidIcon,
     CircleIcon,
     Icon,
     StopIcon,
@@ -243,7 +243,7 @@ export const AskUserQuestionPanel: React.FC<AskUserQuestionPanelProps> = ({ pend
                                 >
                                     <span className="display-flex flex-row gap-2 items-start min-w-0">
                                         <Icon
-                                            icon={isSelected ? CheckmarkCircleIcon : CircleIcon}
+                                            icon={isSelected ? CheckmarkCircleSolidIcon : CircleIcon}
                                             className={`mt-020 scale-12 ${isSelected ? 'font-color-accent-green' : 'font-color-secondary'}`}
                                         />
                                         <span className="min-w-0">
@@ -287,7 +287,7 @@ export const AskUserQuestionPanel: React.FC<AskUserQuestionPanelProps> = ({ pend
                                     }}
                                 >
                                     <Icon
-                                        icon={isOther ? CheckmarkCircleIcon : CircleIcon}
+                                        icon={isOther ? CheckmarkCircleSolidIcon : CircleIcon}
                                         className={`scale-12 ${isOther ? 'font-color-accent-green' : 'font-color-secondary'}`}
                                     />
                                 </button>
