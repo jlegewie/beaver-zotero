@@ -514,6 +514,7 @@ const InputArea: React.FC<InputAreaProps> = ({
                 closeOnSelect={false}
                 showSearchInput={false}
                 portalContainer={menuPortalContainer}
+                groupHeaderClassName="font-color-primary opacity-70"
             />
 
             {/* Input Form */}

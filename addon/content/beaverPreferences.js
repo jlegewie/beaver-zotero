@@ -29,11 +29,18 @@ async function onLoad() {
         }
     });
 
-    // Read the initial tab from window arguments (if passed)
+    // Read the initial tab (and, for the Actions tab, an initial category filter)
+    // from window arguments (if passed)
     var initialTab = null;
+    var initialActionsCategoryFilter = null;
     try {
-        if (window.arguments && window.arguments[0] && window.arguments[0].tab) {
-            initialTab = window.arguments[0].tab;
+        if (window.arguments && window.arguments[0]) {
+            if (window.arguments[0].tab) {
+                initialTab = window.arguments[0].tab;
+            }
+            if (window.arguments[0].actionsCategoryFilter) {
+                initialActionsCategoryFilter = window.arguments[0].actionsCategoryFilter;
+            }
         }
     } catch (e) {
         // Ignore errors reading arguments
@@ -48,7 +55,7 @@ async function onLoad() {
         if (typeof BeaverReact.renderPreferencesWindow === "function") {
             const container = document.getElementById("beaver-pane-preferences");
             if (container) {
-                root = BeaverReact.renderPreferencesWindow(container, initialTab);
+                root = BeaverReact.renderPreferencesWindow(container, initialTab, initialActionsCategoryFilter);
                 Zotero.debug("Beaver: Preferences window React component mounted");
             } else {
                 Zotero.debug("Beaver Error: Container element #beaver-pane-preferences not found");

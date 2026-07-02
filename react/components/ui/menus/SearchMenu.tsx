@@ -83,6 +83,8 @@ export interface SearchMenuProps {
     portalContainer?: HTMLElement | null;
     /** Called after the menu performs its initial focus behavior. */
     onAfterInitialFocus?: () => void;
+    /** Optional CSS class name for group headers */
+    groupHeaderClassName?: string;
 }
 
 /**
@@ -110,6 +112,7 @@ const SearchMenu: React.FC<SearchMenuProps> = ({
     onEmptyBackspace,
     portalContainer,
     onAfterInitialFocus,
+    groupHeaderClassName = 'font-color-secondary'
 }) => {
     const menuRef = useRef<HTMLDivElement | null>(null);
     const scrollContainerRef = useRef<HTMLDivElement | null>(null);
@@ -423,7 +426,7 @@ const SearchMenu: React.FC<SearchMenuProps> = ({
                 <div
                     key={index}
                     role="presentation"
-                    className="px-2 py-1 font-color-secondary text-sm font-semibold mt-1 first:mt-0"
+                    className={`px-2 py-1 text-sm font-semibold mt-1 first:mt-0 ${groupHeaderClassName}`}
                 >
                     {item.customContent ?? <span className="truncate">{item.label}</span>}
                 </div>

@@ -3,6 +3,7 @@ import { PopupMessage, PopupMessageType } from '../types/popupMessage';
 import { ExternalReference } from '../types/externalReferences';
 import { getPref } from '../../src/utils/prefs';
 import { isUsingBeaverCreditsAtom } from './models';
+import type { ActionCategoryFilter } from '../types/actions';
 
 export const isSidebarVisibleAtom = atom(false);
 export const isLibraryTabAtom = atom(false);
@@ -11,6 +12,18 @@ export const isWebSearchEnabledAtom = atom(false);
 export type PreferencePageTab = 'general' | 'sync' | 'permissions' | 'billing' | 'models' | 'actions' | 'advanced' | 'account';
 export const activePreferencePageTabAtom = atom<PreferencePageTab>('general');
 export const isPreferencePageVisibleAtom = atom(false);
+
+/**
+ * A one-shot request to set the Actions preferences category filter. A null
+ * filter explicitly clears category filtering. `requestId` makes every request
+ * distinct so re-requesting the same category still re-triggers the consumer's
+ * effect. `ActionsPreferenceSection` applies it once, then resets this to null.
+ */
+export interface ActionsCategoryFilterRequest {
+    filter: ActionCategoryFilter | null;
+    requestId: number;
+}
+export const pendingActionsCategoryFilterAtom = atom<ActionsCategoryFilterRequest | null>(null);
 export const mcpServerEnabledAtom = atom(getPref('mcpServerEnabled'));
 export const mcpCreateNoteToolEnabledAtom = atom(getPref('mcpCreateNoteToolEnabled'));
 export const dataProviderEnabledAtom = atom(getPref('dataProviderEnabled'));

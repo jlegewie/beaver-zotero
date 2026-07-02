@@ -5,7 +5,7 @@
  * Also provides `computeActionGroups` for building grouped slash-menu sections.
  */
 
-import { Action, ActionTargetType } from '../types/actions';
+import { Action, ActionCategory, ActionTargetType } from '../types/actions';
 import { ZoteroContext } from '../atoms/zoteroContext';
 import { agentItemFilter } from '../../src/utils/agentItemSupport';
 import { getDisplayNameFromItem } from './sourceUtils';
@@ -309,4 +309,30 @@ function getItemLabel(item: Zotero.Item): string {
         return truncateText(getDisplayNameFromItem(item), MAX_LABEL_ITEM_LENGTH);
     }
     return truncateText(item.getDisplayTitle(), MAX_LABEL_ITEM_LENGTH);
+}
+
+// ---------------------------------------------------------------------------
+// Category split for the homepage skill panels
+//
+// Skill panels (Research / Organize / Annotate) show only the actions in a
+// category that apply to the current selection, split into two sections: the
+// selected target and library-wide (global). Visibility filtering happens
+// upstream (actionsForContextAtom); this only scopes by category and splits.
+// ---------------------------------------------------------------------------
+
+/**
+ * Split a context-visible action list into the selected target's actions and
+ * the library-wide (global) actions for one bucket.
+ */
+export function splitCategoryActions(
+    contextActions: Action[],
+    category: ActionCategory | null,
+    activeTargetType: ActionTargetType | null,
+): { targetActions: Action[]; globalActions: Action[] } {
+    const scoped = category === null
+        ? contextActions.filter(a => a.category == null)
+        : contextActions.filter(a => a.category === category);
+    const targetActions = activeTargetType ? scoped.filter(a => a.targetType === activeTargetType) : [];
+    const globalActions = scoped.filter(a => a.targetType === 'global');
+    return { targetActions, globalActions };
 }

@@ -4,6 +4,7 @@ import { initializeReactUI } from "../../react/ui/initialization";
 import { KeyboardManager } from "../utils/keyboardManager";
 import { getPref } from "../utils/prefs";
 import { PreferencePageTab } from "../../react/atoms/ui";
+import { ActionCategoryFilter } from "../../react/types/actions";
 
 let keyboardManager: KeyboardManager | null = null;
 
@@ -20,7 +21,7 @@ interface BeaverWindow extends Window {
         renderGlobalInitializer: (container: Element) => any;
         renderWindowSidebar: (container: Element) => any;
         renderFloatingPopup: (container: Element) => any;
-        renderPreferencesWindow: (container: Element, initialTab?: PreferencePageTab | null) => any;
+        renderPreferencesWindow: (container: Element, initialTab?: PreferencePageTab | null, initialActionsCategoryFilter?: ActionCategoryFilter | null) => any;
         unmountFromElement: (container: Element) => boolean;
     };
 }
@@ -593,14 +594,15 @@ export class BeaverUIFactory {
     }
 
     /**
-     * Open Beaver preferences in a separate window
+     * Open Beaver preferences in a separate window. `actionsCategoryFilter` requests
+     * that the Actions tab pre-filter its list to that category (or "uncategorized").
      */
-    static openPreferencesWindow(tab?: PreferencePageTab): void {
+    static openPreferencesWindow(tab?: PreferencePageTab, actionsCategoryFilter?: ActionCategoryFilter): void {
         const existingWindow = this.findPreferencesWindow();
         if (existingWindow) {
-            // Switch tab if requested via the global function
+            // Switch tab (and apply the category filter) if requested via the global function
             if (tab && (Zotero as any).__beaverOpenPreferencesTab) {
-                (Zotero as any).__beaverOpenPreferencesTab(tab);
+                (Zotero as any).__beaverOpenPreferencesTab(tab, actionsCategoryFilter);
             }
             existingWindow.focus();
             Zotero.debug("Beaver: Focusing existing preferences window");
@@ -612,7 +614,7 @@ export class BeaverUIFactory {
             'chrome://beaver/content/beaverPreferences.xhtml',
             BEAVER_PREFERENCES_WINDOW_NAME,
             'chrome,resizable,centerscreen,dialog=false',
-            { tab: tab || null }
+            { tab: tab || null, actionsCategoryFilter: actionsCategoryFilter || null }
         );
         Zotero.debug("Beaver: Opened preferences window");
     }
