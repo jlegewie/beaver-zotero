@@ -1,7 +1,8 @@
 import React, { useRef, useEffect, type ReactNode } from 'react';
 import InputArea from "./input/InputArea"
 import AskUserQuestionPanel from "./input/AskUserQuestionPanel"
-import { pendingApprovalsAtom, pendingQuestionsAtom } from '../agents/agentActions';
+import { pendingApprovalsAtom } from '../agents/agentActions';
+import { pendingQuestionsAtom } from '../agents/pendingQuestions';
 import Header from "./Header"
 import { useEventSubscription } from '../hooks/useEventSubscription';
 import { ThreadView } from "./agentRuns";

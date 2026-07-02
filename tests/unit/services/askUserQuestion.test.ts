@@ -57,7 +57,7 @@ import {
     clearAllPendingQuestionsAtom,
     pendingQuestionsAtom,
     removePendingQuestionAtom,
-} from '../../../react/agents/agentActions';
+} from '../../../react/agents/pendingQuestions';
 
 class MockWebSocket {
     static CONNECTING = 0;

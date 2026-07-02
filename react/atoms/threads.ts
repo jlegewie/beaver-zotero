@@ -23,8 +23,8 @@ import {
     validateAppliedAgentAction, 
     undoAgentActionAtom,
     clearAllPendingApprovalsAtom,
-    clearAllPendingQuestionsAtom,
 } from "../agents/agentActions";
+import { clearAllPendingQuestionsAtom } from "../agents/pendingQuestions";
 import { processToolReturnResults } from "../agents/toolResultProcessing";
 import { upgradeToolReturn } from "../compat/legacyToolResults";
 import { loadItemDataForAgentActions } from "../utils/agentActionUtils";
