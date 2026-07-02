@@ -583,6 +583,11 @@
     cursor: pointer;
 }
 
+/* Chat-history pill: clicking it opens the action in the preferences window. */
+[id^="beaver-pane-"] .beaver-slash-command-clickable {
+    cursor: pointer;
+}
+
 
 [id^="beaver-pane-"] .preference-input {
     font-family: system-ui, -apple-system, sans-serif;

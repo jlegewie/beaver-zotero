@@ -48,7 +48,8 @@ export class SlashCommandNode extends TextNode {
     __commandName: string;
     __actionId: string;
     __targetType?: ActionTargetType;
-    // Human-readable action title, shown as a native hover tooltip.
+    // Human-readable action title, surfaced in the pill's hover card
+    // (SlashCommandHoverCardPlugin) via the data-title attribute.
     __title?: string;
     // Ghost text rendered after the pill while it awaits an argument
     // (see ArgumentHintPlugin in LexicalEditorInput).
@@ -128,7 +129,9 @@ export class SlashCommandNode extends TextNode {
         dom.setAttribute('data-lexical-slash', 'true');
         dom.setAttribute('data-command', this.__commandName);
         if (this.__actionId) dom.setAttribute('data-action-id', this.__actionId);
-        if (this.__title) dom.title = this.__title;
+        // Title snapshot for the hover card's fallback when the action has
+        // been deleted (a native `title` would double up with the card).
+        if (this.__title) dom.setAttribute('data-title', this.__title);
         return dom;
     }
 
@@ -142,7 +145,8 @@ export class SlashCommandNode extends TextNode {
             else dom.removeAttribute('data-action-id');
         }
         if (prevNode.__title !== this.__title) {
-            dom.title = this.__title ?? '';
+            if (this.__title) dom.setAttribute('data-title', this.__title);
+            else dom.removeAttribute('data-title');
         }
         return updated;
     }

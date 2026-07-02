@@ -37,7 +37,8 @@ import {
     slashDescriptorsEqual,
     type SlashCommandDescriptor,
 } from '../../../utils/slashCommands';
-import { openPreferencesWindow } from '../../../../src/ui/openPreferencesWindow';
+import { getHost } from '../../../host';
+import { SlashCommandHoverCardPlugin } from './SlashCommandHoverCardPlugin';
 
 export type { SlashCommandDescriptor };
 
@@ -946,9 +947,10 @@ const SelectionPersistencePlugin: React.FC = () => {
 };
 
 /**
- * Opens the preferences window (Actions tab) with the clicked /command pill's
- * action revealed in edit mode. The pill's DOM carries the action id via the
- * data-action-id attribute (see SlashCommandNode.createDOM).
+ * Opens the host's action editor (for Zotero, the preferences window's Actions
+ * tab) with the clicked /command pill's action revealed in edit mode. The
+ * pill's DOM carries the action id via the data-action-id attribute (see
+ * SlashCommandNode.createDOM).
  */
 const SlashCommandClickPlugin: React.FC = () => {
     const [editor] = useLexicalComposerContext();
@@ -959,7 +961,7 @@ const SlashCommandClickPlugin: React.FC = () => {
             if (!pill) return;
             const actionId = pill.getAttribute('data-action-id');
             if (!actionId) return;
-            openPreferencesWindow('actions', undefined, actionId);
+            getHost().navigation?.openActionSettings?.(actionId);
         };
         return editor.registerRootListener((rootElement, prevRootElement) => {
             if (prevRootElement) prevRootElement.removeEventListener('click', handler);
@@ -1055,6 +1057,7 @@ export const LexicalEditorInput = forwardRef<LexicalEditorInputHandle, LexicalEd
                     <SelectionGuardPlugin pendingDomSelectionRef={pendingDomSelectionRef} />
                     <SelectionPersistencePlugin />
                     <SlashCommandClickPlugin />
+                    <SlashCommandHoverCardPlugin />
                     <SubmitOnEnterPlugin onSubmit={onSubmit} />
                     <EditorApi ref={ref} />
                 </div>

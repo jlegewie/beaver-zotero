@@ -7,6 +7,7 @@ import { activateCitation } from './citationActivation';
 import { launchExternalFile, notifyReferenceUnavailable } from './sourceActions';
 import { navigateToAnnotation } from '../../utils/readerUtils';
 import { navigateToAttachmentMatch as navigateToAttachmentMatchImpl } from '../../utils/attachmentMatchNavigation';
+import { openPreferencesWindow } from '../../../src/ui/openPreferencesWindow';
 
 /**
  * Whether a referenced item still exists in the Zotero library. History-rendered
@@ -77,4 +78,7 @@ export const zoteroNavigation: NavigationHost = {
         });
     },
     launchExternalFile,
+    openActionSettings(actionId: string): void {
+        openPreferencesWindow('actions', undefined, actionId);
+    },
 };

@@ -106,6 +106,13 @@ export interface NavigationHost {
     navigateToAttachmentMatch(match: AttachmentMatchNavigation): void | Promise<void>;
     /** Open a locally stored external-file copy by its ext key (no-op if no local copy). */
     launchExternalFile(extKey: string): void | Promise<void>;
+    /**
+     * Open the client's settings surface for editing a saved action (for
+     * Zotero, the Actions tab of the preferences window with `actionId`
+     * revealed in edit mode). Optional — clients without an action editor
+     * omit it, and action pills degrade to hover-only.
+     */
+    openActionSettings?(actionId: string): void;
 }
 
 /**
