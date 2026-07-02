@@ -3,6 +3,7 @@ import { Citation } from "../types/citations";
 import { MessageAttachment } from "../types/attachments/apiTypes";
 import { ZoteroLibrary, ZoteroCollection, ZoteroTag } from "../types/zotero";
 import type { CardKind } from "../types/librarySuggestions";
+import type { ActionCategory, ActionTargetType } from "../types/actions";
 
 /**
  * LLM usage associated with an agent run.
@@ -101,6 +102,28 @@ export function isFirstRunOrigin(origin: PromptOrigin | undefined | null): boole
 }
 
 /**
+ * A saved action the user invoked as a /command token in the message content.
+ * Mirrors `PromptAction` in `app/models/agent_run.py`.
+ *
+ * The token stays verbatim in `BeaverAgentPrompt.content`; this object carries
+ * the resolved prompt so the backend can tell the model what the command means.
+ */
+export interface PromptAction {
+    /** Slash token as it appears in content, without the leading '/' */
+    command: string;
+    /** Client-side action id (builtin id or custom uuid) */
+    action_id: string;
+    /** Human-readable action title at send time */
+    title?: string;
+    /** Resolved prompt text; null when the action definition no longer exists */
+    prompt: string | null;
+    /** Target-type group the action was invoked under */
+    target_type?: ActionTargetType;
+    /** Category the action belongs to */
+    category?: ActionCategory;
+}
+
+/**
  * Chat message content sent by the client.
  * Contains all user input for a chat completion request.
  */
@@ -123,6 +146,8 @@ export interface BeaverAgentPrompt {
     custom_instructions?: string;
     /** Where this prompt came from */
     origin?: PromptOrigin;
+    /** Saved actions invoked as /command tokens in `content` */
+    actions?: PromptAction[];
 }
 
 // ============================================================================

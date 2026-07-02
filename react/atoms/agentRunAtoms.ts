@@ -57,7 +57,7 @@ import type { ExternalFileAttachment } from '../types/attachments/apiTypes';
 import { getApplicationStateProvider } from './applicationState';
 import { uint8ArrayToBase64 } from '../utils/fileUtils';
 import { isAttachmentOnServer } from '../../src/utils/webAPI';
-import { AgentRun, BeaverAgentPrompt, MessageSearchFilters, PromptOrigin, ToolRequest } from '../agents/types';
+import { AgentRun, BeaverAgentPrompt, MessageSearchFilters, PromptAction, PromptOrigin, ToolRequest } from '../agents/types';
 import {
     threadRunsAtom,
     activeRunAtom,
@@ -1620,16 +1620,23 @@ async function executeWSRequest(
  * 6. "run_complete" event → update usage, set status="completed"
  * 7. "done" event → move activeRun to threadRuns, close connection
  */
+export interface SendWSMessageOptions {
+    runIdOverride?: string;
+    permissionsOverride?: Partial<ChargingPermissions>;
+    origin?: PromptOrigin;
+    /** Saved actions invoked as /command tokens in the message content */
+    actions?: PromptAction[];
+}
+
 export const sendWSMessageAtom = atom(
     null,
     async (
         get,
         set,
         message: string,
-        runIdOverride?: string,
-        permissionsOverride?: Partial<ChargingPermissions>,
-        origin?: PromptOrigin,
+        options?: SendWSMessageOptions,
     ) => {
+        const { runIdOverride, permissionsOverride, origin, actions } = options ?? {};
         const isPending = get(isWSChatPendingAtom);
         logger('sendWSMessageAtom: Called at ' + Date.now() + ' with message: ' + message.substring(0, 50) + ' (isPending: ' + isPending + ')', 1);
         
@@ -1859,6 +1866,7 @@ export const sendWSMessageAtom = atom(
             filters: filtersPayload,
             ...(toolRequests ? { tool_requests: toolRequests } : {}),
             ...(origin ? { origin } : {}),
+            ...(actions?.length ? { actions } : {}),
         };
 
         // Get current thread ID (null for new thread)

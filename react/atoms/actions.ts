@@ -18,10 +18,12 @@ import { zoteroContextAtom } from './zoteroContext';
 import { isActionVisible, ActionContext } from '../utils/actionVisibility';
 import { resolvePromptVariables, EMPTY_VARIABLE_HINTS } from '../utils/promptVariables';
 import { sendWSMessageAtom } from './agentRunAtoms';
-import { currentMessageContentAtom, currentMessageItemsAtom, currentMessageCollectionsAtom, pendingActionInputFocusAtom } from './messageComposition';
+import { currentMessageItemsAtom, currentMessageCollectionsAtom, pendingPillInsertAtom } from './messageComposition';
 import { CollectionReference } from '../types/zotero';
 import { addPopupMessageAtom } from '../utils/popupMessageUtils';
 import { isRejectedItemValidation, itemValidationResultsAtom } from './itemValidation';
+import { toSlashToken, type SlashCommandDescriptor } from '../utils/slashCommands';
+import type { PromptAction } from '../agents/types';
 
 // ---------------------------------------------------------------------------
 // Base atom — initialised once from prefs + built-ins
@@ -174,145 +176,44 @@ export const actionsForContextAtom = atom<Action[]>((get) => {
 });
 
 // ---------------------------------------------------------------------------
-// Atomic action execution — resolves variables, adds items, sends message
-// ---------------------------------------------------------------------------
-
-export const sendResolvedActionAtom = atom(
-    null,
-    async (get, set, payload: { text: string; targetType?: ActionTargetType }) => {
-        const { text, items, collection, emptyItemVariables } = await resolvePromptVariables(
-            payload.text, payload.targetType
-        );
-
-        if (emptyItemVariables.length > 0) {
-            const hint = EMPTY_VARIABLE_HINTS[emptyItemVariables[0]] ?? 'No items found for this prompt.';
-            set(addPopupMessageAtom, {
-                type: 'warning',
-                title: 'Action skipped',
-                text: hint,
-                expire: true,
-                duration: 4000,
-            });
-            return;
-        }
-
-        // Check cached validation results and skip rejected items.
-        if (items.length > 0) {
-            const validationResults = get(itemValidationResultsAtom);
-            for (const item of items) {
-                const key   = `${item.libraryID}-${item.key}`;
-                const cached = validationResults.get(key);
-                if (isRejectedItemValidation(item, cached)) {
-                    set(addPopupMessageAtom, {
-                        type: 'error',
-                        title: 'Action skipped',
-                        text: cached?.reason || 'One or more items failed validation.',
-                        expire: true,
-                        duration: 4000,
-                    });
-                    return;
-                }
-            }
-        }
-
-        if (items.length > 0) {
-            const currentItems = get(currentMessageItemsAtom);
-            const existingKeys = new Set(currentItems.map(i => `${i.libraryID}-${i.key}`));
-            const newItems = items.filter(i => !existingKeys.has(`${i.libraryID}-${i.key}`));
-            if (newItems.length > 0) {
-                set(currentMessageItemsAtom, [...currentItems, ...newItems]);
-            }
-        }
-
-        if (collection && (get(currentMessageCollectionsAtom) as CollectionReference[]).length === 0) {
-            set(currentMessageCollectionsAtom, [collection]);
-        }
-
-        return set(sendWSMessageAtom, text);
-    },
-);
-
-// ---------------------------------------------------------------------------
-// Stage an action in the input — used when the action's prompt contains
-// `[[name]]` user-input placeholders. Resolves auto variables, attaches
-// items/collections, appends the prompt to the existing message content
-// (separated by a blank line) with `[[]]` placeholders preserved, and
-// signals the input to select the first placeholder.
+// Stage an action as a /command pill in the chat input.
 //
-// `pretext` overrides the existing message content as the prefix (used by
-// the slash menu, where the live content includes the trailing `/query`
-// that the menu has already consumed). When omitted, the current
-// `currentMessageContentAtom` value is used as the prefix.
+// Single entry point used by the home launcher, action suggestions, the
+// library context menu, and the reader toolbar. The pill is inserted into the
+// input (via `pendingPillInsertAtom`, consumed by InputArea) and the user
+// submits the message themselves; the action's prompt is resolved at send
+// time in `sendComposedMessageAtom`, exactly like a slash-menu pill.
 // ---------------------------------------------------------------------------
 
-export const stageActionInInputAtom = atom(
+export const stageActionPillAtom = atom(
     null,
-    async (
-        get,
-        set,
-        payload: { actionId: string; text: string; targetType?: ActionTargetType; pretext?: string },
-    ) => {
-        const { actionId, text: actionText, targetType, pretext } = payload;
-
-        const { text: resolvedText, items, collection, emptyItemVariables } =
-            await resolvePromptVariables(actionText, targetType);
-
-        if (emptyItemVariables.length > 0) {
-            const hint = EMPTY_VARIABLE_HINTS[emptyItemVariables[0]] ?? 'No items found for this prompt.';
-            set(addPopupMessageAtom, {
-                type: 'warning',
-                title: 'Action skipped',
-                text: hint,
-                expire: true,
-                duration: 4000,
-            });
-            return;
-        }
-
-        if (items.length > 0) {
-            const validationResults = get(itemValidationResultsAtom);
-            for (const item of items) {
-                const key = `${item.libraryID}-${item.key}`;
-                const cached = validationResults.get(key);
-                if (isRejectedItemValidation(item, cached)) {
-                    set(addPopupMessageAtom, {
-                        type: 'error',
-                        title: 'Action skipped',
-                        text: cached?.reason || 'One or more items failed validation.',
-                        expire: true,
-                        duration: 4000,
-                    });
-                    return;
-                }
-            }
-        }
-
-        if (items.length > 0) {
-            const currentItems = get(currentMessageItemsAtom);
-            const existingKeys = new Set(currentItems.map(i => `${i.libraryID}-${i.key}`));
-            const newItems = items.filter(i => !existingKeys.has(`${i.libraryID}-${i.key}`));
-            if (newItems.length > 0) {
-                set(currentMessageItemsAtom, [...currentItems, ...newItems]);
-            }
-        }
-
-        if (collection && (get(currentMessageCollectionsAtom) as CollectionReference[]).length === 0) {
-            set(currentMessageCollectionsAtom, [collection]);
-        }
-
-        const prefix = pretext !== undefined ? pretext : get(currentMessageContentAtom);
-        const finalText = prefix.length > 0
-            ? `${prefix}\n\n${resolvedText}`
-            : resolvedText;
-
-        set(currentMessageContentAtom, finalText);
-        set(markActionUsedAtom, actionId);
-        set(pendingActionInputFocusAtom, (n) => n + 1);
+    (get, set, payload: {
+        actionId: string;
+        targetType?: ActionTargetType;
+        fallbackTitle?: string;
+        /** Window whose editor should receive the pill (where the user acted). */
+        targetWindow?: Window;
+    }) => {
+        const action = get(actionsAtom).find(a => a.id === payload.actionId);
+        const title = action?.title ?? payload.fallbackTitle ?? 'action';
+        const descriptor: SlashCommandDescriptor = {
+            commandName: toSlashToken(title),
+            actionId: payload.actionId,
+            targetType: payload.targetType,
+            title,
+        };
+        set(pendingPillInsertAtom, { descriptor, targetWindow: payload.targetWindow, nonce: Date.now() });
+        set(markActionUsedAtom, payload.actionId);
     },
 );
 
 // ---------------------------------------------------------------------------
 // Send a composed message that contains one or more /command pills.
+//
+// The pill tokens stay verbatim in the message content; each pill's action
+// prompt is resolved here ({{ }} variables + item/collection attachment) and
+// sent as a structured `actions` entry on the prompt. The backend appends a
+// definition block telling the model what each /command means.
 // ---------------------------------------------------------------------------
 
 export const sendComposedMessageAtom = atom(
@@ -322,7 +223,7 @@ export const sendComposedMessageAtom = atom(
         set,
         payload: {
             baseText: string;
-            pills: { commandName: string; actionId: string; targetType?: ActionTargetType }[];
+            pills: SlashCommandDescriptor[];
         },
     ): Promise<boolean> => {
         const { baseText, pills } = payload;
@@ -331,13 +232,28 @@ export const sendComposedMessageAtom = atom(
 
         const accumulatedItems: Zotero.Item[] = [];
         let accumulatedCollection: CollectionReference | null = null;
-        // Resolved prompt for each pill, by index (null = unknown/deleted action).
-        const resolvedTexts: (string | null)[] = [];
+        // One entry per distinct command. Insertion-time collision handling
+        // keeps tokens unique per distinct action, so first-wins dedup here
+        // only collapses repeated pills of the same action.
+        const promptActions: PromptAction[] = [];
+        const seenCommands = new Set<string>();
 
         for (const pill of pills) {
+            if (seenCommands.has(pill.commandName)) continue;
+            seenCommands.add(pill.commandName);
+
             const action = actions.find(a => a.id === pill.actionId);
             if (!action) {
-                resolvedTexts.push(null);
+                // Action deleted since the pill was inserted — send the pill
+                // identity without a prompt; the backend tells the model the
+                // definition is unavailable.
+                promptActions.push({
+                    command: pill.commandName,
+                    action_id: pill.actionId,
+                    title: pill.title,
+                    prompt: null,
+                    target_type: pill.targetType,
+                });
                 continue;
             }
 
@@ -380,25 +296,19 @@ export const sendComposedMessageAtom = atom(
             if (collection && !accumulatedCollection) {
                 accumulatedCollection = collection;
             }
-            resolvedTexts.push(resolvedText);
-        }
 
-        // Substitute each "/command" token with its resolved prompt, scanning
-        // left-to-right so repeated/duplicate tokens map to the right pill and
-        // surrounding user text is preserved.
-        let finalText = '';
-        let cursor = 0;
-        pills.forEach((pill, idx) => {
-            const resolved = resolvedTexts[idx];
-            if (resolved === null) return;
-            const token = `/${pill.commandName}`;
-            const tokenIdx = baseText.indexOf(token, cursor);
-            if (tokenIdx === -1) return;
-            finalText += baseText.slice(cursor, tokenIdx) + resolved;
-            cursor = tokenIdx + token.length;
-        });
-        finalText += baseText.slice(cursor);
-        finalText = finalText.trim();
+            promptActions.push({
+                command: pill.commandName,
+                action_id: pill.actionId,
+                // Prefer the pill's title snapshot: if the action was renamed
+                // between staging and send, the metadata must still describe
+                // the visible /token.
+                title: pill.title ?? action.title,
+                prompt: resolvedText,
+                target_type: pill.targetType,
+                category: action.category,
+            });
+        }
 
         if (accumulatedItems.length > 0) {
             const currentItems = get(currentMessageItemsAtom);
@@ -413,7 +323,7 @@ export const sendComposedMessageAtom = atom(
             set(currentMessageCollectionsAtom, [accumulatedCollection]);
         }
 
-        await set(sendWSMessageAtom, finalText);
+        await set(sendWSMessageAtom, baseText.trim(), { actions: promptActions });
         return true;
     },
 );

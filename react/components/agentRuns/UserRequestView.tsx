@@ -10,6 +10,8 @@ import ModelSelectionButton from '../ui/buttons/ModelSelectionButton';
 import { regenerateWithEditedPromptAtom, isWSChatPendingAtom } from '../../atoms/agentRunAtoms';
 import { selectedModelAtom } from '../../atoms/models';
 import { isStreamingAtom } from '../../agents/atoms';
+import { filterPromptActionsForContent } from '../../utils/slashCommands';
+import { renderContentWithSlashPills } from './slashCommandRendering';
 
 interface UserRequestViewProps {
     userPrompt: BeaverAgentPrompt;
@@ -183,10 +185,12 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
         e.preventDefault();
         if (isPending || editedContent.length === 0) return;
 
-        // Build the edited prompt
+        // Build the edited prompt. Drop actions whose /command token the user
+        // removed while editing (the plain textarea can't add new pills).
         const editedPrompt: BeaverAgentPrompt = {
             ...userPrompt,
             content: editedContent,
+            actions: filterPromptActionsForContent(userPrompt.actions, editedContent),
         };
 
         setIsEditing(false);
@@ -235,10 +239,12 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
                         whiteSpace: 'pre-wrap',
                         display: 'block' 
                     }}
-                    ref={contentRef} 
+                    ref={contentRef}
                     onContextMenu={handleContextMenu}
                 >
-                    {userPrompt.content}
+                    {userPrompt.actions?.length
+                        ? renderContentWithSlashPills(userPrompt.content, userPrompt.actions)
+                        : userPrompt.content}
                 </div>
 
                 {/* Edit icon (visible on hover) */}

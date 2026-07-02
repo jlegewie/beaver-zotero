@@ -12,7 +12,9 @@ export interface BeaverEvents {
     };
     contextMenuAction: {
         actionId: string;
-        actionText: string;
+        /** Action title at dispatch time; fallback for the /command token when
+         *  the action can't be found in the store (e.g. deleted mid-flight). */
+        actionTitle: string;
         targetType: ActionTargetType;
         itemIds: number[];
         collectionId: number | null;

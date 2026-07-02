@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { Action, ActionCategory, ActionTargetType, CATEGORY_LABELS, TARGET_TYPE_LABELS, TARGET_TYPE_DESCRIPTIONS } from "../../types/actions";
+import { hasUserInputVariables } from "../../utils/userInputVariables";
 import Button from "../ui/Button";
 import MenuButton from "../ui/MenuButton";
 import Tooltip from "../ui/Tooltip";
@@ -210,6 +211,13 @@ const ActionCard: React.FC<ActionCardProps> = ({
                         <span className="action-target-badge" data-type={action.targetType}>
                             {TARGET_TYPE_LABELS[action.targetType]}
                         </span>
+                        {hasUserInputVariables(action.text) && (
+                            <Tooltip content="This prompt contains [[ ]] placeholders, which are sent as written." width="220px">
+                                <span className="action-target-badge" data-type="placeholder">
+                                    Placeholders
+                                </span>
+                            </Tooltip>
+                        )}
                     </div>
                     {action.text && (
                         <div className="font-color-secondary text-base action-card-preview">
@@ -284,6 +292,15 @@ const ActionCard: React.FC<ActionCardProps> = ({
                         rows={3}
                     />
                 </div>
+                {hasUserInputVariables(editText) && (
+                    <div className="action-field-help text-sm font-color-tertiary display-flex flex-row gap-2 items-start">
+                        <Icon icon={InformationCircleIcon} size={13} className="flex-shrink-0" style={{ marginTop: '2px' }} />
+                        <span>
+                            This prompt contains [[ ]] placeholders. They are currently sent to the
+                            assistant as written; a new way to fill them in is coming in a future update.
+                        </span>
+                    </div>
+                )}
 
                 {/* Applies to + Category — two outlined pickers side by side */}
                 <div className="display-flex flex-row gap-4 mt-3">

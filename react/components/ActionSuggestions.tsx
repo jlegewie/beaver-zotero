@@ -213,7 +213,7 @@ const ActionSuggestions: React.FC<ActionSuggestionsProps> = ({ showGlobal = true
         <Button
             key={action.id}
             variant="ghost"
-            onClick={() => runAction(action)}
+            onClick={(e) => runAction(action, e.currentTarget.ownerDocument.defaultView)}
             disabled={isBusy || !isLibrarySupported}
             className="w-full justify-between"
             style={{ padding: '6px 6px' }}

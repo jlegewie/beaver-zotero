@@ -7,7 +7,7 @@ import { actionsAtom, actionContextAtom, markActionUsedAtom } from '../atoms/act
 import { computeActionGroups } from '../utils/actionVisibility';
 import { openPreferencesWindow } from '../../src/ui/openPreferencesWindow';
 import { Action, ActionCategory, ActionTargetType } from '../types/actions';
-import { SlashCommandDescriptor } from '../components/input/lexical/LexicalEditorInput';
+import { SlashCommandDescriptor, toSlashToken } from '../utils/slashCommands';
 import { MenuPosition, SearchMenuItem } from '../components/ui/menus/SearchMenu';
 
 // Category icons mirror the homepage launcher and Actions preferences so the
@@ -20,16 +20,6 @@ const CATEGORY_ICONS: Record<ActionCategory, React.ComponentType<React.SVGProps<
 };
 const categoryIcon = (cat: ActionCategory | undefined): React.ComponentType<React.SVGProps<SVGSVGElement>> =>
     cat ? CATEGORY_ICONS[cat] : ZapIcon;
-
-/** Turn an action title into a single `/command` token (e.g. "Summarize Paper"
- *  → "summarize-paper"). The slash menu closes on whitespace, so the token must
- *  not contain spaces. */
-const toSlashToken = (title: string): string =>
-    title
-        .trim()
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, '-')
-        .replace(/^-+|-+$/g, '') || 'action';
 
 export function useSlashMenu(
     inputRef: React.RefObject<HTMLElement | null>,

@@ -1,9 +1,8 @@
 import React, { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { StopIcon, GlobalSearchIcon } from '../icons/icons';
-import { useAtom, useSetAtom, useAtomValue } from 'jotai';
+import { useAtom, useSetAtom, useAtomValue, useStore } from 'jotai';
 import { newThreadAtom, currentThreadIdAtom } from '../../atoms/threads';
-import { currentMessageContentAtom, pendingActionInputFocusAtom } from '../../atoms/messageComposition';
-import { findNextUserInputVariable } from '../../utils/userInputVariables';
+import { currentMessageContentAtom, pendingPillInsertAtom } from '../../atoms/messageComposition';
 import { sendWSMessageAtom, isWSChatPendingAtom, closeWSConnectionAtom, sendApprovalResponseAtom } from '../../atoms/agentRunAtoms';
 import { pendingApprovalsAtom, removePendingApprovalAtom } from '../../agents/agentActions';
 import Button from '../ui/Button';
@@ -69,7 +68,8 @@ const InputArea: React.FC<InputAreaProps> = ({
     const softCapTriggeredRuns = useAtomValue(softCapTriggeredRunsAtom);
     const isWebSearchAllowed = useAtomValue(isWebSearchAllowedAtom);
     const currentNoteItem = useAtomValue(currentNoteItemAtom);
-    const pendingActionFocus = useAtomValue(pendingActionInputFocusAtom);
+    const pendingPillInsert = useAtomValue(pendingPillInsertAtom);
+    const store = useStore();
     const webSearchDescriptionId = useId();
 
     // Imperative handle exposed by the Lexical editor (focus / clear).
@@ -184,22 +184,34 @@ const InputArea: React.FC<InputAreaProps> = ({
         focusEditor();
     }, []);
 
-    // When an action with `[[name]]` placeholders is staged, focus the editor so
-    // the user can start typing. Placeholder selection (previously done via the
-    // textarea's setSelectionRange) is now handled inside the Lexical editor.
+    // Consume a staged /command pill (home launcher, context menu, reader
+    // toolbar). This component owns the editor handle, so the pill is inserted
+    // here; running on mount as well covers the sidebar-just-opened case.
+    // The user submits the message themselves (no auto-send).
+    //
+    // Multiple InputAreas can be mounted at once (main-window sidebar + the
+    // separate Beaver window), all subscribed to the same atom. Consumption is
+    // therefore a CLAIM: the editor in the payload's `targetWindow` (where the
+    // user triggered the action) claims immediately; other editors act only as
+    // a delayed fallback in case the target never consumes (e.g. its editor is
+    // not mounted). The synchronous re-check + clear of the live atom value
+    // guarantees exactly one editor inserts the pill.
     useEffect(() => {
-        if (pendingActionFocus === 0) return;
-        const timer = setTimeout(() => {
+        if (!pendingPillInsert) return;
+        const claim = () => {
+            // Another editor may have claimed this pill already.
+            if (store.get(pendingPillInsertAtom) !== pendingPillInsert) return;
+            store.set(pendingPillInsertAtom, null);
+            editorHandleRef.current?.insertSlashCommand(pendingPillInsert.descriptor, null);
             focusEditor();
-            const first = findNextUserInputVariable(messageContent, 0);
-            if (first) {
-                editorHandleRef.current?.selectRange(first.start, first.end);
-            } else {
-                editorHandleRef.current?.selectRange(messageContent.length, messageContent.length);
-            }
-        }, 0);
+        };
+        const ownWindow = inputRef.current?.ownerDocument.defaultView ?? null;
+        const isTarget = pendingPillInsert.targetWindow
+            ? pendingPillInsert.targetWindow === ownWindow
+            : (inputRef.current?.ownerDocument.hasFocus() ?? false);
+        const timer = setTimeout(claim, isTarget ? 0 : 150);
         return () => clearTimeout(timer);
-    }, [focusEditor, messageContent, pendingActionFocus]);
+    }, [focusEditor, inputRef, pendingPillInsert, store]);
 
     const queueSelectionRestore = useCallback((offset: number, skipFocus: boolean) => {
         pendingSelectionRestoreRef.current = { offset, skipFocus };
@@ -287,25 +299,13 @@ const InputArea: React.FC<InputAreaProps> = ({
         verticalPosition,
     ]);
 
-    /** Tab selects the next `[[name]]` after the cursor, or falls through. */
-    const handleVariableTab = useCallback((e: React.KeyboardEvent<HTMLElement>): boolean => {
-        if (e.key !== 'Tab' || e.shiftKey) return false;
-        const cursor = editorHandleRef.current?.getSelectionOffset();
-        const next = findNextUserInputVariable(messageContent, cursor ?? 0);
-        if (!next) return false;
-        e.preventDefault();
-        editorHandleRef.current?.selectRange(next.start, next.end);
-        return true;
-    }, [messageContent]);
-
     const handleEditorKeyDown = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
         if (handleSlashMenuKeyDown(e)) return;
-        if (handleVariableTab(e)) return;
         if ((e.key === 'n' || e.key === 'N') && ((Zotero.isMac && e.metaKey) || (!Zotero.isMac && e.ctrlKey))) {
             e.preventDefault();
             newThread();
         }
-    }, [handleSlashMenuKeyDown, handleVariableTab, newThread]);
+    }, [handleSlashMenuKeyDown, newThread]);
 
     const handleSubmit = async (
         e: React.FormEvent<HTMLFormElement> | React.MouseEvent<HTMLButtonElement>

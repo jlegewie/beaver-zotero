@@ -445,7 +445,7 @@ function dispatchAction(action: Action, context: any): void {
     eventBus.dispatchEvent(new win.CustomEvent('contextMenuAction', {
         detail: {
             actionId: action.id,
-            actionText: action.text,
+            actionTitle: action.title,
             targetType: action.targetType,
             itemIds,
             collectionId,

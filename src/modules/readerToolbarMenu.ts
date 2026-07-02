@@ -231,7 +231,7 @@ function openBeaverMenu(reader: any, anchorButton: HTMLElement): void {
                     eventBus.dispatchEvent(new mainWin.CustomEvent('contextMenuAction', {
                         detail: {
                             actionId: action.id,
-                            actionText: action.text,
+                            actionTitle: action.title,
                             targetType: 'attachment',
                             itemIds: readerItemID ? [readerItemID] : [],
                             collectionId: null,

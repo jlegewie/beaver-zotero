@@ -1,7 +1,7 @@
 /**
  * Hook that listens for "contextMenuAction" events dispatched from the esbuild
  * bundle's MenuManager integration and orchestrates the sidebar-open → new-thread
- * → set-items → send-action flow.
+ * → set-items → stage-action-pill flow. The user submits the message themselves.
  */
 
 import { useSetAtom, useAtomValue } from 'jotai';
@@ -9,23 +9,20 @@ import { userAtom } from '../atoms/auth';
 import { newThreadAtom } from '../atoms/threads';
 import { currentMessageItemsAtom, currentMessageCollectionsAtom } from '../atoms/messageComposition';
 import { collectionToReference } from '../types/zotero';
-import { sendResolvedActionAtom, markActionUsedAtom, stageActionInInputAtom } from '../atoms/actions';
+import { stageActionPillAtom } from '../atoms/actions';
 import { eventManager } from '../events/eventManager';
 import { useEventSubscription } from './useEventSubscription';
 import { logger } from '../../src/utils/logger';
-import { hasUserInputVariables } from '../utils/userInputVariables';
 
 export function useContextMenuActionHandler() {
     const user = useAtomValue(userAtom);
     const newThread = useSetAtom(newThreadAtom);
     const setCurrentMessageItems = useSetAtom(currentMessageItemsAtom);
     const setCurrentMessageCollections = useSetAtom(currentMessageCollectionsAtom);
-    const sendResolvedAction = useSetAtom(sendResolvedActionAtom);
-    const stageActionInInput = useSetAtom(stageActionInInputAtom);
-    const markActionUsed = useSetAtom(markActionUsedAtom);
+    const stageActionPill = useSetAtom(stageActionPillAtom);
 
     useEventSubscription('contextMenuAction', async (detail) => {
-        const { actionId, actionText, targetType, itemIds, collectionId } = detail;
+        const { actionId, actionTitle, targetType, itemIds, collectionId } = detail;
 
         logger(`useContextMenuActionHandler: Received action ${actionId} (${targetType}), ${itemIds.length} items`);
 
@@ -64,21 +61,19 @@ export function useContextMenuActionHandler() {
                     }
                 }
 
-                // 4. Stage if the prompt has [[name]] placeholders, otherwise send
-                if (hasUserInputVariables(actionText)) {
-                    await stageActionInInput({
-                        actionId,
-                        text: actionText,
-                        targetType,
-                        pretext: '',
-                    });
-                } else {
-                    await sendResolvedAction({ text: actionText, targetType });
-                    markActionUsed(actionId);
-                }
+                // 4. Stage the action as a /command pill in the input. The
+                //    context menu / reader toolbar live in the main window and
+                //    step 1 force-opened its sidebar, so target that editor
+                //    (not the separate Beaver window, if one is open).
+                stageActionPill({
+                    actionId,
+                    targetType,
+                    fallbackTitle: actionTitle,
+                    targetWindow: Zotero.getMainWindow(),
+                });
             } catch (error) {
                 logger(`useContextMenuActionHandler: Error executing action: ${error}`, 1);
             }
         }, 0);
-    }, [user, newThread, setCurrentMessageItems, setCurrentMessageCollections, sendResolvedAction, stageActionInInput, markActionUsed]);
+    }, [user, newThread, setCurrentMessageItems, setCurrentMessageCollections, stageActionPill]);
 }

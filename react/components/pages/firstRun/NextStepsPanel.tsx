@@ -63,13 +63,15 @@ const NextStepsPanel: React.FC<NextStepsPanelProps> = ({ origin, onDismiss }) =>
             origin.collection_name,
         );
         onDismiss();
-        await sendWSMessage(prompt, undefined, undefined, {
-            kind: 'first_run_followup',
-            card_kind: origin.card_kind,
-            followup_id: fu.id,
-            topic_label: origin.topic_label ?? null,
-            collection_name: origin.collection_name ?? null,
-            empty_library: origin.empty_library ?? false,
+        await sendWSMessage(prompt, {
+            origin: {
+                kind: 'first_run_followup',
+                card_kind: origin.card_kind,
+                followup_id: fu.id,
+                topic_label: origin.topic_label ?? null,
+                collection_name: origin.collection_name ?? null,
+                empty_library: origin.empty_library ?? false,
+            },
         });
     };
 

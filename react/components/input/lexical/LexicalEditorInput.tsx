@@ -24,22 +24,15 @@ import {
     LexicalNode,
     SKIP_SELECTION_FOCUS_TAG,
 } from 'lexical';
-import { ActionTargetType } from '../../../types/actions';
 import {
     $createSlashCommandNode,
     $isSlashCommandNode,
     SlashCommandNode,
 } from './SlashCommandNode';
 
-/** A /slash-command pill present in the editor, with the action identity it
- *  carries so the send path can resolve it back to the action's prompt. */
-export interface SlashCommandDescriptor {
-    commandName: string;
-    actionId: string;
-    targetType?: ActionTargetType;
-    /** Human-readable action title, shown as a native hover tooltip. */
-    title?: string;
-}
+import type { SlashCommandDescriptor } from '../../../utils/slashCommands';
+
+export type { SlashCommandDescriptor };
 
 export type LexicalEditorInputHandle = {
     focus: () => void;
@@ -51,9 +44,12 @@ export type LexicalEditorInputHandle = {
     deleteTrailingCharacter: () => void;
     selectRange: (start: number, end: number, options?: { skipFocus?: boolean }) => void;
     getSelectionOffset: () => number | null;
-    /** Replace the trailing `/query` (length `queryLength`, excluding the `/`)
-     *  with a styled command pill followed by a space, caret left at the end. */
-    insertSlashCommand: (descriptor: SlashCommandDescriptor, queryLength: number) => void;
+    /** Insert a styled command pill followed by a space, caret left at the
+     *  end. With a numeric `queryLength`, the trailing `/query` (length
+     *  `queryLength`, excluding the `/`) the user typed is replaced by the
+     *  pill (slash-menu flow). With `null`, nothing is removed and the pill is
+     *  appended after the existing content (programmatic staging flow). */
+    insertSlashCommand: (descriptor: SlashCommandDescriptor, queryLength: number | null) => void;
     /** Returns the command pills currently in the editor, in document order. */
     getSlashCommands: () => SlashCommandDescriptor[];
 };
@@ -197,30 +193,62 @@ const EditorApi = forwardRef<LexicalEditorInputHandle>(
                 insertSlashCommand: (descriptor, queryLength) => {
                     editor.update(() => {
                         const root = $getRoot();
-                        // Remove the trailing "/query" the user typed (the `/`
-                        // trigger plus the typed query). The slash menu closes on
-                        // whitespace, so the query never spans nodes and always
-                        // lives in the final plain-text node(s) - never inside an
-                        // existing pill.
-                        let remaining = queryLength + 1; // +1 for the leading '/'
-                        const textNodes = root.getAllTextNodes();
-                        for (let i = textNodes.length - 1; i >= 0 && remaining > 0; i--) {
-                            const node = textNodes[i];
-                            if ($isSlashCommandNode(node)) break;
-                            const text = node.getTextContent();
-                            if (text.length <= remaining) {
-                                remaining -= text.length;
-                                node.remove();
-                            } else {
-                                node.setTextContent(text.slice(0, text.length - remaining));
-                                remaining = 0;
+                        if (queryLength !== null) {
+                            // Remove the trailing "/query" the user typed (the `/`
+                            // trigger plus the typed query). The slash menu closes on
+                            // whitespace, so the query never spans nodes and always
+                            // lives in the final plain-text node(s) - never inside an
+                            // existing pill.
+                            let remaining = queryLength + 1; // +1 for the leading '/'
+                            const textNodes = root.getAllTextNodes();
+                            for (let i = textNodes.length - 1; i >= 0 && remaining > 0; i--) {
+                                const node = textNodes[i];
+                                if ($isSlashCommandNode(node)) break;
+                                const text = node.getTextContent();
+                                if (text.length <= remaining) {
+                                    remaining -= text.length;
+                                    node.remove();
+                                } else {
+                                    node.setTextContent(text.slice(0, text.length - remaining));
+                                    remaining = 0;
+                                }
                             }
                         }
+
+                        // Resolve token collisions against pills already in the
+                        // editor: two different actions whose titles collapse to
+                        // the same token get a numeric suffix, so the visible
+                        // token (and the wire `command` derived from it) stays
+                        // unambiguous. Repeated pills of the SAME action keep
+                        // the same token (deduped at send).
+                        const existingPills: SlashCommandNode[] = [];
+                        const collectPills = (node: LexicalNode) => {
+                            if ($isSlashCommandNode(node)) {
+                                existingPills.push(node);
+                            } else if ($isElementNode(node)) {
+                                node.getChildren().forEach(collectPills);
+                            }
+                        };
+                        root.getChildren().forEach(collectPills);
+                        let commandName = descriptor.commandName;
+                        let suffix = 2;
+                        while (existingPills.some(p =>
+                            p.getCommandName() === commandName && p.getActionId() !== descriptor.actionId
+                        )) {
+                            commandName = `${descriptor.commandName}-${suffix++}`;
+                        }
+
+                        // Separate the pill from preceding text when appending
+                        // programmatically (the slash-menu flow already ends at
+                        // the typed-`/` position, which follows whitespace).
+                        const needsLeadingSpace = queryLength === null
+                            && root.getTextContent().length > 0
+                            && !/\s$/.test(root.getTextContent());
 
                         // Append the pill + a trailing space so the caret can
                         // continue typing after it.
                         const slashNode = $createSlashCommandNode(
-                            descriptor.commandName,
+                            commandName,
                             descriptor.actionId,
                             descriptor.targetType,
                             descriptor.title,
@@ -232,6 +260,9 @@ const EditorApi = forwardRef<LexicalEditorInputHandle>(
                             : $createParagraphNode();
                         if (!$isElementNode(lastChild)) {
                             root.append(paragraph);
+                        }
+                        if (needsLeadingSpace) {
+                            paragraph.append($createTextNode(' '));
                         }
                         paragraph.append(slashNode);
                         slashNode.insertAfter(spaceNode);
@@ -251,6 +282,7 @@ const EditorApi = forwardRef<LexicalEditorInputHandle>(
                                     commandName: node.getCommandName(),
                                     actionId: node.getActionId(),
                                     targetType: node.getTargetType(),
+                                    title: node.getTitle(),
                                 });
                             } else if ($isElementNode(node)) {
                                 node.getChildren().forEach(visit);
