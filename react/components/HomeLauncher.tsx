@@ -84,7 +84,7 @@ const HomeLauncher: React.FC<{ style?: React.CSSProperties }> = ({ style }) => {
                                 onClick={() => toggle(cat.id)}
                                 aria-pressed={isActive}
                                 iconClassName="flex-shrink-0 scale-11"
-                                style={{ padding: "4px 8px", borderRadius: "6px" }}
+                                style={{ padding: "4px 7px", borderRadius: "6px" }}
                             >
                                 <span className="font-medium">{cat.label}</span>
                             </Button>
