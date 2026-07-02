@@ -52,10 +52,11 @@ export const AskUserQuestionPanel: React.FC<AskUserQuestionPanelProps> = ({ pend
     const total = questions.length;
 
     const [index, setIndex] = useState(0);
-    // Selected option ids / custom text per question id — preserved across
-    // back/forward navigation, sent together on Submit.
+    // Selected option ids / custom text / "Other" selection per question id —
+    // preserved across back/forward navigation, sent together on Submit.
     const [selections, setSelections] = useState<Record<string, string[]>>({});
     const [customTexts, setCustomTexts] = useState<Record<string, string>>({});
+    const [otherSelected, setOtherSelected] = useState<Record<string, boolean>>({});
     // Guards double-submit in the instant before the panel unmounts.
     const [isSubmitted, setIsSubmitted] = useState(false);
 
@@ -66,18 +67,21 @@ export const AskUserQuestionPanel: React.FC<AskUserQuestionPanelProps> = ({ pend
 
     const allowsCustom = (q: AskUserQuestionItem) => q.allow_custom ?? true;
 
+    // Custom text counts only while "Other" is selected — an Other selection
+    // with nothing typed keeps Next/Submit disabled, and text left behind
+    // after deselecting Other neither counts nor gets sent.
     const isAnswered = (q: AskUserQuestionItem) =>
         (selections[q.id]?.length ?? 0) > 0 ||
-        (allowsCustom(q) && (customTexts[q.id]?.trim() ?? '') !== '');
+        (allowsCustom(q) && !!otherSelected[q.id] && (customTexts[q.id]?.trim() ?? '') !== '');
 
-    // Focus the custom-answer field when the panel appears or the question
-    // changes, and keep its height fitted to its content.
+    // Keep the custom-answer field's height fitted to its (per-question)
+    // content when the panel appears or the question changes. Deliberately no
+    // focus here — the field is only focused when the user picks "Other".
     useEffect(() => {
         const ta = textareaRef.current;
         if (!ta) return;
         ta.style.height = 'auto';
         ta.style.height = `${ta.scrollHeight}px`;
-        ta.focus();
     }, [index]);
 
     const toggleOption = (q: AskUserQuestionItem, optionId: string) => {
@@ -94,6 +98,30 @@ export const AskUserQuestionPanel: React.FC<AskUserQuestionPanelProps> = ({ pend
             }
             return { ...prev, [q.id]: isSelected ? [] : [optionId] };
         });
+        // Radio semantics: picking a listed option deselects "Other".
+        if (!q.allow_multiple) {
+            setOtherSelected((prev) => (prev[q.id] ? { ...prev, [q.id]: false } : prev));
+        }
+    };
+
+    // Select "Other" (idempotent). Radio semantics: clears the listed
+    // selections when the question is single-select. Also invoked from the
+    // textarea's focus handler so clicking straight into the text field
+    // selects Other without an extra click.
+    const selectOther = (q: AskUserQuestionItem) => {
+        setOtherSelected((prev) => (prev[q.id] ? prev : { ...prev, [q.id]: true }));
+        if (!q.allow_multiple) {
+            setSelections((prev) => ((prev[q.id]?.length ?? 0) > 0 ? { ...prev, [q.id]: [] } : prev));
+        }
+    };
+
+    const handleOtherClick = (q: AskUserQuestionItem) => {
+        if (otherSelected[q.id]) {
+            setOtherSelected((prev) => ({ ...prev, [q.id]: false }));
+        } else {
+            selectOther(q);
+            textareaRef.current?.focus();
+        }
     };
 
     const submitAll = useCallback((overrides?: { clearQuestionId?: string }) => {
@@ -104,7 +132,7 @@ export const AskUserQuestionPanel: React.FC<AskUserQuestionPanelProps> = ({ pend
             return {
                 item_id: q.id,
                 selected_option_ids: cleared ? [] : (selections[q.id] ?? []),
-                custom_text: cleared || !allowsCustom(q)
+                custom_text: cleared || !allowsCustom(q) || !otherSelected[q.id]
                     ? null
                     : (customTexts[q.id]?.trim() || null),
             };
@@ -115,7 +143,7 @@ export const AskUserQuestionPanel: React.FC<AskUserQuestionPanelProps> = ({ pend
             answers,
             cancelled: false,
         });
-    }, [isSubmitted, questions, selections, customTexts, sendResponse, pendingQuestion]);
+    }, [isSubmitted, questions, selections, customTexts, otherSelected, sendResponse, pendingQuestion]);
 
     const handleNext = useCallback(() => {
         if (!question || !isAnswered(question) || isSubmitted) return;
@@ -124,7 +152,7 @@ export const AskUserQuestionPanel: React.FC<AskUserQuestionPanelProps> = ({ pend
         } else {
             setIndex((i) => i + 1);
         }
-    }, [question, isLast, isSubmitted, submitAll, selections, customTexts]);
+    }, [question, isLast, isSubmitted, submitAll, selections, customTexts, otherSelected]);
 
     // Skip advances past the current question without an answer (clearing any
     // partial one). On the last question that means sending the response with
@@ -133,6 +161,7 @@ export const AskUserQuestionPanel: React.FC<AskUserQuestionPanelProps> = ({ pend
         if (!question || isSubmitted) return;
         setSelections((prev) => ({ ...prev, [question.id]: [] }));
         setCustomTexts((prev) => ({ ...prev, [question.id]: '' }));
+        setOtherSelected((prev) => ({ ...prev, [question.id]: false }));
         if (isLast) {
             submitAll({ clearQuestionId: question.id });
         } else {
@@ -148,6 +177,7 @@ export const AskUserQuestionPanel: React.FC<AskUserQuestionPanelProps> = ({ pend
     if (!question) return null;
 
     const selectedIds = selections[question.id] ?? [];
+    const isOther = !!otherSelected[question.id];
 
     return (
         <div
@@ -200,24 +230,17 @@ export const AskUserQuestionPanel: React.FC<AskUserQuestionPanelProps> = ({ pend
                             return (
                                 <Button
                                     key={option.id}
-                                    variant={isSelected ? 'surface' : 'ghost-secondary'}
+                                    variant='ghost-secondary'
                                     className="text-left w-full"
                                     onClick={() => toggleOption(question, option.id)}
                                     aria-pressed={isSelected}
                                     disabled={isSubmitted}
-                                    style={{
-                                        padding: '3px 6px',
-                                        // The surface (selected) variant has a 1px
-                                        // border, ghost-secondary has none — pin a
-                                        // transparent border so selection doesn't
-                                        // change the box size and shift siblings.
-                                        ...(isSelected ? {} : { border: '1px solid transparent' }),
-                                    }}
+                                    style={{ padding: '3px 6px' }}
                                 >
                                     <span className="display-flex flex-row gap-2 items-start min-w-0">
                                         <Icon
                                             icon={isSelected ? CheckmarkCircleIcon : CircleIcon}
-                                            className={`mt-020 ${isSelected ? 'font-color-accent' : 'font-color-secondary'}`}
+                                            className={`mt-020 scale-11 ${isSelected ? 'font-color-accent-green' : 'font-color-secondary'}`}
                                         />
                                         <span className="min-w-0">
                                             <span className="font-color-primary text-base">{option.label}</span>
@@ -231,38 +254,70 @@ export const AskUserQuestionPanel: React.FC<AskUserQuestionPanelProps> = ({ pend
                                 </Button>
                             );
                         })}
-                    </div>
 
-                    {/* Custom answer — the composer's text field, repurposed */}
-                    {allowsCustom(question) && (
-                        <div className="mt-1 ml-2">
-                            <textarea
-                                ref={textareaRef}
-                                className="chat-input"
-                                rows={1}
-                                placeholder="Other..."
-                                aria-label={`Custom answer for: ${question.question}`}
-                                value={customTexts[question.id] ?? ''}
-                                disabled={isSubmitted}
-                                onChange={(e) =>
-                                    setCustomTexts((prev) => ({
-                                        ...prev,
-                                        [question.id]: e.target.value,
-                                    }))
-                                }
-                                onInput={(e) => {
-                                    e.currentTarget.style.height = 'auto';
-                                    e.currentTarget.style.height = `${e.currentTarget.scrollHeight}px`;
-                                }}
-                                onKeyDown={(e) => {
-                                    if (e.key === 'Enter' && !e.shiftKey) {
-                                        e.preventDefault();
-                                        handleNext();
-                                    }
-                                }}
-                            />
-                        </div>
-                    )}
+                        {/* "Other" — an inline option row: toggle icon + the
+                            free-text field on one line. Clicking the icon
+                            selects Other and focuses the field; focusing or
+                            typing in the field selects Other. The row mirrors
+                            an option row's geometry and selected styling. */}
+                        {allowsCustom(question) && (
+                            <div
+                                className="display-flex flex-row gap-2 items-start w-full min-w-0"
+                                style={{ padding: '3px 6px', }}
+                            >
+                                <button
+                                    type="button"
+                                    aria-pressed={isOther}
+                                    aria-label="Other (custom answer)"
+                                    disabled={isSubmitted}
+                                    onClick={() => handleOtherClick(question)}
+                                    className="display-flex mt-15"
+                                    style={{
+                                        background: 'transparent',
+                                        border: 0,
+                                        padding: 0,
+                                        cursor: 'pointer',
+                                        // Match the option rows' icon size (they
+                                        // inherit the button variant's 0.9rem).
+                                        fontSize: '0.9rem',
+                                    }}
+                                >
+                                    <Icon
+                                        icon={isOther ? CheckmarkCircleIcon : CircleIcon}
+                                        className={`scale-11 ${isOther ? 'font-color-accent-green' : 'font-color-secondary'}`}
+                                    />
+                                </button>
+                                <textarea
+                                    ref={textareaRef}
+                                    className="chat-input"
+                                    rows={1}
+                                    placeholder="Other..."
+                                    aria-label={`Custom answer for: ${question.question}`}
+                                    value={customTexts[question.id] ?? ''}
+                                    disabled={isSubmitted}
+                                    style={{ flex: 1 }}
+                                    onFocus={() => selectOther(question)}
+                                    onChange={(e) => {
+                                        selectOther(question);
+                                        setCustomTexts((prev) => ({
+                                            ...prev,
+                                            [question.id]: e.target.value,
+                                        }));
+                                    }}
+                                    onInput={(e) => {
+                                        e.currentTarget.style.height = 'auto';
+                                        e.currentTarget.style.height = `${e.currentTarget.scrollHeight}px`;
+                                    }}
+                                    onKeyDown={(e) => {
+                                        if (e.key === 'Enter' && !e.shiftKey) {
+                                            e.preventDefault();
+                                            handleNext();
+                                        }
+                                    }}
+                                />
+                            </div>
+                        )}
+                    </div>
                 </div>
 
                 {/* Footer: Stop ... Skip Next/Submit */}
