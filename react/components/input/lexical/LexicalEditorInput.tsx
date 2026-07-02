@@ -241,10 +241,13 @@ export interface LexicalEditorInputProps {
 
 // Exposes a textarea-like focus()/clear() API to the parent via ref so the
 // surrounding InputArea can keep its existing imperative usage.
-const EditorApi = forwardRef<LexicalEditorInputHandle>(
-    function EditorApi(_props, ref) {
+const EditorApi = forwardRef<LexicalEditorInputHandle, {
+    pinnedEndCaretRef: React.MutableRefObject<boolean>;
+}>(
+    function EditorApi({ pinnedEndCaretRef }, ref) {
         const [editor] = useLexicalComposerContext();
         const setPlainText = useCallback((text: string, selectionStart = text.length, selectionEnd = selectionStart) => {
+            pinnedEndCaretRef.current = false;
             editor.update(() => {
                 const root = $getRoot();
                 root.clear();
@@ -262,7 +265,7 @@ const EditorApi = forwardRef<LexicalEditorInputHandle>(
                     p.select();
                 }
             });
-        }, [editor]);
+        }, [editor, pinnedEndCaretRef]);
 
         useImperativeHandle(
             ref,
@@ -282,6 +285,7 @@ const EditorApi = forwardRef<LexicalEditorInputHandle>(
                     setPlainText(text, caretOffset);
                 },
                 deleteTrailingCharacter: () => {
+                    pinnedEndCaretRef.current = false;
                     editor.update(() => {
                         const root = $getRoot();
                         const textNodes = root.getAllTextNodes();
@@ -297,6 +301,7 @@ const EditorApi = forwardRef<LexicalEditorInputHandle>(
                     });
                 },
                 selectRange: (start, end, options) => {
+                    pinnedEndCaretRef.current = false;
                     editor.update(
                         () => $selectFlatRange(start, end),
                         options?.skipFocus ? { tag: SKIP_SELECTION_FOCUS_TAG } : undefined,
@@ -384,6 +389,13 @@ const EditorApi = forwardRef<LexicalEditorInputHandle>(
                     // mouse click) and land the caret at the end, right after the
                     // inserted pill + space.
                     editor.focus(() => { /* noop */ }, { defaultSelection: 'rootEnd' });
+                    // Pin the caret to the end until the user interacts: the
+                    // UI churn that follows a staged insert (sidebar opening,
+                    // panels re-rendering, attachments mounting) can reset the
+                    // chrome document's selection offsets to 0, dropping the
+                    // caret behind the pill or to the start of the input. See
+                    // PinnedEndCaretPlugin.
+                    pinnedEndCaretRef.current = true;
                 },
                 getSlashCommands: () => {
                     let result: SlashCommandDescriptor[] = [];
@@ -393,7 +405,7 @@ const EditorApi = forwardRef<LexicalEditorInputHandle>(
                     return result;
                 },
             }),
-            [editor, setPlainText],
+            [editor, setPlainText, pinnedEndCaretRef],
         );
         return null;
     },
@@ -799,6 +811,12 @@ const SelectionGuardPlugin: React.FC<{
                 const sel = win.getSelection();
                 pendingDomSelectionRef.current = sel ? captureDomSelection(sel, root) : null;
             };
+            // XUL popups and drag capture can swallow the pointerup that would
+            // normally clear the flag; a stuck `pointerDown` would disable the
+            // repair below indefinitely.
+            const onPointerCancel = () => {
+                pointerDown = false;
+            };
             // Runs after Lexical's own selectionchange listener (registered at
             // editor creation, so earlier), i.e. once Lexical has adopted the
             // current DOM selection and the snapshot is no longer needed.
@@ -807,11 +825,14 @@ const SelectionGuardPlugin: React.FC<{
             };
 
             const onMutations = (records: MutationRecord[]) => {
-                for (const record of records) {
-                    // Editor-internal (or mixed) batch: Lexical's reconciler
-                    // sets the selection itself after its own mutations.
-                    if (root.contains(record.target)) return;
-                }
+                // Editor-internal records are the reconciler's own work — it
+                // sets the selection itself after them. Only mutations outside
+                // the editor can clobber the caret via the chrome document's
+                // selection reset, so a batch with no external record needs no
+                // repair. Mixed batches DO get repaired: the comparison below
+                // runs against the already-committed editor state, so a
+                // reconciler-placed selection compares equal and is left alone.
+                if (records.every(record => root.contains(record.target))) return;
                 if (pointerDown) return;
                 if (editor.isComposing()) return;
                 if (doc.activeElement !== root) return;
@@ -864,11 +885,13 @@ const SelectionGuardPlugin: React.FC<{
             observer.observe(doc.documentElement, { childList: true, subtree: true, characterData: true });
             doc.addEventListener('pointerdown', onPointerDown, true);
             doc.addEventListener('pointerup', onPointerUp, true);
+            doc.addEventListener('pointercancel', onPointerCancel, true);
             doc.addEventListener('selectionchange', onSelectionChange);
             return () => {
                 observer.disconnect();
                 doc.removeEventListener('pointerdown', onPointerDown, true);
                 doc.removeEventListener('pointerup', onPointerUp, true);
+                doc.removeEventListener('pointercancel', onPointerCancel, true);
                 doc.removeEventListener('selectionchange', onSelectionChange);
             };
         };
@@ -943,6 +966,86 @@ const SelectionPersistencePlugin: React.FC = () => {
             }
         });
     }, [editor]);
+    return null;
+};
+
+/**
+ * Keeps the caret pinned to the end of the content after a programmatic
+ * /command pill insert, until the user interacts with the editor.
+ *
+ * A staged pill always ends as "pill + space" with the caret at the very end
+ * (`/action |`). But the insert is followed by heavy UI churn — the sidebar
+ * opening, launcher panels re-rendering, attachment chips mounting — and in
+ * Zotero's chrome document every one of those mutations can reset the
+ * selection offsets to 0 (see SelectionGuardPlugin), leaving the caret right
+ * behind the pill or at the start of the input. The MutationObserver repair
+ * in SelectionGuardPlugin covers the common cases, but it must stand down
+ * while the editor is not the active element or a pointer is down, and once
+ * Lexical adopts a clobbered selection the state matches the DOM and no later
+ * repair fires.
+ *
+ * This plugin closes that gap deterministically: while pinned, any
+ * selectionchange that leaves the selection inside the editor but NOT at the
+ * end of the content is corrected back to the end. The pin is released on the
+ * first real user interaction (keydown in the editor, pointerdown anywhere,
+ * IME composition) and whenever the caret is placed explicitly through the
+ * imperative handle (setText / selectRange / clear / deleteTrailingCharacter).
+ */
+const PinnedEndCaretPlugin: React.FC<{
+    pinnedRef: React.MutableRefObject<boolean>;
+}> = ({ pinnedRef }) => {
+    const [editor] = useLexicalComposerContext();
+    useEffect(() => {
+        const setup = (root: HTMLElement): (() => void) => {
+            const doc = root.ownerDocument;
+            const win = doc.defaultView;
+            if (!win) return () => {};
+
+            const unpin = () => {
+                pinnedRef.current = false;
+            };
+
+            const onSelectionChange = () => {
+                if (!pinnedRef.current) return;
+                if (editor.isComposing()) return;
+                const sel = win.getSelection();
+                if (!sel || !sel.anchorNode || !sel.focusNode) return;
+                // Only correct selections that landed inside the editor — a
+                // selection elsewhere means another surface owns it (and the
+                // editor state selection is restored by focus() on return).
+                if (!root.contains(sel.anchorNode) || !root.contains(sel.focusNode)) return;
+                let textLength = 0;
+                editor.getEditorState().read(() => {
+                    textLength = $getRoot().getTextContent().length;
+                });
+                const live = getDomFlatSelectionOffsets(root, sel);
+                if (live && live.anchor === textLength && live.focus === textLength) return;
+                editor.update(() => $selectFlatRange(textLength, textLength));
+            };
+
+            doc.addEventListener('selectionchange', onSelectionChange);
+            doc.addEventListener('pointerdown', unpin, true);
+            root.addEventListener('keydown', unpin, true);
+            root.addEventListener('compositionstart', unpin, true);
+            return () => {
+                doc.removeEventListener('selectionchange', onSelectionChange);
+                doc.removeEventListener('pointerdown', unpin, true);
+                root.removeEventListener('keydown', unpin, true);
+                root.removeEventListener('compositionstart', unpin, true);
+            };
+        };
+
+        let cleanupDom: (() => void) | null = null;
+        const unregister = editor.registerRootListener((rootElement) => {
+            cleanupDom?.();
+            cleanupDom = rootElement ? setup(rootElement) : null;
+        });
+        return () => {
+            unregister();
+            cleanupDom?.();
+            cleanupDom = null;
+        };
+    }, [editor, pinnedRef]);
     return null;
 };
 
@@ -1022,6 +1125,12 @@ export const LexicalEditorInput = forwardRef<LexicalEditorInputHandle, LexicalEd
         // reads when repairing chrome-document selection resets).
         const pendingDomSelectionRef = useRef<DomSelectionSnapshot | null>(null);
 
+        // True after a programmatic /command pill insert, until the first user
+        // interaction: while set, PinnedEndCaretPlugin holds the caret at the
+        // end of the content ("/action |") against chrome-document selection
+        // resets. Written by EditorApi, read by PinnedEndCaretPlugin.
+        const pinnedEndCaretRef = useRef(false);
+
         // The ContentEditable ref callback MUST keep a stable identity across
         // renders. Lexical memoizes its root-element ref on this callback, so a
         // changing identity makes it re-run editor.setRootElement() on every
@@ -1075,10 +1184,11 @@ export const LexicalEditorInput = forwardRef<LexicalEditorInputHandle, LexicalEd
                     <CaretNavigationPlugin suspendedRef={suspendNavRef} pendingDomSelectionRef={pendingDomSelectionRef} />
                     <SelectionGuardPlugin pendingDomSelectionRef={pendingDomSelectionRef} />
                     <SelectionPersistencePlugin />
+                    <PinnedEndCaretPlugin pinnedRef={pinnedEndCaretRef} />
                     <SlashCommandClickPlugin />
                     <SlashCommandHoverCardPlugin />
                     <SubmitOnEnterPlugin onSubmit={onSubmit} />
-                    <EditorApi ref={ref} />
+                    <EditorApi ref={ref} pinnedEndCaretRef={pinnedEndCaretRef} />
                 </div>
             </LexicalComposer>
         );
