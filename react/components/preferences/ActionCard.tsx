@@ -111,15 +111,21 @@ const ActionCard: React.FC<ActionCardProps> = ({
 
     /** Final `name` to persist: a manual name is normalized, an automatic one
      *  is derived from the title; both get a numeric suffix if another action
-     *  already uses the command. Collision-free automatic names are stored as
-     *  `undefined` so the command keeps tracking future title edits. */
+     *  already uses the command. Collision-free automatic names are not stored
+     *  as an explicit command, so future title edits keep updating the command.
+     *  When clearing an action that HAD an explicit name (e.g. a built-in's
+     *  default), automatic mode is persisted as `""` rather than `undefined`:
+     *  an undefined field would be dropped from the JSON-serialized built-in
+     *  override, resurrecting the base name on the next merge. */
     const resolveNameForSave = useCallback((title: string, rawName: string): string | undefined => {
         const derived = toSlashToken(title);
         const manual = rawName.trim() ? toSlashToken(rawName) : "";
         const unique = resolveUniqueCommand(manual || derived);
-        if (!manual && unique === derived) return undefined;
+        if (!manual && unique === derived) {
+            return action.name !== undefined ? "" : undefined;
+        }
         return unique;
-    }, [resolveUniqueCommand]);
+    }, [resolveUniqueCommand, action.name]);
 
     // Ref to hold latest draft values so the click-outside listener doesn't re-register on every keystroke
     const draftRef = useRef({ editTitle, editText, editName, editArgumentHint, editTargetType, editCategory });

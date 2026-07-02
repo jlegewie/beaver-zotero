@@ -33,7 +33,8 @@ export const toSlashToken = (title: string): string =>
 
 /** The `/command` token for an action: its explicit `name` when set (names
  *  must never contain whitespace; guard anyway against hand-edited prefs),
- *  otherwise a token derived from the title. */
+ *  otherwise a token derived from the title. An empty name means "explicitly
+ *  cleared, derive from the title" (see Action.name). */
 export const getActionCommand = (action: Pick<Action, 'name' | 'title'>): string => {
     const name = action.name?.trim();
     return name && !/\s/.test(name) ? name : toSlashToken(action.title);

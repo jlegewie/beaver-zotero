@@ -26,7 +26,7 @@ export interface Action {
     id: string;                    // "builtin-*" for built-ins, crypto.randomUUID() for user
     title: string;                 // Max 45 chars
     text: string;                  // Prompt template with {{variables}}
-    name?: string;                 // Slash-command name (no whitespace); derived from title when unset
+    name?: string;                 // Slash-command name (no whitespace); unset or "" → derived from title ("" marks an explicitly cleared name so it survives JSON overrides)
     id_model?: string;
     targetType: ActionTargetType;
     category?: ActionCategory;     // Skill grouping for the homepage launcher (independent of targetType)
