@@ -22,7 +22,7 @@ import { currentMessageItemsAtom, currentMessageCollectionsAtom, pendingPillInse
 import { CollectionReference } from '../types/zotero';
 import { addPopupMessageAtom } from '../utils/popupMessageUtils';
 import { isRejectedItemValidation, itemValidationResultsAtom } from './itemValidation';
-import { toSlashToken, type SlashCommandDescriptor } from '../utils/slashCommands';
+import { getActionCommand, toSlashToken, type SlashCommandDescriptor } from '../utils/slashCommands';
 import type { PromptAction } from '../agents/types';
 
 // ---------------------------------------------------------------------------
@@ -58,10 +58,11 @@ export const saveActionsAtom = atom(
                 // Compare each overridable field
                 if (action.title !== base.title) { override.title = action.title; hasChange = true; }
                 if (action.text !== base.text) { override.text = action.text; hasChange = true; }
+                if ((action.name ?? undefined) !== (base.name ?? undefined)) { override.name = action.name; hasChange = true; }
                 if ((action.id_model ?? undefined) !== (base.id_model ?? undefined)) { override.id_model = action.id_model; hasChange = true; }
                 if (action.targetType !== base.targetType) { override.targetType = action.targetType; hasChange = true; }
                 if ((action.category ?? undefined) !== (base.category ?? undefined)) { override.category = action.category; hasChange = true; }
-                if ((action.placeholder ?? undefined) !== (base.placeholder ?? undefined)) { override.placeholder = action.placeholder; hasChange = true; }
+                if ((action.argumentHint ?? undefined) !== (base.argumentHint ?? undefined)) { override.argumentHint = action.argumentHint; hasChange = true; }
                 if ((action.sortOrder ?? undefined) !== (base.sortOrder ?? undefined)) { override.sortOrder = action.sortOrder; hasChange = true; }
                 if ((action.minItems ?? undefined) !== (base.minItems ?? undefined)) { override.minItems = action.minItems; hasChange = true; }
 
@@ -197,10 +198,11 @@ export const stageActionPillAtom = atom(
         const action = get(actionsAtom).find(a => a.id === payload.actionId);
         const title = action?.title ?? payload.fallbackTitle ?? 'action';
         const descriptor: SlashCommandDescriptor = {
-            commandName: toSlashToken(title),
+            commandName: action ? getActionCommand(action) : toSlashToken(title),
             actionId: payload.actionId,
             targetType: payload.targetType,
             title,
+            argumentHint: action?.argumentHint,
         };
         set(pendingPillInsertAtom, { descriptor, targetWindow: payload.targetWindow, nonce: Date.now() });
         set(markActionUsedAtom, payload.actionId);

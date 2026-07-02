@@ -544,6 +544,18 @@
     -webkit-user-select: none;
 }
 
+/* Argument-hint ghost text - rendered after a freshly inserted /command pill
+   via the paragraph's data-argument-hint attribute (see ArgumentHintPlugin).
+   It follows the pill's trailing space, so the caret blinks between the pill
+   and the greyed-out hint, like placeholder text for the argument slot. */
+[id^="beaver-pane-"] .beaver-lexical-content p[data-argument-hint]::after {
+    content: attr(data-argument-hint);
+    color: var(--fill-tertiary);
+    pointer-events: none;
+    user-select: none;
+    -webkit-user-select: none;
+}
+
 /* Mention pill - uses the same .source-button / .variant-outline styling
    shared with MessageItemButton so pills feel native. */
 [id^="beaver-pane-"] .beaver-mention-pill {

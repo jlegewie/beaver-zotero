@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
     toSlashToken,
+    getActionCommand,
     splitContentBySlashTokens,
     splitContentByCommandTokens,
     slashDescriptorsEqual,
@@ -26,6 +27,23 @@ describe('toSlashToken', () => {
     it('falls back to "action" for empty results', () => {
         expect(toSlashToken('!!!')).toBe('action');
         expect(toSlashToken('')).toBe('action');
+    });
+});
+
+describe('getActionCommand', () => {
+    it('prefers the explicit name over the title', () => {
+        expect(getActionCommand({ name: 'summarize', title: 'Summarize this paper' })).toBe('summarize');
+    });
+
+    it('derives the command from the title when name is unset', () => {
+        expect(getActionCommand({ title: 'Summarize Paper' })).toBe('summarize-paper');
+        expect(getActionCommand({ name: undefined, title: 'Find & Replace!' })).toBe('find-replace');
+    });
+
+    it('ignores names that are empty or contain whitespace', () => {
+        expect(getActionCommand({ name: '', title: 'Summarize Paper' })).toBe('summarize-paper');
+        expect(getActionCommand({ name: '   ', title: 'Summarize Paper' })).toBe('summarize-paper');
+        expect(getActionCommand({ name: 'has space', title: 'Summarize Paper' })).toBe('summarize-paper');
     });
 });
 
@@ -119,6 +137,17 @@ describe('slashDescriptorsEqual', () => {
         expect(slashDescriptorsEqual([d('x')], [])).toBe(false);
         expect(slashDescriptorsEqual([], [])).toBe(true);
         expect(slashDescriptorsEqual([d('x'), d('y')], [d('y'), d('x')])).toBe(false);
+    });
+
+    it('compares argumentHint', () => {
+        expect(slashDescriptorsEqual(
+            [{ ...d('x'), argumentHint: 'topic' }],
+            [{ ...d('x'), argumentHint: 'topic' }],
+        )).toBe(true);
+        expect(slashDescriptorsEqual(
+            [{ ...d('x'), argumentHint: 'topic' }],
+            [d('x')],
+        )).toBe(false);
     });
 });
 

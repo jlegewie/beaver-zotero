@@ -1,5 +1,8 @@
-import React, { useState, useEffect, useRef, useCallback } from "react";
+import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { useAtomValue } from "jotai";
 import { Action, ActionCategory, ActionTargetType, CATEGORY_LABELS, TARGET_TYPE_LABELS, TARGET_TYPE_DESCRIPTIONS } from "../../types/actions";
+import { actionsAtom } from "../../atoms/actions";
+import { getActionCommand, toSlashToken } from "../../utils/slashCommands";
 import { hasUserInputVariables } from "../../utils/userInputVariables";
 import Button from "../ui/Button";
 import MenuButton from "../ui/MenuButton";
@@ -18,6 +21,8 @@ import {
 } from "../icons/icons";
 
 const MAX_TITLE_LENGTH = 45;
+const MAX_NAME_LENGTH = 45;
+const MAX_ARGUMENT_HINT_LENGTH = 100;
 const MAX_PROMPT_TEXT_LENGTH = 2250;
 
 const TARGET_TYPE_OPTIONS: ActionTargetType[] = ["global", "items", "attachment", "note", "collection"];
@@ -78,6 +83,12 @@ const ActionCard: React.FC<ActionCardProps> = ({
     const [isEditing, setIsEditing] = useState(() => !action.title && !action.text);
     const [editTitle, setEditTitle] = useState(action.title);
     const [editText, setEditText] = useState(action.text);
+    // Raw slash-command name draft. Empty string = automatic mode: the name is
+    // derived from the title and not persisted (unless it needs a numeric
+    // suffix to stay unique). Any typed value switches to manual mode;
+    // clearing the field switches back to automatic.
+    const [editName, setEditName] = useState(action.name ?? "");
+    const [editArgumentHint, setEditArgumentHint] = useState(action.argumentHint ?? "");
     const [editTargetType, setEditTargetType] = useState<ActionTargetType>(action.targetType);
     const [editCategory, setEditCategory] = useState<ActionCategory | undefined>(action.category);
     const textareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -85,11 +96,36 @@ const ActionCard: React.FC<ActionCardProps> = ({
     const cardRef = useRef<HTMLDivElement | null>(null);
     const previousActionRef = useRef(action);
 
+    // Effective /commands of all OTHER actions, for uniqueness checks.
+    const allActions = useAtomValue(actionsAtom);
+    const takenCommands = useMemo(() => new Set(
+        allActions.filter(a => a.id !== action.id).map(a => getActionCommand(a))
+    ), [allActions, action.id]);
+
+    const resolveUniqueCommand = useCallback((base: string): string => {
+        if (!takenCommands.has(base)) return base;
+        let suffix = 2;
+        while (takenCommands.has(`${base}-${suffix}`)) suffix++;
+        return `${base}-${suffix}`;
+    }, [takenCommands]);
+
+    /** Final `name` to persist: a manual name is normalized, an automatic one
+     *  is derived from the title; both get a numeric suffix if another action
+     *  already uses the command. Collision-free automatic names are stored as
+     *  `undefined` so the command keeps tracking future title edits. */
+    const resolveNameForSave = useCallback((title: string, rawName: string): string | undefined => {
+        const derived = toSlashToken(title);
+        const manual = rawName.trim() ? toSlashToken(rawName) : "";
+        const unique = resolveUniqueCommand(manual || derived);
+        if (!manual && unique === derived) return undefined;
+        return unique;
+    }, [resolveUniqueCommand]);
+
     // Ref to hold latest draft values so the click-outside listener doesn't re-register on every keystroke
-    const draftRef = useRef({ editTitle, editText, editTargetType, editCategory });
+    const draftRef = useRef({ editTitle, editText, editName, editArgumentHint, editTargetType, editCategory });
     useEffect(() => {
-        draftRef.current = { editTitle, editText, editTargetType, editCategory };
-    }, [editTitle, editText, editTargetType, editCategory]);
+        draftRef.current = { editTitle, editText, editName, editArgumentHint, editTargetType, editCategory };
+    }, [editTitle, editText, editName, editArgumentHint, editTargetType, editCategory]);
 
     // Sync local draft state when action changes
     useEffect(() => {
@@ -97,11 +133,13 @@ const ActionCard: React.FC<ActionCardProps> = ({
         if (actionSwitched || !isEditing) {
             setEditTitle(action.title);
             setEditText(action.text);
+            setEditName(action.name ?? "");
+            setEditArgumentHint(action.argumentHint ?? "");
             setEditTargetType(action.targetType);
             setEditCategory(action.category);
         }
         previousActionRef.current = action;
-    }, [action, action.title, action.text, action.targetType, action.category, isEditing]);
+    }, [action, action.title, action.text, action.name, action.argumentHint, action.targetType, action.category, isEditing]);
 
     // Close edit mode on click outside — auto-saves, or removes if the action is empty
     useEffect(() => {
@@ -111,13 +149,21 @@ const ActionCard: React.FC<ActionCardProps> = ({
 
         const handleClickOutside = (e: MouseEvent) => {
             if (cardRef.current && !cardRef.current.contains(e.target as Node)) {
-                const { editTitle: title, editText: text, editTargetType: targetType, editCategory: category } = draftRef.current;
+                const { editTitle: title, editText: text, editName: name, editArgumentHint: argumentHint, editTargetType: targetType, editCategory: category } = draftRef.current;
                 // New action that's still empty — remove it
                 if (!title && !text && !action.title && !action.text) {
                     onRemove();
                 } else {
                     // Auto-save current draft
-                    onChange({ ...action, title, text, targetType, category });
+                    onChange({
+                        ...action,
+                        title,
+                        text,
+                        name: resolveNameForSave(title, name),
+                        argumentHint: argumentHint.trim() || undefined,
+                        targetType,
+                        category,
+                    });
                 }
                 setIsEditing(false);
             }
@@ -125,7 +171,7 @@ const ActionCard: React.FC<ActionCardProps> = ({
 
         doc.addEventListener("mousedown", handleClickOutside);
         return () => doc.removeEventListener("mousedown", handleClickOutside);
-    }, [isEditing, action, onChange, onRemove]);
+    }, [isEditing, action, onChange, onRemove, resolveNameForSave]);
 
     // Focus title input when entering edit mode
     useEffect(() => {
@@ -152,6 +198,8 @@ const ActionCard: React.FC<ActionCardProps> = ({
         if (!isEditing) {
             setEditTitle(action.title);
             setEditText(action.text);
+            setEditName(action.name ?? "");
+            setEditArgumentHint(action.argumentHint ?? "");
             setEditTargetType(action.targetType);
             setEditCategory(action.category);
             setIsEditing(true);
@@ -173,6 +221,8 @@ const ActionCard: React.FC<ActionCardProps> = ({
         }
         setEditTitle(action.title);
         setEditText(action.text);
+        setEditName(action.name ?? "");
+        setEditArgumentHint(action.argumentHint ?? "");
         setEditTargetType(action.targetType);
         setEditCategory(action.category);
         setIsEditing(false);
@@ -183,11 +233,21 @@ const ActionCard: React.FC<ActionCardProps> = ({
             ...action,
             title: editTitle,
             text: editText,
+            name: resolveNameForSave(editTitle, editName),
+            argumentHint: editArgumentHint.trim() || undefined,
             targetType: editTargetType,
             category: editCategory,
         });
         setIsEditing(false);
-    }, [action, editTitle, editText, editTargetType, editCategory, onChange]);
+    }, [action, editTitle, editText, editName, editArgumentHint, editTargetType, editCategory, onChange, resolveNameForSave]);
+
+    // Automatic mode (no manual name typed): preview the title-derived
+    // command, including the numeric suffix it would get on save.
+    const isAutoName = editName === "";
+    const displayedName = isAutoName
+        ? (editTitle.trim() ? resolveUniqueCommand(toSlashToken(editTitle)) : "")
+        : editName;
+    const manualNameConflict = !isAutoName && takenCommands.has(toSlashToken(editName));
 
     const targetTypeMenuItems: MenuItem[] = TARGET_TYPE_OPTIONS.map(tt => ({
         label: TARGET_TYPE_LABELS[tt],
@@ -224,9 +284,10 @@ const ActionCard: React.FC<ActionCardProps> = ({
                         <div className="font-color-primary text-base font-medium">
                             {action.title || <span className="font-color-tertiary">Untitled action</span>}
                         </div>
-                        <span className="action-target-badge" data-type={action.targetType}>
-                            {TARGET_TYPE_LABELS[action.targetType]}
-                        </span>
+                        <div className="font-color-secondary text-base truncate">
+                            /{getActionCommand(action)}
+                        </div>
+                        <div className="flex-1" />
                         {hasUserInputVariables(action.text) && (
                             <Tooltip content="This prompt contains [[ ]] placeholders, which are sent as written." width="220px">
                                 <span className="action-target-badge" data-type="placeholder">
@@ -234,6 +295,9 @@ const ActionCard: React.FC<ActionCardProps> = ({
                                 </span>
                             </Tooltip>
                         )}
+                        <span className="action-target-badge" data-type={action.targetType}>
+                            {TARGET_TYPE_LABELS[action.targetType]}
+                        </span>
                     </div>
                     {action.text && (
                         <div className="font-color-secondary text-base action-card-preview">
@@ -275,19 +339,69 @@ const ActionCard: React.FC<ActionCardProps> = ({
             </div>
 
             <div className="action-edit-body">
-                {/* Name */}
-                <div className="action-field-label text-base font-color-primary font-semibold">Name</div>
+                {/* Title */}
+                <div className="action-field-label text-base font-color-primary font-semibold">Title</div>
                 <div className="action-field-box">
                     <input
                         ref={titleInputRef}
                         type="text"
                         value={editTitle}
                         onChange={(e) => setEditTitle(e.target.value)}
-                        placeholder="Action name..."
-                        aria-label="Action name"
+                        placeholder="Action title..."
+                        aria-label="Action title"
                         maxLength={MAX_TITLE_LENGTH}
                         className="action-field-control text-base font-medium"
                     />
+                </div>
+
+                {/* Slash command + Argument hint — two fields side by side */}
+                <div className="display-flex flex-row gap-4 mt-3">
+                    <div className="display-flex flex-col flex-1 min-w-0">
+                        <FieldLabel
+                            label="Slash command"
+                            tooltip="Typing /command in the chat input inserts this action. Derived from the title unless you set it yourself; spaces are not allowed."
+                        />
+                        <div className="action-field-box display-flex flex-row items-center">
+                            <span className="font-color-tertiary text-base">/</span>
+                            <input
+                                type="text"
+                                value={displayedName}
+                                onChange={(e) => setEditName(e.target.value.toLowerCase().replace(/\s+/g, "-"))}
+                                placeholder="action-name"
+                                aria-label="Slash command name"
+                                maxLength={MAX_NAME_LENGTH}
+                                className="action-field-control text-base"
+                            />
+                        </div>
+                        <div className={`action-field-help text-sm ${manualNameConflict ? "font-color-red" : "font-color-tertiary"}`}>
+                            {manualNameConflict
+                                ? "Already used. A number will be added."
+                                : isAutoName
+                                    ? "Derived from the title. Edit to set your own."
+                                    : "Clear the field to derive it from the title again."}
+                        </div>
+                    </div>
+
+                    <div className="display-flex flex-col flex-1 min-w-0">
+                        <FieldLabel
+                            label="Argument hint"
+                            tooltip="Hint shown during autocomplete to indicate expected arguments."
+                        />
+                        <div className="action-field-box">
+                            <input
+                                type="text"
+                                value={editArgumentHint}
+                                onChange={(e) => setEditArgumentHint(e.target.value)}
+                                placeholder="e.g. topic or question"
+                                aria-label="Argument hint"
+                                maxLength={MAX_ARGUMENT_HINT_LENGTH}
+                                className="action-field-control text-base"
+                            />
+                        </div>
+                        <div className="action-field-help text-sm font-color-tertiary">
+                            Shown greyed out after the inserted command.
+                        </div>
+                    </div>
                 </div>
 
                 {/* Prompt */}

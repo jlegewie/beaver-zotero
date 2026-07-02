@@ -30,6 +30,7 @@ export const BUILTIN_ACTIONS: Action[] = [
 
     {
         id: 'builtin-summarize',
+        name: 'summarize',
         title: 'Summarize',
         text: 'Write a concise summary of this paper covering the research question, methodology, key findings, and main conclusions. Save the summary as a Zotero note attached to the item. If available, cite specific sentences from the attachment to support each claim.',
         targetType: 'items',
@@ -38,6 +39,7 @@ export const BUILTIN_ACTIONS: Action[] = [
 
     {
         id: 'builtin-fit-research',
+        name: 'fit-into-library',
         title: 'How does this fit into my library?',
         text: 'How does this paper connect to the rest of my library? Does it support, challenge, or extend ideas in papers I already have? Write a short report that directly compares the paper to other research in my library including a comparison table. Use a Zotero note attached to the item.',
         targetType: 'items',
@@ -47,6 +49,7 @@ export const BUILTIN_ACTIONS: Action[] = [
 
     {
         id: 'builtin-find-similar',
+        name: 'find-similar',
         title: 'Find similar papers',
         text: 'Use external search to find papers that are closely related to this item. Focus on papers that use similar methods or study the same phenomenon. Return 10 results ranked by relevance with a one-sentence explanation of why each is relevant.',
         targetType: 'items',
@@ -64,6 +67,7 @@ export const BUILTIN_ACTIONS: Action[] = [
 
     {
         id: 'builtin-tag-items',
+        name: 'auto-tag',
         title: 'Auto-tag',
         text: 'Analyze these items and assign appropriate tags to them. Use tags that already exist in my library when they fit. For new tags, keep them concise (1-3 words), lowercase, and consistent with my existing tagging style.',
         targetType: 'items',
@@ -73,6 +77,7 @@ export const BUILTIN_ACTIONS: Action[] = [
 
     {
         id: 'builtin-sort-into-collections',
+        name: 'sort-into-collections',
         title: 'Sort into collections',
         text: 'Look at these items and add them to my existing collections if they fit. If an item doesn\'t fit any existing collection, say so and suggest a new collection name.',
         targetType: 'items',
@@ -86,6 +91,7 @@ export const BUILTIN_ACTIONS: Action[] = [
 
     {
         id: 'builtin-skim-paper',
+        name: 'skim',
         title: 'Skim this paper',
         text: 'Help me skim this paper. Use highlight annotations to mark the key passages I should read to get the gist: the central argument and contribution, data and methods, main findings, and key conclusions. Aim for 4-8 short highlights (2-3 sentences each) in the main body of the paper, avoid the introduction. Be extremely selective and only highlight short passages so I can skim it quickly. After completingthe highlights, provide a short summary structured in the following format: **Central argument and contribution**. [1-2 sentence summary] [citations to relevant annotations] etc.',
         targetType: 'attachment',
@@ -95,6 +101,7 @@ export const BUILTIN_ACTIONS: Action[] = [
 
     {
         id: 'builtin-key-findings',
+        name: 'key-findings',
         title: 'Highlight key findings',
         text: 'Read this paper and identify the key findings. For each one, create a highlight annotation with 1-3 specific sentences that states the finding, with a brief comment explaining its significance. Focus on empirical results and novel contributions, not background or literature review. Aim for 3-6 highlights covering the most important findings. After completing the highlights, provide a short summary with citations to the new annotations.',
         targetType: 'attachment',
@@ -104,6 +111,7 @@ export const BUILTIN_ACTIONS: Action[] = [
 
     {
         id: 'builtin-attachment-fit-research',
+        name: 'fit-into-library-pdf',
         title: 'How does this fit into my library?',
         text: 'How does this paper connect to the rest of my library? Does it support, challenge, or extend ideas in papers I already have? Write a short report that directly compares the paper to other research in my library including a comparison table. Use a Zotero note attached to the item.',
         targetType: 'attachment',
@@ -121,6 +129,7 @@ export const BUILTIN_ACTIONS: Action[] = [
 
     {
         id: 'builtin-extract-references',
+        name: 'key-references',
         title: 'Find key references from this paper',
         text: 'Identify the 3-4 most important references cited in this paper. Focus on the ones that are foundational to its argument or method. For each, explain why it matters to this paper and search my library to check if I already have it. For any I am missing, search for them outside of my library and cite them as external references.',
         targetType: 'attachment',
@@ -142,6 +151,7 @@ export const BUILTIN_ACTIONS: Action[] = [
 
     {
         id: 'builtin-review-note',
+        name: 'review-note',
         title: 'Review and give feedback on this note',
         text: 'Review this note and provide feedback. Identify where arguments are unclear or underdeveloped, flag claims that lack supporting evidence, point out logical gaps or inconsistencies, and suggest where additional detail or citations would strengthen the note. Do not rewrite the note. Provide your feedback as comments so I can decide what to revise.',
         targetType: 'note',
@@ -150,6 +160,7 @@ export const BUILTIN_ACTIONS: Action[] = [
 
     {
         id: 'builtin-note-check-citations',
+        name: 'check-citations',
         title: 'Check and strengthen citations',
         text: 'Review this note and check every claim and citation. For unsupported claims, search my library for papers that could back them up and add citations. For existing citations, verify they actually support the point being made. Flag any claims you cannot find support for in my library. Update the note with improved citations.',
         targetType: 'note',
@@ -158,6 +169,7 @@ export const BUILTIN_ACTIONS: Action[] = [
 
     {
         id: 'builtin-edit-note',
+        name: 'edit-note',
         title: 'Edit this note for clarity and structure',
         text: 'Edit this note to improve clarity, structure, and flow. Tighten the prose, fix awkward phrasing, and improve the logical progression of ideas. Do not change the substance. Preserve my arguments, conclusions, and voice. Flag any spots where evidence is thin or citations are needed.',
         targetType: 'note',
@@ -170,6 +182,7 @@ export const BUILTIN_ACTIONS: Action[] = [
 
     {
         id: 'builtin-collection-gaps',
+        name: 'find-gaps',
         title: 'What am I missing in this collection?',
         text: 'Analyze the papers in this collection and identify gaps in coverage. What subtopics, methods, or perspectives are underrepresented? Use external search for papers in these areas to fill the gaps and suggest up to 8 additions with a short explanation of why each is relevant. Always cite the most relevant papers as external references.',
         targetType: 'collection',
@@ -188,6 +201,7 @@ export const BUILTIN_ACTIONS: Action[] = [
 
     {
         id: 'builtin-collection-summarize',
+        name: 'summarize-collection',
         title: 'Summarize this collection',
         text: 'Write a concise narrative summary of this collection: what topics it covers, the main findings across papers, where authors agree and disagree, and what methodological approaches are represented. Keep it under 500 words. Avoid bullet points and numbered lists. Use a note for the summary and assign it to this collection. Cite all relevant papers in the note.',
         // Save as a Zotero note in this collection.
@@ -198,6 +212,7 @@ export const BUILTIN_ACTIONS: Action[] = [
     
     {
         id: 'builtin-collection-organize-sub-collections',
+        name: 'organize-sub-collections',
         title: 'Organize into thematic sub-collections',
         text: 'Organize every item in this collection into thematic sub-collections. Make sure to check for existing sub-collections first. Only create new sub-collections if necessary.',
         targetType: 'collection',
@@ -207,6 +222,7 @@ export const BUILTIN_ACTIONS: Action[] = [
 
     {
         id: 'builtin-collection-tag-all',
+        name: 'tag-collection',
         title: 'Tag all items in this collection',
         text: 'Analyze every item in this collection and assign appropriate tags to each item. Use my existing tags where they fit. Be consistent across items. Papers on similar subtopics should share tags.',
         targetType: 'collection',
@@ -220,6 +236,7 @@ export const BUILTIN_ACTIONS: Action[] = [
 
     {
         id: 'builtin-organize-recent',
+        name: 'organize-recent',
         title: 'Organize my recent additions',
         text: 'Look at items I\'ve added in the last 7 days. For each one, assign appropriate tags and add them to the appropriate collection. If no existing collection fits, suggest creating a new one.{{recent_items}}',
         targetType: 'global',
@@ -229,6 +246,7 @@ export const BUILTIN_ACTIONS: Action[] = [
 
     {
         id: 'builtin-whats-new',
+        name: 'whats-new',
         title: 'What\'s new in my research areas?',
         text: 'Look at my recent additions to identify what I\'m currently working on. Search for notable recent papers in these areas, prioritizing highly-cited and relevant results. Return up to 10 papers. Indicate which ones I already have.{{recent_items}}',
         targetType: 'global',
@@ -247,6 +265,7 @@ export const BUILTIN_ACTIONS: Action[] = [
 
     {
         id: 'builtin-fix-metadata-recent',
+        name: 'fix-metadata',
         title: 'Fix metadata for my recent additions',
         text: 'Look at items I\'ve added in the last 7 days. For each one, fix missing or incomplete metadata (DOI, title, abstract, authors).{{recent_items}}',
         targetType: 'global',
@@ -256,6 +275,7 @@ export const BUILTIN_ACTIONS: Action[] = [
 
     {
         id: 'builtin-tag-untagged',
+        name: 'tag-untagged',
         title: 'Tag all untagged items',
         text: 'Find all items in my library that have no tags. Analyze each one and assign appropriate subject tags. Use existing tags from my library when they fit. Be consistent: similar papers should get similar tags.',
         // {{untagged_items}}

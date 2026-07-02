@@ -7,7 +7,7 @@ import { actionsAtom, actionContextAtom, markActionUsedAtom } from '../atoms/act
 import { computeActionGroups } from '../utils/actionVisibility';
 import { openPreferencesWindow } from '../../src/ui/openPreferencesWindow';
 import { Action, ActionCategory, ActionTargetType } from '../types/actions';
-import { SlashCommandDescriptor, toSlashToken } from '../utils/slashCommands';
+import { SlashCommandDescriptor, getActionCommand } from '../utils/slashCommands';
 import { MenuPosition, SearchMenuItem } from '../components/ui/menus/SearchMenu';
 
 // Category icons mirror the homepage launcher and Actions preferences so the
@@ -49,7 +49,13 @@ export function useSlashMenu(
         slashQueryRef.current = '';
 
         insertSlashCommand?.(
-            { commandName: toSlashToken(action.title), actionId: action.id, targetType: groupTargetType, title: action.title },
+            {
+                commandName: getActionCommand(action),
+                actionId: action.id,
+                targetType: groupTargetType,
+                title: action.title,
+                argumentHint: action.argumentHint,
+            },
             queryLength,
         );
         markActionUsed(action.id);
@@ -76,11 +82,21 @@ export function useSlashMenu(
             },
         };
 
+        // The typed query matches against both the action title and its
+        // /command name (what the pill will actually insert).
+        const queryPosition = (a: Action): number => {
+            const inTitle = a.title.toLowerCase().indexOf(query);
+            const inCommand = getActionCommand(a).toLowerCase().indexOf(query);
+            if (inTitle === -1) return inCommand;
+            if (inCommand === -1) return inTitle;
+            return Math.min(inTitle, inCommand);
+        };
+
         const sortByRelevance = (actions: Action[]): Action[] => {
             return [...actions].sort((a, b) => {
                 if (query) {
-                    const posA = a.title.toLowerCase().indexOf(query);
-                    const posB = b.title.toLowerCase().indexOf(query);
+                    const posA = queryPosition(a);
+                    const posB = queryPosition(b);
                     if (posA !== posB) return posA - posB;
                 }
                 if (a.lastUsed && !b.lastUsed) return -1;
@@ -99,7 +115,7 @@ export function useSlashMenu(
                 ...g,
                 filtered: sortByRelevance(
                     query
-                        ? g.actions.filter(a => a.title.toLowerCase().includes(query))
+                        ? g.actions.filter(a => queryPosition(a) !== -1)
                         : g.actions
                 ),
             }))

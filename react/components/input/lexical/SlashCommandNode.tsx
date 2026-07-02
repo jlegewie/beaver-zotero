@@ -15,6 +15,7 @@ export type SerializedSlashCommandNode = Spread<
         actionId: string;
         targetType?: ActionTargetType;
         title?: string;
+        argumentHint?: string;
     },
     SerializedTextNode
 >;
@@ -49,6 +50,9 @@ export class SlashCommandNode extends TextNode {
     __targetType?: ActionTargetType;
     // Human-readable action title, shown as a native hover tooltip.
     __title?: string;
+    // Ghost text rendered after the pill while it awaits an argument
+    // (see ArgumentHintPlugin in LexicalEditorInput).
+    __argumentHint?: string;
 
     static getType(): string {
         return 'beaver-slash-command';
@@ -60,6 +64,7 @@ export class SlashCommandNode extends TextNode {
             node.__actionId,
             node.__targetType,
             node.__title,
+            node.__argumentHint,
             node.__text,
             node.__key,
         );
@@ -70,6 +75,7 @@ export class SlashCommandNode extends TextNode {
         actionId = '',
         targetType?: ActionTargetType,
         title?: string,
+        argumentHint?: string,
         text?: string,
         key?: NodeKey,
     ) {
@@ -79,6 +85,7 @@ export class SlashCommandNode extends TextNode {
         this.__actionId = actionId;
         this.__targetType = targetType;
         this.__title = title;
+        this.__argumentHint = argumentHint;
         // Token mode is applied in $createSlashCommandNode (Lexical copies
         // __mode across clones via afterCloneFrom, so setting it once at
         // creation is enough).
@@ -90,6 +97,7 @@ export class SlashCommandNode extends TextNode {
             serializedNode.actionId,
             serializedNode.targetType,
             serializedNode.title,
+            serializedNode.argumentHint,
         );
         node.setFormat(serializedNode.format);
         node.setDetail(serializedNode.detail);
@@ -107,6 +115,7 @@ export class SlashCommandNode extends TextNode {
             actionId: this.__actionId,
             targetType: this.__targetType,
             title: this.__title,
+            argumentHint: this.__argumentHint,
         };
     }
 
@@ -154,6 +163,10 @@ export class SlashCommandNode extends TextNode {
         return this.__title;
     }
 
+    getArgumentHint(): string | undefined {
+        return this.__argumentHint;
+    }
+
     // Slash pills should never split into two text nodes on typing
     canInsertTextBefore(): boolean {
         return false;
@@ -173,8 +186,9 @@ export function $createSlashCommandNode(
     actionId = '',
     targetType?: ActionTargetType,
     title?: string,
+    argumentHint?: string,
 ): SlashCommandNode {
-    const node = new SlashCommandNode(commandName, actionId, targetType, title);
+    const node = new SlashCommandNode(commandName, actionId, targetType, title, argumentHint);
     // Atomic editing: delete removes the whole pill, typing inside replaces it.
     node.setMode('token');
     return $applyNodeReplacement(node);

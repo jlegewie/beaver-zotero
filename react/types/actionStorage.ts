@@ -118,10 +118,11 @@ export const getMergedActions = (): Action[] => {
             if (override.title !== undefined) merged.title = override.title;
 
             if (override.text !== undefined) merged.text = override.text;
+            if (override.name !== undefined) merged.name = override.name;
             if (override.id_model !== undefined) merged.id_model = override.id_model;
             if (override.targetType !== undefined) merged.targetType = override.targetType;
             if (override.category !== undefined) merged.category = override.category;
-            if (override.placeholder !== undefined) merged.placeholder = override.placeholder;
+            if (override.argumentHint !== undefined) merged.argumentHint = override.argumentHint;
             if (override.sortOrder !== undefined) merged.sortOrder = override.sortOrder;
             if (override.minItems !== undefined) merged.minItems = override.minItems;
         }

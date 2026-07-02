@@ -26,10 +26,11 @@ export interface Action {
     id: string;                    // "builtin-*" for built-ins, crypto.randomUUID() for user
     title: string;                 // Max 45 chars
     text: string;                  // Prompt template with {{variables}}
+    name?: string;                 // Slash-command name (no whitespace); derived from title when unset
     id_model?: string;
     targetType: ActionTargetType;
     category?: ActionCategory;     // Skill grouping for the homepage launcher (independent of targetType)
-    placeholder?: string;          // Reserved for a future slash-command argument slot (currently unwired)
+    argumentHint?: string;         // Hint shown during autocomplete to indicate expected arguments
     minItems?: number;             // For targetType "items", default 1
     sortOrder?: number;            // Lower = higher in list
     deprecated?: boolean;          // For phasing out built-ins
@@ -43,10 +44,11 @@ export interface ActionOverride {
     hidden?: boolean;
     title?: string;
     text?: string;
+    name?: string;
     id_model?: string;
     targetType?: ActionTargetType;
     category?: ActionCategory;
-    placeholder?: string;
+    argumentHint?: string;
     sortOrder?: number;
     minItems?: number;
 }
@@ -107,7 +109,8 @@ export const isAction = (obj: unknown): obj is Action => {
         typeof o.targetType === 'string' &&
         VALID_TARGET_TYPES.has(o.targetType as string) &&
         (o.category === undefined || (typeof o.category === 'string' && VALID_CATEGORIES.has(o.category as string))) &&
-        (o.placeholder === undefined || typeof o.placeholder === 'string') &&
+        (o.name === undefined || (typeof o.name === 'string' && !/\s/.test(o.name))) &&
+        (o.argumentHint === undefined || typeof o.argumentHint === 'string') &&
         (o.id_model === undefined || typeof o.id_model === 'string') &&
         (o.minItems === undefined || typeof o.minItems === 'number') &&
         (o.sortOrder === undefined || typeof o.sortOrder === 'number') &&

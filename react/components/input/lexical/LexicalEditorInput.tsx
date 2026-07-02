@@ -18,6 +18,7 @@ import {
     $getRoot,
     $getSelection,
     $isElementNode,
+    $isLineBreakNode,
     $isRangeSelection,
     $setSelection,
     COMMAND_PRIORITY_HIGH,
@@ -51,6 +52,7 @@ function $collectSlashCommandDescriptors(): SlashCommandDescriptor[] {
                 actionId: node.getActionId(),
                 targetType: node.getTargetType(),
                 title: node.getTitle(),
+                argumentHint: node.getArgumentHint(),
             });
         } else if ($isElementNode(node)) {
             node.getChildren().forEach(visit);
@@ -73,6 +75,7 @@ function $buildContentNodes(text: string, pills: SlashCommandDescriptor[]): Lexi
                 segment.match.actionId,
                 segment.match.targetType,
                 segment.match.title,
+                segment.match.argumentHint,
             )
             : $createTextNode(segment.text));
 }
@@ -359,6 +362,7 @@ const EditorApi = forwardRef<LexicalEditorInputHandle>(
                             descriptor.actionId,
                             descriptor.targetType,
                             descriptor.title,
+                            descriptor.argumentHint,
                         );
                         const spaceNode = $createTextNode(' ');
                         const lastChild = root.getLastChild();
@@ -505,6 +509,63 @@ const SlashCommandRevertPlugin: React.FC = () => {
                 }
             }
         });
+    }, [editor]);
+    return null;
+};
+
+/**
+ * Renders an action's argument hint as greyed-out ghost text after a freshly
+ * inserted /command pill ("/summarize-paper |hint…", caret before the hint),
+ * mimicking placeholder text for the argument slot.
+ *
+ * The hint shows while a pill carrying an argumentHint is the last
+ * non-whitespace content of the editor's last line, and disappears as soon as
+ * the user types an argument (or breaks to a new line). It is rendered purely
+ * via a `data-argument-hint` attribute on the pill's paragraph plus a CSS
+ * ::after rule, so it is never part of the editor content. Attribute-only DOM
+ * writes are safe here: Lexical's reconciler ignores foreign attributes, and
+ * attribute mutations don't trigger the chrome document's selection reset
+ * (see SelectionGuardPlugin).
+ */
+const ArgumentHintPlugin: React.FC = () => {
+    const [editor] = useLexicalComposerContext();
+    useEffect(() => {
+        let decoratedEl: HTMLElement | null = null;
+        const apply = () => {
+            let hint: string | null = null;
+            let paragraphKey: string | null = null;
+            editor.getEditorState().read(() => {
+                const last = $getRoot().getLastChild();
+                if (!$isElementNode(last)) return;
+                const children = last.getChildren();
+                for (let i = children.length - 1; i >= 0; i--) {
+                    const node = children[i];
+                    if ($isSlashCommandNode(node)) {
+                        hint = node.getArgumentHint() || null;
+                        paragraphKey = last.getKey();
+                        return;
+                    }
+                    // A line break or any non-whitespace content after the
+                    // pill means the user has moved on — no hint.
+                    if ($isLineBreakNode(node) || node.getTextContent().trim().length > 0) return;
+                }
+            });
+            const el = hint && paragraphKey ? editor.getElementByKey(paragraphKey) : null;
+            if (decoratedEl && decoratedEl !== el) {
+                decoratedEl.removeAttribute('data-argument-hint');
+            }
+            if (el && hint && el.getAttribute('data-argument-hint') !== hint) {
+                el.setAttribute('data-argument-hint', hint);
+            }
+            decoratedEl = el;
+        };
+        const unregister = editor.registerUpdateListener(apply);
+        apply();
+        return () => {
+            unregister();
+            decoratedEl?.removeAttribute('data-argument-hint');
+            decoratedEl = null;
+        };
     }, [editor]);
     return null;
 };
@@ -989,6 +1050,7 @@ export const LexicalEditorInput = forwardRef<LexicalEditorInputHandle, LexicalEd
                     <HistoryPlugin />
                     <PlainTextSync value={value} onChange={onChange} pills={pills} onPillsChange={onPillsChange} />
                     <SlashCommandRevertPlugin />
+                    <ArgumentHintPlugin />
                     <CaretNavigationPlugin suspendedRef={suspendNavRef} pendingDomSelectionRef={pendingDomSelectionRef} />
                     <SelectionGuardPlugin pendingDomSelectionRef={pendingDomSelectionRef} />
                     <SelectionPersistencePlugin />

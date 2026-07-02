@@ -7,7 +7,7 @@
  */
 
 import type { PromptAction } from '../agents/types';
-import type { ActionTargetType } from '../types/actions';
+import type { Action, ActionTargetType } from '../types/actions';
 
 /** A /slash-command pill present in the editor, with the action identity it
  *  carries so the send path can resolve it back to the action's prompt. */
@@ -17,6 +17,8 @@ export interface SlashCommandDescriptor {
     targetType?: ActionTargetType;
     /** Human-readable action title, shown as a native hover tooltip. */
     title?: string;
+    /** Ghost text shown after the inserted pill to indicate expected arguments. */
+    argumentHint?: string;
 }
 
 /** Turn an action title into a single `/command` token (e.g. "Summarize Paper"
@@ -28,6 +30,14 @@ export const toSlashToken = (title: string): string =>
         .toLowerCase()
         .replace(/[^a-z0-9]+/g, '-')
         .replace(/^-+|-+$/g, '') || 'action';
+
+/** The `/command` token for an action: its explicit `name` when set (names
+ *  must never contain whitespace; guard anyway against hand-edited prefs),
+ *  otherwise a token derived from the title. */
+export const getActionCommand = (action: Pick<Action, 'name' | 'title'>): string => {
+    const name = action.name?.trim();
+    return name && !/\s/.test(name) ? name : toSlashToken(action.title);
+};
 
 const escapeRegExp = (value: string): string =>
     value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -120,7 +130,8 @@ export function slashDescriptorsEqual(
         p.commandName === b[i].commandName &&
         p.actionId === b[i].actionId &&
         p.targetType === b[i].targetType &&
-        p.title === b[i].title
+        p.title === b[i].title &&
+        p.argumentHint === b[i].argumentHint
     );
 }
 
