@@ -17,10 +17,10 @@ function notifyExternalFileUnavailable(): void {
 }
 
 /**
- * A navigation target (item, collection, annotation) that was rendered from
- * persisted run history but is no longer in the Zotero library.
+ * A navigation target (item, collection, annotation, saved action) that was
+ * rendered from persisted run history but no longer exists on this computer.
  */
-export type UnavailableReferenceKind = 'item' | 'collection' | 'annotation';
+export type UnavailableReferenceKind = 'item' | 'collection' | 'annotation' | 'action';
 
 const UNAVAILABLE_REFERENCE_COPY: Record<UnavailableReferenceKind, { title: string; text: string }> = {
     item: {
@@ -34,6 +34,10 @@ const UNAVAILABLE_REFERENCE_COPY: Record<UnavailableReferenceKind, { title: stri
     annotation: {
         title: 'Annotation Not Available',
         text: 'This annotation is no longer in your Zotero library. It may have been deleted.',
+    },
+    action: {
+        title: 'Action Not Found',
+        text: 'This action is not available on this computer. It may have been deleted or created on another device.',
     },
 };
 

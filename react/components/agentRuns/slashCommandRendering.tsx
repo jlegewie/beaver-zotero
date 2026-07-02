@@ -21,38 +21,40 @@ import { getHost } from '../../host';
  * Plain-text segments are emitted as-is (the parent preserves whitespace via
  * `white-space: pre-wrap`); unmatched or malformed tokens degrade to raw text.
  *
- * Each pill shows a hover card (action title, prompt preview, edit hint) and
- * opens the action in the host's settings on click. The click stops
- * propagation so it doesn't also trigger the surrounding message's
- * click-to-edit behavior.
+ * Each pill shows a hover card (action title, prompt preview, edit hint).
+ * When the host exposes an action editor (`navigation.openActionSettings`),
+ * clicking a pill opens the action there — stopping propagation so it doesn't
+ * also trigger the surrounding message's click-to-edit behavior. Hosts without
+ * one degrade to hover-only: no click affordance, no edit-hint footer, and
+ * clicks bubble to the surrounding message as usual.
  */
 export function renderContentWithSlashPills(
     content: string,
     actions: PromptAction[],
 ): React.ReactNode[] {
+    const canEditActions = Boolean(getHost().navigation?.openActionSettings);
     return splitContentBySlashTokens(content, actions).map((segment, i) => {
         const action = segment.action;
         if (!action) {
             return <React.Fragment key={i}>{segment.text}</React.Fragment>;
         }
+        const popup = buildActionPopup({
+            title: action.title,
+            command: action.command,
+            prompt: action.prompt,
+            category: action.category,
+        });
+        if (!canEditActions) popup.action = null;
         return (
-            <ChipWithPopup
-                key={i}
-                popup={buildActionPopup({
-                    title: action.title,
-                    command: action.command,
-                    prompt: action.prompt,
-                    category: action.category,
-                })}
-            >
+            <ChipWithPopup key={i} popup={popup}>
                 <span
-                    className="beaver-slash-command beaver-slash-command-clickable"
-                    onClick={(e) => {
+                    className={`beaver-slash-command${canEditActions ? ' beaver-slash-command-clickable' : ''}`}
+                    onClick={canEditActions ? (e) => {
                         // Gecko dispatches click for non-primary buttons too.
                         if (e.button !== 0) return;
                         e.stopPropagation();
                         getHost().navigation?.openActionSettings?.(action.action_id);
-                    }}
+                    } : undefined}
                 >
                     {segment.text}
                 </span>

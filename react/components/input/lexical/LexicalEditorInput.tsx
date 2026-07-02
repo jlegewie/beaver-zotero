@@ -951,21 +951,40 @@ const SelectionPersistencePlugin: React.FC = () => {
  * tab) with the clicked /command pill's action revealed in edit mode. The
  * pill's DOM carries the action id via the data-action-id attribute (see
  * SlashCommandNode.createDOM).
+ *
+ * A plain left-click on a pill is an "open the action" command, not a text
+ * interaction, so the browser's default caret placement is suppressed on
+ * mousedown (the click event still fires with a prevented mousedown) — the
+ * caret stays exactly where it was instead of landing mid-token. Modified
+ * clicks (e.g. shift = extend selection) keep native text behavior and do not
+ * activate the pill.
  */
 const SlashCommandClickPlugin: React.FC = () => {
     const [editor] = useLexicalComposerContext();
     useEffect(() => {
-        const handler = (e: MouseEvent) => {
-            const target = e.target as Element | null;
-            const pill = target?.closest?.('.beaver-slash-command');
+        const activatedPill = (e: MouseEvent): HTMLElement | null => {
+            if (e.button !== 0 || e.shiftKey) return null;
+            return ((e.target as Element | null)?.closest?.('.beaver-slash-command') ?? null) as HTMLElement | null;
+        };
+        const onMouseDown = (e: MouseEvent) => {
+            if (activatedPill(e)) e.preventDefault();
+        };
+        const onClick = (e: MouseEvent) => {
+            const pill = activatedPill(e);
             if (!pill) return;
             const actionId = pill.getAttribute('data-action-id');
             if (!actionId) return;
             getHost().navigation?.openActionSettings?.(actionId);
         };
         return editor.registerRootListener((rootElement, prevRootElement) => {
-            if (prevRootElement) prevRootElement.removeEventListener('click', handler);
-            if (rootElement) rootElement.addEventListener('click', handler);
+            if (prevRootElement) {
+                prevRootElement.removeEventListener('mousedown', onMouseDown);
+                prevRootElement.removeEventListener('click', onClick);
+            }
+            if (rootElement) {
+                rootElement.addEventListener('mousedown', onMouseDown);
+                rootElement.addEventListener('click', onClick);
+            }
         });
     }, [editor]);
     return null;

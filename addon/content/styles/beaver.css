@@ -576,6 +576,7 @@
     background-color: var(--tag-blue-quarternary);
     color: var(--tag-blue-primary);
     line-height: 1.25;
+    transition: background-color 200ms ease-in-out;
 }
 
 /* In-input pill: clicking it opens the action in the preferences window. */
@@ -586,6 +587,12 @@
 /* Chat-history pill: clicking it opens the action in the preferences window. */
 [id^="beaver-pane-"] .beaver-slash-command-clickable {
     cursor: pointer;
+}
+
+/* Hover feedback for clickable pills (one step up the tag-blue scale). */
+[id^="beaver-pane-"] .beaver-slash-command-live:hover,
+[id^="beaver-pane-"] .beaver-slash-command-clickable:hover {
+    background-color: var(--tag-blue-tertiary);
 }
 
 

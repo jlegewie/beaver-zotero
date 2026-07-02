@@ -8,6 +8,7 @@ import { launchExternalFile, notifyReferenceUnavailable } from './sourceActions'
 import { navigateToAnnotation } from '../../utils/readerUtils';
 import { navigateToAttachmentMatch as navigateToAttachmentMatchImpl } from '../../utils/attachmentMatchNavigation';
 import { openPreferencesWindow } from '../../../src/ui/openPreferencesWindow';
+import { getMergedActions } from '../../types/actionStorage';
 
 /**
  * Whether a referenced item still exists in the Zotero library. History-rendered
@@ -79,6 +80,14 @@ export const zoteroNavigation: NavigationHost = {
     },
     launchExternalFile,
     openActionSettings(actionId: string): void {
+        // Pills in chat history carry send-time action ids that may not exist
+        // here: the action can be deleted, or it was a custom action created
+        // on another computer (custom ids live in the local profile's prefs).
+        // Same visibility check the preferences Actions tab uses for reveal.
+        if (!getMergedActions().some((a) => a.id === actionId)) {
+            notifyReferenceUnavailable('action');
+            return;
+        }
         openPreferencesWindow('actions', undefined, actionId);
     },
 };

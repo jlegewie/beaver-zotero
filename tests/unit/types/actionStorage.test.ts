@@ -14,12 +14,13 @@ import type { ActionCustomizations } from '../../../react/types/actions';
 // In-memory pref store backing the Zotero.Prefs stub from tests/setup.ts, so
 // customizations round-trip through the real JSON serialization.
 const prefStore = new Map<string, unknown>();
+const { Prefs } = (globalThis as any).Zotero;
 
 describe('actionStorage', () => {
     beforeEach(() => {
         prefStore.clear();
-        vi.mocked(Zotero.Prefs.get).mockImplementation((key: string) => prefStore.get(key));
-        vi.mocked(Zotero.Prefs.set).mockImplementation((key: string, value: unknown) => {
+        vi.mocked(Prefs.get).mockImplementation((key: string) => prefStore.get(key));
+        vi.mocked(Prefs.set).mockImplementation((key: string, value: unknown) => {
             prefStore.set(key, value);
         });
     });
