@@ -18,7 +18,7 @@ import {
     CheckmarkCircleSolidIcon,
     CircleIcon,
     Icon,
-    StopIcon,
+    StopStrokeIcon,
 } from '../icons/icons';
 import { logger } from '../../../src/utils/logger';
 
@@ -335,8 +335,8 @@ export const AskUserQuestionPanel: React.FC<AskUserQuestionPanelProps> = ({ pend
                 <div className="display-flex flex-row items-center pt-2 gap-2">
                     <Tooltip content="Stop the agent run" showArrow singleLine>
                         <Button
-                            variant="surface"
-                            rightIcon={StopIcon}
+                            variant="outline"
+                            rightIcon={StopStrokeIcon}
                             ariaLabel="Stop generating"
                             style={{ padding: '2px 5px' }}
                             onClick={handleStop}
