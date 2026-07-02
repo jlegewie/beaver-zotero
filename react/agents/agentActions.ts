@@ -30,7 +30,7 @@ import type {
     NoteAnnotationItem,
 } from '../types/agentActions/createAnnotations';
 import { normalizeAnnotationTags } from '../types/agentActions/createAnnotations';
-import type { WSDeferredApprovalRequest, AgentActionType } from '../../src/services/agentProtocol';
+import type { WSDeferredApprovalRequest, WSAskUserQuestionRequest, AskUserQuestionItem, AgentActionType } from '../../src/services/agentProtocol';
 
 // =============================================================================
 // Agent Action Types
@@ -1015,6 +1015,74 @@ export const clearAllPendingApprovalsAtom = atom(
         dismissDiffPreview();
         set(diffPreviewNoteKeyAtom, null);
         set(pendingApprovalsAtom, new Map());
+    }
+);
+
+// =============================================================================
+// Pending User Question State (ask_user_question tool)
+// =============================================================================
+
+/**
+ * Pending ask_user_question request from the backend.
+ * When set, the composer is replaced by the interactive question panel
+ * (AskUserQuestionPanel) and the run blocks until the user submits or skips.
+ */
+export interface PendingQuestion {
+    /** Correlation id for the wire response (WSAskUserQuestionResponse) */
+    questionId: string;
+    /** Tool call ID this question belongs to (the map key) */
+    toolcallId: string;
+    /** Optional card title */
+    title?: string | null;
+    /** The questions to present */
+    questions: AskUserQuestionItem[];
+}
+
+/**
+ * Atom storing pending question requests, keyed by toolcallId.
+ * Unlike approvals (keyed by action_id with a linear-search getter), questions
+ * are keyed by toolcallId directly — the per-toolcall removal on tool return
+ * (the backend-timeout path) keys by tool call, and questionId rides along
+ * for the wire response.
+ */
+export const pendingQuestionsAtom = atom<Map<string, PendingQuestion>>(new Map());
+
+/** Add a pending question from a WS event. */
+export const addPendingQuestionAtom = atom(
+    null,
+    (_, set, event: WSAskUserQuestionRequest) => {
+        set(pendingQuestionsAtom, (prev) => {
+            const next = new Map(prev);
+            next.set(event.toolcall_id, {
+                questionId: event.question_id,
+                toolcallId: event.toolcall_id,
+                title: event.title,
+                questions: event.questions,
+            });
+            return next;
+        });
+    }
+);
+
+/** Remove a specific pending question by toolcallId (after the user responds
+ * or the tool return arrives). */
+export const removePendingQuestionAtom = atom(
+    null,
+    (_get, set, toolcallId: string) => {
+        set(pendingQuestionsAtom, (prev) => {
+            if (!prev.has(toolcallId)) return prev;
+            const next = new Map(prev);
+            next.delete(toolcallId);
+            return next;
+        });
+    }
+);
+
+/** Clear all pending questions (thread switch, run complete, disconnect, ...). */
+export const clearAllPendingQuestionsAtom = atom(
+    null,
+    (_get, set) => {
+        set(pendingQuestionsAtom, new Map());
     }
 );
 

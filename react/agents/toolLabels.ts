@@ -140,6 +140,13 @@ export function getToolResultLabelSuffix(
             const n = view.references.length;
             return n ? ` (${plural(n, 'result')})` : null;
         }
+        case 'user_question': {
+            // The backend omits the default status — treat absent as answered.
+            const status = view.status ?? 'answered';
+            if (status === 'cancelled') return ' (skipped)';
+            if (status === 'no_response') return ' (no response)';
+            return ' (answered)';
+        }
         default:
             return null;
     }

@@ -34,8 +34,10 @@ const VERSION_GATES: { feature: string; minVersion: string; op: Op }[] = [
     { feature: 'edit_metadata_creators', minVersion: '0.11.2', op: 'gte' },
 ];
 
-// Features the backend never derives from version
-const DECLARATION_ONLY_FEATURES = ['external_files'];
+// Features the backend never derives from version. ask_user_question is
+// declaration-only because client-feature declaration predates it — every
+// client that ships the question card also declares features explicitly.
+const DECLARATION_ONLY_FEATURES = ['external_files', 'ask_user_question'];
 
 // The full backend feature vocabulary (ALL_FEATURES in version_gates.py): every
 // version-gated feature plus the declaration-only ones.

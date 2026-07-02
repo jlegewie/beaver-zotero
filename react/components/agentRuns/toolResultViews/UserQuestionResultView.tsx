@@ -1,0 +1,62 @@
+import React from 'react';
+import { UserQuestionView } from '../../../types/toolResultViews';
+
+/**
+ * Shared renderer for the {@link UserQuestionView} view model (ask_user_question).
+ *
+ * Renders the answered (or skipped/timed-out) question card in chat history:
+ * each question with the selected option labels and/or the free-text answer.
+ * Host-agnostic — pure view data, no client lookups.
+ */
+export const UserQuestionResultView: React.FC<{ view: UserQuestionView }> = ({ view }) => {
+    // The backend default is "answered" and may be omitted on the wire —
+    // gate only on the non-default states.
+    const status = view.status ?? 'answered';
+    const statusNote =
+        status === 'cancelled'
+            ? 'Question skipped'
+            : status === 'no_response'
+                ? 'No response'
+                : null;
+
+    return (
+        <div className="display-flex flex-col min-w-0 p-3 gap-4">
+            {statusNote && (
+                <div className="text-sm font-color-tertiary">
+                    {statusNote}
+                </div>
+            )}
+            {view.answers.map((answer, index) => {
+                const selected = answer.selected ?? [];
+                const customText = answer.custom_text?.trim();
+                return (
+                    <div key={index} className="display-flex flex-col min-w-0 gap-05">
+                        <div className="text-base font-color-secondary">
+                            {answer.question}
+                        </div>
+                        {(selected.length > 0 || customText) ? (
+                            <div className="display-flex flex-col min-w-0 gap-05">
+                                {selected.map((label) => (
+                                    <div key={label} className="font-color-primary">
+                                        {label}
+                                    </div>
+                                ))}
+                                {customText && (
+                                    <div className="font-color-primary">
+                                        {customText}
+                                    </div>
+                                )}
+                            </div>
+                        ) : (
+                            <div className="text-sm font-color-tertiary">
+                                Not answered
+                            </div>
+                        )}
+                    </div>
+                );
+            })}
+        </div>
+    );
+};
+
+export default UserQuestionResultView;
