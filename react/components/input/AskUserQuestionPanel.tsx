@@ -235,7 +235,7 @@ export const AskUserQuestionPanel: React.FC<AskUserQuestionPanelProps> = ({ pend
 
                     {/* Custom answer — the composer's text field, repurposed */}
                     {allowsCustom(question) && (
-                        <div className="mt-1 -ml-1">
+                        <div className="mt-1 ml-2">
                             <textarea
                                 ref={textareaRef}
                                 className="chat-input"

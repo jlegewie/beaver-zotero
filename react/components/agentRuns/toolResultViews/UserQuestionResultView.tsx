@@ -21,11 +21,6 @@ export const UserQuestionResultView: React.FC<{ view: UserQuestionView }> = ({ v
 
     return (
         <div className="display-flex flex-col min-w-0 p-3 gap-4">
-            {statusNote && (
-                <div className="text-sm font-color-tertiary">
-                    {statusNote}
-                </div>
-            )}
             {view.answers.map((answer, index) => {
                 const selected = answer.selected ?? [];
                 const customText = answer.custom_text?.trim();
