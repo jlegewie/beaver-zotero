@@ -558,12 +558,11 @@
    in Gecko). Horizontal padding, background and radius still render inline. */
 [id^="beaver-pane-"] .beaver-slash-command {
     display: inline;
-    padding: 0 4px;
+    padding: 2px 4px;
     margin: 0 1px;
-    border-radius: 4px;
-    background-color: var(--fill-quinary);
-    color: var(--fill-primary);
-    font-weight: 500;
+    border-radius: 6px;
+    background-color: var(--tag-blue-quarternary);
+    color: var(--tag-blue-primary);
     line-height: 1.25;
 }
 
