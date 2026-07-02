@@ -210,6 +210,30 @@ export interface AttachmentSearchView {
     attachments: AttachmentSearchRowView[];
 }
 
+/** One question + resolved answer of a {@link UserQuestionView}. Selections
+ * are option *labels* (already resolved server-side), not option ids. */
+export interface UserQuestionAnswerView {
+    question: string;
+    /** Labels of the options the user selected; empty when skipped/unanswered. */
+    selected?: string[];
+    /** Free-text 'Other' answer the user typed, if any. */
+    custom_text?: string | null;
+}
+
+export interface UserQuestionView {
+    view_type: "user_question";
+    tool_name: "ask_user_question";
+    /**
+     * Outcome of the question card. The backend default is `"answered"` —
+     * treat an absent value as answered and gate only on the NON-default
+     * states (`cancelled` / `no_response`).
+     */
+    status?: "answered" | "no_response" | "cancelled";
+    title?: string | null;
+    /** One entry per question asked (present in every status). */
+    answers: UserQuestionAnswerView[];
+}
+
 /** The general discriminated union — discriminated by `view_type`. */
 export type ToolResultView =
     | ItemListView
@@ -217,7 +241,8 @@ export type ToolResultView =
     | ExternalReferenceListView
     | CollectionListView
     | TagListView
-    | AttachmentSearchView;
+    | AttachmentSearchView
+    | UserQuestionView;
 
 // ---------------------------------------------------------------------------
 // Type guards
@@ -233,7 +258,8 @@ export function isToolResultView(value: unknown): value is ToolResultView {
         viewType === "external_reference_list" ||
         viewType === "collection_list" ||
         viewType === "tag_list" ||
-        viewType === "attachment_search"
+        viewType === "attachment_search" ||
+        viewType === "user_question"
     );
 }
 
@@ -259,6 +285,10 @@ export function isTagListView(view: ToolResultView): view is TagListView {
 
 export function isAttachmentSearchView(view: ToolResultView): view is AttachmentSearchView {
     return view.view_type === "attachment_search";
+}
+
+export function isUserQuestionView(view: ToolResultView): view is UserQuestionView {
+    return view.view_type === "user_question";
 }
 
 export function isItemRow(row: ItemListRow): row is ItemRowView {
@@ -292,6 +322,8 @@ export function getToolResultRenderableCount(view: ToolResultView): number | nul
             return view.attachment_count;
         case "external_reference_list":
             return view.found_count ?? view.references.length;
+        case "user_question":
+            return view.answers.length;
         default:
             return null;
     }

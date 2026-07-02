@@ -1,5 +1,8 @@
 import React, { useRef, useEffect, type ReactNode } from 'react';
 import InputArea from "./input/InputArea"
+import AskUserQuestionPanel from "./input/AskUserQuestionPanel"
+import { pendingApprovalsAtom } from '../agents/agentActions';
+import { pendingQuestionsAtom } from '../agents/pendingQuestions';
 import Header from "./Header"
 import { useEventSubscription } from '../hooks/useEventSubscription';
 import { ThreadView } from "./agentRuns";
@@ -167,6 +170,16 @@ const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
     const allWarnings = useAtomValue(threadWarningsAtom);
     const creditInfoWarning = allWarnings.findLast((w) => w.type === 'credit_info');
     const isFirstRunVisible = useAtomValue(isFirstRunVisibleAtom);
+
+    // ask_user_question takeover: while the agent blocks on a question, the
+    // question panel replaces the composer entirely (the draft message atom is
+    // untouched, so the composer restores it afterwards). Approval mode wins
+    // when both are pending — InputArea owns the approval flow.
+    const pendingApprovalsMap = useAtomValue(pendingApprovalsAtom);
+    const pendingQuestionsMap = useAtomValue(pendingQuestionsAtom);
+    const activeQuestion = pendingApprovalsMap.size === 0 && pendingQuestionsMap.size > 0
+        ? pendingQuestionsMap.values().next().value ?? null
+        : null;
 
     useEffect(() => {
         setIsSkippedFilesDialogVisible(false);
@@ -350,9 +363,17 @@ const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
                     <div id="beaver-prompt" className="flex-none px-3 pb-3 relative">
                         <PopupOverlayContainer />
                         <ScrollDownButton onClick={handleScrollToBottom} isWindow={isWindow} />
-                        <DragDropWrapper>
-                            <InputArea inputRef={inputRef} placeholder={inputPlaceholder} />
-                        </DragDropWrapper>
+                        {activeQuestion ? (
+                            // key resets local answer state per question request
+                            <AskUserQuestionPanel
+                                key={activeQuestion.questionId}
+                                pendingQuestion={activeQuestion}
+                            />
+                        ) : (
+                            <DragDropWrapper>
+                                <InputArea inputRef={inputRef} placeholder={inputPlaceholder} />
+                            </DragDropWrapper>
+                        )}
                     </div>
                 )}
 

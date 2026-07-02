@@ -8,6 +8,7 @@ import { CollectionListResultView } from './toolResultViews/CollectionListResult
 import { TagListResultView } from './toolResultViews/TagListResultView';
 import { AnnotationListResultView } from './toolResultViews/AnnotationListResultView';
 import { AttachmentSearchResultView } from './toolResultViews/AttachmentSearchResultView';
+import { UserQuestionResultView } from './toolResultViews/UserQuestionResultView';
 
 interface ToolResultViewProps {
     result: ToolReturnPart;
@@ -33,6 +34,8 @@ function renderFromView(view: ToolResultViewModel): React.ReactNode | null {
             return <AnnotationListResultView view={view} />;
         case 'attachment_search':
             return <AttachmentSearchResultView view={view} />;
+        case 'user_question':
+            return <UserQuestionResultView view={view} />;
         default:
             return null;
     }

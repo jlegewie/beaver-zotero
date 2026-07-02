@@ -167,6 +167,9 @@ export const TOOL_BASE_LABELS: Record<string, string> = {
     // Suggestions
     return_suggestions: 'Suggestions',
 
+    // User interaction
+    ask_user_question: 'Asking a question',
+
     // External search
     search_external_references: 'Web search',
     create_zotero_item: 'Add item',

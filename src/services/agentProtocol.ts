@@ -1446,6 +1446,71 @@ export interface WSDeferredApprovalResponse {
     user_instructions?: string | null;
 }
 
+/** One selectable option of an ask_user_question item (ids are server-assigned) */
+export interface AskUserQuestionOption {
+    /** Server-assigned option id (e.g. 'q0-o1') */
+    id: string;
+    /** Display text for the option */
+    label: string;
+    /** Optional one-line explanation or tradeoff */
+    description?: string | null;
+}
+
+/** One question of an ask_user_question request */
+export interface AskUserQuestionItem {
+    /** Server-assigned question id (e.g. 'q0') */
+    id: string;
+    /** Very short chip label for the question (max ~12 chars) */
+    header?: string | null;
+    /** The complete question to show the user */
+    question: string;
+    /** Selectable options, recommended option first */
+    options: AskUserQuestionOption[];
+    /** Whether multiple options may be selected */
+    allow_multiple?: boolean;
+    /** Whether a free-text 'Other' answer is offered */
+    allow_custom?: boolean;
+}
+
+/**
+ * Request from backend to ask the user structured multiple-choice question(s).
+ * The agent run blocks until the frontend sends a WSAskUserQuestionResponse
+ * with the matching question_id (or the backend-side timeout elapses).
+ *
+ * Like deferred_approval_request, this event carries no request_id — the
+ * response is correlated by question_id.
+ */
+export interface WSAskUserQuestionRequest extends WSBaseEvent {
+    event: 'ask_user_question_request';
+    /** Correlation id for the response */
+    question_id: string;
+    /** The tool call ID this question belongs to (for inline UI matching) */
+    toolcall_id: string;
+    /** Optional card title */
+    title?: string | null;
+    /** The questions to present (1-4) */
+    questions: AskUserQuestionItem[];
+}
+
+/** The user's answer to a single question of an ask_user_question request */
+export interface AskUserQuestionAnswer {
+    /** Matches AskUserQuestionItem.id (e.g. 'q0') */
+    item_id: string;
+    /** Ids of the selected options */
+    selected_option_ids: string[];
+    /** Free-text 'Other' answer the user typed, if any */
+    custom_text?: string | null;
+}
+
+/** Response to an ask_user_question request (user's answers, or a skip) */
+export interface WSAskUserQuestionResponse {
+    type: 'ask_user_question_response';
+    question_id: string;
+    answers: AskUserQuestionAnswer[];
+    /** True when the user skipped the question(s) (or no handler is registered) */
+    cancelled: boolean;
+}
+
 /** Union type for all WebSocket events */
 export type WSEvent =
     | WSReadyEvent
@@ -1487,7 +1552,9 @@ export type WSEvent =
     // Deferred tool events
     | WSAgentActionValidateRequest
     | WSAgentActionExecuteRequest
-    | WSDeferredApprovalRequest;
+    | WSDeferredApprovalRequest
+    // User interaction events
+    | WSAskUserQuestionRequest;
 
 
 // =============================================================================
@@ -1566,6 +1633,7 @@ export const CLIENT_FEATURES = {
     EXTERNAL_SEARCH_SURCHARGE: 'external_search_surcharge',
     EDIT_METADATA_CREATORS: 'edit_metadata_creators',
     EXTERNAL_FILES: 'external_files',
+    ASK_USER_QUESTION: 'ask_user_question',
 } as const;
 
 /** Client type identifier for the Zotero plugin. */
@@ -1814,6 +1882,14 @@ export interface WSCallbacks {
      * @param event The deferred approval request with action details
      */
     onDeferredApprovalRequest?: (event: WSDeferredApprovalRequest) => void;
+
+    /**
+     * Called when the backend asks the user structured multiple-choice
+     * question(s). The frontend should render the question card and send a
+     * WSAskUserQuestionResponse when the user submits or skips.
+     * @param event The question request with questions and correlation id
+     */
+    onAskUserQuestionRequest?: (event: WSAskUserQuestionRequest) => void;
 
     /**
      * Called when the WebSocket connection is established

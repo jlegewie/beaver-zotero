@@ -24,6 +24,7 @@ import {
     undoAgentActionAtom,
     clearAllPendingApprovalsAtom,
 } from "../agents/agentActions";
+import { clearAllPendingQuestionsAtom } from "../agents/pendingQuestions";
 import { processToolReturnResults } from "../agents/toolResultProcessing";
 import { upgradeToolReturn } from "../compat/legacyToolResults";
 import { loadItemDataForAgentActions } from "../utils/agentActionUtils";
@@ -277,6 +278,7 @@ export const newThreadAtom = atom(
             set(activeRunAtom, null);
             set(threadAgentActionsAtom, []);
             set(clearAllPendingApprovalsAtom);
+            set(clearAllPendingQuestionsAtom);
             
             set(isWebSearchEnabledAtom, false);
             
@@ -352,8 +354,9 @@ export const loadThreadAtom = atom(
             set(isWebSearchEnabledAtom, false);
             set(resetCitationMarkersAtom);
 
-            // Clear all pending approvals when loading a different thread
+            // Clear all pending approvals/questions when loading a different thread
             set(clearAllPendingApprovalsAtom);
+            set(clearAllPendingQuestionsAtom);
 
             // Fetch thread name if not provided (e.g., from protocol handler deep links).
             // Check cached recentThreadsAtom first to avoid a network/DB round-trip.

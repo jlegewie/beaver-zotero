@@ -8,7 +8,7 @@
 import { atom, Getter, Setter } from 'jotai';
 import { v4 as uuidv4 } from 'uuid';
 import { agentService } from '../../src/services/agentService';
-import { notifyRunComplete } from '../../src/services/systemNotifications';
+import { notifyRunComplete, notifyUserQuestion } from '../../src/services/systemNotifications';
 import {
     WSCallbacks,
     AgentRunRequest,
@@ -25,6 +25,8 @@ import {
     WSToolCallArgsStreamEvent,
     WSMissingZoteroDataEvent,
     WSDeferredApprovalRequest,
+    WSAskUserQuestionRequest,
+    AskUserQuestionAnswer,
     WSStreamingDoneEvent,
     WSThreadNameEvent,
     ChargingPermissions,
@@ -97,6 +99,11 @@ import {
     buildPendingApprovalFromAction,
     clearAllPendingApprovalsAtom,
 } from '../agents/agentActions';
+import {
+    addPendingQuestionAtom,
+    removePendingQuestionAtom,
+    clearAllPendingQuestionsAtom,
+} from '../agents/pendingQuestions';
 import { getAppliedPdfAnnotationCount } from '../agents/agentActionCounts';
 import { undoEditMetadataAction } from '../utils/editMetadataActions';
 import { undoCreateItemAction } from '../utils/createItemActions';
@@ -948,6 +955,7 @@ export const resetWSStateAtom = atom(null, (_get, set) => {
 export const prepareForNewRunAtom = atom(null, (_get, set) => {
     set(resetWSStateAtom);
     set(clearAllPendingApprovalsAtom);
+    set(clearAllPendingQuestionsAtom);
     set(clearApprovalResponseIntentsAtom);
     set(clearAutoApproveNoteKeysAtom);
 });
@@ -1129,6 +1137,14 @@ function createWSCallbacks(set: Setter): WSCallbacks {
                         break;
                     }
                 }
+
+                // Remove any pending question for this tool call. This covers
+                // the backend-timeout path: after the wait expires the tool
+                // returns 'no_response' and the run continues — without this
+                // removal the stale card would keep the composer disabled for
+                // the rest of the run (the full-clear sites only fire on run
+                // end / disconnect / thread switch).
+                set(removePendingQuestionAtom, toolCallId);
             }
         },
 
@@ -1252,6 +1268,7 @@ function createWSCallbacks(set: Setter): WSCallbacks {
             set(isWSChatPendingAtom, false);
             // Clear pending approvals and dismiss diff preview
             set(clearAllPendingApprovalsAtom);
+            set(clearAllPendingQuestionsAtom);
             // Clear per-run auto-approve state (keys only; IDs kept for UI labeling)
             set(clearAutoApproveNoteKeysAtom);
         },
@@ -1279,6 +1296,7 @@ function createWSCallbacks(set: Setter): WSCallbacks {
             set(wsRetryAtom, null);
             // Clear pending approvals and dismiss diff preview (run failed)
             set(clearAllPendingApprovalsAtom);
+            set(clearAllPendingQuestionsAtom);
             // Clear per-run auto-approve state
             set(clearAutoApproveNoteKeysAtom);
 
@@ -1463,6 +1481,20 @@ function createWSCallbacks(set: Setter): WSCallbacks {
             set(addPendingApprovalAtom, event);
         },
 
+        onAskUserQuestionRequest: (event: WSAskUserQuestionRequest) => {
+            logger('WS onAskUserQuestionRequest:', {
+                questionId: event.question_id,
+                toolcallId: event.toolcall_id,
+                questionCount: event.questions.length,
+            }, 1);
+            set(addPendingQuestionAtom, event);
+
+            // Surface an OS-native notification if the user can't currently see
+            // the question panel (e.g. working in another app), mirroring the
+            // deferred-approval path.
+            notifyUserQuestion(event);
+        },
+
         onOpen: () => {
             logger('WS onOpen: Connection established, waiting for ready...', 1);
             set(isWSConnectedAtom, true);
@@ -1478,6 +1510,7 @@ function createWSCallbacks(set: Setter): WSCallbacks {
             set(streamingDoneRunIdsAtom, new Set<string>());
             // Clear pending approvals and dismiss diff preview (connection lost)
             set(clearAllPendingApprovalsAtom);
+            set(clearAllPendingQuestionsAtom);
             // Clear per-run auto-approve state if the socket drops before done/error.
             set(clearAutoApproveNoteKeysAtom);
 
@@ -2357,6 +2390,7 @@ export const closeWSConnectionAtom = atom(null, async (get, set) => {
 
     // Clear any pending approvals (for parallel tool calls that were awaiting user response)
     set(clearAllPendingApprovalsAtom);
+    set(clearAllPendingQuestionsAtom);
     set(clearApprovalResponseIntentsAtom);
     // Clear per-run auto-approve state
     set(clearAutoApproveNoteKeysAtom);
@@ -2396,6 +2430,9 @@ export const clearThreadAtom = atom(null, (_get, set) => {
     set(citationsAtom, []);
     set(resetCitationMarkersAtom);  // Reset citation markers for cleared thread
     set(clearWarningsAtom);
+    // Clear pending questions so a reset never leaves the composer disabled
+    // behind an unanswerable card (pending approvals are left as-is here).
+    set(clearAllPendingQuestionsAtom);
     // Clear per-run auto-approve state (both keys and action IDs)
     set(clearAutoApproveNoteKeysAtom);
     set(clearAutoApprovedActionIdsAtom);
@@ -2440,5 +2477,23 @@ export const sendApprovalResponseAtom = atom(
         });
         logger(`sendApprovalResponseAtom: Sending approval response for ${actionId}: ${approved}${userInstructions ? ' (with instructions)' : ''}`, 1);
         agentService.sendApprovalResponse(actionId, approved, userInstructions);
+    }
+);
+
+/**
+ * Send the user's answers (or a skip) for an ask_user_question request and
+ * remove the pending question so the composer re-enables immediately.
+ */
+export const sendAskUserQuestionResponseAtom = atom(
+    null,
+    (_get, set, { questionId, toolcallId, answers, cancelled }: {
+        questionId: string;
+        toolcallId: string;
+        answers: AskUserQuestionAnswer[];
+        cancelled?: boolean;
+    }) => {
+        logger(`sendAskUserQuestionResponseAtom: Sending question response for ${questionId}: ${cancelled ? 'cancelled' : `${answers.length} answer(s)`}`, 1);
+        agentService.sendAskUserQuestionResponse(questionId, answers, cancelled ?? false);
+        set(removePendingQuestionAtom, toolcallId);
     }
 );
