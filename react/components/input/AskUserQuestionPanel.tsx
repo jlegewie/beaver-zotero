@@ -226,7 +226,14 @@ export const AskUserQuestionPanel: React.FC<AskUserQuestionPanelProps> = ({ pend
 
                 {/* Question */}
                 <div className="display-flex flex-col gap-1 min-w-0">
-                    <div className="font-color-primary">{question.question}</div>
+                    <div className="font-color-primary">
+                        {question.question}
+                        {question.allow_multiple && (
+                            <span className="font-color-secondary text-base ml-2">
+                                (Multiple choice)
+                            </span>
+                        )}
+                    </div>
 
                     <div className="display-flex flex-col gap-05 items-start mt-1 min-w-0">
                         {question.options.map((option) => {
