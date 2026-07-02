@@ -121,7 +121,15 @@ export function useSlashMenu(
             }))
             .filter(g => g.filtered.length > 0);
 
-        // Always show headers when there are context-specific groups (non-global)
+        const globalFirstGroups = [...visibleGroups].sort((a, b) => {
+            if (a.id === 'global' && b.id !== 'global') return -1;
+            if (a.id !== 'global' && b.id === 'global') return 1;
+            return 0;
+        });
+
+        // Always show headers when there are context-specific groups (non-global).
+        // General actions are intentionally unheaded so they sit directly at the
+        // top of the slash menu before any context-specific sections.
         const hasContextGroup = visibleGroups.some(g => g.id !== 'global');
         const showHeaders = hasContextGroup;
 
@@ -152,11 +160,11 @@ export function useSlashMenu(
         if (verticalPosition === 'above') {
             // For "above" mode, SearchMenu reverses the array for display.
             // Build in reverse visual order:
-            //   - Groups: most relevant first (ends up at bottom after reverse)
+            //   - Groups: general actions first visually, context groups after
             //   - Within each group: actions first, then header
             //     (after reverse: header above its actions)
             //   - Create Action last (ends up at top after reverse)
-            for (const group of visibleGroups) {
+            for (const group of [...globalFirstGroups].reverse()) {
                 for (const action of group.filtered) {
                     items.push({
                         label: action.title,
@@ -164,7 +172,7 @@ export function useSlashMenu(
                         onClick: () => handleSlashSelect(action, group.targetType),
                     });
                 }
-                if (showHeaders && group.label !== lastHeader) {
+                if (showHeaders && group.id !== 'global' && group.label !== lastHeader) {
                     items.push(buildHeaderItem(group));
                     lastHeader = group.label;
                 }
@@ -172,11 +180,11 @@ export function useSlashMenu(
         } else {
             // For "below" mode, SearchMenu does NOT reverse.
             // Build in normal visual order (top-to-bottom):
-            //   - Groups: most relevant first (at top, closest to cursor)
+            //   - Groups: general actions first, context groups after
             //   - Within each group: header first, then actions
             //   - Create Action last (at bottom)
-            for (const group of visibleGroups) {
-                if (showHeaders && group.label !== lastHeader) {
+            for (const group of globalFirstGroups) {
+                if (showHeaders && group.id !== 'global' && group.label !== lastHeader) {
                     items.push(buildHeaderItem(group));
                     lastHeader = group.label;
                 }

@@ -80,7 +80,7 @@ const CategoryPanel: React.FC<CategoryPanelProps> = ({ category, style }) => {
     const hasAny = targetActions.length > 0 || globalActions.length > 0;
 
     return (
-        <div className="display-flex flex-col gap-5 p-1" style={style}>
+        <div className="display-flex flex-col gap-4 p-1" style={style}>
             {!hasAny && (
                 <div className="font-color-secondary text-sm px-2 py-2">
                     Create repeatable workflows for common research tasks
@@ -89,7 +89,7 @@ const CategoryPanel: React.FC<CategoryPanelProps> = ({ category, style }) => {
 
             {globalActions.length > 0 && (
                 <div className="display-flex flex-col gap-1">
-                    <SectionHeader label="Library-wide" />
+                    {/* <SectionHeader label="Library-wide" /> */}
                     {globalActions.map(renderAction)}
                 </div>
             )}
@@ -108,14 +108,14 @@ const CategoryPanel: React.FC<CategoryPanelProps> = ({ category, style }) => {
             <div className="display-flex flex-row items-center gap-2 pt-3">
                 <div className="flex-1" />
                 <Button
-                    variant="outline"
+                    variant="ghost"
                     onClick={() => openPreferencesWindow('actions', categoryFilter)}
-                    rightIcon={SettingsIcon}
+                    icon={SettingsIcon}
                     ariaLabel="Edit actions"
                     title="Edit actions"
                     style={{ padding: '4px 6px' }}
                 >
-                    Edit Actions
+                    Edit
                 </Button>
             </div>
             {!isLibrarySupported && (
