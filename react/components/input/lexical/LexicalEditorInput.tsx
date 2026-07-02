@@ -20,7 +20,6 @@ import {
     $isElementNode,
     $isLineBreakNode,
     $isRangeSelection,
-    $setSelection,
     COMMAND_PRIORITY_HIGH,
     KEY_ENTER_COMMAND,
     LexicalNode,
@@ -874,16 +873,24 @@ const SelectionGuardPlugin: React.FC<{
                 if (!state) return;
                 const stateOffsets = state as { anchor: number; focus: number };
                 if (live.anchor === stateOffsets.anchor && live.focus === stateOffsets.focus) return;
-                // Discrete update: the reconciler re-applies the state
-                // selection to the DOM synchronously, still ahead of the
-                // queued selectionchange task.
+                // Re-select the committed state's offsets, read above in a
+                // read context (which returns the stored selection, not the
+                // DOM). We must NOT clone $getSelection() here: at the start of
+                // a non-headless editor.update() Lexical rebuilds the pending
+                // selection FROM the live DOM (see $internalCreateSelection), so
+                // $getSelection() would return the just-collapsed caret (offset
+                // 0) and the "repair" would cement that collapse into the editor
+                // state. $selectFlatRange sets the anchor/focus points
+                // explicitly, overriding that DOM-derived selection. The
+                // discrete update reconciles the corrected selection to the DOM
+                // synchronously, still ahead of the queued selectionchange task.
+                // (Range direction is not preserved; a collapsed caret — the
+                // common case — is unaffected.)
                 editor.update(() => {
-                    const s = $getSelection();
-                    if ($isRangeSelection(s)) {
-                        const clone = s.clone();
-                        clone.dirty = true;
-                        $setSelection(clone);
-                    }
+                    $selectFlatRange(
+                        Math.min(stateOffsets.anchor, stateOffsets.focus),
+                        Math.max(stateOffsets.anchor, stateOffsets.focus),
+                    );
                 }, { discrete: true });
             };
 
