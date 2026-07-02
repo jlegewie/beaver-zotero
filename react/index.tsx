@@ -223,7 +223,7 @@ export function renderFloatingPopup(domElement: HTMLElement) {
  * Renders the PreferencesWindow into the separate preferences window.
  * Uses the shared Jotai store for consistent state.
  */
-export function renderPreferencesWindow(domElement: HTMLElement, initialTab?: PreferencePageTab | null, initialActionsCategoryFilter?: ActionCategoryFilter | null) {
+export function renderPreferencesWindow(domElement: HTMLElement, initialTab?: PreferencePageTab | null, initialActionsCategoryFilter?: ActionCategoryFilter | null, initialActionId?: string | null) {
     // Clean up any existing root first
     const existingRoot = rootsMap.get(domElement);
     if (existingRoot) {
@@ -236,7 +236,11 @@ export function renderPreferencesWindow(domElement: HTMLElement, initialTab?: Pr
 
     root.render(
         <Provider store={store}>
-            <PreferencesWindow initialTab={initialTab ?? undefined} initialActionsCategoryFilter={initialActionsCategoryFilter ?? undefined} />
+            <PreferencesWindow
+                initialTab={initialTab ?? undefined}
+                initialActionsCategoryFilter={initialActionsCategoryFilter ?? undefined}
+                initialActionId={initialActionId ?? undefined}
+            />
         </Provider>
     );
 

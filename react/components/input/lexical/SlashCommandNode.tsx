@@ -20,21 +20,25 @@ export type SerializedSlashCommandNode = Spread<
 >;
 
 /**
- * Inline TextNode subclass used to render /slash commands as colored text.
+ * Inline TextNode subclass used to render /slash commands as colored pills.
  *
- * Implemented as a normal-mode TextNode (a "text entity", like a hashtag)
- * rather than a DecoratorNode so that:
+ * Implemented as a token-mode TextNode (like a mention) rather than a
+ * DecoratorNode so that:
  *   - the displayed text is exactly what is stored in the editor (WYSIWYG),
- *   - the caret can enter it and arrow keys move through it character by
- *     character - it behaves like ordinary text,
  *   - keyboard users and screen readers still see/hear the command text.
  *
- * `canInsertTextBefore`/`canInsertTextAfter` return false so that typing at the
- * command's boundaries spills into a sibling plain text node (the command keeps
- * its color) while typing *inside* mutates this node's text. A node transform
- * (SlashCommandRevertPlugin in LexicalEditorInput) watches for that mutation:
- * once the text no longer equals "/<commandName>" the node reverts to plain
- * text, so editing a command strips its color.
+ * Token mode makes the pill atomic for editing: backspace/delete removes the
+ * whole pill in one keystroke, and typing with the caret inside it replaces
+ * the pill rather than editing it per character. (Arrow keys skipping over
+ * the pill as a unit is handled separately by CaretNavigationPlugin, which
+ * drives the native Selection API.)
+ *
+ * `canInsertTextBefore`/`canInsertTextAfter` return false so that typing at
+ * the pill's boundaries spills into a sibling plain text node (the pill keeps
+ * its color). A node transform (SlashCommandRevertPlugin in
+ * LexicalEditorInput) remains as a safety net: if the node's text is ever
+ * mutated programmatically so it no longer reads "/<commandName>", the node
+ * reverts to plain text.
  *
  * The visual (background color, padding, etc.) is applied via the CSS class
  * "beaver-slash-command" below - kept purely visual on purpose.
@@ -75,8 +79,9 @@ export class SlashCommandNode extends TextNode {
         this.__actionId = actionId;
         this.__targetType = targetType;
         this.__title = title;
-        // Normal mode: the caret can enter the command and arrow keys move
-        // through it. Reverting to plain text on edit is handled by a transform.
+        // Token mode is applied in $createSlashCommandNode (Lexical copies
+        // __mode across clones via afterCloneFrom, so setting it once at
+        // creation is enough).
     }
 
     static importJSON(serializedNode: SerializedSlashCommandNode): SlashCommandNode {
@@ -107,9 +112,13 @@ export class SlashCommandNode extends TextNode {
 
     createDOM(config: EditorConfig): HTMLElement {
         const dom = super.createDOM(config);
-        dom.classList.add('beaver-slash-command');
+        // "-live" marks the editable in-input pill (clickable, opens the
+        // action in preferences) as opposed to the read-only pills rendered
+        // in chat history, which share the base class only.
+        dom.classList.add('beaver-slash-command', 'beaver-slash-command-live');
         dom.setAttribute('data-lexical-slash', 'true');
         dom.setAttribute('data-command', this.__commandName);
+        if (this.__actionId) dom.setAttribute('data-action-id', this.__actionId);
         if (this.__title) dom.title = this.__title;
         return dom;
     }
@@ -118,6 +127,10 @@ export class SlashCommandNode extends TextNode {
         const updated = super.updateDOM(prevNode, dom, config);
         if (prevNode.__commandName !== this.__commandName) {
             dom.setAttribute('data-command', this.__commandName);
+        }
+        if (prevNode.__actionId !== this.__actionId) {
+            if (this.__actionId) dom.setAttribute('data-action-id', this.__actionId);
+            else dom.removeAttribute('data-action-id');
         }
         if (prevNode.__title !== this.__title) {
             dom.title = this.__title ?? '';
@@ -161,7 +174,10 @@ export function $createSlashCommandNode(
     targetType?: ActionTargetType,
     title?: string,
 ): SlashCommandNode {
-    return $applyNodeReplacement(new SlashCommandNode(commandName, actionId, targetType, title));
+    const node = new SlashCommandNode(commandName, actionId, targetType, title);
+    // Atomic editing: delete removes the whole pill, typing inside replaces it.
+    node.setMode('token');
+    return $applyNodeReplacement(node);
 }
 
 export function $isSlashCommandNode(

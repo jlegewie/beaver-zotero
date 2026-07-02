@@ -6,7 +6,7 @@ import Button from "../ui/Button";
 import { useSetAtom } from 'jotai';
 import { Action, ActionCategory, ActionCategoryFilter, ActionTargetType, generateActionId, TARGET_TYPE_LABELS, CATEGORY_LABELS } from "../../types/actions";
 import { actionsAtom, saveActionsAtom, hideActionAtom, restoreActionAtom, resetActionToDefaultAtom } from "../../atoms/actions";
-import { pendingActionsCategoryFilterAtom } from "../../atoms/ui";
+import { pendingActionsCategoryFilterAtom, pendingActionEditRequestAtom } from "../../atoms/ui";
 import { isBuiltinAction, getActionCustomizations, getHiddenBuiltinActions, importFromOldCustomPrompts, hasOldCustomPrompts } from "../../types/actionStorage";
 import ActionCard from "./ActionCard";
 import MenuButton from "../ui/MenuButton";
@@ -62,6 +62,26 @@ const ActionsPreferenceSection: React.FC = () => {
         setCategoryFilter(pendingCategoryFilter.filter);
         setPendingCategoryFilter(null);
     }, [pendingCategoryFilter, setPendingCategoryFilter]);
+
+    // --- Incoming action-edit request (e.g. clicking an action pill in the
+    // chat input). This effect only clears the filters so the target card is
+    // rendered; the matching ActionCard consumes and clears the request once
+    // it has actually mounted. Clearing the atom here would be batched with
+    // the filter update, so a card hidden by an active filter would never see
+    // the request. ---
+    const [pendingActionEdit, setPendingActionEdit] = useAtom(pendingActionEditRequestAtom);
+    useEffect(() => {
+        if (!pendingActionEdit) return;
+        // Unknown target (e.g. a deleted or hidden action) — drop the request.
+        if (!actions.some(a => a.id === pendingActionEdit.actionId)) {
+            setPendingActionEdit(null);
+            return;
+        }
+        clearFilters();
+    }, [pendingActionEdit, actions, clearFilters, setPendingActionEdit]);
+    const handleForceEditHandled = useCallback(() => {
+        setPendingActionEdit(null);
+    }, [setPendingActionEdit]);
 
     // --- Action Change Handler ---
     const handleActionChange = useCallback((updatedAction: Action) => {
@@ -240,6 +260,8 @@ const ActionsPreferenceSection: React.FC = () => {
                                 isBuiltin={builtin}
                                 isOverridden={overridden}
                                 hasBorder={index > 0}
+                                forceEdit={pendingActionEdit?.actionId === action.id}
+                                onForceEditHandled={handleForceEditHandled}
                             />
                         );
                     })}

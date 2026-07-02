@@ -24,6 +24,20 @@ export interface ActionsCategoryFilterRequest {
     requestId: number;
 }
 export const pendingActionsCategoryFilterAtom = atom<ActionsCategoryFilterRequest | null>(null);
+
+/**
+ * A one-shot request to reveal a specific action in the Actions preferences
+ * tab and open it in edit mode (e.g. after clicking an action pill in the
+ * chat input). `requestId` makes every request distinct so re-requesting the
+ * same action re-triggers the consumers' effects. `ActionsPreferenceSection`
+ * clears any active filters; the matching ActionCard scrolls itself into
+ * view, enters edit mode, and resets this to null.
+ */
+export interface PendingActionEditRequest {
+    actionId: string;
+    requestId: number;
+}
+export const pendingActionEditRequestAtom = atom<PendingActionEditRequest | null>(null);
 export const mcpServerEnabledAtom = atom(getPref('mcpServerEnabled'));
 export const mcpCreateNoteToolEnabledAtom = atom(getPref('mcpCreateNoteToolEnabled'));
 export const dataProviderEnabledAtom = atom(getPref('dataProviderEnabled'));

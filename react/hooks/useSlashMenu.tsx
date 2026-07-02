@@ -223,10 +223,13 @@ export function useSlashMenu(
         return false;
     }, [setMessageContent, verticalPosition]);
 
-    /** Handle keydown when the slash menu is open. Returns true if the event was consumed. */
+    /** Handle keydown when the slash menu is open. Returns true if the event was consumed.
+     *  preventDefault (never stopPropagation!) - the event must keep bubbling to
+     *  SearchMenu's document-level listener, which performs the actual
+     *  navigation/selection. Tab selects like Enter (see SearchMenu selectOnTab). */
     const handleSlashMenuKeyDown = useCallback((e: React.KeyboardEvent<HTMLElement>): boolean => {
         if (!isSlashMenuOpen) return false;
-        if (e.key === 'Enter' || e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        if (e.key === 'Enter' || e.key === 'ArrowDown' || e.key === 'ArrowUp' || e.key === 'Tab') {
             e.preventDefault();
             return true;
         }

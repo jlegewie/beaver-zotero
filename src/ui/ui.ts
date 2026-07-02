@@ -596,13 +596,15 @@ export class BeaverUIFactory {
     /**
      * Open Beaver preferences in a separate window. `actionsCategoryFilter` requests
      * that the Actions tab pre-filter its list to that category (or "uncategorized").
+     * `actionId` requests that the Actions tab reveal that action in edit mode.
      */
-    static openPreferencesWindow(tab?: PreferencePageTab, actionsCategoryFilter?: ActionCategoryFilter): void {
+    static openPreferencesWindow(tab?: PreferencePageTab, actionsCategoryFilter?: ActionCategoryFilter, actionId?: string): void {
         const existingWindow = this.findPreferencesWindow();
         if (existingWindow) {
-            // Switch tab (and apply the category filter) if requested via the global function
+            // Switch tab (and apply the category filter / action-edit request)
+            // if requested via the global function
             if (tab && (Zotero as any).__beaverOpenPreferencesTab) {
-                (Zotero as any).__beaverOpenPreferencesTab(tab, actionsCategoryFilter);
+                (Zotero as any).__beaverOpenPreferencesTab(tab, actionsCategoryFilter, actionId);
             }
             existingWindow.focus();
             Zotero.debug("Beaver: Focusing existing preferences window");
@@ -614,7 +616,7 @@ export class BeaverUIFactory {
             'chrome://beaver/content/beaverPreferences.xhtml',
             BEAVER_PREFERENCES_WINDOW_NAME,
             'chrome,resizable,centerscreen,dialog=false',
-            { tab: tab || null, actionsCategoryFilter: actionsCategoryFilter || null }
+            { tab: tab || null, actionsCategoryFilter: actionsCategoryFilter || null, actionId: actionId || null }
         );
         Zotero.debug("Beaver: Opened preferences window");
     }

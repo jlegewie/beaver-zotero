@@ -79,6 +79,11 @@ export interface SearchMenuProps {
     showSearchInput?: boolean;
     /** Optional callback when backspace/delete is pressed with empty search. Defaults to onClose. */
     onEmptyBackspace?: () => void;
+    /** When true, Tab selects the focused item like Enter. Meant for menus
+     *  without a rendered search input (e.g. the slash menu, where typing
+     *  stays in the chat editor); menus with a real input keep Tab's normal
+     *  focus-navigation semantics. */
+    selectOnTab?: boolean;
     /** Optional container for rendering overlay DOM away from the trigger. */
     portalContainer?: HTMLElement | null;
     /** Called after the menu performs its initial focus behavior. */
@@ -110,6 +115,7 @@ const SearchMenu: React.FC<SearchMenuProps> = ({
     setSearchQuery,
     showSearchInput = true,
     onEmptyBackspace,
+    selectOnTab = false,
     portalContainer,
     onAfterInitialFocus,
     groupHeaderClassName = 'font-color-secondary'
@@ -304,9 +310,11 @@ const SearchMenu: React.FC<SearchMenuProps> = ({
                     });
                     break;
                 case 'Enter':
+                case 'Tab':
+                    if (e.key === 'Tab' && !selectOnTab) break;
                     e.preventDefault();
-                    if (focusedIndex >= 0 && 
-                        focusedIndex < displayOrderMenuItems.length && 
+                    if (focusedIndex >= 0 &&
+                        focusedIndex < displayOrderMenuItems.length &&
                         isFocusableItem(displayOrderMenuItems[focusedIndex])
                     ) {
                         displayOrderMenuItems[focusedIndex].onClick();
@@ -322,7 +330,7 @@ const SearchMenu: React.FC<SearchMenuProps> = ({
         const doc = getDocumentFromElement(menuRef.current);
         doc.addEventListener('keydown', handleKeyNav);
         return () => doc.removeEventListener('keydown', handleKeyNav);
-    }, [isOpen, menuItems, focusedIndex, onClose, closeOnSelect, verticalPosition]);
+    }, [isOpen, menuItems, focusedIndex, onClose, closeOnSelect, verticalPosition, selectOnTab]);
     
     // Scroll to bottom when menu opens in 'above' mode so items nearest the search input are visible
     useEffect(() => {

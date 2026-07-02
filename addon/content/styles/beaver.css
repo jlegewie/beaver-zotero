@@ -566,6 +566,11 @@
     line-height: 1.25;
 }
 
+/* In-input pill: clicking it opens the action in the preferences window. */
+[id^="beaver-pane-"] .beaver-slash-command-live {
+    cursor: pointer;
+}
+
 
 [id^="beaver-pane-"] .preference-input {
     font-family: system-ui, -apple-system, sans-serif;

@@ -76,7 +76,7 @@ const InputArea: React.FC<InputAreaProps> = ({
     // Imperative handle exposed by the Lexical editor (focus / clear).
     const editorHandleRef = useRef<LexicalEditorInputHandle | null>(null);
     const pendingSelectionRestoreRef = useRef<{ offset: number; skipFocus: boolean } | null>(null);
-    const sourceMenuSelectionRestoreRef = useRef<{ offset: number; skipFocus: boolean } | null>(null);
+    const sourceMenuSelectionRestoreRef = useRef<{ offset: number } | null>(null);
     const focusEditor = useCallback(() => {
         editorHandleRef.current?.focus();
     }, []);
@@ -219,15 +219,21 @@ const InputArea: React.FC<InputAreaProps> = ({
         setSelectionRestoreTick((tick) => tick + 1);
     }, []);
 
+    // Runs when the attachment menu closes (its search input owned DOM focus
+    // while open). Refocuses the editor and puts the caret back where the `@`
+    // trigger was typed. Restoring while the menu is still open would fight
+    // its search input: even a skip-focus selection update moves the native
+    // DOM selection into the contenteditable, which Zotero's chrome focus
+    // manager treats as focus movement, yanking focus out of the menu.
     const restoreSourceMenuSelection = useCallback(() => {
         const pendingRestore = sourceMenuSelectionRestoreRef.current;
-        if (!pendingRestore) return;
-        editorHandleRef.current?.selectRange(
-            pendingRestore.offset,
-            pendingRestore.offset,
-            { skipFocus: pendingRestore.skipFocus },
-        );
-    }, []);
+        if (pendingRestore) {
+            editorHandleRef.current?.selectRange(pendingRestore.offset, pendingRestore.offset);
+            return;
+        }
+        // Menu was opened without an `@` trigger (e.g. the "+" button).
+        focusEditor();
+    }, [focusEditor]);
 
     useEffect(() => {
         if (!isAddAttachmentMenuOpen) {
@@ -283,7 +289,7 @@ const InputArea: React.FC<InputAreaProps> = ({
             // Delete just the trailing `@` in place rather than rebuilding the
             // editor from the string, so any colored /command nodes survive.
             editorHandleRef.current?.deleteTrailingCharacter();
-            sourceMenuSelectionRestoreRef.current = { offset: nextValue.length, skipFocus: true };
+            sourceMenuSelectionRestoreRef.current = { offset: nextValue.length };
             return;
         }
 
@@ -491,9 +497,8 @@ const InputArea: React.FC<InputAreaProps> = ({
                     menuPosition={menuPosition}
                     setMenuPosition={setMenuPosition}
                     inputRef={inputRef}
-                    focusInput={focusEditor}
+                    focusInput={restoreSourceMenuSelection}
                     menuPortalContainer={menuPortalContainer}
-                    onAfterMenuInitialFocus={restoreSourceMenuSelection}
                     disabled={isAwaitingApproval}
                     verticalPosition={verticalPosition}
                 />
@@ -514,6 +519,7 @@ const InputArea: React.FC<InputAreaProps> = ({
                 placeholder="Search actions..."
                 closeOnSelect={false}
                 showSearchInput={false}
+                selectOnTab={true}
                 portalContainer={menuPortalContainer}
                 groupHeaderClassName="font-color-primary opacity-70"
             />

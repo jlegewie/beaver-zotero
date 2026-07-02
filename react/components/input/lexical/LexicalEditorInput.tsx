@@ -35,6 +35,7 @@ import {
     slashDescriptorsEqual,
     type SlashCommandDescriptor,
 } from '../../../utils/slashCommands';
+import { openPreferencesWindow } from '../../../../src/ui/openPreferencesWindow';
 
 export type { SlashCommandDescriptor };
 
@@ -73,6 +74,70 @@ function $buildContentNodes(text: string, pills: SlashCommandDescriptor[]): Lexi
                 segment.match.title,
             )
             : $createTextNode(segment.text));
+}
+
+/** Flattened plain-text offsets of the current selection's anchor and focus
+ *  points (offsets are relative to the concatenated text-node content), or
+ *  null when there is no range selection or a point sits outside the text
+ *  nodes. Must be called inside an editor read/update context. */
+function $getFlatSelectionOffsets(): { anchor: number; focus: number } | null {
+    const selection = $getSelection();
+    if (!$isRangeSelection(selection)) return null;
+    const anchorKey = selection.anchor.getNode().getKey();
+    const focusKey = selection.focus.getNode().getKey();
+    let anchor: number | null = null;
+    let focus: number | null = null;
+    let runningOffset = 0;
+    for (const textNode of $getRoot().getAllTextNodes()) {
+        const key = textNode.getKey();
+        if (key === anchorKey) anchor = runningOffset + selection.anchor.offset;
+        if (key === focusKey) focus = runningOffset + selection.focus.offset;
+        runningOffset += textNode.getTextContentSize();
+    }
+    if (anchor === null || focus === null) return null;
+    return { anchor, focus };
+}
+
+/** Map a flattened plain-text [start, end] range (start <= end) back onto the
+ *  editor's text nodes and select it. Must be called inside an update context. */
+function $selectFlatRange(start: number, end: number): void {
+    const root = $getRoot();
+    const textLength = root.getTextContent().length;
+    const safeStart = Math.max(0, Math.min(start, textLength));
+    const safeEnd = Math.max(0, Math.min(end, textLength));
+    const textNodes = root.getAllTextNodes();
+    if (textNodes.length === 0) {
+        root.selectEnd();
+        return;
+    }
+
+    let startNode = textNodes[0];
+    let endNode = textNodes[textNodes.length - 1];
+    let startOffset = 0;
+    let endOffset = endNode.getTextContentSize();
+    let runningOffset = 0;
+
+    for (const textNode of textNodes) {
+        const nodeLength = textNode.getTextContentSize();
+        const nodeStart = runningOffset;
+        const nodeEnd = nodeStart + nodeLength;
+        if (safeStart >= nodeStart && safeStart <= nodeEnd) {
+            startNode = textNode;
+            startOffset = safeStart - nodeStart;
+        }
+        if (safeEnd >= nodeStart && safeEnd <= nodeEnd) {
+            endNode = textNode;
+            endOffset = safeEnd - nodeStart;
+            break;
+        }
+        runningOffset = nodeEnd;
+    }
+
+    startNode.select(startOffset, startOffset);
+    const selection = $getSelection();
+    if ($isRangeSelection(selection)) {
+        selection.focus.set(endNode.getKey(), endOffset, 'text');
+    }
 }
 
 export type LexicalEditorInputHandle = {
@@ -183,60 +248,15 @@ const EditorApi = forwardRef<LexicalEditorInputHandle>(
                     });
                 },
                 selectRange: (start, end, options) => {
-                    editor.update(() => {
-                        const root = $getRoot();
-                        const textLength = root.getTextContent().length;
-                        const safeStart = Math.max(0, Math.min(start, textLength));
-                        const safeEnd = Math.max(0, Math.min(end, textLength));
-                        const textNodes = root.getAllTextNodes();
-                        if (textNodes.length === 0) {
-                            root.selectEnd();
-                            return;
-                        }
-
-                        let startNode = textNodes[0];
-                        let endNode = textNodes[textNodes.length - 1];
-                        let startOffset = 0;
-                        let endOffset = endNode.getTextContentSize();
-                        let runningOffset = 0;
-
-                        for (const textNode of textNodes) {
-                            const nodeLength = textNode.getTextContentSize();
-                            const nodeStart = runningOffset;
-                            const nodeEnd = nodeStart + nodeLength;
-                            if (safeStart >= nodeStart && safeStart <= nodeEnd) {
-                                startNode = textNode;
-                                startOffset = safeStart - nodeStart;
-                            }
-                            if (safeEnd >= nodeStart && safeEnd <= nodeEnd) {
-                                endNode = textNode;
-                                endOffset = safeEnd - nodeStart;
-                                break;
-                            }
-                            runningOffset = nodeEnd;
-                        }
-
-                        startNode.select(startOffset, startOffset);
-                        const selection = $getSelection();
-                        if ($isRangeSelection(selection)) {
-                            selection.focus.set(endNode.getKey(), endOffset, 'text');
-                        }
-                    }, options?.skipFocus ? { tag: SKIP_SELECTION_FOCUS_TAG } : undefined);
+                    editor.update(
+                        () => $selectFlatRange(start, end),
+                        options?.skipFocus ? { tag: SKIP_SELECTION_FOCUS_TAG } : undefined,
+                    );
                 },
                 getSelectionOffset: () => {
                     let offset: number | null = null;
                     editor.getEditorState().read(() => {
-                        const selection = $getSelection();
-                        if (!$isRangeSelection(selection)) return;
-                        const anchorNode = selection.anchor.getNode();
-                        let runningOffset = 0;
-                        for (const textNode of $getRoot().getAllTextNodes()) {
-                            if (textNode.getKey() === anchorNode.getKey()) {
-                                offset = runningOffset + selection.anchor.offset;
-                                return;
-                            }
-                            runningOffset += textNode.getTextContentSize();
-                        }
+                        offset = $getFlatSelectionOffsets()?.anchor ?? null;
                     });
                     return offset;
                 },
@@ -506,10 +526,35 @@ const CaretNavigationPlugin: React.FC<{ suspendedRef: React.MutableRefObject<boo
             const shift = e.shiftKey;
             const alter = shift ? 'extend' : 'move';
 
+            // A caret strictly inside a /command pill's text (not at either
+            // edge). Pills are atomic (token-mode nodes), so horizontal moves
+            // must not rest mid-pill; the boundary positions are fine - they
+            // are visually before/after the pill.
+            const isStrictlyInsidePill = (): boolean => {
+                const node = sel.focusNode;
+                if (!node || node.nodeType !== Node.TEXT_NODE) return false;
+                if (!node.parentElement?.closest('.beaver-slash-command')) return false;
+                return sel.focusOffset > 0 && sel.focusOffset < (node as Text).length;
+            };
             const modify = (dir: string, gran: string) => {
                 try {
                     (sel as unknown as { modify: (a: string, d: string, g: string) => void }).modify(alter, dir, gran);
                 } catch { /* Selection.modify is best-effort */ }
+            };
+            // Horizontal movement treats /command pills as atomic: after the
+            // native step, keep stepping in the same direction until the
+            // moving edge exits the pill, or no progress is possible
+            // (document boundary). Only used for ArrowLeft/Right - a vertical
+            // move landing mid-pill must not be pushed a whole extra line.
+            const modifySkippingPills = (dir: string, gran: string) => {
+                modify(dir, gran);
+                let guard = 0;
+                while (isStrictlyInsidePill() && guard++ < 64) {
+                    const prevNode = sel.focusNode;
+                    const prevOffset = sel.focusOffset;
+                    modify(dir, gran);
+                    if (sel.focusNode === prevNode && sel.focusOffset === prevOffset) break;
+                }
             };
             // Jump to the very start/end of the editable content - used for the
             // document-boundary moves Gecko's Selection.modify() can't perform.
@@ -548,9 +593,9 @@ const CaretNavigationPlugin: React.FC<{ suspendedRef: React.MutableRefObject<boo
                 case 'ArrowLeft':
                 case 'ArrowRight': {
                     const fwd = key === 'ArrowRight';
-                    if (isMac && e.metaKey) modify(fwd ? 'forward' : 'backward', 'lineboundary');
-                    else if ((isMac && e.altKey) || (!isMac && e.ctrlKey)) modify(fwd ? 'right' : 'left', 'word');
-                    else modify(fwd ? 'right' : 'left', 'character');
+                    if (isMac && e.metaKey) modifySkippingPills(fwd ? 'forward' : 'backward', 'lineboundary');
+                    else if ((isMac && e.altKey) || (!isMac && e.ctrlKey)) modifySkippingPills(fwd ? 'right' : 'left', 'word');
+                    else modifySkippingPills(fwd ? 'right' : 'left', 'character');
                     break;
                 }
                 case 'ArrowUp':
@@ -584,6 +629,89 @@ const CaretNavigationPlugin: React.FC<{ suspendedRef: React.MutableRefObject<boo
             if (rootElement) rootElement.addEventListener('keydown', handler, true);
         });
     }, [editor, suspendedRef]);
+    return null;
+};
+
+/**
+ * Preserves the caret position across OS-level window deactivation.
+ *
+ * When the chrome window loses OS focus, Gecko can collapse the native
+ * selection to the start of the contenteditable; Lexical's document-level
+ * selectionchange listener then adopts that collapsed selection, so the caret
+ * sits at offset 0 when the window is refocused. The editor element never
+ * loses *document* focus in this scenario (document.activeElement is
+ * unchanged), so element-level blur/focus can't observe it - we listen on the
+ * window instead. The snapshot/restore only runs while the editor is the
+ * active element, so focus legitimately parked elsewhere (e.g. a menu's
+ * search input) is never clobbered.
+ */
+const SelectionPersistencePlugin: React.FC = () => {
+    const [editor] = useLexicalComposerContext();
+    useEffect(() => {
+        let saved: { anchor: number; focus: number } | null = null;
+        let rootEl: HTMLElement | null = null;
+        const isEditorActive = () =>
+            !!rootEl && rootEl.ownerDocument.activeElement === rootEl;
+
+        const onWindowBlur = (e: FocusEvent) => {
+            // Only window deactivation - element-level blurs don't bubble to
+            // the window, but be defensive about synthesized events.
+            if (e.target !== e.currentTarget) return;
+            if (!isEditorActive()) return;
+            editor.getEditorState().read(() => {
+                saved = $getFlatSelectionOffsets();
+            });
+        };
+        const onWindowFocus = (e: FocusEvent) => {
+            if (e.target !== e.currentTarget) return;
+            const restore = saved;
+            saved = null;
+            if (!restore || !isEditorActive()) return;
+            // Selection direction is not preserved; restore the range
+            // forward-ordered (collapsed carets are unaffected).
+            const start = Math.min(restore.anchor, restore.focus);
+            const end = Math.max(restore.anchor, restore.focus);
+            editor.update(() => $selectFlatRange(start, end));
+        };
+
+        return editor.registerRootListener((rootElement, prevRootElement) => {
+            const prevWin = prevRootElement?.ownerDocument.defaultView;
+            if (prevWin) {
+                prevWin.removeEventListener('blur', onWindowBlur);
+                prevWin.removeEventListener('focus', onWindowFocus);
+            }
+            rootEl = rootElement;
+            const win = rootElement?.ownerDocument.defaultView;
+            if (win) {
+                win.addEventListener('blur', onWindowBlur);
+                win.addEventListener('focus', onWindowFocus);
+            }
+        });
+    }, [editor]);
+    return null;
+};
+
+/**
+ * Opens the preferences window (Actions tab) with the clicked /command pill's
+ * action revealed in edit mode. The pill's DOM carries the action id via the
+ * data-action-id attribute (see SlashCommandNode.createDOM).
+ */
+const SlashCommandClickPlugin: React.FC = () => {
+    const [editor] = useLexicalComposerContext();
+    useEffect(() => {
+        const handler = (e: MouseEvent) => {
+            const target = e.target as Element | null;
+            const pill = target?.closest?.('.beaver-slash-command');
+            if (!pill) return;
+            const actionId = pill.getAttribute('data-action-id');
+            if (!actionId) return;
+            openPreferencesWindow('actions', undefined, actionId);
+        };
+        return editor.registerRootListener((rootElement, prevRootElement) => {
+            if (prevRootElement) prevRootElement.removeEventListener('click', handler);
+            if (rootElement) rootElement.addEventListener('click', handler);
+        });
+    }, [editor]);
     return null;
 };
 
@@ -663,6 +791,8 @@ export const LexicalEditorInput = forwardRef<LexicalEditorInputHandle, LexicalEd
                     <PlainTextSync value={value} onChange={onChange} pills={pills} onPillsChange={onPillsChange} />
                     <SlashCommandRevertPlugin />
                     <CaretNavigationPlugin suspendedRef={suspendNavRef} />
+                    <SelectionPersistencePlugin />
+                    <SlashCommandClickPlugin />
                     <SubmitOnEnterPlugin onSubmit={onSubmit} />
                     <EditorApi ref={ref} />
                 </div>

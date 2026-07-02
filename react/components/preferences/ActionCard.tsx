@@ -56,6 +56,11 @@ interface ActionCardProps {
     isBuiltin: boolean;
     isOverridden: boolean;
     hasBorder?: boolean;
+    /** Externally requested edit mode (e.g. an action pill in the chat input
+     *  was clicked): the card scrolls into view, enters edit mode, and calls
+     *  `onForceEditHandled` to acknowledge the one-shot request. */
+    forceEdit?: boolean;
+    onForceEditHandled?: () => void;
 }
 
 const ActionCard: React.FC<ActionCardProps> = ({
@@ -67,6 +72,8 @@ const ActionCard: React.FC<ActionCardProps> = ({
     isBuiltin,
     isOverridden,
     hasBorder = false,
+    forceEdit = false,
+    onForceEditHandled,
 }) => {
     const [isEditing, setIsEditing] = useState(() => !action.title && !action.text);
     const [editTitle, setEditTitle] = useState(action.title);
@@ -150,6 +157,15 @@ const ActionCard: React.FC<ActionCardProps> = ({
             setIsEditing(true);
         }
     }, [isEditing, action]);
+
+    // Externally requested edit mode: reveal the card, open the editor, and
+    // acknowledge so the request isn't reapplied on remount.
+    useEffect(() => {
+        if (!forceEdit) return;
+        handleEnterEdit();
+        cardRef.current?.scrollIntoView({ block: 'center' });
+        onForceEditHandled?.();
+    }, [forceEdit, handleEnterEdit, onForceEditHandled]);
 
     const handleCancel = useCallback(() => {
         if (!action.title && !action.text) {
