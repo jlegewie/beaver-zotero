@@ -102,6 +102,10 @@ export const AskUserQuestionPanel: React.FC<AskUserQuestionPanelProps> = ({ pend
         if (!q.allow_multiple) {
             setOtherSelected((prev) => (prev[q.id] ? { ...prev, [q.id]: false } : prev));
         }
+        // Move the caret out of the "Other" field when a listed option is
+        // picked — refocusing/typing there would re-select Other.
+        const ta = textareaRef.current;
+        if (ta && ta.ownerDocument.activeElement === ta) ta.blur();
     };
 
     // Select "Other" (idempotent). Radio semantics: clears the listed
@@ -240,7 +244,7 @@ export const AskUserQuestionPanel: React.FC<AskUserQuestionPanelProps> = ({ pend
                                     <span className="display-flex flex-row gap-2 items-start min-w-0">
                                         <Icon
                                             icon={isSelected ? CheckmarkCircleIcon : CircleIcon}
-                                            className={`mt-020 scale-11 ${isSelected ? 'font-color-accent-green' : 'font-color-secondary'}`}
+                                            className={`mt-020 scale-12 ${isSelected ? 'font-color-accent-green' : 'font-color-secondary'}`}
                                         />
                                         <span className="min-w-0">
                                             <span className="font-color-primary text-base">{option.label}</span>
@@ -284,7 +288,7 @@ export const AskUserQuestionPanel: React.FC<AskUserQuestionPanelProps> = ({ pend
                                 >
                                     <Icon
                                         icon={isOther ? CheckmarkCircleIcon : CircleIcon}
-                                        className={`scale-11 ${isOther ? 'font-color-accent-green' : 'font-color-secondary'}`}
+                                        className={`scale-12 ${isOther ? 'font-color-accent-green' : 'font-color-secondary'}`}
                                     />
                                 </button>
                                 <textarea
