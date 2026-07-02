@@ -46,6 +46,7 @@ export { default as ShareIcon } from './ShareIcon';
 export { default as Share05Icon } from './Share05Icon';
 export { default as AlertIcon } from './AlertIcon';
 export { default as StopIcon } from './StopIcon';
+export { default as QuillWriteIcon } from './QuillWriteIcon';
 export { default as StopStrokeIcon } from './StopStrokeIcon';
 export { default as DatabaseStatusIcon } from './DatabaseStatusIcon';
 export { default as UserIcon } from './UserIcon';
