@@ -64,18 +64,18 @@ const PopupMessageItem: React.FC<PopupMessageItemProps> = ({ message, onRemove, 
     const getDefaultIcon = () => {
         switch (message.type) {
             case 'warning':
-                return <Icon icon={AlertIcon} className="scale-12 mt-020 font-color-secondary" />;
+                return <Icon icon={AlertIcon} className="scale-12 mt-020 font-color-primary" />;
             case 'error':
                 return <Icon icon={AlertIcon} className="scale-12 mt-020 font-color-red" />;
             case 'plan_change':
             case 'indexing_complete':
-                return <Icon icon={PuzzleIcon} className="scale-12 mt-020 font-color-secondary" />;
+                return <Icon icon={PuzzleIcon} className="scale-12 mt-020 font-color-primary" />;
             case 'version_update':
                 // return <Icon icon={AiMagicIcon} className="scale-12 mt-020 font-color-secondary" />;
                 return null;
             case 'info':
             default:
-                return <Icon icon={InformationCircleIcon} className="scale-12 mt-020 font-color-secondary" />;
+                return <Icon icon={InformationCircleIcon} className="scale-12 mt-020 font-color-primary" />;
         }
     };
 
@@ -93,7 +93,7 @@ const PopupMessageItem: React.FC<PopupMessageItemProps> = ({ message, onRemove, 
         case 'indexing_complete':
         case 'version_update':
         default:
-            fontColor = 'font-color-secondary';
+            fontColor = 'font-color-primary';
             backgroundColor = 'var(--material-mix-quarternary)';
             borderColor = 'var(--fill-quinary)';
             break;
@@ -147,7 +147,7 @@ const PopupMessageItem: React.FC<PopupMessageItemProps> = ({ message, onRemove, 
                             {message.customContent}
                         </div>
                     ) : (
-                        <div className='text-base font-color-tertiary'>
+                        <div className='text-base font-color-secondary'>
                             {message.text && parseTextWithLinksAndNewlines(message.text)}
                             {message.learnMoreUrl && (
                                 <>
