@@ -89,7 +89,7 @@ export const BUILTIN_ACTIONS: Action[] = [
         argumentHint: 'Optional: what to focus on while skimming',
         targets: ['attachment'],
         category: 'annotate',
-        sortOrder: 200,
+        sortOrder: 108,
     },
 
     {
@@ -101,7 +101,7 @@ export const BUILTIN_ACTIONS: Action[] = [
         argumentHint: 'Optional: your own color scheme or focus',
         targets: ['attachment'],
         category: 'annotate',
-        sortOrder: 210,
+        sortOrder: 105,
     },
 
     {
