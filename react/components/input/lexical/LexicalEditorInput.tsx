@@ -1179,6 +1179,14 @@ export const LexicalEditorInput = forwardRef<LexicalEditorInputHandle, LexicalEd
             [],
         );
 
+        // Expose the placeholder to screen readers
+        useEffect(() => {
+            const el = contentEditableRef.current;
+            if (!el) return;
+            if (placeholder) el.setAttribute('aria-placeholder', placeholder);
+            else el.removeAttribute('aria-placeholder');
+        }, [placeholder]);
+
         return (
             <LexicalComposer initialConfig={{ ...editorConfig, editable: !disabled }}>
                 <div className="beaver-lexical-root">

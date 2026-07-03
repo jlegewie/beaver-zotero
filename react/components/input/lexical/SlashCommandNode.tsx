@@ -28,7 +28,8 @@ export type SerializedSlashCommandNode = Spread<
  * Implemented as a token-mode TextNode (like a mention) rather than a
  * DecoratorNode so that:
  *   - the displayed text is exactly what is stored in the editor (WYSIWYG),
- *   - keyboard users and screen readers still see/hear the command text.
+ *   - keyboard users still traverse the pill as an atomic unit.
+
  *
  * Token mode makes the pill atomic for editing: backspace/delete removes the
  * whole pill in one keystroke, and typing with the caret inside it replaces
@@ -93,7 +94,9 @@ export class SlashCommandNode extends TextNode {
         text?: string,
         key?: NodeKey,
     ) {
-        // Display the "/name" literal in the text so screen readers still hear it
+        // The stored text is the "/name" literal (source of truth for copy/paste
+        // and the wire format); the screen-reader name is set separately in
+        // createDOM via aria-label.
         super(text ?? `/${commandName}`, key);
         this.__commandName = commandName;
         this.__actionId = actionId;
@@ -139,6 +142,12 @@ export class SlashCommandNode extends TextNode {
         };
     }
 
+    // Accessible name for the pill
+    private ariaLabel(): string {
+        const base = this.__title ? this.__title : `/${this.__commandName}`;
+        return this.__missing ? `${base}, command, unavailable` : `${base}, command`;
+    }
+
     createDOM(config: EditorConfig): HTMLElement {
         const dom = super.createDOM(config);
         // "-live" marks the editable in-input pill (clickable, opens the
@@ -151,6 +160,11 @@ export class SlashCommandNode extends TextNode {
         // Title snapshot for the hover card's fallback when the action has
         // been deleted (a native `title` would double up with the card).
         if (this.__title) dom.setAttribute('data-title', this.__title);
+        // Announce the pill as a single labelled unit rather than letting a
+        // screen reader spell out the raw "/command" token character by
+        // character.
+        dom.setAttribute('role', 'img');
+        dom.setAttribute('aria-label', this.ariaLabel());
         if (this.__missing) {
             dom.classList.add('beaver-slash-command-missing');
             dom.setAttribute('data-missing', 'true');
@@ -175,6 +189,14 @@ export class SlashCommandNode extends TextNode {
             dom.classList.toggle('beaver-slash-command-missing', !!this.__missing);
             if (this.__missing) dom.setAttribute('data-missing', 'true');
             else dom.removeAttribute('data-missing');
+        }
+        // Keep the accessible name in sync with the inputs it is derived from.
+        if (
+            prevNode.__commandName !== this.__commandName ||
+            prevNode.__title !== this.__title ||
+            (prevNode.__missing ?? false) !== (this.__missing ?? false)
+        ) {
+            dom.setAttribute('aria-label', this.ariaLabel());
         }
         return updated;
     }
