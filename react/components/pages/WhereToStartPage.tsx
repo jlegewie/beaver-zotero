@@ -127,6 +127,7 @@ const WhereToStartPage: React.FC = () => {
     const start = useSetAtom(startSelectedOptionAtom);
     const skip = useSetAtom(skipWhereToStartAtom);
     const libraryItemCount = useAtomValue(libraryItemCountAtom);
+    const [isSkipping, setIsSkipping] = useState(false);
     const [footerError, setFooterError] = useState<string | null>(null);
 
     // Re-run the loader once the library-count probe resolves so empty-library
@@ -148,8 +149,18 @@ const WhereToStartPage: React.FC = () => {
         }
     };
 
-    const handleSkip = () => {
-        void skip();
+    const handleSkip = async () => {
+        if (isSkipping) return;
+        setIsSkipping(true);
+        setFooterError(null);
+        try {
+            await skip();
+        } catch (err) {
+            logger(`WhereToStartPage: skip failed: ${err}`, 1);
+            setFooterError('Failed to connect to Beaver. Please try again.');
+        } finally {
+            setIsSkipping(false);
+        }
     };
 
     return (
@@ -317,7 +328,7 @@ const WhereToStartPage: React.FC = () => {
                                         option={opt}
                                         isSelected={selectedActionId === opt.actionId}
                                         topic={topic}
-                                        disabled={isSubmitting}
+                                        disabled={isSubmitting || isSkipping}
                                         onSelect={() => select(opt.actionId)}
                                         onTopicChange={setTopic}
                                         onStart={() => void handleStart()}
@@ -334,10 +345,12 @@ const WhereToStartPage: React.FC = () => {
                 buttonLabel="Start"
                 onButtonClick={() => void handleStart()}
                 isLoading={isSubmitting}
-                disabled={!canStart}
+                disabled={!canStart || isSkipping}
                 showBackButton
-                onBackClick={handleSkip}
+                onBackClick={() => void handleSkip()}
                 backButtonLabel="Skip"
+                backButtonDisabled={isSubmitting || isSkipping}
+                backButtonLoading={isSkipping}
                 hideBackIcon
             />
         </div>

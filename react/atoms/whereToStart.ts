@@ -345,10 +345,10 @@ export const startSelectedOptionAtom = atom(null, async (get, set) => {
 export const skipWhereToStartAtom = atom(null, async (_get, set) => {
     try {
         await set(markFirstRunCompleteAtom, SKIP_COMPLETION_KIND);
-    } catch (e) {
-        logger(`whereToStart: skip completion failed: ${e}`, 1);
-    } finally {
         set(devWhereToStartVisibleAtom, false);
         resetSelectionState(set);
+    } catch (e) {
+        logger(`whereToStart: skip completion failed: ${e}`, 1);
+        throw e;
     }
 });

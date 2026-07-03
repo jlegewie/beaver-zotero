@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, type ReactNode } from 'react';
+import React, { useMemo, useRef, useEffect, type ReactNode } from 'react';
 import InputArea from "./input/InputArea"
 import AskUserQuestionPanel from "./input/AskUserQuestionPanel"
 import { pendingApprovalsAtom } from '../agents/agentActions';
@@ -38,6 +38,7 @@ import {
     isDeviceAuthorizedAtom,
     isProfileLoadedAtom,
     isMigratingDataAtom,
+    profileWithPlanAtom,
     syncedLibrariesAtom,
     isDatabaseSyncSupportedAtom,
     pendingUpgradeConsentAtom,
@@ -46,10 +47,11 @@ import {
 } from '../atoms/profile';
 import UpdateRequiredPage from './pages/UpdateRequiredPage';
 import FirstRunPage from './pages/FirstRunPage';
-import { isFirstRunVisibleAtom } from '../atoms/firstRun';
+import { firstRunReturnRequestedAtom, isFirstRunVisibleAtom } from '../atoms/firstRun';
 import WhereToStartPage from './pages/WhereToStartPage';
 import { devWhereToStartVisibleAtom } from '../atoms/whereToStart';
 import ScreenReaderRunAnnouncer from './agentRuns/ScreenReaderRunAnnouncer';
+import { getFirstRunSelectionVariant } from '../utils/firstRunSelection';
 
 interface SidebarProps {
     location: 'library' | 'reader';
@@ -174,7 +176,17 @@ const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
     const allWarnings = useAtomValue(threadWarningsAtom);
     const creditInfoWarning = allWarnings.findLast((w) => w.type === 'credit_info');
     const isFirstRunVisible = useAtomValue(isFirstRunVisibleAtom);
+    const isFirstRunReturnRequested = useAtomValue(firstRunReturnRequestedAtom);
     const isDevWhereToStartVisible = useAtomValue(devWhereToStartVisibleAtom);
+    const profile = useAtomValue(profileWithPlanAtom);
+    const shouldAssignFirstRunVariant = isFirstRunVisible
+        && !isFirstRunReturnRequested
+        && !!profile?.user_id;
+    const firstRunVariant = useMemo(() => {
+        return shouldAssignFirstRunVariant && profile?.user_id
+            ? getFirstRunSelectionVariant(profile.user_id)
+            : 'first_run';
+    }, [profile?.user_id, shouldAssignFirstRunVariant]);
 
     // ask_user_question takeover: while the agent blocks on a question, the
     // question panel replaces the composer entirely (the draft message atom is
@@ -321,11 +333,17 @@ const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
         - explicit "Try another starting point" return (session atom), or
         - Free user, device authorized, never completed first-run on this account. */}
     if (isFirstRunVisible) {
+        const showWhereToStart = !isFirstRunReturnRequested
+            && firstRunVariant === 'where_to_start';
         return (
             <SidebarShell isWindow={isWindow}>
                 <ScreenReaderRunAnnouncer inputRef={inputRef} surface={isWindow ? 'window' : 'sidebar'} />
                 <Header isWindow={isWindow} />
-                <FirstRunPage isWindow={isWindow} inputRef={inputRef} />
+                {showWhereToStart ? (
+                    <WhereToStartPage />
+                ) : (
+                    <FirstRunPage isWindow={isWindow} inputRef={inputRef} />
+                )}
                 <DialogContainer />
             </SidebarShell>
         );

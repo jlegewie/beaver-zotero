@@ -21,6 +21,10 @@ interface OnboardingFooterProps {
     onBackClick?: () => void;
     /** Label for the back button */
     backButtonLabel?: string;
+    /** Whether the back button is disabled */
+    backButtonDisabled?: boolean;
+    /** Whether the back button action is in progress */
+    backButtonLoading?: boolean;
     /** Hide the back button's left arrow icon for secondary actions. */
     hideBackIcon?: boolean;
     /** Visual style for the action button. */
@@ -43,6 +47,8 @@ const OnboardingFooter: React.FC<OnboardingFooterProps> = ({
     showBackButton = false,
     onBackClick,
     backButtonLabel = "Back",
+    backButtonDisabled = false,
+    backButtonLoading = false,
     buttonVariant = "solid",
     hideRightIcon = false,
     hideBackIcon = false,
@@ -62,6 +68,8 @@ const OnboardingFooter: React.FC<OnboardingFooterProps> = ({
                         className="fit-content whitespace-nowrap"
                         icon={hideBackIcon ? undefined : ArrowLeftIcon}
                         onClick={onBackClick}
+                        disabled={backButtonDisabled}
+                        loading={backButtonLoading}
                     >
                         {backButtonLabel}
                     </Button>
