@@ -328,9 +328,13 @@ const ActionCard: React.FC<ActionCardProps> = ({
         <div ref={cardRef} className="action-card action-card-editing">
             {/* Header bar — distinct background, no leading icon, primary actions on the right */}
             <div className="action-edit-header">
-                <div className="text-base font-color-secondary truncate min-w-0">
-                    Editing action:{' '}
-                    <span className="font-semibold font-color-primary">{editTitle.trim() || "New action"}</span>
+                <div className="display-flex flex-row items-center gap-3 truncate min-w-0">
+                    <Icon
+                        icon={categoryIcon(editCategory)}
+                        size={15}
+                        className="font-color-secondary flex-shrink-0"
+                    />
+                    <span className="font-semibold font-color-primary truncate">{editTitle.trim() || "New action"}</span>
                 </div>
                 <div className="display-flex flex-row items-center gap-2 flex-shrink-0">
                     <Button
