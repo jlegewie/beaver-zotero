@@ -2,30 +2,22 @@ import React from "react";
 import { useAtomValue } from 'jotai';
 import { isDatabaseSyncSupportedAtom } from "../../atoms/profile";
 import RecentChats from "../RecentChats";
-import ActionSuggestions from "../ActionSuggestions";
-import { actionsForContextAtom } from "../../atoms/actions";
+import HomeLauncher from "../HomeLauncher";
 import InputArea from "../input/InputArea";
 import DragDropWrapper from "../input/DragDropWrapper";
 import PopupOverlayContainer from "../PopupOverlayContainer";
 import FileStatusBar from "../status/FileStatusBar";
 import { threadWarningsAtom } from "../../atoms/warnings";
-import { libraryHasItemsAtom } from "../../atoms/zoteroContext";
 
 interface HomePageProps {
     isWindow?: boolean;
-    inputRef: React.RefObject<HTMLTextAreaElement | null>;
+    inputRef: React.RefObject<HTMLElement | null>;
 }
 
 const HomePage: React.FC<HomePageProps> = ({ isWindow = false, inputRef }) => {
     const isDatabaseSyncSupported = useAtomValue(isDatabaseSyncSupportedAtom);
-    const actions = useAtomValue(actionsForContextAtom);
     const allWarnings = useAtomValue(threadWarningsAtom);
     const hasCreditInfoWarning = allWarnings.some((w) => w.type === 'credit_info');
-    // All current global/context actions assume the library has items, so they
-    // are hidden when the probe has confirmed an empty library. `null` (probe
-    // still pending) keeps actions visible to avoid a brief flicker on launch.
-    const libraryHasItems = useAtomValue(libraryHasItemsAtom);
-    const showActions = libraryHasItems !== false && actions.length > 0;
 
     // Beta versions use a pre-release tag (e.g. "0.20.0-beta.1")
     const isBeta = /-beta\.\d+$/.test(Zotero.Beaver?.pluginVersion ?? "");
@@ -48,10 +40,8 @@ const HomePage: React.FC<HomePageProps> = ({ isWindow = false, inputRef }) => {
                     <InputArea inputRef={inputRef} verticalPosition="below" />
                 </DragDropWrapper>
 
-                {/* Action suggestions */}
-                {showActions && (
-                    <ActionSuggestions showGlobal={false} />
-                )}
+                {/* Action launcher — category row + expandable panels */}
+                <HomeLauncher />
 
                 {/* Bottom spacer */}
                 <div className="flex-1" />

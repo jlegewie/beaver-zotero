@@ -14,6 +14,7 @@ import { TextSelection } from "../types/attachments/apiTypes";
 import { ZoteroTag, CollectionReference } from "../types/zotero";
 import type { ExternalFileRecord } from "../../src/services/database";
 import { currentNoteItemAtom } from "./zoteroContext";
+import type { SlashCommandDescriptor } from "../utils/slashCommands";
 
 
 /**
@@ -140,11 +141,31 @@ export const removeExternalFileFromMessageAtom = atom(
 );
 
 /**
- * Counter that increments whenever an action with user-input variables is
- * staged in the input. The InputArea listens for changes and selects the
- * first `[[name]]` placeholder so the user can start typing immediately.
+ * A /command pill waiting to be inserted into the chat input. Set by
+ * `stageActionPillAtom` (home launcher, context menu, reader toolbar) and
+ * consumed by InputArea, which owns the editor handle: it inserts the pill,
+ * focuses the editor, and clears this atom. The `nonce` distinguishes
+ * consecutive requests for the same action.
+ *
+ * `targetWindow` names the surface where the user triggered the action, so
+ * that when several InputAreas are mounted (main-window sidebar + separate
+ * Beaver window) the pill deterministically lands in the right editor.
  */
-export const pendingActionInputFocusAtom = atom<number>(0);
+export const pendingPillInsertAtom = atom<{
+    descriptor: SlashCommandDescriptor;
+    targetWindow?: Window;
+    nonce: number;
+} | null>(null);
+
+/**
+ * The /command pills currently in the message, in document order — the shared
+ * companion to `currentMessageContentAtom` (which only carries plain text).
+ * The editor the user edits in pushes its pills here; other mounted editors
+ * (main sidebar vs separate Beaver window) use it to rebuild real pill nodes
+ * when they sync the shared content string, so pills render and submit
+ * correctly from every surface.
+ */
+export const currentMessagePillsAtom = atom<SlashCommandDescriptor[]>([]);
 
 /**
 * Current reader attachment

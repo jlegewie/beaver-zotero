@@ -92,9 +92,11 @@ const AddSourcesMenu: React.FC<{
     isMenuOpen: boolean,
     menuPosition: MenuPosition,
     setMenuPosition: (position: MenuPosition) => void,
+    menuPortalContainer?: HTMLElement | null,
+    onAfterMenuInitialFocus?: () => void,
     disabled?: boolean,
     verticalPosition?: 'above' | 'below'
-}> = ({ showText, onClose, onOpen, isMenuOpen, menuPosition, setMenuPosition, disabled = false, verticalPosition = 'above' }) => {
+}> = ({ showText, onClose, onOpen, isMenuOpen, menuPosition, setMenuPosition, menuPortalContainer, onAfterMenuInitialFocus, disabled = false, verticalPosition = 'above' }) => {
     const [isLoading, setIsLoading] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
     const [searchResults, setSearchResults] = useState<ItemSearchResult[]>([]);
@@ -486,6 +488,8 @@ const AddSourcesMenu: React.FC<{
                 searchQuery={searchQuery}
                 setSearchQuery={setSearchQuery}
                 onEmptyBackspace={handleEmptyBackspace}
+                portalContainer={menuPortalContainer}
+                onAfterInitialFocus={onAfterMenuInitialFocus}
             />
         </>
     );

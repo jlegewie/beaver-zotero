@@ -294,7 +294,7 @@ const RecentChats: React.FC = () => {
         : 'Recent';
 
     return (
-        <div className={`recent-chats${hasPopupMessages ? ' recent-chats-faded' : ''}`}>
+        <div className={`pt-2 recent-chats${hasPopupMessages ? ' recent-chats-faded' : ''}`}>
             <div className="recent-chats-header">
                 <span className="recent-chats-label">
                     {headerLabel}

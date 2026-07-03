@@ -494,6 +494,125 @@
     color: var(--fill-tertiary);
 }
 
+/* -----------------------------------------------------------
+ * Lexical-based rich input (replaces textarea in InputArea)
+ * --------------------------------------------------------- */
+
+[id^="beaver-pane-"] .beaver-lexical-root {
+    position: relative;
+    width: 100%;
+}
+
+/* Scroll host around the contenteditable. Carries the height cap + scrolling. */
+[id^="beaver-pane-"] .beaver-lexical-scroll {
+    position: relative;
+    max-height: 12.5em;
+    overflow-y: auto;
+}
+
+/* ContentEditable shares .chat-input typography / sizing with the old
+   textarea so the rest of the UI is unchanged. */
+[id^="beaver-pane-"] .beaver-lexical-content {
+    min-height: calc(1.25em + 2px);
+    height: auto;
+    max-height: none;
+    white-space: pre-wrap;
+    word-break: break-word;
+    outline: none;
+    user-select: text;
+    -webkit-user-select: text;
+}
+
+/* Reset the Lexical paragraph's default browser margin (1em top/bottom).
+   Without this the first line is pushed ~13px below the editor's top edge,
+   so the absolutely-positioned placeholder (and the slash/source menus that
+   anchor to the editor's bounding rect) sit too high relative to the text. */
+[id^="beaver-pane-"] .beaver-lexical-content p {
+    margin: 0;
+}
+
+/* Placeholder overlay - absolutely positioned and click-through. */
+[id^="beaver-pane-"] .beaver-lexical-placeholder {
+    position: absolute;
+    top: 1px;
+    left: 0;
+    pointer-events: none;
+    color: var(--fill-tertiary);
+    font-size: 13px;
+    line-height: 1.25;
+    user-select: none;
+    -webkit-user-select: none;
+}
+
+/* Argument-hint ghost text - rendered after a freshly inserted /command pill.
+   It is positioned out of flow so long hints do not resize the composer. */
+[id^="beaver-pane-"] .beaver-lexical-content p[data-argument-hint] {
+    position: relative;
+}
+
+[id^="beaver-pane-"] .beaver-lexical-content p[data-argument-hint]::after {
+    content: attr(data-argument-hint);
+    position: absolute;
+    left: var(--beaver-argument-hint-left, 0);
+    right: 0;
+    top: var(--beaver-argument-hint-top, 0);
+    color: var(--fill-tertiary);
+    overflow: hidden;
+    pointer-events: none;
+    text-overflow: ellipsis;
+    user-select: none;
+    -webkit-user-select: none;
+    white-space: nowrap;
+}
+
+/* Mention pill - uses the same .source-button / .variant-outline styling
+   shared with MessageItemButton so pills feel native. */
+[id^="beaver-pane-"] .beaver-mention-pill {
+    display: inline-flex;
+    align-items: center;
+    vertical-align: middle;
+    margin: 0 1px;
+}
+
+/* Slash-command - editable colored text (behaves like normal text, so it must
+   stay `display: inline`; inline-block breaks caret placement between characters
+   in Gecko). Horizontal padding, background and radius still render inline. */
+[id^="beaver-pane-"] .beaver-slash-command {
+    display: inline;
+    padding: 2px 4px;
+    /* margin: 0 1px; */
+    border-radius: 6px;
+    background-color: var(--tag-blue-quarternary);
+    color: var(--tag-blue-primary);
+    line-height: 1.25;
+    transition: background-color 200ms ease-in-out;
+}
+
+/* In-input pill: clicking it opens the action in the preferences window. */
+[id^="beaver-pane-"] .beaver-slash-command-live {
+    cursor: pointer;
+}
+
+/* Chat-history pill: clicking it opens the action in the preferences window. */
+[id^="beaver-pane-"] .beaver-slash-command-clickable {
+    cursor: pointer;
+}
+
+/* Hover feedback for clickable pills (one step up the tag-blue scale). */
+[id^="beaver-pane-"] .beaver-slash-command-live:hover,
+[id^="beaver-pane-"] .beaver-slash-command-clickable:hover {
+    background-color: var(--tag-blue-tertiary);
+}
+
+/* Pill whose action no longer exists (deleted since the message was sent):
+   greyed out, no click affordance, no hover feedback. */
+[id^="beaver-pane-"] .beaver-slash-command-missing,
+[id^="beaver-pane-"] .beaver-slash-command-missing:hover {
+    background-color: var(--fill-quinary);
+    color: var(--fill-secondary);
+    cursor: default;
+}
+
 
 [id^="beaver-pane-"] .preference-input {
     font-family: system-ui, -apple-system, sans-serif;
@@ -542,10 +661,13 @@
     box-sizing: border-box !important;
 }
 
-/* Action Card — connected-list row (view mode) */
+/* Action Card — standalone bordered card (view mode) */
 [id^="beaver-pane-"] .action-card {
     padding: 10px 12px;
     cursor: pointer;
+    border: 1px solid var(--fill-quarternary);
+    border-radius: 8px;
+    overflow: hidden;
     transition: background-color 0.15s ease;
 }
 
@@ -553,10 +675,102 @@
     background-color: var(--material-mix-quarternary);
 }
 
-/* Action Card — edit mode */
+/* Action Card — edit mode: header bar spans full width, so drop card padding */
 [id^="beaver-pane-"] .action-card-editing {
     cursor: default;
+    padding: 0;
+    background-color: transparent;
+}
+
+/* Edit header — distinct tinted bar with the Cancel/Save actions */
+[id^="beaver-pane-"] .action-edit-header {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 8px 12px;
     background-color: var(--material-mix-quarternary);
+    border-bottom: 1px solid var(--fill-quarternary);
+}
+
+[id^="beaver-pane-"] .action-edit-body {
+    display: flex;
+    flex-direction: column;
+    padding: 12px 14px 14px;
+}
+
+/* Field heading (Name / Prompt / Applies to / Category) */
+[id^="beaver-pane-"] .action-field-label {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 5px;
+    margin-bottom: 5px;
+}
+
+/* Inline variant — label sits to the left of its control (Applies to / Category) */
+[id^="beaver-pane-"] .action-field-label-inline {
+    margin-bottom: 0;
+    flex-shrink: 0;
+    white-space: nowrap;
+}
+
+/* Bordered field container for the Name input and Prompt textarea */
+[id^="beaver-pane-"] .action-field-box {
+    border: 1px solid var(--fill-quarternary);
+    border-radius: 6px;
+    background-color: var(--fill-senary);
+    padding: 6px 8px;
+    box-sizing: border-box;
+    transition: border-color 0.15s ease;
+}
+
+[id^="beaver-pane-"] .action-field-box:focus-within {
+    border-color: var(--fill-tertiary);
+}
+
+/* Borderless control that fills a field box */
+[id^="beaver-pane-"] .action-field-control {
+    width: 100%;
+    border: 0;
+    outline: none;
+    background-color: transparent;
+    font-family: system-ui, -apple-system, sans-serif;
+    color: var(--fill-primary);
+    padding: 0;
+    line-height: 1.35;
+    box-sizing: border-box;
+}
+
+[id^="beaver-pane-"] .action-field-control::placeholder {
+    color: var(--fill-tertiary);
+}
+
+[id^="beaver-pane-"] .action-edit-textarea {
+    display: block;
+    min-height: 76px;
+    resize: vertical;
+    overflow-y: auto;
+}
+
+/* Full-width, select-style dropdown for Applies to / Category */
+[id^="beaver-pane-"] button.action-field-select {
+    width: 100%;
+    justify-content: space-between;
+    padding: 6px 8px !important;
+    border-radius: 6px;
+    background-color: var(--fill-senary);
+    font-size: 1rem;
+}
+
+[id^="beaver-pane-"] button.action-field-select:hover {
+    background-color: var(--fill-quinary);
+}
+
+/* Helper line under a field */
+[id^="beaver-pane-"] .action-field-help {
+    margin-top: 5px;
 }
 
 /* Create Annotations Preview — clickable row hover */
@@ -636,6 +850,12 @@
     background-color: var(--tag-purple-quinary);
     color: var(--tag-purple-secondary);
     border-color: var(--tag-purple-tertiary);
+}
+/* Notice badge for prompts that still contain [[ ]] placeholders */
+[id^="beaver-pane-"] .action-target-badge[data-type="placeholder"] {
+    background-color: var(--tag-yellow-quinary);
+    color: var(--tag-yellow-secondary);
+    border-color: var(--tag-yellow-tertiary);
 }
 
 
@@ -922,6 +1142,7 @@
 [id^="beaver-pane-"] .opacity-60 { opacity: 0.6; }
 [id^="beaver-pane-"] .opacity-70 { opacity: 0.7; }
 [id^="beaver-pane-"] .opacity-80 { opacity: 0.8; }
+[id^="beaver-pane-"] .opacity-85 { opacity: 0.85; }
 [id^="beaver-pane-"] .opacity-90 { opacity: 0.9; }
 [id^="beaver-pane-"] .opacity-100 { opacity: 1; }
 [id^="beaver-pane-"] .cursor-pointer { cursor: pointer; }
@@ -990,6 +1211,7 @@
 [id^="beaver-pane-"] .border-quinary { border: 1px solid var(--fill-quinary); }
 [id^="beaver-pane-"] .border-quarternary { border: 1px solid var(--material-mix-quarternary); }
 [id^="beaver-pane-"] .border-popup { border: 1px solid var(--fill-quarternary); }
+[id^="beaver-pane-"] .border-top-popup { border-top: 1px solid var(--fill-quarternary); }
 [id^="beaver-pane-"] .border-transparent { border: 1px solid transparent; }
 [id^="beaver-pane-"] .border-error { border: 1px solid var(--tag-red-tertiary); }
 
