@@ -23,8 +23,9 @@ import {
 
 const MAX_TITLE_LENGTH = 45;
 const MAX_NAME_LENGTH = 45;
+const MAX_DESCRIPTION_LENGTH = 200;
 const MAX_ARGUMENT_HINT_LENGTH = 100;
-const MAX_PROMPT_TEXT_LENGTH = 2250;
+const MAX_PROMPT_TEXT_LENGTH = 12000;
 
 const CATEGORY_OPTIONS: (ActionCategory | undefined)[] = [undefined, "research", "write", "organize", "annotate"];
 
@@ -40,6 +41,15 @@ const categoryIcon = (cat: ActionCategory | undefined): React.ComponentType<Reac
     cat ? CATEGORY_ICONS[cat] : ZapIcon;
 
 const categoryLabel = (cat: ActionCategory | undefined): string => (cat ? CATEGORY_LABELS[cat] : "Uncategorized");
+
+/** "Required" marker shown next to mandatory field labels. Muted once the
+ *  field has a value, red while it's still empty, so the user can see at a
+ *  glance what still blocks saving. */
+const RequiredMark: React.FC<{ satisfied: boolean }> = ({ satisfied }) => (
+    <span className={`text-sm font-normal ${satisfied ? "font-color-tertiary" : "font-color-red"}`}>
+        Required
+    </span>
+);
 
 /** Field heading with a hover-info circle, matching the two-column edit layout. */
 const FieldLabel: React.FC<{ label: string; tooltip: string; className?: string }> = ({ label, tooltip, className = "" }) => (
@@ -80,6 +90,7 @@ const ActionCard: React.FC<ActionCardProps> = ({
     const [isEditing, setIsEditing] = useState(() => !action.title && !action.text);
     const [editTitle, setEditTitle] = useState(action.title);
     const [editText, setEditText] = useState(action.text);
+    const [editDescription, setEditDescription] = useState(action.description ?? "");
     // Raw slash-command name draft. Empty string = automatic mode: the name is
     // derived from the title and not persisted (unless it needs a numeric
     // suffix to stay unique). Any typed value switches to manual mode;
@@ -125,10 +136,10 @@ const ActionCard: React.FC<ActionCardProps> = ({
     }, [resolveUniqueCommand, action.name]);
 
     // Ref to hold latest draft values so the click-outside listener doesn't re-register on every keystroke
-    const draftRef = useRef({ editTitle, editText, editName, editArgumentHint, editTargets, editCategory });
+    const draftRef = useRef({ editTitle, editText, editDescription, editName, editArgumentHint, editTargets, editCategory });
     useEffect(() => {
-        draftRef.current = { editTitle, editText, editName, editArgumentHint, editTargets, editCategory };
-    }, [editTitle, editText, editName, editArgumentHint, editTargets, editCategory]);
+        draftRef.current = { editTitle, editText, editDescription, editName, editArgumentHint, editTargets, editCategory };
+    }, [editTitle, editText, editDescription, editName, editArgumentHint, editTargets, editCategory]);
 
     // Sync local draft state when action changes
     useEffect(() => {
@@ -136,13 +147,14 @@ const ActionCard: React.FC<ActionCardProps> = ({
         if (actionSwitched || !isEditing) {
             setEditTitle(action.title);
             setEditText(action.text);
+            setEditDescription(action.description ?? "");
             setEditName(action.name ?? "");
             setEditArgumentHint(action.argumentHint ?? "");
             setEditTargets(action.targets);
             setEditCategory(action.category);
         }
         previousActionRef.current = action;
-    }, [action, action.title, action.text, action.name, action.argumentHint, action.targets, action.category, isEditing]);
+    }, [action, action.title, action.text, action.description, action.name, action.argumentHint, action.targets, action.category, isEditing]);
 
     // Close edit mode on click outside — auto-saves, or removes if the action is empty
     useEffect(() => {
@@ -152,22 +164,28 @@ const ActionCard: React.FC<ActionCardProps> = ({
 
         const handleClickOutside = (e: MouseEvent) => {
             if (cardRef.current && !cardRef.current.contains(e.target as Node)) {
-                const { editTitle: title, editText: text, editName: name, editArgumentHint: argumentHint, editTargets: targets, editCategory: category } = draftRef.current;
-                // New action that's still empty — remove it
-                if (!title && !text && !action.title && !action.text) {
-                    onRemove();
-                } else {
+                const { editTitle: title, editText: text, editDescription: description, editName: name, editArgumentHint: argumentHint, editTargets: targets, editCategory: category } = draftRef.current;
+                const isValid = title.trim().length > 0 && text.trim().length > 0;
+                const wasNeverSaved = !action.title && !action.text;
+                if (isValid) {
                     // Auto-save current draft
                     onChange({
                         ...action,
                         title,
                         text,
+                        description: description.trim() || undefined,
                         name: resolveNameForSave(title, name),
                         argumentHint: argumentHint.trim() || undefined,
                         targets,
                         category,
                     });
+                } else if (wasNeverSaved) {
+                    // A new action that never reached a saveable state — drop it
+                    // rather than persist an incomplete draft.
+                    onRemove();
                 }
+                // Otherwise (existing action with an invalid draft): discard the
+                // draft and keep the saved values by simply leaving edit mode.
                 setIsEditing(false);
             }
         };
@@ -201,6 +219,7 @@ const ActionCard: React.FC<ActionCardProps> = ({
         if (!isEditing) {
             setEditTitle(action.title);
             setEditText(action.text);
+            setEditDescription(action.description ?? "");
             setEditName(action.name ?? "");
             setEditArgumentHint(action.argumentHint ?? "");
             setEditTargets(action.targets);
@@ -224,6 +243,7 @@ const ActionCard: React.FC<ActionCardProps> = ({
         }
         setEditTitle(action.title);
         setEditText(action.text);
+        setEditDescription(action.description ?? "");
         setEditName(action.name ?? "");
         setEditArgumentHint(action.argumentHint ?? "");
         setEditTargets(action.targets);
@@ -232,17 +252,19 @@ const ActionCard: React.FC<ActionCardProps> = ({
     }, [action, onRemove]);
 
     const handleSave = useCallback(() => {
+        if (!editTitle.trim() || !editText.trim()) return;
         onChange({
             ...action,
             title: editTitle,
             text: editText,
+            description: editDescription.trim() || undefined,
             name: resolveNameForSave(editTitle, editName),
             argumentHint: editArgumentHint.trim() || undefined,
             targets: editTargets,
             category: editCategory,
         });
         setIsEditing(false);
-    }, [action, editTitle, editText, editName, editArgumentHint, editTargets, editCategory, onChange, resolveNameForSave]);
+    }, [action, editTitle, editText, editDescription, editName, editArgumentHint, editTargets, editCategory, onChange, resolveNameForSave]);
 
     // Automatic mode (no manual name typed): preview the title-derived
     // command, including the numeric suffix it would get on save.
@@ -251,6 +273,9 @@ const ActionCard: React.FC<ActionCardProps> = ({
         ? (editTitle.trim() ? resolveUniqueCommand(toSlashToken(editTitle)) : "")
         : editName;
     const manualNameConflict = !isAutoName && takenCommands.has(toSlashToken(editName));
+
+    // Title and prompt are both required to persist an action.
+    const canSave = editTitle.trim().length > 0 && editText.trim().length > 0;
 
     // Target picker offers curated presets; the underlying model is a target
     // set, so hand-edited custom sets round-trip untouched until the user
@@ -350,6 +375,8 @@ const ActionCard: React.FC<ActionCardProps> = ({
                         variant="solid"
                         style={{ padding: '3px 12px' }}
                         onClick={handleSave}
+                        disabled={!canSave}
+                        title={!canSave ? "Add a title and a prompt to save" : undefined}
                     >
                         Save
                     </Button>
@@ -358,7 +385,10 @@ const ActionCard: React.FC<ActionCardProps> = ({
 
             <div className="action-edit-body">
                 {/* Title */}
-                <div className="action-field-label text-base font-color-primary font-semibold">Title</div>
+                <div className="action-field-label text-base font-color-primary font-semibold">
+                    <span>Title</span>
+                    <RequiredMark satisfied={!!editTitle.trim()} />
+                </div>
                 <div className="action-field-box">
                     <input
                         ref={titleInputRef}
@@ -370,6 +400,25 @@ const ActionCard: React.FC<ActionCardProps> = ({
                         maxLength={MAX_TITLE_LENGTH}
                         className="action-field-control text-base font-medium"
                     />
+                </div>
+
+                {/* Description — optional summary surfaced in the /command hover card */}
+                <div className="mt-3">
+                    <FieldLabel
+                        label="Description"
+                        tooltip="Short summary shown when you hover the /command in the chat. Optional."
+                    />
+                    <div className="action-field-box">
+                        <input
+                            type="text"
+                            value={editDescription}
+                            onChange={(e) => setEditDescription(e.target.value)}
+                            placeholder="e.g. Summarize the key findings of the selected paper"
+                            aria-label="Action description"
+                            maxLength={MAX_DESCRIPTION_LENGTH}
+                            className="action-field-control text-base"
+                        />
+                    </div>
                 </div>
 
                 {/* Slash command + Argument hint — two fields side by side */}
@@ -423,7 +472,10 @@ const ActionCard: React.FC<ActionCardProps> = ({
                 </div>
 
                 {/* Prompt */}
-                <div className="action-field-label text-base font-color-primary font-semibold mt-3">Prompt</div>
+                <div className="action-field-label text-base font-color-primary font-semibold mt-3">
+                    <span>Prompt</span>
+                    <RequiredMark satisfied={!!editText.trim()} />
+                </div>
                 <div className="action-field-box">
                     <textarea
                         ref={textareaRef}

@@ -276,7 +276,7 @@ export function computeActionGroups(allActions: Action[], ctx: ActionContext): A
     // --- 6. Global group ---
     const globalActions = allActions.filter(a => a.targets.includes('global'));
     if (globalActions.length > 0) {
-        groups.push({ id: 'global', label: 'General', actions: globalActions, targetType: 'global' });
+        groups.push({ id: 'global', label: 'Anywhere', actions: globalActions, targetType: 'global' });
     }
 
     return groups;

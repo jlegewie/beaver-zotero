@@ -25,7 +25,7 @@ const CATEGORY_ICONS: Record<ActionCategory, React.ComponentType<React.SVGProps<
 
 /** Same cap as chip labels (MAX_CHIP_TEXT_LENGTH in RequestChipPrimitives). */
 const MAX_ACTION_TITLE_LENGTH = 30;
-/** Max length of the prompt preview in the action popup. */
+/** Max length of the description / prompt preview in the action popup. */
 const MAX_PROMPT_PREVIEW_LENGTH = 120;
 
 export interface ActionPopupSource {
@@ -33,6 +33,8 @@ export interface ActionPopupSource {
     title?: string | null;
     /** Slash token (without the leading '/'), used as the title fallback. */
     command?: string | null;
+    /** Short human-facing description; preferred over the prompt for the subtitle. */
+    description?: string | null;
     /** Action prompt text (resolved or raw template); null/absent when the action definition no longer exists. */
     prompt?: string | null;
     /** Skill category, drives the footer icon. */
@@ -41,12 +43,14 @@ export interface ActionPopupSource {
 
 export function buildActionPopup(source: ActionPopupSource): ChipPopupContent {
     const title = source.title || (source.command ? `/${source.command}` : 'Action');
-    const promptPreview = source.prompt
-        ? truncateText(source.prompt.replace(/\s+/g, ' ').trim(), MAX_PROMPT_PREVIEW_LENGTH)
+    // Prefer the user-authored description; fall back to a preview of the prompt.
+    const subtitleSource = source.description?.trim() || source.prompt || '';
+    const subtitleText = subtitleSource
+        ? truncateText(subtitleSource.replace(/\s+/g, ' ').trim(), MAX_PROMPT_PREVIEW_LENGTH)
         : '';
     return {
         title: truncateText(title, MAX_ACTION_TITLE_LENGTH),
-        subtitle: promptPreview ? { text: promptPreview } : null,
+        subtitle: subtitleText ? { text: subtitleText } : null,
         action: {
             icon: (source.category && CATEGORY_ICONS[source.category]) || ZapIcon,
             label: 'Click to edit in preferences',

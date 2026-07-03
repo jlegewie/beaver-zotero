@@ -37,6 +37,7 @@ export interface Action {
     id: string;                    // "builtin-*" for built-ins, crypto.randomUUID() for user
     title: string;                 // Max 45 chars
     text: string;                  // Prompt template with {{variables}}
+    description?: string;          // Short human-facing summary, shown in the /command chip hover card
     name?: string;                 // Slash-command name (no whitespace); unset or "" → derived from title ("" marks an explicitly cleared name so it survives JSON overrides)
     id_model?: string;
     /** Target kinds this action accepts (non-empty). `global` should be the
@@ -57,6 +58,7 @@ export interface ActionOverride {
     hidden?: boolean;
     title?: string;
     text?: string;
+    description?: string;
     name?: string;
     id_model?: string;
     targets?: ActionTargetType[];
@@ -86,7 +88,7 @@ export const TARGET_TYPE_LABELS: Record<ActionTargetType, string> = {
     attachment: "Attachment",
     note: "Note",
     collection: "Collection",
-    global: "General",
+    global: "Anywhere",
 };
 
 export const TARGET_TYPE_DESCRIPTIONS: Record<ActionTargetType, string> = {
@@ -118,7 +120,7 @@ export interface TargetPreset {
 }
 
 export const TARGET_PRESETS: TargetPreset[] = [
-    { id: "global", label: "General", description: "Works anywhere, no context needed", targets: ["global"] },
+    { id: "global", label: "Anywhere", description: "Works anywhere, no context needed", targets: ["global"] },
     { id: "items", label: "Item", description: "Works with library items", targets: ["items"] },
     { id: "attachment", label: "Attachment", description: "Works with PDF, EPUB, and snapshot attachments", targets: ["attachment"] },
     { id: "items-attachment", label: "Item or attachment", description: "Works with library items and file attachments", targets: ["items", "attachment"] },
@@ -171,6 +173,7 @@ export const isStoredAction = (obj: unknown): boolean => {
         typeof o.id === 'string' &&
         typeof o.title === 'string' &&
         typeof o.text === 'string' &&
+        (o.description === undefined || typeof o.description === 'string') &&
         hasValidTargets &&
         (o.category === undefined || (typeof o.category === 'string' && VALID_CATEGORIES.has(o.category as string))) &&
         (o.name === undefined || (typeof o.name === 'string' && !/\s/.test(o.name))) &&

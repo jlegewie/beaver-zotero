@@ -156,7 +156,7 @@ export const SlashCommandHoverCardPlugin: React.FC = () => {
     const action = actionId ? actions.find((a) => a.id === actionId) : undefined;
     const popup = buildActionPopup(
         action
-            ? { title: action.title, prompt: action.text, category: action.category }
+            ? { title: action.title, description: action.description, prompt: action.text, category: action.category }
             : { title: anchor.getAttribute('data-title'), command: anchor.getAttribute('data-command') },
     );
 

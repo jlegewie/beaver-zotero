@@ -115,6 +115,8 @@ export interface PromptAction {
     action_id: string;
     /** Human-readable action title at send time */
     title?: string;
+    /** Short human-facing description, shown in the /command chip hover card */
+    description?: string;
     /** Resolved prompt text; null when the action definition no longer exists */
     prompt: string | null;
     /** Target-type group the action was invoked under */

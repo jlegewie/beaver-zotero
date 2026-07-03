@@ -121,6 +121,7 @@ export const getMergedActions = (): Action[] => {
             const o = normalizeStoredOverride(override);
             if (o.title !== undefined) merged.title = o.title;
             if (o.text !== undefined) merged.text = o.text;
+            if (o.description !== undefined) merged.description = o.description;
             if (o.name !== undefined) merged.name = o.name;
             if (o.id_model !== undefined) merged.id_model = o.id_model;
             if (o.targets !== undefined) merged.targets = o.targets;

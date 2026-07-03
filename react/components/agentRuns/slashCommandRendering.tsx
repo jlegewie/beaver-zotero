@@ -41,6 +41,7 @@ export function renderContentWithSlashPills(
         const popup = buildActionPopup({
             title: action.title,
             command: action.command,
+            description: action.description,
             prompt: action.prompt,
             category: action.category,
         });
