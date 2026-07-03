@@ -452,28 +452,6 @@ const ActionCard: React.FC<ActionCardProps> = ({
                     <div className="display-flex flex-col flex-1 min-w-0">
                         <div className="display-flex flex-row items-center gap-2 min-w-0">
                             <FieldLabel
-                                label="Applies to"
-                                tooltip="Controls when this action shows up, based on your current Zotero selection."
-                                className="action-field-label-inline"
-                            />
-                            <MenuButton
-                                menuItems={targetMenuItems}
-                                variant="outline"
-                                ariaLabel="Select what this action applies to"
-                                className="action-field-select flex-1"
-                                customContent={
-                                    <div className="display-flex flex-row items-center gap-2 w-full min-w-0">
-                                        <span className="flex-1 truncate text-base font-color-primary">{targetsLabel(editTargets)}</span>
-                                        <Icon icon={ArrowDownIcon} size={14} className="font-color-tertiary flex-shrink-0" />
-                                    </div>
-                                }
-                            />
-                        </div>
-                    </div>
-
-                    <div className="display-flex flex-col flex-1 min-w-0">
-                        <div className="display-flex flex-row items-center gap-2 min-w-0">
-                            <FieldLabel
                                 label="Category"
                                 tooltip="Groups this action on the Beaver homepage launcher."
                                 className="action-field-label-inline"
@@ -487,6 +465,27 @@ const ActionCard: React.FC<ActionCardProps> = ({
                                     <div className="display-flex flex-row items-center gap-2 w-full min-w-0">
                                         <Icon icon={categoryIcon(editCategory)} size={14} className="font-color-secondary flex-shrink-0" />
                                         <span className="flex-1 truncate text-base font-color-primary">{categoryLabel(editCategory)}</span>
+                                        <Icon icon={ArrowDownIcon} size={14} className="font-color-tertiary flex-shrink-0" />
+                                    </div>
+                                }
+                            />
+                        </div>
+                    </div>
+                    <div className="display-flex flex-col flex-1 min-w-0">
+                        <div className="display-flex flex-row items-center gap-2 min-w-0">
+                            <FieldLabel
+                                label="Applies to"
+                                tooltip="Controls when this action shows up, based on your current Zotero selection."
+                                className="action-field-label-inline"
+                            />
+                            <MenuButton
+                                menuItems={targetMenuItems}
+                                variant="outline"
+                                ariaLabel="Select what this action applies to"
+                                className="action-field-select flex-1"
+                                customContent={
+                                    <div className="display-flex flex-row items-center gap-2 w-full min-w-0">
+                                        <span className="flex-1 truncate text-base font-color-primary">{targetsLabel(editTargets)}</span>
                                         <Icon icon={ArrowDownIcon} size={14} className="font-color-tertiary flex-shrink-0" />
                                     </div>
                                 }
