@@ -506,10 +506,12 @@ async function handleLibrarySearchHttpRequest(request: any) {
     };
     
     const response = await handleZoteroSearchRequest(wsRequest);
-    
+
     return {
         items: response.items,
         total_count: response.total_count,
+        // Validation warnings identify invalid conditions that were not applied.
+        warnings: response.warnings,
         error: response.error,
         error_code: response.error_code,
     };

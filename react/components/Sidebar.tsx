@@ -47,6 +47,8 @@ import {
 import UpdateRequiredPage from './pages/UpdateRequiredPage';
 import FirstRunPage from './pages/FirstRunPage';
 import { isFirstRunVisibleAtom } from '../atoms/firstRun';
+import WhereToStartPage from './pages/WhereToStartPage';
+import { devWhereToStartVisibleAtom } from '../atoms/whereToStart';
 import ScreenReaderRunAnnouncer from './agentRuns/ScreenReaderRunAnnouncer';
 
 interface SidebarProps {
@@ -172,6 +174,7 @@ const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
     const allWarnings = useAtomValue(threadWarningsAtom);
     const creditInfoWarning = allWarnings.findLast((w) => w.type === 'credit_info');
     const isFirstRunVisible = useAtomValue(isFirstRunVisibleAtom);
+    const isDevWhereToStartVisible = useAtomValue(devWhereToStartVisibleAtom);
 
     // ask_user_question takeover: while the agent blocks on a question, the
     // question panel replaces the composer entirely (the draft message atom is
@@ -328,16 +331,22 @@ const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
         );
     }
 
+    {/* DEV-only: "Where should we start?" launcher opened from the Dev Tools menu. */}
+    if (isDevWhereToStartVisible) {
+        return (
+            <SidebarShell isWindow={isWindow}>
+                <Header isWindow={isWindow} />
+                <WhereToStartPage />
+                <DialogContainer />
+            </SidebarShell>
+        );
+    }
+
     const handleCloseThreadList = () => {
         setIsThreadListView(false);
     };
 
-    // First-run thread → swap input placeholder once a run with a first-run
-    // origin lives in this thread (either the original card run, or a
-    // follow-up triggered from NextStepsPanel). `runs` is the union of
-    // completed (threadRunsAtom) + active runs, and `user_prompt.origin` is
-    // set at submit time so we don't depend on the thread id arriving from
-    // the WS callback.
+    // First-run threads use a follow-up-specific composer placeholder.
     const isFirstRunThread = runs.some(
         (r) => isFirstRunOrigin(r.user_prompt?.origin),
     );

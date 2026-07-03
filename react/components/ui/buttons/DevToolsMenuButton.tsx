@@ -24,6 +24,7 @@ import { threadService } from '../../../../src/services/threadService';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { zoteroContextAtom } from '../../../atoms/zoteroContext';
 import { firstRunReturnRequestedAtom } from '../../../atoms/firstRun';
+import { devWhereToStartVisibleAtom } from '../../../atoms/whereToStart';
 import { logger } from '../../../../src/utils/logger';
 
 interface DevToolsMenuButtonProps {
@@ -43,6 +44,7 @@ const DevToolsMenuButton: React.FC<DevToolsMenuButtonProps> = ({
 }) => {
     const zoteroContext = useAtomValue(zoteroContextAtom);
     const setFirstRunReturnRequested = useSetAtom(firstRunReturnRequestedAtom);
+    const setDevWhereToStartVisible = useSetAtom(devWhereToStartVisibleAtom);
 
     // Log Zotero context state
     const handleLogZoteroContext = () => {
@@ -703,6 +705,11 @@ const DevToolsMenuButton: React.FC<DevToolsMenuButtonProps> = ({
         setFirstRunReturnRequested(true);
     };
 
+    // Show the dev "Where should we start?" action launcher
+    const handleShowWhereToStartPage = () => {
+        setDevWhereToStartVisible(true);
+    };
+
     // Create menu items for dev testing functions
     const menuItems: MenuItem[] = [
         {
@@ -720,6 +727,12 @@ const DevToolsMenuButton: React.FC<DevToolsMenuButtonProps> = ({
         {
             label: "Show First Run Page",
             onClick: handleShowFirstRunPage,
+            icon: SearchIcon,
+            disabled: false,
+        },
+        {
+            label: "Show 'Where to start' Page",
+            onClick: handleShowWhereToStartPage,
             icon: SearchIcon,
             disabled: false,
         },

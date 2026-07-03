@@ -21,13 +21,11 @@ interface OnboardingFooterProps {
     onBackClick?: () => void;
     /** Label for the back button */
     backButtonLabel?: string;
-    /** Visual style for the action button. Defaults to 'solid' so existing
-     *  onboarding pages keep their primary CTA. Pass 'ghost' (or another
-     *  low-emphasis variant) on screens where the action is a Skip/Cancel
-     *  rather than the primary path. */
+    /** Hide the back button's left arrow icon for secondary actions. */
+    hideBackIcon?: boolean;
+    /** Visual style for the action button. */
     buttonVariant?: ButtonVariant;
-    /** Hide the right-side arrow/spinner icon. Pair with `buttonVariant='ghost'`
-     *  for a clean text-link look. The spinner is still shown when loading. */
+    /** Hide the right-side arrow icon. The spinner is still shown when loading. */
     hideRightIcon?: boolean;
 }
 
@@ -47,6 +45,7 @@ const OnboardingFooter: React.FC<OnboardingFooterProps> = ({
     backButtonLabel = "Back",
     buttonVariant = "solid",
     hideRightIcon = false,
+    hideBackIcon = false,
 }) => {
     const rightIcon = isLoading
         ? Spinner
@@ -61,7 +60,7 @@ const OnboardingFooter: React.FC<OnboardingFooterProps> = ({
                     <Button
                         variant="ghost"
                         className="fit-content whitespace-nowrap"
-                        icon={ArrowLeftIcon}
+                        icon={hideBackIcon ? undefined : ArrowLeftIcon}
                         onClick={onBackClick}
                     >
                         {backButtonLabel}
@@ -110,4 +109,3 @@ const OnboardingFooter: React.FC<OnboardingFooterProps> = ({
 };
 
 export default OnboardingFooter;
-

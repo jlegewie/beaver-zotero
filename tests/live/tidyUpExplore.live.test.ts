@@ -2,21 +2,6 @@
  * Live coverage for the `tidy-up` built-in action's Step 1 "Explore" tool
  * recipes (react/types/builtinActions.ts, id `builtin-tidy-up`).
  *
- * The action prompt hard-codes concrete tool calls the agent is told to run to
- * find "messes" — unfiled items, untagged items, items missing an abstract, and
- * recent additions — and promises the user *exact counts* from each. Those
- * recipes are plain strings with no typecheck, so a rename of a search field,
- * operator, or list param would silently rot the prompt: the agent would issue
- * a call that the search handler drops as invalid, quietly relaxing the query
- * and returning a wrong count with no error. This suite is the tripwire.
- *
- * It does two things:
- *   1. Binds prompt <-> test: asserts the exact recipe substrings still live in
- *      the `builtin-tidy-up` text, so editing a recipe forces updating this test.
- *   2. Executes each recipe against live Zotero and asserts it is genuinely
- *      applied — no dropped-condition `warnings`, a numeric `total_count`, and
- *      (for the recent-items list) that the dateAdded/desc sort is honored.
- *
  * Prerequisites:
  *   - Dev build running against Zotero (npm start) with the library management
  *     endpoints registered.
@@ -71,10 +56,7 @@ interface TagsResponse {
     error?: string | null;
 }
 
-// The exact recipe substrings embedded in the tidy-up prompt. Kept in sync with
-// the conditions executed below — if the prompt changes a field/operator, the
-// substring assertion fails here AND the execution below changes, forcing both
-// to move together.
+// Exact recipe substrings embedded in the tidy-up prompt and exercised below.
 const UNFILED_RECIPE = "{'field': 'unfiled', 'operator': 'true'}";
 const UNTAGGED_RECIPE = "{'field': 'tag', 'operator': 'doesNotContain', 'value': ''}";
 const NO_ABSTRACT_RECIPE = "{'field': 'abstractNote', 'operator': 'doesNotContain', 'value': ''}";
@@ -95,8 +77,7 @@ async function search(conditions: Array<Record<string, unknown>>): Promise<Searc
     );
 }
 
-/** A condition that was accepted (not dropped) yields no warnings, no error,
- * and a numeric total_count. This is the core drift assertion. */
+/** Assert that the search handler applied the condition successfully. */
 function expectAppliedCondition(res: SearchResponse): void {
     expect(res.error).toBeFalsy();
     expect(res.warnings ?? []).toEqual([]);
@@ -149,11 +130,8 @@ describe('tidy-up explore recipes', () => {
         }, 30000);
 
         it('join_mode=any with a category filter is NOT used (it inflates the count past the whole library)', async () => {
-            // Documents why the prompt forbids join_mode:'any' here: the
-            // item_category filter injects `itemType isNot ...` conditions that
-            // share the single global join mode, so under 'any' they are OR'd in
-            // and the count exceeds the regular-item universe — a meaningless
-            // number the prompt must never report.
+            // The category filter shares the global join mode with user
+            // conditions, so `any` can include non-regular items in the count.
             const regularOnly = await search([]);
             const inflated = await post<SearchResponse>(
                 '/beaver/library/search',
