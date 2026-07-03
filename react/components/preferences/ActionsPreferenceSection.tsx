@@ -7,7 +7,7 @@ import { useSetAtom } from 'jotai';
 import { Action, ActionCategory, ActionCategoryFilter, ActionTargetType, generateActionId, TARGET_TYPE_LABELS, CATEGORY_LABELS } from "../../types/actions";
 import { actionsAtom, saveActionsAtom, hideActionAtom, restoreActionAtom, resetActionToDefaultAtom } from "../../atoms/actions";
 import { pendingActionsCategoryFilterAtom, pendingActionEditRequestAtom } from "../../atoms/ui";
-import { isBuiltinAction, getActionCustomizations, getHiddenBuiltinActions, importFromOldCustomPrompts, hasOldCustomPrompts } from "../../types/actionStorage";
+import { isBuiltinAction, getActionCustomizations, getHiddenBuiltinActions, hasOldCustomPrompts } from "../../types/actionStorage";
 import ActionCard from "./ActionCard";
 import MenuButton from "../ui/MenuButton";
 import { MenuItem } from "../ui/menu/ContextMenu";
@@ -165,16 +165,6 @@ const ActionsPreferenceSection: React.FC = () => {
         );
     }, [actions]);
 
-    // --- Import from old custom prompts ---
-    const [showImportButton, setShowImportButton] = useState(() => hasOldCustomPrompts());
-    const handleImportOldPrompts = useCallback(() => {
-        const imported = importFromOldCustomPrompts();
-        if (imported.length > 0) {
-            saveActions([...actions, ...imported]);
-        }
-        setShowImportButton(false);
-    }, [actions, saveActions]);
-
     const hiddenBuiltins = useMemo(() => getHiddenBuiltinActions(), [actions]);
 
     return (
@@ -290,19 +280,6 @@ const ActionsPreferenceSection: React.FC = () => {
                         ))}
                     </div>
                 </details>
-            )}
-
-            {/* Import from old custom prompts */}
-            {showImportButton && (
-                <div className="mt-4">
-                    <Button
-                        variant="outline"
-                        onClick={handleImportOldPrompts}
-                        className="text-sm"
-                    >
-                        Import from old Actions
-                    </Button>
-                </div>
             )}
         </>
     );

@@ -158,27 +158,6 @@ export const getMergedActions = (): Action[] => {
 // ---------------------------------------------------------------------------
 
 /**
- * Import user-created prompts from the old `beaver.customPrompts` pref.
- * Excludes old default prompts (`default-*` IDs). Maps `requiresAttachment`
- * to the attachment target, everything else to global.
- * Sets `legacyPromptsImported` pref so the import is only offered once.
- */
-export const importFromOldCustomPrompts = (): Action[] => {
-    const oldPrompts = getCustomPromptsFromPreferences();
-    setPref('legacyPromptsImported', true);
-    return oldPrompts
-        .filter(p => !p.id?.startsWith('default-'))
-        .map((p: CustomPrompt): Action => ({
-            id: generateActionId(),
-            title: p.title,
-            text: p.text,
-            targets: [p.requiresAttachment ? 'attachment' : 'global'],
-            id_model: p.id_model,
-            sortOrder: 999,
-        }));
-};
-
-/**
  * Check if the old customPrompts pref has any user-created content worth importing.
  * Returns false if legacy prompts have already been imported.
  */
