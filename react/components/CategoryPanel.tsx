@@ -1,6 +1,7 @@
 import React from "react";
 import { useAtomValue } from "jotai";
 import Button from "./ui/Button";
+import Tooltip from "./ui/Tooltip";
 import { CSSIcon, CSSItemTypeIcon } from "./icons/zotero";
 import { SettingsIcon, ArrowUpRightIcon } from "./icons/icons";
 import { Action, ActionCategory, TARGET_TYPE_LABELS } from "../types/actions";
@@ -8,6 +9,8 @@ import { actionsForContextAtom, actionContextAtom } from "../atoms/actions";
 import { GroupIconInfo, splitCategoryActions, getActiveTarget } from "../utils/actionVisibility";
 import { useActionRunner } from "../hooks/useActionRunner";
 import { openPreferencesWindow } from "../../src/ui/openPreferencesWindow";
+import { buildActionPopup } from "./agentRuns/requestChips/actionPopup";
+import { ChipPopupCard } from "./agentRuns/requestChips/ChipPopup";
 
 interface CategoryPanelProps {
     /** A skill category, or `null` for the uncategorized "Actions" bucket. */
@@ -51,21 +54,41 @@ const CategoryPanel: React.FC<CategoryPanelProps> = ({ category, style }) => {
     // The uncategorized "Actions" bucket maps to the "uncategorized" filter value.
     const categoryFilter = category ?? "uncategorized";
 
-    const renderAction = (action: Action) => (
-        // <div className="border-bottom-quinary">
-            <Button
+    const renderAction = (action: Action) => {
+        const popup = buildActionPopup({
+            title: action.title,
+            description: action.description,
+            prompt: action.text,
+            category: action.category ?? category ?? undefined,
+        });
+        popup.action = {
+            icon: ArrowUpRightIcon,
+            label: "Click to run action",
+        };
+
+        return (
+            <Tooltip
                 key={action.id}
-                variant="ghost"
-                onClick={(e) => runAction(action, e.currentTarget.ownerDocument.defaultView)}
-                disabled={isBusy}
-                className="w-full justify-between"
-                style={{ padding: '6px 6px' }}
-                rightIcon={ArrowUpRightIcon}
+                content={popup.title}
+                customContent={<ChipPopupCard {...popup} />}
+                width="260px"
+                padding={false}
+                horizontalAlign="start"
+                anchorDisplay="block"
             >
-                <span className="text-base truncate">{action.title}</span>
-            </Button>
-        // </div>
-    );
+                <Button
+                    variant="ghost"
+                    onClick={(e) => runAction(action, e.currentTarget.ownerDocument.defaultView)}
+                    disabled={isBusy}
+                    className="w-full justify-between"
+                    style={{ padding: '6px 6px' }}
+                    rightIcon={ArrowUpRightIcon}
+                >
+                    <span className="text-base truncate">{action.title}</span>
+                </Button>
+            </Tooltip>
+        );
+    };
 
     const hasAny = targetActions.length > 0 || globalActions.length > 0;
 

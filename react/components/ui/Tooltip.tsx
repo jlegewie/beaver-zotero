@@ -34,6 +34,8 @@ export interface TooltipProps {
     stayOpenOnAnchorClick?: boolean;
     /** Optional preferred placement ('top' or 'bottom') */
     placement?: 'top' | 'bottom';
+    /** Horizontal alignment relative to the anchor element */
+    horizontalAlign?: 'center' | 'start' | 'end';
     /** CSS display value for the anchor wrapper */
     anchorDisplay?: React.CSSProperties['display'];
 }
@@ -56,6 +58,7 @@ const Tooltip: React.FC<TooltipProps> = ({
     customContent,
     stayOpenOnAnchorClick = false,
     placement: preferredPlacement,
+    horizontalAlign = 'center',
     anchorDisplay = 'inline-block',
 }) => {
     const [isOpen, setIsOpen] = useState<boolean>(false);
@@ -81,8 +84,14 @@ const Tooltip: React.FC<TooltipProps> = ({
         const anchorRect = anchorRef.current.getBoundingClientRect();
         const tooltipRect = tooltipRef.current.getBoundingClientRect();
         
-        // Calculate center position (default)
+        // Calculate anchor points for horizontal positioning.
         const centerX = anchorRect.left + (anchorRect.width / 2);
+        const arrowInsetFromEdge = Math.min(32, anchorRect.width / 2);
+        const targetX = horizontalAlign === 'start'
+            ? anchorRect.left + arrowInsetFromEdge
+            : horizontalAlign === 'end'
+                ? anchorRect.right - arrowInsetFromEdge
+                : centerX;
         
         // Check if tooltip should be displayed below or above the anchor
         const spaceBelow = win.innerHeight - anchorRect.bottom;
@@ -100,8 +109,11 @@ const Tooltip: React.FC<TooltipProps> = ({
             posY = anchorRect.top - tooltipRect.height - 12;
         }
                 
-        // Base position is at the anchor's center
-        let posX = centerX;
+        let posX = horizontalAlign === 'start'
+            ? anchorRect.left + (tooltipRect.width / 2)
+            : horizontalAlign === 'end'
+                ? anchorRect.right - (tooltipRect.width / 2)
+                : centerX;
         
         // Adjust if tooltip would overflow right or left edge
         const rightEdge = posX + (tooltipRect.width / 2);
@@ -118,11 +130,16 @@ const Tooltip: React.FC<TooltipProps> = ({
             posX += adjustment;
         }
         
-        // Calculate arrow position (relative to tooltip left edge)
-        const arrowPos = `calc(50% + ${centerX - posX}px)`;
+        const tooltipLeft = posX - (tooltipRect.width / 2);
+        const minArrowOffset = 12;
+        const maxArrowOffset = Math.max(minArrowOffset, tooltipRect.width - minArrowOffset);
+        const arrowOffset = Math.min(
+            Math.max(targetX - tooltipLeft, minArrowOffset),
+            maxArrowOffset
+        );
         
         setPosition({ x: posX, y: posY, placement });
-        setArrowPosition(arrowPos);
+        setArrowPosition(`${arrowOffset}px`);
     };
     
     // Update position when tooltip is shown
