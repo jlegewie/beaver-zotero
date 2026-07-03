@@ -538,20 +538,24 @@ const SlashCommandRevertPlugin: React.FC = () => {
  *
  * The hint shows while a pill carrying an argumentHint is the last
  * non-whitespace content of the editor's last line, and disappears as soon as
- * the user types an argument (or breaks to a new line). It is rendered purely
- * via a `data-argument-hint` attribute on the pill's paragraph plus a CSS
- * ::after rule, so it is never part of the editor content. Attribute-only DOM
- * writes are safe here: Lexical's reconciler ignores foreign attributes, and
- * attribute mutations don't trigger the chrome document's selection reset
- * (see SelectionGuardPlugin).
+ * the user types an argument (or breaks to a new line). It is rendered as a
+ * positioned pseudo-element on the pill's paragraph, so long hints can be
+ * truncated without changing the editor height.
  */
 const ArgumentHintPlugin: React.FC = () => {
     const [editor] = useLexicalComposerContext();
     useEffect(() => {
         let decoratedEl: HTMLElement | null = null;
+        const clearDecoration = (el: HTMLElement | null) => {
+            if (!el) return;
+            el.removeAttribute('data-argument-hint');
+            el.style.removeProperty('--beaver-argument-hint-left');
+            el.style.removeProperty('--beaver-argument-hint-top');
+        };
         const apply = () => {
             let hint: string | null = null;
             let paragraphKey: string | null = null;
+            let pillKey: string | null = null;
             editor.getEditorState().read(() => {
                 const last = $getRoot().getLastChild();
                 if (!$isElementNode(last)) return;
@@ -561,6 +565,7 @@ const ArgumentHintPlugin: React.FC = () => {
                     if ($isSlashCommandNode(node)) {
                         hint = node.getArgumentHint() || null;
                         paragraphKey = last.getKey();
+                        pillKey = node.getKey();
                         return;
                     }
                     // A line break or any non-whitespace content after the
@@ -569,19 +574,28 @@ const ArgumentHintPlugin: React.FC = () => {
                 }
             });
             const el = hint && paragraphKey ? editor.getElementByKey(paragraphKey) : null;
+            const pillEl = hint && pillKey ? editor.getElementByKey(pillKey) : null;
             if (decoratedEl && decoratedEl !== el) {
-                decoratedEl.removeAttribute('data-argument-hint');
+                clearDecoration(decoratedEl);
             }
-            if (el && hint && el.getAttribute('data-argument-hint') !== hint) {
+            if (el && pillEl && hint) {
+                const paragraphRect = el.getBoundingClientRect();
+                const pillRect = pillEl.getBoundingClientRect();
+                const left = Math.max(0, pillRect.right - paragraphRect.left + 4);
+                const top = Math.max(0, pillRect.top - paragraphRect.top);
+                el.style.setProperty('--beaver-argument-hint-left', `${left}px`);
+                el.style.setProperty('--beaver-argument-hint-top', `${top}px`);
                 el.setAttribute('data-argument-hint', hint);
+            } else if (el) {
+                clearDecoration(el);
             }
-            decoratedEl = el;
+            decoratedEl = el && pillEl && hint ? el : null;
         };
         const unregister = editor.registerUpdateListener(apply);
         apply();
         return () => {
             unregister();
-            decoratedEl?.removeAttribute('data-argument-hint');
+            clearDecoration(decoratedEl);
             decoratedEl = null;
         };
     }, [editor]);
