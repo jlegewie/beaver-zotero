@@ -101,14 +101,14 @@ const CategoryPanel: React.FC<CategoryPanelProps> = ({ category, style }) => {
             )}
 
             {globalActions.length > 0 && (
-                <div className="display-flex flex-col gap-1">
+                <div className="display-flex flex-col gap-0">
                     {/* <SectionHeader label="Library-wide" /> */}
                     {globalActions.map(renderAction)}
                 </div>
             )}
 
             {targetActions.length > 0 && (
-                <div className={`display-flex flex-col gap-1 ${globalActions.length > 0 ? 'border-top-quinary' : ''}`}>
+                <div className={`display-flex flex-col gap-0 ${globalActions.length > 0 ? 'border-top-quinary' : ''}`}>
                     <SectionHeader
                         label={active?.label ?? (active ? TARGET_TYPE_LABELS[active.targetType] : '')}
                         iconInfo={active?.iconInfo}
