@@ -1,12 +1,10 @@
 import React from "react";
 import { useAtomValue } from "jotai";
 import Button from "./ui/Button";
-import Icon from "./icons/Icon";
 import { CSSIcon, CSSItemTypeIcon } from "./icons/zotero";
-import { AlertIcon, SettingsIcon, ArrowUpRightIcon } from "./icons/icons";
+import { SettingsIcon, ArrowUpRightIcon } from "./icons/icons";
 import { Action, ActionCategory, TARGET_TYPE_LABELS } from "../types/actions";
 import { actionsForContextAtom, actionContextAtom } from "../atoms/actions";
-import { searchableLibraryIdsAtom } from "../atoms/profile";
 import { GroupIconInfo, splitCategoryActions, getActiveTarget } from "../utils/actionVisibility";
 import { useActionRunner } from "../hooks/useActionRunner";
 import { openPreferencesWindow } from "../../src/ui/openPreferencesWindow";
@@ -45,14 +43,7 @@ const SectionHeader: React.FC<{ label: string; iconInfo?: GroupIconInfo, classNa
 const CategoryPanel: React.FC<CategoryPanelProps> = ({ category, style }) => {
     const contextActions = useAtomValue(actionsForContextAtom);
     const ctx = useAtomValue(actionContextAtom);
-    const searchableLibraryIds = useAtomValue(searchableLibraryIdsAtom);
     const { runAction, isBusy } = useActionRunner();
-
-    // Whether the current library is synced with Beaver (mirrors ActionSuggestions).
-    const currentLibraryId = ctx.zotero.isLibraryTab
-        ? ctx.zotero.libraryView.libraryId
-        : ctx.zotero.readerAttachment?.libraryID ?? ctx.zotero.noteItem?.libraryID ?? null;
-    const isLibrarySupported = !!(currentLibraryId && searchableLibraryIds.includes(currentLibraryId));
 
     const active = getActiveTarget(ctx);
     const { targetActions, globalActions } = splitCategoryActions(contextActions, category, active?.targetType ?? null);
@@ -66,7 +57,7 @@ const CategoryPanel: React.FC<CategoryPanelProps> = ({ category, style }) => {
                 key={action.id}
                 variant="ghost"
                 onClick={(e) => runAction(action, e.currentTarget.ownerDocument.defaultView)}
-                disabled={!isLibrarySupported || isBusy}
+                disabled={isBusy}
                 className="w-full justify-between"
                 style={{ padding: '6px 6px' }}
                 rightIcon={ArrowUpRightIcon}
@@ -117,14 +108,6 @@ const CategoryPanel: React.FC<CategoryPanelProps> = ({ category, style }) => {
                     Edit
                 </Button>
             </div>
-            {!isLibrarySupported && (
-                <div className="display-flex flex-row gap-1 items-start font-color-tertiary mt-1">
-                    <Icon icon={AlertIcon} className="mt-010" />
-                    <div className="text-sm">
-                        This library is not synced with Beaver
-                    </div>
-                </div>
-            )}
         </div>
     );
 };
