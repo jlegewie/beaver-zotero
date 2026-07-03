@@ -499,7 +499,7 @@ const ActionCard: React.FC<ActionCardProps> = ({
                     "Delete" hides it (built-ins are defined in code and can't be truly
                     removed); it stays restorable from the Deleted actions list. Reset to
                     default (edited built-ins only) sits bottom-right. */}
-                <div className="display-flex flex-row flex-1 items-center gap-2 px-2 pt-2">
+                <div className="display-flex flex-row flex-1 items-center gap-2 pt-3">
                     <div className="flex-1"></div>
                     {isBuiltin && isOverridden && onResetToDefault && (
                         <>
