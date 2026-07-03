@@ -18,7 +18,7 @@ import {
     normalizeStoredOverride,
     generateActionId,
 } from './actions';
-import { BUILTIN_ACTIONS } from './builtinActions';
+import { ALL_BUILTIN_ACTIONS } from './builtinActions';
 import { CustomPrompt, getCustomPromptsFromPreferences } from './settings';
 
 // ---------------------------------------------------------------------------
@@ -78,7 +78,7 @@ export const saveActionLastUsed = (id: string, timestamp: string): void => {
 // Built-in helpers
 // ---------------------------------------------------------------------------
 
-const builtinIds = new Set(BUILTIN_ACTIONS.map(a => a.id));
+const builtinIds = new Set(ALL_BUILTIN_ACTIONS.map(a => a.id));
 
 export const isBuiltinAction = (id: string): boolean => builtinIds.has(id);
 
@@ -93,7 +93,7 @@ export const isBuiltinOverridden = (id: string): boolean => {
 
 export const getHiddenBuiltinActions = (): Action[] => {
     const c = getActionCustomizations();
-    return BUILTIN_ACTIONS.filter(a => c.overrides[a.id]?.hidden === true);
+    return ALL_BUILTIN_ACTIONS.filter(a => c.overrides[a.id]?.hidden === true);
 };
 
 // ---------------------------------------------------------------------------
@@ -111,7 +111,7 @@ export const getMergedActions = (): Action[] => {
     const actions: Action[] = [];
 
     // 1. Built-in actions with overrides applied
-    for (const builtin of BUILTIN_ACTIONS) {
+    for (const builtin of ALL_BUILTIN_ACTIONS) {
         const override = c.overrides[builtin.id];
         if (override?.hidden) continue;
         if (builtin.deprecated && !override) continue;

@@ -23,7 +23,7 @@ import {
     normalizeStoredAction,
     normalizeStoredOverride,
 } from '../../react/types/actions';
-import { BUILTIN_ACTIONS } from '../../react/types/builtinActions';
+import { ALL_BUILTIN_ACTIONS } from '../../react/types/builtinActions';
 import { getPref } from '../utils/prefs';
 import { openPreferencesWindow } from '../ui/openPreferencesWindow';
 import { agentItemFilter, isAgentSupportedItem } from '../utils/agentItemSupport';
@@ -128,7 +128,7 @@ export function getMergedActions(): Action[] {
     const c = getActionCustomizations();
     const actions: Action[] = [];
 
-    for (const builtin of BUILTIN_ACTIONS) {
+    for (const builtin of ALL_BUILTIN_ACTIONS) {
         const override = c.overrides[builtin.id];
         if (override?.hidden) continue;
         if (builtin.deprecated && !override) continue;

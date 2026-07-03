@@ -7,7 +7,8 @@ vi.mock('../../../react/types/settings', () => ({
 }));
 
 import { getMergedActions, saveActionCustomizations } from '../../../react/types/actionStorage';
-import { BUILTIN_ACTIONS } from '../../../react/types/builtinActions';
+import { BUILTIN_ACTIONS, ALL_BUILTIN_ACTIONS } from '../../../react/types/builtinActions';
+import { ARCHIVED_ACTIONS } from '../../../react/types/archivedActions';
 import { getActionCommand, toSlashToken } from '../../../react/utils/slashCommands';
 import type { ActionCustomizations } from '../../../react/types/actions';
 
@@ -152,5 +153,83 @@ describe('actionStorage', () => {
         };
         saveActionCustomizations(invalid as unknown as ActionCustomizations);
         expect(getMergedActions().some(a => a.id === 'custom-bad')).toBe(false);
+    });
+
+    // ── Deprecated tombstones (archivedActions.ts) ──────────────────────
+    //
+    // Retired built-ins that shipped in a released build stay in the base
+    // list as `deprecated: true` tombstones: invisible unless the user has
+    // an override, in which case the override merges onto the full default.
+
+    const archived = ARCHIVED_ACTIONS[0];
+
+    it('archived tombstones keep full attributes, deprecated flag, and no category', () => {
+        for (const a of ARCHIVED_ACTIONS) {
+            expect(a.deprecated, a.id).toBe(true);
+            expect(a.category, a.id).toBeUndefined();
+            expect(a.title, a.id).toBeTruthy();
+            expect(a.text, a.id).toBeTruthy();
+            expect(a.targets.length, a.id).toBeGreaterThan(0);
+        }
+        // Tombstone ids must not collide with active built-ins
+        const activeIds = new Set(BUILTIN_ACTIONS.map(a => a.id));
+        for (const a of ARCHIVED_ACTIONS) {
+            expect(activeIds.has(a.id), a.id).toBe(false);
+        }
+        expect(ALL_BUILTIN_ACTIONS.length).toBe(BUILTIN_ACTIONS.length + ARCHIVED_ACTIONS.length);
+    });
+
+    it('hides a deprecated built-in from users without an override', () => {
+        saveActionCustomizations({ version: 1, overrides: {}, custom: [] });
+        expect(getMergedActions().some(a => a.id === archived.id)).toBe(false);
+    });
+
+    it('keeps a deprecated built-in for users with an override, merging base fields', () => {
+        const c: ActionCustomizations = {
+            version: 1,
+            overrides: { [archived.id]: { title: 'My renamed action' } },
+            custom: [],
+        };
+        saveActionCustomizations(c);
+        const merged = getMergedActions().find(a => a.id === archived.id)!;
+        expect(merged).toBeDefined();
+        expect(merged.title).toBe('My renamed action');
+        // Unmodified fields resolve from the tombstone (including prompt improvements)
+        expect(merged.text).toBe(archived.text);
+        expect(merged.targets).toEqual(archived.targets);
+        // No category → never shown on the homepage launcher
+        expect(merged.category).toBeUndefined();
+    });
+
+    it('preserves archived built-in commands when an override does not change the name', () => {
+        const shippedCommands: Record<string, string> = {
+            'builtin-key-findings': 'key-findings',
+            'builtin-attachment-fit-research': 'fit-into-library-pdf',
+            'builtin-organize-recent': 'organize-recent',
+            'builtin-fix-metadata-recent': 'fix-metadata',
+        };
+
+        const overrides = Object.fromEntries(
+            Object.keys(shippedCommands).map(id => [id, { title: 'My renamed action' }]),
+        ) as ActionCustomizations['overrides'];
+
+        saveActionCustomizations({ version: 1, overrides, custom: [] });
+        const mergedById = new Map(getMergedActions().map(a => [a.id, a]));
+
+        for (const [id, command] of Object.entries(shippedCommands)) {
+            const merged = mergedById.get(id);
+            expect(merged, id).toBeDefined();
+            expect(getActionCommand(merged!), id).toBe(command);
+        }
+    });
+
+    it('keeps a hidden deprecated built-in hidden', () => {
+        const c: ActionCustomizations = {
+            version: 1,
+            overrides: { [archived.id]: { hidden: true } },
+            custom: [],
+        };
+        saveActionCustomizations(c);
+        expect(getMergedActions().some(a => a.id === archived.id)).toBe(false);
     });
 });

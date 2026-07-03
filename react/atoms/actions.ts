@@ -6,7 +6,7 @@
 
 import { atom } from 'jotai';
 import { Action, ActionOverride, ActionTargetType, sameTargets } from '../types/actions';
-import { BUILTIN_ACTIONS } from '../types/builtinActions';
+import { ALL_BUILTIN_ACTIONS } from '../types/builtinActions';
 import {
     getMergedActions,
     getActionCustomizations,
@@ -47,7 +47,7 @@ export const saveActionsAtom = atom(
         const c = getActionCustomizations();
 
         // Rebuild overrides from the actions list
-        const builtinMap = new Map(BUILTIN_ACTIONS.map(a => [a.id, a]));
+        const builtinMap = new Map(ALL_BUILTIN_ACTIONS.map(a => [a.id, a]));
         const newOverrides: Record<string, ActionOverride> = {};
         const newCustom: Action[] = [];
 
