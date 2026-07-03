@@ -253,10 +253,10 @@ export const AskUserQuestionPanel: React.FC<AskUserQuestionPanelProps> = ({ pend
                                             icon={isSelected ? CheckmarkCircleSolidIcon : CircleIcon}
                                             className={`mt-020 scale-12 ${isSelected ? 'font-color-accent-green' : 'font-color-secondary'}`}
                                         />
-                                        <span className="min-w-0">
+                                        <span className="min-w-0 display-flex flex-col gap-05">
                                             <span className="font-color-primary text-base">{option.label}</span>
                                             {option.description && (
-                                                <span className="font-color-secondary text-base ml-2">
+                                                <span className="font-color-secondary text-base">
                                                     {option.description}
                                                 </span>
                                             )}
