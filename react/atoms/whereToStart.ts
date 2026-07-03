@@ -15,7 +15,7 @@ import { sendWSMessageAtom } from './agentRunAtoms';
 import { isWebSearchAllowedAtom, isWebSearchEnabledAtom } from './ui';
 import { beaverDefaultModelAtom, updateSelectedModelAtom } from './models';
 import { resolvePromptVariables } from '../utils/promptVariables';
-import { getActionCommand } from '../utils/slashCommands';
+import { ensurePromptActionTokens, getActionCommand } from '../utils/slashCommands';
 import { PromptAction } from '../agents/types';
 import { ChargingPermissions } from '../../src/services/agentProtocol';
 import { logger } from '../../src/utils/logger';
@@ -316,7 +316,7 @@ export const startSelectedOptionAtom = atom(null, async (get, set) => {
         const runId = uuidv4();
         set(firstRunReturnRequestedAtom, false);
 
-        await set(sendWSMessageAtom, topic, {
+        await set(sendWSMessageAtom, ensurePromptActionTokens(topic, [promptAction]), {
             runIdOverride: runId,
             permissionsOverride: WHERE_TO_START_PERMISSIONS_OVERRIDE,
             actions: [promptAction],
