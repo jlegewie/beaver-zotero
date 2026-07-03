@@ -172,7 +172,19 @@ function questionEvent(overrides: Partial<WSAskUserQuestionRequest> = {}): WSAsk
         questions: [
             {
                 id: 'q0',
-                question: 'Which topic?',
+                question: 'Which topic <ref id="r0"/>?',
+                references: {
+                    r0: {
+                        type: 'item',
+                        library_id: 1,
+                        zotero_key: 'ITEMKEY',
+                        item: {
+                            item_id: '1-ITEMKEY',
+                            item_type: 'journalArticle',
+                            title: 'Item Title',
+                        },
+                    },
+                },
                 options: [
                     { id: 'q0-o0', label: 'Alpha' },
                     { id: 'q0-o1', label: 'Beta' },
@@ -254,7 +266,12 @@ describe('AgentService ask_user_question transport', () => {
         const socket = await completeConnect(service, callbacks, { type: 'q' } as AgentRunRequest);
 
         service.sendAskUserQuestionResponse('qid-1', [
-            { item_id: 'q0', selected_option_ids: ['q0-o1'], custom_text: null },
+            {
+                item_id: 'q0',
+                selected_option_ids: ['q0-o1'],
+                custom_text: null,
+                references: [],
+            },
         ]);
 
         const responses = socket.sentMessages().filter(
@@ -263,7 +280,7 @@ describe('AgentService ask_user_question transport', () => {
         expect(responses).toHaveLength(1);
         expect(responses[0]).toMatchObject({
             question_id: 'qid-1',
-            answers: [{ item_id: 'q0', selected_option_ids: ['q0-o1'] }],
+            answers: [{ item_id: 'q0', selected_option_ids: ['q0-o1'], references: [] }],
             cancelled: false,
         });
     });

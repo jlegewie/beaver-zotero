@@ -72,6 +72,18 @@ export interface CollectionAttachment extends BaseMessageAttachment {
     parent_key: string | null;
 }
 
+export interface TagAttachment {
+    type: "tag";
+    name: string;
+    library_id?: number | null;
+    color?: string | null;
+}
+
+export type AnswerReference =
+    | ItemMetadataAttachment
+    | CollectionAttachment
+    | TagAttachment;
+
 export type ExternalFileContentKind = 'pdf' | 'epub' | 'text' | 'image';
 
 /**

@@ -6,7 +6,19 @@ import type { ZoteroItemReference } from '../../../types/zotero';
 import type { ContentKind } from '../../../types/zotero';
 import { truncateText } from '../../../utils/stringUtils';
 import { ANNOTATION_ICON_BY_TYPE, ANNOTATION_TEXT_BY_TYPE } from '../../../utils/annotationDisplay';
-import type { ValidAnnotationType, ExternalFileContentKind } from '../../../types/attachments/apiTypes';
+import type {
+    AnnotationAttachment,
+    AnswerReference,
+    CollectionAttachment,
+    ExternalFileAttachment,
+    ExternalFileContentKind,
+    ItemMetadataAttachment,
+    MessageAttachment,
+    NoteAttachment,
+    SourceAttachment,
+    ValidAnnotationType,
+} from '../../../types/attachments/apiTypes';
+import { EXTERNAL_LIBRARY_ID } from '../../../../src/services/externalFiles';
 import { ChipWithPopup, type ChipPopupContent, type ChipPopupSubtitle } from './ChipPopup';
 import { ChipButton } from './ChipButton';
 
@@ -27,6 +39,52 @@ function attachmentIconName(contentKind?: ContentKind | ExternalFileContentKind 
         default:
             return 'attachmentFile';
     }
+}
+
+function refKey(ref: ZoteroItemReference): string {
+    return `${ref.library_id}-${ref.zotero_key}`;
+}
+
+function attachmentRef(att: ItemMetadataAttachment | SourceAttachment): ZoteroItemReference {
+    return { library_id: att.library_id, zotero_key: att.zotero_key };
+}
+
+function itemStubDisplayLabel(stub: { creators?: string | null; year?: number | null; title?: string | null }): string | null {
+    const creatorYear = [stub.creators, stub.year].filter(Boolean).join(' ');
+    return creatorYear || stub.title || null;
+}
+
+function itemStubLabel(att: ItemMetadataAttachment): string | null {
+    const stub = att.item;
+    if (!stub) return null;
+    return itemStubDisplayLabel(stub);
+}
+
+function sourceStubLabel(att: SourceAttachment): string | null {
+    const stub = att.attachment;
+    return stub?.title || stub?.filename || (att.parent_item ? itemStubDisplayLabel(att.parent_item) : null);
+}
+
+function annotationTitle(att: AnnotationAttachment): string | undefined {
+    return [att.text, att.comment].filter(Boolean).join('\n') || undefined;
+}
+
+function itemStubSubtitle(att: ItemMetadataAttachment): ChipPopupSubtitle | null {
+    const stub = att.item;
+    if (!stub) return null;
+    const creatorYear = [stub.creators, stub.year].filter(Boolean).join(' ');
+    return creatorYear && stub.title ? { text: stub.title } : null;
+}
+
+function sourceSubtitle(att: SourceAttachment): ChipPopupSubtitle | null {
+    const parent = att.parent_item ? itemStubDisplayLabel(att.parent_item) : null;
+    if (parent) return { prefix: 'Attached to ', text: parent, italic: true };
+    if (att.library_id === EXTERNAL_LIBRARY_ID) return { text: 'External file' };
+    return { text: 'Standalone attachment' };
+}
+
+function noteSubtitle(att: NoteAttachment): ChipPopupSubtitle {
+    return att.parent_key ? { text: 'Attached note' } : { text: 'Standalone note' };
 }
 
 export function ItemChip({
@@ -220,6 +278,94 @@ export function TagChip({
             <CSSIcon name="filter" className="icon-16 scale-60 mt-015 -ml-1" style={{ fill: 'var(--fill-tertiary)' }} />
         </ChipButton>
     );
+}
+
+export function chipForMessageAttachment(
+    att: MessageAttachment | AnswerReference,
+    key?: React.Key,
+): React.ReactNode {
+    switch (att.type) {
+        case 'item': {
+            const ref = attachmentRef(att);
+            return (
+                <ItemChip
+                    key={key ?? `item-${refKey(ref)}`}
+                    itemRef={ref}
+                    isAttachment={false}
+                    itemType={att.item?.item_type}
+                    label={itemStubLabel(att)}
+                    subtitle={itemStubSubtitle(att)}
+                />
+            );
+        }
+        case 'source': {
+            const ref = attachmentRef(att);
+            return (
+                <ItemChip
+                    key={key ?? `source-${refKey(ref)}`}
+                    itemRef={ref}
+                    isAttachment={true}
+                    contentKind={att.attachment?.content_kind}
+                    label={sourceStubLabel(att)}
+                    subtitle={sourceSubtitle(att)}
+                />
+            );
+        }
+        case 'annotation': {
+            const annotation = att as AnnotationAttachment;
+            return (
+                <AnnotationChip
+                    key={key ?? `annotation-${annotation.library_id}-${annotation.zotero_key}`}
+                    annotationRef={{ library_id: annotation.library_id, zotero_key: annotation.zotero_key }}
+                    annotationType={annotation.annotation_type}
+                    color={annotation.color}
+                    title={annotationTitle(annotation)}
+                />
+            );
+        }
+        case 'note': {
+            const note = att as NoteAttachment;
+            return (
+                <NoteChip
+                    key={key ?? `note-${note.library_id}-${note.zotero_key}`}
+                    noteRef={{ library_id: note.library_id, zotero_key: note.zotero_key }}
+                    title={note.title}
+                    subtitle={noteSubtitle(note)}
+                />
+            );
+        }
+        case 'collection': {
+            const collection = att as CollectionAttachment;
+            return (
+                <CollectionChip
+                    key={key ?? `collection-${collection.library_id}-${collection.zotero_key}`}
+                    name={collection.name}
+                    collectionRef={{ library_id: collection.library_id, zotero_key: collection.zotero_key }}
+                />
+            );
+        }
+        case 'external_file': {
+            const file = att as ExternalFileAttachment;
+            return (
+                <ExternalFileChip
+                    key={key ?? `external-${file.ext_key}`}
+                    extKey={file.ext_key}
+                    filename={file.filename}
+                    contentKind={file.content_kind}
+                />
+            );
+        }
+        case 'tag':
+            return (
+                <TagChip
+                    key={key ?? `tag-${att.library_id ?? 'all'}-${att.name}`}
+                    tag={att.name}
+                    color={att.color}
+                />
+            );
+        default:
+            return null;
+    }
 }
 
 export function ExternalFileChip({

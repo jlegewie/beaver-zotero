@@ -307,6 +307,12 @@ export interface ItemDataWithStatus {
     status: ZoteroItemStatus;
 }
 
+/** Collection data with sync status information */
+export interface CollectionDataWithStatus {
+    collection: ZoteroCollection;
+    status: ZoteroItemStatus;
+}
+
 /**
  * File availability status - describes whether full text content is available for AI use.
  * Used to communicate to the LLM what content can be extracted from attachments.

@@ -21,6 +21,8 @@ import {
     StopStrokeIcon,
 } from '../icons/icons';
 import { logger } from '../../../src/utils/logger';
+import { renderContentWithRefChips } from '../agentRuns/refChipRendering';
+import { flattenRefTokens } from '../../utils/refTokens';
 
 interface AskUserQuestionPanelProps {
     pendingQuestion: PendingQuestion;
@@ -139,6 +141,7 @@ export const AskUserQuestionPanel: React.FC<AskUserQuestionPanelProps> = ({ pend
                 custom_text: cleared || !allowsCustom(q) || !otherSelected[q.id]
                     ? null
                     : (customTexts[q.id]?.trim() || null),
+                references: [],
             };
         });
         sendResponse({
@@ -227,7 +230,7 @@ export const AskUserQuestionPanel: React.FC<AskUserQuestionPanelProps> = ({ pend
                 {/* Question */}
                 <div className="display-flex flex-col gap-1 min-w-0">
                     <div className="font-color-primary">
-                        {question.question}
+                        {renderContentWithRefChips(question.question, question.references ?? {})}
                         {question.allow_multiple && (
                             <span className="font-color-secondary text-base ml-2">
                                 (Multiple choice)
@@ -254,10 +257,12 @@ export const AskUserQuestionPanel: React.FC<AskUserQuestionPanelProps> = ({ pend
                                             className={`mt-020 scale-12 ${isSelected ? 'font-color-accent-green' : 'font-color-secondary'}`}
                                         />
                                         <span className="min-w-0">
-                                            <span className="font-color-primary text-base">{option.label}</span>
+                                            <span className="font-color-primary text-base">
+                                                {renderContentWithRefChips(option.label, question.references ?? {})}
+                                            </span>
                                             {option.description && (
                                                 <span className="font-color-secondary text-base ml-2">
-                                                    {option.description}
+                                                    {renderContentWithRefChips(option.description, question.references ?? {})}
                                                 </span>
                                             )}
                                         </span>
@@ -303,7 +308,7 @@ export const AskUserQuestionPanel: React.FC<AskUserQuestionPanelProps> = ({ pend
                                     className="chat-input"
                                     rows={1}
                                     placeholder="Other..."
-                                    aria-label={`Custom answer for: ${question.question}`}
+                                    aria-label={`Custom answer for: ${flattenRefTokens(question.question, question.references ?? {})}`}
                                     value={customTexts[question.id] ?? ''}
                                     disabled={isSubmitted}
                                     style={{ flex: 1 }}

@@ -8,6 +8,7 @@
  */
 
 import type { ContentKind, PartLocation } from "./citations";
+import type { AnswerReference, MessageAttachment } from "./attachments/apiTypes";
 import type { ExternalReference } from "./externalReferences";
 
 // ---------------------------------------------------------------------------
@@ -218,6 +219,8 @@ export interface UserQuestionAnswerView {
     selected?: string[];
     /** Free-text 'Other' answer the user typed, if any. */
     custom_text?: string | null;
+    references?: Record<string, MessageAttachment>;
+    answer_references?: AnswerReference[];
 }
 
 export interface UserQuestionView {

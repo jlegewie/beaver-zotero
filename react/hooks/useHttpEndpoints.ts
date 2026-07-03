@@ -328,6 +328,7 @@ async function handleZoteroDataHttpRequest(request: any) {
         event: 'zotero_data_request',
         request_id: generateRequestId(),
         items: request.items,
+        collections: request.collections ?? [],
         include_attachments: request.include_attachments,
         include_parents: request.include_parents,
         include_notes: request.include_notes,
@@ -339,6 +340,7 @@ async function handleZoteroDataHttpRequest(request: any) {
     return {
         items: response.items,
         attachments: response.attachments,
+        collections: response.collections,
         notes: response.notes,
         annotations: response.annotations,
         errors: response.errors,

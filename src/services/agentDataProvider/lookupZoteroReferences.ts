@@ -6,7 +6,7 @@
  */
 
 import { logger } from '../../utils/logger';
-import { ItemDataWithStatus, AttachmentDataWithStatus, ZoteroItemReference, ItemStub } from '../../../react/types/zotero';
+import { ItemDataWithStatus, AttachmentDataWithStatus, CollectionDataWithStatus, ZoteroItemReference, ItemStub } from '../../../react/types/zotero';
 import { searchableLibraryIdsAtom, syncWithZoteroAtom } from '../../../react/atoms/profile';
 import { userIdAtom } from '../../../react/atoms/auth';
 import { store } from '../../../react/store';
@@ -16,6 +16,7 @@ import {
     getYearFromItem,
     serializeAttachment,
     serializeAnnotation,
+    serializeCollection,
     serializeItem,
     serializeNote,
     serializeItemStub,
@@ -38,6 +39,7 @@ export interface LookupZoteroReferencesOptions {
      */
     include_notes?: boolean;
     file_status_level?: FileStatusLevel;  // default: 'lightweight'
+    collections?: ZoteroItemReference[];
 }
 
 export interface LookupZoteroReferencesResult {
@@ -45,7 +47,23 @@ export interface LookupZoteroReferencesResult {
     attachments: AttachmentDataWithStatus[];
     notes: NoteResultItem[];
     annotations: AnnotationResultItem[];
+    collections: CollectionDataWithStatus[];
     errors: WSDataError[];
+}
+
+function computeCollectionStatus(
+    collection: Zotero.Collection,
+    syncedLibraryIds: number[],
+): CollectionDataWithStatus['status'] {
+    const isSyncedLibrary = syncedLibraryIds.includes(collection.libraryID);
+    const isInTrash = Boolean((collection as any).deleted);
+    return {
+        is_synced_library: isSyncedLibrary,
+        is_in_trash: isInTrash,
+        available_locally_or_on_server: true,
+        passes_sync_filters: isSyncedLibrary && !isInTrash,
+        is_pending_sync: null,
+    };
 }
 
 /**
@@ -64,6 +82,7 @@ export async function lookupZoteroReferences(
     options: LookupZoteroReferencesOptions,
 ): Promise<LookupZoteroReferencesResult> {
     const errors: WSDataError[] = [];
+    const collectionReferences = options.collections ?? [];
 
     // Get sync configuration from store
     const searchableLibraryIds = store.get(searchableLibraryIdsAtom);
@@ -75,12 +94,14 @@ export async function lookupZoteroReferences(
     const attachmentKeys = new Set<string>();
     const noteKeys = new Set<string>();
     const annotationKeys = new Set<string>();
+    const collectionKeys = new Set<string>();
 
     // Collect Zotero items to serialize
     const itemsToSerialize: Zotero.Item[] = [];
     const attachmentsToSerialize: Zotero.Item[] = [];
     const notesToSerialize: Zotero.Item[] = [];
     const annotationsToSerialize: Zotero.Item[] = [];
+    const collectionsToSerialize: Zotero.Collection[] = [];
 
     const makeKey = (libraryId: number, zoteroKey: string) => `${libraryId}-${zoteroKey}`;
 
@@ -104,6 +125,25 @@ export async function lookupZoteroReferences(
         })
     );
 
+    const collectionLoadResults = await Promise.all(
+        collectionReferences.map(async (reference) => {
+            try {
+                const collection = await Zotero.Collections.getByLibraryAndKeyAsync(
+                    reference.library_id,
+                    reference.zotero_key,
+                );
+                if (!collection) {
+                    return { reference, error: 'Collection not found in local database', error_code: 'not_found' as const };
+                }
+                return { reference, collection };
+            } catch (error: any) {
+                logger(`lookupZoteroReferences: Failed to load zotero collection ${reference.library_id}-${reference.zotero_key}: ${error}`, 1);
+                const details = error instanceof Error ? `${error.message}\n${error.stack || ''}` : String(error);
+                return { reference, error: 'Failed to load collection', error_code: 'load_failed' as const, details };
+            }
+        })
+    );
+
     // Process results, preserving order
     for (const result of loadResults) {
         if ('item' in result && result.item) {
@@ -115,6 +155,22 @@ export async function lookupZoteroReferences(
                 error: result.error,
                 error_code: result.error_code,
                 details: result.details
+            });
+        }
+    }
+    for (const result of collectionLoadResults) {
+        if ('collection' in result && result.collection) {
+            const key = makeKey(result.reference.library_id, result.reference.zotero_key);
+            if (!collectionKeys.has(key)) {
+                collectionKeys.add(key);
+                collectionsToSerialize.push(result.collection);
+            }
+        } else if ('error' in result) {
+            errors.push({
+                reference: result.reference,
+                error: result.error,
+                error_code: result.error_code,
+                details: result.details,
             });
         }
     }
@@ -450,6 +506,27 @@ export async function lookupZoteroReferences(
     const items = itemResults.filter((i): i is ItemDataWithStatus => i !== null);
     const attachments = attachmentResults.filter((a): a is AttachmentDataWithStatus => a !== null);
 
+    const collectionResults = await Promise.all(
+        collectionsToSerialize.map(async (collection): Promise<CollectionDataWithStatus | null> => {
+            try {
+                return {
+                    collection: await serializeCollection(collection),
+                    status: computeCollectionStatus(collection, searchableLibraryIds),
+                };
+            } catch (error: any) {
+                logger(`lookupZoteroReferences: Failed to serialize collection ${collection.libraryID}/${collection.key}: ${error}`, 1);
+                errors.push({
+                    reference: { library_id: collection.libraryID, zotero_key: collection.key },
+                    error: 'Failed to serialize collection',
+                    error_code: 'load_failed',
+                    details: error instanceof Error ? `${error.message}\n${error.stack || ''}` : String(error),
+                });
+                return null;
+            }
+        })
+    );
+    const collections = collectionResults.filter((c): c is CollectionDataWithStatus => c !== null);
+
     // Note parents — serialize each distinct parent once into an ItemStub anchor.
     const noteParentItems = [...new Set(
         notesToSerialize
@@ -535,6 +612,7 @@ export async function lookupZoteroReferences(
         attachments,
         notes: noteResults,
         annotations: annotationResults,
+        collections,
         errors,
     };
 }

@@ -24,6 +24,7 @@ export async function handleZoteroDataRequest(request: WSZoteroDataRequest): Pro
         include_parents: request.include_parents,
         include_notes: request.include_notes ?? true,
         file_status_level: request.file_status_level,
+        collections: request.collections ?? [],
     });
 
     return {
@@ -31,6 +32,7 @@ export async function handleZoteroDataRequest(request: WSZoteroDataRequest): Pro
         request_id: request.request_id,
         items: result.items,
         attachments: result.attachments,
+        collections: result.collections.length > 0 ? result.collections : undefined,
         notes: result.notes.length > 0 ? result.notes : undefined,
         annotations: result.annotations.length > 0 ? result.annotations : undefined,
         errors: result.errors.length > 0 ? result.errors : undefined,

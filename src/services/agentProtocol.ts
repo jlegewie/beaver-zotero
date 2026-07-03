@@ -1,8 +1,8 @@
 import { SubscriptionStatus, ProcessingMode, ChargeType } from '../../react/types/profile';
 import { TextPart, ThinkingPart, ToolCallPart, ToolReturnPart, RetryPromptPart, RunUsage } from '../../react/agents/types';
 import { ZoteroItemReference } from '../../react/types/zotero';
-import { ItemDataWithStatus, AttachmentDataWithStatus, ItemStub, ItemSummary, AttachmentInfo, AttachmentStub } from '../../react/types/zotero';
-import { ReaderState, NoteState } from '../../react/types/attachments/apiTypes';
+import { ItemDataWithStatus, AttachmentDataWithStatus, CollectionDataWithStatus, ItemStub, ItemSummary, AttachmentInfo, AttachmentStub } from '../../react/types/zotero';
+import { AnswerReference, MessageAttachment, ReaderState, NoteState } from '../../react/types/attachments/apiTypes';
 import { BeaverAgentPrompt } from '../../react/agents/types';
 import { CustomChatModel } from '../../react/types/settings';
 import { AttachmentData, ItemData } from '../../react/types/zotero';
@@ -593,6 +593,8 @@ export interface WSZoteroDataRequest extends WSBaseEvent {
     include_notes?: boolean;
     /** References to fetch data for */
     items: ZoteroItemReference[];
+    /** Collection references to fetch data for */
+    collections?: ZoteroItemReference[];
     /**
      * Level of file status analysis for attachments:
      * - 'none': Skip file_status entirely (fastest, for metadata-only lookups)
@@ -610,6 +612,8 @@ export interface WSZoteroDataResponse {
     items: ItemDataWithStatus[];
     /** Attachment metadata with status for successfully retrieved attachments */
     attachments: AttachmentDataWithStatus[];
+    /** Collection metadata with status for successfully retrieved collections */
+    collections?: CollectionDataWithStatus[];
     /** Note metadata for successfully retrieved notes */
     notes?: NoteResultItem[];
     /** Annotation metadata for successfully retrieved annotations */
@@ -1466,6 +1470,8 @@ export interface AskUserQuestionItem {
     question: string;
     /** Selectable options, recommended option first */
     options: AskUserQuestionOption[];
+    /** Server-resolved reference chips keyed by rewritten ref id */
+    references?: Record<string, MessageAttachment>;
     /** Whether multiple options may be selected */
     allow_multiple?: boolean;
     /** Whether a free-text 'Other' answer is offered */
@@ -1500,6 +1506,8 @@ export interface AskUserQuestionAnswer {
     selected_option_ids: string[];
     /** Free-text 'Other' answer the user typed, if any */
     custom_text?: string | null;
+    /** User-attached references submitted with this answer */
+    references?: AnswerReference[];
 }
 
 /** Response to an ask_user_question request (user's answers, or a skip) */

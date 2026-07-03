@@ -33,6 +33,7 @@ import { store } from "../../react/store";
 import { isSidebarVisibleAtom } from "../../react/atoms/ui";
 import { BeaverUIFactory } from "../ui/ui";
 import { WSAskUserQuestionRequest, WSDeferredApprovalRequest } from "./agentProtocol";
+import { flattenRefTokens } from "../../react/utils/refTokens";
 
 type BeaverVisibility = "beaver-visible" | "zotero-focused" | "zotero-unfocused";
 
@@ -254,7 +255,10 @@ function describeQuestions(event: WSAskUserQuestionRequest): { title: string; bo
     const title = "Beaver has a question";
     const questions = event.questions ?? [];
     if (questions.length <= 1) {
-        const question = questions[0]?.question?.trim();
+        const firstQuestion = questions[0];
+        const question = firstQuestion
+            ? flattenRefTokens(firstQuestion.question, firstQuestion.references ?? {}).trim()
+            : "";
         return {
             title,
             body: question && question.length > 0
