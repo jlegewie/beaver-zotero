@@ -394,7 +394,7 @@ const ActionCard: React.FC<ActionCardProps> = ({
                         ref={titleInputRef}
                         type="text"
                         value={editTitle}
-                        onChange={(e) => setEditTitle(e.target.value)}
+                        onChange={(e) => setEditTitle(e.target.value.slice(0, MAX_TITLE_LENGTH))}
                         placeholder="Action title..."
                         aria-label="Action title"
                         maxLength={MAX_TITLE_LENGTH}
@@ -412,7 +412,7 @@ const ActionCard: React.FC<ActionCardProps> = ({
                         <input
                             type="text"
                             value={editDescription}
-                            onChange={(e) => setEditDescription(e.target.value)}
+                            onChange={(e) => setEditDescription(e.target.value.slice(0, MAX_DESCRIPTION_LENGTH))}
                             placeholder="e.g. Summarize the key findings of the selected paper"
                             aria-label="Action description"
                             maxLength={MAX_DESCRIPTION_LENGTH}
@@ -433,7 +433,7 @@ const ActionCard: React.FC<ActionCardProps> = ({
                             <input
                                 type="text"
                                 value={displayedName}
-                                onChange={(e) => setEditName(e.target.value.toLowerCase().replace(/\s+/g, "-"))}
+                                onChange={(e) => setEditName(e.target.value.toLowerCase().replace(/\s+/g, "-").slice(0, MAX_NAME_LENGTH))}
                                 placeholder="action-name"
                                 aria-label="Slash command name"
                                 maxLength={MAX_NAME_LENGTH}
@@ -458,7 +458,7 @@ const ActionCard: React.FC<ActionCardProps> = ({
                             <input
                                 type="text"
                                 value={editArgumentHint}
-                                onChange={(e) => setEditArgumentHint(e.target.value)}
+                                onChange={(e) => setEditArgumentHint(e.target.value.slice(0, MAX_ARGUMENT_HINT_LENGTH))}
                                 placeholder="e.g. topic or question"
                                 aria-label="Argument hint"
                                 maxLength={MAX_ARGUMENT_HINT_LENGTH}
@@ -480,7 +480,7 @@ const ActionCard: React.FC<ActionCardProps> = ({
                     <textarea
                         ref={textareaRef}
                         value={editText}
-                        onChange={(e) => setEditText(e.target.value)}
+                        onChange={(e) => setEditText(e.target.value.slice(0, MAX_PROMPT_TEXT_LENGTH))}
                         onInput={(e) => {
                             e.currentTarget.style.height = "auto";
                             e.currentTarget.style.height = `${e.currentTarget.scrollHeight}px`;
@@ -492,6 +492,13 @@ const ActionCard: React.FC<ActionCardProps> = ({
                         rows={3}
                     />
                 </div>
+                {/* Character counter — surfaces only near the cap so the user
+                    understands why further typing is truncated. */}
+                {editText.length >= MAX_PROMPT_TEXT_LENGTH - 500 && (
+                    <div className="action-field-help text-sm font-color-tertiary">
+                        {editText.length.toLocaleString()} / {MAX_PROMPT_TEXT_LENGTH.toLocaleString()} characters
+                    </div>
+                )}
                 {hasUserInputVariables(editText) && (
                     <div className="action-field-help text-sm font-color-tertiary display-flex flex-row gap-2 items-start">
                         <Icon icon={InformationCircleIcon} size={13} className="flex-shrink-0" style={{ marginTop: '2px' }} />

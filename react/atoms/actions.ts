@@ -60,7 +60,10 @@ export const saveActionsAtom = atom(
                 // Compare each overridable field
                 if (action.title !== base.title) { override.title = action.title; hasChange = true; }
                 if (action.text !== base.text) { override.text = action.text; hasChange = true; }
-                if ((action.description ?? undefined) !== (base.description ?? undefined)) { override.description = action.description; hasChange = true; }
+                // Persist "" (not undefined) when clearing a built-in's default
+                // description: an undefined field is dropped from the serialized
+                // override, which would resurrect the base description on merge.
+                if ((action.description ?? undefined) !== (base.description ?? undefined)) { override.description = action.description ?? ''; hasChange = true; }
                 if ((action.name ?? undefined) !== (base.name ?? undefined)) { override.name = action.name; hasChange = true; }
                 if ((action.id_model ?? undefined) !== (base.id_model ?? undefined)) { override.id_model = action.id_model; hasChange = true; }
                 if (!sameTargets(action.targets, base.targets)) { override.targets = action.targets; hasChange = true; }
