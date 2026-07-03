@@ -92,12 +92,65 @@ describe('actionStorage', () => {
                 text: 'Do the thing',
                 name: 'my-action',
                 argumentHint: 'what to do it to',
-                targetType: 'global',
+                targets: ['global'],
             }],
         };
         saveActionCustomizations(c);
         const merged = getMergedActions().find(a => a.id === 'custom-1')!;
         expect(merged.name).toBe('my-action');
         expect(merged.argumentHint).toBe('what to do it to');
+    });
+
+    it('normalizes legacy custom actions (single targetType, minItems) to targets', () => {
+        // Older versions stored a single `targetType` string and an optional
+        // `minItems`. Readers accept the legacy shape and normalize.
+        const legacy = {
+            version: 1,
+            overrides: {},
+            custom: [{
+                id: 'custom-legacy',
+                title: 'Legacy Action',
+                text: 'Do the thing',
+                targetType: 'attachment',
+                minItems: 2,
+            }],
+        };
+        saveActionCustomizations(legacy as unknown as ActionCustomizations);
+        const merged = getMergedActions().find(a => a.id === 'custom-legacy')!;
+        expect(merged.targets).toEqual(['attachment']);
+        expect((merged as any).targetType).toBeUndefined();
+        expect((merged as any).minItems).toBeUndefined();
+    });
+
+    it('normalizes a legacy targetType override to targets', () => {
+        const legacy = {
+            version: 1,
+            overrides: { [builtinWithName.id]: { targetType: 'note' } },
+            custom: [],
+        };
+        saveActionCustomizations(legacy as unknown as ActionCustomizations);
+        const merged = getMergedActions().find(a => a.id === builtinWithName.id)!;
+        expect(merged.targets).toEqual(['note']);
+    });
+
+    it('applies a targets override wholesale', () => {
+        const c: ActionCustomizations = {
+            version: 1,
+            overrides: { [builtinWithName.id]: { targets: ['items', 'attachment'] } },
+            custom: [],
+        };
+        saveActionCustomizations(c);
+        const merged = getMergedActions().find(a => a.id === builtinWithName.id)!;
+        expect(merged.targets).toEqual(['items', 'attachment']);
+    });
+
+    it('drops stored actions with no valid target in either shape', () => {
+        const invalid = {
+            version: 1,
+            overrides: {},
+            custom: [{ id: 'custom-bad', title: 'Bad', text: 'x', targetType: 'bogus' }],
+        };
+        saveActionCustomizations(invalid as unknown as ActionCustomizations);
+        expect(getMergedActions().some(a => a.id === 'custom-bad')).toBe(false);
     });
 });

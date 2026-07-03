@@ -12,8 +12,10 @@ import {
     ActionCustomizations,
     ActionLastUsedMap,
     ActionOverride,
-    isAction,
+    isStoredAction,
     isActionCustomizations,
+    normalizeStoredAction,
+    normalizeStoredOverride,
     generateActionId,
 } from './actions';
 import { BUILTIN_ACTIONS } from './builtinActions';
@@ -31,8 +33,9 @@ export const getActionCustomizations = (): ActionCustomizations => {
         if (raw && typeof raw === 'string') {
             const parsed = JSON.parse(raw);
             if (isActionCustomizations(parsed)) {
-                // Validate custom actions
-                parsed.custom = parsed.custom.filter(isAction);
+                // Validate custom actions and normalize legacy shapes
+                // (single `targetType` → `targets` array)
+                parsed.custom = parsed.custom.filter(isStoredAction).map(a => normalizeStoredAction(a as unknown as Record<string, unknown>));
                 return parsed;
             }
         }
@@ -115,16 +118,15 @@ export const getMergedActions = (): Action[] => {
 
         const merged: Action = { ...builtin };
         if (override) {
-            if (override.title !== undefined) merged.title = override.title;
-
-            if (override.text !== undefined) merged.text = override.text;
-            if (override.name !== undefined) merged.name = override.name;
-            if (override.id_model !== undefined) merged.id_model = override.id_model;
-            if (override.targetType !== undefined) merged.targetType = override.targetType;
-            if (override.category !== undefined) merged.category = override.category;
-            if (override.argumentHint !== undefined) merged.argumentHint = override.argumentHint;
-            if (override.sortOrder !== undefined) merged.sortOrder = override.sortOrder;
-            if (override.minItems !== undefined) merged.minItems = override.minItems;
+            const o = normalizeStoredOverride(override);
+            if (o.title !== undefined) merged.title = o.title;
+            if (o.text !== undefined) merged.text = o.text;
+            if (o.name !== undefined) merged.name = o.name;
+            if (o.id_model !== undefined) merged.id_model = o.id_model;
+            if (o.targets !== undefined) merged.targets = o.targets;
+            if (o.category !== undefined) merged.category = o.category;
+            if (o.argumentHint !== undefined) merged.argumentHint = o.argumentHint;
+            if (o.sortOrder !== undefined) merged.sortOrder = o.sortOrder;
         }
         if (lastUsedMap[merged.id]) {
             merged.lastUsed = lastUsedMap[merged.id];
@@ -158,7 +160,7 @@ export const getMergedActions = (): Action[] => {
 /**
  * Import user-created prompts from the old `beaver.customPrompts` pref.
  * Excludes old default prompts (`default-*` IDs). Maps `requiresAttachment`
- * to `targetType: "attachment"`, everything else to `"global"`.
+ * to the attachment target, everything else to global.
  * Sets `legacyPromptsImported` pref so the import is only offered once.
  */
 export const importFromOldCustomPrompts = (): Action[] => {
@@ -170,7 +172,7 @@ export const importFromOldCustomPrompts = (): Action[] => {
             id: generateActionId(),
             title: p.title,
             text: p.text,
-            targetType: p.requiresAttachment ? 'attachment' : 'global',
+            targets: [p.requiresAttachment ? 'attachment' : 'global'],
             id_model: p.id_model,
             sortOrder: 999,
         }));

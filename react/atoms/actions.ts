@@ -5,7 +5,7 @@
  */
 
 import { atom } from 'jotai';
-import { Action, ActionOverride, ActionTargetType } from '../types/actions';
+import { Action, ActionOverride, ActionTargetType, sameTargets } from '../types/actions';
 import { BUILTIN_ACTIONS } from '../types/builtinActions';
 import {
     getMergedActions,
@@ -62,11 +62,10 @@ export const saveActionsAtom = atom(
                 if (action.text !== base.text) { override.text = action.text; hasChange = true; }
                 if ((action.name ?? undefined) !== (base.name ?? undefined)) { override.name = action.name; hasChange = true; }
                 if ((action.id_model ?? undefined) !== (base.id_model ?? undefined)) { override.id_model = action.id_model; hasChange = true; }
-                if (action.targetType !== base.targetType) { override.targetType = action.targetType; hasChange = true; }
+                if (!sameTargets(action.targets, base.targets)) { override.targets = action.targets; hasChange = true; }
                 if ((action.category ?? undefined) !== (base.category ?? undefined)) { override.category = action.category; hasChange = true; }
                 if ((action.argumentHint ?? undefined) !== (base.argumentHint ?? undefined)) { override.argumentHint = action.argumentHint; hasChange = true; }
                 if ((action.sortOrder ?? undefined) !== (base.sortOrder ?? undefined)) { override.sortOrder = action.sortOrder; hasChange = true; }
-                if ((action.minItems ?? undefined) !== (base.minItems ?? undefined)) { override.minItems = action.minItems; hasChange = true; }
 
                 // Preserve hidden flag from existing override
                 if (c.overrides[action.id]?.hidden) {

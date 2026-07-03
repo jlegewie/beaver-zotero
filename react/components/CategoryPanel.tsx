@@ -7,8 +7,7 @@ import { AlertIcon, SettingsIcon, ArrowUpRightIcon } from "./icons/icons";
 import { Action, ActionCategory, TARGET_TYPE_LABELS } from "../types/actions";
 import { actionsForContextAtom, actionContextAtom } from "../atoms/actions";
 import { searchableLibraryIdsAtom } from "../atoms/profile";
-import { GroupIconInfo, splitCategoryActions } from "../utils/actionVisibility";
-import { getActiveTarget } from "./ActionSuggestions";
+import { GroupIconInfo, splitCategoryActions, getActiveTarget } from "../utils/actionVisibility";
 import { useActionRunner } from "../hooks/useActionRunner";
 import { openPreferencesWindow } from "../../src/ui/openPreferencesWindow";
 

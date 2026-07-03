@@ -41,7 +41,9 @@ export function useContextMenuActionHandler() {
                 if (itemIds.length > 0) {
                     const items = await Zotero.Items.getAsync(itemIds);
                     if (items.length > 0) {
-                        const dataTypes = targetType === 'note'
+                        // Multi-target actions can dispatch mixed selections,
+                        // so check the items themselves for notes
+                        const dataTypes = items.some(i => i.isNote())
                             ? ['itemData', 'note']
                             : ['itemData'];
                         await Zotero.Items.loadDataTypes(items, dataTypes);

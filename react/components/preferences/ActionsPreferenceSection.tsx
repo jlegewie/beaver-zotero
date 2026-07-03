@@ -13,8 +13,9 @@ import MenuButton from "../ui/MenuButton";
 import { MenuItem } from "../ui/menu/ContextMenu";
 import {SettingsGroup, SectionLabel, DocLink, SectionHeader} from "./components/SettingsElements";
 
-// Filter dimensions. `targetType` is what an action binds to; `category` is the
-// kind of work it is (both are shown on each action card).
+// Filter dimensions. `targets` is what an action binds to (the filter matches
+// any action accepting the kind); `category` is the kind of work it is (both
+// are shown on each action card).
 const TARGET_FILTER_OPTIONS: ActionTargetType[] = ["items", "attachment", "note", "collection", "global"];
 const CATEGORY_FILTER_OPTIONS: ActionCategory[] = ["research", "write", "organize", "annotate"];
 
@@ -95,13 +96,13 @@ const ActionsPreferenceSection: React.FC = () => {
     // the active filter by construction, filters are left as-is and the new card appears
     // right in the filtered list.
     const handleAddAction = useCallback(() => {
-        const targetType = targetFilter ?? 'global';
+        const targets: ActionTargetType[] = [targetFilter ?? 'global'];
         const category = categoryFilter && categoryFilter !== 'uncategorized' ? categoryFilter : undefined;
         const newAction: Action = {
             id: generateActionId(),
             title: "",
             text: "",
-            targetType,
+            targets,
             category,
             sortOrder: 999,
         };
@@ -116,7 +117,7 @@ const ActionsPreferenceSection: React.FC = () => {
 
     // --- Filtered actions (AND across the two dimensions) ---
     const filteredActions = useMemo(() => actions.filter(a =>
-        (targetFilter === null || a.targetType === targetFilter) &&
+        (targetFilter === null || a.targets.includes(targetFilter)) &&
         (categoryFilter === null
             || (categoryFilter === 'uncategorized' ? !a.category : a.category === categoryFilter))
     ), [actions, targetFilter, categoryFilter]);

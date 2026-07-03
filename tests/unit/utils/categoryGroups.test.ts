@@ -15,21 +15,21 @@ import { splitCategoryActions } from '../../../react/utils/actionVisibility';
 
 const A = (
     id: string,
-    targetType: ActionTargetType,
+    targets: ActionTargetType[],
     category: ActionCategory | undefined,
-): Action => ({ id, title: id, text: `prompt ${id}`, targetType, category });
+): Action => ({ id, title: id, text: `prompt ${id}`, targets, category });
 
 // A representative context-visible action list (already visibility-filtered, as
 // `actionsForContextAtom` would produce). splitCategoryActions only scopes by
 // category and splits selected-target vs library-wide.
 const VISIBLE: Action[] = [
-    A('fit', 'items', 'research'),
-    A('similar', 'items', 'research'),
-    A('whatsnew', 'global', 'research'),
-    A('tag', 'items', 'organize'),
-    A('untagged', 'global', 'organize'),
-    A('summarize', 'items', undefined),   // uncategorized ("Actions" bucket)
-    A('cleanup', 'global', undefined),    // uncategorized library-wide
+    A('fit', ['items'], 'research'),
+    A('similar', ['items', 'attachment'], 'research'),
+    A('whatsnew', ['global'], 'research'),
+    A('tag', ['items'], 'organize'),
+    A('untagged', ['global'], 'organize'),
+    A('summarize', ['items'], undefined),   // uncategorized ("Actions" bucket)
+    A('cleanup', ['global'], undefined),    // uncategorized library-wide
 ];
 
 describe('splitCategoryActions', () => {
@@ -68,6 +68,14 @@ describe('splitCategoryActions', () => {
         // items/global → no target-section actions, only library-wide.
         const { targetActions, globalActions } = splitCategoryActions(VISIBLE, 'research', 'collection');
         expect(targetActions).toEqual([]);
+        expect(globalActions.map(a => a.id)).toEqual(['whatsnew']);
+    });
+
+    it('matches multi-target actions on any accepted kind', () => {
+        // 'similar' targets items|attachment — it appears for an attachment
+        // context even though single-target items actions do not.
+        const { targetActions, globalActions } = splitCategoryActions(VISIBLE, 'research', 'attachment');
+        expect(targetActions.map(a => a.id)).toEqual(['similar']);
         expect(globalActions.map(a => a.id)).toEqual(['whatsnew']);
     });
 

@@ -105,7 +105,7 @@ const summarizeAction: Action = {
     id: 'custom-1',
     title: 'Summarize',
     text: 'Summarize the {{selected_items}}.',
-    targetType: 'items',
+    targets: ['items'],
     category: 'research',
 };
 

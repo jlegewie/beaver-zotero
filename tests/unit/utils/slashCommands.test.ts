@@ -165,7 +165,7 @@ describe('slashDescriptorsEqual', () => {
 describe('promptActionsToDescriptors', () => {
     const availableAction = (overrides: Partial<Action> & Pick<Action, 'id' | 'title'>): Action => ({
         text: 'Prompt text',
-        targetType: 'global',
+        targets: ['global'],
         ...overrides,
     });
 

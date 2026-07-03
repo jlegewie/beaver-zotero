@@ -3,7 +3,8 @@ import { useAtomValue, useSetAtom } from 'jotai';
 import { isStreamingAtom } from '../agents/atoms';
 import { isWSChatPendingAtom } from '../atoms/agentRunAtoms';
 import { Action } from '../types/actions';
-import { stageActionPillAtom } from '../atoms/actions';
+import { stageActionPillAtom, actionContextAtom } from '../atoms/actions';
+import { getActiveTarget, resolveActionBinding } from '../utils/actionVisibility';
 
 /**
  * Shared handler for running an action from a launcher surface (the contextual
@@ -11,11 +12,14 @@ import { stageActionPillAtom } from '../atoms/actions';
  *
  * Selecting an action stages a /command pill in the chat input; the user adds
  * any extra context and submits themselves. The action's prompt is resolved at
- * send time. `isBusy` is true while a run is streaming or pending.
+ * send time. The pill carries the single resolved target type — the active
+ * context target when the action accepts it (see `resolveActionBinding`).
+ * `isBusy` is true while a run is streaming or pending.
  */
 export function useActionRunner() {
     const isStreaming = useAtomValue(isStreamingAtom);
     const isPending = useAtomValue(isWSChatPendingAtom);
+    const ctx = useAtomValue(actionContextAtom);
     const stageActionPill = useSetAtom(stageActionPillAtom);
 
     const isBusy = isPending || isStreaming;
@@ -26,10 +30,10 @@ export function useActionRunner() {
         if (isBusy || action.text.length === 0) return;
         stageActionPill({
             actionId: action.id,
-            targetType: action.targetType,
+            targetType: resolveActionBinding(action, getActiveTarget(ctx)),
             targetWindow: sourceWindow ?? undefined,
         });
-    }, [isBusy, stageActionPill]);
+    }, [isBusy, ctx, stageActionPill]);
 
     return { runAction, isBusy };
 }

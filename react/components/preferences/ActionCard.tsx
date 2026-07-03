@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useAtomValue } from "jotai";
-import { Action, ActionCategory, ActionTargetType, CATEGORY_LABELS, TARGET_TYPE_LABELS, TARGET_TYPE_DESCRIPTIONS } from "../../types/actions";
+import { Action, ActionCategory, ActionTargetType, CATEGORY_LABELS, TARGET_PRESETS, targetsLabel, targetsDescription } from "../../types/actions";
 import { actionsAtom } from "../../atoms/actions";
 import { getActionCommand, toSlashToken } from "../../utils/slashCommands";
 import { hasUserInputVariables } from "../../utils/userInputVariables";
@@ -26,7 +26,6 @@ const MAX_NAME_LENGTH = 45;
 const MAX_ARGUMENT_HINT_LENGTH = 100;
 const MAX_PROMPT_TEXT_LENGTH = 2250;
 
-const TARGET_TYPE_OPTIONS: ActionTargetType[] = ["global", "items", "attachment", "note", "collection"];
 const CATEGORY_OPTIONS: (ActionCategory | undefined)[] = [undefined, "research", "write", "organize", "annotate"];
 
 // Category icons mirror the homepage launcher so the picker matches what users
@@ -91,7 +90,7 @@ const ActionCard: React.FC<ActionCardProps> = ({
     // clearing the field switches back to automatic.
     const [editName, setEditName] = useState(action.name ?? "");
     const [editArgumentHint, setEditArgumentHint] = useState(action.argumentHint ?? "");
-    const [editTargetType, setEditTargetType] = useState<ActionTargetType>(action.targetType);
+    const [editTargets, setEditTargets] = useState<ActionTargetType[]>(action.targets);
     const [editCategory, setEditCategory] = useState<ActionCategory | undefined>(action.category);
     const textareaRef = useRef<HTMLTextAreaElement | null>(null);
     const titleInputRef = useRef<HTMLInputElement | null>(null);
@@ -130,10 +129,10 @@ const ActionCard: React.FC<ActionCardProps> = ({
     }, [resolveUniqueCommand, action.name]);
 
     // Ref to hold latest draft values so the click-outside listener doesn't re-register on every keystroke
-    const draftRef = useRef({ editTitle, editText, editName, editArgumentHint, editTargetType, editCategory });
+    const draftRef = useRef({ editTitle, editText, editName, editArgumentHint, editTargets, editCategory });
     useEffect(() => {
-        draftRef.current = { editTitle, editText, editName, editArgumentHint, editTargetType, editCategory };
-    }, [editTitle, editText, editName, editArgumentHint, editTargetType, editCategory]);
+        draftRef.current = { editTitle, editText, editName, editArgumentHint, editTargets, editCategory };
+    }, [editTitle, editText, editName, editArgumentHint, editTargets, editCategory]);
 
     // Sync local draft state when action changes
     useEffect(() => {
@@ -143,11 +142,11 @@ const ActionCard: React.FC<ActionCardProps> = ({
             setEditText(action.text);
             setEditName(action.name ?? "");
             setEditArgumentHint(action.argumentHint ?? "");
-            setEditTargetType(action.targetType);
+            setEditTargets(action.targets);
             setEditCategory(action.category);
         }
         previousActionRef.current = action;
-    }, [action, action.title, action.text, action.name, action.argumentHint, action.targetType, action.category, isEditing]);
+    }, [action, action.title, action.text, action.name, action.argumentHint, action.targets, action.category, isEditing]);
 
     // Close edit mode on click outside — auto-saves, or removes if the action is empty
     useEffect(() => {
@@ -157,7 +156,7 @@ const ActionCard: React.FC<ActionCardProps> = ({
 
         const handleClickOutside = (e: MouseEvent) => {
             if (cardRef.current && !cardRef.current.contains(e.target as Node)) {
-                const { editTitle: title, editText: text, editName: name, editArgumentHint: argumentHint, editTargetType: targetType, editCategory: category } = draftRef.current;
+                const { editTitle: title, editText: text, editName: name, editArgumentHint: argumentHint, editTargets: targets, editCategory: category } = draftRef.current;
                 // New action that's still empty — remove it
                 if (!title && !text && !action.title && !action.text) {
                     onRemove();
@@ -169,7 +168,7 @@ const ActionCard: React.FC<ActionCardProps> = ({
                         text,
                         name: resolveNameForSave(title, name),
                         argumentHint: argumentHint.trim() || undefined,
-                        targetType,
+                        targets,
                         category,
                     });
                 }
@@ -208,7 +207,7 @@ const ActionCard: React.FC<ActionCardProps> = ({
             setEditText(action.text);
             setEditName(action.name ?? "");
             setEditArgumentHint(action.argumentHint ?? "");
-            setEditTargetType(action.targetType);
+            setEditTargets(action.targets);
             setEditCategory(action.category);
             setIsEditing(true);
         }
@@ -231,7 +230,7 @@ const ActionCard: React.FC<ActionCardProps> = ({
         setEditText(action.text);
         setEditName(action.name ?? "");
         setEditArgumentHint(action.argumentHint ?? "");
-        setEditTargetType(action.targetType);
+        setEditTargets(action.targets);
         setEditCategory(action.category);
         setIsEditing(false);
     }, [action, onRemove]);
@@ -243,11 +242,11 @@ const ActionCard: React.FC<ActionCardProps> = ({
             text: editText,
             name: resolveNameForSave(editTitle, editName),
             argumentHint: editArgumentHint.trim() || undefined,
-            targetType: editTargetType,
+            targets: editTargets,
             category: editCategory,
         });
         setIsEditing(false);
-    }, [action, editTitle, editText, editName, editArgumentHint, editTargetType, editCategory, onChange, resolveNameForSave]);
+    }, [action, editTitle, editText, editName, editArgumentHint, editTargets, editCategory, onChange, resolveNameForSave]);
 
     // Automatic mode (no manual name typed): preview the title-derived
     // command, including the numeric suffix it would get on save.
@@ -257,13 +256,16 @@ const ActionCard: React.FC<ActionCardProps> = ({
         : editName;
     const manualNameConflict = !isAutoName && takenCommands.has(toSlashToken(editName));
 
-    const targetTypeMenuItems: MenuItem[] = TARGET_TYPE_OPTIONS.map(tt => ({
-        label: TARGET_TYPE_LABELS[tt],
-        onClick: () => setEditTargetType(tt),
+    // Target picker offers curated presets; the underlying model is a target
+    // set, so hand-edited custom sets round-trip untouched until the user
+    // picks a preset here.
+    const targetMenuItems: MenuItem[] = TARGET_PRESETS.map(preset => ({
+        label: preset.label,
+        onClick: () => setEditTargets(preset.targets),
         customContent: (
             <div className="display-flex flex-col">
-                <span className="text-sm font-color-primary">{TARGET_TYPE_LABELS[tt]}</span>
-                <span className="text-sm font-color-secondary">{TARGET_TYPE_DESCRIPTIONS[tt]}</span>
+                <span className="text-sm font-color-primary">{preset.label}</span>
+                <span className="text-sm font-color-secondary">{preset.description}</span>
             </div>
         )
     }));
@@ -303,8 +305,8 @@ const ActionCard: React.FC<ActionCardProps> = ({
                                 </span>
                             </Tooltip>
                         )}
-                        <span className="action-target-badge" data-type={action.targetType}>
-                            {TARGET_TYPE_LABELS[action.targetType]}
+                        <span className="action-target-badge" data-type={action.targets[0]}>
+                            {targetsLabel(action.targets)}
                         </span>
                     </div>
                     {action.text && (
@@ -448,19 +450,19 @@ const ActionCard: React.FC<ActionCardProps> = ({
                             tooltip="Controls when this action shows up, based on your current Zotero selection."
                         />
                         <MenuButton
-                            menuItems={targetTypeMenuItems}
+                            menuItems={targetMenuItems}
                             variant="outline"
                             ariaLabel="Select what this action applies to"
                             className="action-field-select"
                             customContent={
                                 <div className="display-flex flex-row items-center gap-2 w-full min-w-0">
-                                    <span className="flex-1 truncate text-base font-color-primary">{TARGET_TYPE_LABELS[editTargetType]}</span>
+                                    <span className="flex-1 truncate text-base font-color-primary">{targetsLabel(editTargets)}</span>
                                     <Icon icon={ArrowDownIcon} size={14} className="font-color-tertiary flex-shrink-0" />
                                 </div>
                             }
                         />
                         <div className="action-field-help text-sm font-color-tertiary">
-                            {TARGET_TYPE_DESCRIPTIONS[editTargetType]}
+                            {targetsDescription(editTargets)}
                         </div>
                     </div>
 

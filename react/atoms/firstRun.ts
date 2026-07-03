@@ -34,7 +34,7 @@ export const MAX_VISIBLE_FIRST_RUN_CARDS = 5;
 /**
  * Hand-authored fallback cards used when the backend fails or returns fewer
  * than 3 cards. Prompts must work without item/collection attachments — they
- * mirror the `targetType: 'global'` builtins in `react/types/builtinActions.ts`.
+ * mirror the global-target builtins in `react/types/builtinActions.ts`.
  */
 const FALLBACK_FIRST_RUN_CARDS: SuggestionCard[] = [
     {

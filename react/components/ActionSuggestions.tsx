@@ -1,145 +1,16 @@
 import React from "react";
 import Button from "./ui/Button";
 import { useAtomValue } from "jotai";
-import { Action, ActionTargetType } from "../types/actions";
+import { Action } from "../types/actions";
 import { actionsForContextAtom, actionContextAtom } from "../atoms/actions";
 import { useActionRunner } from "../hooks/useActionRunner";
-import { getDisplayNameFromItem } from "../utils/sourceUtils";
-import { truncateText } from "../utils/stringUtils";
-import { ActionContext, GroupIconInfo, getIconInfoForItem, isActionableItem } from "../utils/actionVisibility";
+import { getActiveTarget } from "../utils/actionVisibility";
 import { searchableLibraryIdsAtom } from "../atoms/profile";
 import { CSSIcon, CSSItemTypeIcon } from "./icons/zotero";
 import Icon from "./icons/Icon";
 import { AlertIcon, SettingsIcon, ZapIcon } from './icons/icons';
 import { openPreferencesWindow } from "../../src/ui/openPreferencesWindow";
 import IconButton from "./ui/IconButton";
-
-const MAX_CONTEXT_ITEM_LENGTH = 50;
-const MAX_VISIBLE_ITEMS = 1;
-
-export interface ActiveTarget {
-    targetType: ActionTargetType;
-    label: string | null;
-    iconInfo?: GroupIconInfo;
-}
-
-/**
- * Priority chain for determining the single winning action target type.
- *
- * 1. Reader (non-library tab + supported PDF) → 'attachment'
- * 2. Note (non-library tab + note) → 'note'
- * 3. Manual items (currentMessageItemsAtom has supported items):
- *    - All attachments → 'attachment'
- *    - Has regular items → 'items'
- * 4. Selected items (items_selected context with supported items):
- *    - All attachments → 'attachment'
- *    - Has regular items → 'items'
- * 5. Collection (treeRowType === 'collection') → 'collection'
- * 6. Fallback → null (global only)
- */
-export function getActiveTarget(ctx: ActionContext): ActiveTarget | null {
-    const { zotero, manualItems } = ctx;
-
-    // 1. Reader
-    if (zotero.type === 'reader') {
-        const att = zotero.readerAttachment;
-        if (att && isActionableItem(att)) {
-            return { targetType: 'attachment', label: getItemLabel(att), iconInfo: getIconInfoForItem(att) };
-        }
-    }
-
-    // 2. Note
-    if (zotero.type === 'note') {
-        const noteItem = zotero.noteItem;
-        const label = noteItem
-            ? truncateText(noteItem.getNoteTitle(), MAX_CONTEXT_ITEM_LENGTH)
-            : null;
-        return { targetType: 'note', label, iconInfo: { type: 'css-icon', name: 'note' } };
-    }
-
-    // 3. Manual items
-    const manualSupported = manualItems.filter(i => isActionableItem(i));
-    if (manualSupported.length > 0) {
-        const allAttachments = manualSupported.every(i => i.isAttachment());
-        const targetType: ActionTargetType = allAttachments ? 'attachment' : 'items';
-        return { targetType, label: getManualItemsLabel(manualSupported), iconInfo: getIconInfoForItem(manualSupported[0]) };
-    }
-
-    // 4. Selected items
-    if (zotero.type === 'items_selected') {
-        const supported = zotero.selectedItems.filter(i => isActionableItem(i));
-        if (supported.length > 0) {
-            const allAttachments = supported.every(i => i.isAttachment());
-            const targetType: ActionTargetType = allAttachments ? 'attachment' : 'items';
-            const labelItems = targetType === 'attachment'
-                ? supported.filter(i => i.isAttachment())
-                : supported.filter(i => i.isRegularItem());
-            const displayItems = labelItems.length > 0 ? labelItems : supported;
-            return { targetType, label: getSelectedItemsLabel(displayItems), iconInfo: getIconInfoForItem(displayItems[0]) };
-        }
-    }
-
-    // 4b. Selected notes (when no actionable items found in step 4)
-    if (zotero.type === 'items_selected') {
-        const selectedNotes = zotero.selectedItems.filter(i => i.isNote());
-        if (selectedNotes.length > 0) {
-            const label = selectedNotes.length === 1
-                ? truncateText(selectedNotes[0].getNoteTitle(), MAX_CONTEXT_ITEM_LENGTH)
-                : `${selectedNotes.length} selected notes`;
-            return { targetType: 'note', label, iconInfo: { type: 'css-icon', name: 'note' } };
-        }
-    }
-
-    // 5. Collection
-    if (zotero.libraryView.treeRowType === 'collection') {
-        return {
-            targetType: 'collection',
-            label: zotero.libraryView.collectionName ?? null,
-            iconInfo: { type: 'css-icon', name: 'collection' },
-        };
-    }
-
-    // 6. No specific context
-    return null;
-}
-
-/** Display name for any item type — regular items use author/year, others use parent or display title */
-function getItemLabel(item: Zotero.Item): string {
-    if (item.isRegularItem()) {
-        return truncateText(getDisplayNameFromItem(item), MAX_CONTEXT_ITEM_LENGTH);
-    }
-    return truncateText(item.getDisplayTitle(), MAX_CONTEXT_ITEM_LENGTH);
-}
-
-function formatItemNames(items: Zotero.Item[], source: 'selected' | 'attached'): string {
-    const prefix = source === 'selected' ? 'selected' : 'attached';
-    if (items.length > MAX_VISIBLE_ITEMS) {
-        if (source === 'attached' && items.some(i => i.isAttachment()) && items.some(i => i.isRegularItem())) {
-            return `${items.length} ${prefix} items and attachments`;
-        }
-        if (items.every(i => i.isAttachment())) {
-            return `${items.length} ${prefix} attachments`;
-        }
-        if (items.every(i => i.isNote())) {
-            return `${items.length} ${prefix} notes`;
-        }
-        return `${items.length} ${prefix} items`;
-    }
-    const names = items
-        .slice(0, MAX_VISIBLE_ITEMS)
-        .map(i => getItemLabel(i));
-    const remaining = items.length - MAX_VISIBLE_ITEMS;
-    if (remaining > 0) names.push(`+${remaining} more`);
-    return names.join(', ');
-}
-
-function getManualItemsLabel(items: Zotero.Item[]): string {
-    return formatItemNames(items, 'attached');
-}
-
-function getSelectedItemsLabel(items: Zotero.Item[]): string {
-    return formatItemNames(items, 'selected');
-}
 
 interface ActionSuggestionsProps {
     /** When true, global actions are always shown. When false, global actions only appear if no context-specific actions match. */
@@ -168,13 +39,15 @@ const ActionSuggestions: React.FC<ActionSuggestionsProps> = ({ showGlobal = true
         : ctx.zotero.readerAttachment?.libraryID ?? ctx.zotero.noteItem?.libraryID ?? null;
     const isLibrarySupported = currentLibraryId && searchableLibraryIds.includes(currentLibraryId);
 
-    // Determine the single winning target type — never mix types
+    // Determine the single active target type the surface binds to
     const active = getActiveTarget(ctx);
 
     const targetActions = active
-        ? contextActions.filter(a => a.targetType === active.targetType)
+        ? contextActions.filter(a => a.targets.includes(active.targetType))
         : [];
-    const globalActions = contextActions.filter(a => a.targetType === 'global');
+    const globalActions = contextActions.filter(a =>
+        a.targets.includes('global') && !targetActions.includes(a)
+    );
 
     let actions: Action[];
     if (targetActions.length > 0) {

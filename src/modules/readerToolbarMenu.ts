@@ -209,7 +209,7 @@ function openBeaverMenu(reader: any, anchorButton: HTMLElement): void {
     const readerItemID: number | undefined = reader.itemID;
 
     if (isPdf || isEpub) {
-        const actions = getMergedActions().filter(a => a.targetType === 'attachment');
+        const actions = getMergedActions().filter(a => a.targets.includes('attachment'));
 
         if (actions.length > 0) {
             appendSeparator();
