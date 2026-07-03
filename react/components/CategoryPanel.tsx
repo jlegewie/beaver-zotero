@@ -3,7 +3,7 @@ import { useAtomValue } from "jotai";
 import Button from "./ui/Button";
 import Tooltip from "./ui/Tooltip";
 import { CSSIcon, CSSItemTypeIcon } from "./icons/zotero";
-import { SettingsIcon, ArrowUpRightIcon } from "./icons/icons";
+import { ArrowUpRightIcon, ArrowRightIcon } from "./icons/icons";
 import { Action, ActionCategory, TARGET_TYPE_LABELS } from "../types/actions";
 import { actionsForContextAtom, actionContextAtom } from "../atoms/actions";
 import { GroupIconInfo, splitCategoryActions, getActiveTarget } from "../utils/actionVisibility";
@@ -118,17 +118,18 @@ const CategoryPanel: React.FC<CategoryPanelProps> = ({ category, style }) => {
             )}
 
             {/* Footer — edit actions + not-synced warning */}
-            <div className="display-flex flex-row items-center gap-2 pt-3">
-                <div className="flex-1" />
+            <div className="display-flex flex-row items-center gap-2">
+                {/* <div className="flex-1" /> */}
                 <Button
                     variant="ghost"
                     onClick={() => openPreferencesWindow('actions', categoryFilter)}
-                    icon={SettingsIcon}
-                    ariaLabel="Edit actions"
-                    title="Edit actions"
-                    style={{ padding: '4px 6px' }}
+                    rightIcon={ArrowRightIcon}
+                    iconClassName="mt-010"
+                    ariaLabel="Add custom action"
+                    title="Add custom action"
+                    style={{ padding: '4px 6px', gap: '4px' }}
                 >
-                    Edit
+                    Add Custom Action
                 </Button>
             </div>
         </div>
