@@ -239,7 +239,7 @@ const Tooltip: React.FC<TooltipProps> = ({
         >
             <span className={`
                     ${padding && 'px-2 py-1'} block
-                    ${singleLine ? 'display-flex items-center' : ''}
+                    ${singleLine ? 'display-flex items-center' : 'whitespace-normal'}
                     ${singleLine ? 'single-line' : ''}
                 `}
                 style={{ display: singleLine ? 'flex' : 'block' }}

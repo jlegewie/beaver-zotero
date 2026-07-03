@@ -46,7 +46,7 @@ const FieldLabel: React.FC<{ label: string; tooltip: string; className?: string 
     <div className={`action-field-label text-base font-color-primary ${className}`}>
         <span>{label}</span>
         <Tooltip content={tooltip} width="220px">
-            <Icon icon={InformationCircleIcon} size={13} className="font-color-tertiary" />
+            <Icon icon={InformationCircleIcon} size={13} className="font-color-tertiary mt-1" />
         </Tooltip>
     </div>
 );
