@@ -41,6 +41,13 @@ function attachmentIconName(contentKind?: ContentKind | ExternalFileContentKind 
     }
 }
 
+function stopLeftClick(e: React.MouseEvent<HTMLButtonElement>) {
+    e.stopPropagation();
+    if (e.button !== 0) {
+        e.preventDefault();
+    }
+}
+
 function refKey(ref: ZoteroItemReference): string {
     return `${ref.library_id}-${ref.zotero_key}`;
 }
@@ -362,6 +369,169 @@ export function chipForMessageAttachment(
                     tag={att.name}
                     color={att.color}
                 />
+            );
+        default:
+            return null;
+    }
+}
+
+function InlineRefButton({
+    popup,
+    children,
+    onClick,
+}: {
+    popup: ChipPopupContent;
+    children: React.ReactNode;
+    onClick?: React.MouseEventHandler<HTMLButtonElement>;
+}) {
+    return (
+        <ChipWithPopup popup={popup}>
+            <button
+                type="button"
+                className="inline-ref-chip"
+                onClick={(e) => {
+                    stopLeftClick(e);
+                    if (e.button === 0) onClick?.(e);
+                }}
+            >
+                {children}
+            </button>
+        </ChipWithPopup>
+    );
+}
+
+function InlineRefIcon({ children }: { children: React.ReactNode }) {
+    return <span className="inline-ref-chip-icon">{children}</span>;
+}
+
+export function inlineChipForMessageAttachment(
+    att: MessageAttachment,
+    key?: React.Key,
+): React.ReactNode {
+    switch (att.type) {
+        case 'item': {
+            const ref = attachmentRef(att);
+            const displayName = itemStubLabel(att) || 'Item';
+            const iconName = att.item?.item_type || 'document';
+            return (
+                <InlineRefButton
+                    key={key ?? `inline-item-${refKey(ref)}`}
+                    popup={{
+                        icon: <CSSItemTypeIcon itemType={iconName} className="scale-90" />,
+                        title: displayName,
+                        subtitle: itemStubSubtitle(att),
+                        action: { icon: LibraryIcon, label: 'Reveal in library' },
+                    }}
+                    onClick={() => getHost().navigation?.revealInLibrary(ref)}
+                >
+                    <InlineRefIcon>
+                        <CSSItemTypeIcon itemType={iconName} />
+                    </InlineRefIcon>
+                    <span className="inline-ref-chip-label">{displayName}</span>
+                </InlineRefButton>
+            );
+        }
+        case 'source': {
+            const ref = attachmentRef(att);
+            const displayName = sourceStubLabel(att) || 'Attachment';
+            const iconName = attachmentIconName(att.attachment?.content_kind);
+            return (
+                <InlineRefButton
+                    key={key ?? `inline-source-${refKey(ref)}`}
+                    popup={{
+                        icon: <CSSItemTypeIcon itemType={iconName} className="scale-90" />,
+                        title: displayName,
+                        subtitle: sourceSubtitle(att),
+                        action: { icon: LibraryIcon, label: 'Reveal in library' },
+                    }}
+                    onClick={() => getHost().navigation?.revealInLibrary(ref)}
+                >
+                    <InlineRefIcon>
+                        <CSSItemTypeIcon itemType={iconName} />
+                    </InlineRefIcon>
+                    <span className="inline-ref-chip-label">{displayName}</span>
+                </InlineRefButton>
+            );
+        }
+        case 'annotation': {
+            const icon = ANNOTATION_ICON_BY_TYPE[att.annotation_type] || ZOTERO_ICONS.ANNOTATION;
+            const typeLabel = ANNOTATION_TEXT_BY_TYPE[att.annotation_type] || 'Annotation';
+            const ref = { library_id: att.library_id, zotero_key: att.zotero_key };
+            return (
+                <InlineRefButton
+                    key={key ?? `inline-annotation-${refKey(ref)}`}
+                    popup={buildAnnotationChipPopup({
+                        annotationType: att.annotation_type,
+                        color: att.color,
+                        title: annotationTitle(att),
+                    })}
+                    onClick={() => getHost().navigation?.openAnnotation(ref)}
+                >
+                    <InlineRefIcon>
+                        <ZoteroIcon icon={icon} size={14} style={att.color ? { color: att.color } : undefined} />
+                    </InlineRefIcon>
+                    <span className="inline-ref-chip-label">{typeLabel}</span>
+                </InlineRefButton>
+            );
+        }
+        case 'note': {
+            const ref = { library_id: att.library_id, zotero_key: att.zotero_key };
+            const displayName = att.title || 'Untitled Note';
+            return (
+                <InlineRefButton
+                    key={key ?? `inline-note-${refKey(ref)}`}
+                    popup={{
+                        icon: <CSSItemTypeIcon itemType="note" className="scale-90" />,
+                        title: displayName,
+                        subtitle: noteSubtitle(att),
+                        action: { icon: NoteIcon, label: 'Open note' },
+                    }}
+                    onClick={() => getHost().navigation?.openSource(ref)}
+                >
+                    <InlineRefIcon>
+                        <CSSItemTypeIcon itemType="note" />
+                    </InlineRefIcon>
+                    <span className="inline-ref-chip-label">{displayName}</span>
+                </InlineRefButton>
+            );
+        }
+        case 'collection': {
+            const ref = { library_id: att.library_id, zotero_key: att.zotero_key };
+            return (
+                <InlineRefButton
+                    key={key ?? `inline-collection-${refKey(ref)}`}
+                    popup={{
+                        icon: <CSSIcon name="collection" className="icon-16" />,
+                        title: att.name,
+                        subtitle: { text: 'Collection' },
+                        action: { icon: LibraryIcon, label: 'Reveal in library' },
+                    }}
+                    onClick={() => getHost().navigation?.revealCollection(ref)}
+                >
+                    <InlineRefIcon>
+                        <CSSIcon name="collection" className="icon-16" />
+                    </InlineRefIcon>
+                    <span className="inline-ref-chip-label">{att.name}</span>
+                </InlineRefButton>
+            );
+        }
+        case 'external_file':
+            return (
+                <InlineRefButton
+                    key={key ?? `inline-external-${att.ext_key}`}
+                    popup={{
+                        icon: <CSSItemTypeIcon itemType={attachmentIconName(att.content_kind)} className="scale-90" />,
+                        title: att.filename,
+                        subtitle: { text: 'External file' },
+                        action: { icon: ExternalLinkIcon, label: 'Open external file', iconClassName: 'scale-75' },
+                    }}
+                    onClick={() => getHost().navigation?.launchExternalFile(att.ext_key)}
+                >
+                    <InlineRefIcon>
+                        <CSSItemTypeIcon itemType={attachmentIconName(att.content_kind)} />
+                    </InlineRefIcon>
+                    <span className="inline-ref-chip-label">{att.filename}</span>
+                </InlineRefButton>
             );
         default:
             return null;

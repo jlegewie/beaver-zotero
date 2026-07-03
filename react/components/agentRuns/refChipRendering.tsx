@@ -1,7 +1,7 @@
 import React from 'react';
 import type { MessageAttachment } from '../../types/attachments/apiTypes';
 import { splitContentByRefTokens } from '../../utils/refTokens';
-import { chipForMessageAttachment } from './requestChips/RequestChipPrimitives';
+import { inlineChipForMessageAttachment } from './requestChips/RequestChipPrimitives';
 
 export function renderContentWithRefChips(
     content: string,
@@ -11,6 +11,6 @@ export function renderContentWithRefChips(
         if (segment.type === 'text') {
             return <React.Fragment key={`text-${index}`}>{segment.text}</React.Fragment>;
         }
-        return chipForMessageAttachment(segment.attachment, `ref-${segment.refId}-${index}`);
+        return inlineChipForMessageAttachment(segment.attachment, `ref-${segment.refId}-${index}`);
     });
 }

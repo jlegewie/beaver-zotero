@@ -1930,6 +1930,59 @@
     font-size: 0.85rem;
 }
 
+[id^="beaver-pane-"] .inline-ref-chip {
+    -moz-appearance: none !important;
+    appearance: none !important;
+    border: 0 !important;
+    border-radius: 5px;
+    background: transparent !important;
+    /* background-color: var(--fill-quinary); */
+
+    /* color: var(--tag-blue-primary); */
+    /* background-color: var(--tag-blue-quarternary); */
+    
+    box-shadow: none !important;
+    color: inherit;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35em;
+    font: inherit;
+    line-height: inherit;
+    margin: 0 0em;
+    min-height: 0;
+    padding: 0.15em 0.3em;
+    text-align: inherit;
+    transition: background-color 120ms ease-in-out, color 120ms ease-in-out;
+    vertical-align: -0.2em;
+    max-width: 100%
+}
+
+[id^="beaver-pane-"] .inline-ref-chip:hover {
+    color: var(--fill-primary);
+    background-color: var(--fill-quinary) !important;
+}
+
+[id^="beaver-pane-"] .inline-ref-chip-icon {
+    color: currentColor;
+    display: inline-flex;
+    flex: 0 0 auto;
+    /* height: 0.86em; */
+    opacity: 0.85;
+    transform: translateY(0.03em);
+    width: 1.1em;
+}
+
+[id^="beaver-pane-"] .inline-ref-chip-icon svg {
+    /* height: 0.86em; */
+    width: 1.1em;
+}
+
+[id^="beaver-pane-"] .inline-ref-chip-label {
+    line-height: inherit;
+    min-width: 0;
+}
+
 [id^="beaver-pane-"] .source-citation {
     font-size: 0.8em;
     margin-left: 0.15em;
