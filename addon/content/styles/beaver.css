@@ -652,10 +652,13 @@
     box-sizing: border-box !important;
 }
 
-/* Action Card — connected-list row (view mode) */
+/* Action Card — standalone bordered card (view mode) */
 [id^="beaver-pane-"] .action-card {
     padding: 10px 12px;
     cursor: pointer;
+    border: 1px solid var(--fill-quarternary);
+    border-radius: 8px;
+    overflow: hidden;
     transition: background-color 0.15s ease;
 }
 
@@ -695,6 +698,13 @@
     align-items: center;
     gap: 5px;
     margin-bottom: 5px;
+}
+
+/* Inline variant — label sits to the left of its control (Applies to / Category) */
+[id^="beaver-pane-"] .action-field-label-inline {
+    margin-bottom: 0;
+    flex-shrink: 0;
+    white-space: nowrap;
 }
 
 /* Bordered field container for the Name input and Prompt textarea */

@@ -40,12 +40,10 @@ const categoryIcon = (cat: ActionCategory | undefined): React.ComponentType<Reac
     cat ? CATEGORY_ICONS[cat] : ZapIcon;
 
 const categoryLabel = (cat: ActionCategory | undefined): string => (cat ? CATEGORY_LABELS[cat] : "Uncategorized");
-const categoryHelp = (cat: ActionCategory | undefined): string =>
-    cat ? `Shown under the ${CATEGORY_LABELS[cat]} group.` : "Shown in the general Actions group.";
 
 /** Field heading with a hover-info circle, matching the two-column edit layout. */
-const FieldLabel: React.FC<{ label: string; tooltip: string }> = ({ label, tooltip }) => (
-    <div className="action-field-label text-base font-color-primary">
+const FieldLabel: React.FC<{ label: string; tooltip: string; className?: string }> = ({ label, tooltip, className = "" }) => (
+    <div className={`action-field-label text-base font-color-primary ${className}`}>
         <span>{label}</span>
         <Tooltip content={tooltip} width="220px">
             <Icon icon={InformationCircleIcon} size={13} className="font-color-tertiary" />
@@ -61,7 +59,6 @@ interface ActionCardProps {
     onResetToDefault?: () => void;
     isBuiltin: boolean;
     isOverridden: boolean;
-    hasBorder?: boolean;
     /** Externally requested edit mode (e.g. an action pill in the chat input
      *  was clicked): the card scrolls into view, enters edit mode, and calls
      *  `onForceEditHandled` to acknowledge the one-shot request. */
@@ -77,7 +74,6 @@ const ActionCard: React.FC<ActionCardProps> = ({
     onResetToDefault,
     isBuiltin,
     isOverridden,
-    hasBorder = false,
     forceEdit = false,
     onForceEditHandled,
 }) => {
@@ -286,11 +282,16 @@ const ActionCard: React.FC<ActionCardProps> = ({
         return (
             <div
                 ref={cardRef}
-                className={`action-card ${hasBorder ? 'border-top-popup' : ''}`}
+                className="action-card"
                 onClick={handleEnterEdit}
             >
                 <div className="display-flex flex-col flex-1 min-w-0" style={{ gap: '3px' }}>
                     <div className="display-flex flex-row items-center gap-3">
+                        <Icon
+                            icon={categoryIcon(action.category)}
+                            size={15}
+                            className="font-color-secondary flex-shrink-0"
+                        />
                         <div className="font-color-primary text-base font-medium">
                             {action.title || <span className="font-color-tertiary">Untitled action</span>}
                         </div>
@@ -311,7 +312,10 @@ const ActionCard: React.FC<ActionCardProps> = ({
                     </div>
                     {action.text && (
                         <div className="font-color-secondary text-base action-card-preview">
-                            {action.text}
+                            {/* Collapse newlines/blank lines so the 2-line clamp shows a
+                                continuous preview and its ellipsis lands at the end of real
+                                text, not alone on a blank second line. */}
+                            {action.text.replace(/\s+/g, ' ').trim()}
                         </div>
                     )}
                 </div>
@@ -321,7 +325,7 @@ const ActionCard: React.FC<ActionCardProps> = ({
 
     // --- Edit mode ---
     return (
-        <div ref={cardRef} className={`action-card action-card-editing ${hasBorder ? 'border-top-popup' : ''}`}>
+        <div ref={cardRef} className="action-card action-card-editing">
             {/* Header bar — distinct background, no leading icon, primary actions on the right */}
             <div className="action-edit-header">
                 <div className="text-base font-color-secondary truncate min-w-0">
@@ -442,50 +446,51 @@ const ActionCard: React.FC<ActionCardProps> = ({
                     </div>
                 )}
 
-                {/* Applies to + Category — two outlined pickers side by side */}
+                {/* Applies to + Category — two halves side by side; within each half the
+                    label sits inline to the left of a compact picker. */}
                 <div className="display-flex flex-row gap-4 mt-3">
                     <div className="display-flex flex-col flex-1 min-w-0">
-                        <FieldLabel
-                            label="Applies to"
-                            tooltip="Controls when this action shows up, based on your current Zotero selection."
-                        />
-                        <MenuButton
-                            menuItems={targetMenuItems}
-                            variant="outline"
-                            ariaLabel="Select what this action applies to"
-                            className="action-field-select"
-                            customContent={
-                                <div className="display-flex flex-row items-center gap-2 w-full min-w-0">
-                                    <span className="flex-1 truncate text-base font-color-primary">{targetsLabel(editTargets)}</span>
-                                    <Icon icon={ArrowDownIcon} size={14} className="font-color-tertiary flex-shrink-0" />
-                                </div>
-                            }
-                        />
-                        <div className="action-field-help text-sm font-color-tertiary">
-                            {targetsDescription(editTargets)}
+                        <div className="display-flex flex-row items-center gap-2 min-w-0">
+                            <FieldLabel
+                                label="Applies to"
+                                tooltip="Controls when this action shows up, based on your current Zotero selection."
+                                className="action-field-label-inline"
+                            />
+                            <MenuButton
+                                menuItems={targetMenuItems}
+                                variant="outline"
+                                ariaLabel="Select what this action applies to"
+                                className="action-field-select flex-1"
+                                customContent={
+                                    <div className="display-flex flex-row items-center gap-2 w-full min-w-0">
+                                        <span className="flex-1 truncate text-base font-color-primary">{targetsLabel(editTargets)}</span>
+                                        <Icon icon={ArrowDownIcon} size={14} className="font-color-tertiary flex-shrink-0" />
+                                    </div>
+                                }
+                            />
                         </div>
                     </div>
 
                     <div className="display-flex flex-col flex-1 min-w-0">
-                        <FieldLabel
-                            label="Category"
-                            tooltip="Groups this action on the Beaver homepage launcher."
-                        />
-                        <MenuButton
-                            menuItems={categoryMenuItems}
-                            variant="outline"
-                            ariaLabel="Select category"
-                            className="action-field-select"
-                            customContent={
-                                <div className="display-flex flex-row items-center gap-2 w-full min-w-0">
-                                    <Icon icon={categoryIcon(editCategory)} size={14} className="font-color-secondary flex-shrink-0" />
-                                    <span className="flex-1 truncate text-base font-color-primary">{categoryLabel(editCategory)}</span>
-                                    <Icon icon={ArrowDownIcon} size={14} className="font-color-tertiary flex-shrink-0" />
-                                </div>
-                            }
-                        />
-                        <div className="action-field-help text-sm font-color-tertiary">
-                            {categoryHelp(editCategory)}
+                        <div className="display-flex flex-row items-center gap-2 min-w-0">
+                            <FieldLabel
+                                label="Category"
+                                tooltip="Groups this action on the Beaver homepage launcher."
+                                className="action-field-label-inline"
+                            />
+                            <MenuButton
+                                menuItems={categoryMenuItems}
+                                variant="outline"
+                                ariaLabel="Select category"
+                                className="action-field-select flex-1"
+                                customContent={
+                                    <div className="display-flex flex-row items-center gap-2 w-full min-w-0">
+                                        <Icon icon={categoryIcon(editCategory)} size={14} className="font-color-secondary flex-shrink-0" />
+                                        <span className="flex-1 truncate text-base font-color-primary">{categoryLabel(editCategory)}</span>
+                                        <Icon icon={ArrowDownIcon} size={14} className="font-color-tertiary flex-shrink-0" />
+                                    </div>
+                                }
+                            />
                         </div>
                     </div>
                 </div>

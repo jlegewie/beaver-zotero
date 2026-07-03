@@ -11,7 +11,7 @@ import { isBuiltinAction, getActionCustomizations, getHiddenBuiltinActions, impo
 import ActionCard from "./ActionCard";
 import MenuButton from "../ui/MenuButton";
 import { MenuItem } from "../ui/menu/ContextMenu";
-import {SettingsGroup, SectionLabel, DocLink, SectionHeader} from "./components/SettingsElements";
+import {SectionLabel, DocLink, SectionHeader} from "./components/SettingsElements";
 
 // Filter dimensions. `targets` is what an action binds to (the filter matches
 // any action accepting the kind); `category` is the kind of work it is (both
@@ -246,8 +246,8 @@ const ActionsPreferenceSection: React.FC = () => {
                     No actions match the selected filters.
                 </div>
             ) : (
-                <SettingsGroup>
-                    {filteredActions.map((action: Action, index: number) => {
+                <div className="display-flex flex-col" style={{ gap: '8px' }}>
+                    {filteredActions.map((action: Action) => {
                         const builtin = isBuiltinAction(action.id);
                         const overridden = overriddenBuiltinIds.has(action.id);
                         return (
@@ -260,13 +260,12 @@ const ActionsPreferenceSection: React.FC = () => {
                                 onResetToDefault={builtin && overridden ? () => resetActionToDefault(action.id) : undefined}
                                 isBuiltin={builtin}
                                 isOverridden={overridden}
-                                hasBorder={index > 0}
                                 forceEdit={pendingActionEdit?.actionId === action.id}
                                 onForceEditHandled={handleForceEditHandled}
                             />
                         );
                     })}
-                </SettingsGroup>
+                </div>
             )}
 
             {/* Deleted built-ins restore section. Built-ins can't be truly removed, so
