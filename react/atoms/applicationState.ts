@@ -41,10 +41,14 @@ const MAX_LIBRARY_SELECTION = 5;
  *
  * EPUB pages come from the open reader so the reported coordinate matches the
  * visible reader position.
+ *
+ * Excluded libraries are never shared: if the open attachment lives in a
+ * non-searchable library, no reader state is emitted.
  */
-export async function getReaderState(get: Getter): Promise<ReaderState | null> {
+export async function getReaderState(get: Getter, searchableLibraryIds: Set<number>): Promise<ReaderState | null> {
     const readerAttachment = get(currentReaderAttachmentAtom);
     if (!readerAttachment) return null;
+    if (!searchableLibraryIds.has(readerAttachment.libraryID)) return null;
 
     const reader = getCurrentReader();
     const contentKind = reader?.type === 'pdf' || reader?.type === 'epub' || reader?.type === 'snapshot'
@@ -73,10 +77,14 @@ export async function getReaderState(get: Getter): Promise<ReaderState | null> {
 
 /**
  * Build note state for the current note tab item.
+ *
+ * Note state for an item in an excluded (non-searchable) library is never
+ * shared, so its id and title cannot reach the backend or seed a `read_note`.
  */
-export function getNoteState(get: Getter): NoteState | null {
+export function getNoteState(get: Getter, searchableLibraryIds: Set<number>): NoteState | null {
     const noteItem = get(currentNoteItemAtom);
     if (!noteItem) return null;
+    if (!searchableLibraryIds.has(noteItem.libraryID)) return null;
     return {
         library_id: noteItem.libraryID,
         zotero_key: noteItem.key,
@@ -91,15 +99,18 @@ export function getNoteState(get: Getter): NoteState | null {
  * embedding-index status, and per-library summaries).
  */
 export async function buildZoteroApplicationState(get: Getter): Promise<ApplicationStateInput> {
-    const readerState = await getReaderState(get);
-    const noteState = getNoteState(get);
+    // Excluded libraries must never appear in application state
+    const searchableLibraryIds = get(searchableLibraryIdsAtom);
+    const searchableLibrarySet = new Set(searchableLibraryIds);
+
+    const readerState = await getReaderState(get, searchableLibrarySet);
+    const noteState = getNoteState(get, searchableLibrarySet);
 
     // Get current library and collection context
     let currentLibrary: CurrentLibrary | undefined = undefined;
     let currentCollection: CurrentCollection | undefined = undefined;
     let librarySelection: ZoteroItemReference[] | undefined = undefined;
 
-    const searchableLibraryIds = get(searchableLibraryIdsAtom);
     const currentView: 'library' | 'file_reader' | 'note_editor' = get(isLibraryTabAtom) ? 'library' : noteState ? 'note_editor' : 'file_reader';
 
     if (currentView === 'file_reader' && readerState) {
@@ -132,18 +143,21 @@ export async function buildZoteroApplicationState(get: Getter): Promise<Applicat
         if (zp) {
             const libraryId = zp.getSelectedLibraryID();
             const library = Zotero.Libraries.get(libraryId);
-            if (library) {
+            // Omit the current library entirely when it is excluded, rather than
+            // reporting it with is_synced=false — excluded libraries are not
+            // shared at all.
+            if (library && searchableLibrarySet.has(library.libraryID)) {
                 currentLibrary = {
                     library_id: library.libraryID,
                     name: library.name,
                     is_group: library.isGroup,
                     read_only: !library.editable,
-                    is_synced: searchableLibraryIds.includes(library.libraryID),
+                    is_synced: true,
                 };
             }
 
             const collection = zp.getSelectedCollection();
-            if (collection) {
+            if (collection && searchableLibrarySet.has(collection.libraryID)) {
                 currentCollection = {
                     collection_key: collection.key,
                     name: collection.name,
@@ -152,7 +166,9 @@ export async function buildZoteroApplicationState(get: Getter): Promise<Applicat
                 };
             }
 
-            const selectedItems = zp.getSelectedItems();
+            // Drop any selected items that belong to an excluded library.
+            const selectedItems = zp.getSelectedItems()
+                .filter((item: Zotero.Item) => searchableLibrarySet.has(item.libraryID));
             if (selectedItems.length > 0) {
                 librarySelection = selectedItems
                     .slice(0, MAX_LIBRARY_SELECTION)
