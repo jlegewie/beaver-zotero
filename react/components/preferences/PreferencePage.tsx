@@ -891,7 +891,7 @@ const PreferencePage: React.FC = () => {
                                     control={
                                         <Button
                                             variant="outline"
-                                            rightIcon={rebuildIndexButtonProps.icon}
+                                            rightIcon={!isEmbeddingIndexing ? rebuildIndexButtonProps.icon : undefined}
                                             iconClassName={rebuildIndexButtonProps.iconClassName}
                                             onClick={handleRebuildSearchIndex}
                                             disabled={rebuildIndexButtonProps.disabled}
