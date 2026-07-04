@@ -111,7 +111,10 @@ export async function buildZoteroApplicationState(get: Getter): Promise<Applicat
     let currentCollection: CurrentCollection | undefined = undefined;
     let librarySelection: ZoteroItemReference[] | undefined = undefined;
 
-    const currentView: 'library' | 'file_reader' | 'note_editor' = get(isLibraryTabAtom) ? 'library' : noteState ? 'note_editor' : 'file_reader';
+    // Detect the note-editor view from the raw tab context, NOT from the
+    // exclusion-filtered noteState
+    const isNoteTabActive = !!get(currentNoteItemAtom);
+    const currentView: 'library' | 'file_reader' | 'note_editor' = get(isLibraryTabAtom) ? 'library' : isNoteTabActive ? 'note_editor' : 'file_reader';
 
     if (currentView === 'file_reader' && readerState) {
         // In reader view, use the library from the reader attachment
