@@ -153,6 +153,26 @@ export function hasSlashToken(content: string, command: string): boolean {
 }
 
 /**
+ * Return content that visibly invokes every structured prompt action. Normal
+ * composer sends already include `/command` tokens in the text; direct action
+ * launchers may provide the structured action separately, so this helper
+ * prepends any missing tokens while preserving the user's text.
+ */
+export function ensurePromptActionTokens(
+    content: string,
+    actions: PromptAction[] | undefined,
+): string {
+    if (!actions?.length) return content;
+    const missingTokens = actions
+        .filter(a => !hasSlashToken(content, a.command))
+        .map(a => `/${a.command}`);
+    if (missingTokens.length === 0) return content;
+    const prefix = missingTokens.join(' ');
+    if (content.trim().length === 0) return prefix;
+    return `${prefix} ${content.trimStart()}`;
+}
+
+/**
  * Rebuild editor pill descriptors from a message's persisted wire actions,
  * used when a sent message is opened for editing. Each descriptor keeps the
  * persisted `command` (it must match the token in the message content), and is

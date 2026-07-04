@@ -1,4 +1,4 @@
-import React, { useRef, useState, useEffect, useCallback } from 'react';
+import React, { useRef, useState, useEffect, useCallback, useMemo } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { BeaverAgentPrompt } from '../../agents/types';
 import ContextMenu from '../ui/menu/ContextMenu';
@@ -12,7 +12,7 @@ import { regenerateWithEditedPromptAtom, isWSChatPendingAtom } from '../../atoms
 import { selectedModelAtom } from '../../atoms/models';
 import { isStreamingAtom } from '../../agents/atoms';
 import { actionsAtom, buildEditedPromptActionsAtom } from '../../atoms/actions';
-import { promptActionsToDescriptors, type SlashCommandDescriptor } from '../../utils/slashCommands';
+import { ensurePromptActionTokens, promptActionsToDescriptors, type SlashCommandDescriptor } from '../../utils/slashCommands';
 import { renderContentWithSlashPills } from './slashCommandRendering';
 import { LexicalEditorInput, LexicalEditorInputHandle } from '../input/lexical/LexicalEditorInput';
 import { useSlashMenu } from '../../hooks/useSlashMenu';
@@ -68,6 +68,10 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
     const selectedModel = useAtomValue(selectedModelAtom);
     const isStreaming = useAtomValue(isStreamingAtom);
     const allActions = useAtomValue(actionsAtom);
+    const displayContent = useMemo(
+        () => ensurePromptActionTokens(userPrompt.content, userPrompt.actions),
+        [userPrompt.content, userPrompt.actions],
+    );
 
     // Editing is only allowed when canEdit is true AND no run is streaming
     const canEditNow = canEdit && !isStreaming;
@@ -107,7 +111,7 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
             const contentHeight = contentRef.current.scrollHeight;
             setNeedsFade(contentHeight > maxContentHeight);
         }
-    }, [userPrompt.content, maxContentHeight]);
+    }, [displayContent, maxContentHeight]);
 
     // Handle click outside to close edit mode
     useEffect(() => {
@@ -132,7 +136,7 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
             }
 
             setIsEditing(false);
-            setEditedContent(userPrompt.content);
+            setEditedContent(displayContent);
         };
 
         // Use capture phase to catch events before they bubble
@@ -140,7 +144,7 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
         return () => {
             doc.removeEventListener('mousedown', handleClickOutside, true);
         };
-    }, [isEditing, userPrompt.content]);
+    }, [isEditing, displayContent]);
 
     // Close edit mode when scrolled out of view
     useEffect(() => {
@@ -192,11 +196,11 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
             // editor materializes /command tokens as pill nodes only while
             // syncing the content string in, so pills arriving a commit later
             // would leave the tokens as plain text.
-            setEditedContent(userPrompt.content);
+            setEditedContent(displayContent);
             setEditedPills(promptActionsToDescriptors(userPrompt.actions, allActions));
             setIsEditing(true);
         }
-    }, [isEditing, canEditNow, userPrompt.content, userPrompt.actions, allActions]);
+    }, [isEditing, canEditNow, displayContent, userPrompt.actions, allActions]);
 
     // After the slash menu consumed an editor change (open/close/query), the
     // menu re-render can clobber the caret in Zotero's chrome document; put it
@@ -303,8 +307,8 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
                     onContextMenu={handleContextMenu}
                 >
                     {userPrompt.actions?.length
-                        ? renderContentWithSlashPills(userPrompt.content, userPrompt.actions)
-                        : userPrompt.content}
+                        ? renderContentWithSlashPills(displayContent, userPrompt.actions)
+                        : displayContent}
                 </div>
 
                 {/* Edit icon (visible on hover) */}

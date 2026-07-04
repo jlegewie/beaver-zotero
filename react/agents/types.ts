@@ -73,7 +73,7 @@ export interface MessageSearchFilters {
 }
 
 /**
- * Discriminated origin describing why a prompt was sent. Mirrors `PromptOrigin` in `app/models/agent_run.py`.
+ * Discriminated origin describing why a prompt was sent. Matches `PromptOrigin` in `app/models/agent_run.py`.
  *
  * `topic_label` and `collection_name` ride along on first-run origins so the
  * NextStepsPanel follow-up templates can reference the originating card's
@@ -95,6 +95,15 @@ export type PromptOrigin =
         topic_label?: string | null;
         collection_name?: string | null;
         empty_library?: boolean;
+    }
+    | {
+        /**
+         * Run launched from the "Where should we start?" first-action launcher.
+         */
+        kind: 'where_to_start';
+        action_id: string;
+        requires_topic?: boolean;
+        topic_label?: string | null;
     };
 
 export function isFirstRunOrigin(origin: PromptOrigin | undefined | null): boolean {
@@ -103,7 +112,7 @@ export function isFirstRunOrigin(origin: PromptOrigin | undefined | null): boole
 
 /**
  * A saved action the user invoked as a /command token in the message content.
- * Mirrors `PromptAction` in `app/models/agent_run.py`.
+ * Matches `PromptAction` in `app/models/agent_run.py`.
  *
  * The token stays verbatim in `BeaverAgentPrompt.content`; this object carries
  * the resolved prompt so the backend can tell the model what the command means.

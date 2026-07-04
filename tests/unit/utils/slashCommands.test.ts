@@ -6,6 +6,7 @@ import {
     splitContentByCommandTokens,
     slashDescriptorsEqual,
     hasSlashToken,
+    ensurePromptActionTokens,
     filterPromptActionsForContent,
     promptActionsToDescriptors,
     type SlashCommandDescriptor,
@@ -223,6 +224,25 @@ describe('hasSlashToken', () => {
         expect(hasSlashToken('do /summarize now', 'summarize')).toBe(true);
         expect(hasSlashToken('/summarize-paper', 'summarize')).toBe(false);
         expect(hasSlashToken('https://x.test/summarize', 'summarize')).toBe(false);
+    });
+});
+
+describe('ensurePromptActionTokens', () => {
+    it('returns content unchanged when all action tokens are already present', () => {
+        const content = '/a then /b';
+        expect(ensurePromptActionTokens(content, [action('a'), action('b')])).toBe(content);
+    });
+
+    it('prepends missing action tokens to content', () => {
+        expect(ensurePromptActionTokens('focus on methods', [action('a')])).toBe('/a focus on methods');
+    });
+
+    it('returns only tokens for action-only content', () => {
+        expect(ensurePromptActionTokens('', [action('a'), action('b')])).toBe('/a /b');
+    });
+
+    it('does not treat URL paths as existing action tokens', () => {
+        expect(ensurePromptActionTokens('https://x.test/a', [action('a')])).toBe('/a https://x.test/a');
     });
 });
 
