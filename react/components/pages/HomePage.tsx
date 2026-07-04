@@ -1,6 +1,6 @@
 import React from "react";
 import { useAtomValue } from 'jotai';
-import { isDatabaseSyncSupportedAtom } from "../../atoms/profile";
+import { allLibrariesExcludedAtom, isDatabaseSyncSupportedAtom } from "../../atoms/profile";
 import RecentChats from "../RecentChats";
 import HomeLauncher from "../HomeLauncher";
 import InputArea from "../input/InputArea";
@@ -8,14 +8,37 @@ import DragDropWrapper from "../input/DragDropWrapper";
 import PopupOverlayContainer from "../PopupOverlayContainer";
 import FileStatusBar from "../status/FileStatusBar";
 import { threadWarningsAtom } from "../../atoms/warnings";
+import { SettingsIcon }  from "../icons/icons";
+import { openPreferencesWindow } from "../../../src/ui/openPreferencesWindow";
+import Button from "../ui/Button";
 
 interface HomePageProps {
     isWindow?: boolean;
     inputRef: React.RefObject<HTMLElement | null>;
 }
 
+
+const AllLibrariesExcludedMessage = () => (
+    <div
+        className="display-flex flex-row items-center gap-2 text-sm p-2 rounded-md"
+        style={{ color: 'var(--tag-red-secondary)', border: '1px solid var(--tag-red-tertiary)', background: 'var(--tag-red-quinary)' }}
+    >
+        <span className="flex-1">
+            Beaver can't access any libraries. You've excluded all of them.
+        </span>
+        <Button
+            variant="error"
+            icon={SettingsIcon}
+            onClick={() => openPreferencesWindow('sync')}
+        >
+            Open Settings
+        </Button>
+    </div>
+);
+
 const HomePage: React.FC<HomePageProps> = ({ isWindow = false, inputRef }) => {
     const isDatabaseSyncSupported = useAtomValue(isDatabaseSyncSupportedAtom);
+    const allLibrariesExcluded = useAtomValue(allLibrariesExcludedAtom);
     const allWarnings = useAtomValue(threadWarningsAtom);
     const hasCreditInfoWarning = allWarnings.some((w) => w.type === 'credit_info');
 
@@ -41,7 +64,11 @@ const HomePage: React.FC<HomePageProps> = ({ isWindow = false, inputRef }) => {
                 </DragDropWrapper>
 
                 {/* Action launcher — category row + expandable panels */}
-                <HomeLauncher />
+                {allLibrariesExcluded ? (
+                    <AllLibrariesExcludedMessage />
+                ) : (
+                    <HomeLauncher />
+                )}
 
                 {/* Bottom spacer */}
                 <div className="flex-1" />

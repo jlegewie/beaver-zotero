@@ -29,6 +29,7 @@ import ApiKeysSection from "./ApiKeysSection";
 import AdvancedSection from "./AdvancedSection";
 import PermissionsSection from "./PermissionsSection";
 import EmbeddingIndexProgress from "../pages/onboarding/EmbeddingIndexProgress";
+import ExcludedLibrariesList from "./ExcludedLibrariesList";
 
 
 const PreferencePage: React.FC = () => {
@@ -861,41 +862,47 @@ const PreferencePage: React.FC = () => {
                             </SettingsGroup>
                         </span>
                     ) : (
-                        <SettingsGroup>
-                            {isEmbeddingIndexing && embeddingIndexState.phase === 'initial' && embeddingIndexState.totalItems > 0 && (
-                                <EmbeddingIndexProgress />
-                            )}
-                            <SettingsRow
-                                title="Search Index"
-                                description={
-                                    <>
-                                        Syncing the search index ensures that all your library items are indexed and searchable.
-                                        {embeddingIndexState.failedItems > 0 && (
-                                            <span className="display-flex font-color-yellow mt-1">
-                                                {embeddingIndexState.failedItems} items failed to index
-                                            </span>
-                                        )}
-                                        {embeddingIndexState.status === 'error' && embeddingIndexState.error && (
-                                            <span className="display-flex font-color-red mt-1">
-                                                Error: {embeddingIndexState.error}
-                                            </span>
-                                        )}
-                                    </>
-                                }
-                                control={
-                                    <Button
-                                        variant="outline"
-                                        rightIcon={rebuildIndexButtonProps.icon}
-                                        iconClassName={rebuildIndexButtonProps.iconClassName}
-                                        onClick={handleRebuildSearchIndex}
-                                        disabled={rebuildIndexButtonProps.disabled}
-                                        loading={isEmbeddingIndexing}
-                                    >
-                                        {rebuildIndexButtonProps.text}
-                                    </Button>
-                                }
-                            />
-                        </SettingsGroup>
+                        <>
+                            <SectionLabel>Libraries</SectionLabel>
+                            <ExcludedLibrariesList />
+
+                            <SectionLabel>Search Index</SectionLabel>
+                            <SettingsGroup>
+                                {isEmbeddingIndexing && embeddingIndexState.phase === 'initial' && embeddingIndexState.totalItems > 0 && (
+                                    <EmbeddingIndexProgress />
+                                )}
+                                <SettingsRow
+                                    title="Search Index"
+                                    description={
+                                        <>
+                                            Syncing the search index ensures that all your library items are indexed and searchable.
+                                            {embeddingIndexState.failedItems > 0 && (
+                                                <span className="display-flex font-color-yellow mt-1">
+                                                    {embeddingIndexState.failedItems} items failed to index
+                                                </span>
+                                            )}
+                                            {embeddingIndexState.status === 'error' && embeddingIndexState.error && (
+                                                <span className="display-flex font-color-red mt-1">
+                                                    Error: {embeddingIndexState.error}
+                                                </span>
+                                            )}
+                                        </>
+                                    }
+                                    control={
+                                        <Button
+                                            variant="outline"
+                                            rightIcon={rebuildIndexButtonProps.icon}
+                                            iconClassName={rebuildIndexButtonProps.iconClassName}
+                                            onClick={handleRebuildSearchIndex}
+                                            disabled={rebuildIndexButtonProps.disabled}
+                                            loading={isEmbeddingIndexing}
+                                        >
+                                            {rebuildIndexButtonProps.text}
+                                        </Button>
+                                    }
+                                />
+                            </SettingsGroup>
+                        </>
                     )}
 
                     {isDatabaseSyncSupported && (

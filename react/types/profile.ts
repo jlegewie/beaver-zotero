@@ -1,5 +1,10 @@
 import { ZoteroLibrary } from "./zotero";
 
+export interface ExcludedLibrary {
+    type: 'user' | 'group';
+    group_id?: number | null;
+}
+
 /**
  * Plan model interface based on backend SafePlanModel
  */
@@ -145,6 +150,7 @@ export interface SafeProfileModel {
     consent_to_share: boolean;
     email_notifications: boolean;
     libraries?: ZoteroLibrary[];
+    excluded_libraries?: ExcludedLibrary[];
 
     // First-run state (migration 20260430000001)
     first_run_completed_at: string | null;
