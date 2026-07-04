@@ -9,7 +9,7 @@ import {
     WSAgentActionExecuteRequest,
     WSAgentActionExecuteResponse,
 } from '../../agentProtocol';
-import { excludedLibraryMessage, getDeferredToolPreference } from '../utils';
+import { checkLibraryExcluded, excludedLibraryMessage, getDeferredToolPreference } from '../utils';
 import { TimeoutContext, checkAborted } from '../timeout';
 import { TimeoutError } from '../timeout';
 
@@ -545,6 +545,19 @@ async function executeEditMetadataAction(
         edits: MetadataEdit[];
         creators?: Array<{ firstName?: string; lastName?: string; name?: string; creatorType: string }> | null;
     };
+
+    // TOCTOU guard: never edit an item in a library the user excluded from Beaver,
+    // even if validation passed earlier or the execute request skipped it.
+    const excluded = checkLibraryExcluded(library_id);
+    if (excluded) {
+        return {
+            type: 'agent_action_execute_response',
+            request_id: request.request_id,
+            success: false,
+            error: excluded.message,
+            error_code: 'library_not_searchable',
+        };
+    }
 
     // Get the item
     const item = await Zotero.Items.getByLibraryAndKeyAsync(library_id, zotero_key);

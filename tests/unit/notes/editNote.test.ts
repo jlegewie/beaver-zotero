@@ -222,6 +222,7 @@ vi.mock('../../../src/services/agentDataProvider/utils', () => ({
     validateZoteroItemReference: vi.fn(() => null),
     backfillMetadataForError: vi.fn(),
     excludedLibraryMessage: vi.fn((id: number) => `Library ${id} is excluded from Beaver.`),
+    checkLibraryExcluded: vi.fn(() => null),
 }));
 
 vi.mock('../../../src/utils/logger', () => ({

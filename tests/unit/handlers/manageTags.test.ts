@@ -10,6 +10,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 vi.mock('../../../src/services/agentDataProvider/utils', () => ({
     validateLibraryAccess: vi.fn(),
     getDeferredToolPreference: vi.fn(() => 'always_ask'),
+    checkLibraryExcluded: vi.fn(() => null),
 }));
 
 vi.mock('../../../src/utils/logger', () => ({

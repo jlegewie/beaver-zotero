@@ -18,7 +18,7 @@ import {
     WSAgentActionExecuteResponse,
 } from '../../agentProtocol';
 import { ItemDataWithStatus, AttachmentDataWithStatus } from '../../../../react/types/zotero';
-import { excludedLibraryMessage, getDeferredToolPreference, getLibraryByIdOrName, getCollectionByIdOrName } from '../utils';
+import { checkLibraryExcluded, excludedLibraryMessage, getDeferredToolPreference, getLibraryByIdOrName, getCollectionByIdOrName } from '../utils';
 import { TimeoutContext, checkAborted } from '../timeout';
 import { extractCitationReferences } from './extractCitationReferences';
 import { lookupZoteroReferences, LookupZoteroReferencesResult } from '../lookupZoteroReferences';
@@ -452,6 +452,20 @@ async function executeCreateNoteAction(
     }
 
     const targetLibraryId = resolvedLibraryId ?? Zotero.Libraries.userLibraryID;
+
+    // TOCTOU guard: never create in a library the user excluded from Beaver,
+    // even if validation passed earlier or the execute request skipped it.
+    const excludedLibrary = checkLibraryExcluded(targetLibraryId);
+    if (excludedLibrary) {
+        return {
+            type: 'agent_action_execute_response',
+            request_id: request.request_id,
+            success: false,
+            error: excludedLibrary.message,
+            error_code: 'library_not_searchable',
+            timing: buildTiming(),
+        };
+    }
 
     try {
         // Get citation context for rendering

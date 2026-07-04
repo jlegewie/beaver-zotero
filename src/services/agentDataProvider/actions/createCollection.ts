@@ -8,7 +8,7 @@ import {
     WSAgentActionExecuteResponse,
 
 } from '../../agentProtocol';
-import { excludedLibraryMessage, getDeferredToolPreference } from '../utils';
+import { checkLibraryExcluded, excludedLibraryMessage, getDeferredToolPreference } from '../utils';
 import { TimeoutContext, checkAborted } from '../timeout';
 import { TimeoutError } from '../timeout';
 
@@ -234,6 +234,19 @@ async function executeCreateCollectionAction(
             success: false,
             error: `Invalid library ID: ${rawLibraryId}`,
             error_code: 'library_not_found',
+        };
+    }
+
+    // TOCTOU guard: never create in a library the user excluded from Beaver,
+    // even if validation passed earlier or the execute request skipped it.
+    const excluded = checkLibraryExcluded(library_id);
+    if (excluded) {
+        return {
+            type: 'agent_action_execute_response',
+            request_id: request.request_id,
+            success: false,
+            error: excluded.message,
+            error_code: 'library_not_searchable',
         };
     }
 

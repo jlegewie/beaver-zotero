@@ -14,7 +14,7 @@ import {
     prepareSnapshotAnnotationDocument,
 } from '../../annotations/createAnnotation';
 import { getReadableContentKind } from '../../documentExtraction/attachmentResolution';
-import { getAttachmentFileStatus, getDeferredToolPreference, validateLibraryAccess } from '../utils';
+import { checkLibraryExcluded, getAttachmentFileStatus, getDeferredToolPreference, validateLibraryAccess } from '../utils';
 import { TimeoutContext, checkAborted, TimeoutError } from '../timeout';
 import type {
     CreatedAnnotationResult,
@@ -237,6 +237,21 @@ export async function executeCreateNoteAnnotationsAction(
 ): Promise<WSAgentActionExecuteResponse> {
     const data = getActionData(request);
     const { requested_ref, resolved_ref, items, tags } = data;
+
+    // TOCTOU guard: never annotate an attachment in a library the user excluded
+    // from Beaver, even if validation passed earlier or the request skipped it.
+    if (resolved_ref.library_id) {
+        const excluded = checkLibraryExcluded(resolved_ref.library_id);
+        if (excluded) {
+            return {
+                type: 'agent_action_execute_response',
+                request_id: request.request_id,
+                success: false,
+                error: excluded.message,
+                error_code: 'library_not_searchable',
+            };
+        }
+    }
 
     const attachment = await resolveAttachment(resolved_ref);
     const contentKind = attachment ? getAnnotationContentKind(attachment) : null;
