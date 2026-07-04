@@ -28,6 +28,24 @@ export interface ToolCallLabelOptions {
     enrich?: ToolCallLabelEnrich | null;
 }
 
+const CAPABILITY_LABELS: Record<string, string> = {
+    zotero_library_management: 'Library Management',
+    zotero_metadata_editing: 'Metadata Editing',
+    zotero_note_editing: 'Note Editing',
+    zotero_annotations: 'Annotations',
+    external_literature: 'External Literature',
+    beaver_help: 'Beaver Help',
+};
+
+function humanizeCapabilityId(id: string): string {
+    const spaced = id.replace(/[_-]+/g, ' ').trim();
+    return spaced ? spaced.charAt(0).toUpperCase() + spaced.slice(1) : 'capability';
+}
+
+function capabilityLabel(id: string): string {
+    return CAPABILITY_LABELS[id] ?? humanizeCapabilityId(id);
+}
+
 /** Tools whose label headlines a single item's bibliographic name. */
 const SINGLE_ITEM_NAME_TOOLS = new Set([
     'read', 'read_pages', 'read_attachment', 'view', 'read_note',
@@ -765,14 +783,12 @@ function computeMainLabel(
 
         // Progressive disclosure tools
         case 'load_capability': {
-            // args.id is the capability id (e.g. "library-management").
+            // args.id is the stable, persisted capability id (e.g. "zotero_annotations").
             const id = args.id as string | undefined;
             if (id) {
-                const pretty = SKILL_NAME_LABELS[id]
-                    || id.replace(/-/g, ' ').split(' ').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
-                return `${baseLabel}: ${truncate(pretty, 30)}`;
+                return `Loading skill: ${truncate(capabilityLabel(id), 30)}`;
             }
-            return baseLabel;
+            return 'Loading skill';
         }
 
         case 'search_tools': {

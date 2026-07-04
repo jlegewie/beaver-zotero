@@ -177,6 +177,6 @@ export const TOOL_BASE_LABELS: Record<string, string> = {
     lookup_work: 'Lookup work',
 
     // Framework tools
-    load_capability: 'Loading capability',
+    load_capability: 'Loading skill',
     search_tools: 'Finding tools',
 };
