@@ -5,6 +5,7 @@ import { createElement } from 'react';
 import { logger } from "../../src/utils/logger";
 import { addPopupMessageAtom, addRegularItemPopupAtom, addRegularItemsSummaryPopupAtom, removePopupMessageAtom, safeChildAttachments } from "../utils/popupMessageUtils";
 import { getItemValidationAtom, isHardBlockedValidation, isRejectedItemValidation, validateItemsAtom, validateRegularItemAtom } from './itemValidation';
+import { searchableLibraryIdsAtom } from './profile';
 import type { ItemValidationState } from './itemValidation';
 import { toReadabilityInfo, summarizeRegularItemReadability } from '../utils/attachmentReadabilityCopy';
 import { InvalidItemsMessageContent } from '../components/ui/popup/InvalidItemsMessageContent';
@@ -528,8 +529,13 @@ export const updateMessageItemsFromZoteroSelectionAtom = atom(
     null,
     async (get, set, limit?: number) => {
         const items = Zotero.getActiveZoteroPane().getSelectedItems();
-        const itemsFiltered = items.filter((item) => item.isRegularItem() || item.isAttachment() || item.isNote());
-        
+        // Never stage items from libraries the user excluded from Beaver.
+        const searchableLibraryIds = get(searchableLibraryIdsAtom);
+        const itemsFiltered = items.filter((item) =>
+            (item.isRegularItem() || item.isAttachment() || item.isNote()) &&
+            searchableLibraryIds.includes(item.libraryID)
+        );
+
         // Filter out items already in the thread
         const existingKeys = get(allUserAttachmentKeysAtom);
         const newItems = itemsFiltered.filter((item) => !existingKeys.has(`${item.libraryID}-${item.key}`));

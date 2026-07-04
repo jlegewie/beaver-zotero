@@ -1678,11 +1678,14 @@ export const sendWSMessageAtom = atom(
             // Custom instructions (if any)
         const customInstructions = getPref('customInstructions') || undefined;
 
-        // Build attachments from current message items, dropping anything that
-        // validation has already rejected.
+        // Build attachments from current message items. Final send gate: drop
+        // anything validation already rejected AND anything in a library the user
+        // excluded from Beaver
         const validationResults = get(itemValidationResultsAtom);
+        const searchableLibraryIds = get(searchableLibraryIdsAtom);
         const rawSelectedItems = get(currentMessageItemsAtom);
         const rejectedSelectedItems = rawSelectedItems.filter((item) =>
+            !searchableLibraryIds.includes(item.libraryID) ||
             isRejectedItemValidation(item, validationResults.get(`${item.libraryID}-${item.key}`))
         );
         const selectedItems = rejectedSelectedItems.length > 0
@@ -1692,10 +1695,10 @@ export const sendWSMessageAtom = atom(
             set(currentMessageItemsAtom, selectedItems);
             set(addPopupMessageAtom, {
                 type: 'error',
-                title: rejectedSelectedItems.length === 1 ? 'File Removed' : 'Files Removed',
+                title: rejectedSelectedItems.length === 1 ? 'Item Removed' : 'Items Removed',
                 text: rejectedSelectedItems.length === 1
-                    ? 'A file that Beaver cannot read was removed from this message.'
-                    : `${rejectedSelectedItems.length} files that Beaver cannot read were removed from this message.`,
+                    ? 'An item that Beaver cannot use was removed from this message.'
+                    : `${rejectedSelectedItems.length} items that Beaver cannot use were removed from this message.`,
                 expire: true,
                 duration: 4000,
             });

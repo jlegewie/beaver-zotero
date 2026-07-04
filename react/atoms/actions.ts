@@ -22,6 +22,7 @@ import { currentMessageItemsAtom, currentMessageCollectionsAtom, pendingPillInse
 import { CollectionReference } from '../types/zotero';
 import { addPopupMessageAtom } from '../utils/popupMessageUtils';
 import { isRejectedItemValidation, itemValidationResultsAtom } from './itemValidation';
+import { searchableLibraryIdsAtom } from './profile';
 import { getActionCommand, toSlashToken, type SlashCommandDescriptor } from '../utils/slashCommands';
 import type { PromptAction } from '../agents/types';
 import { MessageAttachment, messageAttachmentKey } from '../types/attachments/apiTypes';
@@ -253,6 +254,7 @@ export const resolvePillsToPromptActionsAtom = atom(
         const { pills, persistedActions } = payload;
         const actions = get(actionsAtom);
         const validationResults = get(itemValidationResultsAtom);
+        const searchableLibraryIds = get(searchableLibraryIdsAtom);
 
         const accumulatedItems: Zotero.Item[] = [];
         let accumulatedCollection: CollectionReference | null = null;
@@ -306,6 +308,17 @@ export const resolvePillsToPromptActionsAtom = atom(
 
             for (const item of items) {
                 const key = `${item.libraryID}-${item.key}`;
+                // Enforce library exclusion directly
+                if (!searchableLibraryIds.includes(item.libraryID)) {
+                    set(addPopupMessageAtom, {
+                        type: 'error',
+                        title: 'Action skipped',
+                        text: 'This action references an item in a library you excluded from Beaver. You can change excluded libraries in Beaver Preferences.',
+                        expire: true,
+                        duration: 5000,
+                    });
+                    return null;
+                }
                 const cached = validationResults.get(key);
                 if (isRejectedItemValidation(item, cached)) {
                     set(addPopupMessageAtom, {

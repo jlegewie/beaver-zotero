@@ -23,6 +23,7 @@ import { logger } from '../../src/utils/logger';
 import { agentItemFilter } from '../../src/utils/agentItemSupport';
 import { getCurrentReader } from './readerUtils';
 import { store } from '../store';
+import { searchableLibraryIdsAtom } from '../atoms/profile';
 import { currentReaderAttachmentAtom } from '../atoms/messageComposition';
 import { selectedZoteroItemsAtom, currentNoteItemAtom } from '../atoms/zoteroContext';
 import { ActionTargetType } from '../types/actions';
@@ -350,6 +351,9 @@ async function getOpenReaderAttachment(): Promise<Zotero.Item | null> {
 async function fetchRecentItems(limit: number): Promise<Zotero.Item[]> {
     try {
         const libraryID = Zotero.Libraries.userLibraryID;
+        // Recent items are queried only from the personal library; if the user
+        // excluded it from Beaver, surface nothing.
+        if (!store.get(searchableLibraryIdsAtom).includes(libraryID)) return [];
         const itemIDs: number[] = [];
 
         await Zotero.DB.queryAsync(
