@@ -213,7 +213,7 @@ const ExcludedLibrariesList: React.FC = () => {
                     ref={buttonRef}
                     type="button"
                     className="variant-outline"
-                    style={{ paddingRight: '4px', paddingLeft: '4px', marginRight: '1px' }}
+                    style={{ marginRight: '1px', padding: '4px 6px' }}
                     onClick={handleButtonClick}
                     disabled={unexcludedLibraries.length === 0 || isUpdating}
                     aria-label="Exclude a library"
@@ -231,7 +231,7 @@ const ExcludedLibrariesList: React.FC = () => {
                     <Icon icon={AlertIcon} className="scale-11 mt-015 flex-none" />
                     <span>
                         {allLibrariesExcluded
-                            ? "Beaver can't access any libraries while all libraries are excluded."
+                            ? "All libraries are excluded. Beaver can't access any libraries."
                             : "Your personal library is excluded on every device connected to this account."}
                     </span>
                 </div>
@@ -239,8 +239,8 @@ const ExcludedLibrariesList: React.FC = () => {
 
             <div className="display-flex flex-col rounded-md border-popup">
                 {excludedRows.length === 0 ? (
-                    <div className="p-2 text-sm font-color-tertiary">
-                        No libraries excluded - Beaver can access all your libraries.
+                    <div className="p-2 text-base font-color-secondary">
+                        No libraries excluded. Beaver can access all your libraries.
                     </div>
                 ) : (
                     excludedRows.map((library, index) => {
