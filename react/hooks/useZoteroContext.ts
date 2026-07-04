@@ -7,12 +7,12 @@ import {
     selectedZoteroItemCountAtom,
     libraryViewAtom,
     selectedTagsAtom,
-    currentNoteItemAtom,
     recentlyAddedTodayCountAtom,
     libraryItemCountAtom,
     SMALL_LIBRARY_THRESHOLD,
     LibraryTreeRowType,
 } from '../atoms/zoteroContext';
+import { updateNoteItemAtom } from '../atoms/messageComposition';
 
 const MAX_SELECTED_ITEMS = 10;
 
@@ -140,7 +140,9 @@ export function useZoteroContext() {
     const setSelectedItemCount = useSetAtom(selectedZoteroItemCountAtom);
     const setLibraryView = useSetAtom(libraryViewAtom);
     const setSelectedTags = useSetAtom(selectedTagsAtom);
-    const setNoteItem = useSetAtom(currentNoteItemAtom);
+    // Routes through updateNoteItemAtom (not the raw atom) so the note tab item
+    // is validated — a note in an excluded/unreadable library is flagged invalid.
+    const setNoteItem = useSetAtom(updateNoteItemAtom);
     const setRecentlyAddedTodayCount = useSetAtom(recentlyAddedTodayCountAtom);
     const setLibraryItemCount = useSetAtom(libraryItemCountAtom);
 

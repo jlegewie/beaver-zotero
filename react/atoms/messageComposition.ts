@@ -366,7 +366,9 @@ async function validateItemsInBackground(
     get: any,
     set: any,
     items: Zotero.Item[],
-    isReaderAttachment: boolean = false
+    // Tab-context items (the open reader attachment / note tab) stay on screen
+    // for as long as the tab is open, so their invalid popup should not auto-expire.
+    isTabContext: boolean = false
 ) {
     const getValidation = get(getItemValidationAtom);
     logger(`validateItemsInBackground: Validating ${items.length} items`, 3);
@@ -497,7 +499,7 @@ async function validateItemsInBackground(
                 customContent: createElement(InvalidItemsMessageContent, { 
                     invalidItems: invalidItemsData 
                 }),
-                expire: isReaderAttachment ? false : true,
+                expire: isTabContext ? false : true,
                 duration: 5000
             });
         }
@@ -574,6 +576,27 @@ export const updateReaderAttachmentAtom = atom(
         if (item) {
             set(currentReaderAttachmentAtom, item);
             validateItemsInBackground(get, set, [item], true);
+        }
+    }
+);
+
+/**
+* Update the current note tab item and validate it in the background.
+*/
+export const updateNoteItemAtom = atom(
+    null,
+    (get, set, item: Zotero.Item | null) => {
+        // Remove the previous note's invalid popup before switching
+        const previousNoteKey = get(currentNoteTabItemKeyAtom);
+        if (previousNoteKey) {
+            set(removePopupMessageAtom, previousNoteKey);
+        }
+
+        set(currentNoteItemAtom, item);
+        if (item) {
+            // Fire-and-forget: the note tab stays open, so treat it as a
+            // persistent tab context (isTabContext=true).
+            void validateItemsInBackground(get, set, [item], true);
         }
     }
 );
