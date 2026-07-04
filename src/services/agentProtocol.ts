@@ -640,6 +640,7 @@ export type ZoteroDocumentErrorCode =
     | 'timeout'             // Extraction timed out
     | 'extraction_failed'  // General extraction failure
     | 'recursion_limit'     // Extraction overflowed the JS stack ("too much recursion" / "Maximum call stack")
+    | 'library_excluded'    // Attachment is in a library the user excluded from Beaver
     | 'document_too_large'  // Serialized extraction result exceeds the WebSocket transfer budget
     | 'schema_version_mismatch'
     | 'mode_mismatch';
@@ -763,6 +764,7 @@ export type ViewImagesErrorCode =
     | AttachmentPageImagesErrorCode
     | AttachmentImageErrorCode
     | 'unsupported_type'   // Attachment is neither a PDF nor an image
+    | 'library_excluded'   // Attachment is in a library the user excluded from Beaver
     | 'view_failed';       // General dispatch-level failure
 
 /** A single rendered image returned by a zotero_view_images request. */

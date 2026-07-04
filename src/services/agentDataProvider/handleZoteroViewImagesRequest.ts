@@ -22,7 +22,7 @@ import {
     resolveToPdfAttachment,
 } from '../documentExtraction/attachmentResolution';
 import { isLinkedUrlAttachment } from '../../utils/attachmentFiles';
-import { validateZoteroItemReference } from './utils';
+import { checkLibraryExcluded, validateZoteroItemReference } from './utils';
 import { handleZoteroAttachmentPageImagesRequest } from './handleZoteroAttachmentPageImagesRequest';
 import { handleZoteroAttachmentImageRequest } from './handleZoteroAttachmentImageRequest';
 import { resolveExternalFile } from '../externalFiles';
@@ -230,6 +230,12 @@ export async function handleZoteroViewImagesRequest(
             `Invalid attachment reference '${requestKey}': ${formatError}`,
             'invalid_format'
         );
+    }
+    // Reject libraries the user excluded from Beaver before any item lookup, so
+    // an excluded attachment is never resolved, rendered, or confirmed to exist.
+    const excluded = checkLibraryExcluded(attachment.library_id);
+    if (excluded) {
+        return errorResponse(excluded.message, 'library_excluded');
     }
     if (start_page != null && (!Number.isInteger(start_page) || start_page < 1)) {
         return errorResponse(

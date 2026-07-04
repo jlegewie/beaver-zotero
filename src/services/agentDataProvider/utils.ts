@@ -627,6 +627,37 @@ export function isLibrarySearchable(libraryId: number): boolean {
 }
 
 /**
+ * Model-facing message for a library the user has excluded from Beaver via the
+ * excluded-libraries preference.
+ */
+export function excludedLibraryMessage(libraryId: number): string {
+    const library = Zotero.Libraries?.get?.(libraryId);
+    const name = library ? `"${library.name}"` : 'this library';
+    return (
+        `The library ${name} is excluded from Beaver, so Beaver cannot read or ` +
+        `modify its items. Tell the user they can re-enable access by removing it ` +
+        `from the excluded libraries list in Beaver Preferences.`
+    );
+}
+
+/**
+ * Exclusion gate for read handlers that resolve a raw library id from a request
+ * reference (e.g. document/view requests). Returns an exclusion message when the
+ * library exists but is excluded, or null when access is allowed. Callers map the
+ * message to their own response error_code.
+ *
+ * A non-existent library id returns null so the caller's own not_found path
+ * handles it — a bad reference must not be mislabeled as "excluded".
+ */
+export function checkLibraryExcluded(libraryId: number): { message: string } | null {
+    // A non-existent library id (or an unavailable Libraries API) is left to the
+    // caller's not_found path so a bad reference is never mislabeled "excluded".
+    if (!Zotero.Libraries?.get?.(libraryId)) return null;
+    if (isLibrarySearchable(libraryId)) return null;
+    return { message: excludedLibraryMessage(libraryId) };
+}
+
+/**
  * Get a list of searchable libraries for error responses.
  * Only returns libraries that are in searchableLibraryIdsAtom.
  */
@@ -710,7 +741,7 @@ export function validateLibraryAccess(libraryIdOrName: number | string | null | 
     if (!isLibrarySearchable(library.libraryID)) {
         return {
             valid: false,
-            error: `Library '${library.name}' (ID: ${library.libraryID}) is not synced with Beaver. Access is limited to synced libraries.`,
+            error: excludedLibraryMessage(library.libraryID),
             error_code: 'library_not_searchable',
             available_libraries: getSearchableLibraries(),
         };

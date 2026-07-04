@@ -69,7 +69,7 @@ import {
     WSAgentActionExecuteResponse,
     DeferredToolPreference,
 } from '../../agentProtocol';
-import { getDeferredToolPreference } from '../utils';
+import { excludedLibraryMessage, getDeferredToolPreference } from '../utils';
 import { autoApproveNoteKeysAtom, makeNoteKey } from '../../../../react/atoms/editNoteAutoApprove';
 import { TimeoutContext, checkAborted } from '../timeout';
 import { TimeoutError } from '../timeout';
@@ -433,7 +433,7 @@ async function validateEditNoteAction(
             type: 'agent_action_validate_response',
             request_id: request.request_id,
             valid: false,
-            error: `Library exists but is not synced with Beaver. The user can update this setting in Beaver Preferences. Library: ${library.name} (ID: ${library_id})`,
+            error: excludedLibraryMessage(library_id),
             error_code: 'library_not_searchable',
             preference: 'always_ask',
         };

@@ -18,7 +18,7 @@ import {
     WSAgentActionExecuteResponse,
 } from '../../agentProtocol';
 import { ItemDataWithStatus, AttachmentDataWithStatus } from '../../../../react/types/zotero';
-import { getDeferredToolPreference, getLibraryByIdOrName, getCollectionByIdOrName } from '../utils';
+import { excludedLibraryMessage, getDeferredToolPreference, getLibraryByIdOrName, getCollectionByIdOrName } from '../utils';
 import { TimeoutContext, checkAborted } from '../timeout';
 import { extractCitationReferences } from './extractCitationReferences';
 import { lookupZoteroReferences, LookupZoteroReferencesResult } from '../lookupZoteroReferences';
@@ -298,7 +298,7 @@ async function validateCreateNoteAction(
             type: 'agent_action_validate_response',
             request_id: request.request_id,
             valid: false,
-            error: `Library '${library.name}' is not synced with Beaver. The user can update this setting in Beaver Preferences.`,
+            error: excludedLibraryMessage(resolvedLibraryId),
             error_code: 'library_not_searchable',
             preference: 'always_ask',
             timing: buildTiming(),

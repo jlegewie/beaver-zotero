@@ -9,7 +9,7 @@ import {
     WSAgentActionExecuteResponse,
     FrontendTimingMetadata,
 } from '../../agentProtocol';
-import { getDeferredToolPreference } from '../utils';
+import { excludedLibraryMessage, getDeferredToolPreference } from '../utils';
 import { TimeoutContext, checkAborted } from '../timeout';
 import { TimeoutError } from '../timeout';
 import { TimingAccumulator } from '../../../utils/timing';
@@ -129,7 +129,7 @@ async function validateCreateItemAction(
             type: 'agent_action_validate_response',
             request_id: request.request_id,
             valid: false,
-            error: `Library "${targetLibrary.name}" is not synced with Beaver.`,
+            error: excludedLibraryMessage(targetLibraryId),
             error_code: 'library_not_searchable',
             preference: 'always_ask',
         };

@@ -8,7 +8,7 @@ import {
     WSAgentActionExecuteResponse,
 
 } from '../../agentProtocol';
-import { getDeferredToolPreference } from '../utils';
+import { excludedLibraryMessage, getDeferredToolPreference } from '../utils';
 import { TimeoutContext, checkAborted } from '../timeout';
 import { TimeoutError } from '../timeout';
 
@@ -87,7 +87,7 @@ async function validateCreateCollectionAction(
             type: 'agent_action_validate_response',
             request_id: request.request_id,
             valid: false,
-            error: `Library exists but is not synced with Beaver. The user can update this setting in Beaver Preferences. Library: ${library.name} (ID: ${library_id})`,
+            error: excludedLibraryMessage(library_id),
             error_code: 'library_not_searchable',
             preference: 'always_ask',
         };

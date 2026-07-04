@@ -10,6 +10,7 @@ vi.mock('../../../src/services/documentExtraction/attachmentResolution', () => (
 
 vi.mock('../../../src/services/agentDataProvider/utils', () => ({
     validateZoteroItemReference: vi.fn(() => null),
+    checkLibraryExcluded: vi.fn(() => null),
 }));
 
 vi.mock(
