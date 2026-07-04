@@ -30,7 +30,7 @@ vi.mock('../../../src/utils/editNoteValidation', async () => {
     // mirroring the production wrapper so existing tests that mock
     // `enrichOldStringCitationRefs` (including `.toHaveBeenCalled()` assertions)
     // keep working without change.
-    const enrichMock = vi.fn(() => null as string | null);
+    const enrichMock = vi.fn((_oldString: string, _metadata: any) => null as string | null);
     // Re-export the real `detectPartialSimplifiedTag` so the validator and
     // executor can recognize partial citation/annotation openers in old_string
     // even with this module mocked. Pure string analysis, no side effects.
@@ -143,7 +143,7 @@ vi.mock('../../../src/utils/noteEditorIO', () => ({
 
 vi.mock('../../../src/utils/noteCitationExpand', () => ({
     expandToRawHtml: vi.fn((str: string, _metadata: any, _context: string) => str),
-    preloadPageLabelsForNewCitations: vi.fn().mockResolvedValue(undefined),
+    preloadPageLabelsForNewCitations: vi.fn().mockResolvedValue({}),
     preloadNotePageLabels: vi.fn().mockResolvedValue({}),
     preloadStructuralLocatorPages: vi.fn().mockResolvedValue({ pages: {}, unresolved: [] }),
     buildUnresolvedLocatorWarning: vi.fn(() => null),
@@ -409,7 +409,7 @@ beforeEach(() => {
     vi.mocked(getDeferredToolPreference).mockReturnValue('always_ask');
     vi.mocked(checkDuplicateCitations).mockReturnValue(null);
     vi.mocked(invalidateSimplificationCache).mockImplementation(() => {});
-    vi.mocked(preloadPageLabelsForNewCitations).mockResolvedValue(undefined);
+    vi.mocked(preloadPageLabelsForNewCitations).mockResolvedValue({});
     vi.mocked(enrichOldStringCitationRefs).mockReturnValue(null);
 });
 
@@ -446,10 +446,10 @@ describe('validateEditNoteAction — success', () => {
     });
 
     it('returns correct preference from getDeferredToolPreference', async () => {
-        vi.mocked(getDeferredToolPreference).mockReturnValueOnce('always_allow');
+        vi.mocked(getDeferredToolPreference).mockReturnValueOnce('always_apply');
         const response = await handleAgentActionValidateRequest(makeValidateRequest());
         expect(response.valid).toBe(true);
-        expect(response.preference).toBe('always_allow');
+        expect(response.preference).toBe('always_apply');
     });
 
     it('validates append with match_count 1 and no old content', async () => {
@@ -1505,7 +1505,7 @@ describe('trailing whitespace normalization in matching', () => {
         vi.clearAllMocks();
         const noteHtml = '<div data-schema-version="9"><p>Hello world</p>\n<p>Second para</p></div>';
         mockItem = makeMockItem({ getNote: vi.fn(() => noteHtml) });
-        vi.mocked(Zotero.Items.getByLibraryAndKeyAsync).mockResolvedValue(mockItem);
+        vi.mocked((globalThis as any).Zotero.Items.getByLibraryAndKeyAsync).mockResolvedValue(mockItem);
         vi.mocked(getLatestNoteHtml).mockReturnValue(noteHtml);
     });
 
@@ -1524,8 +1524,8 @@ describe('trailing whitespace normalization in matching', () => {
         expect(response.valid).toBe(true);
         // Must emit normalized_action_data so execution uses the trimmed strings
         expect(response.normalized_action_data).toBeDefined();
-        expect(response.normalized_action_data.old_string).toBe('<p>Hello world</p>');
-        expect(response.normalized_action_data.new_string).toBe('<p>Goodbye world</p>');
+        expect(response.normalized_action_data!.old_string).toBe('<p>Hello world</p>');
+        expect(response.normalized_action_data!.new_string).toBe('<p>Goodbye world</p>');
     });
 
     it('does not trim non-trailing whitespace', async () => {
@@ -1546,7 +1546,7 @@ describe('trailing whitespace normalization in matching', () => {
 
     it('execute trims merged insert_after replacement when note drift removed anchor newlines', async () => {
         mockItem = makeMockItem({ getNote: vi.fn(() => 'hello') });
-        vi.mocked(Zotero.Items.getByLibraryAndKeyAsync).mockResolvedValue(mockItem);
+        vi.mocked((globalThis as any).Zotero.Items.getByLibraryAndKeyAsync).mockResolvedValue(mockItem);
         vi.mocked(getLatestNoteHtml).mockReturnValue('hello');
 
         const req = makeExecuteRequest({
@@ -1571,7 +1571,7 @@ describe('trailing whitespace normalization in matching', () => {
         // which the trimmed form matches both paragraphs.
         const noteHtml = '<div data-schema-version="9"><p>Duplicate</p>\n<p>Duplicate</p></div>';
         mockItem = makeMockItem({ getNote: vi.fn(() => noteHtml) });
-        vi.mocked(Zotero.Items.getByLibraryAndKeyAsync).mockResolvedValue(mockItem);
+        vi.mocked((globalThis as any).Zotero.Items.getByLibraryAndKeyAsync).mockResolvedValue(mockItem);
         vi.mocked(getLatestNoteHtml).mockReturnValue(noteHtml);
 
         const req = makeValidateRequest({
@@ -1593,7 +1593,7 @@ describe('trailing whitespace normalization in matching', () => {
     it('allows ambiguous match after trimming when operation is str_replace_all', async () => {
         const noteHtml = '<div data-schema-version="9"><p>Duplicate</p>\n<p>Duplicate</p></div>';
         mockItem = makeMockItem({ getNote: vi.fn(() => noteHtml) });
-        vi.mocked(Zotero.Items.getByLibraryAndKeyAsync).mockResolvedValue(mockItem);
+        vi.mocked((globalThis as any).Zotero.Items.getByLibraryAndKeyAsync).mockResolvedValue(mockItem);
         vi.mocked(getLatestNoteHtml).mockReturnValue(noteHtml);
 
         const req = makeValidateRequest({
@@ -1609,7 +1609,7 @@ describe('trailing whitespace normalization in matching', () => {
         const response = await handleAgentActionValidateRequest(req);
         expect(response.valid).toBe(true);
         expect(response.normalized_action_data).toBeDefined();
-        expect(response.normalized_action_data.old_string).toBe('<p>Duplicate</p>');
+        expect(response.normalized_action_data!.old_string).toBe('<p>Duplicate</p>');
     });
 
     it('recovers from ambiguous trimmed match via captureValidatedEditTargetContext', async () => {
@@ -1620,7 +1620,7 @@ describe('trailing whitespace normalization in matching', () => {
         // reject these edits without trying disambiguation first.
         const noteHtml = '<div data-schema-version="9"><p>Duplicate</p>\n<p>Duplicate</p></div>';
         mockItem = makeMockItem({ getNote: vi.fn(() => noteHtml) });
-        vi.mocked(Zotero.Items.getByLibraryAndKeyAsync).mockResolvedValue(mockItem);
+        vi.mocked((globalThis as any).Zotero.Items.getByLibraryAndKeyAsync).mockResolvedValue(mockItem);
         vi.mocked(getLatestNoteHtml).mockReturnValue(noteHtml);
         vi.mocked(captureValidatedEditTargetContext).mockReturnValueOnce({
             beforeContext: 'before-anchor',
@@ -1640,9 +1640,9 @@ describe('trailing whitespace normalization in matching', () => {
         const response = await handleAgentActionValidateRequest(req);
         expect(response.valid).toBe(true);
         expect(response.normalized_action_data).toBeDefined();
-        expect(response.normalized_action_data.old_string).toBe('<p>Duplicate</p>');
-        expect(response.normalized_action_data.target_before_context).toBe('before-anchor');
-        expect(response.normalized_action_data.target_after_context).toBe('after-anchor');
+        expect(response.normalized_action_data!.old_string).toBe('<p>Duplicate</p>');
+        expect(response.normalized_action_data!.target_before_context).toBe('before-anchor');
+        expect(response.normalized_action_data!.target_after_context).toBe('after-anchor');
     });
 });
 
@@ -1656,7 +1656,7 @@ describe('JSON-escape unescape fallback in matching', () => {
     it('matches old_string with literal \\" when note has plain " and emits normalized_action_data', async () => {
         const noteHtml = '<div data-schema-version="9"><p>Say "hello"</p></div>';
         mockItem = makeMockItem({ getNote: vi.fn(() => noteHtml) });
-        vi.mocked(Zotero.Items.getByLibraryAndKeyAsync).mockResolvedValue(mockItem);
+        vi.mocked((globalThis as any).Zotero.Items.getByLibraryAndKeyAsync).mockResolvedValue(mockItem);
         vi.mocked(getLatestNoteHtml).mockReturnValue(noteHtml);
 
         const req = makeValidateRequest({
@@ -1674,15 +1674,15 @@ describe('JSON-escape unescape fallback in matching', () => {
         const response = await handleAgentActionValidateRequest(req);
         expect(response.valid).toBe(true);
         expect(response.normalized_action_data).toBeDefined();
-        expect(response.normalized_action_data.old_string).toBe('Say "hello"');
-        expect(response.normalized_action_data.new_string).toBe('Say goodbye');
+        expect(response.normalized_action_data!.old_string).toBe('Say "hello"');
+        expect(response.normalized_action_data!.new_string).toBe('Say goodbye');
     });
 
     it('rejects ambiguous match after JSON-unescape when operation is str_replace', async () => {
         // Note has two identical 'Say "hello"' paragraphs; after unescape both match.
         const noteHtml = '<div data-schema-version="9"><p>Say "hello"</p>\n<p>Say "hello"</p></div>';
         mockItem = makeMockItem({ getNote: vi.fn(() => noteHtml) });
-        vi.mocked(Zotero.Items.getByLibraryAndKeyAsync).mockResolvedValue(mockItem);
+        vi.mocked((globalThis as any).Zotero.Items.getByLibraryAndKeyAsync).mockResolvedValue(mockItem);
         vi.mocked(getLatestNoteHtml).mockReturnValue(noteHtml);
 
         const req = makeValidateRequest({
@@ -1705,7 +1705,7 @@ describe('JSON-escape unescape fallback in matching', () => {
     it('allows ambiguous match after JSON-unescape when operation is str_replace_all', async () => {
         const noteHtml = '<div data-schema-version="9"><p>Say "hello"</p>\n<p>Say "hello"</p></div>';
         mockItem = makeMockItem({ getNote: vi.fn(() => noteHtml) });
-        vi.mocked(Zotero.Items.getByLibraryAndKeyAsync).mockResolvedValue(mockItem);
+        vi.mocked((globalThis as any).Zotero.Items.getByLibraryAndKeyAsync).mockResolvedValue(mockItem);
         vi.mocked(getLatestNoteHtml).mockReturnValue(noteHtml);
 
         const req = makeValidateRequest({
@@ -1721,7 +1721,7 @@ describe('JSON-escape unescape fallback in matching', () => {
         const response = await handleAgentActionValidateRequest(req);
         expect(response.valid).toBe(true);
         expect(response.normalized_action_data).toBeDefined();
-        expect(response.normalized_action_data.old_string).toBe('Say "hello"');
+        expect(response.normalized_action_data!.old_string).toBe('Say "hello"');
     });
 
     it('recovers from ambiguous unescaped match via captureValidatedEditTargetContext', async () => {
@@ -1731,7 +1731,7 @@ describe('JSON-escape unescape fallback in matching', () => {
         // must not reject these edits without trying disambiguation first.
         const noteHtml = '<div data-schema-version="9"><p>Say "hello"</p>\n<p>Say "hello"</p></div>';
         mockItem = makeMockItem({ getNote: vi.fn(() => noteHtml) });
-        vi.mocked(Zotero.Items.getByLibraryAndKeyAsync).mockResolvedValue(mockItem);
+        vi.mocked((globalThis as any).Zotero.Items.getByLibraryAndKeyAsync).mockResolvedValue(mockItem);
         vi.mocked(getLatestNoteHtml).mockReturnValue(noteHtml);
         vi.mocked(captureValidatedEditTargetContext).mockReturnValueOnce({
             beforeContext: 'unescaped-before',
@@ -1751,9 +1751,9 @@ describe('JSON-escape unescape fallback in matching', () => {
         const response = await handleAgentActionValidateRequest(req);
         expect(response.valid).toBe(true);
         expect(response.normalized_action_data).toBeDefined();
-        expect(response.normalized_action_data.old_string).toBe('Say "hello"');
-        expect(response.normalized_action_data.target_before_context).toBe('unescaped-before');
-        expect(response.normalized_action_data.target_after_context).toBe('unescaped-after');
+        expect(response.normalized_action_data!.old_string).toBe('Say "hello"');
+        expect(response.normalized_action_data!.target_before_context).toBe('unescaped-before');
+        expect(response.normalized_action_data!.target_after_context).toBe('unescaped-after');
     });
 
     // The next batch reproduces the failed-edits-18.md case: the LLM
@@ -1767,7 +1767,7 @@ describe('JSON-escape unescape fallback in matching', () => {
         // newline characters in old_string.
         const noteHtml = '<div data-schema-version="9"><h2>Section</h2>\n<hr>\n<p></p></div>';
         mockItem = makeMockItem({ getNote: vi.fn(() => noteHtml) });
-        vi.mocked(Zotero.Items.getByLibraryAndKeyAsync).mockResolvedValue(mockItem);
+        vi.mocked((globalThis as any).Zotero.Items.getByLibraryAndKeyAsync).mockResolvedValue(mockItem);
         vi.mocked(getLatestNoteHtml).mockReturnValue(noteHtml);
 
         const req = makeValidateRequest({
@@ -1786,14 +1786,14 @@ describe('JSON-escape unescape fallback in matching', () => {
         expect(response.valid).toBe(true);
         expect(response.normalized_action_data).toBeDefined();
         // Both old_string and new_string should have real newlines now.
-        expect(response.normalized_action_data.old_string).toBe('<h2>Section</h2>\n<hr>\n<p></p>');
-        expect(response.normalized_action_data.new_string).toBe('<h2>Section</h2>\n<hr>\n<p>New content</p>');
+        expect(response.normalized_action_data!.old_string).toBe('<h2>Section</h2>\n<hr>\n<p></p>');
+        expect(response.normalized_action_data!.new_string).toBe('<h2>Section</h2>\n<hr>\n<p>New content</p>');
     });
 
     it('matches old_string with literal \\n for insert_after operation', async () => {
         const noteHtml = '<div data-schema-version="9"><h2>Anchor</h2>\n<p>Existing</p></div>';
         mockItem = makeMockItem({ getNote: vi.fn(() => noteHtml) });
-        vi.mocked(Zotero.Items.getByLibraryAndKeyAsync).mockResolvedValue(mockItem);
+        vi.mocked((globalThis as any).Zotero.Items.getByLibraryAndKeyAsync).mockResolvedValue(mockItem);
         vi.mocked(getLatestNoteHtml).mockReturnValue(noteHtml);
 
         const req = makeValidateRequest({
@@ -1811,9 +1811,9 @@ describe('JSON-escape unescape fallback in matching', () => {
         const response = await handleAgentActionValidateRequest(req);
         expect(response.valid).toBe(true);
         expect(response.normalized_action_data).toBeDefined();
-        expect(response.normalized_action_data.old_string).toBe('<h2>Anchor</h2>\n<p>Existing</p>');
+        expect(response.normalized_action_data!.old_string).toBe('<h2>Anchor</h2>\n<p>Existing</p>');
         // insert_after merges the unescaped anchor + the unescaped new_string.
-        expect(response.normalized_action_data.new_string).toBe('<h2>Anchor</h2>\n<p>Existing</p>\n<p>Inserted</p>');
+        expect(response.normalized_action_data!.new_string).toBe('<h2>Anchor</h2>\n<p>Existing</p>\n<p>Inserted</p>');
     });
 
     it('matches old_string with mixed \\" and \\n escapes', async () => {
@@ -1821,7 +1821,7 @@ describe('JSON-escape unescape fallback in matching', () => {
         // the same string without ordering bugs.
         const noteHtml = '<div data-schema-version="9"><p>Say "hi"</p>\n<p>Done</p></div>';
         mockItem = makeMockItem({ getNote: vi.fn(() => noteHtml) });
-        vi.mocked(Zotero.Items.getByLibraryAndKeyAsync).mockResolvedValue(mockItem);
+        vi.mocked((globalThis as any).Zotero.Items.getByLibraryAndKeyAsync).mockResolvedValue(mockItem);
         vi.mocked(getLatestNoteHtml).mockReturnValue(noteHtml);
 
         const req = makeValidateRequest({
@@ -1837,14 +1837,14 @@ describe('JSON-escape unescape fallback in matching', () => {
         const response = await handleAgentActionValidateRequest(req);
         expect(response.valid).toBe(true);
         expect(response.normalized_action_data).toBeDefined();
-        expect(response.normalized_action_data.old_string).toBe('<p>Say "hi"</p>\n<p>Done</p>');
-        expect(response.normalized_action_data.new_string).toBe('<p>Say "bye"</p>\n<p>Done</p>');
+        expect(response.normalized_action_data!.old_string).toBe('<p>Say "hi"</p>\n<p>Done</p>');
+        expect(response.normalized_action_data!.new_string).toBe('<p>Say "bye"</p>\n<p>Done</p>');
     });
 
     it('matches old_string with literal \\t when note has real tabs', async () => {
         const noteHtml = '<div data-schema-version="9"><pre>col1\tcol2</pre></div>';
         mockItem = makeMockItem({ getNote: vi.fn(() => noteHtml) });
-        vi.mocked(Zotero.Items.getByLibraryAndKeyAsync).mockResolvedValue(mockItem);
+        vi.mocked((globalThis as any).Zotero.Items.getByLibraryAndKeyAsync).mockResolvedValue(mockItem);
         vi.mocked(getLatestNoteHtml).mockReturnValue(noteHtml);
 
         const req = makeValidateRequest({
@@ -1860,8 +1860,8 @@ describe('JSON-escape unescape fallback in matching', () => {
         const response = await handleAgentActionValidateRequest(req);
         expect(response.valid).toBe(true);
         expect(response.normalized_action_data).toBeDefined();
-        expect(response.normalized_action_data.old_string).toBe('<pre>col1\tcol2</pre>');
-        expect(response.normalized_action_data.new_string).toBe('<pre>a\tb</pre>');
+        expect(response.normalized_action_data!.old_string).toBe('<pre>col1\tcol2</pre>');
+        expect(response.normalized_action_data!.new_string).toBe('<pre>a\tb</pre>');
     });
 
     it('rejects ambiguous match after \\n unescape when operation is str_replace', async () => {
@@ -1869,7 +1869,7 @@ describe('JSON-escape unescape fallback in matching', () => {
         // Block 12c must reject (or disambiguate), not silently confirm.
         const noteHtml = '<div data-schema-version="9"><h2>S</h2>\n<p>X</p>\n<h2>S</h2>\n<p>X</p></div>';
         mockItem = makeMockItem({ getNote: vi.fn(() => noteHtml) });
-        vi.mocked(Zotero.Items.getByLibraryAndKeyAsync).mockResolvedValue(mockItem);
+        vi.mocked((globalThis as any).Zotero.Items.getByLibraryAndKeyAsync).mockResolvedValue(mockItem);
         vi.mocked(getLatestNoteHtml).mockReturnValue(noteHtml);
 
         const req = makeValidateRequest({
@@ -1919,7 +1919,7 @@ describe('citation ref enrichment — validate', () => {
         // Note contains the "enriched" form of the string.
         const noteHtml = '<div data-schema-version="9"><p>See CITATION_WITH_REF</p></div>';
         mockItem = makeMockItem({ getNote: vi.fn(() => noteHtml) });
-        vi.mocked(Zotero.Items.getByLibraryAndKeyAsync).mockResolvedValue(mockItem);
+        vi.mocked((globalThis as any).Zotero.Items.getByLibraryAndKeyAsync).mockResolvedValue(mockItem);
         vi.mocked(getLatestNoteHtml).mockReturnValue(noteHtml);
         vi.mocked(getOrSimplify).mockReturnValue({
             simplified: noteHtml,
@@ -2017,7 +2017,7 @@ describe('citation ref enrichment — validate', () => {
     it('insert_before emits a warning when new_string already ends with old_string', async () => {
         const noteHtml = '<div data-schema-version="9"><p>Main paragraph</p></div>';
         mockItem = makeMockItem({ getNote: vi.fn(() => noteHtml) });
-        vi.mocked(Zotero.Items.getByLibraryAndKeyAsync).mockResolvedValue(mockItem);
+        vi.mocked((globalThis as any).Zotero.Items.getByLibraryAndKeyAsync).mockResolvedValue(mockItem);
         vi.mocked(getLatestNoteHtml).mockReturnValue(noteHtml);
 
         const req = makeValidateRequest({
@@ -2045,7 +2045,7 @@ describe('citation ref enrichment — validate', () => {
     it('insert_after emits a warning when new_string already starts with old_string', async () => {
         const noteHtml = '<div data-schema-version="9"><p>Main paragraph</p></div>';
         mockItem = makeMockItem({ getNote: vi.fn(() => noteHtml) });
-        vi.mocked(Zotero.Items.getByLibraryAndKeyAsync).mockResolvedValue(mockItem);
+        vi.mocked((globalThis as any).Zotero.Items.getByLibraryAndKeyAsync).mockResolvedValue(mockItem);
         vi.mocked(getLatestNoteHtml).mockReturnValue(noteHtml);
 
         const req = makeValidateRequest({
@@ -2073,7 +2073,7 @@ describe('citation ref enrichment — validate', () => {
         const longOld = '<p>' + 'A'.repeat(80) + 'Z'.repeat(80) + '</p>';
         const noteHtml = `<div data-schema-version="9">${longOld}</div>`;
         mockItem = makeMockItem({ getNote: vi.fn(() => noteHtml) });
-        vi.mocked(Zotero.Items.getByLibraryAndKeyAsync).mockResolvedValue(mockItem);
+        vi.mocked((globalThis as any).Zotero.Items.getByLibraryAndKeyAsync).mockResolvedValue(mockItem);
         vi.mocked(getLatestNoteHtml).mockReturnValue(noteHtml);
 
         const req = makeValidateRequest({
@@ -2102,7 +2102,7 @@ describe('citation ref enrichment — validate', () => {
     it('insert_before omits warnings when new_string does not pre-copy old_string', async () => {
         const noteHtml = '<div data-schema-version="9"><p>Main paragraph</p></div>';
         mockItem = makeMockItem({ getNote: vi.fn(() => noteHtml) });
-        vi.mocked(Zotero.Items.getByLibraryAndKeyAsync).mockResolvedValue(mockItem);
+        vi.mocked((globalThis as any).Zotero.Items.getByLibraryAndKeyAsync).mockResolvedValue(mockItem);
         vi.mocked(getLatestNoteHtml).mockReturnValue(noteHtml);
 
         const req = makeValidateRequest({
@@ -2127,7 +2127,7 @@ describe('citation ref enrichment — validate', () => {
         // old_string again and produce duplicated content.
         const noteHtml = '<div data-schema-version="9"><p>Main paragraph</p></div>';
         mockItem = makeMockItem({ getNote: vi.fn(() => noteHtml) });
-        vi.mocked(Zotero.Items.getByLibraryAndKeyAsync).mockResolvedValue(mockItem);
+        vi.mocked((globalThis as any).Zotero.Items.getByLibraryAndKeyAsync).mockResolvedValue(mockItem);
         vi.mocked(getLatestNoteHtml).mockReturnValue(noteHtml);
 
         const req = makeValidateRequest({
@@ -2154,7 +2154,7 @@ describe('citation ref enrichment — validate', () => {
     it('insert_after skips merge when new_string already starts with old_string', async () => {
         const noteHtml = '<div data-schema-version="9"><p>Main paragraph</p></div>';
         mockItem = makeMockItem({ getNote: vi.fn(() => noteHtml) });
-        vi.mocked(Zotero.Items.getByLibraryAndKeyAsync).mockResolvedValue(mockItem);
+        vi.mocked((globalThis as any).Zotero.Items.getByLibraryAndKeyAsync).mockResolvedValue(mockItem);
         vi.mocked(getLatestNoteHtml).mockReturnValue(noteHtml);
 
         const req = makeValidateRequest({
@@ -2224,7 +2224,7 @@ describe('citation ref enrichment — execute (defense-in-depth)', () => {
         vi.clearAllMocks();
         const noteHtml = '<div data-schema-version="9"><p>See CITATION_WITH_REF</p></div>';
         mockItem = makeMockItem({ getNote: vi.fn(() => noteHtml) });
-        vi.mocked(Zotero.Items.getByLibraryAndKeyAsync).mockResolvedValue(mockItem);
+        vi.mocked((globalThis as any).Zotero.Items.getByLibraryAndKeyAsync).mockResolvedValue(mockItem);
         vi.mocked(getLatestNoteHtml).mockReturnValue(noteHtml);
         vi.mocked(getOrSimplify).mockReturnValue({
             simplified: noteHtml,
@@ -2316,7 +2316,7 @@ describe('insert_after multi-match normalization', () => {
         );
         const noteHtml = '<div data-schema-version="9"><p>See CITATION_WITH_REF. See CITATION_WITH_REF.</p></div>';
         const item = makeMockItem({ getNote: vi.fn(() => noteHtml) });
-        vi.mocked(Zotero.Items.getByLibraryAndKeyAsync).mockResolvedValue(item);
+        vi.mocked((globalThis as any).Zotero.Items.getByLibraryAndKeyAsync).mockResolvedValue(item);
         vi.mocked(getLatestNoteHtml).mockReturnValue(noteHtml);
         vi.mocked(getOrSimplify).mockReturnValue({
             simplified: noteHtml,
