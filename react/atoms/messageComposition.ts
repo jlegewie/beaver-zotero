@@ -497,7 +497,7 @@ async function validateItemsInBackground(
                     invalidItems: invalidItemsData 
                 }),
                 expire: isReaderAttachment ? false : true,
-                duration: 3000
+                duration: 5000
             });
         }
 
