@@ -37,6 +37,7 @@ import { logger } from '../../src/utils/logger';
 import { selectedModelAtom, ModelConfig } from './models';
 import { getPref } from '../../src/utils/prefs';
 import { MessageAttachment, SourceAttachment } from '../types/attachments/apiTypes';
+import type { ZoteroCollection } from '../types/zotero';
 import { toMessageAttachment } from '../types/attachments/converters';
 import { safeStub, serializeAttachmentStub, serializeCollection, serializeItemStub, serializeZoteroLibrary } from '../../src/utils/zoteroSerializers';
 import { SubscriptionStatus, ProcessingMode } from '../types/profile';
@@ -74,6 +75,7 @@ import {
 import { userIdAtom } from './auth';
 import { citationsAtom, processCitationsAtom, resetCitationMarkersAtom, mergePageLabelsByAttachmentIdAtom } from './citations';
 import { preloadPageLabelsForCitations } from '../utils/pageLabels';
+import { sanitizeMessageFiltersForSearchableLibraries } from '../utils/messageFilters';
 import {
     addAgentActionsAtom,
     upsertAgentActionsAtom,
@@ -1830,7 +1832,15 @@ export const sendWSMessageAtom = atom(
         }
 
         // Build filters payload
-        const filterState = get(currentMessageFiltersAtom);
+        const rawFilterState = get(currentMessageFiltersAtom);
+        const sanitizedFilters = sanitizeMessageFiltersForSearchableLibraries(
+            rawFilterState,
+            searchableLibraryIds,
+        );
+        const filterState = sanitizedFilters.state;
+        if (sanitizedFilters.changed) {
+            set(currentMessageFiltersAtom, filterState);
+        }
         const filterLibraries = filterState.libraryIds.length > 0
             ? filterState.libraryIds
                 .map(id => Zotero.Libraries.get(id))
@@ -1838,7 +1848,10 @@ export const sendWSMessageAtom = atom(
                 .map(serializeZoteroLibrary)
             : null;
         const filterCollections = filterState.collectionIds.length > 0
-            ? (await Promise.all(filterState.collectionIds.map(id => serializeCollection(Zotero.Collections.get(id))))).filter(Boolean)
+            ? (await Promise.all(filterState.collectionIds.map((id) => {
+                const collection = Zotero.Collections.get(id);
+                return collection ? serializeCollection(collection) : null;
+            }))).filter((collection): collection is ZoteroCollection => collection !== null)
             : null;
         const filterTags = filterState.tagSelections.length > 0
             ? filterState.tagSelections.map(tag => ({ ...tag }))
