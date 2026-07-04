@@ -7,6 +7,7 @@ vi.mock('../../../src/services/agentDataProvider/utils', () => ({
     getDeferredToolPreference: vi.fn(() => 'always_ask'),
     isLibrarySearchable: vi.fn(() => true),
     getCollectionByIdOrName: vi.fn(),
+    checkLibraryExcluded: vi.fn(() => null),
 }));
 
 vi.mock('../../../src/utils/logger', () => ({

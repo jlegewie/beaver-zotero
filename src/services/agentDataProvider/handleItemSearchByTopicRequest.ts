@@ -62,6 +62,19 @@ export async function handleItemSearchByTopicRequest(
 
     // Get searchable library IDs
     const searchableLibraryIds = store.get(searchableLibraryIdsAtom);
+    if (searchableLibraryIds.length === 0) {
+        logger('handleItemSearchByTopicRequest: no searchable libraries available', 1);
+        return {
+            type: 'item_search_by_topic',
+            request_id: request.request_id,
+            items: [],
+            timing: {
+                total_ms: Date.now() - startTime,
+                item_count: 0,
+                attachment_count: 0,
+            },
+        };
+    }
     
     // Resolve library IDs from filter, but always intersect with searchable libraries
     const libraryIds: number[] = [];
@@ -160,7 +173,7 @@ export async function handleItemSearchByTopicRequest(
         searchResults = await searchService.search(request.topic_query, {
             topK: (offset + request.limit) * 4, // Fetch extra to account for filtering and pagination offset
             minSimilarity: 0.3,
-            libraryIds: libraryIds.length > 0 ? libraryIds : undefined,
+            libraryIds,
         });
     } catch (error) {
         logger(`handleItemSearchByTopicRequest: Semantic search failed: ${error}`, 1);

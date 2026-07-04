@@ -17,6 +17,7 @@ import {
 import { ZoteroItemReference } from '../../../react/types/zotero';
 import { makeRemoteFilePath } from '../documentFileIdentity';
 import {
+    checkLibraryExcluded,
     resolveToImageAttachment,
     validateZoteroItemReference,
     loadPdfData,
@@ -89,6 +90,13 @@ export async function handleZoteroAttachmentImageRequest(
             `Invalid format '${format}': must be png, jpeg, or auto`,
             'invalid_format'
         );
+    }
+
+    // Reject libraries the user excluded from Beaver before any item lookup, so
+    // an excluded attachment is never resolved, rendered, or confirmed to exist.
+    const excluded = checkLibraryExcluded(attachment.library_id);
+    if (excluded) {
+        return errorResponse(excluded.message, 'library_excluded');
     }
 
     const maxWidth = effectiveMaxDimension(max_width);

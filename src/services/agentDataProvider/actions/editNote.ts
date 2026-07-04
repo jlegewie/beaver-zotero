@@ -69,7 +69,7 @@ import {
     WSAgentActionExecuteResponse,
     DeferredToolPreference,
 } from '../../agentProtocol';
-import { getDeferredToolPreference } from '../utils';
+import { checkLibraryExcluded, excludedLibraryMessage, getDeferredToolPreference } from '../utils';
 import { autoApproveNoteKeysAtom, makeNoteKey } from '../../../../react/atoms/editNoteAutoApprove';
 import { TimeoutContext, checkAborted } from '../timeout';
 import { TimeoutError } from '../timeout';
@@ -433,7 +433,7 @@ async function validateEditNoteAction(
             type: 'agent_action_validate_response',
             request_id: request.request_id,
             valid: false,
-            error: `Library exists but is not synced with Beaver. The user can update this setting in Beaver Preferences. Library: ${library.name} (ID: ${library_id})`,
+            error: excludedLibraryMessage(library_id),
             error_code: 'library_not_searchable',
             preference: 'always_ask',
         };
@@ -802,6 +802,19 @@ async function executeEditNoteAction(
         target_before_context,
         target_after_context,
     } = request.action_data as EditNoteProposedData;
+
+    // TOCTOU guard: never edit a note in a library the user excluded from Beaver,
+    // even if validation passed earlier or the execute request skipped it.
+    const excludedLibrary = checkLibraryExcluded(library_id);
+    if (excludedLibrary) {
+        return {
+            type: 'agent_action_execute_response',
+            request_id: request.request_id,
+            success: false,
+            error: excludedLibrary.message,
+            error_code: 'library_not_searchable',
+        };
+    }
 
     // 1. Load item
     const item = await Zotero.Items.getByLibraryAndKeyAsync(library_id, zotero_key);

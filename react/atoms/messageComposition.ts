@@ -5,6 +5,7 @@ import { createElement } from 'react';
 import { logger } from "../../src/utils/logger";
 import { addPopupMessageAtom, addRegularItemPopupAtom, addRegularItemsSummaryPopupAtom, removePopupMessageAtom, safeChildAttachments } from "../utils/popupMessageUtils";
 import { getItemValidationAtom, isHardBlockedValidation, isRejectedItemValidation, validateItemsAtom, validateRegularItemAtom } from './itemValidation';
+import { searchableLibraryIdsAtom } from './profile';
 import type { ItemValidationState } from './itemValidation';
 import { toReadabilityInfo, summarizeRegularItemReadability } from '../utils/attachmentReadabilityCopy';
 import { InvalidItemsMessageContent } from '../components/ui/popup/InvalidItemsMessageContent';
@@ -365,7 +366,9 @@ async function validateItemsInBackground(
     get: any,
     set: any,
     items: Zotero.Item[],
-    isReaderAttachment: boolean = false
+    // Tab-context items (the open reader attachment / note tab) stay on screen
+    // for as long as the tab is open, so their invalid popup should not auto-expire.
+    isTabContext: boolean = false
 ) {
     const getValidation = get(getItemValidationAtom);
     logger(`validateItemsInBackground: Validating ${items.length} items`, 3);
@@ -496,8 +499,8 @@ async function validateItemsInBackground(
                 customContent: createElement(InvalidItemsMessageContent, { 
                     invalidItems: invalidItemsData 
                 }),
-                expire: isReaderAttachment ? false : true,
-                duration: 3000
+                expire: isTabContext ? false : true,
+                duration: 5000
             });
         }
 
@@ -528,8 +531,13 @@ export const updateMessageItemsFromZoteroSelectionAtom = atom(
     null,
     async (get, set, limit?: number) => {
         const items = Zotero.getActiveZoteroPane().getSelectedItems();
-        const itemsFiltered = items.filter((item) => item.isRegularItem() || item.isAttachment() || item.isNote());
-        
+        // Never stage items from libraries the user excluded from Beaver.
+        const searchableLibraryIds = get(searchableLibraryIdsAtom);
+        const itemsFiltered = items.filter((item) =>
+            (item.isRegularItem() || item.isAttachment() || item.isNote()) &&
+            searchableLibraryIds.includes(item.libraryID)
+        );
+
         // Filter out items already in the thread
         const existingKeys = get(allUserAttachmentKeysAtom);
         const newItems = itemsFiltered.filter((item) => !existingKeys.has(`${item.libraryID}-${item.key}`));
@@ -568,6 +576,27 @@ export const updateReaderAttachmentAtom = atom(
         if (item) {
             set(currentReaderAttachmentAtom, item);
             validateItemsInBackground(get, set, [item], true);
+        }
+    }
+);
+
+/**
+* Update the current note tab item and validate it in the background.
+*/
+export const updateNoteItemAtom = atom(
+    null,
+    (get, set, item: Zotero.Item | null) => {
+        // Remove the previous note's invalid popup before switching
+        const previousNoteKey = get(currentNoteTabItemKeyAtom);
+        if (previousNoteKey) {
+            set(removePopupMessageAtom, previousNoteKey);
+        }
+
+        set(currentNoteItemAtom, item);
+        if (item) {
+            // Fire-and-forget: the note tab stays open, so treat it as a
+            // persistent tab context (isTabContext=true).
+            void validateItemsInBackground(get, set, [item], true);
         }
     }
 );

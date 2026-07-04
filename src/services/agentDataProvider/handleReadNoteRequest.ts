@@ -15,7 +15,7 @@ import {
 } from '../agentProtocol';
 import { ItemStub, ItemSummary } from '../../../react/types/zotero';
 import { serializeItemStub, serializeItemSummary } from '../../utils/zoteroSerializers';
-import { prepareAttachmentInfoBatchData, processAttachmentInfoBatch } from './utils';
+import { checkLibraryExcluded, prepareAttachmentInfoBatchData, processAttachmentInfoBatch } from './utils';
 import { CITATION_TAG_PATTERN } from '../../../react/utils/citationPreprocessing';
 import {
     normalizeCitationTag,
@@ -122,6 +122,8 @@ async function resolveCitedItems(
     // Load all cited items and keep the final output in citation order.
     const items: Zotero.Item[] = [];
     for (const ref of refs) {
+        // Never resolve cited items in libraries the user excluded from Beaver.
+        if (checkLibraryExcluded(ref.libraryId)) continue;
         try {
             const item = await Zotero.Items.getByLibraryAndKeyAsync(ref.libraryId, ref.itemKey);
             if (item && !item.deleted && (item.isRegularItem?.() || item.isNote?.() || isAnnotationItem(item))) {
@@ -221,6 +223,13 @@ export async function handleReadNoteRequest(
         return errorResponse(
             `Invalid note_id format: '${note_id}'. Expected '{libraryID}-{itemKey}'.`
         );
+    }
+
+    // Reject notes in libraries the user excluded from Beaver before any lookup,
+    // so an excluded note is never read or confirmed to exist.
+    const excluded = checkLibraryExcluded(parsed.libraryId);
+    if (excluded) {
+        return errorResponse(excluded.message);
     }
 
     try {

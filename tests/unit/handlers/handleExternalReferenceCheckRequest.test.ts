@@ -3,7 +3,9 @@
  *
  * Mocks `batchFindExistingReferences` to verify:
  *   - timing fields propagate into the response
- *   - library_ids defaults fall back to Zotero.Libraries.getAll() when empty
+ *   - library_ids default to the searchable (non-excluded) libraries when empty
+ *   - explicitly requested libraries are intersected with the searchable set so
+ *     excluded libraries are never searched
  *   - a thrown error produces an all-null response (no reject)
  */
 
@@ -16,6 +18,13 @@ vi.mock('../../../src/utils/logger', () => ({
 const mockBatchFindExistingReferences = vi.fn();
 vi.mock('../../../react/utils/batchFindExistingReferences', () => ({
     batchFindExistingReferences: (...args: any[]) => mockBatchFindExistingReferences(...args),
+}));
+
+const { mockGetSearchableLibraryIds } = vi.hoisted(() => ({
+    mockGetSearchableLibraryIds: vi.fn(() => [1, 42] as number[]),
+}));
+vi.mock('../../../src/services/agentDataProvider/utils', () => ({
+    getSearchableLibraryIds: mockGetSearchableLibraryIds,
 }));
 
 import { handleExternalReferenceCheckRequest } from '../../../src/services/agentDataProvider/handleExternalReferenceCheckRequest';
@@ -46,6 +55,7 @@ const baseRequest = {
 
 beforeEach(() => {
     mockBatchFindExistingReferences.mockReset();
+    mockGetSearchableLibraryIds.mockReturnValue([1, 42]);
 });
 
 afterEach(() => {
@@ -95,11 +105,8 @@ describe('handleExternalReferenceCheckRequest', () => {
         });
     });
 
-    it('falls back to all libraries when library_ids is undefined', async () => {
-        (globalThis as any).Zotero.Libraries.getAll.mockReturnValue([
-            { libraryID: 1 },
-            { libraryID: 42 },
-        ]);
+    it('falls back to the searchable libraries when library_ids is undefined', async () => {
+        mockGetSearchableLibraryIds.mockReturnValue([1, 42]);
         mockBatchFindExistingReferences.mockResolvedValue({
             results: baseRequest.items.map(i => ({ id: i.id, item: null })),
             timing: {
@@ -118,10 +125,8 @@ describe('handleExternalReferenceCheckRequest', () => {
         );
     });
 
-    it('falls back to all libraries when library_ids is an empty array', async () => {
-        (globalThis as any).Zotero.Libraries.getAll.mockReturnValue([
-            { libraryID: 1 },
-        ]);
+    it('falls back to the searchable libraries when library_ids is an empty array', async () => {
+        mockGetSearchableLibraryIds.mockReturnValue([1]);
         mockBatchFindExistingReferences.mockResolvedValue({
             results: baseRequest.items.map(i => ({ id: i.id, item: null })),
             timing: {
@@ -132,6 +137,28 @@ describe('handleExternalReferenceCheckRequest', () => {
         });
 
         const req = { ...baseRequest, library_ids: [] };
+        await handleExternalReferenceCheckRequest(req as any);
+
+        expect(mockBatchFindExistingReferences).toHaveBeenCalledWith(
+            expect.any(Array),
+            [1]
+        );
+    });
+
+    it('drops excluded libraries from an explicitly requested library_ids list', async () => {
+        // Library 99 is excluded (absent from the searchable set) and must never
+        // be searched, even though the backend requested it explicitly.
+        mockGetSearchableLibraryIds.mockReturnValue([1]);
+        mockBatchFindExistingReferences.mockResolvedValue({
+            results: baseRequest.items.map(i => ({ id: i.id, item: null })),
+            timing: {
+                total_ms: 1, phase1_identifier_lookup_ms: 0, phase2_title_candidates_ms: 0,
+                phase3_fuzzy_matching_ms: 0, candidates_fetched: 0, matches_by_identifier: 0,
+                matches_by_fuzzy: 0,
+            },
+        });
+
+        const req = { ...baseRequest, library_ids: [1, 99] };
         await handleExternalReferenceCheckRequest(req as any);
 
         expect(mockBatchFindExistingReferences).toHaveBeenCalledWith(

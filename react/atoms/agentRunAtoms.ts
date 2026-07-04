@@ -37,6 +37,7 @@ import { logger } from '../../src/utils/logger';
 import { selectedModelAtom, ModelConfig } from './models';
 import { getPref } from '../../src/utils/prefs';
 import { MessageAttachment, SourceAttachment } from '../types/attachments/apiTypes';
+import type { ZoteroCollection } from '../types/zotero';
 import { toMessageAttachment } from '../types/attachments/converters';
 import { safeStub, serializeAttachmentStub, serializeCollection, serializeItemStub, serializeZoteroLibrary } from '../../src/utils/zoteroSerializers';
 import { SubscriptionStatus, ProcessingMode } from '../types/profile';
@@ -74,6 +75,7 @@ import {
 import { userIdAtom } from './auth';
 import { citationsAtom, processCitationsAtom, resetCitationMarkersAtom, mergePageLabelsByAttachmentIdAtom } from './citations';
 import { preloadPageLabelsForCitations } from '../utils/pageLabels';
+import { sanitizeMessageFiltersForSearchableLibraries } from '../utils/messageFilters';
 import {
     addAgentActionsAtom,
     upsertAgentActionsAtom,
@@ -1678,11 +1680,14 @@ export const sendWSMessageAtom = atom(
             // Custom instructions (if any)
         const customInstructions = getPref('customInstructions') || undefined;
 
-        // Build attachments from current message items, dropping anything that
-        // validation has already rejected.
+        // Build attachments from current message items. Final send gate: drop
+        // anything validation already rejected AND anything in a library the user
+        // excluded from Beaver
         const validationResults = get(itemValidationResultsAtom);
+        const searchableLibraryIds = get(searchableLibraryIdsAtom);
         const rawSelectedItems = get(currentMessageItemsAtom);
         const rejectedSelectedItems = rawSelectedItems.filter((item) =>
+            !searchableLibraryIds.includes(item.libraryID) ||
             isRejectedItemValidation(item, validationResults.get(`${item.libraryID}-${item.key}`))
         );
         const selectedItems = rejectedSelectedItems.length > 0
@@ -1692,10 +1697,10 @@ export const sendWSMessageAtom = atom(
             set(currentMessageItemsAtom, selectedItems);
             set(addPopupMessageAtom, {
                 type: 'error',
-                title: rejectedSelectedItems.length === 1 ? 'File Removed' : 'Files Removed',
+                title: rejectedSelectedItems.length === 1 ? 'Item Removed' : 'Items Removed',
                 text: rejectedSelectedItems.length === 1
-                    ? 'A file that Beaver cannot read was removed from this message.'
-                    : `${rejectedSelectedItems.length} files that Beaver cannot read were removed from this message.`,
+                    ? 'An item that Beaver cannot use was removed from this message.'
+                    : `${rejectedSelectedItems.length} items that Beaver cannot use were removed from this message.`,
                 expire: true,
                 duration: 4000,
             });
@@ -1735,7 +1740,8 @@ export const sendWSMessageAtom = atom(
         attachments = await processImageAnnotations(attachments);
 
         // Add collection attachments if set
-        const messageCollections = get(currentMessageCollectionsAtom);
+        const messageCollections = get(currentMessageCollectionsAtom)
+            .filter(col => searchableLibraryIds.includes(col.library_id));
         for (const col of messageCollections) {
             attachments.push({
                 type: 'collection',
@@ -1776,9 +1782,11 @@ export const sendWSMessageAtom = atom(
         }
 
         // Add the current reader attachment as a source if it is not already in
-        // the thread. Reader position is captured in application state.
+        // the thread. Reader position is captured in application state. Send gate:
+        // never auto-attach a reader source in a library the user excluded from
+        // Beaver — this path bypasses the currentMessageItems gate above.
         const readerAttachment = get(currentReaderAttachmentAtom);
-        if (readerAttachment) {
+        if (readerAttachment && searchableLibraryIds.includes(readerAttachment.libraryID)) {
             const allUserAttachmentKeys = get(allUserAttachmentKeysAtom);
             const existingKeys = new Set([
                 ...attachments.map(messageAttachmentKey),
@@ -1805,8 +1813,10 @@ export const sendWSMessageAtom = atom(
             }
         }
 
-        // Add current note tab item as note attachment if not already present
-        if (currentNoteTabItem) {
+        // Add current note tab item as note attachment if not already present.
+        // Send gate: never auto-attach a note in a library the user excluded from
+        // Beaver — this path bypasses the currentMessageItems gate above.
+        if (currentNoteTabItem && searchableLibraryIds.includes(currentNoteTabItem.libraryID)) {
             const allUserAttachmentKeys = get(allUserAttachmentKeysAtom);
             const existingKeys = new Set([
                 ...attachments.map(messageAttachmentKey),
@@ -1822,7 +1832,15 @@ export const sendWSMessageAtom = atom(
         }
 
         // Build filters payload
-        const filterState = get(currentMessageFiltersAtom);
+        const rawFilterState = get(currentMessageFiltersAtom);
+        const sanitizedFilters = sanitizeMessageFiltersForSearchableLibraries(
+            rawFilterState,
+            searchableLibraryIds,
+        );
+        const filterState = sanitizedFilters.state;
+        if (sanitizedFilters.changed) {
+            set(currentMessageFiltersAtom, filterState);
+        }
         const filterLibraries = filterState.libraryIds.length > 0
             ? filterState.libraryIds
                 .map(id => Zotero.Libraries.get(id))
@@ -1830,7 +1848,10 @@ export const sendWSMessageAtom = atom(
                 .map(serializeZoteroLibrary)
             : null;
         const filterCollections = filterState.collectionIds.length > 0
-            ? (await Promise.all(filterState.collectionIds.map(id => serializeCollection(Zotero.Collections.get(id))))).filter(Boolean)
+            ? (await Promise.all(filterState.collectionIds.map((id) => {
+                const collection = Zotero.Collections.get(id);
+                return collection ? serializeCollection(collection) : null;
+            }))).filter((collection): collection is ZoteroCollection => collection !== null)
             : null;
         const filterTags = filterState.tagSelections.length > 0
             ? filterState.tagSelections.map(tag => ({ ...tag }))

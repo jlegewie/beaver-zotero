@@ -6,7 +6,7 @@ import { uiManager } from '../ui/UIManager';
 import { getPref } from '../../src/utils/prefs';
 import { removePopupMessagesByTypeAtom } from '../atoms/ui';
 import { currentMessageItemsAtom, updateMessageItemsFromZoteroSelectionAtom } from '../atoms/messageComposition';
-import { searchableLibraryIdsAtom } from '../atoms/profile';
+import { isProfileLoadedAtom } from '../atoms/profile';
 import { logger } from '../../src/utils/logger';
 import { dismissDiffPreview } from '../utils/noteEditorDiffPreview';
 
@@ -38,9 +38,9 @@ export function useToggleSidebar() {
                 setCurrentMessageItems([]);
                 removePopupMessagesByType(['items_summary']);
                 if (!detail?.skipAutoPopulate) {
-                    const libraryIds = store.get(searchableLibraryIdsAtom);   // Checking for empty array ensures that profile is loaded
+                    const isProfileLoaded = store.get(isProfileLoadedAtom);
                     const addSelectedItemsOnOpen = getPref('addSelectedItemsOnOpen');
-                    if (addSelectedItemsOnOpen && isLibraryTab && libraryIds.length > 0) {
+                    if (addSelectedItemsOnOpen && isLibraryTab && isProfileLoaded) {
                         const maxAddAttachmentToMessage = getPref('maxAddAttachmentToMessage');
                         updateMessageItemsFromZoteroSelection(maxAddAttachmentToMessage);
                     }

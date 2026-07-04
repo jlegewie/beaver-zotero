@@ -19,6 +19,7 @@ import {
 import { BeaverExtractor, ExtractionError, ExtractionErrorCode, WorkerAbortError } from '../../beaver-extract';
 import { makeRemoteFilePath } from '../documentFileIdentity';
 import {
+    checkLibraryExcluded,
     resolveToPdfAttachment,
     validateZoteroItemReference,
     loadPdfData,
@@ -80,6 +81,13 @@ export async function handleZoteroAttachmentPageImagesRequest(
             `Invalid attachment reference '${requestKey}': ${formatError}`,
             'invalid_format'
         );
+    }
+
+    // Reject libraries the user excluded from Beaver before any item lookup, so
+    // an excluded attachment is never resolved, rendered, or confirmed to exist.
+    const excluded = checkLibraryExcluded(attachment.library_id);
+    if (excluded) {
+        return errorResponse(excluded.message, 'library_excluded');
     }
 
     const timeout = createTimeoutController(timeout_seconds, DEFAULT_IMAGES_TIMEOUT_SECONDS);

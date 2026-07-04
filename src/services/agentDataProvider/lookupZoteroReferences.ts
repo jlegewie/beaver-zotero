@@ -20,7 +20,7 @@ import {
     serializeNote,
     serializeItemStub,
 } from '../../utils/zoteroSerializers';
-import { computeItemStatus, prefetchSyncDates, getAttachmentFileStatus, getAttachmentFileStatusLightweight, getBestAttachmentBatch } from './utils';
+import { checkLibraryExcluded, computeItemStatus, prefetchSyncDates, getAttachmentFileStatus, getAttachmentFileStatusLightweight, getBestAttachmentBatch } from './utils';
 import {
     WSDataError,
     AnnotationResultItem,
@@ -90,6 +90,12 @@ export async function lookupZoteroReferences(
 
     const loadResults = await Promise.all(
         references.map(async (reference) => {
+            // Never load items from libraries the user excluded from Beaver; the
+            // reference is reported as an error so its data is never serialized.
+            const excluded = checkLibraryExcluded(reference.library_id);
+            if (excluded) {
+                return { reference, error: excluded.message, error_code: 'library_excluded' as const };
+            }
             try {
                 const zoteroItem = await Zotero.Items.getByLibraryAndKeyAsync(reference.library_id, reference.zotero_key);
                 if (!zoteroItem) {

@@ -80,6 +80,16 @@ vi.mock('../../../react/types/actionStorage', () => ({
     isBuiltinAction: vi.fn((id: string) => id.startsWith('builtin-')),
 }));
 
+// actions.ts imports searchableLibraryIdsAtom from ./profile; mock it to avoid
+// pulling the real profile → files → attachmentsService → supabaseClient chain,
+// and to make the test items' library (1) searchable so the exclusion gate passes.
+vi.mock('../../../react/atoms/profile', async () => {
+    const { atom } = await import('jotai');
+    return {
+        searchableLibraryIdsAtom: atom<number[]>([1]),
+    };
+});
+
 // =============================================================================
 // Imports (after mocks)
 // =============================================================================
@@ -206,6 +216,28 @@ describe('sendComposedMessageAtom', () => {
             emptyItemVariables: [],
         } as any);
         vi.mocked(isRejectedItemValidation).mockReturnValueOnce(true);
+        const store = makeStore();
+        const ok = await store.set(sendComposedMessageAtom, {
+            baseText: '/summarize',
+            pills: [{ commandName: 'summarize', actionId: 'custom-1' }],
+        });
+        expect(ok).toBe(false);
+        expect(sendWSMessageMock).not.toHaveBeenCalled();
+        expect(addPopupMessageMock).toHaveBeenCalledWith(expect.objectContaining({ type: 'error' }));
+    });
+
+    it('aborts without sending when a resolved item is in an excluded library', async () => {
+        // Library 2 is not in the searchable set ([1]); the item is freshly
+        // resolved with no cached validation, so the direct exclusion gate must
+        // catch it even though isRejectedItemValidation would not.
+        const item = { libraryID: 2, key: 'XYZ' };
+        vi.mocked(resolvePromptVariables).mockResolvedValueOnce({
+            text: 'x',
+            items: [item],
+            collection: null,
+            emptyItemVariables: [],
+        } as any);
+        vi.mocked(isRejectedItemValidation).mockReturnValue(false);
         const store = makeStore();
         const ok = await store.set(sendComposedMessageAtom, {
             baseText: '/summarize',

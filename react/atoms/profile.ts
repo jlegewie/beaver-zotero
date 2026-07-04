@@ -1,6 +1,6 @@
 import { atom } from "jotai";
 import { selectAtom } from 'jotai/utils';
-import { SafeProfileWithPlan, PlanFeatures, ProfileBalance, ProcessingMode, CreditPlanStatus, CreditBreakdown, CreditPlan } from "../types/profile";
+import { ExcludedLibrary, SafeProfileWithPlan, PlanFeatures, ProfileBalance, ProcessingMode, CreditPlanStatus, CreditBreakdown, CreditPlan } from "../types/profile";
 import { getZoteroUserIdentifier } from "../../src/utils/zoteroUtils";
 import { ZoteroLibrary } from "../types/zotero";
 import { fileStatusAtom } from "./files";
@@ -60,6 +60,28 @@ export const isDeviceAuthorizedAtom = selectAtom(
 // This is used for Free users who don't store libraries in the backend per privacy policy
 export const localZoteroLibrariesAtom = atom<ZoteroLibrary[]>([]);
 
+export const excludedLibrariesAtom = selectAtom(
+    profileWithPlanAtom,
+    (profile: SafeProfileWithPlan | null) => profile?.excluded_libraries ?? [],
+);
+
+export function libraryExclusionKey(library: Pick<ZoteroLibrary, 'is_group' | 'group_id'>): string {
+    return library.is_group && library.group_id != null ? `group:${library.group_id}` : 'user';
+}
+
+export function excludedEntryKey(entry: ExcludedLibrary): string {
+    // The personal library is globally keyed as "user" because Zotero user
+    // libraries have device-local numeric IDs.
+    return entry.type === 'group' && entry.group_id != null ? `group:${entry.group_id}` : 'user';
+}
+
+export function excludedEntryFromLibrary(library: Pick<ZoteroLibrary, 'is_group' | 'group_id'>): ExcludedLibrary {
+    if (library.is_group && library.group_id != null) {
+        return { type: 'group', group_id: library.group_id };
+    }
+    return { type: 'user' };
+}
+
 // Libraries with synced=true (for Pro sync operations)
 export const syncedLibrariesAtom = atom<ZoteroLibrary[]>((get) => {
     const profile = get(profileWithPlanAtom);
@@ -74,18 +96,16 @@ export const syncedLibraryIdsAtom = selectAtom(
     (a, b) => a.length === b.length && a.every((v, i) => v === b[i])
 );
 
-// Searchable library IDs (for embedding index, search filtering)
-// Free: all local libraries, Pro: synced only
+// Searchable library IDs
 export const searchableLibraryIdsAtom = atom<number[]>((get) => {
-    const isDatabaseSyncSupported = get(isDatabaseSyncSupportedAtom);
-    
-    if (isDatabaseSyncSupported) {
-        // Pro: only synced libraries are searchable
-        return get(syncedLibrariesAtom).map(lib => lib.library_id);
-    } else {
-        // Free: all local libraries are searchable
-        return get(localZoteroLibrariesAtom).map(lib => lib.library_id);
-    }
+    const excluded = new Set(get(excludedLibrariesAtom).map(excludedEntryKey));
+    return get(localZoteroLibrariesAtom)
+        .filter(lib => !excluded.has(libraryExclusionKey(lib)))
+        .map(lib => lib.library_id);
+});
+
+export const allLibrariesExcludedAtom = atom<boolean>((get) => {
+    return get(localZoteroLibrariesAtom).length > 0 && get(searchableLibraryIdsAtom).length === 0;
 });
 
 // Plan data

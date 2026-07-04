@@ -134,8 +134,8 @@ export async function isValidZoteroItem(item: Zotero.Item): Promise<{valid: bool
         return {
             valid: false,
             error: library_name
-                ? `The library "${library_name}" is not synced with Beaver.`
-                : "This library is not synced with Beaver."};
+                ? `The library "${library_name}" is excluded from Beaver. You can update this setting in Beaver Preferences.`
+                : "This library is excluded from Beaver. You can update this setting in Beaver Preferences."};
     }
 
     // Is the library valid for sync?

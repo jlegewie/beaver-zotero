@@ -36,6 +36,7 @@ vi.mock('../../../src/services/agentDataProvider/utils', () => ({
     prepareAttachmentInfoBatchData: vi.fn(async () => ({ bestAttachmentMap: new Map() })),
     processAttachmentInfoBatch: vi.fn(async () => []),
     toAttachmentSummary: vi.fn((attachment: any) => attachment),
+    checkLibraryExcluded: vi.fn(() => null),
 }));
 
 // Mock logger

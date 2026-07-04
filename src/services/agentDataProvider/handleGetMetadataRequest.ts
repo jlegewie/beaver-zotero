@@ -14,7 +14,7 @@ import {
 } from '../agentProtocol';
 import { ItemStub } from '../../../react/types/zotero';
 import { serializeNote, serializeAnnotation, serializeItemStub } from '../../utils/zoteroSerializers';
-import { getAttachmentInfoForItem, formatCreatorsString, extractYear } from './utils';
+import { checkLibraryExcluded, getAttachmentInfoForItem, formatCreatorsString, extractYear } from './utils';
 
 
 /**
@@ -65,7 +65,14 @@ export async function handleGetMetadataRequest(
                 notFound.push(itemId);
                 continue;
             }
-            
+
+            // Never serve metadata for items in libraries the user excluded from
+            // Beaver; report them as not found so no data leaks.
+            if (checkLibraryExcluded(libraryId)) {
+                notFound.push(itemId);
+                continue;
+            }
+
             // Get the item
             const item = await Zotero.Items.getByLibraryAndKeyAsync(libraryId, key);
             if (!item) {
