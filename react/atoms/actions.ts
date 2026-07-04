@@ -339,6 +339,18 @@ export const resolvePillsToPromptActionsAtom = atom(
                 }
             }
             if (collection && !accumulatedCollection) {
+                // A collection-bound action carries no items, so the per-item
+                // check above never sees it — gate the collection's library here.
+                if (!searchableLibraryIds.includes(collection.library_id)) {
+                    set(addPopupMessageAtom, {
+                        type: 'error',
+                        title: 'Action skipped',
+                        text: 'This action targets a collection in a library you excluded from Beaver. You can change excluded libraries in Beaver Preferences.',
+                        expire: true,
+                        duration: 5000,
+                    });
+                    return null;
+                }
                 accumulatedCollection = collection;
             }
 

@@ -1738,7 +1738,8 @@ export const sendWSMessageAtom = atom(
         attachments = await processImageAnnotations(attachments);
 
         // Add collection attachments if set
-        const messageCollections = get(currentMessageCollectionsAtom);
+        const messageCollections = get(currentMessageCollectionsAtom)
+            .filter(col => searchableLibraryIds.includes(col.library_id));
         for (const col of messageCollections) {
             attachments.push({
                 type: 'collection',
@@ -1779,9 +1780,11 @@ export const sendWSMessageAtom = atom(
         }
 
         // Add the current reader attachment as a source if it is not already in
-        // the thread. Reader position is captured in application state.
+        // the thread. Reader position is captured in application state. Send gate:
+        // never auto-attach a reader source in a library the user excluded from
+        // Beaver — this path bypasses the currentMessageItems gate above.
         const readerAttachment = get(currentReaderAttachmentAtom);
-        if (readerAttachment) {
+        if (readerAttachment && searchableLibraryIds.includes(readerAttachment.libraryID)) {
             const allUserAttachmentKeys = get(allUserAttachmentKeysAtom);
             const existingKeys = new Set([
                 ...attachments.map(messageAttachmentKey),
@@ -1808,8 +1811,10 @@ export const sendWSMessageAtom = atom(
             }
         }
 
-        // Add current note tab item as note attachment if not already present
-        if (currentNoteTabItem) {
+        // Add current note tab item as note attachment if not already present.
+        // Send gate: never auto-attach a note in a library the user excluded from
+        // Beaver — this path bypasses the currentMessageItems gate above.
+        if (currentNoteTabItem && searchableLibraryIds.includes(currentNoteTabItem.libraryID)) {
             const allUserAttachmentKeys = get(allUserAttachmentKeysAtom);
             const existingKeys = new Set([
                 ...attachments.map(messageAttachmentKey),
