@@ -690,6 +690,7 @@ export type AttachmentPageImagesErrorCode =
     | 'download_failed'     // Remote file download failed
     | 'invalid_page_value'  // Non-parseable string or unresolved label
     | 'timeout'             // Rendering timed out
+    | 'library_excluded'    // Attachment is in a library the user excluded from Beaver
     | 'render_failed';      // General rendering failure
 
 /** Response to zotero attachment page images request */
@@ -720,6 +721,7 @@ export type AttachmentImageErrorCode =
     | 'download_failed'            // Remote file download failed
     | 'decode_failed'              // Image could not be decoded (corrupt/truncated)
     | 'timeout'                    // Processing timed out
+    | 'library_excluded'           // Attachment is in a library the user excluded from Beaver
     | 'image_processing_failed';   // General resize/encode failure
 
 /** A processed attachment image. Field shapes align with WSPageImage. */
@@ -764,7 +766,6 @@ export type ViewImagesErrorCode =
     | AttachmentPageImagesErrorCode
     | AttachmentImageErrorCode
     | 'unsupported_type'   // Attachment is neither a PDF nor an image
-    | 'library_excluded'   // Attachment is in a library the user excluded from Beaver
     | 'view_failed';       // General dispatch-level failure
 
 /** A single rendered image returned by a zotero_view_images request. */
@@ -832,6 +833,7 @@ export type AttachmentSearchErrorCode =
     | 'too_many_pages'      // PDF exceeds page count limit
     | 'download_failed'     // Remote file download failed
     | 'timeout'             // Search timed out
+    | 'library_excluded'    // Attachment is in a library the user excluded from Beaver
     | 'search_failed';      // General search failure
 
 /** Request from backend to search text within an attachment */

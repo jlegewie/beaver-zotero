@@ -13,6 +13,7 @@ import {
     WSGetAnnotationsRequest,
     WSGetAnnotationsResponse,
 } from '../agentProtocol';
+import { checkLibraryExcluded } from './utils';
 
 
 function invalidResponse(
@@ -49,6 +50,13 @@ export async function handleGetAnnotationsRequest(
         const key = request.attachment_id.substring(dashIndex + 1);
         if (isNaN(libraryId) || !key) {
             return invalidResponse(request, 'Invalid attachment_id format', 'invalid_attachment_id');
+        }
+
+        // Reject attachments in libraries the user excluded from Beaver before any
+        // lookup, so excluded annotations are never returned or confirmed to exist.
+        const excluded = checkLibraryExcluded(libraryId);
+        if (excluded) {
+            return invalidResponse(request, excluded.message, 'library_excluded');
         }
 
         const attachment = await Zotero.Items.getByLibraryAndKeyAsync(libraryId, key);
