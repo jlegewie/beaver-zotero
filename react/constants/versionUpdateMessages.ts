@@ -476,12 +476,18 @@ const versionUpdateMessageList: VersionUpdateMessageConfig[] = [
         footer: `<a href="https://github.com/jlegewie/beaver-zotero/releases/tag/v0.21.0" target='_blank'>Full changelog</a>`,
     },
     {
+        version: "0.21.1",
+        title: "Support for Snapshot Attachments",
+        text: "Beaver can now read, annotate, and cite snapshot attachments down to the sentence level. As of version 0.21, that means support for PDFs, EPUBs, snapshots, images, and plain text files.",
+        inPanel: true,
+    },
+    {
         version: "0.22.0-beta.1",
         title: "Redesigned Actions, Home Screen Launcher and more",
         steps: [
             {
                 title: "Redesigned Actions",
-                description: "Actions are rebuilt to handle more complex, multi-step workflows, so a single action can take on bigger tasks.",
+                description: "Actions are rebuilt to handle more complex, multi-step workflows. Import and export actions to share with others.",
             },
             {
                 title: "Home Screen Launcher",
@@ -493,12 +499,6 @@ const versionUpdateMessageList: VersionUpdateMessageConfig[] = [
             },
         ],
         // footer: `<a href="https://github.com/jlegewie/beaver-zotero/releases/tag/v0.21.0" target='_blank'>Full changelog</a>`,
-    },
-    {
-        version: "0.21.1",
-        title: "Support for Snapshot Attachments",
-        text: "Beaver can now read, annotate, and cite snapshot attachments down to the sentence level. As of version 0.21, that means support for PDFs, EPUBs, snapshots, images, and plain text files.",
-        inPanel: true,
     },
 ];
 
