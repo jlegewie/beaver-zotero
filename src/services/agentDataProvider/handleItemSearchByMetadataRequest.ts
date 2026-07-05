@@ -49,7 +49,8 @@ export async function handleItemSearchByMetadataRequest(
     // Validate: at least one query parameter or filter must be provided
     const hasQuery = !!request.title_query ||
                      !!request.author_query ||
-                     !!request.publication_query;
+                     !!request.publication_query ||
+                     !!request.keyword_query;
     const hasFilter = !!(request.collections_filter?.length) ||
                       !!(request.tags_filter?.length) ||
                       !!(request.libraries_filter?.length) ||
@@ -161,6 +162,7 @@ export async function handleItemSearchByMetadataRequest(
         title_query: request.title_query,
         author_query: request.author_query,
         publication_query: request.publication_query,
+        keyword_query: request.keyword_query,
     }, 1);
 
     // Collect unique items across all libraries
@@ -173,6 +175,7 @@ export async function handleItemSearchByMetadataRequest(
             title_query: request.title_query,
             author_query: request.author_query,
             publication_query: request.publication_query,
+            keyword_query: request.keyword_query,
             year_min: request.year_min,
             year_max: request.year_max,
             item_type: request.item_type_filter,

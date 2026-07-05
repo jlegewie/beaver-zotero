@@ -400,6 +400,7 @@ function computeMainLabel(
             const parts: string[] = [];
             if (args.author_query) parts.push(args.author_query as string);
             if (args.title_query) parts.push(args.title_query as string);
+            if (args.keyword_query) parts.push(args.keyword_query as string);
             if (args.publication_query) parts.push(`in ${args.publication_query}`);
             const yearLabel = formatYearFilter(args.year_filter);
             if (yearLabel) parts.push(yearLabel);

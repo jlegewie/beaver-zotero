@@ -378,6 +378,7 @@ async function handleMetadataSearchHttpRequest(request: any) {
         title_query: request.title_query,
         author_query: request.author_query,
         publication_query: request.publication_query,
+        keyword_query: request.keyword_query,
         year_min: request.year_min,
         year_max: request.year_max,
         item_type_filter: request.item_type_filter,

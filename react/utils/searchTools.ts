@@ -12,6 +12,8 @@ export interface SearchItemsByMetadataOptions {
     author_query?: string;
     /** Journal/publication name (searches publicationTitle field) */
     publication_query?: string;
+    /** Keyword(s) matched across all metadata fields, including title and abstract (Zotero quicksearch) */
+    keyword_query?: string;
     /** Minimum year (inclusive) */
     year_min?: number;
     /** Maximum year (inclusive) */
@@ -59,6 +61,7 @@ export const searchItemsByMetadata = async (
         title_query,
         author_query,
         publication_query,
+        keyword_query,
         year_min,
         year_max,
         year_exact,
@@ -99,6 +102,13 @@ export const searchItemsByMetadata = async (
     // Publication search
     if (publication_query) {
         search.addCondition('publicationTitle', 'contains', publication_query);
+    }
+
+    // Keyword search across all metadata fields (title, abstract, etc.).
+    // Uses Zotero's quicksearch, which is added as a required subsearch and
+    // therefore ANDs with the other conditions regardless of join_mode.
+    if (keyword_query) {
+        search.addCondition('quicksearch-fields', 'contains', keyword_query);
     }
 
     // Year filters

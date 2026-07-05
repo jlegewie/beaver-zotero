@@ -712,6 +712,30 @@ describe('MCP Tool Handlers (via useMcpServer)', () => {
             expect(req.publication_query).toBe('American Economic Review');
         });
 
+        it('passes keyword_query to handler', async () => {
+            mockHandleItemSearchByMetadataRequest.mockResolvedValue({
+                type: 'item_search_by_metadata',
+                items: [],
+            });
+
+            await callTool(endpoint, 'search_by_metadata', { keyword_query: 'institutions growth' });
+
+            const req = mockHandleItemSearchByMetadataRequest.mock.calls[0][0];
+            expect(req.keyword_query).toBe('institutions growth');
+        });
+
+        it('accepts keyword_query alone as a valid search field', async () => {
+            mockHandleItemSearchByMetadataRequest.mockResolvedValue({
+                type: 'item_search_by_metadata',
+                items: [],
+            });
+
+            const result = await callTool(endpoint, 'search_by_metadata', { keyword_query: 'climate' });
+
+            expect(result.isError).toBeFalsy();
+            expect(mockHandleItemSearchByMetadataRequest).toHaveBeenCalled();
+        });
+
         it('returns error when no search fields provided', async () => {
             const result = await callTool(endpoint, 'search_by_metadata', {});
 

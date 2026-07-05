@@ -232,7 +232,8 @@ const SEARCH_BY_METADATA_TOOL = {
     },
     description:
         "Search the user's Zotero reference library by bibliographic metadata: author name, title keywords, " +
-        'or publication/journal name. At least one search field must be provided. Use this when you know specific ' +
+        'publication/journal name, or a general keyword matched across all metadata fields (including title and abstract). ' +
+        'At least one search field must be provided. Use this when you know specific ' +
         'details about the paper(s) you\'re looking for, such as an author name or title fragment. ' +
         'For conceptual/topic-based discovery, use `search_by_topic` instead. ' +
         'Each result includes attachment IDs that can be used with `read_attachment` to read full-text content. ' +
@@ -251,6 +252,10 @@ const SEARCH_BY_METADATA_TOOL = {
             publication_query: {
                 type: 'string',
                 description: 'Journal or publication name (e.g., "American Economic Review").',
+            },
+            keyword_query: {
+                type: 'string',
+                description: 'Keyword(s) matched across all metadata fields, including title and abstract (e.g., "institutions growth").',
             },
             min_year: {
                 type: 'integer',
@@ -790,10 +795,10 @@ async function handleSearchByTopic(args: any): Promise<any> {
 }
 
 async function handleSearchByMetadata(args: any): Promise<any> {
-    const hasQuery = !!args.author_query || !!args.title_query || !!args.publication_query;
+    const hasQuery = !!args.author_query || !!args.title_query || !!args.publication_query || !!args.keyword_query;
     if (!hasQuery) {
         return mcpError(
-            'At least one search field must be provided: author_query, title_query, or publication_query.',
+            'At least one search field must be provided: author_query, title_query, publication_query, or keyword_query.',
         );
     }
 
@@ -806,6 +811,7 @@ async function handleSearchByMetadata(args: any): Promise<any> {
         title_query: args.title_query,
         author_query: args.author_query,
         publication_query: args.publication_query,
+        keyword_query: args.keyword_query,
         year_min: args.min_year,
         year_max: args.max_year,
         libraries_filter: args.libraries_filter,

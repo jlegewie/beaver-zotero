@@ -491,6 +491,8 @@ export interface WSItemSearchByMetadataRequest extends WSBaseEvent {
     author_query?: string;
     /** Publication/journal name to search (substring match) */
     publication_query?: string;
+    /** Keyword(s) matched across all metadata fields, including title and abstract */
+    keyword_query?: string;
 
     // Filters (optional, narrow results further)
     /** Minimum publication year (inclusive) */

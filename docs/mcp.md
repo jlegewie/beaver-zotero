@@ -193,13 +193,14 @@ Semantic (meaning-based) search across the user's Zotero library. The most impor
 
 ### `search_by_metadata`
 
-Find specific papers when you know bibliographic details (author name, title keywords, journal). At least one of `author_query`, `title_query`, or `publication_query` is required.
+Find specific papers when you know bibliographic details (author name, title keywords, journal) or a general keyword. At least one of `author_query`, `title_query`, `publication_query`, or `keyword_query` is required.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `author_query` | `string` | No* | Author's last name to search for. |
 | `title_query` | `string` | No* | Keyword or phrase from the title. |
 | `publication_query` | `string` | No* | Journal or publication name. |
+| `keyword_query` | `string` | No* | Keyword(s) matched across all metadata fields, including title and abstract. |
 | `min_year` | `integer` | No | Earliest publication year (inclusive). |
 | `max_year` | `integer` | No | Latest publication year (inclusive). |
 | `libraries_filter` | `string[]` | No | Library names or IDs. |
