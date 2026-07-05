@@ -47,10 +47,10 @@ export const showFileStatusDetailsAtom = atom(false);
 export const isThreadListViewAtom = atom(false);
 
 /**
- * HomeLauncher — the sticky selected category (`null` = collapsed)
+ * HomeLauncher — selected category for the current UI session (`null` = collapsed)
  */
 export type HomeLauncherCategoryId = 'research' | 'write' | 'organize' | 'annotate';
-export const homeLauncherCategoryAtom = atom<HomeLauncherCategoryId | null>('research');
+export const homeLauncherCategoryAtom = atom<HomeLauncherCategoryId | null>(null);
 
 // Error Report Dialog
 export const isErrorReportDialogVisibleAtom = atom(false);

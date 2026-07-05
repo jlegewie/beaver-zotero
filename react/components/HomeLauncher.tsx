@@ -47,13 +47,13 @@ const CATEGORIES: CategoryDef[] = [
  * HomePage launcher shown under the input area. Category is a partition: each
  * action lives in exactly one skill bucket (Research / Write / Organize /
  * Annotate). Actions with no category are not surfaced here — they stay
- * available from the slash menu. The selected tab is sticky — changing the
- * Zotero selection updates the actions listed inside the open panel (via
- * CategoryPanel), but never switches the tab.
+ * available from the slash menu. Changing the Zotero selection updates the
+ * actions listed inside the open panel (via CategoryPanel), but never switches
+ * the tab.
  */
 const HomeLauncher: React.FC<{ style?: React.CSSProperties }> = ({ style }) => {
-    // Sticky tab — only the user changes it. `null` = collapsed. Shared atom so
-    // the selection persists across the library and reader sidebars.
+    // Only the user changes this while the UI is mounted. `null` = collapsed.
+    // The shared atom keeps library and reader sidebars in sync.
     const [expanded, setExpanded] = useAtom(homeLauncherCategoryAtom);
 
     const toggle = (id: CategoryId) => setExpanded((prev) => (prev === id ? null : id));
