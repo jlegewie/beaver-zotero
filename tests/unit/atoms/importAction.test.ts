@@ -171,6 +171,15 @@ describe('importActionAtom — conflict handling', () => {
         expect(result.action.sortOrder).toBe(999);
     });
 
+    it('never carries the built-in-only locked flag onto an imported copy', () => {
+        const store = makeStore();
+        const incoming: Action = { id: 'custom-fresh', title: 'Outline', text: 'x', targets: ['global'], locked: true };
+        const result = store.set(importActionAtom, incoming);
+        expect(result.action.locked).toBeUndefined();
+        const saved = saveActionCustomizationsMock.mock.calls[0][0];
+        expect('locked' in saved.custom[0]).toBe(false);
+    });
+
     it('persists the imported action into custom customizations', () => {
         const store = makeStore();
         const incoming: Action = { id: 'custom-fresh', title: 'Outline', text: 'x', targets: ['global'] };

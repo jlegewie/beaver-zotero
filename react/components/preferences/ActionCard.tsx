@@ -23,6 +23,7 @@ import {
     UndoIcon,
     ShareIcon,
     CopyIcon,
+    LockIcon,
 } from "../icons/icons";
 
 const MAX_TITLE_LENGTH = 45;
@@ -113,6 +114,11 @@ const ActionCard: React.FC<ActionCardProps> = ({
 
     const addPopupMessage = useSetAtom(addPopupMessageAtom);
 
+    // A locked action is code-defined and read-only: the editor opens but no
+    // field can change, Save becomes Close, and delete/reset are hidden.
+    // Export and Duplicate stay available (Duplicate yields an editable copy).
+    const isLocked = action.locked === true;
+
     // Effective /commands of all OTHER actions, for uniqueness checks.
     const allActions = useAtomValue(actionsAtom);
     const takenCommands = useMemo(() => new Set(
@@ -173,6 +179,11 @@ const ActionCard: React.FC<ActionCardProps> = ({
 
         const handleClickOutside = (e: MouseEvent) => {
             if (cardRef.current && !cardRef.current.contains(e.target as Node)) {
+                // Locked actions are read-only — leave edit mode without saving.
+                if (isLocked) {
+                    setIsEditing(false);
+                    return;
+                }
                 const { editTitle: title, editText: text, editDescription: description, editName: name, editArgumentHint: argumentHint, editTargets: targets, editCategory: category } = draftRef.current;
                 const isValid = title.trim().length > 0 && text.trim().length > 0;
                 const wasNeverSaved = !action.title && !action.text;
@@ -261,6 +272,7 @@ const ActionCard: React.FC<ActionCardProps> = ({
     }, [action, onRemove]);
 
     const handleSave = useCallback(() => {
+        if (isLocked) return; // read-only; the primary button is "Close"
         if (!editTitle.trim() || !editText.trim()) return;
         onChange({
             ...action,
@@ -273,7 +285,7 @@ const ActionCard: React.FC<ActionCardProps> = ({
             category: editCategory,
         });
         setIsEditing(false);
-    }, [action, editTitle, editText, editDescription, editName, editArgumentHint, editTargets, editCategory, onChange, resolveNameForSave]);
+    }, [isLocked, action, editTitle, editText, editDescription, editName, editArgumentHint, editTargets, editCategory, onChange, resolveNameForSave]);
 
     // Export the action to a shareable `.beaveraction` file. Uses the current
     // (possibly unsaved) draft when it is valid, so the file matches what the
@@ -406,26 +418,47 @@ const ActionCard: React.FC<ActionCardProps> = ({
                         className="font-color-secondary flex-shrink-0"
                     />
                     <span className="font-semibold font-color-primary truncate">{editTitle.trim() || "New action"}</span>
+                    {isLocked && (
+                        <Tooltip content="This action is managed by Beaver and can't be edited. Duplicate it to make an editable copy." width="220px">
+                            <span className="action-target-badge display-flex flex-row items-center gap-1" data-type="placeholder">
+                                <Icon icon={LockIcon} size={11} />
+                                Managed
+                            </span>
+                        </Tooltip>
+                    )}
                 </div>
                 <div className="display-flex flex-row items-center gap-2 flex-shrink-0">
-                    <Button
-                        type="button"
-                        variant="outline"
-                        style={{ padding: '3px 12px' }}
-                        onClick={handleCancel}
-                    >
-                        Cancel
-                    </Button>
-                    <Button
-                        type="button"
-                        variant="solid"
-                        style={{ padding: '3px 12px' }}
-                        onClick={handleSave}
-                        disabled={!canSave}
-                        title={!canSave ? "Add a title and a prompt to save" : undefined}
-                    >
-                        Save
-                    </Button>
+                    {isLocked ? (
+                        <Button
+                            type="button"
+                            variant="solid"
+                            style={{ padding: '3px 12px' }}
+                            onClick={handleCancel}
+                        >
+                            Close
+                        </Button>
+                    ) : (
+                        <>
+                            <Button
+                                type="button"
+                                variant="outline"
+                                style={{ padding: '3px 12px' }}
+                                onClick={handleCancel}
+                            >
+                                Cancel
+                            </Button>
+                            <Button
+                                type="button"
+                                variant="solid"
+                                style={{ padding: '3px 12px' }}
+                                onClick={handleSave}
+                                disabled={!canSave}
+                                title={!canSave ? "Add a title and a prompt to save" : undefined}
+                            >
+                                Save
+                            </Button>
+                        </>
+                    )}
                 </div>
             </div>
 
@@ -444,6 +477,7 @@ const ActionCard: React.FC<ActionCardProps> = ({
                         placeholder="Action title..."
                         aria-label="Action title"
                         maxLength={MAX_TITLE_LENGTH}
+                        readOnly={isLocked}
                         className="action-field-control text-base font-medium"
                     />
                 </div>
@@ -462,6 +496,7 @@ const ActionCard: React.FC<ActionCardProps> = ({
                             placeholder="e.g. Summarize the key findings of the selected paper"
                             aria-label="Action description"
                             maxLength={MAX_DESCRIPTION_LENGTH}
+                            readOnly={isLocked}
                             className="action-field-control text-base"
                         />
                     </div>
@@ -483,6 +518,7 @@ const ActionCard: React.FC<ActionCardProps> = ({
                                 placeholder="action-name"
                                 aria-label="Slash command name"
                                 maxLength={MAX_NAME_LENGTH}
+                                readOnly={isLocked}
                                 className="action-field-control text-base"
                             />
                         </div>
@@ -508,6 +544,7 @@ const ActionCard: React.FC<ActionCardProps> = ({
                                 placeholder="e.g. topic or question"
                                 aria-label="Argument hint"
                                 maxLength={MAX_ARGUMENT_HINT_LENGTH}
+                                readOnly={isLocked}
                                 className="action-field-control text-base"
                             />
                         </div>
@@ -534,6 +571,7 @@ const ActionCard: React.FC<ActionCardProps> = ({
                         placeholder="Enter prompt text..."
                         aria-label="Action prompt text"
                         maxLength={MAX_PROMPT_TEXT_LENGTH}
+                        readOnly={isLocked}
                         className="action-field-control action-edit-textarea text-base"
                         rows={3}
                     />
@@ -569,6 +607,7 @@ const ActionCard: React.FC<ActionCardProps> = ({
                                 menuItems={categoryMenuItems}
                                 variant="outline"
                                 ariaLabel="Select category"
+                                disabled={isLocked}
                                 className="action-field-select flex-1"
                                 customContent={
                                     <div className="display-flex flex-row items-center gap-2 w-full min-w-0">
@@ -591,6 +630,7 @@ const ActionCard: React.FC<ActionCardProps> = ({
                                 menuItems={targetMenuItems}
                                 variant="outline"
                                 ariaLabel="Select what this action applies to"
+                                disabled={isLocked}
                                 className="action-field-select flex-1"
                                 customContent={
                                     <div className="display-flex flex-row items-center gap-2 w-full min-w-0">
@@ -630,7 +670,9 @@ const ActionCard: React.FC<ActionCardProps> = ({
                         </Button>
                     )}
                     <div className="flex-1"></div>
-                    {isBuiltin && isOverridden && onResetToDefault && (
+                    {/* A locked action can't be reset or deleted — those controls
+                        are hidden, leaving only Export / Duplicate above. */}
+                    {!isLocked && isBuiltin && isOverridden && onResetToDefault && (
                         <>
                             <Button
                                 variant="outline"
@@ -645,15 +687,17 @@ const ActionCard: React.FC<ActionCardProps> = ({
                             </Button>
                         </>
                     )}
-                    <Button
-                        variant="error"
-                        icon={DeleteIcon}
-                        iconClassName="font-color-red"
-                        style={{ padding: "3px 8px" }}
-                        onClick={(e) => { e.stopPropagation(); (isBuiltin ? onHide : onRemove)?.(); setIsEditing(false); }}
-                    >
-                        <span className="font-color-red">Delete</span>
-                    </Button>
+                    {!isLocked && (
+                        <Button
+                            variant="error"
+                            icon={DeleteIcon}
+                            iconClassName="font-color-red"
+                            style={{ padding: "3px 8px" }}
+                            onClick={(e) => { e.stopPropagation(); (isBuiltin ? onHide : onRemove)?.(); setIsEditing(false); }}
+                        >
+                            <span className="font-color-red">Delete</span>
+                        </Button>
+                    )}
                 </div>
             </div>
         </div>

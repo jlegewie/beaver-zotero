@@ -61,6 +61,12 @@ export interface Action {
     sortOrder?: number;            // Lower = higher in list
     deprecated?: boolean;          // For phasing out built-ins
     lastUsed?: string;             // Runtime-only, merged from separate pref
+    /** Built-in-only, code-defined: a locked action is read-only in the UI
+     *  (no field edits, no delete/reset). It is never user-settable — not
+     *  surfaced in the editor, the override model, or the share schema — and is
+     *  stripped from custom actions on save. Duplicating a locked action yields
+     *  an unlocked, editable copy. Defaults to unlocked when absent. */
+    locked?: boolean;
 }
 
 /**

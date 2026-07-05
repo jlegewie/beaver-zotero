@@ -82,8 +82,10 @@ export const saveActionsAtom = atom(
                     newOverrides[action.id] = override;
                 }
             } else {
-                // Custom action — strip lastUsed before persisting
-                const { lastUsed, ...rest } = action;
+                // Custom action — strip runtime-only `lastUsed` and the
+                // built-in-only `locked` flag (locking is code-defined and must
+                // never live in user data) before persisting.
+                const { lastUsed: _lastUsed, locked: _locked, ...rest } = action;
                 newCustom.push(rest);
             }
         }
@@ -154,8 +156,9 @@ export const importActionAtom = atom(
         // automatic (name unset) so future title edits keep updating it.
         const name = commandRenamed ? command : incoming.name;
 
-        // Strip local/runtime fields the importer owns.
-        const { lastUsed: _lastUsed, deprecated: _deprecated, ...rest } = incoming;
+        // Strip local/runtime and built-in-only fields the importer owns.
+        // `locked` never rides along: a duplicated/imported action is editable.
+        const { lastUsed: _lastUsed, deprecated: _deprecated, locked: _locked, ...rest } = incoming;
         const newAction: Action = {
             ...rest,
             id,
