@@ -504,7 +504,7 @@ const PreferencePage: React.FC = () => {
                             borderRadius: 0,
                             background: tab.id === effectiveActiveTab ? 'var(--fill-quinary)' : 'transparent',
                             color: tab.id === effectiveActiveTab ? 'var(--fill-primary)' : 'var(--fill-secondary)',
-                            padding: '4px 12px',
+                            padding: '6px 12px',
                             minHeight: '20px',
                             display: 'inline-flex',
                             alignItems: 'center',
