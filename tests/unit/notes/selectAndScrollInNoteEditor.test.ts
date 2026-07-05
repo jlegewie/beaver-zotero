@@ -22,6 +22,13 @@ vi.mock('../../../react/atoms/auth', () => ({
     userIdAtom: Symbol('userIdAtom'),
 }));
 
+// sourceUtils surfaces unavailable-reference popups; the popup chain pulls in
+// the Supabase client, which requires live env at import time.
+vi.mock('../../../react/host/zotero/sourceActions', () => ({
+    notifyReferenceUnavailable: vi.fn(),
+    launchExternalFile: vi.fn(),
+}));
+
 vi.mock('../../../react/components/agentRuns/EditNotePreview', () => ({
     stripHtmlTags: vi.fn((s: string) => s
         .replace(

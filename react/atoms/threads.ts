@@ -520,15 +520,19 @@ export const loadThreadAtom = atom(
                     await loadItemDataForAgentActions(agent_actions);
                 }
 
-                // Validate agent actions and undo if not valid
+                // Validate agent actions and undo those verifiably reverted in
+                // Zotero. 'unverifiable' means the reference points at a library
+                // this device can't check (group libraryIDs are device-local)
                 if (agent_actions && agent_actions.length > 0) {
                     await Promise.all(agent_actions.map(async (action: AgentAction) => {
-                        const isValid = await validateAppliedAgentAction(action);
-                        if (!isValid) {
+                        const validity = await validateAppliedAgentAction(action);
+                        if (validity === 'invalid') {
                             logger(`loadThreadAtom: undoing agent action ${action.id} because it is not valid`, 1);
                             set(undoAgentActionAtom, action.id);
+                        } else if (validity === 'unverifiable') {
+                            logger(`loadThreadAtom: agent action ${action.id} references a library not available on this device; leaving status unchanged`, 1);
                         }
-                        return isValid;
+                        return validity;
                     }));
                 }
                 
