@@ -5,7 +5,7 @@
  */
 
 import { atom } from 'jotai';
-import { Action, ActionOverride, ActionTargetType, sameTargets } from '../types/actions';
+import { Action, ActionOverride, ActionTargetType, generateActionId, sameTargets } from '../types/actions';
 import { ALL_BUILTIN_ACTIONS } from '../types/builtinActions';
 import {
     getMergedActions,
@@ -98,6 +98,73 @@ export const saveActionsAtom = atom(
         const newCustomizations = { version: 1 as const, overrides: newOverrides, custom: newCustom };
         saveActionCustomizations(newCustomizations);
         set(actionsAtom, getMergedActions());
+    },
+);
+
+// ---------------------------------------------------------------------------
+// Write atom — import a shared action, resolving id + command conflicts
+//
+// A `.beaveraction` file carries the author's id and (optional) slash-command
+// name. Neither can be trusted to be free on the importing machine, so:
+//   - id: kept only when it clashes with nothing (no built-in, no existing
+//     custom action); otherwise a fresh id is minted so the import never
+//     overwrites or shadows an existing action.
+//   - command: kept when its /token is free; otherwise a numeric suffix is
+//     appended and persisted as an explicit `name` so it stays stable.
+//
+// Shared by every import entry point (preferences Import button, drag & drop).
+// Returns the stored action plus what had to change, for user-facing messaging.
+// ---------------------------------------------------------------------------
+
+export interface ActionImportResult {
+    action: Action;
+    /** The /command the imported action ended up with. */
+    command: string;
+    /** True when the author's id collided and a new one was minted. */
+    idReassigned: boolean;
+    /** True when the /command had to be renamed to avoid a clash. */
+    commandRenamed: boolean;
+}
+
+export const importActionAtom = atom(
+    null,
+    (get, set, incoming: Action): ActionImportResult => {
+        const actions = get(actionsAtom);
+
+        // --- Resolve id conflict ---
+        const idTaken = !incoming.id
+            || isBuiltinAction(incoming.id)
+            || actions.some(a => a.id === incoming.id);
+        const id = idTaken ? generateActionId() : incoming.id;
+        const idReassigned = id !== incoming.id;
+
+        // --- Resolve slash-command conflict ---
+        const takenCommands = new Set(actions.map(a => getActionCommand(a)));
+        const desiredCommand = getActionCommand(incoming); // explicit name or title-derived
+        let command = desiredCommand;
+        if (takenCommands.has(command)) {
+            let suffix = 2;
+            while (takenCommands.has(`${desiredCommand}-${suffix}`)) suffix++;
+            command = `${desiredCommand}-${suffix}`;
+        }
+        const commandRenamed = command !== desiredCommand;
+
+        // Persist an explicit name only when we disambiguated, or the incoming
+        // action already carried one. A clash-free title-derived command stays
+        // automatic (name unset) so future title edits keep updating it.
+        const name = commandRenamed ? command : incoming.name;
+
+        // Strip local/runtime fields the importer owns.
+        const { lastUsed: _lastUsed, deprecated: _deprecated, ...rest } = incoming;
+        const newAction: Action = {
+            ...rest,
+            id,
+            name,
+            sortOrder: 999,
+        };
+
+        set(saveActionsAtom, [...actions, newAction]);
+        return { action: newAction, command, idReassigned, commandRenamed };
     },
 );
 

@@ -1,12 +1,15 @@
 import React, { useState, useCallback, useEffect, useMemo } from "react";
 import { useAtom, useAtomValue } from 'jotai';
-import { Icon, FilterIcon, TickIcon, ArrowDownIcon } from '../icons/icons';
+import { Icon, FilterIcon, TickIcon, ArrowDownIcon, UploadCircleIcon } from '../icons/icons';
 import PlusSignIcon from '../icons/PlusSignIcon';
 import Button from "../ui/Button";
 import { useSetAtom } from 'jotai';
 import { Action, ActionCategory, ActionCategoryFilter, ActionTargetType, generateActionId, TARGET_TYPE_LABELS, CATEGORY_LABELS } from "../../types/actions";
-import { actionsAtom, saveActionsAtom, hideActionAtom, restoreActionAtom, resetActionToDefaultAtom } from "../../atoms/actions";
+import { actionsAtom, saveActionsAtom, hideActionAtom, restoreActionAtom, resetActionToDefaultAtom, importActionAtom } from "../../atoms/actions";
 import { pendingActionsCategoryFilterAtom, pendingActionEditRequestAtom } from "../../atoms/ui";
+import { importActionFromFile } from "../../utils/actionShareFile";
+import { addPopupMessageAtom } from "../../utils/popupMessageUtils";
+import { getActionCommand } from "../../utils/slashCommands";
 import { isBuiltinAction, getActionCustomizations, getHiddenBuiltinActions, hasOldCustomPrompts } from "../../types/actionStorage";
 import ActionCard from "./ActionCard";
 import MenuButton from "../ui/MenuButton";
@@ -43,6 +46,8 @@ const ActionsPreferenceSection: React.FC = () => {
     const hideAction = useSetAtom(hideActionAtom);
     const restoreAction = useSetAtom(restoreActionAtom);
     const resetActionToDefault = useSetAtom(resetActionToDefaultAtom);
+    const importAction = useSetAtom(importActionAtom);
+    const addPopupMessage = useSetAtom(addPopupMessageAtom);
 
     // --- Filter state (null = show all for that dimension) ---
     const [targetFilter, setTargetFilter] = useState<ActionTargetType | null>(null);
@@ -109,6 +114,34 @@ const ActionsPreferenceSection: React.FC = () => {
         saveActions([...actions, newAction]);
     }, [actions, saveActions, targetFilter, categoryFilter]);
 
+    // --- Import Action Handler ---
+    // Pick a `.beaveraction` file, import it (resolving id + /command clashes),
+    // then reveal the new action and open it in edit mode so the user can review
+    // it. A renamed command is surfaced in a popup.
+    const handleImportAction = useCallback(() => {
+        (async () => {
+            const result = await importActionFromFile();
+            if (!result) return; // user cancelled the file picker
+            if (!result.ok) {
+                addPopupMessage({ type: 'error', title: 'Import failed', text: result.error, expire: true });
+                return;
+            }
+            const { action, command, commandRenamed } = importAction(result.action);
+            if (commandRenamed) {
+                addPopupMessage({
+                    type: 'info',
+                    title: 'Action imported',
+                    text: `A /${getActionCommand(result.action)} command already existed, so this one was added as /${command}.`,
+                    expire: true,
+                });
+            }
+            // Reveal the new card and open it in edit mode.
+            setPendingActionEdit({ actionId: action.id, requestId: Date.now() });
+        })().catch(() => {
+            addPopupMessage({ type: 'error', title: 'Import failed', text: 'Could not import the action.', expire: true });
+        });
+    }, [importAction, addPopupMessage, setPendingActionEdit]);
+
     // --- Remove Action Handler ---
     const handleRemoveAction = useCallback((id: string) => {
         const newActions = actions.filter(a => a.id !== id);
@@ -171,15 +204,27 @@ const ActionsPreferenceSection: React.FC = () => {
         <>
             <div className="display-flex flex-row items-end justify-between">
                 <SectionHeader>Actions</SectionHeader>
-                <Button
-                    variant="solid"
-                    className="text-base mb-15"
-                    icon={PlusSignIcon}
-                    style={{ padding: '4px 6px' }}
-                    onClick={handleAddAction}
-                >
-                    Add Action
-                </Button>
+                <div className="display-flex flex-row items-center gap-2 mb-15">
+                    <Button
+                        variant="outline"
+                        className="text-base"
+                        icon={UploadCircleIcon}
+                        style={{ padding: '4px 6px' }}
+                        onClick={handleImportAction}
+                        title="Import an action from a .beaveraction file"
+                    >
+                        Import
+                    </Button>
+                    <Button
+                        variant="solid"
+                        className="text-base"
+                        icon={PlusSignIcon}
+                        style={{ padding: '4px 6px' }}
+                        onClick={handleAddAction}
+                    >
+                        Add Action
+                    </Button>
+                </div>
             </div>
             <div className="text-base font-color-secondary mb-2" style={{ paddingLeft: '2px' }}>
                 Actions are reusable prompts for common research tasks.

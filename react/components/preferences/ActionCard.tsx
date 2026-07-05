@@ -1,9 +1,11 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
-import { useAtomValue } from "jotai";
+import { useAtomValue, useSetAtom } from "jotai";
 import { Action, ActionCategory, ActionTargetType, CATEGORY_LABELS, TARGET_PRESETS, targetsLabel, targetsDescription } from "../../types/actions";
 import { actionsAtom } from "../../atoms/actions";
 import { getActionCommand, toSlashToken } from "../../utils/slashCommands";
 import { hasUserInputVariables } from "../../utils/userInputVariables";
+import { exportActionToFile } from "../../utils/actionShareFile";
+import { addPopupMessageAtom } from "../../utils/popupMessageUtils";
 import Button from "../ui/Button";
 import MenuButton from "../ui/MenuButton";
 import Tooltip from "../ui/Tooltip";
@@ -19,6 +21,7 @@ import {
     InformationCircleIcon,
     DeleteIcon,
     UndoIcon,
+    ShareIcon,
 } from "../icons/icons";
 
 const MAX_TITLE_LENGTH = 45;
@@ -103,6 +106,8 @@ const ActionCard: React.FC<ActionCardProps> = ({
     const titleInputRef = useRef<HTMLInputElement | null>(null);
     const cardRef = useRef<HTMLDivElement | null>(null);
     const previousActionRef = useRef(action);
+
+    const addPopupMessage = useSetAtom(addPopupMessageAtom);
 
     // Effective /commands of all OTHER actions, for uniqueness checks.
     const allActions = useAtomValue(actionsAtom);
@@ -265,6 +270,43 @@ const ActionCard: React.FC<ActionCardProps> = ({
         });
         setIsEditing(false);
     }, [action, editTitle, editText, editDescription, editName, editArgumentHint, editTargets, editCategory, onChange, resolveNameForSave]);
+
+    // Export the action to a shareable `.beaveraction` file. Uses the current
+    // (possibly unsaved) draft when it is valid, so the file matches what the
+    // user sees; otherwise falls back to the persisted action.
+    const handleExport = useCallback(() => {
+        const draftValid = editTitle.trim().length > 0 && editText.trim().length > 0;
+        const snapshot: Action = draftValid
+            ? {
+                ...action,
+                title: editTitle,
+                text: editText,
+                description: editDescription.trim() || undefined,
+                name: resolveNameForSave(editTitle, editName),
+                argumentHint: editArgumentHint.trim() || undefined,
+                targets: editTargets,
+                category: editCategory,
+            }
+            : action;
+        exportActionToFile(snapshot)
+            .then((path) => {
+                if (!path) return; // user cancelled
+                addPopupMessage({
+                    type: 'info',
+                    title: 'Action exported',
+                    text: `Saved "${snapshot.title}" to a file. Share it and others can import it into Beaver.`,
+                    expire: true,
+                });
+            })
+            .catch(() => {
+                addPopupMessage({
+                    type: 'error',
+                    title: 'Export failed',
+                    text: 'Could not save the action to a file.',
+                    expire: true,
+                });
+            });
+    }, [action, editTitle, editText, editDescription, editName, editArgumentHint, editTargets, editCategory, resolveNameForSave, addPopupMessage]);
 
     // Automatic mode (no manual name typed): preview the title-derived
     // command, including the numeric suffix it would get on save.
@@ -562,6 +604,16 @@ const ActionCard: React.FC<ActionCardProps> = ({
                     removed); it stays restorable from the Deleted actions list. Reset to
                     default (edited built-ins only) sits bottom-right. */}
                 <div className="display-flex flex-row flex-1 items-center gap-2 pt-3">
+                    <Button
+                        variant="outline"
+                        icon={ShareIcon}
+                        style={{ padding: "3px 8px" }}
+                        disabled={!canSave}
+                        title={!canSave ? "Add a title and a prompt to export" : "Save this action to a file you can share"}
+                        onClick={(e) => { e.stopPropagation(); handleExport(); }}
+                    >
+                        Export
+                    </Button>
                     <div className="flex-1"></div>
                     {isBuiltin && isOverridden && onResetToDefault && (
                         <>
