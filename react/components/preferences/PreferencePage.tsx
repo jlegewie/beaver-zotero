@@ -868,9 +868,6 @@ const PreferencePage: React.FC = () => {
 
                             <SectionLabel>Search Index</SectionLabel>
                             <SettingsGroup>
-                                {isEmbeddingIndexing && embeddingIndexState.phase === 'initial' && embeddingIndexState.totalItems > 0 && (
-                                    <EmbeddingIndexProgress />
-                                )}
                                 <SettingsRow
                                     title="Search Index"
                                     description={
@@ -901,6 +898,9 @@ const PreferencePage: React.FC = () => {
                                         </Button>
                                     }
                                 />
+                                {isEmbeddingIndexing && embeddingIndexState.phase === 'initial' && embeddingIndexState.totalItems > 0 && (
+                                    <EmbeddingIndexProgress />
+                                )}
                             </SettingsGroup>
                         </>
                     )}
