@@ -543,6 +543,7 @@ const PreferencePage: React.FC = () => {
                                             variant="outline"
                                             icon={UserIcon}
                                             onClick={() => Zotero.launchURL(process.env.WEBAPP_BASE_URL + '/login')}
+                                            style={{ padding: '4px 6px' }}
                                         >
                                             Open
                                         </Button>
@@ -565,7 +566,7 @@ const PreferencePage: React.FC = () => {
                                     description="End your current session"
                                     hasBorder
                                     control={
-                                        <Button variant="outline" icon={LogoutIcon} onClick={logout}>
+                                        <Button variant="outline" icon={LogoutIcon} onClick={logout} style={{ padding: '4px 6px' }}>
                                             Logout
                                         </Button>
                                     }
@@ -893,6 +894,7 @@ const PreferencePage: React.FC = () => {
                                             onClick={handleRebuildSearchIndex}
                                             disabled={rebuildIndexButtonProps.disabled}
                                             loading={isEmbeddingIndexing}
+                                            style={{ padding: '4px 6px' }}
                                         >
                                             {rebuildIndexButtonProps.text}
                                         </Button>
