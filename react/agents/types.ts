@@ -106,8 +106,13 @@ export type PromptOrigin =
         topic_label?: string | null;
     };
 
+/** True for any run launched from a first-run onboarding surface */
 export function isFirstRunOrigin(origin: PromptOrigin | undefined | null): boolean {
-    return origin?.kind === 'first_run_card' || origin?.kind === 'first_run_followup';
+    return (
+        origin?.kind === 'first_run_card' ||
+        origin?.kind === 'first_run_followup' ||
+        origin?.kind === 'where_to_start'
+    );
 }
 
 /**

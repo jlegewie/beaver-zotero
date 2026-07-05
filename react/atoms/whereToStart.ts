@@ -70,8 +70,10 @@ export interface StartOption {
     attachmentItem?: Zotero.Item;
 }
 
-// DEV-only session visibility flag; set from the Dev Tools menu.
-export const devWhereToStartVisibleAtom = atom<boolean>(false);
+// Session visibility flag for showing the launcher outside the first-run gate:
+// reopened via "Back to starting points" after a launcher follow-up, or from
+// the Dev Tools menu. Cleared when a run launches or the launcher is skipped.
+export const whereToStartVisibleAtom = atom<boolean>(false);
 
 // null = not yet computed.
 export const whereToStartOptionsAtom = atom<StartOption[] | null>(null);
@@ -328,7 +330,7 @@ export const startSelectedOptionAtom = atom(null, async (get, set) => {
             },
         });
 
-        set(devWhereToStartVisibleAtom, false);
+        set(whereToStartVisibleAtom, false);
         resetSelectionState(set);
     } catch (e) {
         logger(`whereToStart: start failed: ${e}`, 1);
@@ -345,7 +347,7 @@ export const startSelectedOptionAtom = atom(null, async (get, set) => {
 export const skipWhereToStartAtom = atom(null, async (_get, set) => {
     try {
         await set(markFirstRunCompleteAtom, SKIP_COMPLETION_KIND);
-        set(devWhereToStartVisibleAtom, false);
+        set(whereToStartVisibleAtom, false);
         resetSelectionState(set);
     } catch (e) {
         logger(`whereToStart: skip completion failed: ${e}`, 1);

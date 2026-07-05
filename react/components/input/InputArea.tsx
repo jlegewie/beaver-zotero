@@ -19,7 +19,7 @@ import PendingActionsBar from './PendingActionsBar';
 import HighTokenUsageWarningBar from './HighTokenUsageWarningBar';
 import SoftCapWarningBar from './SoftCapWarningBar';
 import NextStepsPanel from '../pages/firstRun/NextStepsPanel';
-import BackToSuggestions from '../pages/firstRun/BackToSuggestions';
+import BackToSuggestions, { FirstRunBackTarget } from '../pages/firstRun/BackToSuggestions';
 import { allRunsAtom } from '../../agents/atoms';
 import { PromptOrigin } from '../../agents/types';
 import { firstRunNextStepsDismissedAtom } from '../../atoms/firstRun';
@@ -143,10 +143,13 @@ const InputArea: React.FC<InputAreaProps> = ({
             return next;
         });
     }, [setNextStepsDismissedRunIds, lastRunId]);
+    // Guided next steps surface after a suggestion-card run or a "Where should
+    // we start?" launcher run — both carry the context NextStepsPanel needs.
+    const lastRunOriginKind = lastRun?.user_prompt.origin?.kind;
     const showNextSteps = Boolean(
         !isAwaitingApproval &&
         lastRun &&
-        lastRun.user_prompt.origin?.kind === 'first_run_card' &&
+        (lastRunOriginKind === 'first_run_card' || lastRunOriginKind === 'where_to_start') &&
         lastRun.status === 'completed' &&
         !nextStepsDismissedRunIds.has(lastRun.id)
     );
@@ -157,6 +160,10 @@ const InputArea: React.FC<InputAreaProps> = ({
         lastRun.status === 'completed' &&
         !nextStepsDismissedRunIds.has(lastRun.id)
     );
+    // The follow-up run's origin
+    const firstRunBackTarget: FirstRunBackTarget = allRuns.some(
+        (r) => r.user_prompt?.origin?.kind === 'where_to_start',
+    ) ? 'launcher' : 'suggestions';
 
     // Mutual exclusion: NextSteps/BackToSuggestions take precedence over the
     // token/soft-cap warning bars; HighToken takes precedence over SoftCap.
@@ -476,16 +483,16 @@ const InputArea: React.FC<InputAreaProps> = ({
                 from a first-run suggestion card. Auto-dismisses on type. */}
             {showNextSteps && lastRun && (
                 <NextStepsPanel
-                    origin={lastRun.user_prompt.origin as Extract<PromptOrigin, { kind: 'first_run_card' }>}
+                    origin={lastRun.user_prompt.origin as Extract<PromptOrigin, { kind: 'first_run_card' | 'where_to_start' }>}
                     onDismiss={handleDismissNextSteps}
                 />
             )}
 
             {/* After a first-run follow-up run, offer a path back to the
-                suggestion grid. */}
+                originating surface (suggestion grid or launcher). */}
             {showBackToSuggestions && (
                 <div className="next-steps-panel px-3 py-2">
-                    <BackToSuggestions onDismiss={handleDismissNextSteps} />
+                    <BackToSuggestions onDismiss={handleDismissNextSteps} backTarget={firstRunBackTarget} />
                 </div>
             )}
 

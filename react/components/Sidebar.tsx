@@ -49,7 +49,7 @@ import UpdateRequiredPage from './pages/UpdateRequiredPage';
 import FirstRunPage from './pages/FirstRunPage';
 import { firstRunReturnRequestedAtom, isFirstRunVisibleAtom } from '../atoms/firstRun';
 import WhereToStartPage from './pages/WhereToStartPage';
-import { devWhereToStartVisibleAtom } from '../atoms/whereToStart';
+import { whereToStartVisibleAtom } from '../atoms/whereToStart';
 import ScreenReaderRunAnnouncer from './agentRuns/ScreenReaderRunAnnouncer';
 import { getFirstRunSelectionVariant } from '../utils/firstRunSelection';
 
@@ -177,7 +177,7 @@ const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
     const creditInfoWarning = allWarnings.findLast((w) => w.type === 'credit_info');
     const isFirstRunVisible = useAtomValue(isFirstRunVisibleAtom);
     const isFirstRunReturnRequested = useAtomValue(firstRunReturnRequestedAtom);
-    const isDevWhereToStartVisible = useAtomValue(devWhereToStartVisibleAtom);
+    const isWhereToStartVisible = useAtomValue(whereToStartVisibleAtom);
     const profile = useAtomValue(profileWithPlanAtom);
     const shouldAssignFirstRunVariant = isFirstRunVisible
         && !isFirstRunReturnRequested
@@ -349,8 +349,10 @@ const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
         );
     }
 
-    {/* DEV-only: "Where should we start?" launcher opened from the Dev Tools menu. */}
-    if (isDevWhereToStartVisible) {
+    {/* "Where should we start?" launcher shown outside the first-run gate:
+        reopened via "Back to starting points" after a launcher follow-up, or
+        from the Dev Tools menu. */}
+    if (isWhereToStartVisible) {
         return (
             <SidebarShell isWindow={isWindow}>
                 <Header isWindow={isWindow} />

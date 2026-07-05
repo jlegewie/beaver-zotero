@@ -10,6 +10,7 @@ import {
     firstRunSuggestionsErrorAtom,
     firstRunSuggestionsModeAtom,
 } from './firstRun';
+import { whereToStartVisibleAtom } from './whereToStart';
 import { getPref, setPref } from '../../src/utils/prefs';
 import { logger } from '../../src/utils/logger';
 
@@ -189,6 +190,7 @@ export const logoutAtom = atom(
         set(firstRunSuggestionsModeAtom, false);
         set(firstRunSuggestionsAtom, null);
         set(firstRunSuggestionsErrorAtom, null);
+        set(whereToStartVisibleAtom, false);
 
         // Reset transient form state and restore authMethod to persisted preference
         resetLoginFormState(set);
