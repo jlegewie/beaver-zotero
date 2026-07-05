@@ -148,6 +148,14 @@ const ActionsPreferenceSection: React.FC = () => {
         saveActions(newActions);
     }, [actions, saveActions]);
 
+    // --- Duplicate Action Handler ---
+    // Reuse the import path: it mints a fresh id (the source id always collides)
+    // and a suffixed /command, appends a custom copy, and we open it in edit mode.
+    const handleDuplicateAction = useCallback((action: Action) => {
+        const { action: copy } = importAction(action);
+        setPendingActionEdit({ actionId: copy.id, requestId: Date.now() });
+    }, [importAction, setPendingActionEdit]);
+
     // --- Filtered actions (AND across the two dimensions) ---
     const filteredActions = useMemo(() => actions.filter(a =>
         (targetFilter === null || a.targets.includes(targetFilter)) &&
@@ -293,6 +301,7 @@ const ActionsPreferenceSection: React.FC = () => {
                                 onRemove={() => handleRemoveAction(action.id)}
                                 onHide={builtin ? () => hideAction(action.id) : undefined}
                                 onResetToDefault={builtin && overridden ? () => resetActionToDefault(action.id) : undefined}
+                                onDuplicate={() => handleDuplicateAction(action)}
                                 isBuiltin={builtin}
                                 isOverridden={overridden}
                                 forceEdit={pendingActionEdit?.actionId === action.id}

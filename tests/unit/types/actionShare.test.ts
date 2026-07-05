@@ -125,6 +125,63 @@ describe('actionShare — schema', () => {
         expect(r.ok).toBe(false);
     });
 
+    // --- Client compatibility -------------------------------------------
+
+    it('stamps the current client on export and accepts it on import', () => {
+        const minimal: Action = { id: 'x', title: 'T', text: 'P', targets: ['global'] };
+        const file = toShareableActionFile(minimal);
+        expect(file.action.client).toEqual(['zotero']);
+        const r = parseShareableAction(serializeAction(minimal));
+        expect(r.ok).toBe(true);
+        if (r.ok) expect(r.action.client).toEqual(['zotero']);
+    });
+
+    it('accepts an action whose client list includes the current client', () => {
+        const r = parseShareableAction(JSON.stringify({
+            kind: SHAREABLE_ACTION_KIND,
+            version: 1,
+            action: { title: 'T', text: 'P', targets: ['global'], client: ['zotero'] },
+        }));
+        expect(r.ok).toBe(true);
+    });
+
+    it('rejects an action whose client list excludes the current client', () => {
+        const r = parseShareableAction(JSON.stringify({
+            kind: SHAREABLE_ACTION_KIND,
+            version: 1,
+            action: { title: 'T', text: 'P', targets: ['global'], client: ['obsidian'] },
+        }));
+        expect(r.ok).toBe(false);
+        if (!r.ok) expect(r.error).toMatch(/not compatible/i);
+    });
+
+    it('rejects an empty or malformed client list', () => {
+        const base = { kind: SHAREABLE_ACTION_KIND, version: 1 };
+        expect(parseShareableAction(JSON.stringify({ ...base, action: { title: 'T', text: 'P', targets: ['global'], client: [] } })).ok).toBe(false);
+        expect(parseShareableAction(JSON.stringify({ ...base, action: { title: 'T', text: 'P', targets: ['global'], client: 'zotero' } })).ok).toBe(false);
+        expect(parseShareableAction(JSON.stringify({ ...base, action: { title: 'T', text: 'P', targets: ['global'], client: [1] } })).ok).toBe(false);
+    });
+
+    it('treats an absent client list as compatible with any client', () => {
+        const r = parseShareableAction(JSON.stringify({
+            kind: SHAREABLE_ACTION_KIND,
+            version: 1,
+            action: { title: 'T', text: 'P', targets: ['global'] },
+        }));
+        expect(r.ok).toBe(true);
+        if (r.ok) expect(r.action.client).toBeUndefined();
+    });
+
+    it('honors an explicit currentClient override', () => {
+        const json = JSON.stringify({
+            kind: SHAREABLE_ACTION_KIND,
+            version: 1,
+            action: { title: 'T', text: 'P', targets: ['global'], client: ['zotero'] },
+        });
+        // A hypothetical other client is not in the list → rejected.
+        expect(parseShareableAction(json, 'zotero').ok).toBe(true);
+    });
+
     it('preserves an empty-string id (importer regenerates as needed)', () => {
         const r = parseShareableAction(JSON.stringify({
             kind: SHAREABLE_ACTION_KIND,

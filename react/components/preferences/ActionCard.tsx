@@ -22,6 +22,7 @@ import {
     DeleteIcon,
     UndoIcon,
     ShareIcon,
+    CopyIcon,
 } from "../icons/icons";
 
 const MAX_TITLE_LENGTH = 45;
@@ -70,6 +71,8 @@ interface ActionCardProps {
     onRemove: () => void;
     onHide?: () => void;
     onResetToDefault?: () => void;
+    /** Create an editable copy of this action as a new custom action. */
+    onDuplicate?: () => void;
     isBuiltin: boolean;
     isOverridden: boolean;
     /** Externally requested edit mode (e.g. an action pill in the chat input
@@ -85,6 +88,7 @@ const ActionCard: React.FC<ActionCardProps> = ({
     onRemove,
     onHide,
     onResetToDefault,
+    onDuplicate,
     isBuiltin,
     isOverridden,
     forceEdit = false,
@@ -614,6 +618,17 @@ const ActionCard: React.FC<ActionCardProps> = ({
                     >
                         Export
                     </Button>
+                    {onDuplicate && (
+                        <Button
+                            variant="outline"
+                            icon={CopyIcon}
+                            style={{ padding: "3px 8px" }}
+                            title="Create an editable copy of this action"
+                            onClick={(e) => { e.stopPropagation(); onDuplicate(); }}
+                        >
+                            Duplicate
+                        </Button>
+                    )}
                     <div className="flex-1"></div>
                     {isBuiltin && isOverridden && onResetToDefault && (
                         <>

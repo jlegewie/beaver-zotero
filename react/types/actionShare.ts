@@ -15,7 +15,8 @@
  * clipboard). Actual file I/O lives in `react/utils/actionShareFile.ts`.
  */
 
-import type { Action, ActionCategory, ActionTargetType } from './actions';
+import type { Action, ActionCategory, ActionClient, ActionTargetType } from './actions';
+import { CURRENT_ACTION_CLIENT } from './actions';
 
 // ---------------------------------------------------------------------------
 // Format constants
@@ -51,6 +52,9 @@ export interface ShareableActionPayloadV1 {
     name?: string;
     id_model?: string;
     targets: ActionTargetType[];
+    /** Clients this action supports. Absent → any client. Import rejects a
+     *  file whose list excludes the importing client. */
+    client?: ActionClient[];
     category?: ActionCategory;
     argumentHint?: string;
 }
@@ -83,6 +87,8 @@ export const toShareableActionFile = (action: Action): ShareableActionFile => {
         title: action.title,
         text: action.text,
         targets: [...action.targets],
+        // Stamp the exporting client so the file declares its compatibility.
+        client: action.client ? [...action.client] : [CURRENT_ACTION_CLIENT],
     };
     if (action.description !== undefined) payload.description = action.description;
     if (action.name !== undefined) payload.name = action.name;
@@ -124,9 +130,12 @@ const isOptionalString = (v: unknown): boolean =>
 // Per-version parsers
 // ---------------------------------------------------------------------------
 
-type VersionParser = (envelope: Record<string, unknown>) => ParseShareableActionResult;
+type VersionParser = (
+    envelope: Record<string, unknown>,
+    currentClient: ActionClient,
+) => ParseShareableActionResult;
 
-const parseV1: VersionParser = (envelope) => {
+const parseV1: VersionParser = (envelope, currentClient) => {
     const raw = envelope.action;
     if (typeof raw !== 'object' || raw === null) {
         return { ok: false, error: 'The action data is missing or malformed.' };
@@ -148,6 +157,22 @@ const parseV1: VersionParser = (envelope) => {
     }
     if (a.category !== undefined && !(typeof a.category === 'string' && VALID_CATEGORIES.has(a.category))) {
         return { ok: false, error: 'The action has an unknown category.' };
+    }
+    // Client compatibility. Absent → runs anywhere. Present → must be a
+    // non-empty list of client strings that includes the importing client.
+    // Unknown client values (for clients this build doesn't know yet) are
+    // tolerated so multi-client shares still import wherever they list us.
+    if (a.client !== undefined) {
+        if (
+            !Array.isArray(a.client) ||
+            a.client.length === 0 ||
+            !a.client.every(c => typeof c === 'string' && c.length > 0)
+        ) {
+            return { ok: false, error: 'The action has a malformed client list.' };
+        }
+        if (!(a.client as string[]).includes(currentClient)) {
+            return { ok: false, error: `This action is not compatible with the ${currentClient} client.` };
+        }
     }
     if (
         !isOptionalString(a.description) ||
@@ -172,6 +197,7 @@ const parseV1: VersionParser = (envelope) => {
     if (a.description !== undefined) action.description = a.description as string;
     if (a.name !== undefined) action.name = a.name as string;
     if (a.id_model !== undefined) action.id_model = a.id_model as string;
+    if (a.client !== undefined) action.client = a.client as ActionClient[];
     if (a.category !== undefined) action.category = a.category as ActionCategory;
     if (a.argumentHint !== undefined) action.argumentHint = a.argumentHint as string;
 
@@ -192,9 +218,13 @@ const MAX_SUPPORTED_VERSION = Math.max(...Object.keys(VERSION_PARSERS).map(Numbe
 
 /**
  * Parse the JSON text of a `.beaveraction` file into an {@link Action}.
- * Never throws; malformed input yields a user-facing `error`.
+ * Never throws; malformed input yields a user-facing `error`. An action whose
+ * `client` list excludes `currentClient` is rejected.
  */
-export const parseShareableAction = (json: string): ParseShareableActionResult => {
+export const parseShareableAction = (
+    json: string,
+    currentClient: ActionClient = CURRENT_ACTION_CLIENT,
+): ParseShareableActionResult => {
     let parsed: unknown;
     try {
         parsed = JSON.parse(json);
@@ -219,5 +249,5 @@ export const parseShareableAction = (json: string): ParseShareableActionResult =
             ? { ok: false, error: 'This action was exported by a newer version of Beaver. Update Beaver to import it.' }
             : { ok: false, error: `This action file version (${version}) is not supported.` };
     }
-    return parser(envelope);
+    return parser(envelope, currentClient);
 };

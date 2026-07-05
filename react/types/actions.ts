@@ -24,6 +24,17 @@
 export type ActionTargetType = "items" | "attachment" | "note" | "collection" | "global";
 
 /**
+ * Clients an action can run in. An action is only usable in a client listed
+ * here (or in any client when the field is absent — the default). Today Beaver
+ * only ships the Zotero client, so `zotero` is the sole valid value; the field
+ * exists so shared actions can declare compatibility as more clients appear.
+ */
+export type ActionClient = "zotero";
+
+/** The client this build runs as. Used to gate imported/shared actions. */
+export const CURRENT_ACTION_CLIENT: ActionClient = "zotero";
+
+/**
  * Skill category for the homepage launcher. Orthogonal to `targets`:
  * `targets` is what an action binds to; `category` is what kind of work it is.
  * An action can have both, independently.
@@ -43,6 +54,8 @@ export interface Action {
     /** Target kinds this action accepts (non-empty). `global` should be the
      *  sole entry when present — "works anywhere" doesn't combine. */
     targets: ActionTargetType[];
+    /** Clients this action supports. Absent → runs in any client. */
+    client?: ActionClient[];
     category?: ActionCategory;     // Skill grouping for the homepage launcher (independent of targets)
     argumentHint?: string;         // Hint shown during autocomplete to indicate expected arguments
     sortOrder?: number;            // Lower = higher in list
