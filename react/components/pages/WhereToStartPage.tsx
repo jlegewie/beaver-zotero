@@ -183,8 +183,7 @@ const WhereToStartPage: React.FC = () => {
                     margin: 4px 0 18px;
                 }
                 .where-to-start-title {
-                    font-family: Georgia, "Times New Roman", serif;
-                    font-size: 2.1rem;
+                    font-size: 2rem;
                     line-height: 1.08;
                     font-weight: 700;
                     letter-spacing: 0;
@@ -192,14 +191,14 @@ const WhereToStartPage: React.FC = () => {
                     margin-bottom: 10px;
                 }
                 .where-to-start-subtitle {
-                    font-size: 1.08rem;
+                    font-size: 1.1rem;
                     line-height: 1.35;
                     color: var(--fill-secondary);
                 }
                 .where-to-start-card {
                     background: var(--material-sidepane);
                     border: 1px solid var(--fill-quarternary);
-                    border-radius: 14px;
+                    border-radius: 18px;
                     box-shadow: 0 10px 24px rgba(0,0,0,0.06);
                     padding: 16px;
                 }
@@ -303,11 +302,16 @@ const WhereToStartPage: React.FC = () => {
 
             <div className="where-to-start-scroll overflow-y-auto scrollbar flex-1 min-h-0">
                 <div className="where-to-start-shell">
+                    {/* Top spacer */}
+                    <div className="flex-1" style={{ minHeight: '4vh', maxHeight: '6vh' }} />
+                    
+                    {/* Heading */}
                     <div className="where-to-start-heading">
-                        <div className="where-to-start-title">Where should we start?</div>
-                        <div className="where-to-start-subtitle">Pick a first task, or describe your own.</div>
+                        <div className="where-to-start-title">Let's dig into your library</div>
+                        <div className="where-to-start-subtitle">Here are a few good places to start.</div>
                     </div>
 
+                    {/* Options */}
                     <div className="where-to-start-card">
                         {showLoading ? (
                             <div className="where-to-start-loader" aria-label="Loading starting points">
