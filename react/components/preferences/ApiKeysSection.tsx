@@ -195,8 +195,8 @@ const ApiKeysSection: React.FC = () => {
                 </div>
 
                 {customProviders.length > 0 ? (
-                    <SettingsGroup className="bg-senary">
-                        {customProviders.map((entry, index) => (
+                    <div className="display-flex flex-col" style={{ gap: '4px' }}>
+                        {customProviders.map((entry) => (
                             <CustomProviderCard
                                 key={entry._id}
                                 model={entry.model}
@@ -205,11 +205,10 @@ const ApiKeysSection: React.FC = () => {
                                 onDuplicate={() => handleDuplicateProvider(entry._id)}
                                 isExpanded={entry._id === expandedProviderId}
                                 onToggleExpand={() => handleToggleExpand(entry._id)}
-                                hasBorder={index > 0}
                                 autoFocusName={entry._id === autoFocusProviderId}
                             />
                         ))}
-                    </SettingsGroup>
+                    </div>
                 ) : (
                     <div className="text-base font-color-tertiary" style={{ paddingLeft: '2px' }}>
                         Click <span className="font-semibold" onClick={handleAddProvider}>Add Provider</span> to add custom endpoints
