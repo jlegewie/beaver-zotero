@@ -132,7 +132,7 @@ export const WHERE_TO_START_FOLLOWUPS: Record<string, FirstRunFollowup[]> = {
             id: 'discover_more_external',
             title: 'Find more recent research on this topic',
             titleWithTopic: 'Find more recent research on {topic}',
-            prompt: 'Use external search to find even more recent, highly-cited papers on this project\'s topic that are not already in the collection. Briefly summarize the most relevant ones and cite them so I can add the ones I want. Your search should be broad and cover multiple angles to ensure full coverage. Import relevant papers and add them to my new collection.',
+            prompt: 'Use external search to find even more recent papers on this project\'s topic that are not already in the collection. Your search should be extremely broad and cover many angles to ensure full coverage. Import relevant papers and add them to my new collection. Provide a high-level overview of what you found and why it is relevant to my project.',
         },
     ],
     // Color-code a paper — highlights are in place.
