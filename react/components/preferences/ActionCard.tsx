@@ -647,11 +647,11 @@ const ActionCard: React.FC<ActionCardProps> = ({
                     "Delete" hides it (built-ins are defined in code and can't be truly
                     removed); it stays restorable from the Deleted actions list. Reset to
                     default (edited built-ins only) sits bottom-right. */}
-                <div className="display-flex flex-row flex-1 items-center gap-2 pt-3">
+                <div className="display-flex flex-row flex-1 items-center gap-2 pt-4">
                     <Button
                         variant="outline"
                         icon={ShareIcon}
-                        style={{ padding: "3px 8px" }}
+                        style={{ padding: '4px 6px' }}
                         disabled={!canSave}
                         title={!canSave ? "Add a title and a prompt to export" : "Save this action to a file you can share"}
                         onClick={(e) => { e.stopPropagation(); handleExport(); }}
@@ -662,7 +662,7 @@ const ActionCard: React.FC<ActionCardProps> = ({
                         <Button
                             variant="outline"
                             icon={CopyIcon}
-                            style={{ padding: "3px 8px" }}
+                            style={{ padding: '4px 6px' }}
                             title="Create an editable copy of this action"
                             onClick={(e) => { e.stopPropagation(); onDuplicate(); }}
                         >
@@ -677,7 +677,7 @@ const ActionCard: React.FC<ActionCardProps> = ({
                             <Button
                                 variant="outline"
                                 icon={UndoIcon}
-                                style={{ padding: "3px 8px" }}
+                                style={{ padding: '4px 6px' }}
                                 // Reset persists immediately (the override is cleared) and
                                 // re-merges the default action; the draft-sync effect refreshes
                                 // the fields, so we stay in edit mode showing the restored values.
@@ -692,7 +692,7 @@ const ActionCard: React.FC<ActionCardProps> = ({
                             variant="error"
                             icon={DeleteIcon}
                             iconClassName="font-color-red"
-                            style={{ padding: "3px 8px" }}
+                            style={{ padding: '4px 6px' }}
                             onClick={(e) => { e.stopPropagation(); (isBuiltin ? onHide : onRemove)?.(); setIsEditing(false); }}
                         >
                             <span className="font-color-red">Delete</span>

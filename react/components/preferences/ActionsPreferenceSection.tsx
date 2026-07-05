@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useEffect, useMemo } from "react";
 import { useAtom, useAtomValue } from 'jotai';
-import { Icon, FilterIcon, TickIcon, ArrowDownIcon, UploadCircleIcon } from '../icons/icons';
+import { Icon, TickIcon, ArrowDownIcon, UploadCircleIcon, ImportIcon } from '../icons/icons';
 import PlusSignIcon from '../icons/PlusSignIcon';
 import Button from "../ui/Button";
 import { useSetAtom } from 'jotai';
@@ -212,11 +212,11 @@ const ActionsPreferenceSection: React.FC = () => {
         <>
             <div className="display-flex flex-row items-end justify-between">
                 <SectionHeader>Actions</SectionHeader>
-                <div className="display-flex flex-row items-center gap-2 mb-15">
+                <div className="display-flex flex-row items-center gap-4 mb-15">
                     <Button
                         variant="outline"
                         className="text-base"
-                        icon={UploadCircleIcon}
+                        icon={ImportIcon}
                         style={{ padding: '4px 6px' }}
                         onClick={handleImportAction}
                         title="Import an action from a .beaveraction file"
