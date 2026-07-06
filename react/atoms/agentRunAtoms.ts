@@ -8,7 +8,7 @@
 import { atom, Getter, Setter } from 'jotai';
 import { v4 as uuidv4 } from 'uuid';
 import { agentService } from '../../src/services/agentService';
-import { notifyRunComplete } from '../../src/services/systemNotifications';
+import { notifyRunComplete, notifyUserQuestion } from '../../src/services/systemNotifications';
 import {
     WSCallbacks,
     AgentRunRequest,
@@ -25,6 +25,8 @@ import {
     WSToolCallArgsStreamEvent,
     WSMissingZoteroDataEvent,
     WSDeferredApprovalRequest,
+    WSAskUserQuestionRequest,
+    AskUserQuestionAnswer,
     WSStreamingDoneEvent,
     WSThreadNameEvent,
     ChargingPermissions,
@@ -35,6 +37,7 @@ import { logger } from '../../src/utils/logger';
 import { selectedModelAtom, ModelConfig } from './models';
 import { getPref } from '../../src/utils/prefs';
 import { MessageAttachment, SourceAttachment } from '../types/attachments/apiTypes';
+import type { ZoteroCollection } from '../types/zotero';
 import { toMessageAttachment } from '../types/attachments/converters';
 import { safeStub, serializeAttachmentStub, serializeCollection, serializeItemStub, serializeZoteroLibrary } from '../../src/utils/zoteroSerializers';
 import { SubscriptionStatus, ProcessingMode } from '../types/profile';
@@ -47,6 +50,7 @@ import {
     currentReaderAttachmentAtom,
     currentMessageFiltersAtom,
     currentMessageContentAtom,
+    currentMessagePillsAtom,
 } from './messageComposition';
 import { isWebSearchEnabledAtom, removePopupMessagesByTypeAtom, isWebSearchAllowedAtom } from './ui';
 import { currentNoteItemAtom } from './zoteroContext';
@@ -55,7 +59,7 @@ import type { ExternalFileAttachment } from '../types/attachments/apiTypes';
 import { getApplicationStateProvider } from './applicationState';
 import { uint8ArrayToBase64 } from '../utils/fileUtils';
 import { isAttachmentOnServer } from '../../src/utils/webAPI';
-import { AgentRun, BeaverAgentPrompt, MessageSearchFilters, PromptOrigin, ToolRequest } from '../agents/types';
+import { AgentRun, BeaverAgentPrompt, MessageSearchFilters, PromptAction, PromptOrigin, ToolRequest } from '../agents/types';
 import {
     threadRunsAtom,
     activeRunAtom,
@@ -71,6 +75,7 @@ import {
 import { userIdAtom } from './auth';
 import { citationsAtom, processCitationsAtom, resetCitationMarkersAtom, mergePageLabelsByAttachmentIdAtom } from './citations';
 import { preloadPageLabelsForCitations } from '../utils/pageLabels';
+import { sanitizeMessageFiltersForSearchableLibraries } from '../utils/messageFilters';
 import {
     addAgentActionsAtom,
     upsertAgentActionsAtom,
@@ -97,6 +102,11 @@ import {
     buildPendingApprovalFromAction,
     clearAllPendingApprovalsAtom,
 } from '../agents/agentActions';
+import {
+    addPendingQuestionAtom,
+    removePendingQuestionAtom,
+    clearAllPendingQuestionsAtom,
+} from '../agents/pendingQuestions';
 import { getAppliedPdfAnnotationCount } from '../agents/agentActionCounts';
 import { undoEditMetadataAction } from '../utils/editMetadataActions';
 import { undoCreateItemAction } from '../utils/createItemActions';
@@ -948,6 +958,7 @@ export const resetWSStateAtom = atom(null, (_get, set) => {
 export const prepareForNewRunAtom = atom(null, (_get, set) => {
     set(resetWSStateAtom);
     set(clearAllPendingApprovalsAtom);
+    set(clearAllPendingQuestionsAtom);
     set(clearApprovalResponseIntentsAtom);
     set(clearAutoApproveNoteKeysAtom);
 });
@@ -1129,6 +1140,14 @@ function createWSCallbacks(set: Setter): WSCallbacks {
                         break;
                     }
                 }
+
+                // Remove any pending question for this tool call. This covers
+                // the backend-timeout path: after the wait expires the tool
+                // returns 'no_response' and the run continues — without this
+                // removal the stale card would keep the composer disabled for
+                // the rest of the run (the full-clear sites only fire on run
+                // end / disconnect / thread switch).
+                set(removePendingQuestionAtom, toolCallId);
             }
         },
 
@@ -1252,6 +1271,7 @@ function createWSCallbacks(set: Setter): WSCallbacks {
             set(isWSChatPendingAtom, false);
             // Clear pending approvals and dismiss diff preview
             set(clearAllPendingApprovalsAtom);
+            set(clearAllPendingQuestionsAtom);
             // Clear per-run auto-approve state (keys only; IDs kept for UI labeling)
             set(clearAutoApproveNoteKeysAtom);
         },
@@ -1279,6 +1299,7 @@ function createWSCallbacks(set: Setter): WSCallbacks {
             set(wsRetryAtom, null);
             // Clear pending approvals and dismiss diff preview (run failed)
             set(clearAllPendingApprovalsAtom);
+            set(clearAllPendingQuestionsAtom);
             // Clear per-run auto-approve state
             set(clearAutoApproveNoteKeysAtom);
 
@@ -1463,6 +1484,20 @@ function createWSCallbacks(set: Setter): WSCallbacks {
             set(addPendingApprovalAtom, event);
         },
 
+        onAskUserQuestionRequest: (event: WSAskUserQuestionRequest) => {
+            logger('WS onAskUserQuestionRequest:', {
+                questionId: event.question_id,
+                toolcallId: event.toolcall_id,
+                questionCount: event.questions.length,
+            }, 1);
+            set(addPendingQuestionAtom, event);
+
+            // Surface an OS-native notification if the user can't currently see
+            // the question panel (e.g. working in another app), mirroring the
+            // deferred-approval path.
+            notifyUserQuestion(event);
+        },
+
         onOpen: () => {
             logger('WS onOpen: Connection established, waiting for ready...', 1);
             set(isWSConnectedAtom, true);
@@ -1478,6 +1513,7 @@ function createWSCallbacks(set: Setter): WSCallbacks {
             set(streamingDoneRunIdsAtom, new Set<string>());
             // Clear pending approvals and dismiss diff preview (connection lost)
             set(clearAllPendingApprovalsAtom);
+            set(clearAllPendingQuestionsAtom);
             // Clear per-run auto-approve state if the socket drops before done/error.
             set(clearAutoApproveNoteKeysAtom);
 
@@ -1587,16 +1623,23 @@ async function executeWSRequest(
  * 6. "run_complete" event → update usage, set status="completed"
  * 7. "done" event → move activeRun to threadRuns, close connection
  */
+export interface SendWSMessageOptions {
+    runIdOverride?: string;
+    permissionsOverride?: Partial<ChargingPermissions>;
+    origin?: PromptOrigin;
+    /** Saved actions invoked as /command tokens in the message content */
+    actions?: PromptAction[];
+}
+
 export const sendWSMessageAtom = atom(
     null,
     async (
         get,
         set,
         message: string,
-        runIdOverride?: string,
-        permissionsOverride?: Partial<ChargingPermissions>,
-        origin?: PromptOrigin,
+        options?: SendWSMessageOptions,
     ) => {
+        const { runIdOverride, permissionsOverride, origin, actions } = options ?? {};
         const isPending = get(isWSChatPendingAtom);
         logger('sendWSMessageAtom: Called at ' + Date.now() + ' with message: ' + message.substring(0, 50) + ' (isPending: ' + isPending + ')', 1);
         
@@ -1637,11 +1680,14 @@ export const sendWSMessageAtom = atom(
             // Custom instructions (if any)
         const customInstructions = getPref('customInstructions') || undefined;
 
-        // Build attachments from current message items, dropping anything that
-        // validation has already rejected.
+        // Build attachments from current message items. Final send gate: drop
+        // anything validation already rejected AND anything in a library the user
+        // excluded from Beaver
         const validationResults = get(itemValidationResultsAtom);
+        const searchableLibraryIds = get(searchableLibraryIdsAtom);
         const rawSelectedItems = get(currentMessageItemsAtom);
         const rejectedSelectedItems = rawSelectedItems.filter((item) =>
+            !searchableLibraryIds.includes(item.libraryID) ||
             isRejectedItemValidation(item, validationResults.get(`${item.libraryID}-${item.key}`))
         );
         const selectedItems = rejectedSelectedItems.length > 0
@@ -1651,10 +1697,10 @@ export const sendWSMessageAtom = atom(
             set(currentMessageItemsAtom, selectedItems);
             set(addPopupMessageAtom, {
                 type: 'error',
-                title: rejectedSelectedItems.length === 1 ? 'File Removed' : 'Files Removed',
+                title: rejectedSelectedItems.length === 1 ? 'Item Removed' : 'Items Removed',
                 text: rejectedSelectedItems.length === 1
-                    ? 'A file that Beaver cannot read was removed from this message.'
-                    : `${rejectedSelectedItems.length} files that Beaver cannot read were removed from this message.`,
+                    ? 'An item that Beaver cannot use was removed from this message.'
+                    : `${rejectedSelectedItems.length} items that Beaver cannot use were removed from this message.`,
                 expire: true,
                 duration: 4000,
             });
@@ -1694,7 +1740,8 @@ export const sendWSMessageAtom = atom(
         attachments = await processImageAnnotations(attachments);
 
         // Add collection attachments if set
-        const messageCollections = get(currentMessageCollectionsAtom);
+        const messageCollections = get(currentMessageCollectionsAtom)
+            .filter(col => searchableLibraryIds.includes(col.library_id));
         for (const col of messageCollections) {
             attachments.push({
                 type: 'collection',
@@ -1735,9 +1782,11 @@ export const sendWSMessageAtom = atom(
         }
 
         // Add the current reader attachment as a source if it is not already in
-        // the thread. Reader position is captured in application state.
+        // the thread. Reader position is captured in application state. Send gate:
+        // never auto-attach a reader source in a library the user excluded from
+        // Beaver — this path bypasses the currentMessageItems gate above.
         const readerAttachment = get(currentReaderAttachmentAtom);
-        if (readerAttachment) {
+        if (readerAttachment && searchableLibraryIds.includes(readerAttachment.libraryID)) {
             const allUserAttachmentKeys = get(allUserAttachmentKeysAtom);
             const existingKeys = new Set([
                 ...attachments.map(messageAttachmentKey),
@@ -1764,8 +1813,10 @@ export const sendWSMessageAtom = atom(
             }
         }
 
-        // Add current note tab item as note attachment if not already present
-        if (currentNoteTabItem) {
+        // Add current note tab item as note attachment if not already present.
+        // Send gate: never auto-attach a note in a library the user excluded from
+        // Beaver — this path bypasses the currentMessageItems gate above.
+        if (currentNoteTabItem && searchableLibraryIds.includes(currentNoteTabItem.libraryID)) {
             const allUserAttachmentKeys = get(allUserAttachmentKeysAtom);
             const existingKeys = new Set([
                 ...attachments.map(messageAttachmentKey),
@@ -1781,7 +1832,15 @@ export const sendWSMessageAtom = atom(
         }
 
         // Build filters payload
-        const filterState = get(currentMessageFiltersAtom);
+        const rawFilterState = get(currentMessageFiltersAtom);
+        const sanitizedFilters = sanitizeMessageFiltersForSearchableLibraries(
+            rawFilterState,
+            searchableLibraryIds,
+        );
+        const filterState = sanitizedFilters.state;
+        if (sanitizedFilters.changed) {
+            set(currentMessageFiltersAtom, filterState);
+        }
         const filterLibraries = filterState.libraryIds.length > 0
             ? filterState.libraryIds
                 .map(id => Zotero.Libraries.get(id))
@@ -1789,7 +1848,10 @@ export const sendWSMessageAtom = atom(
                 .map(serializeZoteroLibrary)
             : null;
         const filterCollections = filterState.collectionIds.length > 0
-            ? (await Promise.all(filterState.collectionIds.map(id => serializeCollection(Zotero.Collections.get(id))))).filter(Boolean)
+            ? (await Promise.all(filterState.collectionIds.map((id) => {
+                const collection = Zotero.Collections.get(id);
+                return collection ? serializeCollection(collection) : null;
+            }))).filter((collection): collection is ZoteroCollection => collection !== null)
             : null;
         const filterTags = filterState.tagSelections.length > 0
             ? filterState.tagSelections.map(tag => ({ ...tag }))
@@ -1826,6 +1888,7 @@ export const sendWSMessageAtom = atom(
             filters: filtersPayload,
             ...(toolRequests ? { tool_requests: toolRequests } : {}),
             ...(origin ? { origin } : {}),
+            ...(actions?.length ? { actions } : {}),
         };
 
         // Get current thread ID (null for new thread)
@@ -1864,6 +1927,7 @@ export const sendWSMessageAtom = atom(
 
             // Reset user message input after creating the run
             set(currentMessageContentAtom, '');
+            set(currentMessagePillsAtom, []);
             set(removePopupMessagesByTypeAtom, ['items_summary']);
             set(currentMessageItemsAtom, []);
             set(currentMessageCollectionsAtom, []);
@@ -2357,6 +2421,7 @@ export const closeWSConnectionAtom = atom(null, async (get, set) => {
 
     // Clear any pending approvals (for parallel tool calls that were awaiting user response)
     set(clearAllPendingApprovalsAtom);
+    set(clearAllPendingQuestionsAtom);
     set(clearApprovalResponseIntentsAtom);
     // Clear per-run auto-approve state
     set(clearAutoApproveNoteKeysAtom);
@@ -2396,6 +2461,9 @@ export const clearThreadAtom = atom(null, (_get, set) => {
     set(citationsAtom, []);
     set(resetCitationMarkersAtom);  // Reset citation markers for cleared thread
     set(clearWarningsAtom);
+    // Clear pending questions so a reset never leaves the composer disabled
+    // behind an unanswerable card (pending approvals are left as-is here).
+    set(clearAllPendingQuestionsAtom);
     // Clear per-run auto-approve state (both keys and action IDs)
     set(clearAutoApproveNoteKeysAtom);
     set(clearAutoApprovedActionIdsAtom);
@@ -2440,5 +2508,23 @@ export const sendApprovalResponseAtom = atom(
         });
         logger(`sendApprovalResponseAtom: Sending approval response for ${actionId}: ${approved}${userInstructions ? ' (with instructions)' : ''}`, 1);
         agentService.sendApprovalResponse(actionId, approved, userInstructions);
+    }
+);
+
+/**
+ * Send the user's answers (or a skip) for an ask_user_question request and
+ * remove the pending question so the composer re-enables immediately.
+ */
+export const sendAskUserQuestionResponseAtom = atom(
+    null,
+    (_get, set, { questionId, toolcallId, answers, cancelled }: {
+        questionId: string;
+        toolcallId: string;
+        answers: AskUserQuestionAnswer[];
+        cancelled?: boolean;
+    }) => {
+        logger(`sendAskUserQuestionResponseAtom: Sending question response for ${questionId}: ${cancelled ? 'cancelled' : `${answers.length} answer(s)`}`, 1);
+        agentService.sendAskUserQuestionResponse(questionId, answers, cancelled ?? false);
+        set(removePendingQuestionAtom, toolcallId);
     }
 );

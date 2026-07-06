@@ -1,17 +1,22 @@
 import React, { useEffect, useRef } from 'react';
 import { useSetAtom } from 'jotai';
-import { isPreferencePageVisibleAtom, activePreferencePageTabAtom, PreferencePageTab } from '../atoms/ui';
+import { isPreferencePageVisibleAtom, activePreferencePageTabAtom, pendingActionsCategoryFilterAtom, pendingActionEditRequestAtom, PreferencePageTab } from '../atoms/ui';
 import { prefWindowFocusRefreshAtom } from '../atoms/profile';
+import type { ActionCategoryFilter } from '../types/actions';
 import PreferencePage from './preferences/PreferencePage';
 import DialogContainer from './dialog/DialogContainer';
 
 interface PreferencesWindowProps {
     initialTab?: PreferencePageTab | null;
+    initialActionsCategoryFilter?: ActionCategoryFilter | null;
+    initialActionId?: string | null;
 }
 
-const PreferencesWindow: React.FC<PreferencesWindowProps> = ({ initialTab }) => {
+const PreferencesWindow: React.FC<PreferencesWindowProps> = ({ initialTab, initialActionsCategoryFilter, initialActionId }) => {
     const setPreferencePageVisible = useSetAtom(isPreferencePageVisibleAtom);
     const setActiveTab = useSetAtom(activePreferencePageTabAtom);
+    const setPendingActionsCategoryFilter = useSetAtom(pendingActionsCategoryFilterAtom);
+    const setPendingActionEditRequest = useSetAtom(pendingActionEditRequestAtom);
     const setPrefWindowFocusRefresh = useSetAtom(prefWindowFocusRefreshAtom);
     const containerRef = useRef<HTMLDivElement>(null);
 
@@ -21,10 +26,24 @@ const PreferencesWindow: React.FC<PreferencesWindowProps> = ({ initialTab }) => 
 
         // Set the initial tab, defaulting to 'general' for generic opens
         setActiveTab(initialTab || 'general');
+        if (initialActionsCategoryFilter) {
+            setPendingActionsCategoryFilter({ filter: initialActionsCategoryFilter, requestId: Date.now() });
+        }
+        if (initialActionId) {
+            setPendingActionEditRequest({ actionId: initialActionId, requestId: Date.now() });
+        }
 
-        // Register global function so BeaverUIFactory can switch tabs on already-open window
-        (Zotero as any).__beaverOpenPreferencesTab = (tab: PreferencePageTab) => {
+        // Register global function so BeaverUIFactory can switch tabs (and request an
+        // actions category filter or an action-edit reveal) on an already-open window
+        (Zotero as any).__beaverOpenPreferencesTab = (tab: PreferencePageTab, actionsCategoryFilter?: ActionCategoryFilter, actionId?: string) => {
             setActiveTab(tab);
+            if (tab === 'actions') {
+                if (actionId) {
+                    setPendingActionEditRequest({ actionId, requestId: Date.now() });
+                } else {
+                    setPendingActionsCategoryFilter({ filter: actionsCategoryFilter ?? null, requestId: Date.now() });
+                }
+            }
         };
 
         return () => {

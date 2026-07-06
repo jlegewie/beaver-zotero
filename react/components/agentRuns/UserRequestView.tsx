@@ -1,4 +1,4 @@
-import React, { useRef, useState, useEffect, useCallback } from 'react';
+import React, { useRef, useState, useEffect, useCallback, useMemo } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { BeaverAgentPrompt } from '../../agents/types';
 import ContextMenu from '../ui/menu/ContextMenu';
@@ -7,9 +7,15 @@ import { RequestChips } from './requestChips';
 import { EditIcon, Spinner } from '../icons/icons';
 import Button from '../ui/Button';
 import ModelSelectionButton from '../ui/buttons/ModelSelectionButton';
+import SearchMenu from '../ui/menus/SearchMenu';
 import { regenerateWithEditedPromptAtom, isWSChatPendingAtom } from '../../atoms/agentRunAtoms';
 import { selectedModelAtom } from '../../atoms/models';
 import { isStreamingAtom } from '../../agents/atoms';
+import { actionsAtom, buildEditedPromptActionsAtom } from '../../atoms/actions';
+import { ensurePromptActionTokens, promptActionsToDescriptors, type SlashCommandDescriptor } from '../../utils/slashCommands';
+import { renderContentWithSlashPills } from './slashCommandRendering';
+import { LexicalEditorInput, LexicalEditorInputHandle } from '../input/lexical/LexicalEditorInput';
+import { useSlashMenu } from '../../hooks/useSlashMenu';
 
 interface UserRequestViewProps {
     userPrompt: BeaverAgentPrompt;
@@ -23,14 +29,19 @@ interface UserRequestViewProps {
 /**
  * Renders the user's request in an agent run.
  * Displays attachments, filters, and the userPrompt content.
- * 
+ *
  * Features:
  * - Limited height with fade-out effect when content exceeds maxContentHeight
  * - Hover effect showing the message is editable (when canEdit is true)
  * - Click to open edit overlay for modifying the message (when canEdit is true)
+ *
+ * The edit overlay uses the same Lexical editor as the chat input: persisted
+ * `/command` tokens are rebuilt as pill nodes from the prompt's `actions`
+ * field (pills whose action no longer exists render greyed out), and the
+ * slash menu is available for adding new action pills.
  */
-export const UserRequestView: React.FC<UserRequestViewProps> = ({ 
-    userPrompt, 
+export const UserRequestView: React.FC<UserRequestViewProps> = ({
+    userPrompt,
     runId,
     maxContentHeight = 200,
     canEdit = true
@@ -38,37 +49,61 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
     const contentRef = useRef<HTMLDivElement | null>(null);
     const containerRef = useRef<HTMLDivElement | null>(null);
     const overlayRef = useRef<HTMLDivElement | null>(null);
-    const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+    // Lexical contenteditable root (for menu positioning / legacy focus) and
+    // the editor's imperative handle.
+    const editInputRef = useRef<HTMLElement | null>(null);
+    const editorHandleRef = useRef<LexicalEditorInputHandle | null>(null);
 
     // Edit mode state
     const [isEditing, setIsEditing] = useState(false);
     const [isHovered, setIsHovered] = useState(false);
     const [editedContent, setEditedContent] = useState(userPrompt.content);
+    const [editedPills, setEditedPills] = useState<SlashCommandDescriptor[]>([]);
     const [needsFade, setNeedsFade] = useState(false);
 
     // Atoms
     const regenerateWithEditedPrompt = useSetAtom(regenerateWithEditedPromptAtom);
+    const buildEditedPromptActions = useSetAtom(buildEditedPromptActionsAtom);
     const isPending = useAtomValue(isWSChatPendingAtom);
     const selectedModel = useAtomValue(selectedModelAtom);
     const isStreaming = useAtomValue(isStreamingAtom);
-    
+    const allActions = useAtomValue(actionsAtom);
+    const displayContent = useMemo(
+        () => ensurePromptActionTokens(userPrompt.content, userPrompt.actions),
+        [userPrompt.content, userPrompt.actions],
+    );
+
     // Editing is only allowed when canEdit is true AND no run is streaming
     const canEditNow = canEdit && !isStreaming;
 
     const {
-        isMenuOpen: isSelectionMenuOpen, 
+        isMenuOpen: isSelectionMenuOpen,
         menuPosition: selectionMenuPosition,
         closeMenu: closeSelectionMenu,
         handleContextMenu,
         menuItems: selectionMenuItems
     } = useSelectionContextMenu(contentRef);
 
-    // Initialize edited content when opening edit mode
-    useEffect(() => {
-        if (isEditing) {
-            setEditedContent(userPrompt.content);
-        }
-    }, [isEditing, userPrompt.content]);
+    const focusEditor = useCallback(() => {
+        editorHandleRef.current?.focus();
+    }, []);
+    // Stable forwarder so the slash menu can insert a command pill into the
+    // Lexical editor (the editor handle isn't available until after mount).
+    const insertSlashCommand = useCallback((descriptor: SlashCommandDescriptor, queryLength: number) => {
+        editorHandleRef.current?.insertSlashCommand(descriptor, queryLength);
+    }, []);
+
+    const {
+        isSlashMenuOpen,
+        slashMenuPosition,
+        slashSearchQuery,
+        setSlashSearchQuery,
+        slashMenuItems,
+        handleSlashDismiss,
+        handleSlashMenuChange,
+        handleSlashTrigger,
+        handleSlashMenuKeyDown,
+    } = useSlashMenu(editInputRef, 'below', focusEditor, insertSlashCommand, setEditedContent);
 
     // Check if content needs fade effect
     useEffect(() => {
@@ -76,7 +111,7 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
             const contentHeight = contentRef.current.scrollHeight;
             setNeedsFade(contentHeight > maxContentHeight);
         }
-    }, [userPrompt.content, maxContentHeight]);
+    }, [displayContent, maxContentHeight]);
 
     // Handle click outside to close edit mode
     useEffect(() => {
@@ -88,12 +123,12 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
 
         const handleClickOutside = (event: MouseEvent) => {
             const target = event.target as Node;
-            
+
             // Don't close if clicking inside the overlay
             if (overlayRef.current?.contains(target)) {
                 return;
             }
-            
+
             // Don't close if clicking inside a menu
             const isMenuClick = (target as Element).closest?.('.context-menu, .search-menu, .dropdown-menu, [role="menu"]');
             if (isMenuClick) {
@@ -101,7 +136,7 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
             }
 
             setIsEditing(false);
-            setEditedContent(userPrompt.content);
+            setEditedContent(displayContent);
         };
 
         // Use capture phase to catch events before they bubble
@@ -109,7 +144,7 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
         return () => {
             doc.removeEventListener('mousedown', handleClickOutside, true);
         };
-    }, [isEditing, userPrompt.content]);
+    }, [isEditing, displayContent]);
 
     // Close edit mode when scrolled out of view
     useEffect(() => {
@@ -134,33 +169,15 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
         return () => observer.disconnect();
     }, [isEditing]);
 
-    const editMaxHeight = maxContentHeight + 50;
-
-    // Focus textarea and resize when entering edit mode
+    // Focus the editor when entering edit mode (caret lands at the end).
     useEffect(() => {
         if (isEditing) {
-            // Use requestAnimationFrame to ensure DOM is ready
+            // Use requestAnimationFrame to ensure the editor is mounted
             requestAnimationFrame(() => {
-                if (textareaRef.current) {
-                    textareaRef.current.focus();
-                    // Move cursor to end
-                    textareaRef.current.selectionStart = textareaRef.current.value.length;
-                    textareaRef.current.selectionEnd = textareaRef.current.value.length;
-                    // Resize to fit content
-                    textareaRef.current.style.height = 'auto';
-                    textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, editMaxHeight)}px`;
-                }
+                editorHandleRef.current?.focus();
             });
         }
-    }, [isEditing, editMaxHeight]);
-
-    // Auto-resize textarea on content change (max editMaxHeight, then scroll)
-    useEffect(() => {
-        if (isEditing && textareaRef.current) {
-            textareaRef.current.style.height = 'auto';
-            textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, editMaxHeight)}px`;
-        }
-    }, [editedContent, isEditing, editMaxHeight]);
+    }, [isEditing]);
 
     // Check if we have content to display in the filters/attachments section
     const hasFiltersOrAttachments =
@@ -175,42 +192,93 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
         // hide the view.
         if (e.button !== 0) return;
         if (!isEditing && canEditNow) {
+            // Content and pills must be staged BEFORE the editor mounts: the
+            // editor materializes /command tokens as pill nodes only while
+            // syncing the content string in, so pills arriving a commit later
+            // would leave the tokens as plain text.
+            setEditedContent(displayContent);
+            setEditedPills(promptActionsToDescriptors(userPrompt.actions, allActions));
             setIsEditing(true);
         }
-    }, [isEditing, canEditNow]);
+    }, [isEditing, canEditNow, displayContent, userPrompt.actions, allActions]);
+
+    // After the slash menu consumed an editor change (open/close/query), the
+    // menu re-render can clobber the caret in Zotero's chrome document; put it
+    // back at the end of the content like the main input does.
+    const queueCaretToEnd = useCallback((offset: number) => {
+        const win = editInputRef.current?.ownerDocument.defaultView;
+        win?.setTimeout(() => {
+            editorHandleRef.current?.selectRange(offset, offset);
+        }, 0);
+    }, []);
+
+    const handleEditorChange = useCallback((value: string) => {
+        if (handleSlashMenuChange(value)) {
+            queueCaretToEnd(value.length);
+            return;
+        }
+        const inputEl = editInputRef.current;
+        if (inputEl && handleSlashTrigger(value, inputEl.getBoundingClientRect())) {
+            queueCaretToEnd(value.length);
+            return;
+        }
+        setEditedContent(value);
+    }, [handleSlashMenuChange, handleSlashTrigger, queueCaretToEnd]);
 
     const handleSubmit = useCallback(async (e: React.FormEvent | React.MouseEvent) => {
         e.preventDefault();
         if (isPending || editedContent.length === 0) return;
 
-        // Build the edited prompt
+        // Build the edited prompt from the editor's pills: surviving pills
+        // reuse their persisted wire action, new pills resolve like a fresh
+        // compose (possibly pulling in attachments), and pills whose token
+        // the user deleted drop out.
+        const pills = editorHandleRef.current?.getSlashCommands() ?? [];
+        const result = await buildEditedPromptActions({
+            pills,
+            persistedActions: userPrompt.actions,
+            existingAttachments: userPrompt.attachments,
+        });
+        if (!result) return; // Cannot run right now — a popup explains why
+
         const editedPrompt: BeaverAgentPrompt = {
             ...userPrompt,
             content: editedContent,
+            actions: result.actions,
+            attachments: result.addedAttachments.length > 0
+                ? [...(userPrompt.attachments ?? []), ...result.addedAttachments]
+                : userPrompt.attachments,
         };
 
         setIsEditing(false);
         await regenerateWithEditedPrompt({ runId, editedPrompt });
-    }, [isPending, editedContent, userPrompt, runId, regenerateWithEditedPrompt]);
+    }, [isPending, editedContent, userPrompt, runId, regenerateWithEditedPrompt, buildEditedPromptActions]);
 
-    const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-        // Submit on Enter (without Shift)
-        if (e.key === 'Enter' && !e.shiftKey && !isPending) {
-            e.preventDefault();
-            handleSubmit(e);
-        }
-        // Close on Escape
+    // Enter in the editor submits (Shift+Enter inserts a newline; handled by
+    // the editor). Suppressed while the slash menu owns the keyboard.
+    const handleEditorSubmit = useCallback(() => {
+        if (isPending || isSlashMenuOpen) return;
+        const fakeEvent = { preventDefault: () => {} } as React.FormEvent;
+        handleSubmit(fakeEvent);
+    }, [isPending, isSlashMenuOpen, handleSubmit]);
+
+    const handleEditorKeyDown = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
+        // While the slash menu is open it owns navigation/selection keys
+        // (including Escape, which closes just the menu).
+        if (handleSlashMenuKeyDown(e)) return;
         if (e.key === 'Escape') {
             e.preventDefault();
             setIsEditing(false);
         }
-    }, [isPending, handleSubmit]);
+    }, [handleSlashMenuKeyDown]);
+
+    const menuPortalContainer = editInputRef.current?.closest('[id^="beaver-react-root-"], #beaver-pane-window') as HTMLElement | null;
 
     return (
         <div className="px-3 py-1 relative" ref={containerRef}>
             {/* Main display (always in DOM for layout) */}
-            <div 
-                id={`user-request-${runId}`} 
+            <div
+                id={`user-request-${runId}`}
                 className={`
                     user-message-display user-request-view
                     ${isHovered && !isEditing ? 'user-request-view-hover' : ''}
@@ -227,18 +295,20 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
                 )}
 
                 {/* Message content with max height and fade */}
-                <div 
+                <div
                     className={`-ml-1 user-select-text user-request-content border-transparent ${needsFade ? 'user-request-content-fade' : ''}`}
-                    style={{ 
-                        maxHeight: `${maxContentHeight}px`, 
-                        overflow: 'hidden', 
+                    style={{
+                        maxHeight: `${maxContentHeight}px`,
+                        overflow: 'hidden',
                         whiteSpace: 'pre-wrap',
-                        display: 'block' 
+                        display: 'block'
                     }}
-                    ref={contentRef} 
+                    ref={contentRef}
                     onContextMenu={handleContextMenu}
                 >
-                    {userPrompt.content}
+                    {userPrompt.actions?.length
+                        ? renderContentWithSlashPills(displayContent, userPrompt.actions)
+                        : displayContent}
                 </div>
 
                 {/* Edit icon (visible on hover) */}
@@ -265,7 +335,7 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
 
             {/* Edit overlay (absolute positioned on top) */}
             {isEditing && (
-                <div 
+                <div
                     ref={overlayRef}
                     className="user-request-edit-overlay user-message-display"
                     onClick={(e) => e.stopPropagation()}
@@ -275,28 +345,50 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
                         <RequestChips userPrompt={userPrompt} />
                     )}
 
-                    {/* Textarea input */}
+                    {/* Slash-command menu (opened by typing "/") */}
+                    <SearchMenu
+                        menuItems={slashMenuItems}
+                        isOpen={isSlashMenuOpen}
+                        onClose={handleSlashDismiss}
+                        position={slashMenuPosition}
+                        verticalPosition="below"
+                        useFixedPosition={true}
+                        width="250px"
+                        searchQuery={slashSearchQuery}
+                        setSearchQuery={setSlashSearchQuery}
+                        onSearch={() => {}}
+                        noResultsText="No actions found"
+                        placeholder="Search actions..."
+                        closeOnSelect={false}
+                        showSearchInput={false}
+                        selectOnTab={true}
+                        portalContainer={menuPortalContainer}
+                        groupHeaderClassName="font-color-primary opacity-70"
+                    />
+
+                    {/* Lexical editor input */}
                     <form onSubmit={handleSubmit} className="display-flex flex-col">
                         <div className="mb-2 -ml-1">
-                            <textarea
-                                ref={textareaRef}
+                            <LexicalEditorInput
+                                ref={editorHandleRef}
                                 value={editedContent}
-                                onChange={(e) => setEditedContent(e.target.value)}
-                                onInput={(e) => {
-                                    e.currentTarget.style.height = 'auto';
-                                    e.currentTarget.style.height = `${Math.min(e.currentTarget.scrollHeight, editMaxHeight)}px`;
-                                }}
-                                style={{ maxHeight: `${editMaxHeight}px` }}
+                                onChange={handleEditorChange}
+                                pills={editedPills}
+                                onPillsChange={setEditedPills}
+                                onSubmit={handleEditorSubmit}
                                 placeholder="Edit your message..."
-                                className="chat-input user-request-edit-textarea"
-                                onKeyDown={handleKeyDown}
-                                rows={1}
+                                ariaLabel="Edit message"
+                                onKeyDown={handleEditorKeyDown}
+                                suspendKeyboardNavigation={isSlashMenuOpen}
+                                onContentEditableRef={(el) => {
+                                    editInputRef.current = el;
+                                }}
                             />
                         </div>
 
                         {/* Button Row */}
                         <div className="display-flex flex-row items-center pt-2">
-                            <ModelSelectionButton inputRef={textareaRef} />
+                            <ModelSelectionButton inputRef={editInputRef} focusInput={focusEditor} />
                             <div className="flex-1" />
                             <div className="display-flex flex-row items-center gap-4">
                                 <Button
@@ -312,7 +404,7 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
                                     variant="solid"
                                     style={{ padding: '2px 5px' }}
                                     onClick={handleSubmit}
-                                    disabled={editedContent.length === 0 || isPending || !selectedModel}
+                                    disabled={editedContent.length === 0 || isPending || !selectedModel || isSlashMenuOpen}
                                 >
                                     <span>Send <span className="opacity-50">⏎</span></span>
                                 </Button>

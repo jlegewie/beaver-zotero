@@ -29,7 +29,6 @@ interface CustomProviderCardProps {
     onDuplicate: () => void;
     isExpanded: boolean;
     onToggleExpand: () => void;
-    hasBorder?: boolean;
     /** Focus the Name field once on mount (used for newly added providers). */
     autoFocusName?: boolean;
 }
@@ -66,7 +65,6 @@ const CustomProviderCard: React.FC<CustomProviderCardProps> = ({
     onDuplicate,
     isExpanded,
     onToggleExpand,
-    hasBorder = false,
     autoFocusName = false,
 }) => {
     const [testStatus, setTestStatus] = useState<TestStatus>('idle');
@@ -179,7 +177,7 @@ const CustomProviderCard: React.FC<CustomProviderCardProps> = ({
     if (!isExpanded) {
         return (
             <div
-                className={`action-card display-flex flex-row items-center gap-3 ${hasBorder ? 'border-top-quinary' : ''}`}
+                className="action-card display-flex flex-row items-center gap-3"
                 onClick={onToggleExpand}
             >
                 <div className="display-flex flex-col flex-1 min-w-0" style={{ gap: '3px' }}>
@@ -209,7 +207,10 @@ const CustomProviderCard: React.FC<CustomProviderCardProps> = ({
 
     // --- Expanded view ---
     return (
-        <div className={`action-card action-card-editing ${hasBorder ? 'border-top-quinary' : ''}`}>
+        // Reuses `.action-card-editing` only to drop the pointer cursor / hover
+        // background; that class zeroes padding for ActionCard's full-width header
+        // layout, so restore card padding inline (this card has no header/body).
+        <div className="action-card action-card-editing" style={{ padding: '10px 12px' }}>
             <div className="display-flex flex-col" style={{ gap: '14px' }}>
                 {/* Name */}
                 <label className="display-flex flex-col">
@@ -326,6 +327,7 @@ const CustomProviderCard: React.FC<CustomProviderCardProps> = ({
                         variant="outline"
                         width="220px"
                         className="text-base"
+                        style={{ padding: '4px 6px' }}
                         ariaLabel="Test endpoint"
                         disabled={!isComplete && testStatus !== 'loading'}
                         tooltipContent={!isComplete ? 'Fill in all required fields to test the endpoint.' : undefined}
@@ -335,6 +337,7 @@ const CustomProviderCard: React.FC<CustomProviderCardProps> = ({
                             variant="outline"
                             icon={CopyIcon}
                             onClick={onDuplicate}
+                            style={{ padding: '4px 6px' }}
                         >
                             Duplicate
                         </Button>
@@ -342,12 +345,14 @@ const CustomProviderCard: React.FC<CustomProviderCardProps> = ({
                             variant="outline"
                             icon={DeleteIcon}
                             onClick={onRemove}
+                            style={{ padding: '4px 6px' }}
                         >
                             Delete
                         </Button>
                         <Button
                             variant="solid"
                             onClick={onToggleExpand}
+                            style={{ padding: '4px 6px' }}
                         >
                             Done
                         </Button>

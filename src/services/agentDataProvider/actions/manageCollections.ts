@@ -20,7 +20,7 @@ import {
     WSAgentActionExecuteRequest,
     WSAgentActionExecuteResponse,
 } from '../../agentProtocol';
-import { getDeferredToolPreference, isLibrarySearchable, getCollectionByIdOrName } from '../utils';
+import { checkLibraryExcluded, excludedLibraryMessage, getDeferredToolPreference, isLibrarySearchable, getCollectionByIdOrName } from '../utils';
 import { TimeoutContext, checkAborted, TimeoutError } from '../timeout';
 import { logger } from '../../../utils/logger';
 
@@ -193,7 +193,7 @@ export async function validateManageCollectionsAction(
             type: 'agent_action_validate_response',
             request_id: request.request_id,
             valid: false,
-            error: `Collection '${collection.name}' is in library '${library.name}' which is not synced with Beaver.`,
+            error: excludedLibraryMessage(libraryID),
             error_code: 'library_not_searchable',
             preference: 'always_ask',
         };
@@ -404,6 +404,19 @@ export async function executeManageCollectionsAction(
             success: false,
             error: 'library_id missing or invalid in action_data',
             error_code: 'invalid_library_id',
+        };
+    }
+
+    // TOCTOU guard: never rename/move/delete collections in a library the user
+    // excluded from Beaver, even if validation passed earlier or was skipped.
+    const excluded = checkLibraryExcluded(library_id);
+    if (excluded) {
+        return {
+            type: 'agent_action_execute_response',
+            request_id: request.request_id,
+            success: false,
+            error: excluded.message,
+            error_code: 'library_not_searchable',
         };
     }
 

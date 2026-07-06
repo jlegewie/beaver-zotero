@@ -9,7 +9,7 @@ import {
     WSAgentActionExecuteResponse,
     FrontendTimingMetadata,
 } from '../../agentProtocol';
-import { getDeferredToolPreference } from '../utils';
+import { checkLibraryExcluded, excludedLibraryMessage, getDeferredToolPreference } from '../utils';
 import { TimeoutContext, checkAborted } from '../timeout';
 import { TimeoutError } from '../timeout';
 import { TimingAccumulator } from '../../../utils/timing';
@@ -129,7 +129,7 @@ async function validateCreateItemAction(
             type: 'agent_action_validate_response',
             request_id: request.request_id,
             valid: false,
-            error: `Library "${targetLibrary.name}" is not synced with Beaver.`,
+            error: excludedLibraryMessage(targetLibraryId),
             error_code: 'library_not_searchable',
             preference: 'always_ask',
         };
@@ -290,6 +290,20 @@ async function executeCreateItemAction(
         library_id = Zotero.Libraries.userLibraryID;
     }
     ta.record('resolve_library_ms', Date.now() - libResolveStart);
+
+    // TOCTOU guard: never create in a library the user excluded from Beaver,
+    // even if validation passed earlier or the execute request skipped it.
+    const excluded = checkLibraryExcluded(library_id);
+    if (excluded) {
+        return {
+            type: 'agent_action_execute_response',
+            request_id: request.request_id,
+            success: false,
+            error: excluded.message,
+            error_code: 'library_not_searchable',
+            timing: buildTiming(),
+        };
+    }
 
     try {
         logger(`executeCreateItemAction: Creating item "${proposedData.item.title}" in library ${library_id}`, 1);

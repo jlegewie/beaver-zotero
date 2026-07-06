@@ -10,6 +10,12 @@ import { attachExternalFile } from '../../../src/services/externalFiles';
 import type { ExternalFileRecord } from '../../../src/services/database';
 import { selectedModelAtom } from '../../atoms/models';
 import { requestPlusToolsAtom } from '../../atoms/ui';
+import { importActionAtom, stageActionPillAtom } from '../../atoms/actions';
+import { readActionFile, isActionFilePath } from '../../utils/actionShareFile';
+import { addPopupMessageAtom } from '../../utils/popupMessageUtils';
+import { getActionCommand } from '../../utils/slashCommands';
+import { getHost } from '../../host';
+import { SettingsIcon } from '../icons/icons';
 
 interface DragDropWrapperProps {
     children: React.ReactNode;
@@ -52,6 +58,9 @@ const DragDropWrapper: React.FC<DragDropWrapperProps> = ({
     const addItemsToCurrentMessageItems = useSetAtom(addItemsToCurrentMessageItemsAtom);
     const addItemToCurrentMessageItems = useSetAtom(addItemToCurrentMessageItemsAtom);
     const addExternalFilesToCurrentMessage = useSetAtom(addExternalFilesToCurrentMessageAtom);
+    const importAction = useSetAtom(importActionAtom);
+    const stageActionPill = useSetAtom(stageActionPillAtom);
+    const addPopupMessage = useSetAtom(addPopupMessageAtom);
     const searchableLibraryIds = useAtomValue(searchableLibraryIdsAtom);
     const selectedModel = useAtomValue(selectedModelAtom);
     const requestPlusTools = useAtomValue(requestPlusToolsAtom);
@@ -348,6 +357,43 @@ const DragDropWrapper: React.FC<DragDropWrapperProps> = ({
         }
     };
 
+    /**
+     * Import dropped `.beaveraction` files. Each is read, parsed, and added
+     * (resolving id/command conflicts); its /command is also staged as a pill in
+     * the chat input (in the window the file was dropped on) so the action is
+     * ready to run, and a popup confirms the action and links to its settings.
+     */
+    const importActionFiles = async (paths: string[], targetWindow?: Window) => {
+        for (const path of paths) {
+            const result = await readActionFile(path);
+            if (!result.ok) {
+                addPopupMessage({ type: 'error', title: 'Import failed', text: result.error, expire: true });
+                continue;
+            }
+            const { action, command, commandRenamed } = importAction(result.action);
+            // Stage the imported action's /command pill in the input area
+            stageActionPill({
+                actionId: action.id,
+                fallbackTitle: action.title,
+                targetWindow,
+            });
+            const renamedNote = commandRenamed
+                ? ` The /${getActionCommand(result.action)} command was taken, so it was added as /${command}.`
+                : '';
+            addPopupMessage({
+                type: 'info',
+                title: 'Action added',
+                text: `"${action.title}" was added to your message. Type /${command} to use it again.${renamedNote}`,
+                expire: false,
+                button: {
+                    text: 'Open in settings',
+                    icon: SettingsIcon,
+                    onClick: () => getHost().navigation?.openActionSettings?.(action.id),
+                },
+            });
+        }
+    };
+
     const handleDrop = async (e: React.DragEvent<HTMLDivElement>) => {
         e.preventDefault();
         e.stopPropagation();
@@ -435,13 +481,27 @@ const DragDropWrapper: React.FC<DragDropWrapperProps> = ({
                 showErrorMessage('No files found in drop');
                 return;
             }
-            if (files.length > maxAddAttachmentToMessage) {
+
+            // Shareable action files (.beaveraction) are imported as actions,
+            // not attached as message files. Any other dropped files continue
+            // through the external-file attach path below.
+            const actionFiles = files.filter(f => isActionFilePath(f.path));
+            const otherFiles = files.filter(f => !isActionFilePath(f.path));
+            if (actionFiles.length > 0) {
+                const targetWindow = e.currentTarget.ownerDocument.defaultView ?? undefined;
+                await importActionFiles(actionFiles.map(f => f.path), targetWindow);
+            }
+            if (otherFiles.length === 0) {
+                return;
+            }
+
+            if (otherFiles.length > maxAddAttachmentToMessage) {
                 showErrorMessage(`You can add up to ${maxAddAttachmentToMessage} files at a time.`);
                 return;
             }
             const attached: ExternalFileRecord[] = [];
             const supportsVision = selectedModel?.supports_vision === true;
-            for (const file of files) {
+            for (const file of otherFiles) {
                 const result = await attachExternalFile(file, {
                     supportsVision,
                     canHandleOCRLocally: supportsVision || Boolean(requestPlusTools),

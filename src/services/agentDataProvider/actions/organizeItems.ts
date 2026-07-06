@@ -1,7 +1,7 @@
 import { WSAgentActionValidateRequest, WSAgentActionValidateResponse, WSAgentActionExecuteRequest, WSAgentActionExecuteResponse } from '../../agentProtocol';
 import { store } from '../../../../react/store';
 import { searchableLibraryIdsAtom } from '../../../../react/atoms/profile';
-import { getDeferredToolPreference } from '../utils';
+import { checkLibraryExcluded, excludedLibraryMessage, getDeferredToolPreference } from '../utils';
 import { TimeoutContext, checkAborted } from '../timeout';
 import { TimeoutError } from '../timeout';
 import { logger } from '../../../utils/logger';
@@ -120,7 +120,7 @@ export async function validateOrganizeItemsAction(
                 type: 'agent_action_validate_response',
                 request_id: request.request_id,
                 valid: false,
-                error: `Library '${library.name}' is not synced with Beaver`,
+                error: excludedLibraryMessage(libraryId),
                 error_code: 'library_not_searchable',
                 preference: 'always_ask',
             };
@@ -367,6 +367,23 @@ export async function executeOrganizeItemsAction(
         tags?: { add?: string[]; remove?: string[] } | null;
         collections?: { add?: string[]; remove?: string[] } | null;
     };
+
+    // TOCTOU guard: never mutate items in a library the user excluded from Beaver,
+    // even if validation passed earlier or the execute request skipped it.
+    for (const itemId of item_ids) {
+        const libraryId = parseInt(itemId.split('-')[0], 10);
+        const excluded = checkLibraryExcluded(libraryId);
+        if (excluded) {
+            return {
+                type: 'agent_action_execute_response',
+                request_id: request.request_id,
+                success: false,
+                error: excluded.message,
+                error_code: 'library_not_searchable',
+                timing: buildTiming(),
+            };
+        }
+    }
 
     let itemsModified = 0;
     const skippedItems: string[] = [];

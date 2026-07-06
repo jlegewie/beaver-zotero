@@ -27,7 +27,7 @@ import { navigateToEpubCitation } from '../../utils/epubVisualizer/epubCitationN
 import { navigateToSnapshotCitation } from '../../utils/snapshotVisualizer/snapshotCitationNavigation';
 import { resolvePageLabelFromLabels } from '../../utils/pageLabels';
 import { getPageLabelsForItem } from './itemData';
-import { launchExternalFile } from './sourceActions';
+import { launchExternalFile, notifyReferenceUnavailable } from './sourceActions';
 import { getPref } from '../../../src/utils/prefs';
 import { logger } from '../../../src/utils/logger';
 import { selectItemById } from '../../../src/utils/selectItem';
@@ -102,6 +102,7 @@ export async function activateCitation(activation: CitationActivation): Promise<
 
     if (!item) {
         logger(`Citation activation: Failed to get Zotero item (${effectiveLibraryID}, ${effectiveItemKey})`);
+        notifyReferenceUnavailable('item');
         return;
     }
 

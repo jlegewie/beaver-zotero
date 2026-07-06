@@ -507,9 +507,9 @@ const LIST_TAGS_TOOL = {
     description:
         "List tags in the user's Zotero library. " +
         'Tags are user-defined labels attached to references (e.g., "to-read", "methods", "key-paper"). ' +
-        'Returns tag names and how many items use each tag. ' +
+        'Returns tag names with per-type counts: item_count (regular items), attachment_count, note_count, and annotation_count. ' +
         'Use this to discover available tags before using them as filters in `search_by_topic` or `search_by_metadata` (`tags_filter`). ' +
-        'Set `min_item_count` to filter out rarely-used tags.',
+        'Set `min_item_count` to filter out rarely-used tags (counts all tagged objects, not just regular items).',
     inputSchema: {
         type: 'object' as const,
         properties: {
@@ -1296,7 +1296,13 @@ async function handleListTags(args: any): Promise<any> {
         has_more: hasMore,
         next_offset: hasMore ? offset + limit : null,
         tags: response.tags.map((t) => {
-            const tag: any = { name: t.name, item_count: t.item_count };
+            const tag: any = {
+                name: t.name,
+                item_count: t.item_count,
+                attachment_count: t.attachment_count ?? 0,
+                note_count: t.note_count ?? 0,
+                annotation_count: t.annotation_count ?? 0,
+            };
             if (t.color) tag.color = t.color;
             return tag;
         }),

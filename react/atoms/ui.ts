@@ -3,6 +3,7 @@ import { PopupMessage, PopupMessageType } from '../types/popupMessage';
 import { ExternalReference } from '../types/externalReferences';
 import { getPref } from '../../src/utils/prefs';
 import { isUsingBeaverCreditsAtom } from './models';
+import type { ActionCategoryFilter } from '../types/actions';
 
 export const isSidebarVisibleAtom = atom(false);
 export const isLibraryTabAtom = atom(false);
@@ -11,6 +12,32 @@ export const isWebSearchEnabledAtom = atom(false);
 export type PreferencePageTab = 'general' | 'sync' | 'permissions' | 'billing' | 'models' | 'actions' | 'advanced' | 'account';
 export const activePreferencePageTabAtom = atom<PreferencePageTab>('general');
 export const isPreferencePageVisibleAtom = atom(false);
+
+/**
+ * A one-shot request to set the Actions preferences category filter. A null
+ * filter explicitly clears category filtering. `requestId` makes every request
+ * distinct so re-requesting the same category still re-triggers the consumer's
+ * effect. `ActionsPreferenceSection` applies it once, then resets this to null.
+ */
+export interface ActionsCategoryFilterRequest {
+    filter: ActionCategoryFilter | null;
+    requestId: number;
+}
+export const pendingActionsCategoryFilterAtom = atom<ActionsCategoryFilterRequest | null>(null);
+
+/**
+ * A one-shot request to reveal a specific action in the Actions preferences
+ * tab and open it in edit mode (e.g. after clicking an action pill in the
+ * chat input). `requestId` makes every request distinct so re-requesting the
+ * same action re-triggers the consumers' effects. `ActionsPreferenceSection`
+ * clears any active filters; the matching ActionCard scrolls itself into
+ * view, enters edit mode, and resets this to null.
+ */
+export interface PendingActionEditRequest {
+    actionId: string;
+    requestId: number;
+}
+export const pendingActionEditRequestAtom = atom<PendingActionEditRequest | null>(null);
 export const mcpServerEnabledAtom = atom(getPref('mcpServerEnabled'));
 export const mcpCreateNoteToolEnabledAtom = atom(getPref('mcpCreateNoteToolEnabled'));
 export const dataProviderEnabledAtom = atom(getPref('dataProviderEnabled'));
@@ -18,6 +45,12 @@ export const requestPlusToolsAtom = atom(getPref('requestPlusTools'));
 export const isWebSearchAllowedAtom = atom((get) => Boolean(get(isUsingBeaverCreditsAtom) || get(requestPlusToolsAtom)));
 export const showFileStatusDetailsAtom = atom(false);
 export const isThreadListViewAtom = atom(false);
+
+/**
+ * HomeLauncher — selected category for the current UI session (`null` = collapsed)
+ */
+export type HomeLauncherCategoryId = 'research' | 'write' | 'organize' | 'annotate';
+export const homeLauncherCategoryAtom = atom<HomeLauncherCategoryId | null>(null);
 
 // Error Report Dialog
 export const isErrorReportDialogVisibleAtom = atom(false);

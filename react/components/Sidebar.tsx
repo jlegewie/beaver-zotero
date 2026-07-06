@@ -1,5 +1,8 @@
-import React, { useRef, useEffect, type ReactNode } from 'react';
+import React, { useMemo, useRef, useEffect, type ReactNode } from 'react';
 import InputArea from "./input/InputArea"
+import AskUserQuestionPanel from "./input/AskUserQuestionPanel"
+import { pendingApprovalsAtom } from '../agents/agentActions';
+import { pendingQuestionsAtom } from '../agents/pendingQuestions';
 import Header from "./Header"
 import { useEventSubscription } from '../hooks/useEventSubscription';
 import { ThreadView } from "./agentRuns";
@@ -35,6 +38,7 @@ import {
     isDeviceAuthorizedAtom,
     isProfileLoadedAtom,
     isMigratingDataAtom,
+    profileWithPlanAtom,
     syncedLibrariesAtom,
     isDatabaseSyncSupportedAtom,
     pendingUpgradeConsentAtom,
@@ -43,8 +47,11 @@ import {
 } from '../atoms/profile';
 import UpdateRequiredPage from './pages/UpdateRequiredPage';
 import FirstRunPage from './pages/FirstRunPage';
-import { isFirstRunVisibleAtom } from '../atoms/firstRun';
+import { firstRunReturnRequestedAtom, isFirstRunVisibleAtom } from '../atoms/firstRun';
+import WhereToStartPage from './pages/WhereToStartPage';
+import { whereToStartVisibleAtom } from '../atoms/whereToStart';
 import ScreenReaderRunAnnouncer from './agentRuns/ScreenReaderRunAnnouncer';
+import { getFirstRunSelectionVariant } from '../utils/firstRunSelection';
 
 interface SidebarProps {
     location: 'library' | 'reader';
@@ -143,7 +150,9 @@ const SidebarShell = ({
 };
 
 const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
-    const inputRef = useRef<HTMLTextAreaElement>(null);
+    // Input element is now a contenteditable div (Lexical editor) rather than
+    // a textarea. Typed as HTMLElement so `.focus()` keeps working.
+    const inputRef = useRef<HTMLElement | null>(null);
     const loginEmailRef = useRef<HTMLInputElement>(null);
     const runs = useAtomValue(allRunsAtom);
     const messagesContainerRef = useRef<HTMLDivElement>(null);
@@ -167,6 +176,27 @@ const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
     const allWarnings = useAtomValue(threadWarningsAtom);
     const creditInfoWarning = allWarnings.findLast((w) => w.type === 'credit_info');
     const isFirstRunVisible = useAtomValue(isFirstRunVisibleAtom);
+    const isFirstRunReturnRequested = useAtomValue(firstRunReturnRequestedAtom);
+    const isWhereToStartVisible = useAtomValue(whereToStartVisibleAtom);
+    const profile = useAtomValue(profileWithPlanAtom);
+    const shouldAssignFirstRunVariant = isFirstRunVisible
+        && !isFirstRunReturnRequested
+        && !!profile?.user_id;
+    const firstRunVariant = useMemo(() => {
+        return shouldAssignFirstRunVariant && profile?.user_id
+            ? getFirstRunSelectionVariant(profile.user_id)
+            : 'first_run';
+    }, [profile?.user_id, shouldAssignFirstRunVariant]);
+
+    // ask_user_question takeover: while the agent blocks on a question, the
+    // question panel replaces the composer entirely (the draft message atom is
+    // untouched, so the composer restores it afterwards). Approval mode wins
+    // when both are pending — InputArea owns the approval flow.
+    const pendingApprovalsMap = useAtomValue(pendingApprovalsAtom);
+    const pendingQuestionsMap = useAtomValue(pendingQuestionsAtom);
+    const activeQuestion = pendingApprovalsMap.size === 0 && pendingQuestionsMap.size > 0
+        ? pendingQuestionsMap.values().next().value ?? null
+        : null;
 
     useEffect(() => {
         setIsSkippedFilesDialogVisible(false);
@@ -303,11 +333,30 @@ const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
         - explicit "Try another starting point" return (session atom), or
         - Free user, device authorized, never completed first-run on this account. */}
     if (isFirstRunVisible) {
+        const showWhereToStart = !isFirstRunReturnRequested
+            && firstRunVariant === 'where_to_start';
         return (
             <SidebarShell isWindow={isWindow}>
                 <ScreenReaderRunAnnouncer inputRef={inputRef} surface={isWindow ? 'window' : 'sidebar'} />
                 <Header isWindow={isWindow} />
-                <FirstRunPage isWindow={isWindow} inputRef={inputRef} />
+                {showWhereToStart ? (
+                    <WhereToStartPage />
+                ) : (
+                    <FirstRunPage isWindow={isWindow} inputRef={inputRef} />
+                )}
+                <DialogContainer />
+            </SidebarShell>
+        );
+    }
+
+    {/* "Where should we start?" launcher shown outside the first-run gate:
+        reopened via "Back to starting points" after a launcher follow-up, or
+        from the Dev Tools menu. */}
+    if (isWhereToStartVisible) {
+        return (
+            <SidebarShell isWindow={isWindow}>
+                <Header isWindow={isWindow} />
+                <WhereToStartPage />
                 <DialogContainer />
             </SidebarShell>
         );
@@ -317,12 +366,7 @@ const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
         setIsThreadListView(false);
     };
 
-    // First-run thread → swap input placeholder once a run with a first-run
-    // origin lives in this thread (either the original card run, or a
-    // follow-up triggered from NextStepsPanel). `runs` is the union of
-    // completed (threadRunsAtom) + active runs, and `user_prompt.origin` is
-    // set at submit time so we don't depend on the thread id arriving from
-    // the WS callback.
+    // First-run threads use a follow-up-specific composer placeholder.
     const isFirstRunThread = runs.some(
         (r) => isFirstRunOrigin(r.user_prompt?.origin),
     );
@@ -350,9 +394,17 @@ const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
                     <div id="beaver-prompt" className="flex-none px-3 pb-3 relative">
                         <PopupOverlayContainer />
                         <ScrollDownButton onClick={handleScrollToBottom} isWindow={isWindow} />
-                        <DragDropWrapper>
-                            <InputArea inputRef={inputRef} placeholder={inputPlaceholder} />
-                        </DragDropWrapper>
+                        {activeQuestion ? (
+                            // key resets local answer state per question request
+                            <AskUserQuestionPanel
+                                key={activeQuestion.questionId}
+                                pendingQuestion={activeQuestion}
+                            />
+                        ) : (
+                            <DragDropWrapper>
+                                <InputArea inputRef={inputRef} placeholder={inputPlaceholder} />
+                            </DragDropWrapper>
+                        )}
                     </div>
                 )}
 

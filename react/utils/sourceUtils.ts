@@ -14,6 +14,7 @@ import { safeFileExists } from '../../src/utils/zoteroUtils';
 import { getNoteContentPreviewText } from './noteText';
 import type { EditNoteOperation } from '../types/agentActions/editNote';
 import { getBeaverFooterAppendPoint } from '../../src/utils/noteEditFooter';
+import { notifyReferenceUnavailable } from '../host/zotero/sourceActions';
 import {
     getPageLocator,
     normalizeCitationTag,
@@ -134,8 +135,8 @@ export async function isValidZoteroItem(item: Zotero.Item): Promise<{valid: bool
         return {
             valid: false,
             error: library_name
-                ? `The library "${library_name}" is not synced with Beaver.`
-                : "This library is not synced with Beaver."};
+                ? `The library "${library_name}" is excluded from Beaver. You can update this setting in Beaver Preferences.`
+                : "This library is excluded from Beaver. You can update this setting in Beaver Preferences."};
     }
 
     // Is the library valid for sync?
@@ -262,7 +263,12 @@ export async function isValidZoteroItem(item: Zotero.Item): Promise<{valid: bool
 export function revealSource(source: ZoteroItemReference | SourceAttachment, collectionKey?: string) {
     if (!source.library_id || !source.zotero_key) return;
     const itemID = Zotero.Items.getIDFromLibraryAndKey(source.library_id, source.zotero_key);
-    if (itemID && Zotero.getActiveZoteroPane()) {
+    if (!itemID) {
+        logger(`revealSource: item not found (${source.library_id}, ${source.zotero_key})`);
+        notifyReferenceUnavailable('item');
+        return;
+    }
+    if (Zotero.getActiveZoteroPane()) {
         // Convert collection key to collection ID if provided
         let collectionId: number | undefined;
         if (collectionKey) {
@@ -316,7 +322,11 @@ export async function getCurrentCollectionKeyForItem(
 
 export async function openSource(source: SourceAttachment | ZoteroItemReference) {
     const item = getZoteroItem(source);
-    if (!item) return;
+    if (!item) {
+        logger(`openSource: item not found (${source.library_id}, ${source.zotero_key})`);
+        notifyReferenceUnavailable('item');
+        return;
+    }
     
     // Regular items
     if (item.isRegularItem()) {

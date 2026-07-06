@@ -16,6 +16,15 @@ import {
 import { getCollectionByIdOrName, validateLibraryAccess, isLibrarySearchable, getSearchableLibraries } from './utils';
 
 
+/** Per-tag counts broken down by the type of object carrying the tag. */
+interface TagCounts {
+    itemCount: number;
+    attachmentCount: number;
+    noteCount: number;
+    annotationCount: number;
+}
+
+
 /**
  * Handle list_tags request from backend.
  * Lists tags in a library.
@@ -80,114 +89,131 @@ export async function handleListTagsRequest(
         }
         
         const libraryName = library.name;
-        
+
         // Get tag colors (this is a sync operation from cache)
         const tagColors = Zotero.Tags.getColors(library.libraryID);
-        
-        // Build tag info with item counts using efficient SQL
-        const tagMap: Map<string, { count: number; type: number }> = new Map();
-        
+
+        // Build tag counts broken down by tagged-object type
+        const tagMap: Map<string, TagCounts> = new Map();
+
+        // Columns per row: name, itemCount, attachmentCount, noteCount, annotationCount.
+        // Each (itemID, tagID) pair yields exactly one row, and the item-type
+        // LEFT JOINs are 1:1, so SUM(CASE ...) counts each object exactly once.
+        const accumulateRow = (row: any) => {
+            const name = row.getResultByIndex(0) as string;
+            const itemCount = (row.getResultByIndex(1) as number) || 0;
+            const attachmentCount = (row.getResultByIndex(2) as number) || 0;
+            const noteCount = (row.getResultByIndex(3) as number) || 0;
+            const annotationCount = (row.getResultByIndex(4) as number) || 0;
+
+            const existing = tagMap.get(name);
+            if (existing) {
+                existing.itemCount += itemCount;
+                existing.attachmentCount += attachmentCount;
+                existing.noteCount += noteCount;
+                existing.annotationCount += annotationCount;
+            } else {
+                tagMap.set(name, { itemCount, attachmentCount, noteCount, annotationCount });
+            }
+        };
+
+        // Per-type tag counts. Classify each tagged item by its type via the
+        // item-type tables (an item belongs to exactly one of these, or is a
+        // regular item when it appears in none).
+        const COUNT_COLUMNS = `
+                SUM(CASE WHEN IA.itemID IS NULL AND INo.itemID IS NULL AND IAn.itemID IS NULL THEN 1 ELSE 0 END) AS itemCount,
+                SUM(CASE WHEN IA.itemID IS NOT NULL THEN 1 ELSE 0 END) AS attachmentCount,
+                SUM(CASE WHEN INo.itemID IS NOT NULL THEN 1 ELSE 0 END) AS noteCount,
+                SUM(CASE WHEN IAn.itemID IS NOT NULL THEN 1 ELSE 0 END) AS annotationCount`;
+
+        const COUNT_JOINS = `
+                LEFT JOIN itemAttachments IA ON I.itemID = IA.itemID
+                LEFT JOIN itemNotes INo ON I.itemID = INo.itemID
+                LEFT JOIN itemAnnotations IAn ON I.itemID = IAn.itemID`;
+
         if (resolvedCollection) {
             const collection = resolvedCollection;
-            
+
             // Get all descendant collection IDs (including the collection itself)
             const allDescendants = collection.getDescendents(false, 'collection', false);
             const collectionIds = [collection.id, ...allDescendants.map((d: any) => d.id)];
             const placeholders = collectionIds.map(() => '?').join(',');
-            
-            // Get tags with item counts for items in this collection (recursive)
-            // Only count top-level regular items (not attachments, notes, annotations)
+
+            // Tags for items in this collection (recursive across sub-collections).
             const sql = `
-                SELECT T.name, IT.type, COUNT(DISTINCT I.itemID) as itemCount
+                WITH RECURSIVE scope(itemID) AS (
+                    SELECT itemID FROM collectionItems WHERE collectionID IN (${placeholders})
+                    UNION
+                    SELECT children.itemID
+                    FROM (
+                        SELECT itemID, parentItemID FROM itemAttachments WHERE parentItemID IS NOT NULL
+                        UNION ALL
+                        SELECT itemID, parentItemID FROM itemNotes WHERE parentItemID IS NOT NULL
+                        UNION ALL
+                        SELECT itemID, parentItemID FROM itemAnnotations
+                    ) AS children
+                    JOIN scope ON children.parentItemID = scope.itemID
+                )
+                SELECT T.name,${COUNT_COLUMNS}
                 FROM itemTags IT
                 JOIN tags T ON IT.tagID = T.tagID
                 JOIN items I ON IT.itemID = I.itemID
-                JOIN collectionItems CI ON I.itemID = CI.itemID
-                LEFT JOIN itemAttachments IA ON I.itemID = IA.itemID
-                LEFT JOIN itemNotes INo ON I.itemID = INo.itemID
-                LEFT JOIN itemAnnotations IAn ON I.itemID = IAn.itemID
+                JOIN scope S ON I.itemID = S.itemID${COUNT_JOINS}
                 WHERE I.libraryID = ?
-                AND CI.collectionID IN (${placeholders})
                 AND I.itemID NOT IN (SELECT itemID FROM deletedItems)
-                AND IA.itemID IS NULL
-                AND INo.itemID IS NULL
-                AND IAn.itemID IS NULL
-                GROUP BY T.tagID, T.name, IT.type
+                GROUP BY T.tagID, T.name
             `;
-            
-            await Zotero.DB.queryAsync(sql, [library.libraryID, ...collectionIds], {
-                onRow: (row: any) => {
-                    const name = row.getResultByIndex(0) as string;
-                    const type = row.getResultByIndex(1) as number;
-                    const count = row.getResultByIndex(2) as number;
-                    
-                    // Combine counts for same tag name (different types)
-                    const existing = tagMap.get(name);
-                    if (existing) {
-                        existing.count += count;
-                    } else {
-                        tagMap.set(name, { count, type });
-                    }
-                }
+
+            await Zotero.DB.queryAsync(sql, [...collectionIds, library.libraryID], {
+                onRow: accumulateRow,
             });
         } else {
-            // Get all tags with item counts for the entire library
-            // Only count top-level regular items (not attachments, notes, annotations)
+            // All tags in the library, counted across every tagged-object type.
             const sql = `
-                SELECT T.name, IT.type, COUNT(DISTINCT I.itemID) as itemCount
+                SELECT T.name,${COUNT_COLUMNS}
                 FROM itemTags IT
                 JOIN tags T ON IT.tagID = T.tagID
-                JOIN items I ON IT.itemID = I.itemID
-                LEFT JOIN itemAttachments IA ON I.itemID = IA.itemID
-                LEFT JOIN itemNotes INo ON I.itemID = INo.itemID
-                LEFT JOIN itemAnnotations IAn ON I.itemID = IAn.itemID
+                JOIN items I ON IT.itemID = I.itemID${COUNT_JOINS}
                 WHERE I.libraryID = ?
                 AND I.itemID NOT IN (SELECT itemID FROM deletedItems)
-                AND IA.itemID IS NULL
-                AND INo.itemID IS NULL
-                AND IAn.itemID IS NULL
-                GROUP BY T.tagID, T.name, IT.type
+                GROUP BY T.tagID, T.name
             `;
-            
+
             await Zotero.DB.queryAsync(sql, [library.libraryID], {
-                onRow: (row: any) => {
-                    const name = row.getResultByIndex(0) as string;
-                    const type = row.getResultByIndex(1) as number;
-                    const count = row.getResultByIndex(2) as number;
-                    
-                    // Combine counts for same tag name (different types)
-                    const existing = tagMap.get(name);
-                    if (existing) {
-                        existing.count += count;
-                    } else {
-                        tagMap.set(name, { count, type });
-                    }
-                }
+                onRow: accumulateRow,
             });
         }
-        
+
         // Build tag info array
         const tags: TagInfo[] = [];
         for (const [name, data] of tagMap) {
-            // Skip if below minimum count
-            if (data.count < (request.min_item_count ?? 0)) {
+            // Filter on the total number of tagged objects so a tag is kept even
+            // when it lives only on attachments/notes/annotations.
+            const totalCount = data.itemCount + data.attachmentCount + data.noteCount + data.annotationCount;
+            if (totalCount < (request.min_item_count ?? 0)) {
                 continue;
             }
-            
+
             // Get color if any
             const colorInfo = tagColors.get(name);
-            
+
             tags.push({
                 name,
-                item_count: data.count,
+                item_count: data.itemCount,
+                attachment_count: data.attachmentCount,
+                note_count: data.noteCount,
+                annotation_count: data.annotationCount,
                 color: colorInfo?.color || null,
             });
         }
-        
-        // Sort by item count (descending), then by name
+
+        // Sort by total tagged-object count (descending), then by name
+        const totalOf = (t: TagInfo) =>
+            t.item_count + (t.attachment_count ?? 0) + (t.note_count ?? 0) + (t.annotation_count ?? 0);
         tags.sort((a, b) => {
-            if (b.item_count !== a.item_count) {
-                return b.item_count - a.item_count;
+            const diff = totalOf(b) - totalOf(a);
+            if (diff !== 0) {
+                return diff;
             }
             return a.name.localeCompare(b.name);
         });

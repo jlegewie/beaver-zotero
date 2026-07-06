@@ -24,8 +24,7 @@ import { OnboardingHeader, OnboardingFooter } from './onboarding';
 import { ChargingPermissions } from '../../../src/services/agentProtocol';
 import { logger } from '../../../src/utils/logger';
 
-// On the first run we suppress confirmation prompts so the suggested action
-// "just works" without surfacing permission UI to a brand-new user.
+// Suggested first-run actions launch without cost-confirmation prompts.
 const FIRST_RUN_PERMISSIONS_OVERRIDE: Partial<ChargingPermissions> = {
     confirm_extraction_costs: false,
     confirm_external_search_costs: false,
@@ -33,7 +32,7 @@ const FIRST_RUN_PERMISSIONS_OVERRIDE: Partial<ChargingPermissions> = {
 
 interface FirstRunPageProps {
     isWindow?: boolean;
-    inputRef: React.RefObject<HTMLTextAreaElement | null>;
+    inputRef: React.RefObject<HTMLElement | null>;
 }
 
 const isDev = process.env.NODE_ENV === 'development';
@@ -68,9 +67,8 @@ const FirstRunPage: React.FC<FirstRunPageProps> = () => {
         setIsCompleting(true);
         setFooterError(null);
         try {
-            // Returning users opening the page from the account menu skip the
-            // completion stamp — they've already finished first-run. Routing
-            // returns to HomePage when both session flags are cleared.
+            // Suggestions-mode visits are already completed and only clear the
+            // session-level return flags.
             if (!isSuggestionsMode) {
                 await markComplete(isLibraryEmpty ? 'empty_library_continue' : 'skip');
             }
@@ -165,6 +163,8 @@ const FirstRunPage: React.FC<FirstRunPageProps> = () => {
                     </div>
                 )}
             </div>
+
+
 
             {/* Footer */}
             <OnboardingFooter

@@ -3,6 +3,7 @@ import { Citation } from "../types/citations";
 import { MessageAttachment } from "../types/attachments/apiTypes";
 import { ZoteroLibrary, ZoteroCollection, ZoteroTag } from "../types/zotero";
 import type { CardKind } from "../types/librarySuggestions";
+import type { ActionCategory, ActionTargetType } from "../types/actions";
 
 /**
  * LLM usage associated with an agent run.
@@ -72,7 +73,7 @@ export interface MessageSearchFilters {
 }
 
 /**
- * Discriminated origin describing why a prompt was sent. Mirrors `PromptOrigin` in `app/models/agent_run.py`.
+ * Discriminated origin describing why a prompt was sent. Matches `PromptOrigin` in `app/models/agent_run.py`.
  *
  * `topic_label` and `collection_name` ride along on first-run origins so the
  * NextStepsPanel follow-up templates can reference the originating card's
@@ -94,10 +95,48 @@ export type PromptOrigin =
         topic_label?: string | null;
         collection_name?: string | null;
         empty_library?: boolean;
+    }
+    | {
+        /**
+         * Run launched from the "Where should we start?" first-action launcher.
+         */
+        kind: 'where_to_start';
+        action_id: string;
+        requires_topic?: boolean;
+        topic_label?: string | null;
     };
 
+/** True for any run launched from a first-run onboarding surface */
 export function isFirstRunOrigin(origin: PromptOrigin | undefined | null): boolean {
-    return origin?.kind === 'first_run_card' || origin?.kind === 'first_run_followup';
+    return (
+        origin?.kind === 'first_run_card' ||
+        origin?.kind === 'first_run_followup' ||
+        origin?.kind === 'where_to_start'
+    );
+}
+
+/**
+ * A saved action the user invoked as a /command token in the message content.
+ * Matches `PromptAction` in `app/models/agent_run.py`.
+ *
+ * The token stays verbatim in `BeaverAgentPrompt.content`; this object carries
+ * the resolved prompt so the backend can tell the model what the command means.
+ */
+export interface PromptAction {
+    /** Slash token as it appears in content, without the leading '/' */
+    command: string;
+    /** Client-side action id (builtin id or custom uuid) */
+    action_id: string;
+    /** Human-readable action title at send time */
+    title?: string;
+    /** Short human-facing description, shown in the /command chip hover card */
+    description?: string;
+    /** Resolved prompt text; null when the action definition no longer exists */
+    prompt: string | null;
+    /** Target-type group the action was invoked under */
+    target_type?: ActionTargetType;
+    /** Category the action belongs to */
+    category?: ActionCategory;
 }
 
 /**
@@ -123,6 +162,8 @@ export interface BeaverAgentPrompt {
     custom_instructions?: string;
     /** Where this prompt came from */
     origin?: PromptOrigin;
+    /** Saved actions invoked as /command tokens in `content` */
+    actions?: PromptAction[];
 }
 
 // ============================================================================

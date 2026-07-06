@@ -35,7 +35,7 @@ export const InvalidItemsMessageContent: React.FC<InvalidItemsMessageContentProp
 
                 return (
                     <div key={reason} className="display-flex flex-row items-center gap-1">
-                        <div className="font-color-tertiary text-md ml-05">
+                        <div className="font-color-secondary text-md ml-05">
                             {parseTextWithLinksAndNewlines(displayText)}
                         </div>
                         {infoItem && infoItem.url && (

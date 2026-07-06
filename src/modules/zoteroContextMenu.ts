@@ -17,10 +17,13 @@
 import {
     Action,
     ActionCustomizations,
+    ActionTargetType,
     isActionCustomizations,
-    isAction,
+    isStoredAction,
+    normalizeStoredAction,
+    normalizeStoredOverride,
 } from '../../react/types/actions';
-import { BUILTIN_ACTIONS } from '../../react/types/builtinActions';
+import { ALL_BUILTIN_ACTIONS } from '../../react/types/builtinActions';
 import { getPref } from '../utils/prefs';
 import { openPreferencesWindow } from '../ui/openPreferencesWindow';
 import { agentItemFilter, isAgentSupportedItem } from '../utils/agentItemSupport';
@@ -43,34 +46,50 @@ function isActionableContextItem(item: any): boolean {
 }
 
 // ---------------------------------------------------------------------------
-// Winning target type — determined per popup-show by submenu onShowing,
+// Selection composition — determined per popup-show by submenu onShowing,
 // consumed by filterItemAction. Safe because submenu onShowing always fires
 // before inner menu items' onShowing (parent popup → submenu popup order).
+//
+// Each action is filtered by eligibility: it shows when the selection
+// contains at least one item of a kind the action targets. On execution the
+// eligible items (across all of the action's target kinds) are attached and
+// the rest of the selection is dropped.
 // ---------------------------------------------------------------------------
 
-interface WinningTarget { type: 'items' | 'attachment' | 'note'; count: number }
-let winningTarget: WinningTarget | null = null;
+interface SelectionComposition { items: number; attachment: number; note: number }
+let selectionComposition: SelectionComposition | null = null;
 
-/**
- * Determine the single winning target type from selected items.
- * Priority: regular items > supported attachments > notes (mirrors getActiveTarget in ActionSuggestions).
- */
-function getWinningTarget(items: any[]): WinningTarget | null {
+function getSelectionComposition(items: any[]): SelectionComposition {
     const actionable = items.filter((i: any) => isActionableContextItem(i));
-    const regular = actionable.filter((i: any) => i.isRegularItem());
-    if (regular.length > 0) return { type: 'items', count: regular.length };
-    const attachments = actionable.filter((i: any) => i.isAttachment?.());
-    if (attachments.length > 0) return { type: 'attachment', count: attachments.length };
-    const notes = items.filter((i: any) => i.isNote?.() && !safeIsInTrash(i));
-    if (notes.length > 0) return { type: 'note', count: notes.length };
-    return null;
+    return {
+        items: actionable.filter((i: any) => i.isRegularItem()).length,
+        attachment: actionable.filter((i: any) => i.isAttachment?.()).length,
+        note: items.filter((i: any) => i.isNote?.() && !safeIsInTrash(i)).length,
+    };
 }
 
-/** Build a human-readable label for the winning target (e.g. "3 items", "1 attachment"). */
-function winningTargetLabel(wt: WinningTarget): string {
-    if (wt.type === 'items') return `${wt.count} item${wt.count !== 1 ? 's' : ''}`;
-    if (wt.type === 'note') return `${wt.count} note${wt.count !== 1 ? 's' : ''}`;
-    return `${wt.count} attachment${wt.count !== 1 ? 's' : ''}`;
+/** Count of selected items eligible for at least one action target kind. */
+function compositionTotal(c: SelectionComposition): number {
+    return c.items + c.attachment + c.note;
+}
+
+/** Human-readable composition label (e.g. "3 items, 1 note"). */
+function compositionLabel(c: SelectionComposition): string {
+    const parts: string[] = [];
+    if (c.items > 0) parts.push(`${c.items} item${c.items !== 1 ? 's' : ''}`);
+    if (c.attachment > 0) parts.push(`${c.attachment} attachment${c.attachment !== 1 ? 's' : ''}`);
+    if (c.note > 0) parts.push(`${c.note} note${c.note !== 1 ? 's' : ''}`);
+    return parts.join(', ');
+}
+
+/** Selected-item kinds an action accepts (item context menu only). */
+const ITEM_MENU_KINDS: ActionTargetType[] = ['items', 'attachment', 'note'];
+
+/** Whether the current selection contains at least one item eligible for the action. */
+function hasEligibleItems(action: Action, c: SelectionComposition): boolean {
+    return (action.targets.includes('items') && c.items > 0) ||
+        (action.targets.includes('attachment') && c.attachment > 0) ||
+        (action.targets.includes('note') && c.note > 0);
 }
 
 const ITEM_MENU_ID = 'beaver-item-context-menu';
@@ -95,7 +114,9 @@ function getActionCustomizations(): ActionCustomizations {
         if (raw && typeof raw === 'string') {
             const parsed = JSON.parse(raw);
             if (isActionCustomizations(parsed)) {
-                parsed.custom = parsed.custom.filter(isAction);
+                // Accept both stored shapes (legacy single `targetType` and
+                // current `targets` array) and normalize
+                parsed.custom = parsed.custom.filter(isStoredAction).map(a => normalizeStoredAction(a as unknown as Record<string, unknown>));
                 return parsed;
             }
         }
@@ -107,19 +128,22 @@ export function getMergedActions(): Action[] {
     const c = getActionCustomizations();
     const actions: Action[] = [];
 
-    for (const builtin of BUILTIN_ACTIONS) {
+    for (const builtin of ALL_BUILTIN_ACTIONS) {
         const override = c.overrides[builtin.id];
         if (override?.hidden) continue;
         if (builtin.deprecated && !override) continue;
 
         const merged: Action = { ...builtin };
         if (override) {
-            if (override.title !== undefined) merged.title = override.title;
-            if (override.text !== undefined) merged.text = override.text;
-            if (override.id_model !== undefined) merged.id_model = override.id_model;
-            if (override.targetType !== undefined) merged.targetType = override.targetType;
-            if (override.sortOrder !== undefined) merged.sortOrder = override.sortOrder;
-            if (override.minItems !== undefined) merged.minItems = override.minItems;
+            const o = normalizeStoredOverride(override);
+            if (o.title !== undefined) merged.title = o.title;
+            if (o.text !== undefined) merged.text = o.text;
+            if (o.name !== undefined) merged.name = o.name;
+            if (o.id_model !== undefined) merged.id_model = o.id_model;
+            if (o.targets !== undefined) merged.targets = o.targets;
+            if (o.category !== undefined) merged.category = o.category;
+            if (o.argumentHint !== undefined) merged.argumentHint = o.argumentHint;
+            if (o.sortOrder !== undefined) merged.sortOrder = o.sortOrder;
         }
         actions.push(merged);
     }
@@ -218,7 +242,7 @@ function registerMenus(): void {
 
     // --- Item context menu ---
     const itemActions = actions.filter(a =>
-        a.targetType === 'items' || a.targetType === 'attachment' || a.targetType === 'note'
+        a.targets.some(t => ITEM_MENU_KINDS.includes(t))
     );
 
     // Always register — at minimum shows "Add custom action..."
@@ -233,7 +257,7 @@ function registerMenus(): void {
                 const { items, setVisible } = context;
 
                 // Reset module-level state
-                winningTarget = null;
+                selectionComposition = null;
 
                 if (!items || items.length === 0) {
                     setVisible(false);
@@ -245,13 +269,14 @@ function registerMenus(): void {
                     return;
                 }
 
-                // Determine the single winning target type (items > attachments > notes)
-                winningTarget = getWinningTarget(items);
-                if (!winningTarget) {
+                // Determine what eligible kinds the selection contains
+                const composition = getSelectionComposition(items);
+                if (compositionTotal(composition) === 0) {
                     setVisible(false);
                     return;
                 }
 
+                selectionComposition = composition;
                 setVisible(true);
             }),
             menus: buildItemMenuItems(itemActions),
@@ -260,7 +285,7 @@ function registerMenus(): void {
     if (itemKey) registeredItemKey = itemKey;
 
     // --- Collection context menu ---
-    const collectionActions = actions.filter(a => a.targetType === 'collection');
+    const collectionActions = actions.filter(a => a.targets.includes('collection'));
 
     const collectionKey = MenuManager.registerMenu({
         menuID: COLLECTION_MENU_ID,
@@ -297,8 +322,8 @@ function buildItemMenuItems(itemActions: Action[]): any[] {
         onShowing: safeOnShowing('context-header', (_event: any, context: any) => {
             const { items, setVisible, setEnabled, setL10nArgs } = context;
             const totalSelected = items?.length ?? 0;
-            if (winningTarget && winningTarget.count < totalSelected) {
-                setL10nArgs(JSON.stringify({ context: winningTargetLabel(winningTarget) }));
+            if (selectionComposition && compositionTotal(selectionComposition) < totalSelected) {
+                setL10nArgs(JSON.stringify({ context: compositionLabel(selectionComposition) }));
                 setEnabled(false);
                 setVisible(true);
             } else {
@@ -371,39 +396,13 @@ function buildCollectionMenuItems(collectionActions: Action[]): any[] {
 
 function filterItemAction(action: Action, context: any): void {
     const { items, setVisible } = context;
-    if (!items || items.length === 0 || !winningTarget) {
+    if (!items || items.length === 0 || !selectionComposition) {
         setVisible(false);
         return;
     }
 
-    // Only show actions matching the winning target type
-    if (action.targetType !== winningTarget.type) {
-        setVisible(false);
-        return;
-    }
-
-    switch (action.targetType) {
-        case 'items': {
-            const min = action.minItems ?? 1;
-            const actionable = items.filter((i: any) => isActionableContextItem(i));
-            const regular = actionable.filter((i: any) => i.isRegularItem());
-            setVisible(regular.length >= min);
-            break;
-        }
-        case 'attachment': {
-            const actionable = items.filter((i: any) => isActionableContextItem(i));
-            const hasAttachment = actionable.some((i: any) => i.isAttachment?.());
-            setVisible(hasAttachment);
-            break;
-        }
-        case 'note': {
-            const notes = items.filter((i: any) => i.isNote?.() && !safeIsInTrash(i));
-            setVisible(notes.length > 0);
-            break;
-        }
-        default:
-            setVisible(false);
-    }
+    // Show when the selection contains at least one item the action accepts
+    setVisible(hasEligibleItems(action, selectionComposition));
 }
 
 function filterCollectionAction(_action: Action, context: any): void {
@@ -420,31 +419,41 @@ function dispatchAction(action: Action, context: any): void {
     const eventBus = win?.__beaverEventBus;
     if (!eventBus) return;
 
-    // Filter items to the winning target type — never send mismatched items
+    // Attach the union of eligible items (kinds the action targets) and drop
+    // the rest of the selection — never send mismatched items
     const allItems: any[] = context.items ?? [];
-    let filteredItems: any[];
-    switch (action.targetType) {
-        case 'items':
-            filteredItems = allItems.filter((i: any) => i.isRegularItem() && !safeIsInTrash(i));
-            break;
-        case 'attachment':
-            filteredItems = allItems.filter((i: any) => i.isAttachment?.() && isAgentSupportedItem(i) && !safeIsInTrash(i));
-            break;
-        case 'note':
-            filteredItems = allItems.filter((i: any) => i.isNote?.() && !safeIsInTrash(i));
-            break;
-        default:
-            filteredItems = allItems;
-    }
+    const isKindEligible = (i: any): boolean => {
+        if (safeIsInTrash(i)) return false;
+        if (i.isRegularItem()) return action.targets.includes('items');
+        if (i.isAttachment?.()) return action.targets.includes('attachment') && isAgentSupportedItem(i);
+        if (i.isNote?.()) return action.targets.includes('note');
+        return false;
+    };
+    // (Collection-menu dispatches have no selected items; filtering the empty
+    // list is a no-op and the collection rides on `collectionId`.)
+    const filteredItems = allItems.filter(isKindEligible);
 
     const itemIds: number[] = filteredItems.map((i: any) => i.id);
     const collectionId: number | null = context.collectionTreeRow?.ref?.id ?? null;
 
+    // Resolve the single wire target type. Collection-menu dispatches (the
+    // only ones carrying a collectionTreeRow) bind to the collection whenever
+    // the action accepts it — the handler only attaches collectionId for a
+    // 'collection' target. Item-menu dispatches bind to the first item-menu
+    // kind the action accepts that is actually present in what we attach.
+    const resolvedTarget = (collectionId !== null && action.targets.includes('collection'))
+        ? 'collection'
+        : ITEM_MENU_KINDS.find(t =>
+            action.targets.includes(t) && filteredItems.some((i: any) =>
+                t === 'items' ? i.isRegularItem() : t === 'attachment' ? i.isAttachment?.() : i.isNote?.()
+            )
+        ) ?? action.targets[0];
+
     eventBus.dispatchEvent(new win.CustomEvent('contextMenuAction', {
         detail: {
             actionId: action.id,
-            actionText: action.text,
-            targetType: action.targetType,
+            actionTitle: action.title,
+            targetType: resolvedTarget,
             itemIds,
             collectionId,
         },

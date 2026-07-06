@@ -37,7 +37,7 @@ import {
 // Hot-path handler keeps the remote-download-failed popup behavior by
 // passing the popup notifier through `onRemoteDownloadFailure`. The
 // background extractor deliberately omits it.
-import { notifyRemoteDownloadFailure, notifyRemoteFileNotSynced } from './utils';
+import { checkLibraryExcluded, notifyRemoteDownloadFailure, notifyRemoteFileNotSynced } from './utils';
 import { EXTERNAL_LIBRARY_ID, resolveExternalFile } from '../externalFiles';
 import type { ExternalFileRecord } from '../database';
 import { serializeAttachmentStub, serializeItemStub } from '../../utils/zoteroSerializers';
@@ -268,6 +268,13 @@ export async function handleZoteroDocumentRequest(
             `Invalid attachment reference '${requestKey}': ${formatError}`,
             'invalid_format',
         );
+    }
+
+    // Reject libraries the user excluded from Beaver before any item lookup, so
+    // an excluded attachment is never resolved, read, or even confirmed to exist.
+    const excluded = checkLibraryExcluded(attachment.library_id);
+    if (excluded) {
+        return errorResponse(excluded.message, 'library_excluded');
     }
 
     const timeout = createTimeoutController(

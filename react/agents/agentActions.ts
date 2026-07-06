@@ -243,32 +243,60 @@ export const getZoteroItemFromAgentAction = async (action: AgentAction): Promise
 };
 
 /**
- * Validates that an applied agent action is still valid.
- * @param action - The agent action to validate
- * @returns True if the action is valid, false otherwise
+ * Validation result for an applied agent action.
+ *
+ * - 'valid': the applied item was found and matches expectations.
+ * - 'invalid': the item is verifiably gone (or has the wrong type). The user
+ *   reverted the action in Zotero.
+ * - 'unverifiable': the reference cannot be checked on this device.
  */
-export const validateAppliedAgentAction = async (action: AgentAction): Promise<boolean> => {
+export type AppliedActionValidity = 'valid' | 'invalid' | 'unverifiable';
+
+/**
+ * Personal-library references are portable across installs (the personal
+ * library is the same libraryID everywhere); group-library references are not.
+ */
+const isPortableLibraryReference = (ref: ZoteroItemReference): boolean => {
+    return ref.library_id === Zotero.Libraries.userLibraryID;
+};
+
+const checkAppliedReference = async (
+    ref: ZoteroItemReference,
+    mustBeAnnotation: boolean
+): Promise<AppliedActionValidity> => {
+    const item = await Zotero.Items.getByLibraryAndKeyAsync(ref.library_id, ref.zotero_key);
+    if (item) {
+        return mustBeAnnotation && !item.isAnnotation() ? 'invalid' : 'valid';
+    }
+    return isPortableLibraryReference(ref) ? 'invalid' : 'unverifiable';
+};
+
+/**
+ * Validates that an applied agent action is still valid on this device.
+ * @param action - The agent action to validate
+ * @returns 'valid', 'invalid' (verifiably reverted), or 'unverifiable'
+ */
+export const validateAppliedAgentAction = async (action: AgentAction): Promise<AppliedActionValidity> => {
     if (isCreateAnnotationsAgentAction(action)) {
-        if (!hasAppliedBulkAnnotations(action)) return true;
+        if (!hasAppliedBulkAnnotations(action)) return 'valid';
         const created = action.result_data?.created ?? [];
+        let unverifiable = false;
         for (const ref of created) {
-            const item = await Zotero.Items.getByLibraryAndKeyAsync(ref.library_id, ref.zotero_key);
-            if (!item || !item.isAnnotation()) return false;
+            const validity = await checkAppliedReference(ref, true);
+            if (validity === 'invalid') return 'invalid';
+            if (validity === 'unverifiable') unverifiable = true;
         }
-        return true;
+        return unverifiable ? 'unverifiable' : 'valid';
     }
 
     // If action doesn't have an applied Zotero item, it's valid (nothing to check)
-    if (!hasAppliedZoteroItem(action)) return true;
+    if (!hasAppliedZoteroItem(action)) return 'valid';
 
-    // Get the Zotero item from the agent action
-    const item = await getZoteroItemFromAgentAction(action);
-    if (!item) return false;
+    const ref = getZoteroItemReferenceFromAgentAction(action);
+    if (!ref) return 'valid';
 
-    // For annotation actions, verify the item is still an annotation
-    if (isAnnotationAgentAction(action) && !item.isAnnotation()) return false;
-
-    return true;
+    // For annotation actions, the resolved item must still be an annotation
+    return checkAppliedReference(ref, isAnnotationAgentAction(action));
 };
 
 // =============================================================================
@@ -1017,6 +1045,10 @@ export const clearAllPendingApprovalsAtom = atom(
         set(pendingApprovalsAtom, new Map());
     }
 );
+
+// Note: the run-blocking ask_user_question state (PendingQuestion,
+// pendingQuestionsAtom, ...) lives in `./pendingQuestions.ts` — questions are
+// deliberately NOT agent actions (no apply/undo/validate lifecycle).
 
 /**
  * Get pending approval for a specific toolcall_id.
