@@ -39,7 +39,10 @@ export function libraryRefForLibraryID(libraryID: number): string | null {
         // Real group ids are positive; guard the false/undefined a non-group
         // library could return despite the declared non-nullable return type.
         if (!groupID) return null;
-        return `g${groupID}`;
+
+        // Only ever emit a grammar-conforming ref
+        const ref = `g${groupID}`;
+        return LIBRARY_REF_PATTERN.test(ref) ? ref : null;
     } catch {
         // Not a group library (e.g. a feed) or the Groups cache isn't ready.
         return null;
@@ -103,7 +106,9 @@ export async function resolveItemReference(
     ref: { library_ref?: string | null; library_id: number; zotero_key: string }
 ): Promise<ResolvedItemReference> {
     const libraryID = resolveLibraryRef(ref);
-    if (libraryID === null) {
+    // `resolveLibraryRef` returns null when a group isn't on this device, and can
+    // fall back to a bare `library_id`
+    if (!libraryID) {
         return { status: 'library_unavailable' };
     }
 

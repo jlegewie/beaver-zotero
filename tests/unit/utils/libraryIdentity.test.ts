@@ -49,6 +49,15 @@ describe('libraryIdentity', () => {
             getGroupIDFromLibraryID.mockReturnValue(false);
             expect(libraryRefForLibraryID(7)).toBeNull();
         });
+
+        it('returns null for a malformed group id rather than emit a non-grammar ref', () => {
+            // A non-integer or negative id would stringify to "g1.5" / "g-3",
+            // which the backend rejects wholesale; degrade to null instead.
+            getGroupIDFromLibraryID.mockReturnValue(1.5);
+            expect(libraryRefForLibraryID(7)).toBeNull();
+            getGroupIDFromLibraryID.mockReturnValue(-3);
+            expect(libraryRefForLibraryID(7)).toBeNull();
+        });
     });
 
     describe('parseLibraryRef', () => {
@@ -147,6 +156,14 @@ describe('libraryIdentity', () => {
             getByLibraryAndKeyAsync.mockResolvedValue(false);
             const result = await resolveItemReference({ library_id: 1, zotero_key: 'MISSING1' });
             expect(result).toEqual({ status: 'not_found' });
+        });
+
+        it('returns library_unavailable for a falsy fallback library_id instead of throwing', async () => {
+            // No library_ref, library_id 0: `getByLibraryAndKeyAsync` would throw
+            // on a falsy id, so short-circuit to library_unavailable first.
+            const result = await resolveItemReference({ library_id: 0, zotero_key: 'AAAAAAA1' });
+            expect(result).toEqual({ status: 'library_unavailable' });
+            expect(getByLibraryAndKeyAsync).not.toHaveBeenCalled();
         });
     });
 });
