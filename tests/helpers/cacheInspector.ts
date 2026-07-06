@@ -1117,3 +1117,45 @@ export async function fetchAttachmentImage(
         ...extra,
     });
 }
+
+// =============================================================================
+// Device-portable library identity (/beaver/test/library-identity)
+// =============================================================================
+
+/** Structured `library_ref` returned by `parseLibraryRef`. */
+export type ParsedLibraryRef = { type: 'user' } | { type: 'group'; groupID: number };
+
+export interface ResolveItemReferenceResponse {
+    status: 'found' | 'library_unavailable' | 'not_found';
+    resolved_library_id?: number;
+    item_id?: string;
+    item_type?: string;
+}
+
+/** `libraryRefForLibraryID(library_id)` — portable ref for a local library id (null if none). */
+export async function libraryRefForId(
+    library_id: number,
+): Promise<{ library_ref: string | null; error?: string }> {
+    return post('/beaver/test/library-identity', { op: 'ref_for_id', library_id });
+}
+
+/** `parseLibraryRef(library_ref)` + `LIBRARY_REF_PATTERN.test(library_ref)`. */
+export async function parseLibraryRefViaHttp(
+    library_ref: string,
+): Promise<{ parsed: ParsedLibraryRef | null; matches_pattern: boolean }> {
+    return post('/beaver/test/library-identity', { op: 'parse', library_ref });
+}
+
+/** `resolveLibraryRef({ library_ref, library_id })` — local library id or null. */
+export async function resolveLibraryRefViaHttp(
+    ref: { library_ref?: string | null; library_id?: number },
+): Promise<{ resolved_library_id: number | null }> {
+    return post('/beaver/test/library-identity', { op: 'resolve_ref', ...ref });
+}
+
+/** `resolveItemReference({ library_ref, library_id, zotero_key })` — tri-state resolution. */
+export async function resolveItemReferenceViaHttp(
+    ref: { library_ref?: string | null; library_id?: number; zotero_key?: string },
+): Promise<ResolveItemReferenceResponse> {
+    return post('/beaver/test/library-identity', { op: 'resolve_item', ...ref });
+}

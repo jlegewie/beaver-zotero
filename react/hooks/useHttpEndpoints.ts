@@ -135,6 +135,9 @@ import {
     handleTestViewImagesHttpRequest,
     handleTestAttachmentImageHttpRequest,
 } from './httpHandlers/testExclusionHandlers';
+import {
+    handleTestLibraryIdentityHttpRequest,
+} from './httpHandlers/testLibraryIdentityHandlers';
 import type {
     WSZoteroDataRequest,
     WSExternalReferenceCheckRequest,
@@ -288,6 +291,8 @@ const ENDPOINT_PATHS = [
     '/beaver/test/get-annotations',
     '/beaver/test/view-images',
     '/beaver/test/attachment-image',
+    // Device-portable library-identity resolvers (dev-only)
+    '/beaver/test/library-identity',
 ] as const;
 
 /**
@@ -1058,6 +1063,13 @@ function registerEndpoints(): boolean {
 
         Zotero.Server.Endpoints['/beaver/test/attachment-image'] =
             createEndpoint(handleTestAttachmentImageHttpRequest);
+
+        // Device-portable library-identity resolvers (dev-only): thin wrappers
+        // over libraryRefForLibraryID / parseLibraryRef / resolveLibraryRef /
+        // resolveItemReference so live tests can assert them against real
+        // personal + group libraries.
+        Zotero.Server.Endpoints['/beaver/test/library-identity'] =
+            createEndpoint(handleTestLibraryIdentityHttpRequest);
     }
 
     logger(`useHttpEndpoints: Registered ${ENDPOINT_PATHS.length} HTTP endpoints`, 3);
