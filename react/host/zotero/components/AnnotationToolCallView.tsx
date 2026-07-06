@@ -94,7 +94,7 @@ async function delay(ms: number): Promise<void> {
 async function navigateToNewlyAppliedAnnotation(
     reader: ZoteroReader | undefined,
     annotation: AnnotationAgentAction,
-    result: { zotero_key: string; library_id: number }
+    result: Pick<AnnotationResultData, 'library_id' | 'zotero_key' | 'library_ref'>
 ): Promise<void> {
     try {
         if (reader) {
@@ -730,4 +730,3 @@ export const AnnotationToolCallView: React.FC<AnnotationToolCallViewProps> = ({ 
 };
 
 export default AnnotationToolCallView;
-

@@ -36,11 +36,16 @@ import {
     getBestReadableTextAttachmentAsync,
 } from '../../../src/utils/zoteroItemHelpers';
 import { BEAVER_CITATION_ANNOTATION_AUTHOR } from '../../../src/constants/annotations';
+import { libraryRefForLibraryID } from '../../../src/utils/libraryIdentity';
 import type { CitationActivation } from '../types';
 
 /** Reveal the cited item in the library view. */
 function revealInLibrary(libraryID: number, zoteroKey: string): void {
-    revealSource({ library_id: libraryID, zotero_key: zoteroKey } as ZoteroItemReference);
+    revealSource({
+        library_id: libraryID,
+        zotero_key: zoteroKey,
+        library_ref: libraryRefForLibraryID(libraryID) ?? undefined,
+    } as ZoteroItemReference);
 }
 
 /**

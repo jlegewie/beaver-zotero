@@ -11,6 +11,8 @@ import { MessageAttachment } from './attachments/apiTypes';
 export interface SignalItem {
     library_id: number;
     zotero_key: string;
+    /** Device-portable library identity ("u" | "g<groupID>"). */
+    library_ref?: string;
     item_type: string;
     title?: string | null;
     creators?: string[] | null;   // primary-creator last names only, in author order
@@ -36,6 +38,8 @@ export interface RecentItem extends SignalItem {
 export interface CollectionSignal {
     library_id: number;
     zotero_key: string;
+    /** Device-portable library identity ("u" | "g<groupID>"). */
+    library_ref?: string;
     name: string;
     parent_key?: string | null;
     item_count: number;

@@ -140,6 +140,7 @@ import { triggerProfileRefresh } from '../hooks/useProfileSync';
 import { agentItemFilterAsync, isAgentSupportedItem } from '../../src/utils/agentItemSupport';
 import { safeIsInTrash } from '../../src/utils/zoteroUtils';
 import { wasItemAddedBeforeLastSync } from '../utils/sourceUtils';
+import { libraryRefForLibraryID } from '../../src/utils/libraryIdentity';
 import { ZoteroItemReference, createZoteroItemReference } from '../types/zotero';
 import { markExternalReferenceImportedAtom } from './externalReferences';
 import type { CreateItemProposedData, CreateItemResultData } from '../types/agentActions/items';
@@ -1393,7 +1394,8 @@ function createWSCallbacks(set: Setter): WSCallbacks {
                     if (proposedData?.item?.source_id && resultData.library_id && resultData.zotero_key) {
                         set(markExternalReferenceImportedAtom, proposedData.item.source_id, {
                             library_id: resultData.library_id,
-                            zotero_key: resultData.zotero_key
+                            zotero_key: resultData.zotero_key,
+                            library_ref: resultData.library_ref,
                         });
                         logger(`WS onAgentActions: Marked external reference ${proposedData.item.source_id} as imported`, 1);
                     }
@@ -1747,6 +1749,7 @@ export const sendWSMessageAtom = atom(
                 type: 'collection',
                 library_id: col.library_id,
                 zotero_key: col.zotero_key,
+                library_ref: col.library_ref,
                 name: col.name,
                 parent_key: col.parent_key,
             });
@@ -1803,6 +1806,7 @@ export const sendWSMessageAtom = atom(
                 attachments.push({
                     library_id: readerAttachment.libraryID,
                     zotero_key: readerAttachment.key,
+                    library_ref: libraryRefForLibraryID(readerAttachment.libraryID) ?? undefined,
                     type: 'source',
                     attachment: safeStub(() => serializeAttachmentStub(readerAttachment)),
                     parent_item: safeStub(() => readerAttachment.parentItem ? serializeItemStub(readerAttachment.parentItem) : undefined),

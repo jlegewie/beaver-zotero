@@ -8,6 +8,7 @@
 
 import { ToolCallPart } from './types';
 import { ZoteroItemReference } from '../types/zotero';
+import { libraryRefForLibraryID } from '../../src/utils/libraryIdentity';
 
 /**
  * Parse args from a {@link ToolCallPart} — handles both string and object formats.
@@ -24,6 +25,19 @@ export function parseArgs(part: ToolCallPart): Record<string, unknown> {
     return part.args as Record<string, unknown>;
 }
 
+function zoteroReferenceFromCompoundId(id: string): ZoteroItemReference | null {
+    const [libraryIdStr, ...keyParts] = id.split('-');
+    const zoteroKey = keyParts.join('-');
+    if (!libraryIdStr || !zoteroKey) return null;
+    const libraryId = parseInt(libraryIdStr, 10);
+    if (isNaN(libraryId)) return null;
+    return {
+        library_id: libraryId,
+        zotero_key: zoteroKey,
+        library_ref: libraryRefForLibraryID(libraryId) ?? undefined,
+    };
+}
+
 /**
  * Extract Zotero item references from a tool call part.
  * Looks for attachment_id parameters in tool call arguments.
@@ -37,64 +51,31 @@ export function extractZoteroReferencesFromToolCall(part: ToolCallPart): ZoteroI
     // add_note_annotations, search_in_attachment, view_pages, view_page_images, etc.)
     const attachmentId = args.attachment_id as string | undefined;
     if (attachmentId) {
-        const [libraryIdStr, zoteroKey] = attachmentId.split('-');
-        if (libraryIdStr && zoteroKey) {
-            const libraryId = parseInt(libraryIdStr, 10);
-            if (!isNaN(libraryId)) {
-                references.push({
-                    library_id: libraryId,
-                    zotero_key: zoteroKey,
-                });
-            }
-        }
+        const ref = zoteroReferenceFromCompoundId(attachmentId);
+        if (ref) references.push(ref);
     }
 
     // Extract file id if present (used by read). Zotero attachment ids use
     // '<library_id>-<zotero_key>'; external file ids ('ext-1') carry no Zotero reference.
     const file = args.file as string | undefined;
     if (file && /^\d+-/.test(file)) {
-        const [libraryIdStr, zoteroKey] = file.split('-');
-        if (libraryIdStr && zoteroKey) {
-            const libraryId = parseInt(libraryIdStr, 10);
-            if (!isNaN(libraryId)) {
-                references.push({
-                    library_id: libraryId,
-                    zotero_key: zoteroKey,
-                });
-            }
-        }
+        const ref = zoteroReferenceFromCompoundId(file);
+        if (ref) references.push(ref);
     }
 
     // Extract note_id if present (used by read_note, edit_note)
     const noteId = args.note_id as string | undefined;
     if (noteId) {
-        const [libraryIdStr, ...keyParts] = noteId.split('-');
-        const zoteroKey = keyParts.join('-');
-        if (libraryIdStr && zoteroKey) {
-            const libraryId = parseInt(libraryIdStr, 10);
-            if (!isNaN(libraryId)) {
-                references.push({
-                    library_id: libraryId,
-                    zotero_key: zoteroKey,
-                });
-            }
-        }
+        const ref = zoteroReferenceFromCompoundId(noteId);
+        if (ref) references.push(ref);
     }
 
     // Extract attachment_ids array if present (for tools that accept multiple attachments)
     const attachmentIds = args.attachment_ids as string[] | undefined;
     if (Array.isArray(attachmentIds)) {
         for (const id of attachmentIds) {
-            const [libraryIdStr, zoteroKey] = id.split('-');
-            if (libraryIdStr && zoteroKey) {
-                const libraryId = parseInt(libraryIdStr, 10);
-                if (!isNaN(libraryId)) {
-                    references.push({
-                        library_id: libraryId,
-                        zotero_key: zoteroKey,
-                    });
-                }
-            }
+            const ref = zoteroReferenceFromCompoundId(id);
+            if (ref) references.push(ref);
         }
     }
 

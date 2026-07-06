@@ -69,6 +69,7 @@ export function extractCitationReferences(content: string): ExtractedCitationRef
         references.push({
             library_id: normalized.ref.library_id,
             zotero_key: normalized.ref.zotero_key,
+            library_ref: normalized.ref.library_ref,
         });
     }
 

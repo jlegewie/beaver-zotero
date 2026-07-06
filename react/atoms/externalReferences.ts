@@ -4,6 +4,7 @@ import { ZoteroItemReference } from '../types/zotero';
 import { findExistingReference, FindReferenceData } from '../utils/findExistingReference';
 import { logger } from '../../src/utils/logger';
 import { loadFullItemDataWithAllTypes } from '../../src/utils/zoteroUtils';
+import { libraryRefForLibraryID } from '../../src/utils/libraryIdentity';
 
 /**
  * Cache mapping external reference source IDs to ExternalReference objects
@@ -82,7 +83,8 @@ export const checkExternalReferenceAtom = atom(
                     if (item && !item.deleted) {
                         result = {
                             library_id: firstItem.library_id,
-                            zotero_key: firstItem.zotero_key
+                            zotero_key: firstItem.zotero_key,
+                            library_ref: firstItem.library_ref ?? libraryRefForLibraryID(firstItem.library_id) ?? undefined,
                         };
                         foundItem = item;
                         logger(`checkExternalReference: Backend data validated for ${refId}`, 1);
@@ -109,7 +111,8 @@ export const checkExternalReferenceAtom = atom(
                     if (existingItem) {
                         result = {
                             library_id: existingItem.libraryID,
-                            zotero_key: existingItem.key
+                            zotero_key: existingItem.key,
+                            library_ref: libraryRefForLibraryID(existingItem.libraryID) ?? undefined,
                         };
                         foundItem = existingItem;
                         logger(`checkExternalReference: Found match for ${refId}: ${result.library_id}-${result.zotero_key}`, 1);
@@ -206,7 +209,8 @@ export const checkExternalReferencesAtom = atom(
                                     if (item) {
                                         result = {
                                             library_id: itemRef.library_id,
-                                            zotero_key: itemRef.zotero_key
+                                            zotero_key: itemRef.zotero_key,
+                                            library_ref: itemRef.library_ref ?? libraryRefForLibraryID(itemRef.library_id) ?? undefined,
                                         };
                                         foundItems.push(item);
                                         logger(`checkExternalReferences: Backend data validated for ${refId}: ${result.library_id}-${result.zotero_key}`, 1);
@@ -232,7 +236,8 @@ export const checkExternalReferencesAtom = atom(
                                 if (existingItem) {
                                     result = {
                                         library_id: existingItem.libraryID,
-                                        zotero_key: existingItem.key
+                                        zotero_key: existingItem.key,
+                                        library_ref: libraryRefForLibraryID(existingItem.libraryID) ?? undefined,
                                     };
                                     foundItems.push(existingItem);
                                     logger(`checkExternalReferences: Found match for ${refId}: ${result.library_id}-${result.zotero_key}`, 1);

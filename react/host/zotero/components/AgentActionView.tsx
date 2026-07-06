@@ -387,6 +387,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                             markExternalReferenceImported(proposedData.item.source_id, {
                                 library_id: success.result.library_id,
                                 zotero_key: success.result.zotero_key,
+                                library_ref: success.result.library_ref,
                             });
                         }
                     }
@@ -546,11 +547,12 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     const handleRevealNote = useCallback(async () => {
         const libraryId = action?.result_data?.library_id;
         const zoteroKey = action?.result_data?.zotero_key;
+        const libraryRef = action?.result_data?.library_ref;
         if (!libraryId || !zoteroKey) return;
         // Reveal within the current collection when the note belongs to it,
         // instead of switching to the library root.
         const collectionKey = await getCurrentCollectionKeyForItem(libraryId, zoteroKey);
-        revealSource({ library_id: libraryId, zotero_key: zoteroKey }, collectionKey);
+        revealSource({ library_id: libraryId, zotero_key: zoteroKey, library_ref: libraryRef }, collectionKey);
     }, [action]);
 
     const toggleExpanded = () => setExpanded({ key: expansionKey, expanded: !isExpanded });
@@ -622,6 +624,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
         const revealRef = bulkAnnotationRevealRef ?? {
             library_id: action?.proposed_data?.library_id,
             zotero_key: action?.proposed_data?.zotero_key,
+            library_ref: action?.proposed_data?.library_ref,
         };
         if (!revealRef.library_id || !revealRef.zotero_key) return null;
 
@@ -631,6 +634,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                 revealSource({
                     library_id: revealRef.library_id,
                     zotero_key: revealRef.zotero_key,
+                    library_ref: revealRef.library_ref,
                 });
             },
         };

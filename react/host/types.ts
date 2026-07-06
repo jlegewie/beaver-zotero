@@ -56,6 +56,7 @@ export interface CitationActivation {
 export interface AttachmentMatchNavigation {
     library_id: number;
     zotero_key: string;
+    library_ref?: string;
     content_kind: 'pdf' | 'epub' | 'text' | 'snapshot';
     /** 1-based page number (EPUB: 1-based section ordinal). */
     page_number?: number | null;

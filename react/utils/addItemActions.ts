@@ -545,7 +545,11 @@ export async function applyCreateItemData(
 
     if (getPref('addBeaverProvenanceNote') === true) {
         await createProvenanceNote(
-            { library_id: libraryId, zotero_key: itemKey },
+            {
+                library_id: libraryId,
+                zotero_key: itemKey,
+                library_ref: libraryRefForLibraryID(libraryId) ?? undefined,
+            },
             {
                 reason: proposedData.reason,
                 threadId: options?.threadId,

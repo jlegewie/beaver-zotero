@@ -28,6 +28,7 @@ import {
 } from '../../src/services/agentDataProvider';
 import type { TimeoutContext } from '../../src/services/agentDataProvider/timeout';
 import { getCitationKeyFromItem, getZoteroSelectURI } from '../../src/utils/zoteroUtils';
+import { libraryRefForLibraryID } from '../../src/utils/libraryIdentity';
 import { logger } from '../../src/utils/logger';
 import { isAuthenticatedAtom } from '../atoms/auth';
 import { mcpCreateNoteToolEnabledAtom, mcpServerEnabledAtom } from '../atoms/ui';
@@ -868,7 +869,11 @@ export async function handleReadAttachment(args: any): Promise<any> {
     const wsRequest: WSZoteroDocumentRequest = {
         event: 'zotero_document_request',
         request_id: generateRequestId(),
-        attachment: { library_id: parsed.libraryId, zotero_key: parsed.key },
+        attachment: {
+            library_id: parsed.libraryId,
+            zotero_key: parsed.key,
+            library_ref: libraryRefForLibraryID(parsed.libraryId) ?? undefined,
+        },
         mode: 'markdown',
     };
 

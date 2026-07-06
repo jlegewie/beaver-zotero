@@ -8,6 +8,7 @@
  */
 
 import { logger } from '../../utils/logger';
+import { libraryRefForLibraryID } from '../../utils/libraryIdentity';
 
 import { isAttachmentAvailableRemotely } from '../../utils/webAPI';  // kept for file_missing message check
 import {
@@ -54,6 +55,10 @@ export async function handleZoteroAttachmentPageImagesRequest(
     request: WSZoteroAttachmentPageImagesRequest
 ): Promise<WSZoteroAttachmentPageImagesResponse> {
     const { attachment, pages, scale, dpi, format, jpeg_quality, prefer_page_labels, request_id, timeout_seconds } = request;
+    const responseAttachment = {
+        ...attachment,
+        library_ref: attachment.library_ref ?? libraryRefForLibraryID(attachment.library_id) ?? undefined,
+    };
     const requestKey = `${attachment.library_id}-${attachment.zotero_key}`;
     let errorKey = requestKey;
 
@@ -67,7 +72,7 @@ export async function handleZoteroAttachmentPageImagesRequest(
     ): WSZoteroAttachmentPageImagesResponse => ({
         type: 'zotero_attachment_page_images',
         request_id,
-        attachment,
+        attachment: responseAttachment,
         pages: [],
         total_pages,
         error,
@@ -390,7 +395,7 @@ export async function handleZoteroAttachmentPageImagesRequest(
         return {
             type: 'zotero_attachment_page_images',
             request_id,
-            attachment,
+            attachment: responseAttachment,
             pages: pageImages,
             total_pages: renderResult.pageCount,
         };

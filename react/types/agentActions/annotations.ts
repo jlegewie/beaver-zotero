@@ -46,6 +46,8 @@ export interface HighlightAnnotationProposedData {
     sentence_ids: string[]; // e.g., ["s1", "s2", "s3", "s5"]
     highlight_locations: PageLocation[]; // Bounding boxes
     library_id: number;
+    /** Device-portable library identity ("u" | "g<groupID>"). See `src/utils/libraryIdentity.ts`. */
+    library_ref?: string;
     attachment_key: string;
 }
 
@@ -59,6 +61,8 @@ export interface NoteAnnotationProposedData {
     sentence_ids: string[]; // e.g., ["s42"]
     note_position: NotePosition; // Page position
     library_id: number;
+    /** Device-portable library identity ("u" | "g<groupID>"). See `src/utils/libraryIdentity.ts`. */
+    library_ref?: string;
     attachment_key: string;
 }
 

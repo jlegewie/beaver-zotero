@@ -22,6 +22,8 @@ import { revealSource } from './sourceUtils';
 export interface AttachmentMatchNavRequest {
     library_id: number;
     zotero_key: string;
+    /** Device-portable library identity ("u" | "g<groupID>"). */
+    library_ref?: string;
     content_kind: 'pdf' | 'epub' | 'text' | 'snapshot';
     /** 1-based page number (EPUB: 1-based section ordinal). */
     page_number?: number;
@@ -59,7 +61,11 @@ export async function navigateToAttachmentMatch(nav: AttachmentMatchNavRequest):
     await item.loadAllData();
 
     if (!item.isAttachment()) {
-        revealSource({ library_id: nav.library_id, zotero_key: nav.zotero_key } as ZoteroItemReference);
+        revealSource({
+            library_id: nav.library_id,
+            zotero_key: nav.zotero_key,
+            library_ref: nav.library_ref,
+        } as ZoteroItemReference);
         return;
     }
 
@@ -95,7 +101,11 @@ export async function navigateToAttachmentMatch(nav: AttachmentMatchNavRequest):
         });
         logger(`navigateToAttachmentMatch: EPUB navigation outcome: ${outcome}`);
         if (outcome === 'failed') {
-            revealSource({ library_id: nav.library_id, zotero_key: nav.zotero_key } as ZoteroItemReference);
+            revealSource({
+                library_id: nav.library_id,
+                zotero_key: nav.zotero_key,
+                library_ref: nav.library_ref,
+            } as ZoteroItemReference);
         }
         return;
     }
@@ -122,7 +132,11 @@ export async function navigateToAttachmentMatch(nav: AttachmentMatchNavRequest):
         });
         logger(`navigateToAttachmentMatch: snapshot navigation outcome: ${outcome}`);
         if (outcome === 'failed') {
-            revealSource({ library_id: nav.library_id, zotero_key: nav.zotero_key } as ZoteroItemReference);
+            revealSource({
+                library_id: nav.library_id,
+                zotero_key: nav.zotero_key,
+                library_ref: nav.library_ref,
+            } as ZoteroItemReference);
         }
         return;
     }

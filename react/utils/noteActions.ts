@@ -70,6 +70,7 @@ export interface ProvenanceNoteOptions {
 export interface ProvenanceNoteParent {
     library_id: number;
     zotero_key: string;
+    library_ref?: string;
 }
 
 /**

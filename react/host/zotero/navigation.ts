@@ -70,6 +70,7 @@ export const zoteroNavigation: NavigationHost = {
         return navigateToAttachmentMatchImpl({
             library_id: match.library_id,
             zotero_key: match.zotero_key,
+            library_ref: match.library_ref,
             content_kind: match.content_kind,
             page_number: match.page_number ?? undefined,
             page_label: match.page_label ?? undefined,

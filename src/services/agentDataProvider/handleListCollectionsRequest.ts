@@ -184,6 +184,8 @@ export async function handleListCollectionsRequest(
         
         // Build results
         const allResults: CollectionInfo[] = filteredCollections.map((collection: any) => ({
+            library_id: library.libraryID,
+            library_ref: libraryRefForLibraryID(library.libraryID) ?? undefined,
             collection_key: collection.key,
             name: collection.name,
             parent_key: collection.parentKey || null,

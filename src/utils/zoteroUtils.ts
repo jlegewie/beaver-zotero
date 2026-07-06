@@ -2,6 +2,15 @@ import { getDisplayNameFromItem } from "../../react/utils/sourceUtils";
 import { ZoteroItemReference } from "../../react/types/zotero";
 import type { CreatorJSON } from "../../react/types/agentActions/base";
 import { logger } from "./logger";
+import { libraryRefForLibraryID } from "./libraryIdentity";
+
+function makeZoteroItemReference(libraryID: number, zoteroKey: string): ZoteroItemReference {
+    return {
+        library_id: libraryID,
+        zotero_key: zoteroKey,
+        library_ref: libraryRefForLibraryID(libraryID) ?? undefined,
+    };
+}
 
 /**
  * Context for determining where to create or insert a new Zotero item
@@ -34,7 +43,7 @@ export async function getZoteroTargetContext(): Promise<ZoteroTargetContext> {
             if (readerItem) {
                 targetLibraryId = readerItem.libraryID;
                 parentReference = readerItem.parentKey
-                    ? { library_id: readerItem.libraryID, zotero_key: readerItem.parentKey }
+                    ? makeZoteroItemReference(readerItem.libraryID, readerItem.parentKey)
                     : null;
                 return { targetLibraryId, parentReference, collectionToAddTo };
             }
@@ -51,11 +60,11 @@ export async function getZoteroTargetContext(): Promise<ZoteroTargetContext> {
         targetLibraryId = item.libraryID;
         
         if (item.isRegularItem()) {
-            parentReference = { library_id: item.libraryID, zotero_key: item.key };
+            parentReference = makeZoteroItemReference(item.libraryID, item.key);
         } else if (item.isNote() || item.isAttachment()) {
             // Add to parent (sibling)
             parentReference = item.parentKey
-                ? { library_id: item.libraryID, zotero_key: item.parentKey }
+                ? makeZoteroItemReference(item.libraryID, item.parentKey)
                 : null;
         }
     // No selection - add to current library/collection
@@ -93,7 +102,7 @@ export function getZoteroTargetContextSync(): ZoteroTargetContext {
             if (readerItem) {
                 targetLibraryId = readerItem.libraryID;
                 parentReference = readerItem.parentKey
-                    ? { library_id: readerItem.libraryID, zotero_key: readerItem.parentKey }
+                    ? makeZoteroItemReference(readerItem.libraryID, readerItem.parentKey)
                     : null;
                 return { targetLibraryId, parentReference, collectionToAddTo };
             }
@@ -110,11 +119,11 @@ export function getZoteroTargetContextSync(): ZoteroTargetContext {
         targetLibraryId = item.libraryID;
         
         if (item.isRegularItem()) {
-            parentReference = { library_id: item.libraryID, zotero_key: item.key };
+            parentReference = makeZoteroItemReference(item.libraryID, item.key);
         } else if (item.isNote() || item.isAttachment()) {
             // Add to parent (sibling)
             parentReference = item.parentKey
-                ? { library_id: item.libraryID, zotero_key: item.parentKey }
+                ? makeZoteroItemReference(item.libraryID, item.parentKey)
                 : null;
         }
     // No selection - add to current library/collection

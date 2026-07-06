@@ -32,6 +32,8 @@ export interface ItemRowView {
     /** ALWAYS the resolved main item (e.g. the attachment read), never the parent. */
     library_id: number;
     zotero_key: string;
+    /** Device-portable library identity ("u" | "g<groupID>"). */
+    library_ref?: string;
     /** Row's primary identity — see "Row display conventions" (R/P/A/N). */
     display_name: string;
     /** The bib identity NOT shown by display_name: title (R/P), or "Smith 2004. Title" (A/N). */
@@ -75,6 +77,8 @@ export interface AnnotationRowView {
     kind: "annotation";
     library_id: number;
     zotero_key: string;
+    /** Device-portable library identity ("u" | "g<groupID>"). */
+    library_ref?: string;
     /** highlight | underline | note | image | text */
     annotation_type?: string | null;
     /** annotationText */
@@ -101,6 +105,8 @@ export type ItemListRow = ItemRowView | AnnotationRowView;
 export interface CollectionRowView {
     /** Used by the reveal click. */
     library_id: number;
+    /** Device-portable library identity ("u" | "g<groupID>"). */
+    library_ref?: string;
     /** Collection key (NOT an item key); the frontend maps it to a CollectionReference. */
     collection_key: string;
     name: string;
@@ -130,6 +136,8 @@ export interface AttachmentMatchView {
 export interface AttachmentSearchRowView {
     library_id: number;
     zotero_key: string;
+    /** Device-portable library identity ("u" | "g<groupID>"). */
+    library_ref?: string;
     /** Parent "Smith 2024" or external filename. */
     display_name: string;
     /** Zotero item type for the icon (itemTypeToIconName); null when unresolved. */

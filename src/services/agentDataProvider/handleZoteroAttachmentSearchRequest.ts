@@ -8,6 +8,7 @@
  */
 
 import { logger } from '../../utils/logger';
+import { libraryRefForLibraryID } from '../../utils/libraryIdentity';
 
 import { isAttachmentAvailableRemotely } from '../../utils/webAPI';  // kept for file_missing message check
 import {
@@ -43,6 +44,10 @@ export async function handleZoteroAttachmentSearchRequest(
     request: WSZoteroAttachmentSearchRequest
 ): Promise<WSZoteroAttachmentSearchResponse> {
     const { attachment, query, max_hits_per_page, request_id, timeout_seconds } = request;
+    const responseAttachment = {
+        ...attachment,
+        library_ref: attachment.library_ref ?? libraryRefForLibraryID(attachment.library_id) ?? undefined,
+    };
 
     // Hoisted for catch-block metadata backfill
     let resolvedItem: Zotero.Item | null = null;
@@ -58,7 +63,7 @@ export async function handleZoteroAttachmentSearchRequest(
     ): WSZoteroAttachmentSearchResponse => ({
         type: 'zotero_attachment_search',
         request_id,
-        attachment,
+        attachment: responseAttachment,
         query,
         total_matches: 0,
         pages_with_matches: 0,
@@ -285,7 +290,7 @@ export async function handleZoteroAttachmentSearchRequest(
         return {
             type: 'zotero_attachment_search',
             request_id,
-            attachment,
+            attachment: responseAttachment,
             query,
             total_matches: searchResult.totalMatches,
             pages_with_matches: searchResult.pagesWithMatches,

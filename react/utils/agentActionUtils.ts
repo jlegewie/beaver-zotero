@@ -19,6 +19,8 @@ import { toolAnnotationApplyBatcher, filterAnnotationAgentActions } from './tool
 import { saveStreamingNote } from './noteActions';
 import { currentThreadIdAtom } from '../atoms/threads';
 import { logger } from '../../src/utils/logger';
+import { parseZoteroId } from './citationGrammar';
+import { libraryRefForLibraryID } from '../../src/utils/libraryIdentity';
 
 /**
  * Extract all Zotero item references from agent actions that need to be loaded.
@@ -35,10 +37,15 @@ export function extractItemReferencesFromAgentActions(actions: AgentAction[]): Z
         if (isAnnotationAgentAction(action)) {
             const libraryId = action.proposed_data.library_id;
             const attachmentKey = action.proposed_data.attachment_key;
+            const libraryRef = action.proposed_data.library_ref;
             if (typeof libraryId === 'number' && typeof attachmentKey === 'string' && attachmentKey) {
                 const key = `${libraryId}-${attachmentKey}`;
                 if (!refs.has(key)) {
-                    refs.set(key, { library_id: libraryId, zotero_key: attachmentKey });
+                    refs.set(key, {
+                        library_id: libraryId,
+                        zotero_key: attachmentKey,
+                        ...(typeof libraryRef === 'string' && libraryRef ? { library_ref: libraryRef } : {}),
+                    });
                 }
             }
         }
@@ -47,10 +54,15 @@ export function extractItemReferencesFromAgentActions(actions: AgentAction[]): Z
         if (isZoteroNoteAgentAction(action)) {
             const libraryId = action.proposed_data.library_id;
             const zoteroKey = action.proposed_data.zotero_key;
+            const libraryRef = action.proposed_data.library_ref;
             if (typeof libraryId === 'number' && typeof zoteroKey === 'string' && zoteroKey) {
                 const key = `${libraryId}-${zoteroKey}`;
                 if (!refs.has(key)) {
-                    refs.set(key, { library_id: libraryId, zotero_key: zoteroKey });
+                    refs.set(key, {
+                        library_id: libraryId,
+                        zotero_key: zoteroKey,
+                        ...(typeof libraryRef === 'string' && libraryRef ? { library_ref: libraryRef } : {}),
+                    });
                 }
             }
         }
@@ -58,17 +70,11 @@ export function extractItemReferencesFromAgentActions(actions: AgentAction[]): Z
         // For create_note actions with parent item reference in proposed_data
         if (isCreateNoteAgentAction(action)) {
             const parentItemId = action.proposed_data.parent_item_id as string | undefined;
-            if (parentItemId) {
-                const dashIdx = parentItemId.indexOf('-');
-                if (dashIdx > 0) {
-                    const libraryId = parseInt(parentItemId.substring(0, dashIdx), 10);
-                    const zoteroKey = parentItemId.substring(dashIdx + 1);
-                    if (!isNaN(libraryId) && zoteroKey) {
-                        const key = `${libraryId}-${zoteroKey}`;
-                        if (!refs.has(key)) {
-                            refs.set(key, { library_id: libraryId, zotero_key: zoteroKey });
-                        }
-                    }
+            const parsedParent = parseZoteroId(parentItemId);
+            if (parsedParent) {
+                const key = `${parsedParent.library_id}-${parsedParent.zotero_key}`;
+                if (!refs.has(key)) {
+                    refs.set(key, parsedParent);
                 }
             }
         }
@@ -77,10 +83,15 @@ export function extractItemReferencesFromAgentActions(actions: AgentAction[]): Z
         if (hasAppliedZoteroItem(action)) {
             const libraryId = action.result_data!.library_id;
             const zoteroKey = action.result_data!.zotero_key;
+            const libraryRef = action.result_data!.library_ref;
             if (typeof libraryId === 'number' && typeof zoteroKey === 'string' && zoteroKey) {
                 const key = `${libraryId}-${zoteroKey}`;
                 if (!refs.has(key)) {
-                    refs.set(key, { library_id: libraryId, zotero_key: zoteroKey });
+                    refs.set(key, {
+                        library_id: libraryId,
+                        zotero_key: zoteroKey,
+                        ...(typeof libraryRef === 'string' && libraryRef ? { library_ref: libraryRef } : {}),
+                    });
                 }
             }
         }
@@ -363,10 +374,11 @@ export async function autoCreateNoteAgentActions(
             );
             if (item) {
                 targetLibraryId = proposed.library_id;
+                const libraryRef = proposed.library_ref ?? libraryRefForLibraryID(proposed.library_id) ?? undefined;
                 if (item.isAttachment() && item.parentKey) {
-                    parentReference = { library_id: proposed.library_id, zotero_key: item.parentKey };
+                    parentReference = { library_id: proposed.library_id, zotero_key: item.parentKey, library_ref: libraryRef };
                 } else {
-                    parentReference = { library_id: proposed.library_id, zotero_key: proposed.zotero_key };
+                    parentReference = { library_id: proposed.library_id, zotero_key: proposed.zotero_key, library_ref: libraryRef };
                 }
             }
         }
@@ -440,4 +452,3 @@ export async function autoCreateNoteAgentActions(
         }
     }
 }
-

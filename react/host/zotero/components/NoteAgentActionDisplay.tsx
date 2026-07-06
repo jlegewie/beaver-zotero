@@ -28,6 +28,7 @@ import Tooltip from '../../../components/ui/Tooltip';
 import { selectItemById } from '../../../../src/utils/selectItem';
 import { revealSource, getCurrentCollectionKeyForItem } from '../../../utils/sourceUtils';
 import { isLibraryEditable } from '../../../../src/utils/zoteroUtils';
+import { libraryRefForLibraryID } from '../../../../src/utils/libraryIdentity';
 import { saveStreamingNote } from '../../../utils/noteActions';
 import {
     extractNoteBlocksFromMessages,
@@ -74,11 +75,12 @@ const NoteAgentActionRow: React.FC<NoteAgentActionRowProps> = ({ action, runId, 
     const handleReveal = useCallback(async () => {
         const libraryId = action.result_data?.library_id;
         const zoteroKey = action.result_data?.zotero_key;
+        const libraryRef = action.result_data?.library_ref;
         if (!libraryId || !zoteroKey) return;
         // Reveal within the current collection when the note belongs to it,
         // instead of switching to the library root.
         const collectionKey = await getCurrentCollectionKeyForItem(libraryId, zoteroKey);
-        revealSource({ library_id: libraryId, zotero_key: zoteroKey }, collectionKey);
+        revealSource({ library_id: libraryId, zotero_key: zoteroKey, library_ref: libraryRef }, collectionKey);
     }, [action.result_data]);
 
     // Undo: delete note from Zotero + revert action status
@@ -126,10 +128,11 @@ const NoteAgentActionRow: React.FC<NoteAgentActionRowProps> = ({ action, runId, 
                 );
                 if (item) {
                     targetLibraryId = proposed.library_id;
+                    const libraryRef = proposed.library_ref ?? libraryRefForLibraryID(proposed.library_id) ?? undefined;
                     if (item.isAttachment() && item.parentKey) {
-                        parentReference = { library_id: proposed.library_id, zotero_key: item.parentKey };
+                        parentReference = { library_id: proposed.library_id, zotero_key: item.parentKey, library_ref: libraryRef };
                     } else {
-                        parentReference = { library_id: proposed.library_id, zotero_key: proposed.zotero_key };
+                        parentReference = { library_id: proposed.library_id, zotero_key: proposed.zotero_key, library_ref: libraryRef };
                     }
                 }
             }

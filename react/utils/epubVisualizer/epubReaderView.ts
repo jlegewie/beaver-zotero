@@ -1,5 +1,6 @@
 import { BEAVER_VISUALIZER_ANNOTATION_AUTHOR } from "../../../src/constants/annotations";
 import { logger } from "../../../src/utils/logger";
+import { libraryRefForLibraryID } from "../../../src/utils/libraryIdentity";
 import type { ZoteroItemReference } from "../../types/zotero";
 import { ZoteroReader } from "../annotationUtils";
 import { getCurrentReaderAndWaitForView } from "../readerUtils";
@@ -197,7 +198,11 @@ export function setTemporaryAnnotations(
             annotationIsExternal: false,
             isTemporary: true,
         });
-        refs.push({ zotero_key: tempId, library_id: libraryId });
+        refs.push({
+            zotero_key: tempId,
+            library_id: libraryId,
+            library_ref: libraryRefForLibraryID(libraryId) ?? undefined,
+        });
     });
 
     (reader as any)._internalReader.setAnnotations(

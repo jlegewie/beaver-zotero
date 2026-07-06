@@ -58,9 +58,14 @@ export function createZoteroItemReference(id: string): ZoteroItemReference | nul
     if (!libraryId || !zoteroKey) {
         return null;
     }
+    const parsedLibraryId = parseInt(libraryId, 10);
+    if (!Number.isFinite(parsedLibraryId)) {
+        return null;
+    }
     return {
         zotero_key: zoteroKey,
-        library_id: parseInt(libraryId)
+        library_id: parsedLibraryId,
+        library_ref: libraryRefForLibraryID(parsedLibraryId) ?? undefined,
     };
 }
 

@@ -80,7 +80,8 @@ const AgentActionItemButtons: React.FC<AgentActionItemButtonsProps> = ({
         if (action.status === 'applied' && action.result_data?.zotero_key) {
             return {
                 library_id: action.result_data.library_id,
-                zotero_key: action.result_data.zotero_key
+                zotero_key: action.result_data.zotero_key,
+                library_ref: action.result_data.library_ref,
             };
         }
         // Otherwise use existing library match if found
@@ -331,4 +332,3 @@ const AgentActionItemButtons: React.FC<AgentActionItemButtonsProps> = ({
 };
 
 export default AgentActionItemButtons;
-

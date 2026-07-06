@@ -223,6 +223,7 @@ const CreateItemAgentActionDisplay: React.FC<CreateItemAgentActionDisplayProps> 
         const resultData: CreateItemResultData = {
             library_id: itemRef.library_id,
             zotero_key: itemRef.zotero_key,
+            library_ref: itemRef.library_ref,
             attachment_status: 'none',
         };
 
@@ -255,7 +256,8 @@ const CreateItemAgentActionDisplay: React.FC<CreateItemAgentActionDisplayProps> 
             if (action.proposed_data.item.source_id) {
                 markExternalReferenceImported(action.proposed_data.item.source_id, {
                     library_id: result.library_id,
-                    zotero_key: result.zotero_key
+                    zotero_key: result.zotero_key,
+                    library_ref: result.library_ref,
                 });
             }
 
@@ -337,7 +339,8 @@ const CreateItemAgentActionDisplay: React.FC<CreateItemAgentActionDisplayProps> 
                             if (action.proposed_data.item.source_id) {
                                 markExternalReferenceImported(action.proposed_data.item.source_id, {
                                     library_id: result.library_id,
-                                    zotero_key: result.zotero_key
+                                    zotero_key: result.zotero_key,
+                                    library_ref: result.library_ref,
                                 });
                             }
 
@@ -564,4 +567,3 @@ const CreateItemAgentActionDisplay: React.FC<CreateItemAgentActionDisplayProps> 
 };
 
 export default CreateItemAgentActionDisplay;
-

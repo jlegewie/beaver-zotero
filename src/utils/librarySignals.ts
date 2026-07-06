@@ -4,6 +4,7 @@
 import { serializeItemSummary } from "./zoteroSerializers";
 import { logger } from "./logger";
 import { hasAgentSupportedAttachment } from "./agentItemSupport";
+import { libraryRefForLibraryID } from "./libraryIdentity";
 import {
     ActiveItem,
     ActiveItemKind,
@@ -46,6 +47,7 @@ export async function toSignalItem(item: Zotero.Item): Promise<SignalItem> {
     return {
         library_id: summary.library_id,
         zotero_key: summary.zotero_key,
+        library_ref: summary.library_ref,
         item_type: summary.item_type,
         title: summary.title ?? null,
         creators: lastNames.length > 0 ? lastNames : null,
@@ -244,6 +246,7 @@ export async function getTopCollections(
     }
 
     const out: CollectionSignal[] = [];
+    const libraryRef = libraryRefForLibraryID(libraryID) ?? undefined;
     for (const row of picked) {
         const itemRefs = await getRegularItemKeysInCollection(row.collectionID);
         const sampleIDs = pickEvenly(itemRefs.itemIDs, COLLECTION_SAMPLE_CAP);
@@ -251,12 +254,17 @@ export async function getTopCollections(
         out.push({
             library_id: libraryID,
             zotero_key: row.key,
+            library_ref: libraryRef,
             name: row.name,
             parent_key: row.parentKey,
             item_count: row.itemCount,
             date_added: null,                 // collections have no dateAdded in Zotero
             is_current_view: row.key === currentCollectionKey,
-            item_refs: itemRefs.keys.map((zotero_key) => ({ library_id: libraryID, zotero_key })),
+            item_refs: itemRefs.keys.map((zotero_key) => ({
+                library_id: libraryID,
+                zotero_key,
+                library_ref: libraryRef,
+            })),
             sample_items: sampleItems,
         });
     }
@@ -266,9 +274,11 @@ export async function getTopCollections(
 /** Return all collections in the library as lightweight signals (no item refs or sample items). */
 export async function getAllCollections(libraryID: number): Promise<CollectionSignal[]> {
     const all = await queryCollectionsWithCounts(libraryID);
+    const libraryRef = libraryRefForLibraryID(libraryID) ?? undefined;
     return all.map((row) => ({
         library_id: libraryID,
         zotero_key: row.key,
+        library_ref: libraryRef,
         name: row.name,
         parent_key: row.parentKey,
         item_count: row.itemCount,

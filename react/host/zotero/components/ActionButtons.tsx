@@ -27,6 +27,7 @@ import { createZoteroItem, stampBeaverProvenanceExtra } from '../../../utils/add
 import { logger } from '../../../../src/utils/logger';
 import { ensureItemSynced } from '../../../../src/utils/sync';
 import { getPref } from '../../../../src/utils/prefs';
+import { libraryRefForLibraryID } from '../../../../src/utils/libraryIdentity';
 import { createProvenanceNote } from '../../../utils/noteActions';
 import {
     getPendingCreateItemActionBySourceIdAtom,
@@ -34,6 +35,7 @@ import {
 } from '../../../agents/agentActions';
 import { CreateItemResultData } from '../../../types/agentActions/items';
 import { currentThreadIdAtom } from '../../../atoms/threads';
+import type { ZoteroItemReference } from '../../../types/zotero';
 import type { ExternalReferenceActionMode, ExternalReferenceActionsProps } from '../../types';
 
 const CITED_BY_URL = 'https://openalex.org/works?page=1&filter=cites:';
@@ -69,9 +71,13 @@ const ActionButtons: React.FC<ExternalReferenceActionsProps> = ({
 
     // Track the actual item existence state
     const [itemExists, setItemExists] = useState(item.library_items && item.library_items.length > 0);
-    const [zoteroItemRef, setZoteroItemRef] = useState(
+    const [zoteroItemRef, setZoteroItemRef] = useState<ZoteroItemReference | null>(
         item.library_items && item.library_items.length > 0
-            ? { library_id: item.library_items[0].library_id, zotero_key: item.library_items[0].zotero_key }
+            ? {
+                library_id: item.library_items[0].library_id,
+                zotero_key: item.library_items[0].zotero_key,
+                library_ref: item.library_items[0].library_ref,
+            }
             : null
     );
     const [isLoading, setIsLoading] = useState(false);
@@ -106,9 +112,11 @@ const ActionButtons: React.FC<ExternalReferenceActionsProps> = ({
 
             // Use the item's actual library ID (may differ from user library if in group)
             const libraryId = newItem.libraryID;
+            const libraryRef = libraryRefForLibraryID(libraryId) ?? undefined;
             const newZoteroRef = {
                 library_id: libraryId,
-                zotero_key: newItem.key
+                zotero_key: newItem.key,
+                library_ref: libraryRef,
             };
 
             const provenanceReason = matchingAction?.proposed_data?.reason;
@@ -117,7 +125,7 @@ const ActionButtons: React.FC<ExternalReferenceActionsProps> = ({
             }
             if (getPref('addBeaverProvenanceNote') === true) {
                 await createProvenanceNote(
-                    { library_id: libraryId, zotero_key: newItem.key },
+                    newZoteroRef,
                     {
                         reason: provenanceReason,
                         threadId: threadId ?? undefined,
@@ -151,6 +159,7 @@ const ActionButtons: React.FC<ExternalReferenceActionsProps> = ({
                     const resultData: CreateItemResultData = {
                         library_id: libraryId,
                         zotero_key: newItem.key,
+                        library_ref: libraryRef,
                         attachment_status: attachmentStatus,
                         attachment_key: attachmentKey,
                     };

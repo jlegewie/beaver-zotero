@@ -195,6 +195,10 @@ export async function handleZoteroViewImagesRequest(
             error_code: 'invalid_format',
         };
     }
+    const responseAttachment = {
+        ...attachment,
+        library_ref: attachment.library_ref ?? libraryRefForLibraryID(attachment.library_id) ?? undefined,
+    };
     const requestKey = `${attachment.library_id}-${attachment.zotero_key}`;
 
     // Captured once the target attachment is resolved so error responses can
@@ -213,7 +217,7 @@ export async function handleZoteroViewImagesRequest(
     ): WSZoteroViewImagesResponse => ({
         type: 'zotero_view_images',
         request_id,
-        attachment,
+        attachment: responseAttachment,
         resolved_attachment: resolvedRef,
         kind: resolvedKind,
         images: [],
@@ -357,7 +361,7 @@ export async function handleZoteroViewImagesRequest(
             return {
                 type: 'zotero_view_images',
                 request_id,
-                attachment,
+                attachment: responseAttachment,
                 resolved_attachment: resolvedRef,
                 kind: 'pdf',
                 images,
@@ -389,7 +393,7 @@ export async function handleZoteroViewImagesRequest(
         return {
             type: 'zotero_view_images',
             request_id,
-            attachment,
+            attachment: responseAttachment,
             resolved_attachment: resolvedRef,
             kind: 'image',
             images: [{

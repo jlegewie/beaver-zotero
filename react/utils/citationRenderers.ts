@@ -130,7 +130,13 @@ export function renderToMarkdown(
                 logger(`renderToMarkdown: No Zotero item found for external_id: ${externalId}`);
                 return '';
             }
-            ref = { kind: 'zotero', library_id: mappedZoteroItem.library_id, zotero_key: mappedZoteroItem.zotero_key, loc: ref.loc };
+            ref = {
+                kind: 'zotero',
+                library_id: mappedZoteroItem.library_id,
+                zotero_key: mappedZoteroItem.zotero_key,
+                library_ref: mappedZoteroItem.library_ref,
+                loc: ref.loc,
+            };
         }
 
         // 2b. External file (user-attached, non-Zotero) — no Zotero item or

@@ -229,7 +229,8 @@ export const getZoteroItemReferenceFromAgentAction = (action: AgentAction): Zote
     }
     return {
         library_id: action.result_data!.library_id,
-        zotero_key: action.result_data!.zotero_key
+        zotero_key: action.result_data!.zotero_key,
+        library_ref: action.result_data!.library_ref,
     } as ZoteroItemReference;
 };
 
@@ -406,12 +407,14 @@ export function toAgentAction(raw: Record<string, any>): AgentAction {
     if (actionType === 'highlight_annotation' || actionType === 'note_annotation') {
         const libraryIdRaw = proposedData.library_id ?? proposedData.libraryId;
         const attachmentKeyRaw = proposedData.attachment_key ?? proposedData.attachmentKey;
+        const libraryRef = proposedData.library_ref ?? proposedData.libraryRef;
         const sentenceIds = normalizeSentenceIdList(proposedData.sentence_ids ?? proposedData.sentenceIds);
         
         const normalizedData: any = {
             title: proposedData.title ?? '',
             comment: proposedData.comment ?? '',
             library_id: typeof libraryIdRaw === 'number' ? libraryIdRaw : Number(libraryIdRaw ?? 0),
+            ...(typeof libraryRef === 'string' && libraryRef ? { library_ref: libraryRef } : {}),
             attachment_key: typeof attachmentKeyRaw === 'string' ? attachmentKeyRaw : String(attachmentKeyRaw ?? ''),
             raw_sentence_ids: proposedData.raw_sentence_ids ?? proposedData.rawSentenceIds ?? null,
             sentence_ids: sentenceIds,
@@ -464,12 +467,18 @@ export function toAgentAction(raw: Record<string, any>): AgentAction {
             zotero_key: typeof zoteroKeyRaw === 'string'
                 ? zoteroKeyRaw
                 : (zoteroKeyRaw !== undefined && zoteroKeyRaw !== null ? String(zoteroKeyRaw) : undefined),
+            library_ref: typeof proposedData.library_ref === 'string'
+                ? proposedData.library_ref
+                : (typeof proposedData.libraryRef === 'string' ? proposedData.libraryRef : undefined),
             library: typeof proposedData.library === 'string' ? proposedData.library : undefined,
             collection: typeof proposedData.collection === 'string' ? proposedData.collection : undefined,
             raw_tag: typeof rawTag === 'string' ? rawTag : undefined,
         } as NoteProposedData;
     } else if (actionType === 'create_item') {
         proposedData = {
+            library_id: proposedData.library_id ?? proposedData.libraryId,
+            library_ref: proposedData.library_ref ?? proposedData.libraryRef,
+            library_name: proposedData.library_name ?? proposedData.libraryName,
             item: proposedData.item ?? {},
             reason: proposedData.reason,
             relevance_score: proposedData.relevance_score ?? proposedData.relevanceScore,
@@ -496,6 +505,7 @@ export function toAgentAction(raw: Record<string, any>): AgentAction {
                 ? proposedData.library_id
                 : Number(proposedData.library_id ?? proposedData.libraryId ?? 0),
             zotero_key: proposedData.zotero_key ?? proposedData.zoteroKey ?? '',
+            library_ref: proposedData.library_ref ?? proposedData.libraryRef,
             edits: edits.map((edit: any) => ({
                 field: edit.field ?? '',
                 old_value: edit.old_value ?? edit.oldValue ?? null,
@@ -510,6 +520,7 @@ export function toAgentAction(raw: Record<string, any>): AgentAction {
             library_id: typeof proposedData.library_id === 'number' 
                 ? proposedData.library_id 
                 : Number(proposedData.library_id ?? proposedData.libraryId ?? 0),
+            library_ref: proposedData.library_ref ?? proposedData.libraryRef,
             name: proposedData.name ?? '',
             parent_key: proposedData.parent_key ?? proposedData.parentKey ?? null,
             item_ids: proposedData.item_ids ?? proposedData.itemIds ?? [],
@@ -546,12 +557,14 @@ export function toAgentAction(raw: Record<string, any>): AgentAction {
     if (resultData && (actionType === 'highlight_annotation' || actionType === 'note_annotation')) {
         const zoteroKey = resultData.zotero_key ?? resultData.zoteroKey;
         const libraryId = resultData.library_id ?? resultData.libraryId;
+        const libraryRef = resultData.library_ref ?? resultData.libraryRef;
         const attachmentKey = resultData.attachment_key ?? resultData.attachmentKey;
         
         if (zoteroKey) {
             resultData = {
                 zotero_key: zoteroKey,
                 library_id: typeof libraryId === 'number' ? libraryId : Number(libraryId ?? 0),
+                ...(typeof libraryRef === 'string' && libraryRef ? { library_ref: libraryRef } : {}),
                 attachment_key: typeof attachmentKey === 'string' ? attachmentKey : String(attachmentKey ?? ''),
             };
         }
@@ -560,22 +573,26 @@ export function toAgentAction(raw: Record<string, any>): AgentAction {
     } else if (resultData && actionType === 'zotero_note') {
         const zoteroKey = resultData.zotero_key ?? resultData.zoteroKey;
         const libraryId = resultData.library_id ?? resultData.libraryId;
+        const libraryRef = resultData.library_ref ?? resultData.libraryRef;
         const parentKey = resultData.parent_key ?? resultData.parentKey;
         if (zoteroKey) {
             resultData = {
                 zotero_key: String(zoteroKey),
                 library_id: typeof libraryId === 'number' ? libraryId : Number(libraryId ?? 0),
+                ...(typeof libraryRef === 'string' && libraryRef ? { library_ref: libraryRef } : {}),
                 ...(parentKey ? { parent_key: String(parentKey) } : {})
             };
         }
     } else if (resultData && actionType === 'create_item') {
         const zoteroKey = resultData.zotero_key ?? resultData.zoteroKey ?? resultData.item_key ?? resultData.itemKey;
         const libraryId = resultData.library_id ?? resultData.libraryId;
+        const libraryRef = resultData.library_ref ?? resultData.libraryRef;
         
         if (zoteroKey) {
             resultData = {
                 zotero_key: String(zoteroKey),
                 library_id: typeof libraryId === 'number' ? libraryId : Number(libraryId ?? 0),
+                ...(typeof libraryRef === 'string' && libraryRef ? { library_ref: libraryRef } : {}),
                 attachment_status: resultData.attachment_status ?? resultData.attachmentStatus ?? 'none',
                 attachment_key: resultData.attachment_key ?? resultData.attachmentKey,
                 attachment_resolved_at: resultData.attachment_resolved_at ?? resultData.attachmentResolvedAt,

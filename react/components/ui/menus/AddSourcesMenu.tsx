@@ -10,6 +10,7 @@ import { addPopupMessageAtom } from '../../../utils/popupMessageUtils';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { getPref, setPref } from '../../../../src/utils/prefs';
 import { getRecentAsync, loadFullItemData, getActiveZoteroLibraryId } from '../../../../src/utils/zoteroUtils';
+import { libraryRefForLibraryID } from '../../../../src/utils/libraryIdentity';
 import { searchTitleCreatorYear, scoreSearchResult } from '../../../utils/search';
 import { logger } from '../../../../src/utils/logger';
 import { searchableLibraryIdsAtom } from '../../../atoms/profile';
@@ -32,6 +33,7 @@ type MenuMode = 'sources' | 'libraries' | 'collections' | 'tags' | 'notes';
 interface RecentItem {
     zotero_key: string;
     library_id: number;
+    library_ref?: string;
 }
 
 const updateRecentItems = async (newRecentItems: RecentItem[]) => {
@@ -57,6 +59,10 @@ const updateRecentItems = async (newRecentItems: RecentItem[]) => {
         .filter((item, index, self) =>
             index === self.findIndex((t) => t.zotero_key === item.zotero_key && t.library_id === item.library_id)
         )
+        .map((item) => ({
+            ...item,
+            library_ref: item.library_ref ?? libraryRefForLibraryID(item.library_id) ?? undefined,
+        }))
         .slice(0, RECENT_ITEMS_LIMIT)
 
     // Update recent items
@@ -267,7 +273,11 @@ const AddSourcesMenu: React.FC<{
 
     // Handler functions for menu item callbacks
     const handleAddSourceItem = useCallback((item: Zotero.Item) => {
-        updateRecentItems([{ zotero_key: item.key, library_id: item.libraryID }]);
+        updateRecentItems([{
+            zotero_key: item.key,
+            library_id: item.libraryID,
+            library_ref: libraryRefForLibraryID(item.libraryID) ?? undefined,
+        }]);
         addItemToCurrentMessageItems(item);
         handleOnClose();
     }, [addItemToCurrentMessageItems, handleOnClose]);

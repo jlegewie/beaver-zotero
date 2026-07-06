@@ -6,6 +6,7 @@
 import { AgentAction } from '../agents/agentActions';
 import { CreateCollectionResultData } from '../types/agentActions/base';
 import { logger } from '../../src/utils/logger';
+import { libraryRefForLibraryID } from '../../src/utils/libraryIdentity';
 
 /**
  * Execute a create_collection agent action by creating the collection in Zotero.
@@ -99,6 +100,7 @@ export async function executeCreateCollectionAction(
 
     return {
         library_id,
+        library_ref: libraryRefForLibraryID(library_id) ?? undefined,
         collection_key: collection.key,
         items_added: itemsAdded,
     };

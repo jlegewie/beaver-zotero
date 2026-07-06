@@ -310,6 +310,7 @@ const NoteDisplay: React.FC<NoteDisplayProps> = ({ note, runId, messageId, expor
             getHost().navigation?.revealInLibrary({
                 library_id: noteAction.result_data.library_id,
                 zotero_key: noteAction.result_data.zotero_key,
+                library_ref: noteAction.result_data.library_ref,
             });
         }
     }, [noteAction]);

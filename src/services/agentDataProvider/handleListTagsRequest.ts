@@ -14,6 +14,7 @@ import {
     TagInfo,
 } from '../agentProtocol';
 import { getCollectionByIdOrName, validateLibraryAccess, isLibrarySearchable, getSearchableLibraries } from './utils';
+import { libraryRefForLibraryID } from '../../utils/libraryIdentity';
 
 
 /** Per-tag counts broken down by the type of object carrying the tag. */
@@ -232,6 +233,7 @@ export async function handleListTagsRequest(
             tags: paginatedTags,
             total_count: totalCount,
             library_id: library.libraryID,
+            library_ref: libraryRefForLibraryID(library.libraryID) ?? undefined,
             library_name: libraryName,
         };
     } catch (error) {

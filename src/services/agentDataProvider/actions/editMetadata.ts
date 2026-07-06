@@ -12,6 +12,7 @@ import {
 import { checkLibraryExcluded, excludedLibraryMessage, getDeferredToolPreference } from '../utils';
 import { TimeoutContext, checkAborted } from '../timeout';
 import { TimeoutError } from '../timeout';
+import { libraryRefForLibraryID } from '../../../utils/libraryIdentity';
 
 
 /**
@@ -656,6 +657,9 @@ async function executeEditMetadataAction(
 
         // Build result data
         const resultData: Record<string, any> = {
+            library_id,
+            zotero_key,
+            library_ref: libraryRefForLibraryID(library_id) ?? undefined,
             applied_edits: appliedEdits,
             failed_edits: failedEdits,
         };

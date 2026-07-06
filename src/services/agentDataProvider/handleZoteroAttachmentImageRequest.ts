@@ -58,6 +58,10 @@ export async function handleZoteroAttachmentImageRequest(
     request: WSZoteroAttachmentImageRequest
 ): Promise<WSZoteroAttachmentImageResponse> {
     const { attachment, max_width, max_height, format, jpeg_quality, request_id, timeout_seconds } = request;
+    const responseAttachment = {
+        ...attachment,
+        library_ref: attachment.library_ref ?? libraryRefForLibraryID(attachment.library_id) ?? undefined,
+    };
     const requestKey = `${attachment.library_id}-${attachment.zotero_key}`;
     let errorKey = requestKey;
 
@@ -71,7 +75,7 @@ export async function handleZoteroAttachmentImageRequest(
     ): WSZoteroAttachmentImageResponse => ({
         type: 'zotero_attachment_image',
         request_id,
-        attachment,
+        attachment: responseAttachment,
         resolved_attachment: resolvedRef,
         image: null,
         error,
@@ -231,7 +235,7 @@ export async function handleZoteroAttachmentImageRequest(
         return {
             type: 'zotero_attachment_image',
             request_id,
-            attachment,
+            attachment: responseAttachment,
             resolved_attachment: resolvedRef,
             image: {
                 image_data: uint8ToBase64(processed.data),

@@ -925,6 +925,12 @@ export interface WSReadNoteResponse {
     error?: string;
     /** Note metadata */
     note_id?: string;
+    /** Device-local Zotero library ID of the note. */
+    library_id?: number;
+    /** Zotero key of the note. */
+    zotero_key?: string;
+    /** Device-portable library identity ("u" | "g<groupID>") of the note. */
+    library_ref?: string;
     title?: string;
     /** @deprecated Superseded by `parent_item`. Still emitted for clients/backends predating `parent_item`; remove once the backend reads `parent_item`. */
     parent_item_id?: string;
@@ -1231,6 +1237,9 @@ export interface WSListCollectionsRequest extends WSBaseEvent {
 
 /** Collection information */
 export interface CollectionInfo {
+    library_id?: number;
+    /** Device-portable library identity ("u" | "g<groupID>"). */
+    library_ref?: string;
     collection_key: string;
     name: string;
     parent_key?: string | null;
@@ -1291,6 +1300,8 @@ export interface WSListTagsResponse {
     tags: TagInfo[];
     total_count: number;
     library_id?: number | null;
+    /** Device-portable library identity ('u' / 'g<groupID>') of the listed library. */
+    library_ref?: string;
     library_name?: string | null;
     error?: string | null;
     error_code?: string | null;

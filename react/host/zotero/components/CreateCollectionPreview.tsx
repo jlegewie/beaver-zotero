@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { CSSIcon, Icon, PlusSignIcon } from '../../../components/icons/icons';
 import { getHost } from '../..';
+import { libraryRefForLibraryID } from '../../../../src/utils/libraryIdentity';
 
 type ActionStatus = 'pending' | 'applied' | 'rejected' | 'undone' | 'error' | 'awaiting';
 
@@ -25,6 +26,7 @@ interface CreateCollectionPreviewProps {
     resultData?: {
         collection_key?: string;
         collection_id?: number;
+        library_ref?: string;
         items_added?: number;
     };
 }
@@ -84,7 +86,11 @@ export const CreateCollectionPreview: React.FC<CreateCollectionPreviewProps> = (
 
     const revealCollection = (collectionKey: string) => {
         if (libraryId == null) return;
-        getHost().navigation?.revealCollection({ library_id: libraryId, zotero_key: collectionKey });
+        getHost().navigation?.revealCollection({
+            library_id: libraryId,
+            zotero_key: collectionKey,
+            library_ref: resultData?.library_ref ?? libraryRefForLibraryID(libraryId) ?? undefined,
+        });
     };
 
     const getNewItemStyles = () => {

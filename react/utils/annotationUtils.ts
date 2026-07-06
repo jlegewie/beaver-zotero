@@ -1,5 +1,6 @@
 import { logger } from "../../src/utils/logger";
 import { BEAVER_ANNOTATION_AUTHOR } from '../../src/constants/annotations';
+import { libraryRefForLibraryID } from '../../src/utils/libraryIdentity';
 import { getCurrentReader } from "./readerUtils";
 import { ZoteroItemReference } from "../types/zotero";
 import { getPageViewportInfo } from './pdfUtils';
@@ -553,6 +554,7 @@ export const createTemporaryNoteAnnotation = async (
         return [{
             zotero_key: tempId,
             library_id: reader._item.libraryID,
+            library_ref: libraryRefForLibraryID(reader._item.libraryID) ?? undefined,
         }];
     } catch (error) {
         logger('createTemporaryNoteAnnotation: Failed to create note preview: ' + error);
@@ -666,7 +668,8 @@ export const createBoundingBoxHighlights = async (
             // Create reference for tracking
             annotationReferences.push({
                 zotero_key: tempId,
-                library_id: reader._item.libraryID
+                library_id: reader._item.libraryID,
+                library_ref: libraryRefForLibraryID(reader._item.libraryID) ?? undefined,
             });
         }
         

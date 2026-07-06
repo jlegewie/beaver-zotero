@@ -1,4 +1,5 @@
 import { ID_PREFIXES } from '../../src/beaver-extract/schema/schema';
+import { libraryRefForLibraryID } from '../../src/utils/libraryIdentity';
 import type { ZoteroItemReference } from '../types/zotero';
 
 export type LocatorKind =
@@ -210,7 +211,12 @@ export function parseZoteroId(raw: string | undefined): ZoteroItemReference | nu
     const zoteroKey = clean.slice(dashIndex + 1);
     if (!zoteroKey) return null;
 
-    return { library_id: Number(libraryRaw), zotero_key: zoteroKey };
+    const libraryID = Number(libraryRaw);
+    return {
+        library_id: libraryID,
+        zotero_key: zoteroKey,
+        library_ref: libraryRefForLibraryID(libraryID) ?? undefined,
+    };
 }
 
 function getLocator(rawAttrs: Record<string, string>): Locator | undefined {

@@ -67,6 +67,8 @@ export interface EditMetadataProposedData {
     library_id: number;
     /** Zotero key of the item to edit */
     zotero_key: string;
+    /** Device-portable library identity ("u" | "g<groupID>"). See `src/utils/libraryIdentity.ts`. */
+    library_ref?: string;
     /** List of field edits to apply */
     edits: MetadataEdit[];
     /** New creators list (replaces all existing creators when provided) */
@@ -130,6 +132,8 @@ export interface EditMetadataResultData {
 export interface CreateCollectionProposedData {
     /** Library ID where the collection will be created */
     library_id: number;
+    /** Device-portable library identity ("u" | "g<groupID>"). See `src/utils/libraryIdentity.ts`. */
+    library_ref?: string;
     /** Name of the collection to create */
     name: string;
     /** Parent collection key (optional, for subcollections) */
@@ -225,6 +229,8 @@ export interface TagColorSnapshot {
  */
 export interface ManageTagsProposedData {
     library_id: number;
+    /** Device-portable library identity ("u" | "g<groupID>"). See `src/utils/libraryIdentity.ts`. */
+    library_ref?: string;
     action: 'rename' | 'delete';
     name: string;
     new_name?: string | null;
@@ -267,6 +273,8 @@ export interface ManageTagsResultData {
  */
 export interface ManageCollectionsProposedData {
     library_id: number;
+    /** Device-portable library identity ("u" | "g<groupID>"). See `src/utils/libraryIdentity.ts`. */
+    library_ref?: string;
     action: 'rename' | 'move' | 'delete';
     collection_key: string;
     new_name?: string | null;
@@ -350,6 +358,8 @@ export interface NoteProposedData {
     content?: string | null;
     library_id?: number | null;
     zotero_key?: string | null;
+    /** Device-portable library identity ("u" | "g<groupID>"). See `src/utils/libraryIdentity.ts`. */
+    library_ref?: string;
     /** Library name or ID string (resolved by frontend via getLibraryByIdOrName) */
     library?: string | null;
     /** Collection name or key (resolved by frontend via getCollectionByIdOrName) */
