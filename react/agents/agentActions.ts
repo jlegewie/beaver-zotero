@@ -475,8 +475,13 @@ export function toAgentAction(raw: Record<string, any>): AgentAction {
             raw_tag: typeof rawTag === 'string' ? rawTag : undefined,
         } as NoteProposedData;
     } else if (actionType === 'create_item') {
+        const libraryIdRaw = proposedData.library_id ?? proposedData.libraryId;
+        const parsedLibraryId = libraryIdRaw == null || libraryIdRaw === ''
+            ? undefined
+            : (typeof libraryIdRaw === 'number' ? libraryIdRaw : Number(libraryIdRaw));
+
         proposedData = {
-            library_id: proposedData.library_id ?? proposedData.libraryId,
+            library_id: parsedLibraryId,
             library_ref: proposedData.library_ref ?? proposedData.libraryRef,
             library_name: proposedData.library_name ?? proposedData.libraryName,
             item: proposedData.item ?? {},

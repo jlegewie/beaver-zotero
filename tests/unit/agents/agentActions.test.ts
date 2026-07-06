@@ -19,6 +19,7 @@ import type {
     CreateHighlightAnnotationsProposedData,
     CreateNoteAnnotationsProposedData,
 } from '../../../react/types/agentActions/createAnnotations';
+import type { CreateItemProposedData } from '../../../react/types/agentActions/items';
 
 describe('validateAppliedAgentAction', () => {
     const zotero = (globalThis as any).Zotero;
@@ -156,6 +157,36 @@ describe('getAppliedPdfAnnotationCount', () => {
         } as AgentAction;
 
         expect(getAppliedPdfAnnotationCount(action)).toBe(1);
+    });
+});
+
+describe('toAgentAction create_item normalization', () => {
+    it('parses a string library_id into a numeric library_id', () => {
+        const action = toAgentAction({
+            action_type: 'create_item',
+            proposed_data: {
+                library_id: '42',
+                item: { title: 'Imported item' },
+                file_available: false,
+            },
+        });
+
+        const data = action.proposed_data as CreateItemProposedData;
+        expect(data.library_id).toBe(42);
+    });
+
+    it('parses a camelCase string libraryId into a numeric library_id', () => {
+        const action = toAgentAction({
+            action_type: 'create_item',
+            proposed_data: {
+                libraryId: '43',
+                item: { title: 'Imported item' },
+                fileAvailable: true,
+            },
+        });
+
+        const data = action.proposed_data as CreateItemProposedData;
+        expect(data.library_id).toBe(43);
     });
 });
 

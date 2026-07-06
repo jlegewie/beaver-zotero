@@ -2150,11 +2150,20 @@ function normalizeBackendCollection(
     }
 
     if (libraryId == null) return null;
+    const containerLibraryRefForResolvedLibrary = containerLibraryId === libraryId
+        ? containerLibraryRef
+        : undefined;
+    const libraryRef = compound
+        ? (compound.library_ref ?? libraryRefForLibraryID(libraryId) ?? undefined)
+        : (coll.library_ref
+            ?? containerLibraryRefForResolvedLibrary
+            ?? libraryRefForLibraryID(libraryId)
+            ?? undefined);
 
     return {
         library_id: libraryId,
         zotero_key: zoteroKey,
-        library_ref: coll.library_ref ?? containerLibraryRef ?? compound?.library_ref ?? libraryRefForLibraryID(libraryId) ?? undefined,
+        library_ref: libraryRef,
         name: coll.name,
         parent_key: coll.parent_key ?? null,
     };

@@ -166,9 +166,16 @@ describe('extractListCollectionsData', () => {
 
         it('prefers the compound library when it conflicts with the container library_id', () => {
             const content = {
-                collections: [{ collection_key: '6-ABCD1234', name: 'Methods', item_count: 0, subcollection_count: 0 }],
+                collections: [{
+                    collection_key: '6-ABCD1234',
+                    name: 'Methods',
+                    library_ref: 'g9',
+                    item_count: 0,
+                    subcollection_count: 0,
+                }],
                 total_count: 1,
                 library_id: 9,
+                library_ref: 'g9',
             };
 
             const result = extractListCollectionsData(content);
@@ -176,6 +183,7 @@ describe('extractListCollectionsData', () => {
             expect(result?.collections).toEqual([
                 { library_id: 6, zotero_key: 'ABCD1234', name: 'Methods', parent_key: null },
             ]);
+            expect(result?.collections[0]?.library_ref).toBeUndefined();
         });
 
         it('prefers the compound library when it conflicts with an explicit per-collection library_id', () => {
