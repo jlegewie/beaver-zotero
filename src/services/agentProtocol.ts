@@ -641,6 +641,7 @@ export type ZoteroDocumentErrorCode =
     | 'extraction_failed'  // General extraction failure
     | 'recursion_limit'     // Extraction overflowed the JS stack ("too much recursion" / "Maximum call stack")
     | 'library_excluded'    // Attachment is in a library the user excluded from Beaver
+    | 'library_unavailable' // Attachment is in a library unavailable on this computer
     | 'document_too_large'  // Serialized extraction result exceeds the WebSocket transfer budget
     | 'schema_version_mismatch'
     | 'mode_mismatch';
@@ -691,6 +692,7 @@ export type AttachmentPageImagesErrorCode =
     | 'invalid_page_value'  // Non-parseable string or unresolved label
     | 'timeout'             // Rendering timed out
     | 'library_excluded'    // Attachment is in a library the user excluded from Beaver
+    | 'library_unavailable' // Attachment is in a library unavailable on this computer
     | 'render_failed';      // General rendering failure
 
 /** Response to zotero attachment page images request */
@@ -722,6 +724,7 @@ export type AttachmentImageErrorCode =
     | 'decode_failed'              // Image could not be decoded (corrupt/truncated)
     | 'timeout'                    // Processing timed out
     | 'library_excluded'           // Attachment is in a library the user excluded from Beaver
+    | 'library_unavailable'        // Attachment is in a library unavailable on this computer
     | 'image_processing_failed';   // General resize/encode failure
 
 /** A processed attachment image. Field shapes align with WSPageImage. */
@@ -834,6 +837,7 @@ export type AttachmentSearchErrorCode =
     | 'download_failed'     // Remote file download failed
     | 'timeout'             // Search timed out
     | 'library_excluded'    // Attachment is in a library the user excluded from Beaver
+    | 'library_unavailable' // Attachment is in a library unavailable on this computer
     | 'search_failed';      // General search failure
 
 /** Request from backend to search text within an attachment */

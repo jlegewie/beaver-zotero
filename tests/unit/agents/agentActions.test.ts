@@ -39,6 +39,10 @@ describe('validateAppliedAgentAction', () => {
         getByLibraryAndKeyAsync.mockReset();
         zotero.Items = { ...zotero.Items, getByLibraryAndKeyAsync };
         zotero.Libraries = { ...zotero.Libraries, userLibraryID: 1 };
+        zotero.Groups = {
+            ...zotero.Groups,
+            getLibraryIDFromGroupID: vi.fn((groupID: number) => groupID === 50 ? 5 : null),
+        };
     });
 
     it('returns valid when the applied item resolves', async () => {
@@ -57,11 +61,20 @@ describe('validateAppliedAgentAction', () => {
         expect(await validateAppliedAgentAction(appliedAction(1))).toBe('invalid');
     });
 
-    it('returns unverifiable when a group-library item does not resolve', async () => {
-        // Group libraryIDs are device-local: a failed lookup on this device
-        // must not be treated as a revert (it would persist a false undo).
+    it('returns invalid when a resolved group-library item is gone', async () => {
         getByLibraryAndKeyAsync.mockResolvedValue(null);
-        expect(await validateAppliedAgentAction(appliedAction(5))).toBe('unverifiable');
+        expect(await validateAppliedAgentAction(appliedAction(5, {
+            result_data: { library_id: 99, library_ref: 'g50', zotero_key: 'AAAAAAA1' },
+        }))).toBe('invalid');
+        expect(getByLibraryAndKeyAsync).toHaveBeenCalledWith(5, 'AAAAAAA1');
+    });
+
+    it('returns unverifiable when a group library is unavailable on this device', async () => {
+        getByLibraryAndKeyAsync.mockResolvedValue(null);
+        expect(await validateAppliedAgentAction(appliedAction(5, {
+            result_data: { library_id: 5, library_ref: 'g999', zotero_key: 'AAAAAAA1' },
+        }))).toBe('unverifiable');
+        expect(getByLibraryAndKeyAsync).not.toHaveBeenCalled();
     });
 
     it('returns valid when a group-library item resolves', async () => {
@@ -75,14 +88,14 @@ describe('validateAppliedAgentAction', () => {
         expect(await validateAppliedAgentAction(action)).toBe('invalid');
     });
 
-    it('returns unverifiable for bulk annotations in an unresolvable group library', async () => {
+    it('returns unverifiable for bulk annotations in an unavailable group library', async () => {
         getByLibraryAndKeyAsync.mockResolvedValue(null);
         const action = appliedAction(5, {
             action_type: 'create_highlight_annotations',
             result_data: {
                 created: [
-                    { library_id: 5, zotero_key: 'AAAAAAA1' },
-                    { library_id: 5, zotero_key: 'AAAAAAA2' },
+                    { library_id: 5, library_ref: 'g999', zotero_key: 'AAAAAAA1' },
+                    { library_id: 5, library_ref: 'g999', zotero_key: 'AAAAAAA2' },
                 ],
             },
         } as Partial<AgentAction>);

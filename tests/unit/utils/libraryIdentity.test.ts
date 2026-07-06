@@ -5,6 +5,7 @@ import {
     parseLibraryRef,
     resolveLibraryRef,
     resolveItemReference,
+    resolveWriteTargetLibrary,
 } from '../../../src/utils/libraryIdentity';
 
 describe('libraryIdentity', () => {
@@ -164,6 +165,37 @@ describe('libraryIdentity', () => {
             const result = await resolveItemReference({ library_id: 0, zotero_key: 'AAAAAAA1' });
             expect(result).toEqual({ status: 'library_unavailable' });
             expect(getByLibraryAndKeyAsync).not.toHaveBeenCalled();
+        });
+    });
+
+    describe('resolveWriteTargetLibrary', () => {
+        it('uses legacy library_id when library_ref is absent', () => {
+            expect(resolveWriteTargetLibrary({ library_id: 5 })).toEqual({ ok: true, libraryID: 5 });
+        });
+
+        it('resolves library_name when no id or ref is present', () => {
+            zotero.Libraries.getAll = vi.fn(() => [{ libraryID: 7, name: 'Group Library' }]);
+            expect(resolveWriteTargetLibrary({ library_name: 'group library' })).toEqual({ ok: true, libraryID: 7 });
+        });
+
+        it('defaults to the personal library when no target is provided', () => {
+            expect(resolveWriteTargetLibrary({})).toEqual({ ok: true, libraryID: 1 });
+        });
+
+        it('rejects a malformed present library_ref without falling back to library_id', () => {
+            const result = resolveWriteTargetLibrary({ library_ref: 'bad-ref', library_id: 5 });
+            expect(result).toMatchObject({ ok: false, code: 'invalid_library_ref' });
+        });
+
+        it('rejects an unavailable group library_ref without falling back to library_id', () => {
+            getLibraryIDFromGroupID.mockReturnValue(false);
+            const result = resolveWriteTargetLibrary({ library_ref: 'g42', library_id: 5 });
+            expect(result).toMatchObject({ ok: false, code: 'library_unavailable' });
+        });
+
+        it('resolves a present library_ref and ignores stale library_id', () => {
+            getLibraryIDFromGroupID.mockReturnValue(8);
+            expect(resolveWriteTargetLibrary({ library_ref: 'g42', library_id: 5 })).toEqual({ ok: true, libraryID: 8 });
         });
     });
 });

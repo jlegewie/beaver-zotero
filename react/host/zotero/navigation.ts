@@ -9,17 +9,21 @@ import { navigateToAnnotation } from '../../utils/readerUtils';
 import { navigateToAttachmentMatch as navigateToAttachmentMatchImpl } from '../../utils/attachmentMatchNavigation';
 import { openPreferencesWindow } from '../../../src/ui/openPreferencesWindow';
 import { getMergedActions } from '../../types/actionStorage';
+import { resolveItemReference, resolveLibraryRef } from '../../../src/utils/libraryIdentity';
 
 /**
  * Whether a referenced item still exists in the Zotero library. History-rendered
  * surfaces (request chips, tool-result views) hold persisted refs that may have
  * been deleted since the run was saved. Sync; tolerant of a missing library.
  */
-function itemExists(ref: ZoteroItemReference): boolean {
+function resolveItemID(ref: ZoteroItemReference): { itemID: number; libraryID: number } | null | 'library_unavailable' {
     try {
-        return !!Zotero.Items.getIDFromLibraryAndKey(ref.library_id, ref.zotero_key);
+        const libraryID = resolveLibraryRef(ref);
+        if (!libraryID) return 'library_unavailable';
+        const itemID = Zotero.Items.getIDFromLibraryAndKey(libraryID, ref.zotero_key);
+        return itemID ? { itemID, libraryID } : null;
     } catch {
-        return false;
+        return null;
     }
 }
 
@@ -32,18 +36,24 @@ function itemExists(ref: ZoteroItemReference): boolean {
  */
 export const zoteroNavigation: NavigationHost = {
     revealInLibrary(ref: ZoteroItemReference): void {
-        if (!itemExists(ref)) {
-            notifyReferenceUnavailable('item');
+        const resolved = resolveItemID(ref);
+        if (!resolved || resolved === 'library_unavailable') {
+            notifyReferenceUnavailable('item', resolved === 'library_unavailable' ? 'library_unavailable' : 'missing');
             return;
         }
-        revealSource(ref);
+        revealSource({ ...ref, library_id: resolved.libraryID });
     },
     revealLibrary(libraryId: number): void {
         const library = Zotero.Libraries.get(libraryId);
         if (library) void selectLibrary(library as Zotero.Library);
     },
     revealCollection(ref: ZoteroItemReference): void {
-        const found = Zotero.Collections.getByLibraryAndKey(ref.library_id, ref.zotero_key);
+        const libraryID = resolveLibraryRef(ref);
+        if (!libraryID) {
+            notifyReferenceUnavailable('collection', 'library_unavailable');
+            return;
+        }
+        const found = Zotero.Collections.getByLibraryAndKey(libraryID, ref.zotero_key);
         if (found) selectCollection(found);
         else notifyReferenceUnavailable('collection');
     },
@@ -55,16 +65,17 @@ export const zoteroNavigation: NavigationHost = {
     },
     activateCitation,
     openSource(ref: ZoteroItemReference): Promise<void> {
-        if (!itemExists(ref)) {
-            notifyReferenceUnavailable('item');
+        const resolved = resolveItemID(ref);
+        if (!resolved || resolved === 'library_unavailable') {
+            notifyReferenceUnavailable('item', resolved === 'library_unavailable' ? 'library_unavailable' : 'missing');
             return Promise.resolve();
         }
-        return openZoteroSource(ref);
+        return openZoteroSource({ ...ref, library_id: resolved.libraryID });
     },
     async openAnnotation(ref: ZoteroItemReference): Promise<void> {
-        const item = await Zotero.Items.getByLibraryAndKeyAsync(ref.library_id, ref.zotero_key);
-        if (item && item.isAnnotation()) await navigateToAnnotation(item);
-        else notifyReferenceUnavailable('annotation');
+        const resolved = await resolveItemReference(ref);
+        if (resolved.status === 'found' && resolved.item.isAnnotation()) await navigateToAnnotation(resolved.item);
+        else notifyReferenceUnavailable('annotation', resolved.status === 'library_unavailable' ? 'library_unavailable' : 'missing');
     },
     navigateToAttachmentMatch(match: AttachmentMatchNavigation): Promise<void> {
         return navigateToAttachmentMatchImpl({

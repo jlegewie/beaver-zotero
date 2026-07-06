@@ -140,7 +140,7 @@ import { triggerProfileRefresh } from '../hooks/useProfileSync';
 import { agentItemFilterAsync, isAgentSupportedItem } from '../../src/utils/agentItemSupport';
 import { safeIsInTrash } from '../../src/utils/zoteroUtils';
 import { wasItemAddedBeforeLastSync } from '../utils/sourceUtils';
-import { libraryRefForLibraryID } from '../../src/utils/libraryIdentity';
+import { libraryRefForLibraryID, resolveItemReference, resolveLibraryRef } from '../../src/utils/libraryIdentity';
 import { ZoteroItemReference, createZoteroItemReference } from '../types/zotero';
 import { markExternalReferenceImportedAtom } from './externalReferences';
 import type { CreateItemProposedData, CreateItemResultData } from '../types/agentActions/items';
@@ -608,11 +608,10 @@ async function undoAppliedActionsInReverse(actions: AgentAction[]): Promise<void
             if (isCreateAnnotationsAgentAction(action)) {
                 await undoCreateAnnotationsAction(action);
             } else if (isAnnotationAgentAction(action) || isZoteroNoteAgentAction(action)) {
-                const item = await Zotero.Items.getByLibraryAndKeyAsync(
-                    action.result_data!.library_id,
-                    action.result_data!.zotero_key
-                );
-                if (item) await item.eraseTx();
+                const ref = action.result_data as ZoteroItemReference | undefined;
+                if (!ref) continue;
+                const resolved = await resolveItemReference(ref);
+                if (resolved.status === 'found') await resolved.item.eraseTx();
             } else if (isEditMetadataAgentAction(action)) {
                 // false = preserve fields the user manually modified after apply
                 await undoEditMetadataAction(action, false);
@@ -734,6 +733,7 @@ function confirmUndoAppliedActions(actions: ActionsToUndo): UndoConfirmResult {
 /** Reason why an item might be missing from the backend */
 type MissingItemReason = 
     | 'not_found'           // Item doesn't exist in Zotero
+    | 'library_unavailable' // Library is not available on this computer
     | 'in_trash'            // Item is in trash
     | 'library_not_synced'  // Library not configured to sync
     | 'filtered_from_sync'  // Doesn't pass sync filters (e.g., not a PDF)
@@ -750,14 +750,18 @@ async function determineMissingReason(ref: ZoteroItemReference, userId: string |
         // Get searchable libraries from store
         const searchableLibraryIds = store.get(searchableLibraryIdsAtom);
         const syncWithZotero = store.get(syncWithZoteroAtom);
+        const resolvedLibraryId = resolveLibraryRef(ref);
+        if (!resolvedLibraryId) {
+            return 'library_unavailable';
+        }
 
         // Check if library is searchable (synced for Pro, all local for Free)
-        if (!searchableLibraryIds.includes(ref.library_id)) {
+        if (!searchableLibraryIds.includes(resolvedLibraryId)) {
             return 'library_not_synced';
         }
 
         // Try to get the item from Zotero
-        const item = await Zotero.Items.getByLibraryAndKeyAsync(ref.library_id, ref.zotero_key);
+        const item = await Zotero.Items.getByLibraryAndKeyAsync(resolvedLibraryId, ref.zotero_key);
         if (!item) {
             return 'not_found';
         }
@@ -812,6 +816,7 @@ async function determineMissingReason(ref: ZoteroItemReference, userId: string |
 /** Human-readable messages for each missing reason */
 const MISSING_REASON_MESSAGES: Record<MissingItemReason, string> = {
     'not_found': 'Item not found in your Zotero library',
+    'library_unavailable': "Library is not available on this computer. It may be a group library you haven't joined on this device",
     'in_trash': 'Item is in trash',
     'library_not_synced': 'Library is not configured to sync with Beaver',
     'filtered_from_sync': 'Item type not supported',
@@ -1086,10 +1091,11 @@ function createWSCallbacks(set: Setter): WSCallbacks {
                 const itemReferences = extractZoteroReferencesFromToolCall(event.part);
                 if (itemReferences.length > 0) {
                     logger(`WS onPart: Loading ${itemReferences.length} item data for tool call`, 1);
-                    const itemPromises = itemReferences.map(ref => 
-                        Zotero.Items.getByLibraryAndKeyAsync(ref.library_id, ref.zotero_key)
-                    );
-                    const items = (await Promise.all(itemPromises)).filter(Boolean) as Zotero.Item[];
+                    const itemPromises = itemReferences.map(async ref => {
+                        const resolved = await resolveItemReference(ref);
+                        return resolved.status === 'found' ? resolved.item : null;
+                    });
+                    const items = (await Promise.all(itemPromises)).filter((item): item is Zotero.Item => !!item);
                     if (items.length > 0) {
                         await loadFullItemDataWithAllTypes(items).catch(err => 
                             logger(`WS onPart: Failed to load item data for tool call: ${err}`, 1)

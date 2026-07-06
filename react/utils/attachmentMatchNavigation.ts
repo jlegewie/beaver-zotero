@@ -17,6 +17,8 @@ import { navigateToEpubCitation } from './epubVisualizer/epubCitationNavigation'
 import { navigateToSnapshotCitation } from './snapshotVisualizer/snapshotCitationNavigation';
 import { getCurrentReaderAndWaitForView } from './readerUtils';
 import { revealSource } from './sourceUtils';
+import { resolveItemReference } from '../../src/utils/libraryIdentity';
+import { notifyReferenceUnavailable } from '../host/zotero/sourceActions';
 
 /** One find_in_attachments match to navigate to. */
 export interface AttachmentMatchNavRequest {
@@ -53,11 +55,13 @@ export async function navigateToAttachmentMatch(nav: AttachmentMatchNavRequest):
     // Cleanup any existing temporary annotations
     await BeaverTemporaryAnnotations.cleanupAll();
 
-    const item = await Zotero.Items.getByLibraryAndKeyAsync(nav.library_id, nav.zotero_key);
-    if (!item) {
-        logger(`navigateToAttachmentMatch: item not found (${nav.library_id}-${nav.zotero_key})`);
+    const resolved = await resolveItemReference(nav);
+    if (resolved.status !== 'found') {
+        logger(`navigateToAttachmentMatch: item not found (${nav.library_ref || nav.library_id}-${nav.zotero_key})`);
+        notifyReferenceUnavailable('item', resolved.status === 'library_unavailable' ? 'library_unavailable' : 'missing');
         return;
     }
+    const item = resolved.item;
     await item.loadAllData();
 
     if (!item.isAttachment()) {

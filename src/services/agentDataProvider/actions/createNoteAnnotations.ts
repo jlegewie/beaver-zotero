@@ -26,7 +26,7 @@ import type { ZoteroItemReference } from '../../../../react/types/zotero';
 import { normalizeNotePosition } from '../../../../react/types/agentActions/annotations';
 import { normalizeAnnotationTags } from '../../../../react/types/agentActions/createAnnotations';
 import { shortItemTitle } from '../../../utils/zoteroUtils';
-import { libraryRefForLibraryID } from '../../../utils/libraryIdentity';
+import { libraryRefForLibraryID, resolveItemReference } from '../../../utils/libraryIdentity';
 import { logger } from '../../../utils/logger';
 
 function mapAnnotationErrorCode(error: unknown): string {
@@ -103,8 +103,8 @@ function normalizeItem(raw: any): NoteAnnotationItem {
 
 async function resolveAttachment(ref: ZoteroItemReference): Promise<Zotero.Item | null> {
     if (!ref.library_id || !ref.zotero_key) return null;
-    const item = await Zotero.Items.getByLibraryAndKeyAsync(ref.library_id, ref.zotero_key);
-    return item || null;
+    const resolved = await resolveItemReference(ref);
+    return resolved.status === 'found' ? resolved.item : null;
 }
 
 async function getAttachmentTitle(attachment: Zotero.Item): Promise<string> {
@@ -152,7 +152,19 @@ export async function validateCreateNoteAnnotationsAction(
         };
     }
 
-    const libValidation = validateLibraryAccess(resolved_ref.library_id);
+    const attachment = await resolveAttachment(resolved_ref);
+    const contentKind = attachment ? getAnnotationContentKind(attachment) : null;
+    if (!attachment || !contentKind) {
+        return {
+            type: 'agent_action_validate_response',
+            request_id: request.request_id,
+            valid: false,
+            error: 'Resolved item is not a local PDF or EPUB attachment',
+            error_code: 'invalid_attachment',
+            preference: 'always_ask',
+        };
+    }
+    const libValidation = validateLibraryAccess(attachment.libraryID);
     if (!libValidation.valid) {
         return {
             type: 'agent_action_validate_response',
@@ -171,19 +183,6 @@ export async function validateCreateNoteAnnotationsAction(
             valid: false,
             error: `Library '${library.name}' is read-only and cannot be modified`,
             error_code: 'library_not_editable',
-            preference: 'always_ask',
-        };
-    }
-
-    const attachment = await resolveAttachment(resolved_ref);
-    const contentKind = attachment ? getAnnotationContentKind(attachment) : null;
-    if (!attachment || !contentKind) {
-        return {
-            type: 'agent_action_validate_response',
-            request_id: request.request_id,
-            valid: false,
-            error: 'Resolved item is not a local PDF or EPUB attachment',
-            error_code: 'invalid_attachment',
             preference: 'always_ask',
         };
     }
@@ -244,19 +243,6 @@ export async function executeCreateNoteAnnotationsAction(
 
     // TOCTOU guard: never annotate an attachment in a library the user excluded
     // from Beaver, even if validation passed earlier or the request skipped it.
-    if (resolved_ref.library_id) {
-        const excluded = checkLibraryExcluded(resolved_ref.library_id);
-        if (excluded) {
-            return {
-                type: 'agent_action_execute_response',
-                request_id: request.request_id,
-                success: false,
-                error: excluded.message,
-                error_code: 'library_not_searchable',
-            };
-        }
-    }
-
     const attachment = await resolveAttachment(resolved_ref);
     const contentKind = attachment ? getAnnotationContentKind(attachment) : null;
     if (!attachment || !contentKind) {
@@ -266,6 +252,16 @@ export async function executeCreateNoteAnnotationsAction(
             success: false,
             error: 'Resolved item is not a local PDF or EPUB attachment',
             error_code: 'invalid_attachment',
+        };
+    }
+    const excluded = checkLibraryExcluded(attachment.libraryID);
+    if (excluded) {
+        return {
+            type: 'agent_action_execute_response',
+            request_id: request.request_id,
+            success: false,
+            error: excluded.message,
+            error_code: 'library_not_searchable',
         };
     }
 

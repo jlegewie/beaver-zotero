@@ -8,7 +8,7 @@
  */
 
 import { logger } from '../../utils/logger';
-import { libraryRefForLibraryID } from '../../utils/libraryIdentity';
+import { libraryRefForLibraryID, resolveLibraryRef } from '../../utils/libraryIdentity';
 
 import { isAttachmentAvailableRemotely } from '../../utils/webAPI';  // kept for file_missing message check
 import {
@@ -87,10 +87,14 @@ export async function handleZoteroAttachmentPageImagesRequest(
             'invalid_format'
         );
     }
-
-    // Reject libraries the user excluded from Beaver before any item lookup, so
-    // an excluded attachment is never resolved, rendered, or confirmed to exist.
-    const excluded = checkLibraryExcluded(attachment.library_id);
+    const resolvedLibraryId = resolveLibraryRef(attachment);
+    if (!resolvedLibraryId) {
+        return errorResponse(
+            "Attachment is in a library that isn't available on this computer.",
+            'library_unavailable'
+        );
+    }
+    const excluded = checkLibraryExcluded(resolvedLibraryId);
     if (excluded) {
         return errorResponse(excluded.message, 'library_excluded');
     }
@@ -99,9 +103,8 @@ export async function handleZoteroAttachmentPageImagesRequest(
     const { signal, timeoutSeconds, throwIfTimedOut, dispose } = timeout;
 
     try {
-        // 1. Get the attachment item from Zotero
         const zoteroItem = await Zotero.Items.getByLibraryAndKeyAsync(
-            attachment.library_id,
+            resolvedLibraryId,
             attachment.zotero_key
         );
         throwIfTimedOut('zotero_item_lookup');

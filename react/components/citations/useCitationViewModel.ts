@@ -73,6 +73,7 @@ export function readCitationProps(props: Record<string, unknown>): CitationProps
     }
 
     const libraryIDRaw = propValue(props, 'dataLibraryId', 'data-library-id');
+    const libraryRef = propValue(props, 'dataLibraryRef', 'data-library-ref');
     const zoteroKey = propValue(props, 'dataZoteroKey', 'data-zotero-key');
     const externalId = propValue(props, 'dataExternalId', 'data-external-id');
     const externalSource = propValue(props, 'dataExternalSource', 'data-external-source');
@@ -87,7 +88,13 @@ export function readCitationProps(props: Record<string, unknown>): CitationProps
     if (libraryIDRaw && zoteroKey) {
         const libraryID = Number(libraryIDRaw);
         if (Number.isInteger(libraryID) && libraryID > 0) {
-            const ref: CitationRef = { kind: 'zotero', library_id: libraryID, zotero_key: zoteroKey, ...(loc ? { loc } : {}) };
+            const ref: CitationRef = {
+                kind: 'zotero',
+                library_id: libraryID,
+                zotero_key: zoteroKey,
+                ...(libraryRef ? { library_ref: libraryRef } : {}),
+                ...(loc ? { loc } : {}),
+            };
             return { ok: true, ref, requestedKey: requestedKey || requestedCitationKey(ref), consecutive, adjacent };
         }
     }
@@ -146,6 +153,7 @@ export interface CitationViewModel {
     /** Effective identity, accounting for mapped external references. */
     effectiveLibraryID: number;
     effectiveItemKey: string;
+    effectiveLibraryRef?: string;
     consecutive: boolean;
     adjacent: boolean;
     /** Display strings derived from metadata. */
@@ -215,7 +223,7 @@ export function useCitationViewModel(props: Record<string, unknown>): CitationVi
 
         const displayRef = resolvedRef ?? (parsedProps.ok ? parsedProps.ref : null);
         const zoteroRef = displayRef?.kind === 'zotero'
-            ? { libraryID: displayRef.library_id, itemKey: displayRef.zotero_key }
+            ? { libraryID: displayRef.library_id, itemKey: displayRef.zotero_key, libraryRef: displayRef.library_ref }
             : null;
         const externalSourceId = displayRef?.kind === 'external'
             ? displayRef.external_id
@@ -256,6 +264,7 @@ export function useCitationViewModel(props: Record<string, unknown>): CitationVi
             // Convenience accessors
             libraryID: zoteroRef?.libraryID ?? 0,
             itemKey: zoteroRef?.itemKey ?? '',
+            libraryRef: zoteroRef?.libraryRef,
             requestedRef: parsedProps.ok ? parsedProps.ref : null,
             resolvedRef,
             externalSourceId,
@@ -272,6 +281,7 @@ export function useCitationViewModel(props: Record<string, unknown>): CitationVi
         displayState,
         libraryID,
         itemKey,
+        libraryRef,
         requestedRef,
         resolvedRef,
         externalSourceId,
@@ -285,6 +295,7 @@ export function useCitationViewModel(props: Record<string, unknown>): CitationVi
     // Compute effective libraryID and itemKey (accounting for mapped external citations).
     const effectiveLibraryID = libraryID || mappedZoteroItem?.library_id || 0;
     const effectiveItemKey = itemKey || mappedZoteroItem?.zotero_key || '';
+    const effectiveLibraryRef = libraryRef || mappedZoteroItem?.library_ref || undefined;
 
     // Derive citation display data from metadata alone (citation v2): no Zotero
     // item access happens here, so the same render path works for Zotero items,
@@ -400,6 +411,7 @@ export function useCitationViewModel(props: Record<string, unknown>): CitationVi
         mappedZoteroItem,
         effectiveLibraryID,
         effectiveItemKey,
+        effectiveLibraryRef,
         consecutive: parsedProps.consecutive,
         adjacent: parsedProps.adjacent,
         formatted_citation,

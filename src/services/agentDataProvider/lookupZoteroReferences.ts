@@ -6,7 +6,7 @@
  */
 
 import { logger } from '../../utils/logger';
-import { libraryRefForLibraryID } from '../../utils/libraryIdentity';
+import { libraryRefForLibraryID, resolveItemReference } from '../../utils/libraryIdentity';
 import { ItemDataWithStatus, AttachmentDataWithStatus, ZoteroItemReference, ItemStub } from '../../../react/types/zotero';
 import { searchableLibraryIdsAtom, syncWithZoteroAtom } from '../../../react/atoms/profile';
 import { userIdAtom } from '../../../react/atoms/auth';
@@ -91,16 +91,18 @@ export async function lookupZoteroReferences(
 
     const loadResults = await Promise.all(
         references.map(async (reference) => {
-            // Never load items from libraries the user excluded from Beaver; the
-            // reference is reported as an error so its data is never serialized.
-            const excluded = checkLibraryExcluded(reference.library_id);
-            if (excluded) {
-                return { reference, error: excluded.message, error_code: 'library_excluded' as const };
-            }
             try {
-                const zoteroItem = await Zotero.Items.getByLibraryAndKeyAsync(reference.library_id, reference.zotero_key);
-                if (!zoteroItem) {
+                const resolved = await resolveItemReference(reference);
+                if (resolved.status === 'library_unavailable') {
+                    return { reference, error: 'Library is not available on this computer', error_code: 'library_unavailable' as const };
+                }
+                if (resolved.status === 'not_found') {
                     return { reference, error: 'Item not found in local database', error_code: 'not_found' as const };
+                }
+                const zoteroItem = resolved.item;
+                const excluded = checkLibraryExcluded(zoteroItem.libraryID);
+                if (excluded) {
+                    return { reference, error: excluded.message, error_code: 'library_excluded' as const };
                 }
                 return { reference, item: zoteroItem };
             } catch (error: any) {
@@ -116,6 +118,7 @@ export async function lookupZoteroReferences(
         if ('item' in result && result.item) {
             primaryItems.push(result.item);
             referenceToItem.set(makeKey(result.reference.library_id, result.reference.zotero_key), result.item);
+            referenceToItem.set(makeKey(result.item.libraryID, result.item.key), result.item);
         } else if ('error' in result) {
             errors.push({
                 reference: result.reference,

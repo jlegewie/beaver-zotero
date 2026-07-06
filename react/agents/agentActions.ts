@@ -1,5 +1,6 @@
 import { atom } from 'jotai';
 import { logger } from '../../src/utils/logger';
+import { resolveItemReference } from '../../src/utils/libraryIdentity';
 import { dismissDiffPreview } from '../utils/noteEditorDiffPreview';
 import { updateDiffPreviewForNote, diffPreviewNoteKeyAtom } from '../utils/diffPreviewCoordinator';
 import { makeNoteKey } from '../atoms/editNoteAutoApprove';
@@ -240,7 +241,8 @@ export const getZoteroItemReferenceFromAgentAction = (action: AgentAction): Zote
 export const getZoteroItemFromAgentAction = async (action: AgentAction): Promise<Zotero.Item | null> => {
     const ref = getZoteroItemReferenceFromAgentAction(action);
     if (!ref) return null;
-    return (await Zotero.Items.getByLibraryAndKeyAsync(ref.library_id, ref.zotero_key)) || null;
+    const resolved = await resolveItemReference(ref);
+    return resolved.status === 'found' ? resolved.item : null;
 };
 
 /**
@@ -253,23 +255,14 @@ export const getZoteroItemFromAgentAction = async (action: AgentAction): Promise
  */
 export type AppliedActionValidity = 'valid' | 'invalid' | 'unverifiable';
 
-/**
- * Personal-library references are portable across installs (the personal
- * library is the same libraryID everywhere); group-library references are not.
- */
-const isPortableLibraryReference = (ref: ZoteroItemReference): boolean => {
-    return ref.library_id === Zotero.Libraries.userLibraryID;
-};
-
 const checkAppliedReference = async (
     ref: ZoteroItemReference,
     mustBeAnnotation: boolean
 ): Promise<AppliedActionValidity> => {
-    const item = await Zotero.Items.getByLibraryAndKeyAsync(ref.library_id, ref.zotero_key);
-    if (item) {
-        return mustBeAnnotation && !item.isAnnotation() ? 'invalid' : 'valid';
-    }
-    return isPortableLibraryReference(ref) ? 'invalid' : 'unverifiable';
+    const resolved = await resolveItemReference(ref);
+    if (resolved.status === 'library_unavailable') return 'unverifiable';
+    if (resolved.status === 'not_found') return 'invalid';
+    return mustBeAnnotation && !resolved.item.isAnnotation() ? 'invalid' : 'valid';
 };
 
 /**
@@ -1123,8 +1116,13 @@ export async function buildPendingApprovalFromAction(action: AgentAction): Promi
         const hasCreators = Array.isArray(actionData.creators) && actionData.creators.length > 0;
 
         if (libraryId && zoteroKey && (edits.length > 0 || hasCreators)) {
-            const item = await Zotero.Items.getByLibraryAndKeyAsync(libraryId, zoteroKey);
-            if (item) {
+            const resolved = await resolveItemReference({
+                library_id: libraryId,
+                library_ref: typeof actionData.library_ref === 'string' ? actionData.library_ref : undefined,
+                zotero_key: zoteroKey,
+            });
+            if (resolved.status === 'found') {
+                const item = resolved.item;
                 const values: Record<string, any> = {};
                 for (const edit of edits) {
                     const field = typeof edit?.field === 'string' ? edit.field : null;

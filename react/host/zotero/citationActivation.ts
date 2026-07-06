@@ -36,7 +36,7 @@ import {
     getBestReadableTextAttachmentAsync,
 } from '../../../src/utils/zoteroItemHelpers';
 import { BEAVER_CITATION_ANNOTATION_AUTHOR } from '../../../src/constants/annotations';
-import { libraryRefForLibraryID } from '../../../src/utils/libraryIdentity';
+import { libraryRefForLibraryID, resolveItemReference } from '../../../src/utils/libraryIdentity';
 import type { CitationActivation } from '../types';
 
 /** Reveal the cited item in the library view. */
@@ -63,6 +63,7 @@ export async function activateCitation(activation: CitationActivation): Promise<
         hasMappedItem,
         effectiveLibraryID,
         effectiveItemKey,
+        effectiveLibraryRef,
         previewText,
         ownerDocument,
     } = activation;
@@ -97,19 +98,24 @@ export async function activateCitation(activation: CitationActivation): Promise<
     // Cleanup any existing temporary annotations
     await BeaverTemporaryAnnotations.cleanupAll();
 
-    if (!effectiveLibraryID || !effectiveItemKey) {
+    if ((!effectiveLibraryID && !effectiveLibraryRef) || !effectiveItemKey) {
         logger('Citation activation: No valid item reference');
         return;
     }
 
-    logger(`Citation activation: Zotero Item (${effectiveLibraryID}, ${effectiveItemKey})`);
-    const item = await Zotero.Items.getByLibraryAndKeyAsync(effectiveLibraryID, effectiveItemKey);
+    logger(`Citation activation: Zotero Item (${effectiveLibraryRef || effectiveLibraryID}, ${effectiveItemKey})`);
+    const resolved = await resolveItemReference({
+        library_ref: effectiveLibraryRef,
+        library_id: effectiveLibraryID,
+        zotero_key: effectiveItemKey,
+    });
 
-    if (!item) {
-        logger(`Citation activation: Failed to get Zotero item (${effectiveLibraryID}, ${effectiveItemKey})`);
-        notifyReferenceUnavailable('item');
+    if (resolved.status !== 'found') {
+        logger(`Citation activation: Failed to get Zotero item (${effectiveLibraryRef || effectiveLibraryID}, ${effectiveItemKey})`);
+        notifyReferenceUnavailable('item', resolved.status === 'library_unavailable' ? 'library_unavailable' : 'missing');
         return;
     }
+    const item = resolved.item;
 
     await item.loadAllData();
 

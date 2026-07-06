@@ -19,7 +19,7 @@ import {
     WSAgentActionExecuteResponse,
 } from '../../agentProtocol';
 import { checkLibraryExcluded, getDeferredToolPreference, validateLibraryAccess } from '../utils';
-import { libraryRefForLibraryID } from '../../../utils/libraryIdentity';
+import { libraryRefForLibraryID, resolveWriteTargetLibrary } from '../../../utils/libraryIdentity';
 import { TimeoutContext, checkAborted, TimeoutError } from '../timeout';
 import { logger } from '../../../utils/logger';
 
@@ -308,11 +308,12 @@ export async function executeManageTagsAction(
     request: WSAgentActionExecuteRequest,
     ctx: TimeoutContext,
 ): Promise<WSAgentActionExecuteResponse> {
-    const { action, name, new_name, library_id } = request.action_data as {
+    const { action, name, new_name, library_id, library_ref } = request.action_data as {
         action: 'rename' | 'delete';
         name: string;
         new_name?: string | null;
         library_id: number;
+        library_ref?: string | null;
     };
 
     if (!library_id || typeof library_id !== 'number') {
@@ -325,9 +326,21 @@ export async function executeManageTagsAction(
         };
     }
 
+    const targetResolution = resolveWriteTargetLibrary({ library_id, library_ref });
+    if (!targetResolution.ok) {
+        return {
+            type: 'agent_action_execute_response',
+            request_id: request.request_id,
+            success: false,
+            error: targetResolution.message,
+            error_code: targetResolution.code === 'library_unavailable' ? 'library_unavailable' : 'invalid_library_id',
+        };
+    }
+    const resolvedLibraryId = targetResolution.libraryID;
+
     // TOCTOU guard: never rename/delete tags in a library the user excluded from
     // Beaver, even if validation passed earlier or the execute request skipped it.
-    const excluded = checkLibraryExcluded(library_id);
+    const excluded = checkLibraryExcluded(resolvedLibraryId);
     if (excluded) {
         return {
             type: 'agent_action_execute_response',
@@ -342,16 +355,16 @@ export async function executeManageTagsAction(
         // Re-snapshot the authoritative pre-apply state at execute time.
         // This ensures a re-apply after manual library edits produces a fresh
         // snapshot that the next undo can correctly reverse.
-        const resolution = await resolveTagByName(name, library_id);
+        const resolution = await resolveTagByName(name, resolvedLibraryId);
         const tagID = resolution.tagID;
         if (resolution.tagID !== null && resolution.source === 'cache_rebuilt') {
-            logger(`executeManageTagsAction: cache desync repaired for '${name}' in library ${library_id} (Zotero.Tags.init rebuilt, tagID=${tagID})`, 1);
+            logger(`executeManageTagsAction: cache desync repaired for '${name}' in library ${resolvedLibraryId} (Zotero.Tags.init rebuilt, tagID=${tagID})`, 1);
         }
 
         let affectedItemIds: string[] = [];
         if (tagID !== null) {
             try {
-                const ids = await Zotero.Tags.getTagItems(library_id, tagID);
+                const ids = await Zotero.Tags.getTagItems(resolvedLibraryId, tagID);
                 if (ids.length > MAX_SNAPSHOT_ITEMS) {
                     return {
                         type: 'agent_action_execute_response',
@@ -361,12 +374,12 @@ export async function executeManageTagsAction(
                         error_code: 'too_many_items',
                     };
                 }
-                affectedItemIds = await itemIdsToKeys(library_id, ids);
+                affectedItemIds = await itemIdsToKeys(resolvedLibraryId, ids);
             } catch (e) {
                 logger(`executeManageTagsAction: getTagItems snapshot failed: ${e}`, 1);
             }
         }
-        const rawColor = Zotero.Tags.getColor(library_id, name);
+        const rawColor = Zotero.Tags.getColor(resolvedLibraryId, name);
         const oldColor = rawColor && typeof rawColor === 'object'
             ? { color: (rawColor as any).color, position: (rawColor as any).position }
             : null;
@@ -390,18 +403,18 @@ export async function executeManageTagsAction(
             isMerge = existingTarget !== false && existingTarget != null;
 
             checkAborted(ctx, 'manage_tags:before_rename');
-            await Zotero.Tags.rename(library_id, name, target);
-            logger(`executeManageTagsAction: Renamed tag '${name}' → '${target}' in library ${library_id}`, 1);
+            await Zotero.Tags.rename(resolvedLibraryId, name, target);
+            logger(`executeManageTagsAction: Renamed tag '${name}' → '${target}' in library ${resolvedLibraryId}`, 1);
         } else if (action === 'delete') {
             if (tagID === null) {
                 // Already gone — treat as success with 0 affected items
-                logger(`executeManageTagsAction: Tag '${name}' not found in library ${library_id}; treating as already deleted`, 1);
+                logger(`executeManageTagsAction: Tag '${name}' not found in library ${resolvedLibraryId}; treating as already deleted`, 1);
             } else {
                 checkAborted(ctx, 'manage_tags:before_delete');
                 // onProgress and types are optional at runtime (see Zotero.Tags.removeFromLibrary
                 // JSDoc in tags.js); the .d.ts in zotero-types marks them required. Pass undefined.
-                await (Zotero.Tags.removeFromLibrary as any)(library_id, [tagID]);
-                logger(`executeManageTagsAction: Deleted tag '${name}' from library ${library_id}`, 1);
+                await (Zotero.Tags.removeFromLibrary as any)(resolvedLibraryId, [tagID]);
+                logger(`executeManageTagsAction: Deleted tag '${name}' from library ${resolvedLibraryId}`, 1);
             }
         } else {
             return {
@@ -418,8 +431,8 @@ export async function executeManageTagsAction(
             request_id: request.request_id,
             success: true,
             result_data: {
-                library_id,
-                library_ref: libraryRefForLibraryID(library_id) ?? undefined,
+                library_id: resolvedLibraryId,
+                library_ref: libraryRefForLibraryID(resolvedLibraryId) ?? undefined,
                 action,
                 name,
                 new_name: new_name ?? null,

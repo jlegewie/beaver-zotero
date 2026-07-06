@@ -20,7 +20,7 @@ import { saveStreamingNote } from './noteActions';
 import { currentThreadIdAtom } from '../atoms/threads';
 import { logger } from '../../src/utils/logger';
 import { parseZoteroId } from './citationGrammar';
-import { libraryRefForLibraryID } from '../../src/utils/libraryIdentity';
+import { libraryRefForLibraryID, resolveItemReference } from '../../src/utils/libraryIdentity';
 
 /**
  * Extract all Zotero item references from agent actions that need to be loaded.
@@ -113,10 +113,10 @@ export async function loadItemDataForAgentActions(actions: AgentAction[]): Promi
     const refs = extractItemReferencesFromAgentActions(actions);
     if (refs.length === 0) return [];
 
-    // Fetch items by library and key
-    const itemPromises = refs.map(ref =>
-        Zotero.Items.getByLibraryAndKeyAsync(ref.library_id, ref.zotero_key)
-    );
+    const itemPromises = refs.map(async ref => {
+        const resolved = await resolveItemReference(ref);
+        return resolved.status === 'found' ? resolved.item : null;
+    });
     const items = (await Promise.all(itemPromises)).filter((item): item is Zotero.Item => !!item);
 
     // Load full item data
@@ -369,16 +369,19 @@ export async function autoCreateNoteAgentActions(
         let targetLibraryId: number | undefined;
 
         if (proposed.library_id != null && proposed.zotero_key) {
-            const item = await Zotero.Items.getByLibraryAndKeyAsync(
-                proposed.library_id, proposed.zotero_key
-            );
-            if (item) {
-                targetLibraryId = proposed.library_id;
-                const libraryRef = proposed.library_ref ?? libraryRefForLibraryID(proposed.library_id) ?? undefined;
+            const resolved = await resolveItemReference({
+                library_id: proposed.library_id,
+                library_ref: proposed.library_ref,
+                zotero_key: proposed.zotero_key,
+            });
+            if (resolved.status === 'found') {
+                const item = resolved.item;
+                targetLibraryId = item.libraryID;
+                const libraryRef = proposed.library_ref ?? libraryRefForLibraryID(item.libraryID) ?? undefined;
                 if (item.isAttachment() && item.parentKey) {
-                    parentReference = { library_id: proposed.library_id, zotero_key: item.parentKey, library_ref: libraryRef };
+                    parentReference = { library_id: item.libraryID, zotero_key: item.parentKey, library_ref: libraryRef };
                 } else {
-                    parentReference = { library_id: proposed.library_id, zotero_key: proposed.zotero_key, library_ref: libraryRef };
+                    parentReference = { library_id: item.libraryID, zotero_key: proposed.zotero_key, library_ref: libraryRef };
                 }
             }
         }

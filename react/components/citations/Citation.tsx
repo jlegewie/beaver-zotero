@@ -34,6 +34,7 @@ const TOOLTIP_WIDTH = '250px';
  */
 interface CitationProps {
     dataLibraryId?: string | number;
+    dataLibraryRef?: string;
     dataZoteroKey?: string;
     dataExternalId?: string;
     dataExternalSource?: string;
@@ -79,6 +80,7 @@ const Citation: React.FC<CitationProps> = (props) => {
         mappedZoteroItem,
         effectiveLibraryID,
         effectiveItemKey,
+        effectiveLibraryRef,
         consecutive,
         citation,
         previewText,
@@ -122,6 +124,7 @@ const Citation: React.FC<CitationProps> = (props) => {
             hasMappedItem: !!mappedZoteroItem,
             effectiveLibraryID,
             effectiveItemKey,
+            effectiveLibraryRef,
             previewText,
             ownerDocument: e.currentTarget.ownerDocument,
         });

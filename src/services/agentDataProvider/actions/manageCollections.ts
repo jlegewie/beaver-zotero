@@ -21,7 +21,7 @@ import {
     WSAgentActionExecuteResponse,
 } from '../../agentProtocol';
 import { checkLibraryExcluded, excludedLibraryMessage, getDeferredToolPreference, isLibrarySearchable, getCollectionByIdOrName } from '../utils';
-import { libraryRefForLibraryID } from '../../../utils/libraryIdentity';
+import { libraryRefForLibraryID, resolveWriteTargetLibrary } from '../../../utils/libraryIdentity';
 import { TimeoutContext, checkAborted, TimeoutError } from '../timeout';
 import { logger } from '../../../utils/logger';
 
@@ -392,12 +392,13 @@ export async function executeManageCollectionsAction(
     request: WSAgentActionExecuteRequest,
     ctx: TimeoutContext,
 ): Promise<WSAgentActionExecuteResponse> {
-    const { action, collection_key, new_name, new_parent_key, library_id } = request.action_data as {
+    const { action, collection_key, new_name, new_parent_key, library_id, library_ref } = request.action_data as {
         action: 'rename' | 'move' | 'delete';
         collection_key: string;
         new_name?: string | null;
         new_parent_key?: string | null;
         library_id: number;
+        library_ref?: string | null;
     };
 
     if (!library_id || typeof library_id !== 'number') {
@@ -410,9 +411,21 @@ export async function executeManageCollectionsAction(
         };
     }
 
+    const targetResolution = resolveWriteTargetLibrary({ library_id, library_ref });
+    if (!targetResolution.ok) {
+        return {
+            type: 'agent_action_execute_response',
+            request_id: request.request_id,
+            success: false,
+            error: targetResolution.message,
+            error_code: targetResolution.code === 'library_unavailable' ? 'library_unavailable' : 'invalid_library_id',
+        };
+    }
+    const resolvedLibraryId = targetResolution.libraryID;
+
     // TOCTOU guard: never rename/move/delete collections in a library the user
     // excluded from Beaver, even if validation passed earlier or was skipped.
-    const excluded = checkLibraryExcluded(library_id);
+    const excluded = checkLibraryExcluded(resolvedLibraryId);
     if (excluded) {
         return {
             type: 'agent_action_execute_response',
@@ -424,7 +437,7 @@ export async function executeManageCollectionsAction(
     }
 
     try {
-        const collection = await Zotero.Collections.getByLibraryAndKeyAsync(library_id, collection_key);
+        const collection = await Zotero.Collections.getByLibraryAndKeyAsync(resolvedLibraryId, collection_key);
         if (!collection) {
             return {
                 type: 'agent_action_execute_response',
@@ -476,13 +489,13 @@ export async function executeManageCollectionsAction(
             checkAborted(ctx, 'manage_collections:before_rename');
             collection.name = target;
             await collection.saveTx();
-            logger(`executeManageCollectionsAction: Renamed collection ${library_id}-${collection_key} → '${target}'`, 1);
+            logger(`executeManageCollectionsAction: Renamed collection ${resolvedLibraryId}-${collection_key} → '${target}'`, 1);
         } else if (action === 'move') {
             // Zotero uses `false` to signal top-level (see collection.js parentKey setter).
             checkAborted(ctx, 'manage_collections:before_move');
             (collection as any).parentKey = new_parent_key ? new_parent_key : false;
             await collection.saveTx();
-            logger(`executeManageCollectionsAction: Moved collection ${library_id}-${collection_key} to parent ${new_parent_key ?? 'top-level'}`, 1);
+            logger(`executeManageCollectionsAction: Moved collection ${resolvedLibraryId}-${collection_key} to parent ${new_parent_key ?? 'top-level'}`, 1);
         } else if (action === 'delete') {
             checkAborted(ctx, 'manage_collections:before_delete');
             // Soft-delete (trash): collection is hidden from the library view,
@@ -493,7 +506,7 @@ export async function executeManageCollectionsAction(
             // (see Zotero.Items.startEmptyTrashTimer in items.js).
             (collection as any).deleted = true;
             await collection.saveTx();
-            logger(`executeManageCollectionsAction: Trashed collection ${library_id}-${collection_key}`, 1);
+            logger(`executeManageCollectionsAction: Trashed collection ${resolvedLibraryId}-${collection_key}`, 1);
         } else {
             return {
                 type: 'agent_action_execute_response',
@@ -509,8 +522,8 @@ export async function executeManageCollectionsAction(
             request_id: request.request_id,
             success: true,
             result_data: {
-                library_id,
-                library_ref: libraryRefForLibraryID(library_id) ?? undefined,
+                library_id: resolvedLibraryId,
+                library_ref: libraryRefForLibraryID(resolvedLibraryId) ?? undefined,
                 action,
                 collection_key,
                 new_name: new_name ?? null,

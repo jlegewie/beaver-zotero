@@ -90,6 +90,91 @@ export function resolveLibraryRef(ref: { library_ref?: string | null; library_id
     }
 }
 
+export type WriteTargetLibraryResolution =
+    | { ok: true; libraryID: number }
+    | { ok: false; code: 'invalid_library_ref' | 'library_unavailable' | 'invalid_library_id' | 'library_not_found'; message: string };
+
+/**
+ * Resolves the target library for a write operation.
+ *
+ * Reads may fall back from malformed `library_ref` to legacy `library_id`, but
+ * writes must not: a present `library_ref` is the authoritative portable
+ * library identity. Falling back to a stale local rowid can write into the
+ * wrong group library on another device.
+ */
+export function resolveWriteTargetLibrary(ref: {
+    library_ref?: string | null;
+    library_id?: number | null;
+    library_name?: string | null;
+}): WriteTargetLibraryResolution {
+    if (ref.library_ref != null && ref.library_ref !== '') {
+        const parsed = parseLibraryRef(ref.library_ref);
+        if (!parsed) {
+            return {
+                ok: false,
+                code: 'invalid_library_ref',
+                message: `Invalid library_ref: ${ref.library_ref}`,
+            };
+        }
+
+        try {
+            if (parsed.type === 'user') {
+                return { ok: true, libraryID: Zotero.Libraries.userLibraryID };
+            }
+            const libraryID = Zotero.Groups.getLibraryIDFromGroupID(parsed.groupID);
+            if (!libraryID) {
+                return {
+                    ok: false,
+                    code: 'library_unavailable',
+                    message: `The target group library (${ref.library_ref}) is not available on this computer.`,
+                };
+            }
+            return { ok: true, libraryID };
+        } catch {
+            return {
+                ok: false,
+                code: 'library_unavailable',
+                message: `The target group library (${ref.library_ref}) is not available on this computer.`,
+            };
+        }
+    }
+
+    if (ref.library_id != null && ref.library_id !== 0) {
+        if (typeof ref.library_id === 'number' && Number.isInteger(ref.library_id) && ref.library_id > 0) {
+            return { ok: true, libraryID: ref.library_id };
+        }
+        return {
+            ok: false,
+            code: 'invalid_library_id',
+            message: `Invalid library ID: ${ref.library_id}`,
+        };
+    }
+
+    if (ref.library_name) {
+        const matchedLibrary = Zotero.Libraries.getAll().find(
+            (lib: any) => lib.name.toLowerCase() === ref.library_name!.toLowerCase()
+        );
+        if (!matchedLibrary) {
+            return {
+                ok: false,
+                code: 'library_not_found',
+                message: `Library not found: "${ref.library_name}"`,
+            };
+        }
+        const libraryID = matchedLibrary.libraryID;
+        if (typeof libraryID !== 'number' || libraryID <= 0) {
+            return {
+                ok: false,
+                code: 'invalid_library_id',
+                message: `Invalid library found for "${ref.library_name}"`,
+            };
+        }
+        return { ok: true, libraryID };
+    }
+
+    return { ok: true, libraryID: Zotero.Libraries.userLibraryID };
+}
+
 /** Outcome of resolving an item reference on this device. */
 export type ResolvedItemReference =
     | { status: 'found'; item: Zotero.Item }

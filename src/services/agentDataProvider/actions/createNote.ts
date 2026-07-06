@@ -19,7 +19,7 @@ import {
 } from '../../agentProtocol';
 import { ItemDataWithStatus, AttachmentDataWithStatus } from '../../../../react/types/zotero';
 import { checkLibraryExcluded, excludedLibraryMessage, getDeferredToolPreference, getLibraryByIdOrName, getCollectionByIdOrName } from '../utils';
-import { libraryRefForLibraryID } from '../../../utils/libraryIdentity';
+import { libraryRefForLibraryID, resolveWriteTargetLibrary } from '../../../utils/libraryIdentity';
 import { TimeoutContext, checkAborted } from '../timeout';
 import { extractCitationReferences } from './extractCitationReferences';
 import { lookupZoteroReferences, LookupZoteroReferencesResult } from '../lookupZoteroReferences';
@@ -36,6 +36,8 @@ interface CreateNoteActionData {
     title: string;
     content: string;
     parent_item_id?: string | null;
+    library_id?: number | null;
+    library_ref?: string | null;
     library?: string | null;
     collection?: string | null;
 }
@@ -91,6 +93,8 @@ async function validateCreateNoteAction(
         title,
         content,
         parent_item_id: rawParentItemId,
+        library_id: rawLibraryId,
+        library_ref: libraryRef,
         library: libraryNameOrId,
         collection: collectionNameOrKey,
     } = request.action_data as CreateNoteActionData;
@@ -202,7 +206,7 @@ async function validateCreateNoteAction(
     // The shared helper walks the item chain up to a regular item, or falls
     // back to standalone-with-related-item when the chain ends at a standalone.
     const parentResolution = await ta.track('parent_resolution_ms', () =>
-        resolveCreateNoteParent(parentItemIdInput)
+        resolveCreateNoteParent(parentItemIdInput, libraryRef ?? undefined)
     );
     if (!parentResolution.ok) {
         return {
@@ -226,6 +230,69 @@ async function validateCreateNoteAction(
     // one bucket. Recorded before each early-return so failure paths attribute
     // their cost too.
     const tLib = Date.now();
+    if (libraryRef) {
+        const targetResolution = resolveWriteTargetLibrary({
+            library_ref: libraryRef,
+            library_id: rawLibraryId,
+            library_name: null,
+        });
+        if (!targetResolution.ok) {
+            ta.record('library_resolution_ms', Date.now() - tLib);
+            return {
+                type: 'agent_action_validate_response',
+                request_id: request.request_id,
+                valid: false,
+                error: targetResolution.message,
+                error_code: targetResolution.code === 'library_unavailable' ? 'library_unavailable' : 'library_not_found',
+                preference: 'always_ask',
+                timing: buildTiming(),
+            };
+        }
+        if (resolvedLibraryId != null && resolvedLibraryId !== targetResolution.libraryID) {
+            ta.record('library_resolution_ms', Date.now() - tLib);
+            return {
+                type: 'agent_action_validate_response',
+                request_id: request.request_id,
+                valid: false,
+                error: 'Resolved parent library does not match the requested library_ref',
+                error_code: 'library_collection_mismatch',
+                preference: 'always_ask',
+                timing: buildTiming(),
+            };
+        }
+        resolvedLibraryId = targetResolution.libraryID;
+    }
+    if (!libraryRef && rawLibraryId != null && rawLibraryId !== 0) {
+        const targetResolution = resolveWriteTargetLibrary({
+            library_id: rawLibraryId,
+            library_name: null,
+        });
+        if (!targetResolution.ok) {
+            ta.record('library_resolution_ms', Date.now() - tLib);
+            return {
+                type: 'agent_action_validate_response',
+                request_id: request.request_id,
+                valid: false,
+                error: targetResolution.message,
+                error_code: 'library_not_found',
+                preference: 'always_ask',
+                timing: buildTiming(),
+            };
+        }
+        if (resolvedLibraryId != null && resolvedLibraryId !== targetResolution.libraryID) {
+            ta.record('library_resolution_ms', Date.now() - tLib);
+            return {
+                type: 'agent_action_validate_response',
+                request_id: request.request_id,
+                valid: false,
+                error: 'Resolved parent library does not match the requested library_id',
+                error_code: 'library_collection_mismatch',
+                preference: 'always_ask',
+                timing: buildTiming(),
+            };
+        }
+        resolvedLibraryId = targetResolution.libraryID;
+    }
     if (resolvedLibraryId == null && libraryNameOrId) {
         const libraryResult = getLibraryByIdOrName(libraryNameOrId);
         if (libraryResult.wasExplicitlyRequested && !libraryResult.library) {
@@ -428,6 +495,7 @@ async function executeCreateNoteAction(
         title: string;
         content: string;
         library_id?: number | null;  // resolved by validation
+        library_ref?: string | null;  // resolved by validation
         parent_key?: string | null;  // resolved by validation
         collection_key?: string | null;  // resolved by validation
         related_item_key?: string | null;  // set by validation when falling back to standalone
@@ -438,6 +506,7 @@ async function executeCreateNoteAction(
         title,
         content,
         library_id: resolvedLibraryId,
+        library_ref: libraryRef,
         parent_key: parentKey,
         collection_key: collectionKey,
         related_item_key: relatedItemKey,
@@ -455,7 +524,22 @@ async function executeCreateNoteAction(
         };
     }
 
-    const targetLibraryId = resolvedLibraryId ?? Zotero.Libraries.userLibraryID;
+    const targetResolution = resolveWriteTargetLibrary({
+        library_ref: libraryRef,
+        library_id: resolvedLibraryId,
+        library_name: null,
+    });
+    if (!targetResolution.ok) {
+        return {
+            type: 'agent_action_execute_response',
+            request_id: request.request_id,
+            success: false,
+            error: targetResolution.message,
+            error_code: targetResolution.code === 'library_unavailable' ? 'library_unavailable' : 'library_not_found',
+            timing: buildTiming(),
+        };
+    }
+    const targetLibraryId = targetResolution.libraryID;
 
     // TOCTOU guard: never create in a library the user excluded from Beaver,
     // even if validation passed earlier or the execute request skipped it.

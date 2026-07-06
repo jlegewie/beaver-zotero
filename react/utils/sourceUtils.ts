@@ -15,6 +15,7 @@ import { getNoteContentPreviewText } from './noteText';
 import type { EditNoteOperation } from '../types/agentActions/editNote';
 import { getBeaverFooterAppendPoint } from '../../src/utils/noteEditFooter';
 import { notifyReferenceUnavailable } from '../host/zotero/sourceActions';
+import { resolveItemReference, resolveLibraryRef } from '../../src/utils/libraryIdentity';
 import {
     getPageLocator,
     normalizeCitationTag,
@@ -62,17 +63,10 @@ export function getReferenceFromItem(item: Zotero.Item): string {
 */
 export function getZoteroItem(source: SourceAttachment | ZoteroItemReference): Zotero.Item | null {
     try {
-        let libId: number;
-        let itemKeyValue: string;
         if (!source.library_id || !source.zotero_key) return null;
-
-        if ('library_id' in source && 'zotero_key' in source) {
-            libId = source.library_id;
-            itemKeyValue = source.zotero_key;
-        } else {
-            console.error("getZoteroItem: Source object does not have expected key structure (libraryID/itemKey or library_id/zotero_key):", source);
-            return null;
-        }
+        const libId = resolveLibraryRef(source);
+        if (!libId) return null;
+        const itemKeyValue = source.zotero_key;
         const item = Zotero.Items.getByLibraryAndKey(libId, itemKeyValue);
         return item || null;
     } catch (error) {
@@ -262,9 +256,15 @@ export async function isValidZoteroItem(item: Zotero.Item): Promise<{valid: bool
  */
 export function revealSource(source: ZoteroItemReference | SourceAttachment, collectionKey?: string) {
     if (!source.library_id || !source.zotero_key) return;
-    const itemID = Zotero.Items.getIDFromLibraryAndKey(source.library_id, source.zotero_key);
+    const libraryID = resolveLibraryRef(source);
+    if (!libraryID) {
+        logger(`revealSource: library unavailable (${source.library_ref || source.library_id}, ${source.zotero_key})`);
+        notifyReferenceUnavailable('item', 'library_unavailable');
+        return;
+    }
+    const itemID = Zotero.Items.getIDFromLibraryAndKey(libraryID, source.zotero_key);
     if (!itemID) {
-        logger(`revealSource: item not found (${source.library_id}, ${source.zotero_key})`);
+        logger(`revealSource: item not found (${libraryID}, ${source.zotero_key})`);
         notifyReferenceUnavailable('item');
         return;
     }
@@ -272,7 +272,7 @@ export function revealSource(source: ZoteroItemReference | SourceAttachment, col
         // Convert collection key to collection ID if provided
         let collectionId: number | undefined;
         if (collectionKey) {
-            const id = Zotero.Collections.getIDFromLibraryAndKey(source.library_id, collectionKey);
+            const id = Zotero.Collections.getIDFromLibraryAndKey(libraryID, collectionKey);
             if (id !== false) {
                 collectionId = id;
             }
@@ -321,12 +321,13 @@ export async function getCurrentCollectionKeyForItem(
 }
 
 export async function openSource(source: SourceAttachment | ZoteroItemReference) {
-    const item = getZoteroItem(source);
-    if (!item) {
-        logger(`openSource: item not found (${source.library_id}, ${source.zotero_key})`);
-        notifyReferenceUnavailable('item');
+    const resolved = await resolveItemReference(source);
+    if (resolved.status !== 'found') {
+        logger(`openSource: item not found (${source.library_ref || source.library_id}, ${source.zotero_key})`);
+        notifyReferenceUnavailable('item', resolved.status === 'library_unavailable' ? 'library_unavailable' : 'missing');
         return;
     }
+    const item = resolved.item;
     
     // Regular items
     if (item.isRegularItem()) {

@@ -29,6 +29,7 @@ export interface CitationActivation {
     /** Effective library identity, accounting for mapped external references. */
     effectiveLibraryID: number;
     effectiveItemKey: string;
+    effectiveLibraryRef?: string;
     /** Stripped preview text (used as the temporary-annotation label). */
     previewText: string;
     /** Document the click originated from (targets the right reader window). */

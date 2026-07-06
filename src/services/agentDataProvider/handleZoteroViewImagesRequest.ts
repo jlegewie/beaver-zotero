@@ -16,7 +16,7 @@ import {
     ViewImagesErrorCode,
 } from '../agentProtocol';
 import { ZoteroItemReference, ItemStub, AttachmentStub } from '../../../react/types/zotero';
-import { libraryRefForLibraryID } from '../../utils/libraryIdentity';
+import { libraryRefForLibraryID, resolveLibraryRef } from '../../utils/libraryIdentity';
 import {
     getReadableContentKind,
     resolveToImageAttachment,
@@ -236,9 +236,14 @@ export async function handleZoteroViewImagesRequest(
             'invalid_format'
         );
     }
-    // Reject libraries the user excluded from Beaver before any item lookup, so
-    // an excluded attachment is never resolved, rendered, or confirmed to exist.
-    const excluded = checkLibraryExcluded(attachment.library_id);
+    const resolvedLibraryId = resolveLibraryRef(attachment);
+    if (!resolvedLibraryId) {
+        return errorResponse(
+            "Attachment is in a library that isn't available on this computer.",
+            'library_unavailable'
+        );
+    }
+    const excluded = checkLibraryExcluded(resolvedLibraryId);
     if (excluded) {
         return errorResponse(excluded.message, 'library_excluded');
     }
@@ -274,9 +279,8 @@ export async function handleZoteroViewImagesRequest(
     }
 
     try {
-        // 1. Look up the requested item
         const zoteroItem = await Zotero.Items.getByLibraryAndKeyAsync(
-            attachment.library_id,
+            resolvedLibraryId,
             attachment.zotero_key
         );
         if (!zoteroItem) {

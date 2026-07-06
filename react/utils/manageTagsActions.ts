@@ -23,7 +23,7 @@
 import { AgentAction } from '../agents/agentActions';
 import type { ManageTagsProposedData, ManageTagsResultData, TagColorSnapshot } from '../types/agentActions/base';
 import { logger } from '../../src/utils/logger';
-import { libraryRefForLibraryID } from '../../src/utils/libraryIdentity';
+import { libraryRefForLibraryID, resolveLibraryRef } from '../../src/utils/libraryIdentity';
 
 const MAX_SNAPSHOT_ITEMS = 5000;
 
@@ -53,22 +53,24 @@ export async function executeManageTagsAction(
 ): Promise<ManageTagsResultData> {
     const data = action.proposed_data as ManageTagsProposedData;
     const { library_id, action: op, name, new_name } = data;
+    const resolvedLibraryID = resolveLibraryRef(data);
+    if (!resolvedLibraryID) throw new Error('Tag library is not available on this computer');
 
     // Snapshot the authoritative pre-apply state RIGHT BEFORE the op.
     const tagID = Zotero.Tags.getID(name);
     let affectedItemIds: string[] = [];
     if (tagID !== false && tagID != null) {
         try {
-            const ids = await Zotero.Tags.getTagItems(library_id, tagID);
+            const ids = await Zotero.Tags.getTagItems(resolvedLibraryID, tagID);
             if (ids.length > MAX_SNAPSHOT_ITEMS) {
                 throw new Error(`Tag '${name}' is used on ${ids.length} items (over the ${MAX_SNAPSHOT_ITEMS} safety cap)`);
             }
-            affectedItemIds = await itemIdsToKeys(library_id, ids);
+            affectedItemIds = await itemIdsToKeys(resolvedLibraryID, ids);
         } catch (e) {
             logger(`executeManageTagsAction: getTagItems snapshot failed: ${e}`, 1);
         }
     }
-    const rawColor = Zotero.Tags.getColor(library_id, name);
+    const rawColor = Zotero.Tags.getColor(resolvedLibraryID, name);
     const oldColor: TagColorSnapshot | null = rawColor && typeof rawColor === 'object'
         ? { color: (rawColor as any).color, position: (rawColor as any).position }
         : null;
@@ -80,23 +82,23 @@ export async function executeManageTagsAction(
         if (!target) throw new Error('new_name required for rename');
         const existingTarget = Zotero.Tags.getID(target);
         isMerge = existingTarget !== false && existingTarget != null;
-        await Zotero.Tags.rename(library_id, name, target);
-        logger(`executeManageTagsAction: Renamed '${name}' → '${target}' in library ${library_id}`, 1);
+        await Zotero.Tags.rename(resolvedLibraryID, name, target);
+        logger(`executeManageTagsAction: Renamed '${name}' → '${target}' in library ${resolvedLibraryID}`, 1);
     } else if (op === 'delete') {
         if (tagID === false || tagID == null) {
             logger(`executeManageTagsAction: Tag '${name}' not found; treating as already deleted`, 1);
         } else {
             // onProgress and types are optional at runtime despite zotero-types .d.ts
-            await (Zotero.Tags.removeFromLibrary as any)(library_id, [tagID]);
-            logger(`executeManageTagsAction: Deleted '${name}' from library ${library_id}`, 1);
+            await (Zotero.Tags.removeFromLibrary as any)(resolvedLibraryID, [tagID]);
+            logger(`executeManageTagsAction: Deleted '${name}' from library ${resolvedLibraryID}`, 1);
         }
     } else {
         throw new Error(`Unsupported manage_tags action: ${op}`);
     }
 
     return {
-        library_id,
-        library_ref: libraryRefForLibraryID(library_id) ?? undefined,
+        library_id: resolvedLibraryID,
+        library_ref: libraryRefForLibraryID(resolvedLibraryID) ?? undefined,
         action: op,
         name,
         new_name: new_name ?? null,
@@ -127,6 +129,11 @@ export async function undoManageTagsAction(
 ): Promise<void> {
     const data = action.proposed_data as ManageTagsProposedData;
     const { library_id, action: op, name, new_name } = data;
+    const resolvedLibraryID = resolveLibraryRef(data);
+    if (!resolvedLibraryID) {
+        logger(`undoManageTagsAction: Library unavailable for ${data.library_ref || library_id}; skipping`, 1);
+        return;
+    }
     const result = (action.result_data ?? {}) as Partial<ManageTagsResultData>;
     const affected_item_ids = result.affected_item_ids ?? [];
     const old_color = result.old_color ?? null;
@@ -136,7 +143,7 @@ export async function undoManageTagsAction(
         if (!old_color) return;
         try {
             const c: TagColorSnapshot = old_color;
-            await Zotero.Tags.setColor(library_id, name, c.color, c.position ?? 0);
+            await Zotero.Tags.setColor(resolvedLibraryID, name, c.color, c.position ?? 0);
         } catch (e) {
             logger(`undoManageTagsAction: Failed to restore color: ${e}`, 1);
         }
@@ -147,7 +154,7 @@ export async function undoManageTagsAction(
         if (!target) throw new Error('new_name missing — cannot undo');
 
         if (!is_merge) {
-            await Zotero.Tags.rename(library_id, target, name);
+            await Zotero.Tags.rename(resolvedLibraryID, target, name);
             await restoreColor();
             logger(`undoManageTagsAction: Renamed '${target}' → '${name}' (undo)`, 1);
             return;
@@ -158,7 +165,7 @@ export async function undoManageTagsAction(
             logger(`undoManageTagsAction: No affected_item_ids snapshot; cannot undo merge`, 1);
             return;
         }
-        await retagItems(library_id, affected_item_ids, name);
+        await retagItems(resolvedLibraryID, affected_item_ids, name);
         await restoreColor();
         logger(`undoManageTagsAction: Re-tagged ${affected_item_ids.length} items with '${name}' (merge undo)`, 1);
     } else if (op === 'delete') {
@@ -167,7 +174,7 @@ export async function undoManageTagsAction(
             await restoreColor();
             return;
         }
-        await retagItems(library_id, affected_item_ids, name);
+        await retagItems(resolvedLibraryID, affected_item_ids, name);
         await restoreColor();
         logger(`undoManageTagsAction: Re-added tag '${name}' to ${affected_item_ids.length} items (delete undo)`, 1);
     } else {

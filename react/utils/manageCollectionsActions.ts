@@ -28,7 +28,7 @@
 import { AgentAction, ManageCollectionsAgentAction } from '../agents/agentActions';
 import type { ManageCollectionsProposedData, ManageCollectionsResultData } from '../types/agentActions/base';
 import { logger } from '../../src/utils/logger';
-import { libraryRefForLibraryID } from '../../src/utils/libraryIdentity';
+import { libraryRefForLibraryID, resolveLibraryRef } from '../../src/utils/libraryIdentity';
 
 
 export async function executeManageCollectionsAction(
@@ -36,8 +36,10 @@ export async function executeManageCollectionsAction(
 ): Promise<ManageCollectionsResultData> {
     const data = action.proposed_data as ManageCollectionsProposedData;
     const { library_id, action: op, collection_key, new_name, new_parent_key } = data;
+    const resolvedLibraryID = resolveLibraryRef(data);
+    if (!resolvedLibraryID) throw new Error('Collection library is not available on this computer');
 
-    const collection = await Zotero.Collections.getByLibraryAndKeyAsync(library_id, collection_key);
+    const collection = await Zotero.Collections.getByLibraryAndKeyAsync(resolvedLibraryID, collection_key);
     if (!collection) {
         throw new Error(`Collection not found: ${collection_key}`);
     }
@@ -71,22 +73,22 @@ export async function executeManageCollectionsAction(
         if (!target) throw new Error('new_name required for rename');
         collection.name = target;
         await collection.saveTx();
-        logger(`executeManageCollectionsAction: Renamed collection ${library_id}-${collection_key}`, 1);
+        logger(`executeManageCollectionsAction: Renamed collection ${resolvedLibraryID}-${collection_key}`, 1);
     } else if (op === 'move') {
         (collection as any).parentKey = new_parent_key ? new_parent_key : false;
         await collection.saveTx();
-        logger(`executeManageCollectionsAction: Moved collection ${library_id}-${collection_key}`, 1);
+        logger(`executeManageCollectionsAction: Moved collection ${resolvedLibraryID}-${collection_key}`, 1);
     } else if (op === 'delete') {
         (collection as any).deleted = true;
         await collection.saveTx();
-        logger(`executeManageCollectionsAction: Trashed collection ${library_id}-${collection_key}`, 1);
+        logger(`executeManageCollectionsAction: Trashed collection ${resolvedLibraryID}-${collection_key}`, 1);
     } else {
         throw new Error(`Unsupported manage_collections action: ${op}`);
     }
 
     return {
-        library_id,
-        library_ref: libraryRefForLibraryID(library_id) ?? undefined,
+        library_id: resolvedLibraryID,
+        library_ref: libraryRefForLibraryID(resolvedLibraryID) ?? undefined,
         action: op,
         collection_key,
         new_name: new_name ?? null,
@@ -113,14 +115,19 @@ export async function undoManageCollectionsAction(
 ): Promise<void> {
     const data = action.proposed_data as ManageCollectionsProposedData;
     const { library_id, action: op, collection_key } = data;
+    const resolvedLibraryID = resolveLibraryRef(data);
+    if (!resolvedLibraryID) {
+        logger(`undoManageCollectionsAction: Library unavailable for ${data.library_ref || library_id}-${collection_key}; skipping`, 1);
+        return;
+    }
     const result = (action.result_data ?? {}) as Partial<ManageCollectionsResultData>;
     const old_name = result.old_name ?? null;
     const old_parent_key = result.old_parent_key ?? null;
 
     if (op === 'rename') {
-        const collection = await Zotero.Collections.getByLibraryAndKeyAsync(library_id, collection_key);
+        const collection = await Zotero.Collections.getByLibraryAndKeyAsync(resolvedLibraryID, collection_key);
         if (!collection) {
-            logger(`undoManageCollectionsAction: Collection ${library_id}-${collection_key} not found; skipping`, 1);
+            logger(`undoManageCollectionsAction: Collection ${resolvedLibraryID}-${collection_key} not found; skipping`, 1);
             return;
         }
         const originalName = (old_name ?? '').trim();
@@ -132,9 +139,9 @@ export async function undoManageCollectionsAction(
     }
 
     if (op === 'move') {
-        const collection = await Zotero.Collections.getByLibraryAndKeyAsync(library_id, collection_key);
+        const collection = await Zotero.Collections.getByLibraryAndKeyAsync(resolvedLibraryID, collection_key);
         if (!collection) {
-            logger(`undoManageCollectionsAction: Collection ${library_id}-${collection_key} not found; skipping`, 1);
+            logger(`undoManageCollectionsAction: Collection ${resolvedLibraryID}-${collection_key} not found; skipping`, 1);
             return;
         }
         (collection as any).parentKey = old_parent_key ? old_parent_key : false;
@@ -144,7 +151,7 @@ export async function undoManageCollectionsAction(
     }
 
     if (op === 'delete') {
-        const collection = await Zotero.Collections.getByLibraryAndKeyAsync(library_id, collection_key);
+        const collection = await Zotero.Collections.getByLibraryAndKeyAsync(resolvedLibraryID, collection_key);
         if (!collection) {
             // Trash was emptied (manually or by auto-empty). The collection
             // is gone from the DB and its key is unrecoverable.
@@ -156,7 +163,7 @@ export async function undoManageCollectionsAction(
         if (!(collection as any).deleted) {
             // Already restored (e.g. user clicked "Restore to Library" in
             // Zotero). Treat as success.
-            logger(`undoManageCollectionsAction: Collection ${library_id}-${collection_key} already restored; skipping`, 1);
+            logger(`undoManageCollectionsAction: Collection ${resolvedLibraryID}-${collection_key} already restored; skipping`, 1);
             return;
         }
         (collection as any).deleted = false;

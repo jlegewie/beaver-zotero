@@ -1,5 +1,5 @@
 import { logger } from '../../../utils/logger';
-import { libraryRefForLibraryID } from '../../../utils/libraryIdentity';
+import { libraryRefForLibraryID, resolveItemReference } from '../../../utils/libraryIdentity';
 import { searchableLibraryIdsAtom } from '../../../../react/atoms/profile';
 import { EditNoteProposedData, type EditNoteOperation } from '../../../../react/types/agentActions/editNote';
 import {
@@ -393,7 +393,7 @@ async function validateEditNoteAction(
     // place (see `applyOldStringEnrichment`). All downstream code operates on
     // the enriched value, and `buildNormalizedActionData` below automatically
     // propagates the enrichment into `normalized_action_data`.
-    const { library_id, zotero_key, new_string, operation: rawOp } = request.action_data as EditNoteProposedData;
+    const { library_id, library_ref, zotero_key, new_string, operation: rawOp } = request.action_data as EditNoteProposedData;
     const baseActionData = request.action_data as EditNoteProposedData;
     let { old_string } = baseActionData;
     const operation: EditNoteOperation = rawOp ?? 'str_replace';
@@ -414,35 +414,18 @@ async function validateEditNoteAction(
             : undefined;
     };
 
-    // 1. Validate library exists
-    const library = Zotero.Libraries.get(library_id);
-    if (!library) {
+    const resolved = await resolveItemReference({ library_id, library_ref, zotero_key });
+    if (resolved.status === 'library_unavailable') {
         return {
             type: 'agent_action_validate_response',
             request_id: request.request_id,
             valid: false,
-            error: `Library not found: ${library_id}`,
-            error_code: 'library_not_found',
+            error: `Library not available for note: ${library_ref || library_id}-${zotero_key}`,
+            error_code: 'library_unavailable',
             preference: 'always_ask',
         };
     }
-
-    // 2. Check library is searchable
-    const searchableIds = store.get(searchableLibraryIdsAtom);
-    if (!searchableIds.includes(library_id)) {
-        return {
-            type: 'agent_action_validate_response',
-            request_id: request.request_id,
-            valid: false,
-            error: excludedLibraryMessage(library_id),
-            error_code: 'library_not_searchable',
-            preference: 'always_ask',
-        };
-    }
-
-    // 3. Item exists
-    const item = await Zotero.Items.getByLibraryAndKeyAsync(library_id, zotero_key);
-    if (!item) {
+    if (resolved.status === 'not_found') {
         return {
             type: 'agent_action_validate_response',
             request_id: request.request_id,
@@ -452,10 +435,38 @@ async function validateEditNoteAction(
             preference: 'always_ask',
         };
     }
+    const item = resolved.item;
+    const resolvedLibraryId = item.libraryID;
+
+    // 1. Validate library exists
+    const library = Zotero.Libraries.get(resolvedLibraryId);
+    if (!library) {
+        return {
+            type: 'agent_action_validate_response',
+            request_id: request.request_id,
+            valid: false,
+            error: `Library not found: ${resolvedLibraryId}`,
+            error_code: 'library_not_found',
+            preference: 'always_ask',
+        };
+    }
+
+    // 2. Check library is searchable
+    const searchableIds = store.get(searchableLibraryIdsAtom);
+    if (!searchableIds.includes(resolvedLibraryId)) {
+        return {
+            type: 'agent_action_validate_response',
+            request_id: request.request_id,
+            valid: false,
+            error: excludedLibraryMessage(resolvedLibraryId),
+            error_code: 'library_not_searchable',
+            preference: 'always_ask',
+        };
+    }
 
     // 4. Item is a note
     if (!item.isNote()) {
-        const itemId = `${library_id}-${zotero_key}`;
+        const itemId = `${resolvedLibraryId}-${zotero_key}`;
         const resp = {
             type: 'agent_action_validate_response',
             request_id: request.request_id,
@@ -496,16 +507,16 @@ async function validateEditNoteAction(
             type: 'agent_action_validate_response',
             request_id: request.request_id,
             valid: false,
-            error: `Note ${library_id}-${zotero_key} is empty`,
+            error: `Note ${resolvedLibraryId}-${zotero_key} is empty`,
             error_code: 'empty_note',
             preference: 'always_ask',
         };
     }
 
     // 8. Simplify note (needed for both modes)
-    const noteId = `${library_id}-${zotero_key}`;
-    const pageLabelsByItemId = await preloadNotePageLabels(rawHtml, library_id, { extractOnCacheMiss: true });
-    const { simplified, metadata } = getOrSimplify(noteId, rawHtml, library_id, pageLabelsByItemId);
+    const noteId = `${resolvedLibraryId}-${zotero_key}`;
+    const pageLabelsByItemId = await preloadNotePageLabels(rawHtml, resolvedLibraryId, { extractOnCacheMiss: true });
+    const { simplified, metadata } = getOrSimplify(noteId, rawHtml, resolvedLibraryId, pageLabelsByItemId);
 
     // Snapshot external-reference state once so every expandToRawHtml('new', ...)
     // below can resolve `<citation external_id="..."/>` consistently.
@@ -518,7 +529,7 @@ async function validateEditNoteAction(
 
         const noteTitle = item.getNoteTitle() || '(untitled)';
         const totalLines = simplified.split('\n').length;
-        const preference = getEditNotePreference(library_id, zotero_key);
+        const preference = getEditNotePreference(resolvedLibraryId, zotero_key);
 
         return {
             type: 'agent_action_validate_response',
@@ -552,7 +563,7 @@ async function validateEditNoteAction(
 
         const noteTitle = item.getNoteTitle() || '(untitled)';
         const totalLines = simplified.split('\n').length;
-        const preference = getEditNotePreference(library_id, zotero_key);
+        const preference = getEditNotePreference(resolvedLibraryId, zotero_key);
 
         return {
             type: 'agent_action_validate_response',
@@ -648,7 +659,7 @@ async function validateEditNoteAction(
             old_string ?? '',
             new_string,
             operation,
-            library_id,
+            resolvedLibraryId,
         );
         if (!match) {
             return {
@@ -672,7 +683,7 @@ async function validateEditNoteAction(
                 old_string ?? '',
                 new_string,
                 operation,
-                library_id,
+                resolvedLibraryId,
             );
         }
     }
@@ -767,7 +778,7 @@ async function validateEditNoteAction(
         request.request_id,
         item,
         simplified,
-        library_id,
+        resolvedLibraryId,
         zotero_key,
         match.matchCount,
         buildNormalizedActionData(overrides),
@@ -791,6 +802,7 @@ async function executeEditNoteAction(
 ): Promise<WSAgentActionExecuteResponse> {
     const {
         library_id,
+        library_ref,
         zotero_key,
         new_string,
         operation: rawOp,
@@ -806,7 +818,22 @@ async function executeEditNoteAction(
 
     // TOCTOU guard: never edit a note in a library the user excluded from Beaver,
     // even if validation passed earlier or the execute request skipped it.
-    const excludedLibrary = checkLibraryExcluded(library_id);
+    const resolved = await resolveItemReference({ library_id, library_ref, zotero_key });
+    if (resolved.status !== 'found') {
+        return {
+            type: 'agent_action_execute_response',
+            request_id: request.request_id,
+            success: false,
+            error: resolved.status === 'library_unavailable'
+                ? `Library not available for note: ${library_ref || library_id}-${zotero_key}`
+                : `Item not found: ${library_id}-${zotero_key}`,
+            error_code: resolved.status === 'library_unavailable' ? 'library_unavailable' : 'item_not_found',
+        };
+    }
+    const item = resolved.item;
+    const resolvedLibraryId = item.libraryID;
+
+    const excludedLibrary = checkLibraryExcluded(resolvedLibraryId);
     if (excludedLibrary) {
         return {
             type: 'agent_action_execute_response',
@@ -814,18 +841,6 @@ async function executeEditNoteAction(
             success: false,
             error: excludedLibrary.message,
             error_code: 'library_not_searchable',
-        };
-    }
-
-    // 1. Load item
-    const item = await Zotero.Items.getByLibraryAndKeyAsync(library_id, zotero_key);
-    if (!item) {
-        return {
-            type: 'agent_action_execute_response',
-            request_id: request.request_id,
-            success: false,
-            error: `Item not found: ${library_id}-${zotero_key}`,
-            error_code: 'item_not_found',
         };
     }
 
@@ -851,16 +866,16 @@ async function executeEditNoteAction(
     // 4. Pre-seed page labels before the final note snapshot. The final
     //    cache-only preload below keeps extraction out of the read/write window.
     const preSeedHtml = item.getNote();
-    await preloadNotePageLabels(preSeedHtml, library_id, { extractOnCacheMiss: true });
+    await preloadNotePageLabels(preSeedHtml, resolvedLibraryId, { extractOnCacheMiss: true });
 
     // 5. Get current note HTML (kept for rollback on save failure)
     //    Avoid async operations between here and item.setNote() to preserve atomicity.
     const oldHtml: string = item.getNote();
 
     // 6. Get metadata from cache or re-simplify
-    const noteId = `${library_id}-${zotero_key}`;
-    const pageLabelsByItemId = await preloadNotePageLabels(oldHtml, library_id);
-    const { simplified, metadata } = getOrSimplify(noteId, oldHtml, library_id, pageLabelsByItemId);
+    const noteId = `${resolvedLibraryId}-${zotero_key}`;
+    const pageLabelsByItemId = await preloadNotePageLabels(oldHtml, resolvedLibraryId);
+    const { simplified, metadata } = getOrSimplify(noteId, oldHtml, resolvedLibraryId, pageLabelsByItemId);
 
     // Snapshot external-reference state once so every expandToRawHtml('new', ...)
     // below can resolve `<citation external_id="..."/>` consistently.
@@ -944,7 +959,7 @@ async function executeEditNoteAction(
         }
 
         await waitForNoteSaveStabilization(item, newHtml);
-        clearNoteEditorSelection(library_id, zotero_key);
+        clearNoteEditorSelection(resolvedLibraryId, zotero_key);
         invalidateSimplificationCache(noteId);
 
         // Check for duplicate citation warnings
@@ -956,9 +971,9 @@ async function executeEditNoteAction(
             request_id: request.request_id,
             success: true,
             result_data: {
-                library_id,
+                library_id: resolvedLibraryId,
                 zotero_key,
-                library_ref: libraryRefForLibraryID(library_id) ?? undefined,
+                library_ref: libraryRefForLibraryID(resolvedLibraryId) ?? undefined,
                 occurrences_replaced: 1,
                 warnings,
                 undo_full_html: strippedHtml,
@@ -1040,7 +1055,7 @@ async function executeEditNoteAction(
         }
 
         await waitForNoteSaveStabilization(item, newHtml);
-        clearNoteEditorSelection(library_id, zotero_key);
+        clearNoteEditorSelection(resolvedLibraryId, zotero_key);
         invalidateSimplificationCache(noteId);
 
         const duplicateWarning = checkDuplicateCitations(new_string, metadata);
@@ -1058,9 +1073,9 @@ async function executeEditNoteAction(
             request_id: request.request_id,
             success: true,
             result_data: {
-                library_id,
+                library_id: resolvedLibraryId,
                 zotero_key,
-                library_ref: libraryRefForLibraryID(library_id) ?? undefined,
+                library_ref: libraryRefForLibraryID(resolvedLibraryId) ?? undefined,
                 occurrences_replaced: 1,
                 warnings,
                 undo_old_html: '',
@@ -1114,7 +1129,7 @@ async function executeEditNoteAction(
             old_string ?? '',
             new_string,
             operation,
-            library_id,
+            resolvedLibraryId,
         );
         if (!match) {
             return {
@@ -1139,7 +1154,7 @@ async function executeEditNoteAction(
                 old_string ?? '',
                 new_string,
                 operation,
-                library_id,
+                resolvedLibraryId,
             );
         }
     }
@@ -1325,7 +1340,7 @@ async function executeEditNoteAction(
     await waitForNoteSaveStabilization(item, newHtml);
 
     // 15. Clear editor selection so it doesn't shift to unrelated text
-    clearNoteEditorSelection(library_id, zotero_key);
+    clearNoteEditorSelection(resolvedLibraryId, zotero_key);
 
     // 16. Invalidate cache
     invalidateSimplificationCache(noteId);
@@ -1353,9 +1368,9 @@ async function executeEditNoteAction(
         request_id: request.request_id,
         success: true,
         result_data: {
-            library_id,
+            library_id: resolvedLibraryId,
             zotero_key,
-            library_ref: libraryRefForLibraryID(library_id) ?? undefined,
+            library_ref: libraryRefForLibraryID(resolvedLibraryId) ?? undefined,
             occurrences_replaced: replacementCount,
             warnings,
             undo_old_html: expandedOld,

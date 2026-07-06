@@ -6,7 +6,7 @@
 import { AgentAction } from '../agents/agentActions';
 import { CreateCollectionResultData } from '../types/agentActions/base';
 import { logger } from '../../src/utils/logger';
-import { libraryRefForLibraryID } from '../../src/utils/libraryIdentity';
+import { libraryRefForLibraryID, resolveLibraryRef, resolveWriteTargetLibrary } from '../../src/utils/libraryIdentity';
 
 /**
  * Execute a create_collection agent action by creating the collection in Zotero.
@@ -16,41 +16,18 @@ import { libraryRefForLibraryID } from '../../src/utils/libraryIdentity';
 export async function executeCreateCollectionAction(
     action: AgentAction
 ): Promise<CreateCollectionResultData> {
-    const { library_id: rawLibraryId, library_name, name, parent_key, item_ids } = action.proposed_data as {
+    const { library_id: rawLibraryId, library_ref, library_name, name, parent_key, item_ids } = action.proposed_data as {
         library_id?: number | null;
+        library_ref?: string | null;
         library_name?: string | null;
         name: string;
         parent_key?: string | null;
         item_ids?: string[];
     };
 
-    // Resolve target library: use provided ID, resolve name, or default to user's main library
-    let library_id: number;
-
-    if (rawLibraryId == null || rawLibraryId === 0) {
-        // Not provided or normalized to 0 — try library_name, then default
-        if (library_name) {
-            const allLibraries = Zotero.Libraries.getAll();
-            const matchedLibrary = allLibraries.find(
-                (lib: any) => lib.name.toLowerCase() === library_name.toLowerCase()
-            );
-            if (!matchedLibrary) {
-                throw new Error(`Library not found: "${library_name}"`);
-            }
-            const resolvedLibraryID = matchedLibrary.libraryID;
-            if (typeof resolvedLibraryID !== 'number' || resolvedLibraryID <= 0) {
-                throw new Error(`Invalid library found for "${library_name}"`);
-            }
-            library_id = resolvedLibraryID;
-        } else {
-            library_id = Zotero.Libraries.userLibraryID;
-        }
-    } else if (typeof rawLibraryId === 'number' && rawLibraryId > 0) {
-        library_id = rawLibraryId;
-    } else {
-        // Explicitly provided but invalid (negative, NaN, fractional, etc.)
-        throw new Error(`Invalid library ID: ${rawLibraryId}`);
-    }
+    const targetLibrary = resolveWriteTargetLibrary({ library_ref, library_id: rawLibraryId, library_name });
+    if (!targetLibrary.ok) throw new Error(targetLibrary.message);
+    const library_id = targetLibrary.libraryID;
 
     // Build collection params
     const collectionParams: { name: string; libraryID: number; parentID?: number } = {
@@ -128,8 +105,14 @@ export async function undoCreateCollectionAction(
     }
 
     // Get the collection
+    const libraryID = resolveLibraryRef({ library_ref: resultData.library_ref, library_id: resultData.library_id });
+    if (!libraryID) {
+        logger(`undoCreateCollectionAction: Library unavailable for ${resultData.library_ref || resultData.library_id}-${resultData.collection_key}`, 1);
+        return;
+    }
+
     const collection = await Zotero.Collections.getByLibraryAndKeyAsync(
-        resultData.library_id,
+        libraryID,
         resultData.collection_key
     );
 
