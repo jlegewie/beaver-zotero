@@ -8,6 +8,7 @@ import { TimingAccumulator } from '../../src/utils/timing';
 import { emitAttachmentResolved } from './attachmentResolvedEvent';
 import { getPref } from '../../src/utils/prefs';
 import { createProvenanceNote } from './noteActions';
+import { libraryRefForLibraryID } from '../../src/utils/libraryIdentity';
 
 const SAVE_ATTACHMENTS_WITH_TRANSLATORS = false;
 const BEAVER_PROVENANCE_MARKER = 'Added by Beaver';
@@ -595,6 +596,7 @@ export async function applyCreateItemData(
     return {
         library_id: libraryId,
         zotero_key: itemKey,
+        library_ref: libraryRefForLibraryID(libraryId) ?? undefined,
         attachment_status: attachmentStatus,
         attachment_key: attachmentKey,
     };

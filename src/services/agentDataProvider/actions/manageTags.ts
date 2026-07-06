@@ -19,6 +19,7 @@ import {
     WSAgentActionExecuteResponse,
 } from '../../agentProtocol';
 import { checkLibraryExcluded, getDeferredToolPreference, validateLibraryAccess } from '../utils';
+import { libraryRefForLibraryID } from '../../../utils/libraryIdentity';
 import { TimeoutContext, checkAborted, TimeoutError } from '../timeout';
 import { logger } from '../../../utils/logger';
 
@@ -284,6 +285,7 @@ export async function validateManageTagsAction(
         valid: true,
         current_value: {
             library_id: libraryID,
+            library_ref: libraryRefForLibraryID(libraryID) ?? undefined,
             library_name: library.name,
             action,
             name,
@@ -295,6 +297,7 @@ export async function validateManageTagsAction(
         // captured at execute time.
         normalized_action_data: {
             library_id: libraryID,
+            library_ref: libraryRefForLibraryID(libraryID) ?? undefined,
         },
         preference,
     };
@@ -416,6 +419,7 @@ export async function executeManageTagsAction(
             success: true,
             result_data: {
                 library_id,
+                library_ref: libraryRefForLibraryID(library_id) ?? undefined,
                 action,
                 name,
                 new_name: new_name ?? null,

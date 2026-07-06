@@ -26,6 +26,7 @@ import type { ZoteroItemReference } from '../../../../react/types/zotero';
 import { normalizePageLocations } from '../../../../react/types/agentActions/annotations';
 import { normalizeAnnotationTags } from '../../../../react/types/agentActions/createAnnotations';
 import { shortItemTitle } from '../../../utils/zoteroUtils';
+import { libraryRefForLibraryID } from '../../../utils/libraryIdentity';
 import { logger } from '../../../utils/logger';
 
 function mapAnnotationErrorCode(error: unknown): string {
@@ -52,9 +53,12 @@ function epubSectionOrdinal(pageLabel: string | null | undefined): number | unde
 }
 
 function normalizeRef(raw: any): ZoteroItemReference {
+    const libraryRef = raw?.library_ref ?? raw?.libraryRef;
     return {
         library_id: typeof raw?.library_id === 'number' ? raw.library_id : Number(raw?.libraryId ?? raw?.library_id ?? 0),
         zotero_key: String(raw?.zotero_key ?? raw?.zoteroKey ?? ''),
+        // Carry the device-portable library_ref through unchanged when present.
+        ...(typeof libraryRef === 'string' && libraryRef ? { library_ref: libraryRef } : {}),
     };
 }
 
@@ -288,6 +292,7 @@ export async function executeCreateHighlightAnnotationsAction(
                         loc_raw: item.loc_raw,
                         library_id: ref.library_id,
                         zotero_key: ref.zotero_key,
+                        library_ref: libraryRefForLibraryID(ref.library_id) ?? undefined,
                     });
                 } catch (error: any) {
                     failed.push({
@@ -316,6 +321,7 @@ export async function executeCreateHighlightAnnotationsAction(
                         loc_raw: item.loc_raw,
                         library_id: ref.library_id,
                         zotero_key: ref.zotero_key,
+                        library_ref: libraryRefForLibraryID(ref.library_id) ?? undefined,
                     });
                 } catch (error: any) {
                     failed.push({
@@ -366,6 +372,7 @@ export async function executeCreateHighlightAnnotationsAction(
                         loc_raw: item.loc_raw,
                         library_id: ref.library_id,
                         zotero_key: ref.zotero_key,
+                        library_ref: libraryRefForLibraryID(ref.library_id) ?? undefined,
                     });
                 } catch (error: any) {
                     failed.push({

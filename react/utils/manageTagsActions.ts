@@ -23,6 +23,7 @@
 import { AgentAction } from '../agents/agentActions';
 import type { ManageTagsProposedData, ManageTagsResultData, TagColorSnapshot } from '../types/agentActions/base';
 import { logger } from '../../src/utils/logger';
+import { libraryRefForLibraryID } from '../../src/utils/libraryIdentity';
 
 const MAX_SNAPSHOT_ITEMS = 5000;
 
@@ -95,6 +96,7 @@ export async function executeManageTagsAction(
 
     return {
         library_id,
+        library_ref: libraryRefForLibraryID(library_id) ?? undefined,
         action: op,
         name,
         new_name: new_name ?? null,

@@ -6,6 +6,7 @@
  */
 
 import { logger } from '../../utils/logger';
+import { libraryRefForLibraryID } from '../../utils/libraryIdentity';
 import { ItemDataWithStatus, AttachmentDataWithStatus, ZoteroItemReference, ItemStub } from '../../../react/types/zotero';
 import { searchableLibraryIdsAtom, syncWithZoteroAtom } from '../../../react/atoms/profile';
 import { userIdAtom } from '../../../react/atoms/auth';
@@ -392,7 +393,11 @@ export async function lookupZoteroReferences(
             } catch (error: any) {
                 logger(`lookupZoteroReferences: Failed to serialize item ${item.libraryID}/${item.key}: ${error}`, 1);
                 errors.push({
-                    reference: { library_id: item.libraryID, zotero_key: item.key },
+                    reference: {
+                        library_id: item.libraryID,
+                        zotero_key: item.key,
+                        library_ref: libraryRefForLibraryID(item.libraryID) ?? undefined,
+                    },
                     error: 'Failed to serialize item',
                     error_code: 'load_failed',
                     details: error instanceof Error ? `${error.message}\n${error.stack || ''}` : String(error),
@@ -410,7 +415,11 @@ export async function lookupZoteroReferences(
                 });
                 if (!serialized) {
                     errors.push({
-                        reference: { library_id: attachment.libraryID, zotero_key: attachment.key },
+                        reference: {
+                            library_id: attachment.libraryID,
+                            zotero_key: attachment.key,
+                            library_ref: libraryRefForLibraryID(attachment.libraryID) ?? undefined,
+                        },
                         error: 'Attachment not available locally',
                         error_code: 'not_available',
                     });
@@ -442,7 +451,11 @@ export async function lookupZoteroReferences(
             } catch (error: any) {
                 logger(`lookupZoteroReferences: Failed to serialize attachment ${attachment.libraryID}/${attachment.key}: ${error}`, 1);
                 errors.push({
-                    reference: { library_id: attachment.libraryID, zotero_key: attachment.key },
+                    reference: {
+                        library_id: attachment.libraryID,
+                        zotero_key: attachment.key,
+                        library_ref: libraryRefForLibraryID(attachment.libraryID) ?? undefined,
+                    },
                     error: 'Failed to serialize attachment',
                     error_code: 'load_failed',
                     details: error instanceof Error ? `${error.message}\n${error.stack || ''}` : String(error),
@@ -480,7 +493,11 @@ export async function lookupZoteroReferences(
         } catch (error: any) {
             logger(`lookupZoteroReferences: Failed to serialize note ${note.libraryID}/${note.key}: ${error}`, 1);
             errors.push({
-                reference: { library_id: note.libraryID, zotero_key: note.key },
+                reference: {
+                    library_id: note.libraryID,
+                    zotero_key: note.key,
+                    library_ref: libraryRefForLibraryID(note.libraryID) ?? undefined,
+                },
                 error: 'Failed to serialize note',
                 error_code: 'load_failed',
                 details: error instanceof Error ? `${error.message}\n${error.stack || ''}` : String(error),
@@ -528,7 +545,11 @@ export async function lookupZoteroReferences(
         } catch (error: any) {
             logger(`lookupZoteroReferences: Failed to serialize annotation ${annotation.libraryID}/${annotation.key}: ${error}`, 1);
             errors.push({
-                reference: { library_id: annotation.libraryID, zotero_key: annotation.key },
+                reference: {
+                    library_id: annotation.libraryID,
+                    zotero_key: annotation.key,
+                    library_ref: libraryRefForLibraryID(annotation.libraryID) ?? undefined,
+                },
                 error: 'Failed to serialize annotation',
                 error_code: 'load_failed',
                 details: error instanceof Error ? `${error.message}\n${error.stack || ''}` : String(error),

@@ -1,4 +1,5 @@
 import { logger } from '../../../utils/logger';
+import { libraryRefForLibraryID } from '../../../utils/libraryIdentity';
 import { searchableLibraryIdsAtom } from '../../../../react/atoms/profile';
 import { EditNoteProposedData, type EditNoteOperation } from '../../../../react/types/agentActions/editNote';
 import {
@@ -957,6 +958,7 @@ async function executeEditNoteAction(
             result_data: {
                 library_id,
                 zotero_key,
+                library_ref: libraryRefForLibraryID(library_id) ?? undefined,
                 occurrences_replaced: 1,
                 warnings,
                 undo_full_html: strippedHtml,
@@ -1058,6 +1060,7 @@ async function executeEditNoteAction(
             result_data: {
                 library_id,
                 zotero_key,
+                library_ref: libraryRefForLibraryID(library_id) ?? undefined,
                 occurrences_replaced: 1,
                 warnings,
                 undo_old_html: '',
@@ -1352,6 +1355,7 @@ async function executeEditNoteAction(
         result_data: {
             library_id,
             zotero_key,
+            library_ref: libraryRefForLibraryID(library_id) ?? undefined,
             occurrences_replaced: replacementCount,
             warnings,
             undo_old_html: expandedOld,

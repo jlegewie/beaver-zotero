@@ -1,5 +1,6 @@
 import { calculateObjectHash } from '../utils/hash';
 import { logger } from './logger';
+import { libraryRefForLibraryID } from './libraryIdentity';
 import { ItemDataHashedFields, AttachmentDataHashedFields, ItemData, ItemStub, ItemSummary, CollectionSummary, ZoteroCreator, ZoteroCollection, BibliographicIdentifier, AttachmentDataWithMimeType, ZoteroLibrary, AttachmentStub } from '../../react/types/zotero';
 import { getCollectionClientDateModifiedAsISOString, getCitationKeyFromItem, getMimeType, safeIsInTrash, safeFileExists } from './zoteroUtils';
 import { syncingItemFilterAsync } from './sync';
@@ -50,8 +51,9 @@ export function getCollectionSummariesFromItem(item: Zotero.Item): CollectionSum
             return {
                 library_id: item.libraryID,
                 zotero_key: collection.key,
+                library_ref: libraryRefForLibraryID(item.libraryID) ?? undefined,
                 name: collection.name,
-            };
+            } as CollectionSummary;
         })
         .filter((s): s is CollectionSummary => s !== null);
     return summaries.length > 0 ? summaries : null;
@@ -126,6 +128,7 @@ async function getCollectionsFromItem(item: Zotero.Item): Promise<ZoteroCollecti
             return {
                 library_id: item.libraryID,
                 zotero_key: collection.key,
+                library_ref: libraryRefForLibraryID(item.libraryID) ?? undefined,
                 name: collection.name,
                 zotero_version: collection.version,
                 date_modified: await getCollectionClientDateModifiedAsISOString(collection_id),
@@ -258,6 +261,7 @@ export async function serializeCollection(
     return {
         library_id: collection.libraryID,
         zotero_key: collection.key,
+        library_ref: libraryRefForLibraryID(collection.libraryID) ?? undefined,
         name: collection.name,
         zotero_version: collection.version,
         date_modified: finalDateModified,
@@ -339,6 +343,10 @@ export async function serializeItem(item: Zotero.Item, clientDateModified: strin
         // Add non-hashed fields
         date_added: Zotero.Date.sqlToISO8601(item.dateAdded), // Convert UTC SQL datetime format to ISO string
         date_modified: finalDateModified,
+        // Device-portable library identity. Not part of hashedFields: it's
+        // derived from library_id (already hashed) and never changes on its
+        // own, so it must not affect the metadata hash.
+        library_ref: libraryRefForLibraryID(item.libraryID) ?? undefined,
         // Add the calculated hash
         zotero_version: item.version,
         zotero_synced: item.synced,
@@ -363,6 +371,7 @@ export async function serializeItemSummary(item: Zotero.Item): Promise<ItemSumma
         // full ItemSummary by the backend), unlike the lean ItemStub.
         zotero_key: item.key,
         library_id: item.libraryID,
+        library_ref: libraryRefForLibraryID(item.libraryID) ?? undefined,
         item_type: item.itemType,
         title: item.getField('title', false, true) || null,
         creators: getCreatorsFromItem(item),
@@ -388,6 +397,7 @@ export async function serializeItemSummary(item: Zotero.Item): Promise<ItemSumma
 export function serializeItemStub(item: Zotero.Item): ItemStub {
     return {
         item_id: `${item.libraryID}-${item.key}`,
+        library_ref: libraryRefForLibraryID(item.libraryID) ?? undefined,
         item_type: item.itemType,
         title: item.getField('title', false, true) || null,
         creators: formatZoteroCreatorsString(getCreatorsFromItem(item)),
@@ -418,6 +428,7 @@ export function safeStub<T>(build: () => T): T | undefined {
 export function serializeAttachmentStub(item: Zotero.Item, contentKind?: ContentKind): AttachmentStub {
     return {
         attachment_id: `${item.libraryID}-${item.key}`,
+        library_ref: libraryRefForLibraryID(item.libraryID) ?? undefined,
         parent_item_id: item.parentKey ? `${item.libraryID}-${item.parentKey}` : null,
         title: item.getField?.('title') || item.getDisplayTitle?.() || null,
         filename: item.attachmentFilename || null,
@@ -538,6 +549,10 @@ export async function serializeAttachment(
         mime_type: await getMimeType(item),
         date_added: Zotero.Date.sqlToISO8601(item.dateAdded),
         date_modified: finalDateModified,
+        // Device-portable library identity, derived from library_id (already
+        // hashed above) — kept out of hashedFields so it never affects the
+        // metadata hash.
+        library_ref: libraryRefForLibraryID(item.libraryID) ?? undefined,
         // Add the calculated hash
         attachment_metadata_hash: metadataHash,
         zotero_version: item.version,
@@ -561,6 +576,7 @@ export function serializeZoteroLibrary(library: _ZoteroTypes.Library.LibraryLike
     return {
         library_id: library.libraryID,
         group_id: library.isGroup ? library.id : null,
+        library_ref: libraryRefForLibraryID(library.libraryID) ?? undefined,
         name: library.name,
         is_group: library.isGroup,
         type: library.libraryType,
@@ -672,6 +688,7 @@ export function serializeNote(
     return {
         result_type: 'note',
         item_id: `${note.libraryID}-${note.key}`,
+        library_ref: libraryRefForLibraryID(note.libraryID) ?? undefined,
         title: note.getDisplayTitle?.() || '',
         parent_item_id: parent?.item_id ?? null,
         parent_title: parent?.title ?? null,
@@ -735,6 +752,7 @@ export function serializeAnnotation(
     return {
         result_type: 'annotation',
         annotation_id: `${annotation.libraryID}-${annotation.key}`,
+        library_ref: libraryRefForLibraryID(annotation.libraryID) ?? undefined,
         annotation_type: ann.annotationType ?? null,
         text: ann.annotationText ?? null,
         comment: ann.annotationComment ?? null,

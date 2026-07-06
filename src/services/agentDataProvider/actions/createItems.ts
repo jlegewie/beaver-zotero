@@ -10,6 +10,7 @@ import {
     FrontendTimingMetadata,
 } from '../../agentProtocol';
 import { checkLibraryExcluded, excludedLibraryMessage, getDeferredToolPreference } from '../utils';
+import { libraryRefForLibraryID } from '../../../utils/libraryIdentity';
 import { TimeoutContext, checkAborted } from '../timeout';
 import { TimeoutError } from '../timeout';
 import { TimingAccumulator } from '../../../utils/timing';
@@ -206,6 +207,7 @@ async function validateCreateItemAction(
         valid: true,
         current_value: {
             library_id: targetLibraryId,
+            library_ref: libraryRefForLibraryID(targetLibraryId) ?? undefined,
             library_name: targetLibrary.name,
             items_count: items.length,
             existing_items: existingItems,

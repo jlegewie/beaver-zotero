@@ -16,6 +16,7 @@ import {
     ViewImagesErrorCode,
 } from '../agentProtocol';
 import { ZoteroItemReference, ItemStub, AttachmentStub } from '../../../react/types/zotero';
+import { libraryRefForLibraryID } from '../../utils/libraryIdentity';
 import {
     getReadableContentKind,
     resolveToImageAttachment,
@@ -291,6 +292,7 @@ export async function handleZoteroViewImagesRequest(
         const targetRef: ZoteroItemReference = {
             library_id: target.item.libraryID,
             zotero_key: target.item.key,
+            library_ref: libraryRefForLibraryID(target.item.libraryID) ?? undefined,
         };
         if (
             targetRef.library_id !== attachment.library_id

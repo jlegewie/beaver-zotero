@@ -15,6 +15,7 @@ import {
 } from '../agentProtocol';
 import { ItemStub, ItemSummary } from '../../../react/types/zotero';
 import { serializeItemStub, serializeItemSummary } from '../../utils/zoteroSerializers';
+import { libraryRefForLibraryID } from '../../utils/libraryIdentity';
 import { checkLibraryExcluded, prepareAttachmentInfoBatchData, processAttachmentInfoBatch } from './utils';
 import { CITATION_TAG_PATTERN } from '../../../react/utils/citationPreprocessing';
 import {
@@ -41,6 +42,7 @@ function serializeNoteCitationSummary(item: Zotero.Item): ItemSummary {
     return {
         library_id: item.libraryID,
         zotero_key: item.key,
+        library_ref: libraryRefForLibraryID(item.libraryID) ?? undefined,
         item_type: 'note',
         title,
         preview: getNoteContentPreviewText(noteHtml, title, CITED_NOTE_PREVIEW_LENGTH),
@@ -53,6 +55,7 @@ function serializeAnnotationCitationSummary(item: Zotero.Item): ItemSummary {
     return {
         library_id: item.libraryID,
         zotero_key: item.key,
+        library_ref: libraryRefForLibraryID(item.libraryID) ?? undefined,
         item_type: 'annotation',
         title: snippet ? `Annotation: ${snippet}` : 'Annotation',
         annotation_text: annotation.annotationText || null,

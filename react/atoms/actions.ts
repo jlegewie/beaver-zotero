@@ -554,6 +554,7 @@ export const buildEditedPromptActionsAtom = atom(
                 type: 'collection',
                 library_id: resolved.collection.library_id,
                 zotero_key: resolved.collection.zotero_key,
+                library_ref: resolved.collection.library_ref,
                 name: resolved.collection.name,
                 parent_key: resolved.collection.parent_key,
             });

@@ -19,6 +19,7 @@ import {
 } from '../../agentProtocol';
 import { ItemDataWithStatus, AttachmentDataWithStatus } from '../../../../react/types/zotero';
 import { checkLibraryExcluded, excludedLibraryMessage, getDeferredToolPreference, getLibraryByIdOrName, getCollectionByIdOrName } from '../utils';
+import { libraryRefForLibraryID } from '../../../utils/libraryIdentity';
 import { TimeoutContext, checkAborted } from '../timeout';
 import { extractCitationReferences } from './extractCitationReferences';
 import { lookupZoteroReferences, LookupZoteroReferencesResult } from '../lookupZoteroReferences';
@@ -60,6 +61,7 @@ interface CitedItemsData {
 interface CreateNoteResultData {
     library_id: number;
     zotero_key: string;
+    library_ref?: string;
     parent_key?: string;
     collection_key?: string;
     note_content?: string;
@@ -379,6 +381,7 @@ async function validateCreateNoteAction(
         title: title.trim(),
         content,
         library_id: resolvedLibraryId,
+        library_ref: libraryRefForLibraryID(resolvedLibraryId) ?? undefined,
         parent_item_id: parentItemIdInput ?? null,
         collection: collectionInput ?? null,
         parent_key: parentKey,
@@ -393,6 +396,7 @@ async function validateCreateNoteAction(
         valid: true,
         current_value: {
             library_id: resolvedLibraryId,
+            library_ref: libraryRefForLibraryID(resolvedLibraryId) ?? undefined,
             library_name: library.name,
             parent_key: parentKey,
             collection_key: resolvedCollectionKey,
@@ -608,6 +612,7 @@ async function executeCreateNoteAction(
         const resultData: CreateNoteResultData = {
             library_id: zoteroNote.libraryID,
             zotero_key: zoteroNote.key,
+            library_ref: libraryRefForLibraryID(zoteroNote.libraryID) ?? undefined,
             ...(zoteroNote.parentKey ? { parent_key: zoteroNote.parentKey } : {}),
             ...(collectionKey ? { collection_key: collectionKey } : {}),
             ...(noteContent ? { note_content: noteContent } : {}),

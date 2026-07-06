@@ -6,6 +6,7 @@
 import { AgentAction } from '../agents/agentActions';
 import type { EditNoteResultData, EditNoteOperation } from '../types/agentActions/editNote';
 import { logger } from '../../src/utils/logger';
+import { libraryRefForLibraryID } from '../../src/utils/libraryIdentity';
 import {
     getOrSimplify,
     invalidateSimplificationCache,
@@ -276,6 +277,7 @@ export async function executeEditNoteAction(
         return {
             library_id,
             zotero_key,
+            library_ref: libraryRefForLibraryID(library_id) ?? undefined,
             occurrences_replaced: 1,
             warnings,
             undo_full_html: strippedHtml,
@@ -344,6 +346,7 @@ export async function executeEditNoteAction(
         const result: EditNoteResultData = {
             library_id,
             zotero_key,
+            library_ref: libraryRefForLibraryID(library_id) ?? undefined,
             occurrences_replaced: 1,
             warnings,
             undo_old_html: '',
@@ -547,6 +550,7 @@ export async function executeEditNoteAction(
     const result: EditNoteResultData = {
         library_id,
         zotero_key,
+        library_ref: libraryRefForLibraryID(library_id) ?? undefined,
         occurrences_replaced: replacementCount,
         warnings,
         undo_old_html: expandedOld,

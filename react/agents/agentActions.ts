@@ -306,9 +306,13 @@ export const validateAppliedAgentAction = async (action: AgentAction): Promise<A
 function normalizeZoteroItemReference(raw: any): ZoteroItemReference {
     const libraryId = raw?.library_id ?? raw?.libraryId;
     const zoteroKey = raw?.zotero_key ?? raw?.zoteroKey;
+    // Carry the device-portable library_ref through unchanged when the
+    // backend sent one
+    const libraryRef = raw?.library_ref ?? raw?.libraryRef;
     return {
         library_id: typeof libraryId === 'number' ? libraryId : Number(libraryId ?? 0),
         zotero_key: typeof zoteroKey === 'string' ? zoteroKey : String(zoteroKey ?? ''),
+        ...(typeof libraryRef === 'string' && libraryRef ? { library_ref: libraryRef } : {}),
     };
 }
 

@@ -14,6 +14,7 @@ import {
     CollectionInfo,
 } from '../agentProtocol';
 import { getCollectionByIdOrName, validateLibraryAccess, isLibrarySearchable, getSearchableLibraries } from './utils';
+import { libraryRefForLibraryID } from '../../utils/libraryIdentity';
 
 
 /**
@@ -210,6 +211,7 @@ export async function handleListCollectionsRequest(
             collections,
             total_count: totalCount,
             library_id: library.libraryID,
+            library_ref: libraryRefForLibraryID(library.libraryID) ?? undefined,
             library_name: libraryName,
         };
     } catch (error) {

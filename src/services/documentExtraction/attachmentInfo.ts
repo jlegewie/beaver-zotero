@@ -9,6 +9,7 @@ import { getContentKind } from './attachmentResolution';
 import { isReadableContentKind, type AttachmentInfo, type ContentKind } from './shared/contentKinds';
 import { getPDFPageCountFromFulltext, getPDFPageCountFromWorker } from './shared/pageCount';
 import type { TimingAccumulator } from '../../utils/timing';
+import { libraryRefForLibraryID } from '../../utils/libraryIdentity';
 
 export interface AttachmentInfoOptions {
     parentItemId?: string | null;
@@ -482,6 +483,7 @@ export async function getAttachmentInfo(
     const isPrimary = options.isPrimary ?? false;
     const base: AttachmentInfo = {
         attachment_id: attachmentId(item),
+        library_ref: libraryRefForLibraryID(item.libraryID) ?? undefined,
         parent_item_id: options.parentItemId ?? defaultParentItemId(item),
         title: item.getField?.('title') || item.getDisplayTitle?.() || null,
         filename: item.attachmentFilename || null,

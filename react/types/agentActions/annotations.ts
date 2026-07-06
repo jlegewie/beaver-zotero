@@ -73,6 +73,8 @@ export type AnnotationProposedData = HighlightAnnotationProposedData | NoteAnnot
 export interface AnnotationResultData {
     zotero_key: string; // The Zotero key assigned to the annotation
     library_id: number;
+    /** Device-portable library identity ("u" | "g<groupID>"). See `src/utils/libraryIdentity.ts`. */
+    library_ref?: string;
     attachment_key: string;
 }
 

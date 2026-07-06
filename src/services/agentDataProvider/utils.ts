@@ -1,6 +1,7 @@
 import { logger } from '../../utils/logger';
 import { ZoteroItemStatus, FrontendFileStatus, AttachmentInfo } from '../../../react/types/zotero';
 import { safeIsInTrash, safeFileExists, isLinkedUrlAttachment } from '../../utils/zoteroUtils';
+import { libraryRefForLibraryID } from '../../utils/libraryIdentity';
 import { syncingItemFilterAsync } from '../../utils/sync';
 import { getPref } from '../../utils/prefs';
 
@@ -608,6 +609,8 @@ export function extractYear(dateStr: string | undefined): number | null {
  */
 export interface AvailableLibraryInfo {
     library_id: number;
+    /** Device-portable library identity ("u" | "g<groupID>"). See `src/utils/libraryIdentity.ts`. */
+    library_ref?: string;
     name: string;
 }
 
@@ -667,6 +670,7 @@ export function getSearchableLibraries(): AvailableLibraryInfo[] {
         .filter((lib: any) => searchableIds.includes(lib.libraryID))
         .map((lib: any) => ({
             library_id: lib.libraryID,
+            library_ref: libraryRefForLibraryID(lib.libraryID) ?? undefined,
             name: lib.name,
         }));
 }
@@ -678,6 +682,7 @@ export function getSearchableLibraries(): AvailableLibraryInfo[] {
 export function getAvailableLibraries(): AvailableLibraryInfo[] {
     return Zotero.Libraries.getAll().map((lib: any) => ({
         library_id: lib.libraryID,
+        library_ref: libraryRefForLibraryID(lib.libraryID) ?? undefined,
         name: lib.name,
     }));
 }

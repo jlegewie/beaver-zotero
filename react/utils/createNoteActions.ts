@@ -13,11 +13,14 @@ import { prepareCitationRenderContext } from './citationRenderContext';
 import { wrapWithSchemaVersion, getBeaverNoteFooterHTML } from './noteActions';
 import { logger } from '../../src/utils/logger';
 import { resolveCreateNoteParent } from '../../src/services/agentDataProvider/actions/resolveCreateNoteParent';
+import { libraryRefForLibraryID } from '../../src/utils/libraryIdentity';
 
 
 export interface CreateNoteResultData {
     library_id: number;
     zotero_key: string;
+    /** Device-portable library identity ("u" | "g<groupID>"). See `src/utils/libraryIdentity.ts`. */
+    library_ref?: string;
     parent_key?: string;
     collection_key?: string;
     /** Simplified HTML content of the created note (same format as read_note) */
@@ -180,6 +183,7 @@ export async function executeCreateNoteAction(action: AgentAction, runId?: strin
     return {
         library_id: zoteroNote.libraryID,
         zotero_key: zoteroNote.key,
+        library_ref: libraryRefForLibraryID(zoteroNote.libraryID) ?? undefined,
         ...(zoteroNote.parentKey ? { parent_key: zoteroNote.parentKey } : {}),
         ...(effectiveCollectionKey ? { collection_key: effectiveCollectionKey } : {}),
         ...(relatedItemKey ? { related_item_key: relatedItemKey } : {}),

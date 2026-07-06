@@ -986,6 +986,8 @@ export interface WSZoteroSearchRequest extends WSBaseEvent {
 export interface RegularSearchResultItem {
     result_type: 'regular';
     item_id: string;
+    /** Device-portable library identity ("u" | "g<groupID>") of the item referenced by `item_id`. */
+    library_ref?: string;
     item_type: string;
     title?: string | null;
     creators?: string | null;
@@ -997,6 +999,8 @@ export interface RegularSearchResultItem {
 export interface NoteResultItem {
     result_type: 'note';
     item_id: string;
+    /** Device-portable library identity ("u" | "g<groupID>") of the note referenced by `item_id`. */
+    library_ref?: string;
     title?: string | null;
     /** @deprecated Superseded by `parent_item`. Still emitted for clients/backends predating `parent_item`; remove once the backend reads `parent_item`. */
     parent_item_id?: string | null;
@@ -1032,6 +1036,8 @@ export interface AnnotationResultItem {
     result_type: 'annotation';
     /** Annotation id, format "library_id-zotero_key". */
     annotation_id: string;
+    /** Device-portable library identity ("u" | "g<groupID>") of the annotation referenced by `annotation_id`. */
+    library_ref?: string;
     /** "highlight" | "underline" | "note" | "image" | "ink" | "text" */
     annotation_type?: string | null;
     /** Highlighted/selected text, when present. */
@@ -1073,6 +1079,8 @@ export type ListItemsResultItem = RegularListResultItem | NoteResultItem | Attac
 /** Brief library info for error responses */
 export interface AvailableLibraryInfo {
     library_id: number;
+    /** Device-portable library identity ("u" | "g<groupID>"). See `src/utils/libraryIdentity.ts`. */
+    library_ref?: string;
     name: string;
 }
 
@@ -1111,6 +1119,8 @@ export interface WSListItemsRequest extends WSBaseEvent {
 export interface RegularListResultItem {
     result_type: 'regular';
     item_id: string;
+    /** Device-portable library identity ("u" | "g<groupID>") of the item referenced by `item_id`. */
+    library_ref?: string;
     item_type: string;
     title?: string | null;
     creators?: string | null;
@@ -1236,6 +1246,8 @@ export interface WSListCollectionsResponse {
     collections: CollectionInfo[];
     total_count: number;
     library_id?: number | null;
+    /** Device-portable library identity ('u' / 'g<groupID>') of the listed library. */
+    library_ref?: string;
     library_name?: string | null;
     error?: string | null;
     error_code?: string | null;
@@ -1299,6 +1311,8 @@ export interface WSListLibrariesRequest extends WSBaseEvent {
 /** Per-library count snapshot */
 export interface LibrarySummary {
     library_id: number;
+    /** Device-portable library identity ("u" | "g<groupID>"). See `src/utils/libraryIdentity.ts`. */
+    library_ref?: string;
     name: string;
     is_group: boolean;
     read_only: boolean;
@@ -1656,6 +1670,8 @@ export const ZOTERO_PLUGIN_FEATURES: string[] = Object.values(CLIENT_FEATURES);
 export interface CurrentLibrary {
     /** Library ID */
     library_id: number;
+    /** Device-portable library identity ("u" | "g<groupID>"). See `src/utils/libraryIdentity.ts`. */
+    library_ref?: string;
     /** Library name (e.g., "My Library" or group name) */
     name: string;
     /** Whether this is a group library */
@@ -1674,6 +1690,8 @@ export interface CurrentCollection {
     name: string;
     /** Library ID this collection belongs to */
     library_id: number;
+    /** Device-portable library identity ("u" | "g<groupID>"). See `src/utils/libraryIdentity.ts`. */
+    library_ref?: string;
     /** Parent collection key, if this is a subcollection */
     parent_key?: string | null;
 }

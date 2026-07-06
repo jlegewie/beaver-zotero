@@ -6,6 +6,7 @@ import { getPageViewportInfo, isPDFDocumentAvailable, waitForPDFDocument, applyR
 import { isLibraryEditable } from '../../src/utils/zoteroUtils';
 import { BEAVER_ANNOTATION_AUTHOR, resolveBeaverAnnotationColor } from '../../src/constants/annotations';
 import { AnnotationProposedAction, isHighlightAnnotationAction, isNoteAnnotationAction, AnnotationResultData } from '../types/agentActions/base';
+import { libraryRefForLibraryID } from '../../src/utils/libraryIdentity';
 
 
 const NOTE_RECT_SIZE = 18;
@@ -324,6 +325,7 @@ export async function applyAnnotation(
         return {
             zotero_key: annotationKey,
             library_id: annotation.proposed_data.library_id,
+            library_ref: libraryRefForLibraryID(annotation.proposed_data.library_id) ?? undefined,
             attachment_key: annotation.proposed_data.attachment_key,
         };
     } catch (error: any) {

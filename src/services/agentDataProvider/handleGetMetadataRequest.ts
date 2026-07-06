@@ -14,6 +14,7 @@ import {
 } from '../agentProtocol';
 import { ItemStub } from '../../../react/types/zotero';
 import { serializeNote, serializeAnnotation, serializeItemStub } from '../../utils/zoteroSerializers';
+import { libraryRefForLibraryID } from '../../utils/libraryIdentity';
 import { checkLibraryExcluded, getAttachmentInfoForItem, formatCreatorsString, extractYear } from './utils';
 
 
@@ -195,6 +196,7 @@ export async function handleGetMetadataRequest(
             // Get full item data via toJSON({ mode: 'full' }) - includes all fields
             const itemData: Record<string, any> = item.toJSON({ mode: 'full' });
             itemData.item_id = itemId;
+            itemData.library_ref = libraryRefForLibraryID(libraryId) ?? undefined;
             
             // Return all fields (including tags and collections)
             const result: Record<string, any> = { ...itemData };

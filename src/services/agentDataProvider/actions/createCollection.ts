@@ -9,6 +9,7 @@ import {
 
 } from '../../agentProtocol';
 import { checkLibraryExcluded, excludedLibraryMessage, getDeferredToolPreference } from '../utils';
+import { libraryRefForLibraryID } from '../../../utils/libraryIdentity';
 import { TimeoutContext, checkAborted } from '../timeout';
 import { TimeoutError } from '../timeout';
 
@@ -170,6 +171,7 @@ async function validateCreateCollectionAction(
     // Build current value for preview (includes resolved library_id)
     const currentValue = {
         library_id: library_id,
+        library_ref: libraryRefForLibraryID(library_id) ?? undefined,
         library_name: library.name,
         parent_key: parent_key || null,
         item_count: item_ids?.length || 0,
@@ -319,6 +321,7 @@ async function executeCreateCollectionAction(
             success: true,
             result_data: {
                 library_id,
+                library_ref: libraryRefForLibraryID(library_id) ?? undefined,
                 collection_key: collection.key,
                 items_added: itemsAdded,
             },

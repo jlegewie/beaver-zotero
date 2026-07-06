@@ -14,6 +14,8 @@
 import { agentService } from '../../src/services/agentService';
 import { logger } from '../../src/utils/logger';
 
+import { libraryRefForLibraryID } from '../../src/utils/libraryIdentity';
+
 export interface AttachmentResolvedPayload {
     threadId?: string;
     actionId?: string;
@@ -38,6 +40,7 @@ export function emitAttachmentResolved(payload: AttachmentResolvedPayload): void
         action_id: payload.actionId,
         library_id: payload.libraryId,
         zotero_key: payload.zoteroKey,
+        library_ref: libraryRefForLibraryID(payload.libraryId) ?? undefined,
         attachment_status: payload.attachmentStatus,
         attachment_key: payload.attachmentKey,
     });

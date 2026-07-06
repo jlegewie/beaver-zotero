@@ -7,6 +7,7 @@ import { AgentAction } from '../agents/agentActions';
 import { EditMetadataResultData, AppliedMetadataEdit, FailedMetadataEdit, MetadataEdit, CreatorJSON } from '../types/agentActions/base';
 import { logger } from '../../src/utils/logger';
 import { sanitizeCreators } from '../../src/utils/zoteroUtils';
+import { libraryRefForLibraryID } from '../../src/utils/libraryIdentity';
 
 /**
  * Result of an undo operation
@@ -144,6 +145,7 @@ export async function executeEditMetadataAction(
     return {
         library_id,
         zotero_key,
+        library_ref: libraryRefForLibraryID(library_id) ?? undefined,
         applied_edits: appliedEdits,
         rejected_edits: [],
         failed_edits: failedEdits,

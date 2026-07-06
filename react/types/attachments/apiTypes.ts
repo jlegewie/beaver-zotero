@@ -24,6 +24,8 @@ export type MessageAttachment =
 interface BaseMessageAttachment {
     library_id: number;
     zotero_key: string;
+    /** Device-portable library identity ("u" | "g<groupID>"). See `src/utils/libraryIdentity.ts`. */
+    library_ref?: string;
 }
 
 export interface ItemMetadataAttachment extends BaseMessageAttachment {
@@ -106,6 +108,8 @@ export interface ExternalFileAttachment {
 export interface ReaderState {
     library_id: number;
     zotero_key: string;
+    /** Device-portable library identity ("u" | "g<groupID>"). See `src/utils/libraryIdentity.ts`. */
+    library_ref?: string;
     current_page: number | null;
     /** Reader type. Lets the backend route the active reader's selection to the
      *  correct locator model. Omitted only for unrecognized reader types. */
@@ -117,6 +121,8 @@ export interface ReaderState {
 export interface NoteState {
     library_id: number;
     zotero_key: string;
+    /** Device-portable library identity ("u" | "g<groupID>"). See `src/utils/libraryIdentity.ts`. */
+    library_ref?: string;
     parent_key?: string;
     title?: string;
 }
@@ -146,6 +152,8 @@ export interface AnnotationPosition {
 export interface Annotation {
     library_id: number;
     zotero_key: string;
+    /** Device-portable library identity ("u" | "g<groupID>"). See `src/utils/libraryIdentity.ts`. */
+    library_ref?: string;
     parent_key: string;
     // annotation_type: "ink" | "highlight" | "underline" | "note" | "image" | "text";
     annotation_type: ValidAnnotationType;

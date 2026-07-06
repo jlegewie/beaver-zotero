@@ -42,6 +42,8 @@ export interface CreateItemResultData {
     // From ZoteroItemReference
     library_id: number;
     zotero_key: string;  // The Zotero key assigned to the new item
+    /** Device-portable library identity ("u" | "g<groupID>"). See `src/utils/libraryIdentity.ts`. */
+    library_ref?: string;
 
     // Attachment lifecycle (see AttachmentStatus above)
     attachment_status: AttachmentStatus;

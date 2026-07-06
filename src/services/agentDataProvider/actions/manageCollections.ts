@@ -21,6 +21,7 @@ import {
     WSAgentActionExecuteResponse,
 } from '../../agentProtocol';
 import { checkLibraryExcluded, excludedLibraryMessage, getDeferredToolPreference, isLibrarySearchable, getCollectionByIdOrName } from '../utils';
+import { libraryRefForLibraryID } from '../../../utils/libraryIdentity';
 import { TimeoutContext, checkAborted, TimeoutError } from '../timeout';
 import { logger } from '../../../utils/logger';
 
@@ -363,6 +364,7 @@ export async function validateManageCollectionsAction(
         valid: true,
         current_value: {
             library_id: libraryID,
+            library_ref: libraryRefForLibraryID(libraryID) ?? undefined,
             library_name: library.name,
             action,
             collection_key: collection.key,
@@ -377,6 +379,7 @@ export async function validateManageCollectionsAction(
         // Snapshots are captured at execute time, not here.
         normalized_action_data: {
             library_id: libraryID,
+            library_ref: libraryRefForLibraryID(libraryID) ?? undefined,
             collection_key: collection.key,
             ...(action === 'move' ? { new_parent_key: newParentKey } : {}),
         },
@@ -507,6 +510,7 @@ export async function executeManageCollectionsAction(
             success: true,
             result_data: {
                 library_id,
+                library_ref: libraryRefForLibraryID(library_id) ?? undefined,
                 action,
                 collection_key,
                 new_name: new_name ?? null,

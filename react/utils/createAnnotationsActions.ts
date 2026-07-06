@@ -23,6 +23,7 @@ import {
 import { getReadableContentKind } from '../../src/services/documentExtraction/attachmentResolution';
 import { getAttachmentFileStatus } from '../../src/services/agentDataProvider/utils';
 import { logger } from '../../src/utils/logger';
+import { libraryRefForLibraryID } from '../../src/utils/libraryIdentity';
 
 type AnnotationContentKind = 'pdf' | 'epub';
 
@@ -92,6 +93,7 @@ export async function executeCreateHighlightAnnotationsAction(
                     loc_raw: item.loc_raw,
                     library_id: ref.library_id,
                     zotero_key: ref.zotero_key,
+                    library_ref: libraryRefForLibraryID(ref.library_id) ?? undefined,
                 });
             } catch (error: any) {
                 failed.push({
@@ -142,6 +144,7 @@ export async function executeCreateHighlightAnnotationsAction(
                     loc_raw: item.loc_raw,
                     library_id: ref.library_id,
                     zotero_key: ref.zotero_key,
+                    library_ref: libraryRefForLibraryID(ref.library_id) ?? undefined,
                 });
             } catch (error: any) {
                 failed.push({
@@ -224,6 +227,7 @@ export async function executeCreateNoteAnnotationsAction(
                 loc_raw: item.loc_raw,
                 library_id: ref.library_id,
                 zotero_key: ref.zotero_key,
+                library_ref: libraryRefForLibraryID(ref.library_id) ?? undefined,
             });
         } catch (error: any) {
             failed.push({

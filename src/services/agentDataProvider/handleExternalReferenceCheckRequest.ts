@@ -17,6 +17,7 @@ import {
 
 } from '../agentProtocol';
 import { getSearchableLibraryIds } from './utils';
+import { libraryRefForLibraryID } from '../../utils/libraryIdentity';
 
 
 /**
@@ -85,7 +86,8 @@ export async function handleExternalReferenceCheckRequest(request: WSExternalRef
                 exists: true,
                 item: {
                     library_id: result.item.library_id,
-                    zotero_key: result.item.zotero_key
+                    zotero_key: result.item.zotero_key,
+                    library_ref: libraryRefForLibraryID(result.item.library_id) ?? undefined,
                 }
             };
         } else {

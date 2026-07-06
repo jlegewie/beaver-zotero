@@ -15,6 +15,7 @@ import {
     AttachmentImageErrorCode,
 } from '../agentProtocol';
 import { ZoteroItemReference } from '../../../react/types/zotero';
+import { libraryRefForLibraryID } from '../../utils/libraryIdentity';
 import { makeRemoteFilePath } from '../documentFileIdentity';
 import {
     checkLibraryExcluded,
@@ -131,7 +132,11 @@ export async function handleZoteroAttachmentImageRequest(
         }
         const { item: imageItem, key: imageKey } = resolveResult;
         errorKey = imageKey;
-        resolvedRef = { library_id: imageItem.libraryID, zotero_key: imageItem.key };
+        resolvedRef = {
+            library_id: imageItem.libraryID,
+            zotero_key: imageItem.key,
+            library_ref: libraryRefForLibraryID(imageItem.libraryID) ?? undefined,
+        };
 
         // 3. Get the file path — returns false if missing or nonexistent
         const rawFilePath = await imageItem.getFilePathAsync();

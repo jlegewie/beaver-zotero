@@ -106,6 +106,8 @@ export interface EditMetadataResultData {
     library_id: number;
     /** Zotero key of the edited item */
     zotero_key: string;
+    /** Device-portable library identity ("u" | "g<groupID>"). See `src/utils/libraryIdentity.ts`. */
+    library_ref?: string;
     /** List of field edits that were successfully applied */
     applied_edits: AppliedMetadataEdit[];
     /** List of field names that were rejected by the user */
@@ -142,6 +144,8 @@ export interface CreateCollectionProposedData {
 export interface CreateCollectionResultData {
     /** Library ID of the created collection */
     library_id: number;
+    /** Device-portable library identity ("u" | "g<groupID>"). See `src/utils/libraryIdentity.ts`. */
+    library_ref?: string;
     /** Zotero key of the created collection */
     collection_key: string;
     /** Number of items added to the collection (if any were requested) */
@@ -235,6 +239,8 @@ export interface ManageTagsProposedData {
  */
 export interface ManageTagsResultData {
     library_id: number;
+    /** Device-portable library identity ("u" | "g<groupID>"). See `src/utils/libraryIdentity.ts`. */
+    library_ref?: string;
     action: 'rename' | 'delete';
     name: string;
     new_name?: string | null;
@@ -277,6 +283,8 @@ export interface ManageCollectionsProposedData {
  */
 export interface ManageCollectionsResultData {
     library_id: number;
+    /** Device-portable library identity ("u" | "g<groupID>"). See `src/utils/libraryIdentity.ts`. */
+    library_ref?: string;
     action: 'rename' | 'move' | 'delete';
     collection_key: string;
     new_name?: string | null;
@@ -353,6 +361,8 @@ export interface NoteProposedData {
 export interface NoteResultData {
     library_id: number;
     zotero_key: string;
+    /** Device-portable library identity ("u" | "g<groupID>"). See `src/utils/libraryIdentity.ts`. */
+    library_ref?: string;
     parent_key?: string;
 }
 

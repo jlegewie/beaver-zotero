@@ -41,6 +41,7 @@ import { checkLibraryExcluded, notifyRemoteDownloadFailure, notifyRemoteFileNotS
 import { EXTERNAL_LIBRARY_ID, resolveExternalFile } from '../externalFiles';
 import type { ExternalFileRecord } from '../database';
 import { serializeAttachmentStub, serializeItemStub } from '../../utils/zoteroSerializers';
+import { libraryRefForLibraryID } from '../../utils/libraryIdentity';
 import {
     createPreparedJsonMessage,
     type PreparedJsonMessage,
@@ -409,6 +410,7 @@ export async function handleZoteroDocumentRequest(
                 resolved_attachment: {
                     library_id: resolvedItem.libraryID,
                     zotero_key: resolvedItem.key,
+                    library_ref: libraryRefForLibraryID(resolvedItem.libraryID) ?? undefined,
                 },
                 content_type: contentType,
                 content_kind: 'text',
@@ -443,6 +445,7 @@ export async function handleZoteroDocumentRequest(
                     resolved_attachment: {
                         library_id: result.resolvedAttachment.libraryId,
                         zotero_key: result.resolvedAttachment.zoteroKey,
+                        library_ref: libraryRefForLibraryID(result.resolvedAttachment.libraryId) ?? undefined,
                     },
                     content_type: result.contentType,
                     content_kind: 'epub',
@@ -480,6 +483,7 @@ export async function handleZoteroDocumentRequest(
                     resolved_attachment: {
                         library_id: result.resolvedAttachment.libraryId,
                         zotero_key: result.resolvedAttachment.zoteroKey,
+                        library_ref: libraryRefForLibraryID(result.resolvedAttachment.libraryId) ?? undefined,
                     },
                     content_type: result.contentType,
                     content_kind: 'snapshot',
@@ -537,6 +541,7 @@ export async function handleZoteroDocumentRequest(
                     resolved_attachment: {
                         library_id: result.resolvedAttachment.libraryId,
                         zotero_key: result.resolvedAttachment.zoteroKey,
+                        library_ref: libraryRefForLibraryID(result.resolvedAttachment.libraryId) ?? undefined,
                     },
                     content_type: result.contentType,
                     content_kind: 'pdf',
@@ -550,6 +555,7 @@ export async function handleZoteroDocumentRequest(
                 resolved_attachment: {
                     library_id: result.resolvedAttachment.libraryId,
                     zotero_key: result.resolvedAttachment.zoteroKey,
+                    library_ref: libraryRefForLibraryID(result.resolvedAttachment.libraryId) ?? undefined,
                 },
                 content_type: result.contentType,
                 content_kind: 'pdf',
