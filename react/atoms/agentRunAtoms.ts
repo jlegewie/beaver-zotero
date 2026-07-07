@@ -132,7 +132,8 @@ import {
     clearAutoApprovedActionIdsAtom,
     makeNoteKey,
 } from './editNoteAutoApprove';
-import { loadFullItemDataWithAllTypes, getZoteroUserIdentifier } from '../../src/utils/zoteroUtils';
+import { loadFullItemDataWithAllTypes } from '../../src/utils/zoteroUtils';
+import { buildZoteroInstanceWire } from '../../src/services/zoteroInstanceWire';
 import { dismissDiffPreview } from '../utils/noteEditorDiffPreview';
 import { store } from '../store';
 import { profileSyncStatusAtom, searchableLibraryIdsAtom, syncWithZoteroAtom } from './profile';
@@ -1569,12 +1570,9 @@ async function executeWSRequest(
     try {
         logger('WS Starting connection for run:', run.id);
         const frontendVersion = Zotero.Beaver.pluginVersion || '';
-        const zid = getZoteroUserIdentifier();
+        const zoteroInstance = buildZoteroInstanceWire(get(searchableLibraryIdsAtom));
         await agentService.connect(request, callbacks, frontendVersion, ZOTERO_PLUGIN_CLIENT_TYPE, ZOTERO_PLUGIN_FEATURES, {
-            local_user_key: zid.localUserKey,
-            ...(zid.userID ? { user_id: zid.userID } : {}),
-            ...(zid.accountName ? { account_name: zid.accountName } : {}),
-            ...(zid.deviceName ? { device_name: zid.deviceName } : {}),
+            ...zoteroInstance,
         });
         logger('WS Connection established and ready');
     } catch (error: any) {

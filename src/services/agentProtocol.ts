@@ -1600,12 +1600,19 @@ export interface WSAuthMessage {
  * present and unique per install — the discriminator when one Beaver account has
  * several installs connected. The rest are best-effort context/labels (`user_id`/
  * `account_name` are absent when Zotero sync is off).
+ *
+ * `libraries` carries the install's searchable index scope — canonical library
+ * refs for libraries not excluded in Beaver Preferences.
  */
 export interface ZoteroInstanceWire {
     local_user_key: string;
     user_id?: string;
     account_name?: string;
     device_name?: string;
+    /** Canonical library refs in scope: `u<userID>`/`l<localUserKey>` and
+     * `g<groupID>` values for searchable libraries.
+     */
+    libraries?: string[];
 }
 
 /**

@@ -4,6 +4,7 @@ vi.mock('../../../src/utils/getAPIBaseURL', () => ({ default: 'https://api.examp
 vi.mock('../../../src/utils/logger', () => ({ logger: vi.fn() }));
 vi.mock('../../../src/utils/zoteroUtils', () => ({
     getZoteroUserIdentifier: vi.fn(() => ({ localUserKey: 'local-user-key' })),
+    getInstanceLibraryRefs: vi.fn(() => []),
 }));
 vi.mock('../../../src/services/agentService', () => ({
     getWSAuthToken: vi.fn().mockResolvedValue('token'),
