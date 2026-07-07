@@ -42,6 +42,17 @@ export interface PDFWorkerClientSlots {
     background: PDFWorkerClientSlot;
 }
 
+/**
+ * Context for a worker start-phase failure (see `PDFConfig.onWorkerStartFailure`).
+ * `consecutiveFailures` counts start failures since the last successful worker
+ * handshake for this slot — the host thresholds/debounces on it.
+ */
+export interface WorkerStartFailureInfo {
+    slotName: PDFWorkerSlotName;
+    consecutiveFailures: number;
+    reason: string;
+}
+
 /** Worker-side URLs sent to the worker as the first message after spawn. */
 export interface PDFWorkerUrls {
     mupdfWasmFactoryUrl: string;
@@ -59,6 +70,9 @@ export interface PDFConfig {
     workerClientSlots: PDFWorkerClientSlots;
     /** Logger sink (see `PDFLogSink`). */
     log: PDFLogSink;
+
+    /** Optional host hook fired when a worker fails to *start* */
+    onWorkerStartFailure?: (info: WorkerStartFailureInfo) => void;
 
     /** URLs forwarded to the worker via the configure message. */
     worker: PDFWorkerUrls;

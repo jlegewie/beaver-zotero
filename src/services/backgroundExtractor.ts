@@ -744,7 +744,12 @@ export class BackgroundExtractor {
 }
 
 function isTransientResponseError(code: string): boolean {
-    return code === 'download_failed' || code === 'extraction_failed';
+    return code === 'download_failed'
+        || code === 'extraction_failed'
+        // The local PDF engine failed to start / respawn — machine-local and
+        // transient, so a background job should retry rather than complete
+        // terminally (the worker host may recover before the next attempt).
+        || code === 'worker_unavailable';
 }
 
 function dispatchBackgroundEvent(name: string, detail: unknown): void {

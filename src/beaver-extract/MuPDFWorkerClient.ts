@@ -239,6 +239,11 @@ export class MuPDFWorkerClient {
      */
     private spawnCount = 0;
     private retryCount = 0;
+    /**
+     * Consecutive worker start-phase failures (module load / configure
+     * handshake) since the last successful handshake.
+     */
+    private consecutiveStartFailures = 0;
     private dispatchCounts: Record<string, number> = {};
     private lastSpawnTime: number | null = null;
     private fatalOperationKeys = new Set<string>();
@@ -343,12 +348,12 @@ export class MuPDFWorkerClient {
         (worker as any).onerror = (event: any) => {
             const message = event?.message || "worker onerror";
             cfg.log(`[MuPDFWorkerClient ${this.slotName}] worker.onerror: ${message}`, 1);
-            this.markStale(`worker.onerror: ${message}`);
+            this.markStale(`worker.onerror: ${message}`, { startError: true });
         };
         (worker as any).onmessageerror = (event: any) => {
             const message = event?.message || "worker onmessageerror";
             cfg.log(`[MuPDFWorkerClient ${this.slotName}] worker.onmessageerror: ${message}`, 1);
-            this.markStale(`worker.onmessageerror: ${message}`);
+            this.markStale(`worker.onmessageerror: ${message}`, { startError: true });
         };
 
         this.worker = worker;
@@ -400,7 +405,7 @@ export class MuPDFWorkerClient {
         };
         entry.timeoutId = setTimeout(() => {
             if (this.startup !== entry || entry.configured) return;
-            this.markStale("configure handshake timed out");
+            this.markStale("configure handshake timed out", { startError: true });
         }, 15000);
         (entry.timeoutId as any)?.unref?.();
         return entry;
@@ -414,6 +419,7 @@ export class MuPDFWorkerClient {
         } catch (e) {
             this.markStale(
                 `configure postMessage threw during ${reason}: ${e instanceof Error ? e.message : String(e)}`,
+                { startError: true },
             );
         }
     }
@@ -438,6 +444,9 @@ export class MuPDFWorkerClient {
         if (lifecycle.kind === "configured") {
             if (this.startup?.worker === worker) {
                 this.startup.resolve();
+                // The worker completed its handshake — the slot is healthy
+                // again, so clear the consecutive start-failure streak.
+                this.consecutiveStartFailures = 0;
             }
             return;
         }
@@ -492,13 +501,21 @@ export class MuPDFWorkerClient {
      * Mark the worker as stale: terminate it, reject all pending entries,
      * clear singleton state. Idempotent.
      */
-    private markStale(reason: string): void {
+    private markStale(reason: string, opts?: { startError?: boolean }): void {
         this.clearIdleTimer();
         const w = this.worker;
         this.worker = null;
         this.spawnedFromWindowInternal = null;
         const startup = this.startup;
         this.startup = null;
+
+        // A "start-phase" failure is a worker that died before it ever completed
+        // its configure handshake
+        const startPhaseFailure =
+            !!opts?.startError && !this.disposed && !!startup && !startup.configured;
+        if (startPhaseFailure) {
+            this.consecutiveStartFailures++;
+        }
 
         if (w) {
             try {
@@ -528,6 +545,22 @@ export class MuPDFWorkerClient {
         this.pending.clear();
         for (const entry of pending) {
             entry.reject(stale);
+        }
+
+        // Surface a repeated inability to start the worker to the host
+        if (startPhaseFailure && isConfigured()) {
+            try {
+                getConfig().onWorkerStartFailure?.({
+                    slotName: this.slotName,
+                    consecutiveFailures: this.consecutiveStartFailures,
+                    reason,
+                });
+            } catch (e) {
+                getConfig().log(
+                    `[MuPDFWorkerClient ${this.slotName}] onWorkerStartFailure hook threw: ${e}`,
+                    2,
+                );
+            }
         }
     }
 
@@ -1082,6 +1115,7 @@ export class MuPDFWorkerClient {
         disposed: boolean;
         spawnCount: number;
         retryCount: number;
+        consecutiveStartFailures: number;
         pendingCount: number;
         nextId: number;
         dispatchCounts: Record<string, number>;
@@ -1093,6 +1127,7 @@ export class MuPDFWorkerClient {
             disposed: this.disposed,
             spawnCount: this.spawnCount,
             retryCount: this.retryCount,
+            consecutiveStartFailures: this.consecutiveStartFailures,
             pendingCount: this.pending.size,
             nextId: this.nextId,
             dispatchCounts: { ...this.dispatchCounts },
@@ -1105,6 +1140,7 @@ export class MuPDFWorkerClient {
     resetStats(): void {
         this.spawnCount = 0;
         this.retryCount = 0;
+        this.consecutiveStartFailures = 0;
         this.dispatchCounts = {};
         this.lastSpawnTime = null;
     }
