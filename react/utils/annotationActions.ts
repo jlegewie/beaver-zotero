@@ -298,10 +298,21 @@ export async function applyAnnotation(
     if (!reader || !annotation.proposed_data?.attachment_key) {
         throw new Error('Invalid reader or attachment key');
     }
-    
+
+    // Resolve the annotation's library through the device-portable library_ref
+    // (with legacy library_id fallback) so the editability check and the recorded
+    // result target the library the annotation actually lands in — even when this
+    // device numbers a group library differently than the device that proposed it.
+    // The proposed_data.library_id alone is a stale device-local rowid for
+    // cross-device group annotations. Mirrors deleteAnnotationFromReader.
+    const resolvedLibraryId = resolveLibraryRef(annotation.proposed_data);
+    if (!resolvedLibraryId) {
+        throw new Error("The annotation's library isn't available on this computer");
+    }
+
     try {
         // Check if the library is editable before attempting to create annotations
-        if (!isLibraryEditable(annotation.proposed_data.library_id)) {
+        if (!isLibraryEditable(resolvedLibraryId)) {
             throw new Error('Cannot create annotations in a read-only library');
         }
 
@@ -324,8 +335,8 @@ export async function applyAnnotation(
         const annotationKey = await createAnnotation(reader, annotation);
         return {
             zotero_key: annotationKey,
-            library_id: annotation.proposed_data.library_id,
-            library_ref: libraryRefForLibraryID(annotation.proposed_data.library_id) ?? undefined,
+            library_id: resolvedLibraryId,
+            library_ref: libraryRefForLibraryID(resolvedLibraryId) ?? annotation.proposed_data.library_ref ?? undefined,
             attachment_key: annotation.proposed_data.attachment_key,
         };
     } catch (error: any) {

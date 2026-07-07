@@ -39,6 +39,8 @@ import {
 } from '../../../utils/createAnnotationsActions';
 import type { CreateItemProposedData } from '../../../types/agentActions/items';
 import { shortItemTitle } from '../../../../src/utils/zoteroUtils';
+import { resolveItemReference, resolveLibraryRef } from '../../../../src/utils/libraryIdentity';
+import { notifyReferenceUnavailable } from '../sourceActions';
 import { logger } from '../../../../src/utils/logger';
 import {
     TickIcon,
@@ -213,16 +215,20 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                 action?.proposed_data?.resolved_ref?.library_id ??
                 action?.proposed_data?.library_id ??
                 pendingApproval?.actionData?.library_id;
+            const libraryRef: string | undefined =
+                action?.proposed_data?.resolved_ref?.library_ref ??
+                action?.proposed_data?.library_ref ??
+                pendingApproval?.actionData?.library_ref;
             const zoteroKey: string | undefined =
                 action?.proposed_data?.resolved_ref?.zotero_key ??
                 action?.proposed_data?.zotero_key ??
                 pendingApproval?.actionData?.zotero_key;
-            
+
             if (!libraryId || !zoteroKey) return;
-            
-            const item = await Zotero.Items.getByLibraryAndKeyAsync(libraryId, zoteroKey);
-            if (item) {
-                const title = await shortItemTitle(item);
+
+            const resolved = await resolveItemReference({ library_ref: libraryRef, library_id: libraryId, zotero_key: zoteroKey });
+            if (resolved.status === 'found') {
+                const title = await shortItemTitle(resolved.item);
                 setItemTitle({ key: itemTitleKey, title });
             }
         };
@@ -598,7 +604,16 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                 !!action?.result_data?.zotero_key
             ),
             tooltip: 'Open note',
-            onClick: () => openNoteByKey(action!.result_data!.library_id, action!.result_data!.zotero_key),
+            onClick: () => {
+                // Resolve through the device-portable library_ref so a note created
+                // in a group library on another computer opens the right local item.
+                const libraryId = resolveLibraryRef({
+                    library_ref: action!.result_data!.library_ref,
+                    library_id: action!.result_data!.library_id,
+                });
+                if (libraryId) void openNoteByKey(libraryId, action!.result_data!.zotero_key);
+                else notifyReferenceUnavailable('item', 'library_unavailable');
+            },
         },
         {
             matches: () => (
@@ -609,12 +624,15 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
             tooltip: 'Open annotation',
             onClick: async () => {
                 const firstCreated = action!.result_data!.created[0];
-                const annotationItem = await Zotero.Items.getByLibraryAndKeyAsync(
-                    firstCreated.library_id,
-                    firstCreated.zotero_key,
-                );
-                if (annotationItem) {
-                    await navigateToAnnotation(annotationItem as Zotero.Item);
+                const resolved = await resolveItemReference({
+                    library_ref: firstCreated.library_ref,
+                    library_id: firstCreated.library_id,
+                    zotero_key: firstCreated.zotero_key,
+                });
+                if (resolved.status === 'found') {
+                    await navigateToAnnotation(resolved.item as Zotero.Item);
+                } else {
+                    notifyReferenceUnavailable('annotation', resolved.status === 'library_unavailable' ? 'library_unavailable' : 'missing');
                 }
             },
         },
