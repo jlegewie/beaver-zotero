@@ -21,10 +21,12 @@ import { supabase } from '../../src/services/supabaseClient';
 import { providerConnection } from '../../src/services/providerConnection';
 import { logger } from '../../src/utils/logger';
 import { isAuthenticatedAtom, sessionAtom } from '../atoms/auth';
+import { isProfileLoadedAtom } from '../atoms/profile';
 import { dataProviderEnabledAtom } from '../atoms/ui';
 
 export function useProviderWake() {
     const isAuthenticated = useAtomValue(isAuthenticatedAtom);
+    const isProfileLoaded = useAtomValue(isProfileLoadedAtom);
     const session = useAtomValue(sessionAtom);
     const enabled = useAtomValue(dataProviderEnabledAtom);
     const channelRef = useRef<RealtimeChannel | null>(null);
@@ -32,7 +34,7 @@ export function useProviderWake() {
     const userId = session?.user?.id ?? null;
 
     useEffect(() => {
-        if (!isAuthenticated || !enabled || !userId) {
+        if (!isAuthenticated || !isProfileLoaded || !enabled || !userId) {
             return;
         }
 
@@ -89,5 +91,5 @@ export function useProviderWake() {
             // eventually; this just makes the teardown immediate.
             providerConnection.close(1000, 'Provider wake subscription stopped');
         };
-    }, [isAuthenticated, enabled, userId]);
+    }, [isAuthenticated, isProfileLoaded, enabled, userId]);
 }

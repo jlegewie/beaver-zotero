@@ -390,6 +390,62 @@ export function getZoteroUserIdentifier(): ZoteroInstanceIdentity {
 }
 
 /**
+ * Canonical, machine-independent library ref — the compact spelling of Zotero's
+ * object-URI scheme the backend search index keys rows on:
+ *
+ *   group    → `g${groupID}`                     (global, server-assigned group id)
+ *   personal → synced ? `u${userID}` : `l${localUserKey}`
+ *
+ * Returns null for feed libraries (never indexed) or an unknown libraryID. The
+ * local `libraryID` (sequential per Zotero DB) is deliberately NEVER used on the
+ * wire — it is not portable across installs.
+ */
+export function getCanonicalLibraryRef(libraryID: number): string | null {
+    const library = Zotero.Libraries.get(libraryID);
+    if (!library) return null;
+    if (library.libraryType === 'group') {
+        const groupID = Zotero.Groups.getGroupIDFromLibraryID(libraryID);
+        return groupID ? `g${groupID}` : null;
+    }
+    if (library.libraryType === 'user') {
+        const { userID, localUserKey } = getZoteroUserIdentifier();
+        return userID ? `u${userID}` : `l${localUserKey}`;
+    }
+    // Feed (or any other) library type — not part of the indexable scope.
+    return null;
+}
+
+/**
+ * Searchable index scope of the running Zotero install: the personal library ref
+ * plus one `g<groupID>` per group library that is not excluded in Beaver
+ * Preferences. Sent in the auth handshake so the backend can scope search-index
+ * queries over the shared per-user namespace to exactly the libraries this
+ * install may search. Feed libraries are excluded, the list is de-duplicated,
+ * and any failure is swallowed (returns []) so scope computation never blocks
+ * auth.
+ */
+export function getInstanceLibraryRefs(searchableLibraryIds: number[]): string[] {
+    try {
+        const refs = new Set<string>();
+        for (const libraryID of searchableLibraryIds) {
+            const library = Zotero.Libraries.get(libraryID);
+            if (!library) {
+                continue;
+            }
+            if (library.libraryType !== 'user' && library.libraryType !== 'group') {
+                continue;
+            }
+            const ref = getCanonicalLibraryRef(libraryID);
+            if (ref) refs.add(ref);
+        }
+        return Array.from(refs);
+    } catch (e) {
+        Zotero.logError(e as Error);
+        return [];
+    }
+}
+
+/**
  * Build a zotero://select URI that opens Zotero and selects the given item.
  * Works without loading the full item — only needs libraryID and key.
  *
