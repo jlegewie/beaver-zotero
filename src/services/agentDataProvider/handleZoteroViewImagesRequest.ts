@@ -302,8 +302,11 @@ export async function handleZoteroViewImagesRequest(
             zotero_key: target.item.key,
             library_ref: libraryRefForLibraryID(target.item.libraryID) ?? undefined,
         };
+        // Compare against the resolved library, not the request's raw
+        // library_id: a library_ref-resolved request legitimately maps to a
+        // different local library id, and that alone is not a redirect.
         if (
-            targetRef.library_id !== attachment.library_id
+            targetRef.library_id !== resolvedLibraryId
             || targetRef.zotero_key !== attachment.zotero_key
         ) {
             resolvedRef = targetRef;

@@ -23,7 +23,7 @@
 import { AgentAction } from '../agents/agentActions';
 import type { ManageTagsProposedData, ManageTagsResultData, TagColorSnapshot } from '../types/agentActions/base';
 import { logger } from '../../src/utils/logger';
-import { libraryRefForLibraryID, resolveLibraryRef } from '../../src/utils/libraryIdentity';
+import { libraryRefForLibraryID, resolveWriteTargetLibrary } from '../../src/utils/libraryIdentity';
 
 const MAX_SNAPSHOT_ITEMS = 5000;
 
@@ -52,9 +52,21 @@ export async function executeManageTagsAction(
     action: AgentAction
 ): Promise<ManageTagsResultData> {
     const data = action.proposed_data as ManageTagsProposedData;
-    const { library_id, action: op, name, new_name } = data;
-    const resolvedLibraryID = resolveLibraryRef(data);
-    if (!resolvedLibraryID) throw new Error('Tag library is not available on this computer');
+    const { action: op, name, new_name, library_id, library_ref } = data;
+    // A destructive write must carry an explicit target. Reject a
+    // stale/malformed action (e.g. library_id: 0 with no library_ref) instead
+    // of letting resolveWriteTargetLibrary fall back to its personal-library
+    // default, which could rename/delete a same-named tag in the wrong
+    // library. Mirrors the backend execute guard.
+    if ((!library_id || typeof library_id !== 'number') && !library_ref) {
+        throw new Error('manage_tags action is missing a target library');
+    }
+    // Writes resolve strictly: a present-but-invalid library_ref must fail
+    // rather than fall back to a stale device-local library_id. Legacy data
+    // with no library_ref still falls back to library_id.
+    const resolution = resolveWriteTargetLibrary(data);
+    if (!resolution.ok) throw new Error(resolution.message);
+    const resolvedLibraryID = resolution.libraryID;
 
     // Snapshot the authoritative pre-apply state RIGHT BEFORE the op.
     const tagID = Zotero.Tags.getID(name);
@@ -129,11 +141,16 @@ export async function undoManageTagsAction(
 ): Promise<void> {
     const data = action.proposed_data as ManageTagsProposedData;
     const { library_id, action: op, name, new_name } = data;
-    const resolvedLibraryID = resolveLibraryRef(data);
-    if (!resolvedLibraryID) {
-        logger(`undoManageTagsAction: Library unavailable for ${data.library_ref || library_id}; skipping`, 1);
+    if ((!library_id || typeof library_id !== 'number') && !data.library_ref) {
+        logger('undoManageTagsAction: missing target library; skipping', 1);
         return;
     }
+    const resolution = resolveWriteTargetLibrary(data);
+    if (!resolution.ok) {
+        logger(`undoManageTagsAction: ${resolution.message} (${data.library_ref || library_id}); skipping`, 1);
+        return;
+    }
+    const resolvedLibraryID = resolution.libraryID;
     const result = (action.result_data ?? {}) as Partial<ManageTagsResultData>;
     const affected_item_ids = result.affected_item_ids ?? [];
     const old_color = result.old_color ?? null;

@@ -1,6 +1,6 @@
 import { atom } from 'jotai';
 import { logger } from '../../src/utils/logger';
-import { resolveItemReference } from '../../src/utils/libraryIdentity';
+import { isLibraryReferencePortable, resolveItemReference } from '../../src/utils/libraryIdentity';
 import { dismissDiffPreview } from '../utils/noteEditorDiffPreview';
 import { updateDiffPreviewForNote, diffPreviewNoteKeyAtom } from '../utils/diffPreviewCoordinator';
 import { makeNoteKey } from '../atoms/editNoteAutoApprove';
@@ -261,7 +261,14 @@ const checkAppliedReference = async (
 ): Promise<AppliedActionValidity> => {
     const resolved = await resolveItemReference(ref);
     if (resolved.status === 'library_unavailable') return 'unverifiable';
-    if (resolved.status === 'not_found') return 'invalid';
+    if (resolved.status === 'not_found') {
+        // "Not found" is only proof of deletion when the reference identifies
+        // its library portably. A legacy reference (no library_ref) into a
+        // group library resolves through a device-local library_id, so a miss
+        // may just mean that id maps to a different group on this device — not
+        // that the item is gone. Treat that as unverifiable, never a revert.
+        return isLibraryReferencePortable(ref) ? 'invalid' : 'unverifiable';
+    }
     return mustBeAnnotation && !resolved.item.isAnnotation() ? 'invalid' : 'valid';
 };
 

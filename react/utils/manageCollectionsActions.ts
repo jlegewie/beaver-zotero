@@ -28,16 +28,28 @@
 import { AgentAction, ManageCollectionsAgentAction } from '../agents/agentActions';
 import type { ManageCollectionsProposedData, ManageCollectionsResultData } from '../types/agentActions/base';
 import { logger } from '../../src/utils/logger';
-import { libraryRefForLibraryID, resolveLibraryRef } from '../../src/utils/libraryIdentity';
+import { libraryRefForLibraryID, resolveWriteTargetLibrary } from '../../src/utils/libraryIdentity';
 
 
 export async function executeManageCollectionsAction(
     action: AgentAction
 ): Promise<ManageCollectionsResultData> {
     const data = action.proposed_data as ManageCollectionsProposedData;
-    const { library_id, action: op, collection_key, new_name, new_parent_key } = data;
-    const resolvedLibraryID = resolveLibraryRef(data);
-    if (!resolvedLibraryID) throw new Error('Collection library is not available on this computer');
+    const { action: op, collection_key, new_name, new_parent_key, library_id, library_ref } = data;
+    // A destructive write must carry an explicit target. Reject a
+    // stale/malformed action (e.g. library_id: 0 with no library_ref) instead
+    // of letting resolveWriteTargetLibrary fall back to its personal-library
+    // default, which could rename/move/delete a same-key collection in the
+    // wrong library. Mirrors the backend execute guard.
+    if ((!library_id || typeof library_id !== 'number') && !library_ref) {
+        throw new Error('manage_collections action is missing a target library');
+    }
+    // Writes resolve strictly (a present-but-invalid library_ref fails rather
+    // than falling back to a stale device-local library_id); legacy data with
+    // no library_ref still falls back to library_id.
+    const resolution = resolveWriteTargetLibrary(data);
+    if (!resolution.ok) throw new Error(resolution.message);
+    const resolvedLibraryID = resolution.libraryID;
 
     const collection = await Zotero.Collections.getByLibraryAndKeyAsync(resolvedLibraryID, collection_key);
     if (!collection) {
@@ -115,11 +127,16 @@ export async function undoManageCollectionsAction(
 ): Promise<void> {
     const data = action.proposed_data as ManageCollectionsProposedData;
     const { library_id, action: op, collection_key } = data;
-    const resolvedLibraryID = resolveLibraryRef(data);
-    if (!resolvedLibraryID) {
-        logger(`undoManageCollectionsAction: Library unavailable for ${data.library_ref || library_id}-${collection_key}; skipping`, 1);
+    if ((!library_id || typeof library_id !== 'number') && !data.library_ref) {
+        logger(`undoManageCollectionsAction: missing target library (${collection_key}); skipping`, 1);
         return;
     }
+    const resolution = resolveWriteTargetLibrary(data);
+    if (!resolution.ok) {
+        logger(`undoManageCollectionsAction: ${resolution.message} (${data.library_ref || library_id}-${collection_key}); skipping`, 1);
+        return;
+    }
+    const resolvedLibraryID = resolution.libraryID;
     const result = (action.result_data ?? {}) as Partial<ManageCollectionsResultData>;
     const old_name = result.old_name ?? null;
     const old_parent_key = result.old_parent_key ?? null;

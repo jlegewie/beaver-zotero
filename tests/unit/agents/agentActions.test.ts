@@ -82,6 +82,15 @@ describe('validateAppliedAgentAction', () => {
         expect(await validateAppliedAgentAction(appliedAction(5))).toBe('valid');
     });
 
+    it('returns unverifiable when a legacy group-library item (no library_ref) is not found', async () => {
+        // A device-local group library_id is not a portable identity: a miss
+        // may just mean that id maps to a different group here, so it must not
+        // be treated as a revert. This covers all data written before library_ref.
+        getByLibraryAndKeyAsync.mockResolvedValue(null);
+        expect(await validateAppliedAgentAction(appliedAction(5))).toBe('unverifiable');
+        expect(getByLibraryAndKeyAsync).toHaveBeenCalledWith(5, 'AAAAAAA1');
+    });
+
     it('returns invalid when an annotation action resolves to a non-annotation', async () => {
         getByLibraryAndKeyAsync.mockResolvedValue({ isAnnotation: () => false });
         const action = appliedAction(1, { action_type: 'highlight_annotation' } as Partial<AgentAction>);

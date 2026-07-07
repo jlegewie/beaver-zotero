@@ -2,6 +2,7 @@ import { WSAgentActionValidateRequest, WSAgentActionValidateResponse, WSAgentAct
 import { store } from '../../../../react/store';
 import { searchableLibraryIdsAtom } from '../../../../react/atoms/profile';
 import { checkLibraryExcluded, excludedLibraryMessage, getDeferredToolPreference } from '../utils';
+import { resolveItemReference } from '../../../utils/libraryIdentity';
 import { TimeoutContext, checkAborted } from '../timeout';
 import { TimeoutError } from '../timeout';
 import { logger } from '../../../utils/logger';
@@ -139,8 +140,18 @@ export async function validateOrganizeItemsAction(
         }
 
         // Validate item exists
-        const item = await Zotero.Items.getByLibraryAndKeyAsync(libraryId, zoteroKey);
-        if (!item) {
+        const resolved = await resolveItemReference({ library_id: libraryId, zotero_key: zoteroKey });
+        if (resolved.status === 'library_unavailable') {
+            return {
+                type: 'agent_action_validate_response',
+                request_id: request.request_id,
+                valid: false,
+                error: `Item not found: ${itemId}. This library isn't available on this computer.`,
+                error_code: 'library_unavailable',
+                preference: 'always_ask',
+            };
+        }
+        if (resolved.status === 'not_found') {
             return {
                 type: 'agent_action_validate_response',
                 request_id: request.request_id,
@@ -150,6 +161,7 @@ export async function validateOrganizeItemsAction(
                 preference: 'always_ask',
             };
         }
+        const item = resolved.item;
 
         // Tags: allowed on regular items, attachments, notes, and annotations
         if (hasTagChanges && !item.isRegularItem() && !item.isAttachment() && !item.isNote() && !item.isAnnotation()) {
@@ -448,14 +460,15 @@ export async function executeOrganizeItemsAction(
                 const libraryId = parseInt(parts[0], 10);
                 const zoteroKey = parts.slice(1).join('-');
 
-                const item = await ta.track('item_lookup_ms', () =>
-                    Zotero.Items.getByLibraryAndKeyAsync(libraryId, zoteroKey)
+                const resolvedItem = await ta.track('item_lookup_ms', () =>
+                    resolveItemReference({ library_id: libraryId, zotero_key: zoteroKey })
                 );
-                if (!item) {
-                    // Item not found - skip but don't fail the transaction
+                if (resolvedItem.status !== 'found') {
+                    // Item not found or its library unavailable on this device - skip but don't fail the transaction
                     skippedItems.push(itemId);
                     continue;
                 }
+                const item = resolvedItem.item;
 
                 // Annotations support tags but not collections. Tag changes below
                 // are item-type-agnostic; collection ops are guarded by isTopLevel,

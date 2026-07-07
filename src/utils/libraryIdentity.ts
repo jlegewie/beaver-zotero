@@ -90,6 +90,29 @@ export function resolveLibraryRef(ref: { library_ref?: string | null; library_id
     }
 }
 
+/**
+ * Whether a reference identifies its library portably — i.e. whether a
+ * `not_found` result is trustworthy proof the item is gone rather than an
+ * artifact of a device-local `library_id`.
+ *
+ * True when a valid `library_ref` is present (the resolver returns
+ * `library_unavailable`, not `not_found`, when such a library is missing on
+ * this device, so a `not_found` there means the library resolved and the key
+ * is genuinely gone) or when the reference points at the personal library,
+ * whose id is identical on every device. A bare group `library_id` is
+ * device-local, so a miss can't be distinguished from "this id maps to a
+ * different group on this device"; callers that would treat a miss as deletion
+ * must fall back to "unverifiable" in that case.
+ */
+export function isLibraryReferencePortable(ref: { library_ref?: string | null; library_id: number }): boolean {
+    if (ref.library_ref && parseLibraryRef(ref.library_ref)) return true;
+    try {
+        return ref.library_id === Zotero.Libraries.userLibraryID;
+    } catch {
+        return false;
+    }
+}
+
 export type WriteTargetLibraryResolution =
     | { ok: true; libraryID: number }
     | { ok: false; code: 'invalid_library_ref' | 'library_unavailable' | 'invalid_library_id' | 'library_not_found'; message: string };
@@ -155,10 +178,14 @@ export function resolveWriteTargetLibrary(ref: {
             (lib: any) => lib.name.toLowerCase() === ref.library_name!.toLowerCase()
         );
         if (!matchedLibrary) {
+            // Do not list library names here: this helper runs before the
+            // per-action exclusion guard and `getAll()` includes libraries the
+            // user excluded from Beaver, so echoing names would leak excluded
+            // (private) libraries to the model.
             return {
                 ok: false,
                 code: 'library_not_found',
-                message: `Library not found: "${ref.library_name}"`,
+                message: `Library not found: "${ref.library_name}". Omit the library parameter to use the default library.`,
             };
         }
         const libraryID = matchedLibrary.libraryID;
@@ -173,6 +200,21 @@ export function resolveWriteTargetLibrary(ref: {
     }
 
     return { ok: true, libraryID: Zotero.Libraries.userLibraryID };
+}
+
+/**
+ * Maps a failed write-target resolution to the model-facing `{ error, error_code }`
+ * an agent-action response carries. Collapses the resolver's four internal codes
+ * to the two the wire protocol uses, so every action reports the same
+ * `error_code` for the same underlying failure.
+ */
+export function writeTargetLibraryError(
+    resolution: Extract<WriteTargetLibraryResolution, { ok: false }>
+): { error: string; error_code: 'library_unavailable' | 'library_not_found' } {
+    return {
+        error: resolution.message,
+        error_code: resolution.code === 'library_unavailable' ? 'library_unavailable' : 'library_not_found',
+    };
 }
 
 /** Outcome of resolving an item reference on this device. */

@@ -3,6 +3,7 @@
  */
 
 import { logger } from '../../utils/logger';
+import { resolveItemReference } from '../../utils/libraryIdentity';
 import {
     formatZoteroCreatorsString,
     getCreatorsFromItem,
@@ -59,10 +60,18 @@ export async function handleGetAnnotationsRequest(
             return invalidResponse(request, excluded.message, 'library_excluded');
         }
 
-        const attachment = await Zotero.Items.getByLibraryAndKeyAsync(libraryId, key);
-        if (!attachment) {
+        const resolved = await resolveItemReference({ library_id: libraryId, zotero_key: key });
+        if (resolved.status === 'library_unavailable') {
+            return invalidResponse(
+                request,
+                'Attachment is in a library that is not available on this computer.',
+                'library_unavailable',
+            );
+        }
+        if (resolved.status === 'not_found') {
             return invalidResponse(request, 'Attachment not found', 'not_found');
         }
+        const attachment = resolved.item;
 
         if (!attachment.isFileAttachment?.()) {
             return invalidResponse(request, 'Item is not a file attachment', 'not_attachment');

@@ -6,7 +6,7 @@
  */
 
 import { logger } from '../../utils/logger';
-import { libraryRefForLibraryID, resolveItemReference } from '../../utils/libraryIdentity';
+import { libraryRefForLibraryID, resolveItemReference, resolveLibraryRef } from '../../utils/libraryIdentity';
 import { ItemDataWithStatus, AttachmentDataWithStatus, ZoteroItemReference, ItemStub } from '../../../react/types/zotero';
 import { searchableLibraryIdsAtom, syncWithZoteroAtom } from '../../../react/atoms/profile';
 import { userIdAtom } from '../../../react/atoms/auth';
@@ -92,6 +92,18 @@ export async function lookupZoteroReferences(
     const loadResults = await Promise.all(
         references.map(async (reference) => {
             try {
+                // Gate on library exclusion BEFORE any item lookup, so an item
+                // in an excluded library is never resolved or confirmed to
+                // exist. Resolve the library through library_ref (with legacy
+                // library_id fallback) so the check targets the same library
+                // the item would load from.
+                const resolvedLibraryId = resolveLibraryRef(reference);
+                if (resolvedLibraryId) {
+                    const excluded = checkLibraryExcluded(resolvedLibraryId);
+                    if (excluded) {
+                        return { reference, error: excluded.message, error_code: 'library_excluded' as const };
+                    }
+                }
                 const resolved = await resolveItemReference(reference);
                 if (resolved.status === 'library_unavailable') {
                     return { reference, error: 'Library is not available on this computer', error_code: 'library_unavailable' as const };
@@ -99,12 +111,7 @@ export async function lookupZoteroReferences(
                 if (resolved.status === 'not_found') {
                     return { reference, error: 'Item not found in local database', error_code: 'not_found' as const };
                 }
-                const zoteroItem = resolved.item;
-                const excluded = checkLibraryExcluded(zoteroItem.libraryID);
-                if (excluded) {
-                    return { reference, error: excluded.message, error_code: 'library_excluded' as const };
-                }
-                return { reference, item: zoteroItem };
+                return { reference, item: resolved.item };
             } catch (error: any) {
                 logger(`lookupZoteroReferences: Failed to load zotero item ${reference.library_id}-${reference.zotero_key}: ${error}`, 1);
                 const details = error instanceof Error ? `${error.message}\n${error.stack || ''}` : String(error);

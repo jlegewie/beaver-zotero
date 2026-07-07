@@ -182,10 +182,13 @@ export async function handleListCollectionsRequest(
             }
         }
         
+        // Constant for the whole request; computed once.
+        const libraryRef = libraryRefForLibraryID(library.libraryID) ?? undefined;
+
         // Build results
         const allResults: CollectionInfo[] = filteredCollections.map((collection: any) => ({
             library_id: library.libraryID,
-            library_ref: libraryRefForLibraryID(library.libraryID) ?? undefined,
+            library_ref: libraryRef,
             collection_key: collection.key,
             name: collection.name,
             parent_key: collection.parentKey || null,
@@ -213,7 +216,7 @@ export async function handleListCollectionsRequest(
             collections,
             total_count: totalCount,
             library_id: library.libraryID,
-            library_ref: libraryRefForLibraryID(library.libraryID) ?? undefined,
+            library_ref: libraryRef,
             library_name: libraryName,
         };
     } catch (error) {

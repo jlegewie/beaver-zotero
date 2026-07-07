@@ -19,7 +19,7 @@ import {
 } from '../../agentProtocol';
 import { ItemDataWithStatus, AttachmentDataWithStatus } from '../../../../react/types/zotero';
 import { checkLibraryExcluded, excludedLibraryMessage, getDeferredToolPreference, getLibraryByIdOrName, getCollectionByIdOrName } from '../utils';
-import { libraryRefForLibraryID, resolveWriteTargetLibrary } from '../../../utils/libraryIdentity';
+import { libraryRefForLibraryID, resolveWriteTargetLibrary, writeTargetLibraryError } from '../../../utils/libraryIdentity';
 import { TimeoutContext, checkAborted } from '../timeout';
 import { extractCitationReferences } from './extractCitationReferences';
 import { lookupZoteroReferences, LookupZoteroReferencesResult } from '../lookupZoteroReferences';
@@ -242,8 +242,7 @@ async function validateCreateNoteAction(
                 type: 'agent_action_validate_response',
                 request_id: request.request_id,
                 valid: false,
-                error: targetResolution.message,
-                error_code: targetResolution.code === 'library_unavailable' ? 'library_unavailable' : 'library_not_found',
+                ...writeTargetLibraryError(targetResolution),
                 preference: 'always_ask',
                 timing: buildTiming(),
             };
@@ -273,8 +272,7 @@ async function validateCreateNoteAction(
                 type: 'agent_action_validate_response',
                 request_id: request.request_id,
                 valid: false,
-                error: targetResolution.message,
-                error_code: 'library_not_found',
+                ...writeTargetLibraryError(targetResolution),
                 preference: 'always_ask',
                 timing: buildTiming(),
             };
@@ -296,14 +294,15 @@ async function validateCreateNoteAction(
     if (resolvedLibraryId == null && libraryNameOrId) {
         const libraryResult = getLibraryByIdOrName(libraryNameOrId);
         if (libraryResult.wasExplicitlyRequested && !libraryResult.library) {
-            const allLibraries = Zotero.Libraries.getAll();
-            const availableNames = allLibraries.map((lib) => lib.name).join(', ');
             ta.record('library_resolution_ms', Date.now() - tLib);
             return {
                 type: 'agent_action_validate_response',
                 request_id: request.request_id,
                 valid: false,
-                error: `Library not found: "${libraryNameOrId}". Omit the library parameter to use the default library. Available libraries: ${availableNames}`,
+                // Do not list library names: getAll() includes libraries the
+                // user excluded from Beaver, so echoing them would leak
+                // excluded (private) libraries to the model.
+                error: `Library not found: "${libraryNameOrId}". Omit the library parameter to use the default library.`,
                 error_code: 'library_not_found',
                 preference: 'always_ask',
                 timing: buildTiming(),
@@ -534,8 +533,7 @@ async function executeCreateNoteAction(
             type: 'agent_action_execute_response',
             request_id: request.request_id,
             success: false,
-            error: targetResolution.message,
-            error_code: targetResolution.code === 'library_unavailable' ? 'library_unavailable' : 'library_not_found',
+            ...writeTargetLibraryError(targetResolution),
             timing: buildTiming(),
         };
     }

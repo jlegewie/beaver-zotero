@@ -1,10 +1,9 @@
 /**
  * Live tests asserting that `library_ref` is emitted through every production
  * data-provider handler and serializer the identity change touched, for both
- * personal ("u") and group ("g<groupID>") items. This is the regression net for
- * Phase 1: `libraryRefForLibraryID()` is now injected into ~40 serializer/funnel
- * sites, and these tests confirm the funnels still produce correct output and
- * stamp the portable ref.
+ * personal ("u") and group ("g<groupID>") items. `libraryRefForLibraryID()` is
+ * injected into the serializer/funnel sites, and these tests confirm the funnels
+ * still produce correct output and stamp the portable ref.
  *
  * Handlers covered: /beaver/library/libraries, /library/list, /library/search,
  * /library/metadata, /library/collections, /library/find-annotations, and

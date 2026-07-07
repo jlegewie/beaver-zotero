@@ -6,7 +6,7 @@ import { getPageViewportInfo, isPDFDocumentAvailable, waitForPDFDocument, applyR
 import { isLibraryEditable } from '../../src/utils/zoteroUtils';
 import { BEAVER_ANNOTATION_AUTHOR, resolveBeaverAnnotationColor } from '../../src/constants/annotations';
 import { AnnotationProposedAction, isHighlightAnnotationAction, isNoteAnnotationAction, AnnotationResultData } from '../types/agentActions/base';
-import { libraryRefForLibraryID } from '../../src/utils/libraryIdentity';
+import { libraryRefForLibraryID, resolveLibraryRef } from '../../src/utils/libraryIdentity';
 
 
 const NOTE_RECT_SIZE = 18;
@@ -342,9 +342,18 @@ export async function deleteAnnotationFromReader(
         throw new Error('Annotation key missing for deletion');
     }
 
+    // Resolve the annotation's library through library_ref (with legacy
+    // library_id fallback) so undo targets the right library even when this
+    // device numbers a group library differently than the applying device.
+    const resolvedLibraryId = resolveLibraryRef(annotation.result_data);
+    if (!resolvedLibraryId) {
+        logger('deleteAnnotationFromReader: annotation library is not available on this computer', 1);
+        return;
+    }
+
     const reader = getCurrentReader() as ZoteroReader | null;
     const attachmentItem = await getAttachmentItem(
-        annotation.result_data.library_id,
+        resolvedLibraryId,
         annotation.result_data.attachment_key
     );
     if (reader && attachmentItem && isReaderForAttachment(reader, attachmentItem)) {
@@ -357,7 +366,7 @@ export async function deleteAnnotationFromReader(
     }
 
     const annotationItem = await Zotero.Items.getByLibraryAndKeyAsync(
-        annotation.result_data.library_id,
+        resolvedLibraryId,
         annotation.result_data.zotero_key
     );
     if (annotationItem) {

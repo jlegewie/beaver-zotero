@@ -9,7 +9,7 @@ import {
 
 } from '../../agentProtocol';
 import { checkLibraryExcluded, excludedLibraryMessage, getDeferredToolPreference } from '../utils';
-import { libraryRefForLibraryID, resolveWriteTargetLibrary } from '../../../utils/libraryIdentity';
+import { libraryRefForLibraryID, resolveWriteTargetLibrary, writeTargetLibraryError } from '../../../utils/libraryIdentity';
 import { TimeoutContext, checkAborted } from '../timeout';
 import { TimeoutError } from '../timeout';
 
@@ -36,8 +36,7 @@ async function validateCreateCollectionAction(
             type: 'agent_action_validate_response',
             request_id: request.request_id,
             valid: false,
-            error: targetResolution.message,
-            error_code: targetResolution.code === 'library_unavailable' ? 'library_unavailable' : 'library_not_found',
+            ...writeTargetLibraryError(targetResolution),
             preference: 'always_ask',
         };
     }
@@ -185,8 +184,7 @@ async function executeCreateCollectionAction(
             type: 'agent_action_execute_response',
             request_id: request.request_id,
             success: false,
-            error: targetResolution.message,
-            error_code: targetResolution.code === 'library_unavailable' ? 'library_unavailable' : 'library_not_found',
+            ...writeTargetLibraryError(targetResolution),
         };
     }
     const library_id = targetResolution.libraryID;

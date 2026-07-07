@@ -322,6 +322,8 @@ export async function handleListItemsRequest(
 
         // Build result items
         const items: ListItemsResultItem[] = [];
+        // Single-library request; the portable ref is constant across results.
+        const libraryRef = libraryRefForLibraryID(library.libraryID) ?? undefined;
         for (const { item } of paginatedItems) {
             if (item.isNote()) {
                 const parentInfo = item.parentItemID ? parentMap.get(item.parentItemID) : null;
@@ -353,7 +355,7 @@ export async function handleListItemsRequest(
                 const resultItem: RegularListResultItem = {
                     result_type: 'regular',
                     item_id: `${library.libraryID}-${item.key}`,
-                    library_ref: libraryRefForLibraryID(library.libraryID) ?? undefined,
+                    library_ref: libraryRef,
                     item_type: item.itemType,
                     title,
                     creators: formatCreatorsString(creators),

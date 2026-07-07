@@ -28,7 +28,7 @@ import Tooltip from '../../../components/ui/Tooltip';
 import { selectItemById } from '../../../../src/utils/selectItem';
 import { revealSource, getCurrentCollectionKeyForItem } from '../../../utils/sourceUtils';
 import { isLibraryEditable } from '../../../../src/utils/zoteroUtils';
-import { libraryRefForLibraryID } from '../../../../src/utils/libraryIdentity';
+import { libraryRefForLibraryID, resolveItemReference } from '../../../../src/utils/libraryIdentity';
 import { saveStreamingNote } from '../../../utils/noteActions';
 import {
     extractNoteBlocksFromMessages,
@@ -89,10 +89,15 @@ const NoteAgentActionRow: React.FC<NoteAgentActionRowProps> = ({ action, runId, 
         setIsBusy(true);
         try {
             if (action.result_data?.library_id && action.result_data?.zotero_key) {
-                const item = await Zotero.Items.getByLibraryAndKeyAsync(
-                    action.result_data.library_id, action.result_data.zotero_key
-                );
-                if (item) await item.eraseTx();
+                // Resolve through library_ref (with legacy library_id fallback)
+                // so the note is found even when this device numbers its group
+                // library differently than the device that created it.
+                const resolved = await resolveItemReference({
+                    library_id: action.result_data.library_id,
+                    library_ref: action.result_data.library_ref,
+                    zotero_key: action.result_data.zotero_key,
+                });
+                if (resolved.status === 'found') await resolved.item.eraseTx();
             }
             clearNoteAutoApplied(action.id);
             undoAgentAction(action.id);
@@ -123,17 +128,27 @@ const NoteAgentActionRow: React.FC<NoteAgentActionRowProps> = ({ action, runId, 
             let targetLibraryId: number | undefined;
 
             if (proposed.library_id != null && proposed.zotero_key) {
-                const item = await Zotero.Items.getByLibraryAndKeyAsync(
-                    proposed.library_id, proposed.zotero_key
-                );
-                if (item) {
-                    targetLibraryId = proposed.library_id;
-                    const libraryRef = proposed.library_ref ?? libraryRefForLibraryID(proposed.library_id) ?? undefined;
-                    if (item.isAttachment() && item.parentKey) {
-                        parentReference = { library_id: proposed.library_id, zotero_key: item.parentKey, library_ref: libraryRef };
-                    } else {
-                        parentReference = { library_id: proposed.library_id, zotero_key: proposed.zotero_key, library_ref: libraryRef };
-                    }
+                // Resolve the intended parent through library_ref (with legacy
+                // library_id fallback). If it can't be resolved on this device,
+                // reject rather than silently misfiling the note into the
+                // personal library via the fallback below.
+                const resolved = await resolveItemReference({
+                    library_id: proposed.library_id,
+                    library_ref: proposed.library_ref,
+                    zotero_key: proposed.zotero_key,
+                });
+                if (resolved.status !== 'found') {
+                    logger(`NoteAgentActionRow: parent item unavailable (${resolved.status}), rejecting action`, 1);
+                    rejectAgentAction(action.id);
+                    return;
+                }
+                const item = resolved.item;
+                targetLibraryId = item.libraryID;
+                const libraryRef = proposed.library_ref ?? libraryRefForLibraryID(item.libraryID) ?? undefined;
+                if (item.isAttachment() && item.parentKey) {
+                    parentReference = { library_id: item.libraryID, zotero_key: item.parentKey, library_ref: libraryRef };
+                } else {
+                    parentReference = { library_id: item.libraryID, zotero_key: proposed.zotero_key, library_ref: libraryRef };
                 }
             }
 
@@ -356,10 +371,14 @@ const NoteAgentActionGroup: React.FC<NoteAgentActionGroupProps> = ({ runId, acti
             for (const action of appliedActions) {
                 try {
                     if (action.result_data?.library_id && action.result_data?.zotero_key) {
-                        const item = await Zotero.Items.getByLibraryAndKeyAsync(
-                            action.result_data.library_id, action.result_data.zotero_key
-                        );
-                        if (item) await item.eraseTx();
+                        // library_ref (with legacy library_id fallback) resolves
+                        // the note across device-local group library numbering.
+                        const resolved = await resolveItemReference({
+                            library_id: action.result_data.library_id,
+                            library_ref: action.result_data.library_ref,
+                            zotero_key: action.result_data.zotero_key,
+                        });
+                        if (resolved.status === 'found') await resolved.item.eraseTx();
                     }
                     clearNoteAutoApplied(action.id);
                     undoAgentAction(action.id);

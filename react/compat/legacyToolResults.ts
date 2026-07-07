@@ -18,6 +18,7 @@
 import { ToolReturnPart } from "../agents/types";
 import { ZoteroItemReference } from "../types/zotero";
 import { logger } from "../../src/utils/logger";
+import { resolveItemReference } from "../../src/utils/libraryIdentity";
 import { truncateText, formatNumberRanges } from "../utils/stringUtils";
 import { EXTERNAL_LIBRARY_ID } from "../../src/services/externalFiles";
 import {
@@ -96,13 +97,19 @@ const ANNOTATION_PREVIEW_MAX_LENGTH = 300;
 // stays unit-testable with mocked items).
 // ===========================================================================
 
-/** Resolve a (library, key) reference to a live item, or null. */
-async function loadItem(libraryId: number, key: string): Promise<Zotero.Item | null> {
+/**
+ * Resolve a reference to a live item, or null. Prefers the device-portable
+ * `library_ref` (falling back to the device-local `library_id` when absent,
+ * matching every reference written before `library_ref` existed).
+ */
+async function loadItem(
+    ref: { library_ref?: string; library_id: number; zotero_key: string },
+): Promise<Zotero.Item | null> {
     try {
-        const item = await Zotero.Items.getByLibraryAndKeyAsync(libraryId, key);
-        return item || null;
+        const resolved = await resolveItemReference(ref);
+        return resolved.status === "found" ? resolved.item : null;
     } catch (error) {
-        logger(`legacyToolResults: failed to resolve ${libraryId}-${key}: ${error}`, 1);
+        logger(`legacyToolResults: failed to resolve ${ref.library_id}-${ref.zotero_key}: ${error}`, 1);
         return null;
     }
 }
@@ -305,7 +312,7 @@ function selfRow(base: RowBase, item: Zotero.Item, parent: Zotero.Item | null): 
  */
 async function hydrateRow(spec: RowSpec): Promise<ItemListRow> {
     const { ref, headline, locationLabel = null, status = "ok" } = spec;
-    const item = await loadItem(ref.library_id, ref.zotero_key);
+    const item = await loadItem(ref);
 
     if (!item) {
         return {
@@ -337,7 +344,7 @@ async function hydrateRow(spec: RowSpec): Promise<ItemListRow> {
     // Resolve the bibliographic parent (explicit override for read_note, else
     // the item's own). Regular items have none → resolveParent returns null.
     const parent = spec.parentRefOverride
-        ? await loadItem(spec.parentRefOverride.library_id, spec.parentRefOverride.zotero_key)
+        ? await loadItem(spec.parentRefOverride)
         : await resolveParent(item);
     if (parent) await ensureItemData(parent);
 
@@ -502,7 +509,7 @@ async function hydrateAttachmentSearchRow(
         };
     }
 
-    const item = await loadItem(att.library_id, att.zotero_key);
+    const item = await loadItem(att);
     if (!item) {
         return baseRow; // not in library — key as display name, item_type null
     }
@@ -591,7 +598,7 @@ async function buildAnnotationListView(
 
     const rows: AnnotationRowView[] = [];
     for (const ref of data.annotations) {
-        const item = await loadItem(ref.library_id, ref.zotero_key);
+        const item = await loadItem(ref);
         if (item && item.isAnnotation?.()) {
             rows.push(await hydrateAnnotationRow(ref, item));
         }

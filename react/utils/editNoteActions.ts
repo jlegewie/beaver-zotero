@@ -6,7 +6,7 @@
 import { AgentAction } from '../agents/agentActions';
 import type { EditNoteResultData, EditNoteOperation } from '../types/agentActions/editNote';
 import { logger } from '../../src/utils/logger';
-import { libraryRefForLibraryID } from '../../src/utils/libraryIdentity';
+import { libraryRefForLibraryID, resolveItemReference } from '../../src/utils/libraryIdentity';
 import {
     getOrSimplify,
     invalidateSimplificationCache,
@@ -153,13 +153,15 @@ export async function executeEditNoteAction(
     action: AgentAction
 ): Promise<EditNoteResultData> {
     const {
-        library_id,
+        library_id: requestedLibraryId,
+        library_ref,
         zotero_key,
         old_string,
         new_string,
         operation: rawOp,
     } = action.proposed_data as {
         library_id: number;
+        library_ref?: string;
         zotero_key: string;
         old_string?: string;
         new_string: string;
@@ -181,11 +183,17 @@ export async function executeEditNoteAction(
         target_after_context?: string;
     };
 
-    // 1. Load item
-    const item = await Zotero.Items.getByLibraryAndKeyAsync(library_id, zotero_key);
-    if (!item) {
-        throw new Error(`Item not found: ${library_id}-${zotero_key}`);
+    // 1. Load item. Resolve through library_ref (with legacy library_id
+    //    fallback) so a note in a group library resolves to the right local
+    //    library even when this device numbers that group differently.
+    const resolved = await resolveItemReference({ library_id: requestedLibraryId, library_ref, zotero_key });
+    if (resolved.status !== 'found') {
+        throw new Error(resolved.status === 'library_unavailable'
+            ? `Note library is not available on this computer: ${library_ref || requestedLibraryId}-${zotero_key}`
+            : `Item not found: ${requestedLibraryId}-${zotero_key}`);
     }
+    const item = resolved.item;
+    const library_id = item.libraryID;
 
     // 2. Load note data
     await item.loadDataType('note');
@@ -588,8 +596,9 @@ export async function executeEditNoteAction(
 export async function undoEditNoteAction(
     action: AgentAction
 ): Promise<void> {
-    const { library_id, zotero_key, old_string, new_string, operation: rawOp } = action.proposed_data as {
+    const { library_id: requestedLibraryId, library_ref, zotero_key, old_string, new_string, operation: rawOp } = action.proposed_data as {
         library_id: number;
+        library_ref?: string;
         zotero_key: string;
         old_string?: string;
         new_string: string;
@@ -599,12 +608,20 @@ export async function undoEditNoteAction(
 
     const resultData = action.result_data as EditNoteResultData | undefined;
 
+    // Resolve the note through library_ref (with legacy library_id fallback) so
+    // undo targets the right note even when this device numbers a group library
+    // differently than the device that applied the edit.
+    const resolved = await resolveItemReference({ library_id: requestedLibraryId, library_ref, zotero_key });
+    if (resolved.status !== 'found') {
+        throw new Error(resolved.status === 'library_unavailable'
+            ? `Note library is not available on this computer: ${library_ref || requestedLibraryId}-${zotero_key}`
+            : `Item not found: ${requestedLibraryId}-${zotero_key}`);
+    }
+    const item = resolved.item;
+    const library_id = item.libraryID;
+
     // ── rewrite undo: restore full note from undo_full_html ──
     if (resultData?.undo_full_html) {
-        const item = await Zotero.Items.getByLibraryAndKeyAsync(library_id, zotero_key);
-        if (!item) {
-            throw new Error(`Item not found: ${library_id}-${zotero_key}`);
-        }
         await item.loadDataType('note');
         const noteId = `${library_id}-${zotero_key}`;
 
@@ -631,13 +648,7 @@ export async function undoEditNoteAction(
 
     const isDeletion = !new_string;
 
-    // 1. Load item
-    const item = await Zotero.Items.getByLibraryAndKeyAsync(library_id, zotero_key);
-    if (!item) {
-        throw new Error(`Item not found: ${library_id}-${zotero_key}`);
-    }
-
-    // 2. Load note data
+    // 1. Load note data (item resolved above via library_ref with fallback)
     await item.loadDataType('note');
     const noteId = `${library_id}-${zotero_key}`;
 

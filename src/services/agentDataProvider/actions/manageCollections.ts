@@ -21,7 +21,7 @@ import {
     WSAgentActionExecuteResponse,
 } from '../../agentProtocol';
 import { checkLibraryExcluded, excludedLibraryMessage, getDeferredToolPreference, isLibrarySearchable, getCollectionByIdOrName } from '../utils';
-import { libraryRefForLibraryID, resolveWriteTargetLibrary } from '../../../utils/libraryIdentity';
+import { libraryRefForLibraryID, resolveWriteTargetLibrary, writeTargetLibraryError } from '../../../utils/libraryIdentity';
 import { TimeoutContext, checkAborted, TimeoutError } from '../timeout';
 import { logger } from '../../../utils/logger';
 
@@ -103,12 +103,13 @@ async function classifyNonCollectionKey(
 export async function validateManageCollectionsAction(
     request: WSAgentActionValidateRequest
 ): Promise<WSAgentActionValidateResponse> {
-    const { action, collection_key: rawCollectionKey, new_name: rawNewName, new_parent_key: rawNewParentKey, library_id: rawLibraryId } = request.action_data as {
+    const { action, collection_key: rawCollectionKey, new_name: rawNewName, new_parent_key: rawNewParentKey, library_id: rawLibraryId, library_ref } = request.action_data as {
         action: 'rename' | 'move' | 'delete';
         collection_key: string;
         new_name?: string | null;
         new_parent_key?: string | null;
         library_id?: number | null;
+        library_ref?: string | null;
     };
 
     if (!rawCollectionKey || typeof rawCollectionKey !== 'string' || !rawCollectionKey.trim()) {
@@ -123,7 +124,26 @@ export async function validateManageCollectionsAction(
     }
 
     const trimmedCollectionKey = rawCollectionKey.trim();
-    const hintLibraryId = typeof rawLibraryId === 'number' && rawLibraryId > 0 ? rawLibraryId : undefined;
+    // A present library_ref is authoritative: resolve it strictly (exactly as
+    // executeManageCollectionsAction does) so validate fails a malformed or
+    // unavailable ref instead of falling back to a stale library_id and
+    // scoping the collection lookup to the wrong library.
+    let refLibraryId: number | undefined;
+    if (library_ref) {
+        const resolution = resolveWriteTargetLibrary({ library_ref, library_id: rawLibraryId });
+        if (!resolution.ok) {
+            return {
+                type: 'agent_action_validate_response',
+                request_id: request.request_id,
+                valid: false,
+                ...writeTargetLibraryError(resolution),
+                preference: 'always_ask',
+            };
+        }
+        refLibraryId = resolution.libraryID;
+    }
+    const hintLibraryId = refLibraryId
+        ?? (typeof rawLibraryId === 'number' && rawLibraryId > 0 ? rawLibraryId : undefined);
 
     // Consistency check: when both the compound collection_key and the
     // separate library_id are sent, they must agree. (library_id is on its
@@ -401,7 +421,9 @@ export async function executeManageCollectionsAction(
         library_ref?: string | null;
     };
 
-    if (!library_id || typeof library_id !== 'number') {
+    // A device-portable library_ref is a valid target on its own, so only
+    // reject when neither a usable library_id nor a library_ref is present.
+    if ((!library_id || typeof library_id !== 'number') && !library_ref) {
         return {
             type: 'agent_action_execute_response',
             request_id: request.request_id,
@@ -417,8 +439,7 @@ export async function executeManageCollectionsAction(
             type: 'agent_action_execute_response',
             request_id: request.request_id,
             success: false,
-            error: targetResolution.message,
-            error_code: targetResolution.code === 'library_unavailable' ? 'library_unavailable' : 'invalid_library_id',
+            ...writeTargetLibraryError(targetResolution),
         };
     }
     const resolvedLibraryId = targetResolution.libraryID;

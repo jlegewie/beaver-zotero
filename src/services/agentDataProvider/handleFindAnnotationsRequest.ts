@@ -7,6 +7,7 @@ import {
     ZOTERO_ANNOTATION_PALETTE_COLORS,
 } from '../../constants/annotations';
 import { logger } from '../../utils/logger';
+import { resolveItemReference } from '../../utils/libraryIdentity';
 import {
     formatZoteroCreatorsString,
     getCreatorsFromItem,
@@ -634,10 +635,18 @@ export async function handleFindAnnotationsRequest(
             if (!parsed) {
                 return invalidResponse(request, 'Invalid attachment_id format', 'invalid_attachment_id');
             }
-            const attachment = await Zotero.Items.getByLibraryAndKeyAsync(parsed.libraryId, parsed.key);
-            if (!attachment) {
+            const resolved = await resolveItemReference({ library_id: parsed.libraryId, zotero_key: parsed.key });
+            if (resolved.status === 'library_unavailable') {
+                return invalidResponse(
+                    request,
+                    `Attachment "${attachmentInput}" is in a library that is not available on this computer.`,
+                    'library_unavailable',
+                );
+            }
+            if (resolved.status === 'not_found') {
                 return invalidResponse(request, 'Attachment not found', 'not_found');
             }
+            const attachment = resolved.item;
             if (!attachment.isFileAttachment?.()) {
                 return invalidResponse(request, 'Item is not a file attachment', 'not_attachment');
             }

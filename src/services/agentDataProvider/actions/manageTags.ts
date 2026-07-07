@@ -19,7 +19,7 @@ import {
     WSAgentActionExecuteResponse,
 } from '../../agentProtocol';
 import { checkLibraryExcluded, getDeferredToolPreference, validateLibraryAccess } from '../utils';
-import { libraryRefForLibraryID, resolveWriteTargetLibrary } from '../../../utils/libraryIdentity';
+import { libraryRefForLibraryID, resolveWriteTargetLibrary, writeTargetLibraryError } from '../../../utils/libraryIdentity';
 import { TimeoutContext, checkAborted, TimeoutError } from '../timeout';
 import { logger } from '../../../utils/logger';
 
@@ -127,11 +127,12 @@ function formatSuggestions(suggestions: string[]): string {
 export async function validateManageTagsAction(
     request: WSAgentActionValidateRequest
 ): Promise<WSAgentActionValidateResponse> {
-    const { action, name: rawName, new_name: rawNewName, library_id: rawLibraryId, library_name } = request.action_data as {
+    const { action, name: rawName, new_name: rawNewName, library_id: rawLibraryId, library_ref, library_name } = request.action_data as {
         action: 'rename' | 'delete';
         name: string;
         new_name?: string | null;
         library_id?: number | null;
+        library_ref?: string | null;
         library_name?: string | null;
     };
 
@@ -148,11 +149,30 @@ export async function validateManageTagsAction(
     }
 
     // Resolve library (int / name / default). We use the generic helper so the
-    // behavior matches other handlers.
+    // behavior matches other handlers. A present library_ref is authoritative:
+    // resolve it strictly (exactly as executeManageTagsAction does) so validate
+    // fails a malformed/unavailable ref instead of silently falling back to a
+    // stale library_id and validating against the wrong library.
+    let refLibraryId: number | undefined;
+    if (library_ref) {
+        const resolution = resolveWriteTargetLibrary({ library_ref, library_id: rawLibraryId });
+        if (!resolution.ok) {
+            return {
+                type: 'agent_action_validate_response',
+                request_id: request.request_id,
+                valid: false,
+                ...writeTargetLibraryError(resolution),
+                preference: 'always_ask',
+            };
+        }
+        refLibraryId = resolution.libraryID;
+    }
     const libIdentifier =
-        typeof rawLibraryId === 'number' && rawLibraryId > 0
-            ? rawLibraryId
-            : (library_name ?? null);
+        refLibraryId != null
+            ? refLibraryId
+            : (typeof rawLibraryId === 'number' && rawLibraryId > 0
+                ? rawLibraryId
+                : (library_name ?? null));
     const libValidation = validateLibraryAccess(libIdentifier);
     if (!libValidation.valid) {
         return {
@@ -316,7 +336,9 @@ export async function executeManageTagsAction(
         library_ref?: string | null;
     };
 
-    if (!library_id || typeof library_id !== 'number') {
+    // A device-portable library_ref is a valid target on its own, so only
+    // reject when neither a usable library_id nor a library_ref is present.
+    if ((!library_id || typeof library_id !== 'number') && !library_ref) {
         return {
             type: 'agent_action_execute_response',
             request_id: request.request_id,
@@ -332,8 +354,7 @@ export async function executeManageTagsAction(
             type: 'agent_action_execute_response',
             request_id: request.request_id,
             success: false,
-            error: targetResolution.message,
-            error_code: targetResolution.code === 'library_unavailable' ? 'library_unavailable' : 'invalid_library_id',
+            ...writeTargetLibraryError(targetResolution),
         };
     }
     const resolvedLibraryId = targetResolution.libraryID;
