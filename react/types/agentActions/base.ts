@@ -180,13 +180,18 @@ export interface CollectionChanges {
  * Proposed data for organizing items (tags and collections)
  */
 export interface OrganizeItemsProposedData {
-    /** List of item IDs to organize (format: "library_id-zotero_key") */
+    /**
+     * List of item IDs to organize. Portable form "<library_ref>-<zotero_key>"
+     * (e.g. "u-ABCD1234", "g12345-ABCD1234"); legacy rows may still hold the
+     * device-local "<library_id>-<zotero_key>" form. Both parse via
+     * `parseItemReference`.
+     */
     item_ids: string[];
     /** Tags to add/remove */
     tags?: TagChanges | null;
     /** Collections to add/remove */
     collections?: CollectionChanges | null;
-    /** Current state of items for undo (item_id -> {tags: [...], collections: [...]}) */
+    /** Current state of items for undo (item_id -> {tags: [...], collections: [...]}), keyed by the same item ids as item_ids */
     current_state?: Record<string, { tags: string[]; collections: string[] }>;
 }
 

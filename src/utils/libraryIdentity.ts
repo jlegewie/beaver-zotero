@@ -59,6 +59,31 @@ export function parseLibraryRef(ref: string): ParsedLibraryRef | null {
     return { type: 'group', groupID: parseInt(ref.slice(1), 10) };
 }
 
+/** A model-facing item id parsed into its portable-or-legacy library reference + key. */
+export type ParsedItemReference = { library_ref?: string; library_id?: number; zotero_key: string };
+
+/**
+ * Parses a model-facing item id `"<prefix>-<zotero_key>"` where `<prefix>` is
+ * either a portable `library_ref` (`"u"` | `"g<groupID>"`) or a legacy
+ * device-local numeric `library_id`. Zotero keys contain no hyphen, so the first
+ * hyphen splits prefix from key unambiguously. Returns `null` on malformed input.
+ *
+ * Feed directly into `resolveItemReference` / `resolveLibraryRef`: a portable
+ * prefix yields `library_ref` (which wins), a numeric prefix yields the legacy
+ * `library_id`.
+ */
+export function parseItemReference(itemId: string): ParsedItemReference | null {
+    const idx = itemId.indexOf('-');
+    if (idx <= 0 || idx === itemId.length - 1) return null;
+    const prefix = itemId.slice(0, idx);
+    const zotero_key = itemId.slice(idx + 1);
+    if (LIBRARY_REF_PATTERN.test(prefix)) return { library_ref: prefix, zotero_key };
+    // Strict numeric prefix: `parseInt` would silently accept "5abc" as 5, which
+    // violates the malformed → null contract, so gate on a digits-only prefix first.
+    if (!/^[1-9][0-9]*$/.test(prefix)) return null;
+    return { library_id: parseInt(prefix, 10), zotero_key };
+}
+
 /**
  * Resolves a `{ library_ref?, library_id }` pair to a local `libraryID`.
  *
@@ -72,11 +97,11 @@ export function parseLibraryRef(ref: string): ParsedLibraryRef | null {
  * - When both are present and disagree, `library_ref` wins: it is the
  *   portable identity, `library_id` is only a same-device cache of it.
  */
-export function resolveLibraryRef(ref: { library_ref?: string | null; library_id: number }): number | null {
+export function resolveLibraryRef(ref: { library_ref?: string | null; library_id?: number | null }): number | null {
     const parsed = ref.library_ref ? parseLibraryRef(ref.library_ref) : null;
     if (!parsed) {
         // Absent or unparseable: fall back to legacy behavior.
-        return ref.library_id;
+        return ref.library_id ?? null;
     }
 
     // Best-effort, like `libraryRefForLibraryID`: never throw even if
@@ -230,7 +255,7 @@ export type ResolvedItemReference =
  * doesn't exist there" (`not_found` — genuinely gone, merged, or moved).
  */
 export async function resolveItemReference(
-    ref: { library_ref?: string | null; library_id: number; zotero_key: string }
+    ref: { library_ref?: string | null; library_id?: number | null; zotero_key: string }
 ): Promise<ResolvedItemReference> {
     const libraryID = resolveLibraryRef(ref);
     // `resolveLibraryRef` returns null when a group isn't on this device, and can

@@ -42,6 +42,13 @@ interface ZoteroDataResponse {
     attachments: Array<{ attachment: { library_ref?: string; library_id?: number } }>;
     errors?: unknown[];
 }
+interface ValidateResponse {
+    valid: boolean;
+    error?: string | null;
+    error_code?: string | null;
+    current_value?: Record<string, unknown>;
+    normalized_action_data?: { item_ids?: string[] };
+}
 
 let available: boolean;
 let topo: LibraryTopology;
@@ -178,5 +185,59 @@ describe('/beaver/zotero-data (serializeItem / serializeAttachment)', () => {
         expect(res.errors ?? []).toEqual([]);
         for (const w of res.items) expect(w.item.library_ref).toBe(topo.group!.library_ref);
         for (const w of res.attachments) expect(w.attachment.library_ref).toBe(topo.group!.library_ref);
+    });
+});
+
+describe('/beaver/agent-action/validate (organize_items normalization)', () => {
+    // organize_items validation is read-only (it only snapshots current state, never
+    // saves), so it is safe to run against real items. It must return device-portable
+    // item_ids in normalized_action_data so the backend persists + replays them.
+    beforeEach((ctx) => skipIfNoZotero(ctx, available));
+
+    it('normalizes a personal item id to the portable "u-" form', async (ctx) => {
+        if (!personalKey) return ctx.skip();
+        const res = await post<ValidateResponse>('/beaver/agent-action/validate', {
+            action_type: 'organize_items',
+            action_data: {
+                item_ids: [`${topo.personal.library_id}-${personalKey}`],
+                tags: { add: ['beaver-live-test-tag'], remove: [] },
+                collections: null,
+            },
+        });
+        expect(res.valid).toBe(true);
+        expect(res.normalized_action_data?.item_ids?.[0]).toBe(`u-${personalKey}`);
+        // current_value is keyed by the same portable id (for consistent undo).
+        expect(Object.keys(res.current_value ?? {})).toContain(`u-${personalKey}`);
+    });
+
+    it('accepts an already-portable "u-<key>" id and normalizes it back to itself (dual-format)', async (ctx) => {
+        if (!personalKey) return ctx.skip();
+        const res = await post<ValidateResponse>('/beaver/agent-action/validate', {
+            action_type: 'organize_items',
+            action_data: {
+                item_ids: [`u-${personalKey}`],
+                tags: { add: ['beaver-live-test-tag'], remove: [] },
+                collections: null,
+            },
+        });
+        expect(res.valid).toBe(true);
+        expect(res.normalized_action_data?.item_ids?.[0]).toBe(`u-${personalKey}`);
+    });
+
+    it('normalizes a group item id to the portable "g<id>-" form', async (ctx) => {
+        if (!groupItemId || !topo.group) return ctx.skip();
+        const res = await post<ValidateResponse>('/beaver/agent-action/validate', {
+            action_type: 'organize_items',
+            action_data: {
+                item_ids: [groupItemId],
+                tags: { add: ['beaver-live-test-tag'], remove: [] },
+                collections: null,
+            },
+        });
+        // A read-only group would fail validation for an unrelated reason; only
+        // assert normalization when validation succeeds.
+        if (!res.valid) return ctx.skip();
+        const key = groupItemId.slice(groupItemId.indexOf('-') + 1);
+        expect(res.normalized_action_data?.item_ids?.[0]).toBe(`${topo.group.library_ref}-${key}`);
     });
 });

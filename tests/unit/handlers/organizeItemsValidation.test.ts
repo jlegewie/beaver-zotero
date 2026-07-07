@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../../../react/store", () => ({
-  store: { get: vi.fn(() => [1]) },
+  // Personal library (1) + a local group library (100) are searchable.
+  store: { get: vi.fn(() => [1, 100]) },
 }));
 
 vi.mock("../../../react/atoms/profile", () => ({
@@ -17,8 +18,12 @@ import type { WSAgentActionValidateRequest } from "../../../src/services/agentPr
 
 type ItemKind = "annotation" | "regular";
 
-function mockItem(kind: ItemKind) {
+// Item echoes the (libraryID, key) it was resolved with so the handler can
+// derive the portable id from item.libraryID / item.key.
+function makeItem(kind: ItemKind, libraryID: number, key: string) {
   return {
+    libraryID,
+    key,
     isAnnotation: () => kind === "annotation",
     isRegularItem: () => kind === "regular",
     isAttachment: () => false,
@@ -40,17 +45,27 @@ function buildRequest(actionData: Record<string, any>): WSAgentActionValidateReq
   } as unknown as WSAgentActionValidateRequest;
 }
 
-describe("validateOrganizeItemsAction annotation tag-gate", () => {
+describe("validateOrganizeItemsAction", () => {
   let previousZotero: any;
-  let currentItem: ReturnType<typeof mockItem>;
+  let itemKind: ItemKind;
 
   beforeEach(() => {
     vi.clearAllMocks();
-    currentItem = mockItem("annotation");
+    itemKind = "regular";
     previousZotero = (globalThis as any).Zotero;
     (globalThis as any).Zotero = {
-      Libraries: { get: vi.fn(() => ({ name: "My Library", editable: true })) },
-      Items: { getByLibraryAndKeyAsync: vi.fn(async () => currentItem) },
+      Libraries: {
+        get: vi.fn(() => ({ name: "My Library", editable: true })),
+        userLibraryID: 1,
+      },
+      // Group library 100 <-> server group id 12345. Any other id is unknown.
+      Groups: {
+        getGroupIDFromLibraryID: vi.fn((libId: number) => (libId === 100 ? 12345 : false)),
+        getLibraryIDFromGroupID: vi.fn((groupId: number) => (groupId === 12345 ? 100 : false)),
+      },
+      Items: {
+        getByLibraryAndKeyAsync: vi.fn(async (libId: number, key: string) => makeItem(itemKind, libId, key)),
+      },
       ItemTypes: { getName: vi.fn(() => "annotation") },
       Collections: { getByLibraryAndKeyAsync: vi.fn() },
     };
@@ -60,7 +75,8 @@ describe("validateOrganizeItemsAction annotation tag-gate", () => {
     (globalThis as any).Zotero = previousZotero;
   });
 
-  it("allows tag changes on an annotation", async () => {
+  it("allows tag changes on an annotation and keys state by the portable id", async () => {
+    itemKind = "annotation";
     const res = await validateOrganizeItemsAction(
       buildRequest({
         item_ids: ["1-ANNOTKEY"],
@@ -71,11 +87,13 @@ describe("validateOrganizeItemsAction annotation tag-gate", () => {
 
     expect(res.valid).toBe(true);
     expect(res.current_value).toEqual({
-      "1-ANNOTKEY": { tags: ["existing"], collections: [] },
+      "u-ANNOTKEY": { tags: ["existing"], collections: [] },
     });
+    expect(res.normalized_action_data).toEqual({ item_ids: ["u-ANNOTKEY"] });
   });
 
   it("rejects collection changes on an annotation", async () => {
+    itemKind = "annotation";
     const res = await validateOrganizeItemsAction(
       buildRequest({
         item_ids: ["1-ANNOTKEY"],
@@ -89,7 +107,6 @@ describe("validateOrganizeItemsAction annotation tag-gate", () => {
   });
 
   it("still allows tag changes on regular items (regression)", async () => {
-    currentItem = mockItem("regular");
     const res = await validateOrganizeItemsAction(
       buildRequest({
         item_ids: ["1-REGULARKEY"],
@@ -99,5 +116,90 @@ describe("validateOrganizeItemsAction annotation tag-gate", () => {
     );
 
     expect(res.valid).toBe(true);
+  });
+
+  it("normalizes a personal-library legacy numeric id to the portable 'u-' form", async () => {
+    const res = await validateOrganizeItemsAction(
+      buildRequest({
+        item_ids: ["1-ABCD1234"],
+        tags: { add: ["x"], remove: [] },
+        collections: null,
+      }),
+    );
+
+    expect(res.valid).toBe(true);
+    expect(res.normalized_action_data).toEqual({ item_ids: ["u-ABCD1234"] });
+    expect(res.current_value).toEqual({
+      "u-ABCD1234": { tags: ["existing"], collections: [] },
+    });
+  });
+
+  it("normalizes a group-library legacy numeric id to the portable 'g<id>-' form", async () => {
+    const res = await validateOrganizeItemsAction(
+      buildRequest({
+        item_ids: ["100-GRPKEY12"],
+        tags: { add: ["x"], remove: [] },
+        collections: null,
+      }),
+    );
+
+    expect(res.valid).toBe(true);
+    expect(res.normalized_action_data).toEqual({ item_ids: ["g12345-GRPKEY12"] });
+  });
+
+  it("resolves a group item addressed by its portable library_ref to the right local library", async () => {
+    const res = await validateOrganizeItemsAction(
+      buildRequest({
+        item_ids: ["g12345-GRPKEY12"],
+        tags: { add: ["x"], remove: [] },
+        collections: null,
+      }),
+    );
+
+    expect(res.valid).toBe(true);
+    // The item lookup must use the group's LOCAL libraryID (100), not the ref.
+    expect((globalThis as any).Zotero.Items.getByLibraryAndKeyAsync).toHaveBeenCalledWith(100, "GRPKEY12");
+    expect(res.normalized_action_data).toEqual({ item_ids: ["g12345-GRPKEY12"] });
+  });
+
+  it("normalizes each item independently in a mixed-library tag-only batch", async () => {
+    const res = await validateOrganizeItemsAction(
+      buildRequest({
+        item_ids: ["1-AAAA1111", "100-BBBB2222"],
+        tags: { add: ["x"], remove: [] },
+        collections: null,
+      }),
+    );
+
+    expect(res.valid).toBe(true);
+    expect(res.normalized_action_data).toEqual({
+      item_ids: ["u-AAAA1111", "g12345-BBBB2222"],
+    });
+  });
+
+  it("returns library_unavailable for a portable group ref not present on this device", async () => {
+    const res = await validateOrganizeItemsAction(
+      buildRequest({
+        item_ids: ["g99999-ZZZZ0000"],
+        tags: { add: ["x"], remove: [] },
+        collections: null,
+      }),
+    );
+
+    expect(res.valid).toBe(false);
+    expect(res.error_code).toBe("library_unavailable");
+  });
+
+  it("rejects a malformed item id", async () => {
+    const res = await validateOrganizeItemsAction(
+      buildRequest({
+        item_ids: ["5abc-ABCD1234"],
+        tags: { add: ["x"], remove: [] },
+        collections: null,
+      }),
+    );
+
+    expect(res.valid).toBe(false);
+    expect(res.error_code).toBe("invalid_item_id");
   });
 });

@@ -3,6 +3,7 @@ import {
     LIBRARY_REF_PATTERN,
     libraryRefForLibraryID,
     parseLibraryRef,
+    parseItemReference,
     resolveLibraryRef,
     resolveItemReference,
     resolveWriteTargetLibrary,
@@ -96,6 +97,44 @@ describe('libraryIdentity', () => {
             expect(LIBRARY_REF_PATTERN.test('g5')).toBe(true);
             expect(LIBRARY_REF_PATTERN.test('g0')).toBe(false);
             expect(LIBRARY_REF_PATTERN.test('G5')).toBe(false);
+        });
+    });
+
+    describe('parseItemReference', () => {
+        it('parses a portable personal-library id', () => {
+            expect(parseItemReference('u-ABCD1234')).toEqual({ library_ref: 'u', zotero_key: 'ABCD1234' });
+        });
+
+        it('parses a portable group-library id', () => {
+            expect(parseItemReference('g12345-ABCD1234')).toEqual({ library_ref: 'g12345', zotero_key: 'ABCD1234' });
+        });
+
+        it('parses a legacy numeric id', () => {
+            expect(parseItemReference('5-ABCD1234')).toEqual({ library_id: 5, zotero_key: 'ABCD1234' });
+        });
+
+        it('returns null for a leading hyphen (empty prefix)', () => {
+            expect(parseItemReference('-ABCD1234')).toBeNull();
+        });
+
+        it('returns null for a trailing hyphen (empty key)', () => {
+            expect(parseItemReference('u-')).toBeNull();
+        });
+
+        it('returns null for a non-numeric, non-ref prefix', () => {
+            expect(parseItemReference('foo-ABCD1234')).toBeNull();
+        });
+
+        it('returns null for a mixed alphanumeric numeric prefix (parseInt would accept "5abc" as 5)', () => {
+            expect(parseItemReference('5abc-ABCD1234')).toBeNull();
+        });
+
+        it('returns null when there is no hyphen', () => {
+            expect(parseItemReference('ABCD1234')).toBeNull();
+        });
+
+        it('rejects a zero / negative numeric prefix', () => {
+            expect(parseItemReference('0-ABCD1234')).toBeNull();
         });
     });
 
