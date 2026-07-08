@@ -13,6 +13,7 @@
 
 import { vi } from "vitest";
 import { configurePDFForTests } from "./configurePDFForTests";
+import type { WorkerStartFailureInfo } from "../../src/beaver-extract/config";
 
 export class MockWorker {
     static instances: MockWorker[] = [];
@@ -66,7 +67,9 @@ export class MockWorker {
  * `MockWorker`, and configure the PDF package against it. Returns the mock
  * window so callers can inspect it.
  */
-export function setupZoteroMainWindowWithMockWorker(): any {
+export function setupZoteroMainWindowWithMockWorker(
+    opts: { onWorkerStartFailure?: (info: WorkerStartFailureInfo) => void } = {},
+): any {
     const win: any = { Worker: MockWorker };
     (globalThis as any).Zotero = (globalThis as any).Zotero ?? {};
     // The package no longer reads Zotero.getMainWindow directly — it goes
@@ -82,6 +85,7 @@ export function setupZoteroMainWindowWithMockWorker(): any {
         slotKey: "__beaverMuPDFWorkerClient_hot",
         backgroundSlotKey: "__beaverMuPDFWorkerClient_background",
         getWorkerHost: () => win,
+        onWorkerStartFailure: opts.onWorkerStartFailure,
     });
     return win;
 }

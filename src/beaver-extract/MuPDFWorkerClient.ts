@@ -239,6 +239,11 @@ export class MuPDFWorkerClient {
      */
     private spawnCount = 0;
     private retryCount = 0;
+    /**
+     * Consecutive worker start-phase failures (module load / configure
+     * handshake) since the last successful handshake.
+     */
+    private consecutiveStartFailures = 0;
     private dispatchCounts: Record<string, number> = {};
     private lastSpawnTime: number | null = null;
     private fatalOperationKeys = new Set<string>();
@@ -311,6 +316,10 @@ export class MuPDFWorkerClient {
         const cfg = getConfig();
         const mainWindow = cfg.getWorkerHost();
         if (!mainWindow) {
+            // Pre-spawn failure: no StartupEntry exists, so this never reaches
+            // markStale. Count it here so repeated hot-slot spawn failures still
+            // raise the restart prompt (this surfaces as worker_unavailable).
+            this.recordStartFailure("spawn failed: no main window available");
             throw new WorkerSpawnError(
                 "MuPDFWorkerClient: no main window available to spawn worker",
             );
@@ -329,12 +338,25 @@ export class MuPDFWorkerClient {
 
         const WorkerCtor = (mainWindow as any).Worker as typeof Worker;
         if (!WorkerCtor) {
+            this.recordStartFailure("spawn failed: no Worker constructor");
             throw new WorkerSpawnError(
                 "MuPDFWorkerClient: main window has no Worker constructor",
             );
         }
 
-        const worker = new WorkerCtor(cfg.workerUrl, { type: "module" });
+        let worker: Worker;
+        try {
+            worker = new WorkerCtor(cfg.workerUrl, { type: "module" });
+        } catch (e) {
+            // A synchronous construction failure is also a pre-spawn failure
+            // (no StartupEntry yet). Count it and normalize to WorkerSpawnError
+            // so it classifies as worker_unavailable like the other paths.
+            const detail = e instanceof Error ? e.message : String(e);
+            this.recordStartFailure(`spawn failed: ${detail}`);
+            throw new WorkerSpawnError(
+                `MuPDFWorkerClient: worker construction failed: ${detail}`,
+            );
+        }
         this.spawnCount++;
         this.lastSpawnTime = Date.now();
         cfg.log(`[MuPDFWorkerClient ${this.slotName}] spawned new worker`, 3);
@@ -343,12 +365,12 @@ export class MuPDFWorkerClient {
         (worker as any).onerror = (event: any) => {
             const message = event?.message || "worker onerror";
             cfg.log(`[MuPDFWorkerClient ${this.slotName}] worker.onerror: ${message}`, 1);
-            this.markStale(`worker.onerror: ${message}`);
+            this.markStale(`worker.onerror: ${message}`, { startError: true });
         };
         (worker as any).onmessageerror = (event: any) => {
             const message = event?.message || "worker onmessageerror";
             cfg.log(`[MuPDFWorkerClient ${this.slotName}] worker.onmessageerror: ${message}`, 1);
-            this.markStale(`worker.onmessageerror: ${message}`);
+            this.markStale(`worker.onmessageerror: ${message}`, { startError: true });
         };
 
         this.worker = worker;
@@ -400,7 +422,7 @@ export class MuPDFWorkerClient {
         };
         entry.timeoutId = setTimeout(() => {
             if (this.startup !== entry || entry.configured) return;
-            this.markStale("configure handshake timed out");
+            this.markStale("configure handshake timed out", { startError: true });
         }, 15000);
         (entry.timeoutId as any)?.unref?.();
         return entry;
@@ -414,6 +436,7 @@ export class MuPDFWorkerClient {
         } catch (e) {
             this.markStale(
                 `configure postMessage threw during ${reason}: ${e instanceof Error ? e.message : String(e)}`,
+                { startError: true },
             );
         }
     }
@@ -438,6 +461,9 @@ export class MuPDFWorkerClient {
         if (lifecycle.kind === "configured") {
             if (this.startup?.worker === worker) {
                 this.startup.resolve();
+                // The worker completed its handshake — the slot is healthy
+                // again, so clear the consecutive start-failure streak.
+                this.consecutiveStartFailures = 0;
             }
             return;
         }
@@ -489,16 +515,48 @@ export class MuPDFWorkerClient {
     }
 
     /**
+     * Record a worker start-phase failure: bump the consecutive-failure streak
+     * and notify the host hook so it can prompt the user after repeated
+     * failures. Covers both post-spawn failures (handshake timeout, `onerror`,
+     * routed here from `markStale`) and pre-spawn failures (the
+     * `WorkerSpawnError` paths in `ensureWorker`, which never create a
+     * `StartupEntry` and so never reach `markStale`). Guarded so a host callback
+     * error can never break the caller.
+     */
+    private recordStartFailure(reason: string): void {
+        if (this.disposed) return;
+        this.consecutiveStartFailures++;
+        if (!isConfigured()) return;
+        try {
+            getConfig().onWorkerStartFailure?.({
+                slotName: this.slotName,
+                consecutiveFailures: this.consecutiveStartFailures,
+                reason,
+            });
+        } catch (e) {
+            getConfig().log(
+                `[MuPDFWorkerClient ${this.slotName}] onWorkerStartFailure hook threw: ${e}`,
+                2,
+            );
+        }
+    }
+
+    /**
      * Mark the worker as stale: terminate it, reject all pending entries,
      * clear singleton state. Idempotent.
      */
-    private markStale(reason: string): void {
+    private markStale(reason: string, opts?: { startError?: boolean }): void {
         this.clearIdleTimer();
         const w = this.worker;
         this.worker = null;
         this.spawnedFromWindowInternal = null;
         const startup = this.startup;
         this.startup = null;
+
+        // A "start-phase" failure is a worker that died before it ever completed
+        // its configure handshake
+        const startPhaseFailure =
+            !!opts?.startError && !this.disposed && !!startup && !startup.configured;
 
         if (w) {
             try {
@@ -528,6 +586,13 @@ export class MuPDFWorkerClient {
         this.pending.clear();
         for (const entry of pending) {
             entry.reject(stale);
+        }
+
+        // Surface a repeated inability to start the worker to the host (e.g. to
+        // prompt the user to restart). Fired after state is cleared and pending
+        // is rejected.
+        if (startPhaseFailure) {
+            this.recordStartFailure(reason);
         }
     }
 
@@ -1082,6 +1147,7 @@ export class MuPDFWorkerClient {
         disposed: boolean;
         spawnCount: number;
         retryCount: number;
+        consecutiveStartFailures: number;
         pendingCount: number;
         nextId: number;
         dispatchCounts: Record<string, number>;
@@ -1093,6 +1159,7 @@ export class MuPDFWorkerClient {
             disposed: this.disposed,
             spawnCount: this.spawnCount,
             retryCount: this.retryCount,
+            consecutiveStartFailures: this.consecutiveStartFailures,
             pendingCount: this.pending.size,
             nextId: this.nextId,
             dispatchCounts: { ...this.dispatchCounts },
@@ -1105,6 +1172,7 @@ export class MuPDFWorkerClient {
     resetStats(): void {
         this.spawnCount = 0;
         this.retryCount = 0;
+        this.consecutiveStartFailures = 0;
         this.dispatchCounts = {};
         this.lastSpawnTime = null;
     }

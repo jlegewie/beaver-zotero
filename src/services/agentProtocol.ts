@@ -638,6 +638,7 @@ export type ZoteroDocumentErrorCode =
     | 'page_out_of_range'   // Requested pages are out of range
     | 'download_failed'     // Remote file download failed
     | 'timeout'             // Extraction timed out
+    | 'worker_unavailable'  // The local PDF engine could not start / died and could not be respawned (transient, retryable)
     | 'extraction_failed'  // General extraction failure
     | 'recursion_limit'     // Extraction overflowed the JS stack ("too much recursion" / "Maximum call stack")
     | 'library_excluded'    // Attachment is in a library the user excluded from Beaver

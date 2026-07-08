@@ -15,17 +15,27 @@
  *  - webpack (`react/`): from `react/index.tsx` at module-init time.
  */
 
-import { configurePDF } from "../beaver-extract/config";
+import { configurePDF, type WorkerStartFailureInfo } from "../beaver-extract/config";
 import { logger } from "./logger";
+
+/**
+ * Options for `configurePDFForBeaver`.
+ *
+ * `onWorkerStartFailure` is supplied only by the webpack (React) bundle
+ */
+export interface ConfigurePDFForBeaverOptions {
+    onWorkerStartFailure?: (info: WorkerStartFailureInfo) => void;
+}
 
 /**
  * Install the PDF package config for Beaver. Idempotent — a later call
  * replaces the prior config.
  */
-export function configurePDFForBeaver(): void {
+export function configurePDFForBeaver(options: ConfigurePDFForBeaverOptions = {}): void {
     configurePDF({
         workerUrl: "chrome://beaver/content/scripts/mupdf-worker.js",
         getWorkerHost: () => Zotero.getMainWindow?.() ?? null,
+        onWorkerStartFailure: options.onWorkerStartFailure,
         workerClientSlots: {
             hot: {
                 get: () => (Zotero as any).__beaverMuPDFWorkerClient_hot,
