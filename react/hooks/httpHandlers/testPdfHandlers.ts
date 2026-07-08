@@ -20,6 +20,7 @@ import type {
 } from '../../../src/beaver-extract';
 import { projectAnalyzeLayout } from '../../../src/beaver-extract/debug/analyzeLayoutProjection';
 import { projectTracePage } from '../../../src/beaver-extract/debug/traceProjection';
+import { UNRESOLVED_LIBRARY_ID } from '../../../src/utils/libraryIdentity';
 
 
 // =============================================================================
@@ -58,7 +59,7 @@ async function loadPdfBytesForTestEndpoint(
         }
     }
     const { library_id, zotero_key } = request || {};
-    if (library_id == null || zotero_key == null) {
+    if (library_id == null || zotero_key == null || library_id === UNRESOLVED_LIBRARY_ID) {
         return {
             ok: false,
             error: {
@@ -186,7 +187,7 @@ export async function handleTestPdfPageCountHttpRequest(request: any) {
         }
     } else {
         const { library_id, zotero_key } = request || {};
-        if (library_id == null || zotero_key == null) {
+        if (library_id == null || zotero_key == null || library_id === UNRESOLVED_LIBRARY_ID) {
             return {
                 ok: false,
                 error: {

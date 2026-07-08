@@ -22,6 +22,7 @@ import { isWebSearchAllowedAtom, isWebSearchEnabledAtom } from './ui';
 import { beaverDefaultModelAtom, updateSelectedModelAtom } from './models';
 import { ChargingPermissions } from '../../src/services/agentProtocol';
 import { logger } from '../../src/utils/logger';
+import { UNRESOLVED_LIBRARY_ID } from '../../src/utils/libraryIdentity';
 
 export const firstRunSuggestionsAtom = atom<LibrarySuggestionsResponse | null>(null);
 export const firstRunSuggestionsLoadingAtom = atom<boolean>(false);
@@ -259,6 +260,9 @@ async function hydrateAttachments(
             // External files are not Zotero objects; nothing to hydrate.
             continue;
         }
+        // A library_id whose library isn't available on this device resolves
+        // to the unresolved sentinel; skip it (the lookup would throw).
+        if (a.library_id === UNRESOLVED_LIBRARY_ID) continue;
         if (a.type === 'collection') {
             const c = await Zotero.Collections.getByLibraryAndKeyAsync(a.library_id, a.zotero_key);
             if (c) {

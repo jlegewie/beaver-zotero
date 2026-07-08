@@ -12,6 +12,7 @@ import { CreateNotePreview } from './CreateNotePreview';
 import { ManageTagsPreview } from './ManageTagsPreview';
 import { ManageCollectionsPreview } from './ManageCollectionsPreview';
 import { CreateAnnotationsPreview } from './CreateAnnotationsPreview';
+import { UNRESOLVED_LIBRARY_ID } from '../../../../src/utils/libraryIdentity';
 import type { ActionStatus, PreviewData } from './agentActionViewHelpers';
 
 /**
@@ -60,7 +61,10 @@ export const ActionPreview: React.FC<{
         let itemTypeID: number | undefined;
         const libraryId = previewData.actionData.library_id;
         const zoteroKey = previewData.actionData.zotero_key;
-        if (typeof libraryId === 'number' && zoteroKey) {
+        // A library ref that couldn't be mapped to a local library on this
+        // device resolves to UNRESOLVED_LIBRARY_ID; the lookup below would
+        // throw on it, so fall back to the agent-supplied label instead.
+        if (typeof libraryId === 'number' && libraryId !== UNRESOLVED_LIBRARY_ID && zoteroKey) {
             const item = Zotero.Items.getByLibraryAndKey(libraryId, zoteroKey);
             if (item) itemTypeID = item.itemTypeID;
         }

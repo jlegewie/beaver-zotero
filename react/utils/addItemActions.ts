@@ -8,7 +8,7 @@ import { TimingAccumulator } from '../../src/utils/timing';
 import { emitAttachmentResolved } from './attachmentResolvedEvent';
 import { getPref } from '../../src/utils/prefs';
 import { createProvenanceNote } from './noteActions';
-import { libraryRefForLibraryID } from '../../src/utils/libraryIdentity';
+import { libraryRefForLibraryID, resolveLibraryRef } from '../../src/utils/libraryIdentity';
 
 const SAVE_ATTACHMENTS_WITH_TRANSLATORS = false;
 const BEAVER_PROVENANCE_MARKER = 'Added by Beaver';
@@ -922,8 +922,17 @@ export async function deleteAddedItem(action: CreateItemProposedAction): Promise
         throw new Error('Item key missing for deletion');
     }
 
+    const libraryID = resolveLibraryRef({
+        library_ref: action.result_data.library_ref,
+        library_id: action.result_data.library_id,
+    });
+    if (!libraryID) {
+        logger(`deleteAddedItem: Library unavailable for ${action.result_data.library_ref || action.result_data.library_id}-${action.result_data.zotero_key}`, 1);
+        return;
+    }
+
     const item = await Zotero.Items.getByLibraryAndKeyAsync(
-        action.result_data.library_id,
+        libraryID,
         action.result_data.zotero_key
     );
 

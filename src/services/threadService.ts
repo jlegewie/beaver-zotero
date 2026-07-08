@@ -1,5 +1,6 @@
 import { ApiService } from './apiService';
 import API_BASE_URL from '../utils/getAPIBaseURL';
+import { libraryRefForLibraryID } from '../utils/libraryIdentity';
 
 
 /**
@@ -91,6 +92,11 @@ export class ThreadService extends ApiService {
      * @param mode Search in attachments, citations, or both
      * @returns List of thread+run matches (thread may appear multiple times).
      *   NOTE: No ordering guarantee — callers must sort client-side if order matters.
+     *
+     * Sends the device-portable `library_ref` ("u" / "g<groupID>") alongside the
+     * device-local `libraryId` so the backend also matches group-library items
+     * written on another device (where the local library_id differs). Legacy
+     * rows with no stored library_ref still match by the numeric library_id.
      */
     async findThreadsByItem(
         libraryId: number,
@@ -101,6 +107,12 @@ export class ThreadService extends ApiService {
             library_id: String(libraryId),
             mode,
         });
+        // Derive the portable ref (best-effort; null for the external-file sentinel
+        // or when Zotero mapping is unavailable) and send it when present.
+        const libraryRef = libraryRefForLibraryID(libraryId);
+        if (libraryRef) {
+            params.append('library_ref', libraryRef);
+        }
         for (const key of zoteroKeys) {
             params.append('zotero_keys', key);
         }

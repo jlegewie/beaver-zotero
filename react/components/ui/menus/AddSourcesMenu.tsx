@@ -10,7 +10,7 @@ import { addPopupMessageAtom } from '../../../utils/popupMessageUtils';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { getPref, setPref } from '../../../../src/utils/prefs';
 import { getRecentAsync, loadFullItemData, getActiveZoteroLibraryId } from '../../../../src/utils/zoteroUtils';
-import { libraryRefForLibraryID } from '../../../../src/utils/libraryIdentity';
+import { libraryRefForLibraryID, UNRESOLVED_LIBRARY_ID } from '../../../../src/utils/libraryIdentity';
 import { searchTitleCreatorYear, scoreSearchResult } from '../../../utils/search';
 import { logger } from '../../../../src/utils/logger';
 import { searchableLibraryIdsAtom } from '../../../atoms/profile';
@@ -77,11 +77,15 @@ const getRecentItems = async (): Promise<Zotero.Item[]> => {
         if (Array.isArray(recentItemsPrefParsed)) {
             recentItems = (await Promise.all(
                 recentItemsPrefParsed
-                    .filter((recentItem): recentItem is RecentItem => 
-                        typeof recentItem === 'object' && 
-                        recentItem !== null && 
-                        'zotero_key' in recentItem && 
-                        'library_id' in recentItem
+                    .filter((recentItem): recentItem is RecentItem =>
+                        typeof recentItem === 'object' &&
+                        recentItem !== null &&
+                        'zotero_key' in recentItem &&
+                        'library_id' in recentItem &&
+                        // A portable library ref that couldn't be resolved on this
+                        // device carries library_id 0, which throws synchronously
+                        // if looked up.
+                        recentItem.library_id !== UNRESOLVED_LIBRARY_ID
                     )
                     .map(async (recentItem) => await Zotero.Items.getByLibraryAndKeyAsync(recentItem.library_id, recentItem.zotero_key))
             )).filter((item): item is Zotero.Item => Boolean(item));

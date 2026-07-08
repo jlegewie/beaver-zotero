@@ -9,6 +9,7 @@ import { resolveEpubAnnotationTarget } from '../../../../src/services/annotation
 import { BeaverTemporaryAnnotations } from '../../../utils/annotationUtils';
 import { logger } from '../../../../src/utils/logger';
 import { BEAVER_ANNOTATION_COLORS } from '../../../../src/constants/annotations';
+import { UNRESOLVED_LIBRARY_ID } from '../../../../src/utils/libraryIdentity';
 import { TagPill } from '../../../components/agentRuns/TagPill';
 import { AnnotationTooltip, getAnnotationTooltipIcon } from '../../../components/agentRuns/AnnotationTooltip';
 import type {
@@ -182,7 +183,14 @@ export const CreateAnnotationsPreview: React.FC<CreateAnnotationsPreviewProps> =
     useEffect(() => {
         let cancelled = false;
         (async () => {
-            if (!resolvedRef?.zotero_key || typeof resolvedRef.library_id !== 'number') return;
+            // resolvedRef is agent-supplied and may carry UNRESOLVED_LIBRARY_ID
+            // when its library isn't available on this device; the lookup below
+            // would throw on it.
+            if (
+                !resolvedRef?.zotero_key
+                || typeof resolvedRef.library_id !== 'number'
+                || resolvedRef.library_id === UNRESOLVED_LIBRARY_ID
+            ) return;
             try {
                 const attachment = await Zotero.Items.getByLibraryAndKeyAsync(
                     resolvedRef.library_id,
@@ -205,8 +213,11 @@ export const CreateAnnotationsPreview: React.FC<CreateAnnotationsPreviewProps> =
         try {
             await BeaverTemporaryAnnotations.cleanupAll();
 
+            // firstCreated.library_id comes from the action's result_data and
+            // may carry UNRESOLVED_LIBRARY_ID; fall through to the attachment
+            // navigation below when it can't be resolved on this device.
             const firstCreated = createdEntries[0];
-            if (firstCreated) {
+            if (firstCreated && firstCreated.library_id !== UNRESOLVED_LIBRARY_ID) {
                 const annotationItem = await Zotero.Items.getByLibraryAndKeyAsync(
                     firstCreated.library_id,
                     firstCreated.zotero_key,
@@ -217,7 +228,11 @@ export const CreateAnnotationsPreview: React.FC<CreateAnnotationsPreviewProps> =
                 }
             }
 
-            if (!resolvedRef?.zotero_key || typeof resolvedRef.library_id !== 'number') return;
+            if (
+                !resolvedRef?.zotero_key
+                || typeof resolvedRef.library_id !== 'number'
+                || resolvedRef.library_id === UNRESOLVED_LIBRARY_ID
+            ) return;
 
             // Determine the navigation path from the attachment's actual content
             // kind.

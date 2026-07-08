@@ -12,6 +12,7 @@ import { ZoteroItemReference } from '../types/zotero';
 import { logger } from '../../src/utils/logger';
 import { ExternalReference } from '../types/externalReferences';
 import { formatExternalCitation } from '../atoms/externalReferences';
+import { UNRESOLVED_LIBRARY_ID } from '../../src/utils/libraryIdentity';
 import {
     baseCitationKey,
     externalCompatKey,
@@ -161,6 +162,13 @@ export function renderToMarkdown(
         }
         
         const { library_id: libraryID, zotero_key: itemKey } = ref;
+
+        // A portable ref whose library isn't on this device can't be looked
+        // up (and would throw) — nothing to cite.
+        if (libraryID === UNRESOLVED_LIBRARY_ID) {
+            logger(`renderToMarkdown: Library unavailable for libraryID: ${libraryID}, itemKey: ${itemKey}`);
+            return '';
+        }
 
         // Get the Zotero item
         try {

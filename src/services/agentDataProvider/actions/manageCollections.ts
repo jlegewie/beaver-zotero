@@ -162,6 +162,20 @@ export async function validateManageCollectionsAction(
     // way out — once all agents send compound collection_key it can be
     // dropped from the schema.)
     const parsed = parseCollectionRef(trimmedCollectionKey);
+    // The compound key embedded a portable library_ref this device can't map
+    // to a local library. Report unavailability rather than falling through
+    // to getCollectionByIdOrName with the unresolved sentinel, which would
+    // throw when passed to a raw Collections lookup.
+    if (parsed.libraryId === UNRESOLVED_LIBRARY_ID) {
+        return {
+            type: 'agent_action_validate_response',
+            request_id: request.request_id,
+            valid: false,
+            error: `The collection's library (${trimmedCollectionKey}) is not available on this computer.`,
+            error_code: 'library_unavailable',
+            preference: 'always_ask',
+        };
+    }
     if (parsed.libraryId !== null && hintLibraryId !== undefined && parsed.libraryId !== hintLibraryId) {
         return {
             type: 'agent_action_validate_response',

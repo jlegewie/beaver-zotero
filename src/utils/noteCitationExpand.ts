@@ -100,6 +100,10 @@ export async function preloadPageLabelsForNewCitations(str: string): Promise<Pag
         const attrStr = match[1];
         const normalized = normalizeCitationTag(parseRawCitationAttributes(attrStr));
         if (!normalized.ok || normalized.ref.kind !== 'zotero' || !getPageLocator(normalized.ref)) continue;
+        // A portable ref whose library isn't on this device cannot be looked
+        // up (and Zotero throws on the unresolved sentinel); expansion reports
+        // the unavailable library with a proper error later.
+        if (normalized.ref.library_id === UNRESOLVED_LIBRARY_ID) continue;
 
         let attachmentItem: any = null;
         const item = Zotero.Items.getByLibraryAndKey(normalized.ref.library_id, normalized.ref.zotero_key);
@@ -268,6 +272,12 @@ export async function preloadStructuralLocatorPages(str: string): Promise<Struct
         const citationKey = requestedCitationKey(normalized.ref);
         if (seen.has(citationKey)) continue;
         seen.add(citationKey);
+
+        // A portable ref whose library isn't on this device can't be looked
+        // up; skip it here rather than misreport it as an unresolved locator —
+        // expansion rejects the citation with a proper unavailable-library
+        // error.
+        if (normalized.ref.library_id === UNRESOLVED_LIBRARY_ID) continue;
 
         const describe = `id="${modelObjectIdFromReference(normalized.ref)}" loc="${loc.raw}"`;
         try {

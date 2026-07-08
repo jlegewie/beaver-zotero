@@ -4,6 +4,7 @@ import { getLibraryByIdOrName, getCollectionByIdOrName } from '../../../src/serv
 import type { CitationRef } from '../../utils/citationGrammar';
 import type { ZoteroItemReference } from '../../types/zotero';
 import { logger } from '../../../src/utils/logger';
+import { UNRESOLVED_LIBRARY_ID } from '../../../src/utils/libraryIdentity';
 import type { ItemDataHost, ResolvedItemDisplay } from '../types';
 
 /**
@@ -56,6 +57,9 @@ export const zoteroItemData: ItemDataHost = {
         labelsByAttachmentId: PageLabelsByAttachmentId,
     ): Record<number, string> | null {
         if (ref.kind !== 'zotero') return null;
+        // A library ref that couldn't be mapped to a local library on this
+        // device resolves to this sentinel; the lookup below would throw on it.
+        if (ref.library_id === UNRESOLVED_LIBRARY_ID) return null;
         try {
             const item = Zotero.Items.getByLibraryAndKey(ref.library_id, ref.zotero_key);
             if (!item || typeof item === 'boolean') return null;
@@ -70,6 +74,7 @@ export const zoteroItemData: ItemDataHost = {
     },
 
     async resolveItemDisplay(ref: ZoteroItemReference): Promise<ResolvedItemDisplay | null> {
+        if (ref.library_id === UNRESOLVED_LIBRARY_ID) return null;
         try {
             const item = Zotero.Items.getByLibraryAndKey(ref.library_id, ref.zotero_key);
             if (!item || typeof item === 'boolean') return null;

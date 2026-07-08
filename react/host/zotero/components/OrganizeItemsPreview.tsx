@@ -73,9 +73,12 @@ export const OrganizeItemsPreview: React.FC<OrganizeItemsPreviewProps> = ({
             const names: Record<string, string> = {};
             
             // Get library ID from the first item id (portable or legacy).
+            // resolveLibraryRef can legitimately return UNRESOLVED_LIBRARY_ID
+            // (0), which the lookup below would throw on, so guard on falsy
+            // rather than `!= null`.
             const parsedFirst = itemIds.length > 0 ? parseItemReference(itemIds[0]) : null;
             const libraryId = parsedFirst ? resolveLibraryRef(parsedFirst) : null;
-            if (libraryId != null) {
+            if (libraryId) {
                 for (const key of keys) {
                     try {
                         const collection = await Zotero.Collections.getByLibraryAndKeyAsync(libraryId, key);

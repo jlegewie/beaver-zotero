@@ -25,7 +25,7 @@ import {
     parseRawCitationAttributes,
 } from '../../react/utils/citationGrammar';
 import type { PageLabelsByAttachmentId } from '../../react/atoms/citations';
-import { modelObjectId, modelObjectIdFromReference, resolveObjectId } from './libraryIdentity';
+import { modelObjectId, modelObjectIdFromReference, resolveObjectId, UNRESOLVED_LIBRARY_ID } from './libraryIdentity';
 
 // =============================================================================
 // New-string validation
@@ -105,9 +105,12 @@ export function checkNewCitationItemsExist(
         if (!normalized.ok || normalized.ref.kind !== 'zotero') continue; // will fail later in expansion with a proper error
 
         const id = modelObjectIdFromReference(normalized.ref);
+        const label = extractAttr(attrStr, 'id') ? 'id' : extractAttr(attrStr, 'item_id') ? 'item_id' : 'att_id';
+        if (normalized.ref.library_id === UNRESOLVED_LIBRARY_ID) {
+            return `Citation ${label}="${id}" references an item in a library that is not available on this computer.`;
+        }
         const item = Zotero.Items.getByLibraryAndKey(normalized.ref.library_id, normalized.ref.zotero_key);
         if (!item) {
-            const label = extractAttr(attrStr, 'id') ? 'id' : extractAttr(attrStr, 'item_id') ? 'item_id' : 'att_id';
             return `Citation references a Zotero item that does not exist: ${label}="${id}". Verify the item ID is correct.`;
         }
     }
@@ -191,7 +194,7 @@ function resolveAttIdToParent(
     attId: string,
 ): { parentItemId: string; attachmentItem: any } | null {
     const ref = resolveObjectId(attId);
-    if (!ref) return null;
+    if (!ref || ref.library_id === UNRESOLVED_LIBRARY_ID) return null;
     const item = Zotero.Items.getByLibraryAndKey(ref.library_id, ref.zotero_key);
     if (!item || typeof item === 'boolean') return null;
     if (!item.isAttachment?.()) return null;
@@ -230,7 +233,7 @@ function translateAttIdPageLocator(
 
 function resolveUnifiedIdForOldString(id: string): { itemId?: string; attId?: string } {
     const ref = resolveObjectId(id);
-    if (!ref) return { itemId: id };
+    if (!ref || ref.library_id === UNRESOLVED_LIBRARY_ID) return { itemId: id };
     const item = Zotero.Items.getByLibraryAndKey(ref.library_id, ref.zotero_key);
     if (item && typeof item !== 'boolean' && item.isAttachment?.()) {
         return { attId: id };

@@ -20,6 +20,7 @@ import {
     resolveLibraryRef,
     resolveObjectId,
     modelObjectIdFromReference,
+    UNRESOLVED_LIBRARY_ID,
 } from '../../src/utils/libraryIdentity';
 import {
     getPageLocator,
@@ -299,6 +300,7 @@ export async function getCurrentCollectionKeyForItem(
     libraryId: number,
     zoteroKey: string,
 ): Promise<string | undefined> {
+    if (libraryId === UNRESOLVED_LIBRARY_ID) return undefined;
     try {
         const selectedCollection = Zotero.getActiveZoteroPane()?.getSelectedCollection?.();
         if (!selectedCollection || selectedCollection.libraryID !== libraryId) return undefined;
@@ -850,7 +852,7 @@ function formatCitationTextForSearch(citationItems: any[]): string | null {
 
 function lookupCitationItemForSearch(itemId: string, locator?: string): any | null {
     const ref = resolveObjectId(itemId);
-    if (!ref) return null;
+    if (!ref || ref.library_id === UNRESOLVED_LIBRARY_ID) return null;
     const item = Zotero.Items.getByLibraryAndKey(ref.library_id, ref.zotero_key);
     if (!item || typeof item === 'boolean') return null;
     const citeItem = item.isAttachment?.() && item.parentItemID

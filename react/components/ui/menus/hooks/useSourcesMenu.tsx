@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { ItemSearchResult } from '../../../../../src/services/searchService';
 import { getActiveZoteroLibraryId, getRecentAsync, loadFullItemData } from '../../../../../src/utils/zoteroUtils';
+import { UNRESOLVED_LIBRARY_ID } from '../../../../../src/utils/libraryIdentity';
 import { ArrowRightIcon, CSSIcon, FileLinkIcon, Icon } from '../../../icons/icons';
 import { SearchMenuItem } from '../SearchMenu';
 import { SourceMenuItemContext, createSourceMenuItem } from '../utils/menuItemFactories';
@@ -295,6 +296,11 @@ export const useSourcesMenu = ({
             const items: SearchMenuItem[] = [];
 
             for (const result of searchResults) {
+                // A portable library ref that couldn't be resolved on this device
+                // carries library_id 0, which throws synchronously if looked up.
+                if (result.library_id === UNRESOLVED_LIBRARY_ID) {
+                    continue;
+                }
                 const item = await Zotero.Items.getByLibraryAndKeyAsync(result.library_id, result.zotero_key);
                 if (!item) {
                     continue;

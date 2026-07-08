@@ -27,7 +27,7 @@ import { createZoteroItem, stampBeaverProvenanceExtra } from '../../../utils/add
 import { logger } from '../../../../src/utils/logger';
 import { ensureItemSynced } from '../../../../src/utils/sync';
 import { getPref } from '../../../../src/utils/prefs';
-import { libraryRefForLibraryID } from '../../../../src/utils/libraryIdentity';
+import { libraryRefForLibraryID, UNRESOLVED_LIBRARY_ID } from '../../../../src/utils/libraryIdentity';
 import { createProvenanceNote } from '../../../utils/noteActions';
 import {
     getPendingCreateItemActionBySourceIdAtom,
@@ -213,8 +213,11 @@ const ActionButtons: React.FC<ExternalReferenceActionsProps> = ({
         setItemExists(cachedRef !== null);
         setZoteroItemRef(cachedRef);
 
-        // Check for best attachment if item exists
-        if (cachedRef !== null) {
+        // Check for best attachment if item exists. cachedRef comes from the
+        // external reference cache, which may carry UNRESOLVED_LIBRARY_ID when
+        // its library isn't available on this device; the lookup below would
+        // throw on it.
+        if (cachedRef !== null && cachedRef.library_id !== UNRESOLVED_LIBRARY_ID) {
             try {
                 const zoteroItem = Zotero.Items.getByLibraryAndKey(cachedRef.library_id, cachedRef.zotero_key);
                 if (zoteroItem && zoteroItem.isRegularItem()) {
@@ -226,7 +229,7 @@ const ActionButtons: React.FC<ExternalReferenceActionsProps> = ({
                 logger(`ActionButtons: Item not loaded for ${cachedRef.library_id}/${cachedRef.zotero_key}: ${e}`);
             }
         } else {
-            // Item was deleted, clear attachment
+            // Item was deleted, or its library isn't available here; clear attachment
             setBestAttachment(null);
         }
     }, [cachedRef]);
@@ -247,8 +250,10 @@ const ActionButtons: React.FC<ExternalReferenceActionsProps> = ({
                 setItemExists(result !== null);
                 setZoteroItemRef(result);
 
-                // Check for best attachment if item exists
-                if (result !== null) {
+                // Check for best attachment if item exists (skip when the
+                // library isn't available on this device — see the cachedRef
+                // effect above for why this can be UNRESOLVED_LIBRARY_ID)
+                if (result !== null && result.library_id !== UNRESOLVED_LIBRARY_ID) {
                     try {
                         const zoteroItem = Zotero.Items.getByLibraryAndKey(result.library_id, result.zotero_key);
                         if (zoteroItem && zoteroItem.isRegularItem()) {

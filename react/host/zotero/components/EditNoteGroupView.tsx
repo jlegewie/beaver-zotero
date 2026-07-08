@@ -41,6 +41,7 @@ import SplitApplyButton from '../../../components/ui/buttons/SplitApplyButton';
 import { openNoteByKey } from '../../../utils/sourceUtils';
 import { executeEditNoteAction, undoEditNoteAction } from '../../../utils/editNoteActions';
 import { logger } from '../../../../src/utils/logger';
+import { UNRESOLVED_LIBRARY_ID } from '../../../../src/utils/libraryIdentity';
 import { EditNoteRowView } from './EditNoteRowView';
 import { isDiffPreviewLive } from '../../../utils/diffPreviewCoordinator';
 import {
@@ -242,6 +243,10 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
 
     useEffect(() => {
         if (!resolvedTarget || !itemTitleKey || noteTitle) return;
+        // resolvedTarget is derived from agent-supplied tool args/action data and
+        // may carry UNRESOLVED_LIBRARY_ID when its library isn't available on
+        // this device; the lookup below would throw on it.
+        if (resolvedTarget.libraryId === UNRESOLVED_LIBRARY_ID) return;
         let cancelled = false;
         (async () => {
             try {

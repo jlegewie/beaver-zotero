@@ -2,7 +2,7 @@ import { getDisplayNameFromItem } from "../../react/utils/sourceUtils";
 import { ZoteroItemReference } from "../../react/types/zotero";
 import type { CreatorJSON } from "../../react/types/agentActions/base";
 import { logger } from "./logger";
-import { libraryRefForLibraryID } from "./libraryIdentity";
+import { libraryRefForLibraryID, UNRESOLVED_LIBRARY_ID } from "./libraryIdentity";
 
 function makeZoteroItemReference(libraryID: number, zoteroKey: string): ZoteroItemReference {
     return {
@@ -1171,6 +1171,7 @@ export async function getItemLanguage(
     libraryID: number,
     key: string
 ): Promise<string | null> {
+    if (libraryID === UNRESOLVED_LIBRARY_ID) return null;
     const item = await Zotero.Items.getByLibraryAndKeyAsync(libraryID, key);
     if (!item) return null;
 

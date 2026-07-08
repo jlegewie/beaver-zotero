@@ -22,6 +22,7 @@ import { getAttachmentFileStatus, isRemoteAccessAvailable } from '../../src/serv
 import type { PageLabels } from '../../src/services/documentCache';
 import type { Citation } from '../types/citations';
 import { getBestPDFAttachmentAsync } from '../../src/utils/zoteroItemHelpers';
+import { UNRESOLVED_LIBRARY_ID } from '../../src/utils/libraryIdentity';
 import {
     getPageLocator,
     getRequestedRef,
@@ -132,6 +133,9 @@ export async function preloadPageLabelsForContent(content: string): Promise<Page
     while ((match = regex.exec(content)) !== null) {
         const normalized = normalizeCitationTag(parseRawCitationAttributes(match[1] || ''));
         if (!normalized.ok || normalized.ref.kind !== 'zotero') continue;
+        // A portable ref whose library isn't on this device can't be looked up
+        // (and would throw); there's nothing to preload for it.
+        if (normalized.ref.library_id === UNRESOLVED_LIBRARY_ID) continue;
 
         try {
             const item = Zotero.Items.getByLibraryAndKey(normalized.ref.library_id, normalized.ref.zotero_key);
@@ -208,6 +212,9 @@ export async function preloadPageLabelsForCitations(
                 ? requestedRef
                 : null;
         if (!zoteroRef) continue;
+        // A portable ref whose library isn't on this device can't be looked up
+        // (and would throw); there's nothing to preload for it.
+        if (zoteroRef.library_id === UNRESOLVED_LIBRARY_ID) continue;
 
         try {
             const item = Zotero.Items.getByLibraryAndKey(zoteroRef.library_id, zoteroRef.zotero_key);

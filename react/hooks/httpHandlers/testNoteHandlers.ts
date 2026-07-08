@@ -10,6 +10,7 @@ import { wrapWithSchemaVersion } from '../../utils/noteActions';
 import { undoEditNoteAction } from '../../utils/editNoteActions';
 import { getLatestNoteHtml } from '../../../src/utils/noteEditorIO';
 import type { AgentAction } from '../../agents/agentActions';
+import { UNRESOLVED_LIBRARY_ID } from '../../../src/utils/libraryIdentity';
 
 
 export async function handleTestNoteCreateHttpRequest(request: any) {
@@ -41,7 +42,7 @@ export async function handleTestNoteCreateHttpRequest(request: any) {
 
 export async function handleTestNoteDeleteHttpRequest(request: any) {
     const { library_id, zotero_key } = request;
-    if (library_id == null || zotero_key == null) {
+    if (library_id == null || zotero_key == null || library_id === UNRESOLVED_LIBRARY_ID) {
         return { error: 'Provide library_id + zotero_key' };
     }
     const item = await Zotero.Items.getByLibraryAndKeyAsync(library_id, zotero_key);
@@ -53,7 +54,7 @@ export async function handleTestNoteDeleteHttpRequest(request: any) {
 
 export async function handleTestNoteReadHttpRequest(request: any) {
     const { library_id, zotero_key } = request;
-    if (library_id == null || zotero_key == null) {
+    if (library_id == null || zotero_key == null || library_id === UNRESOLVED_LIBRARY_ID) {
         return { error: 'Provide library_id + zotero_key' };
     }
     const item = await Zotero.Items.getByLibraryAndKeyAsync(library_id, zotero_key);
@@ -96,7 +97,7 @@ export async function handleTestNoteReadHttpRequest(request: any) {
 
 export async function handleTestNoteOpenEditorHttpRequest(request: any) {
     const { library_id, zotero_key, open_in_window } = request;
-    if (library_id == null || zotero_key == null) {
+    if (library_id == null || zotero_key == null || library_id === UNRESOLVED_LIBRARY_ID) {
         return { error: 'Provide library_id + zotero_key' };
     }
     const item = await Zotero.Items.getByLibraryAndKeyAsync(library_id, zotero_key);
@@ -129,7 +130,7 @@ export async function handleTestNoteOpenEditorHttpRequest(request: any) {
 
 export async function handleTestNoteCloseEditorHttpRequest(request: any) {
     const { library_id, zotero_key } = request;
-    if (library_id == null || zotero_key == null) {
+    if (library_id == null || zotero_key == null || library_id === UNRESOLVED_LIBRARY_ID) {
         return { error: 'Provide library_id + zotero_key' };
     }
     const item = await Zotero.Items.getByLibraryAndKeyAsync(library_id, zotero_key);

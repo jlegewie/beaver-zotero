@@ -28,6 +28,7 @@ vi.mock('../../../src/utils/logger', () => ({ logger: vi.fn() }));
 // =============================================================================
 
 import {
+    checkNewCitationItemsExist,
     enrichOldStringCitationRefs,
     detectPartialSimplifiedTag,
 } from '../../../src/utils/editNoteValidation';
@@ -62,6 +63,9 @@ function installZoteroItems(byKey: Map<string, ItemStub>) {
     (globalThis as any).Zotero = (globalThis as any).Zotero ?? {};
     (globalThis as any).Zotero.Items = {
         getByLibraryAndKey: vi.fn((libId: number, key: string) => {
+            // Mirrors Zotero's getIDFromLibraryAndKey: a falsy library id
+            // throws rather than returning false.
+            if (!libId) throw new Error('Library ID not provided');
             return byKey.get(`${libId}-${key}`) ?? false;
         }),
     };
@@ -675,5 +679,51 @@ describe('detectPartialSimplifiedTag', () => {
         const result = detectPartialSimplifiedTag(`<citation ${longAttrs}`);
         expect(result).not.toBeNull();
         expect(result!.snippet.length).toBeLessThanOrEqual(60);
+    });
+});
+
+// =============================================================================
+// checkNewCitationItemsExist — unavailable-library refs
+// =============================================================================
+
+describe('checkNewCitationItemsExist (portable ids)', () => {
+    beforeEach(() => {
+        (globalThis as any).Zotero.Libraries = { userLibraryID: 1 };
+        (globalThis as any).Zotero.Groups = {
+            getLibraryIDFromGroupID: vi.fn(() => false),
+            getGroupIDFromLibraryID: vi.fn(() => {
+                throw new Error('Group not found');
+            }),
+        };
+    });
+
+    it('reports an unavailable library distinctly, without a Zotero lookup', () => {
+        const error = checkNewCitationItemsExist(
+            'New text <citation id="g999-ABCD1234"/>.',
+            buildMetadata([]),
+        );
+
+        expect(error).toContain('not available on this computer');
+        expect(error).toContain('g999-ABCD1234');
+        expect((globalThis as any).Zotero.Items.getByLibraryAndKey).not.toHaveBeenCalled();
+    });
+
+    it('reports a genuinely missing item in an available library as nonexistent', () => {
+        const error = checkNewCitationItemsExist(
+            'New text <citation id="u-MISSING1"/>.',
+            buildMetadata([]),
+        );
+
+        expect(error).toContain('does not exist');
+    });
+
+    it('accepts a new citation whose item exists', () => {
+        installZoteroItems(new Map([['1-ABCD1234', { libraryID: 1 }]]));
+        const error = checkNewCitationItemsExist(
+            'New text <citation id="u-ABCD1234"/>.',
+            buildMetadata([]),
+        );
+
+        expect(error).toBeNull();
     });
 });

@@ -2086,21 +2086,21 @@ export interface ListCollectionsViewData {
 }
 
 /**
- * Parse a compound collection key of the form "<library_id>-<key>"
- * (e.g. "6-ABCD1234") into its parts. Returns null for a plain Zotero key, so
- * callers never pass a compound string to Zotero.Collections.getByLibraryAndKey.
+ * Parse a compound collection key in the portable ("u-<key>" / "g<groupID>-<key>")
+ * or legacy numeric ("<library_id>-<key>") form into its parts. Returns null
+ * for a plain Zotero key, so callers never pass a compound string to
+ * Zotero.Collections.getByLibraryAndKey.
  * Zotero object keys are 8-character uppercase alphanumeric strings.
  */
 function parseCompoundCollectionKey(
     collectionKey: string
 ): ZoteroItemReference | null {
-    const match = collectionKey.match(/^(\d+)-([A-Z0-9]{8})$/);
-    if (!match) return null;
-    const libraryId = parseInt(match[1], 10);
+    const parsed = resolveObjectId(collectionKey);
+    if (!parsed || !/^[A-Z0-9]{8}$/.test(parsed.zotero_key)) return null;
     return {
-        library_id: libraryId,
-        zotero_key: match[2],
-        library_ref: libraryRefForLibraryID(libraryId) ?? undefined,
+        library_id: parsed.library_id,
+        zotero_key: parsed.zotero_key,
+        library_ref: parsed.library_ref,
     };
 }
 

@@ -26,6 +26,7 @@ import {
 import { ButtonVariant } from '../../../components/ui/Button';
 import { CreateItemAgentAction } from '../../../agents/agentActions';
 import { ZoteroItemReference } from '../../../types/zotero';
+import { UNRESOLVED_LIBRARY_ID } from '../../../../src/utils/libraryIdentity';
 
 const CITED_BY_URL = 'https://openalex.org/works?page=1&filter=cites:';
 
@@ -141,11 +142,14 @@ const AgentActionItemButtons: React.FC<AgentActionItemButtonsProps> = ({
     // Fetch best attachment when we have an item reference
     useEffect(() => {
         const fetchAttachment = async () => {
-            if (!effectiveItemRef) {
+            // effectiveItemRef may come from persisted action result_data, whose
+            // library_id resolves to UNRESOLVED_LIBRARY_ID when the library isn't
+            // available on this device; the lookup below would throw on it.
+            if (!effectiveItemRef || effectiveItemRef.library_id === UNRESOLVED_LIBRARY_ID) {
                 setBestAttachment(null);
                 return;
             }
-            
+
             const zoteroItem = await Zotero.Items.getByLibraryAndKeyAsync(
                 effectiveItemRef.library_id,
                 effectiveItemRef.zotero_key
