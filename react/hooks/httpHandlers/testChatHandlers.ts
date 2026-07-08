@@ -197,6 +197,19 @@ export async function handleTestChatSendHttpRequest(request: any) {
 
     if (request?.newThread === true) {
         await store.set(newThreadAtom, { skipActiveRunConfirm: true, skipAutoPopulate: true });
+    } else {
+        // Continue a specific existing thread: load it first if it isn't already the
+        // current one. Without this, the send targets whatever thread happens to be
+        // current in the store (e.g. the last one reopened via load-thread), NOT the
+        // requested `threadId`.
+        const threadId = request?.threadId ?? request?.thread_id;
+        if (typeof threadId === 'string' && threadId && store.get(currentThreadIdAtom) !== threadId) {
+            const userId = request?.user_id ?? store.get(userIdAtom);
+            if (!userId) {
+                return { ok: false, error: 'No user_id to load requested threadId (not logged in?)' };
+            }
+            await store.set(loadThreadAtom, { user_id: userId, threadId });
+        }
     }
 
     if (store.get(isWSChatPendingAtom)) {
