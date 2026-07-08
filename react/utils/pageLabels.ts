@@ -22,7 +22,8 @@ import { getAttachmentFileStatus, isRemoteAccessAvailable } from '../../src/serv
 import type { PageLabels } from '../../src/services/documentCache';
 import type { Citation } from '../types/citations';
 import { getBestPDFAttachmentAsync } from '../../src/utils/zoteroItemHelpers';
-import { UNRESOLVED_LIBRARY_ID } from '../../src/utils/libraryIdentity';
+import { UNRESOLVED_LIBRARY_ID, resolveLibraryRef } from '../../src/utils/libraryIdentity';
+import { isLibrarySearchable } from '../../src/services/agentDataProvider/utils';
 import {
     getPageLocator,
     getRequestedRef,
@@ -212,12 +213,17 @@ export async function preloadPageLabelsForCitations(
                 ? requestedRef
                 : null;
         if (!zoteroRef) continue;
-        // A portable ref whose library isn't on this device can't be looked up
-        // (and would throw); there's nothing to preload for it.
-        if (zoteroRef.library_id === UNRESOLVED_LIBRARY_ID) continue;
+        // Group citations carry a device-local library_id of
+        // UNRESOLVED_LIBRARY_ID; resolve the portable library_ref to this
+        // device's local library id (null → library not on this device, nothing
+        // to preload) so group citations get printed-page labels too. Enforce
+        // the excluded-library boundary AFTER resolving: an excluded group that
+        // happens to be present locally must not trigger file reads/extraction.
+        const resolvedLibraryId = resolveLibraryRef({ library_ref: zoteroRef.library_ref, library_id: zoteroRef.library_id });
+        if (!resolvedLibraryId || !isLibrarySearchable(resolvedLibraryId)) continue;
 
         try {
-            const item = Zotero.Items.getByLibraryAndKey(zoteroRef.library_id, zoteroRef.zotero_key);
+            const item = Zotero.Items.getByLibraryAndKey(resolvedLibraryId, zoteroRef.zotero_key);
             if (!item) continue;
 
             const preloadPath = await getCitationPreloadFilePath(item);

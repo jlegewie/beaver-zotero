@@ -12,7 +12,8 @@ import { CreateNotePreview } from './CreateNotePreview';
 import { ManageTagsPreview } from './ManageTagsPreview';
 import { ManageCollectionsPreview } from './ManageCollectionsPreview';
 import { CreateAnnotationsPreview } from './CreateAnnotationsPreview';
-import { UNRESOLVED_LIBRARY_ID } from '../../../../src/utils/libraryIdentity';
+import { resolveLibraryRef } from '../../../../src/utils/libraryIdentity';
+import { isLibrarySearchable } from '../../../../src/services/agentDataProvider/utils';
 import type { ActionStatus, PreviewData } from './agentActionViewHelpers';
 
 /**
@@ -59,12 +60,19 @@ export const ActionPreview: React.FC<{
         // to the type's equivalent field). Falls back to the agent-supplied
         // label when the item is not loaded.
         let itemTypeID: number | undefined;
-        const libraryId = previewData.actionData.library_id;
         const zoteroKey = previewData.actionData.zotero_key;
-        // A library ref that couldn't be mapped to a local library on this
-        // device resolves to UNRESOLVED_LIBRARY_ID; the lookup below would
-        // throw on it, so fall back to the agent-supplied label instead.
-        if (typeof libraryId === 'number' && libraryId !== UNRESOLVED_LIBRARY_ID && zoteroKey) {
+        // Resolve the portable library_ref to a local library id first: a group
+        // item's device-local library_id is UNRESOLVED_LIBRARY_ID (0) — its
+        // identity is the ref — so keying off library_id alone would skip the
+        // lookup for an available group item. resolveLibraryRef returns the
+        // local id (or null when the library isn't on this device); we also
+        // enforce the excluded-library boundary and fall back to the
+        // agent-supplied label when the item isn't readable here.
+        const libraryId = resolveLibraryRef({
+            library_ref: previewData.actionData.library_ref,
+            library_id: previewData.actionData.library_id,
+        });
+        if (libraryId && isLibrarySearchable(libraryId) && zoteroKey) {
             const item = Zotero.Items.getByLibraryAndKey(libraryId, zoteroKey);
             if (item) itemTypeID = item.itemTypeID;
         }
@@ -224,6 +232,19 @@ export const ActionPreview: React.FC<{
             ? (previewData.currentValue?.old_content || previewData.resultData?.undo_full_html)
             : undefined;
 
+        // Resolve the portable library_ref to a local id and enforce the
+        // excluded-library boundary before handing it to EditNotePreview, which
+        // fetches note HTML + page labels: an excluded group present locally
+        // must not be read from the preview. Pass undefined when unresolvable or
+        // excluded so the preview's own guard treats it as unavailable.
+        const resolvedNoteLibraryId = resolveLibraryRef({
+            library_ref: previewData.actionData.library_ref,
+            library_id: previewData.actionData.library_id,
+        });
+        const noteLibraryId = resolvedNoteLibraryId && isLibrarySearchable(resolvedNoteLibraryId)
+            ? resolvedNoteLibraryId
+            : undefined;
+
         return (
             <EditNotePreview
                 oldString={oldString}
@@ -233,7 +254,7 @@ export const ActionPreview: React.FC<{
                 occurrencesReplaced={occurrencesReplaced}
                 warnings={warnings}
                 status={status}
-                libraryId={previewData.actionData.library_id}
+                libraryId={noteLibraryId}
                 zoteroKey={previewData.actionData.zotero_key}
             />
         );

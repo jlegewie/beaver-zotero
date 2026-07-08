@@ -9,7 +9,8 @@ import { resolveEpubAnnotationTarget } from '../../../../src/services/annotation
 import { BeaverTemporaryAnnotations } from '../../../utils/annotationUtils';
 import { logger } from '../../../../src/utils/logger';
 import { BEAVER_ANNOTATION_COLORS } from '../../../../src/constants/annotations';
-import { UNRESOLVED_LIBRARY_ID } from '../../../../src/utils/libraryIdentity';
+import { UNRESOLVED_LIBRARY_ID, resolveLibraryRef } from '../../../../src/utils/libraryIdentity';
+import { isLibrarySearchable } from '../../../../src/services/agentDataProvider/utils';
 import { TagPill } from '../../../components/agentRuns/TagPill';
 import { AnnotationTooltip, getAnnotationTooltipIcon } from '../../../components/agentRuns/AnnotationTooltip';
 import type {
@@ -176,6 +177,19 @@ export const CreateAnnotationsPreview: React.FC<CreateAnnotationsPreviewProps> =
     }
 
     const resolvedRef = actionData.resolved_ref;
+    // A group attachment's device-local library_id is UNRESOLVED_LIBRARY_ID (0) —
+    // its identity is the portable library_ref. Resolve to this device's local
+    // library id (null when the library isn't on this device) so the content-kind
+    // and navigation lookups below work for available group attachments. Enforce
+    // the excluded-library boundary after resolving: an excluded group that is
+    // present locally must not be read or opened in the reader from a preview.
+    const rawResolvedLibraryId = resolveLibraryRef({
+        library_ref: resolvedRef?.library_ref,
+        library_id: resolvedRef?.library_id,
+    });
+    const resolvedLibraryId = rawResolvedLibraryId && isLibrarySearchable(rawResolvedLibraryId)
+        ? rawResolvedLibraryId
+        : null;
     const noun = kind === 'highlight' ? 'highlight' : 'note';
 
     // Resolve the attachment's content kind once
@@ -183,17 +197,12 @@ export const CreateAnnotationsPreview: React.FC<CreateAnnotationsPreviewProps> =
     useEffect(() => {
         let cancelled = false;
         (async () => {
-            // resolvedRef is agent-supplied and may carry UNRESOLVED_LIBRARY_ID
-            // when its library isn't available on this device; the lookup below
-            // would throw on it.
-            if (
-                !resolvedRef?.zotero_key
-                || typeof resolvedRef.library_id !== 'number'
-                || resolvedRef.library_id === UNRESOLVED_LIBRARY_ID
-            ) return;
+            // resolvedLibraryId is null when the attachment's library isn't on
+            // this device; the lookup below would throw on an unresolved id.
+            if (!resolvedRef?.zotero_key || !resolvedLibraryId) return;
             try {
                 const attachment = await Zotero.Items.getByLibraryAndKeyAsync(
-                    resolvedRef.library_id,
+                    resolvedLibraryId,
                     resolvedRef.zotero_key,
                 );
                 const resolved = attachment ? getReadableContentKind(attachment as Zotero.Item) : null;
@@ -203,7 +212,7 @@ export const CreateAnnotationsPreview: React.FC<CreateAnnotationsPreviewProps> =
             }
         })();
         return () => { cancelled = true; };
-    }, [resolvedRef?.library_id, resolvedRef?.zotero_key]);
+    }, [resolvedLibraryId, resolvedRef?.zotero_key]);
     const isEpub = contentKind === 'epub';
 
     const handleItemClick = useCallback(async (
@@ -228,16 +237,12 @@ export const CreateAnnotationsPreview: React.FC<CreateAnnotationsPreviewProps> =
                 }
             }
 
-            if (
-                !resolvedRef?.zotero_key
-                || typeof resolvedRef.library_id !== 'number'
-                || resolvedRef.library_id === UNRESOLVED_LIBRARY_ID
-            ) return;
+            if (!resolvedRef?.zotero_key || !resolvedLibraryId) return;
 
             // Determine the navigation path from the attachment's actual content
             // kind.
             const attachment = await Zotero.Items.getByLibraryAndKeyAsync(
-                resolvedRef.library_id,
+                resolvedLibraryId,
                 resolvedRef.zotero_key,
             );
             if (!attachment) return;
