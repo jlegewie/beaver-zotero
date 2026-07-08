@@ -264,27 +264,6 @@ function getCitationIdentityRef(params: CitationKeyParams): CitationRef | null {
 }
 
 /**
- * Parse a "libraryID-itemKey" reference string.
- * Handles optional 'user-content-' prefix added by rehype-sanitize.
- *
- * @param ref Reference string in format "libraryID-itemKey"
- * @returns Parsed reference or null if invalid
- */
-export function parseItemReference(ref: string | undefined): { libraryID: number; itemKey: string } | null {
-    if (!ref) return null;
-    const clean = ref.replace('user-content-', '');
-    const dashIndex = clean.indexOf('-');
-    if (dashIndex > 0) {
-        const libraryID = parseInt(clean.substring(0, dashIndex), 10);
-        const itemKey = clean.substring(dashIndex + 1);
-        if (libraryID > 0 && itemKey) {
-            return { libraryID, itemKey };
-        }
-    }
-    return null;
-}
-
-/**
  * Normalized citation attributes from LLM output.
  * All attribute names are normalized (e.g., attachment_id → att_id).
  */

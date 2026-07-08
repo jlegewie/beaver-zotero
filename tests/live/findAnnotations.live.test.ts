@@ -73,8 +73,10 @@ function uniqueLabel(): string {
     return `find-annotations-live-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
-function itemID(ref: { library_id: number; zotero_key: string }): string {
-    return `${ref.library_id}-${ref.zotero_key}`;
+function itemID(ref: { library_id: number; library_ref?: string | null; zotero_key: string }): string {
+    // Handlers emit portable ids ("u-KEY" / "g<groupID>-KEY") when the library
+    // maps, so compare in the same grammar the response rows use.
+    return `${ref.library_ref ?? ref.library_id}-${ref.zotero_key}`;
 }
 
 function attachmentId(attachment: AttachmentFixture): string {
@@ -375,7 +377,11 @@ describe('find_annotations group library', () => {
         expect(response.error).toBeFalsy();
         expect(response.annotations.map(a => a.annotation_id)).toContain(annotationId);
         const created = response.annotations.find(a => a.annotation_id === annotationId)!;
-        expect(created.attachment_id).toBe(attachmentId(GROUP_LIB_PDF));
+        // Rows emit the portable "g<groupID>-KEY" form; the fixture only knows
+        // the device-local library id, so accept either grammar for this key.
+        expect(created.attachment_id).toMatch(
+            new RegExp(`^(g[1-9][0-9]*|${GROUP_LIB_PDF.library_id})-${GROUP_LIB_PDF.zotero_key}$`)
+        );
     }, 60000);
 });
 

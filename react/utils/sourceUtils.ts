@@ -15,7 +15,12 @@ import { getNoteContentPreviewText } from './noteText';
 import type { EditNoteOperation } from '../types/agentActions/editNote';
 import { getBeaverFooterAppendPoint } from '../../src/utils/noteEditFooter';
 import { notifyReferenceUnavailable } from '../host/zotero/sourceActions';
-import { resolveItemReference, resolveLibraryRef } from '../../src/utils/libraryIdentity';
+import {
+    resolveItemReference,
+    resolveLibraryRef,
+    resolveObjectId,
+    modelObjectIdFromReference,
+} from '../../src/utils/libraryIdentity';
 import {
     getPageLocator,
     normalizeCitationTag,
@@ -844,11 +849,9 @@ function formatCitationTextForSearch(citationItems: any[]): string | null {
 }
 
 function lookupCitationItemForSearch(itemId: string, locator?: string): any | null {
-    const dashIdx = itemId.indexOf('-');
-    if (dashIdx === -1) return null;
-    const libraryID = parseInt(itemId.substring(0, dashIdx), 10);
-    const key = itemId.substring(dashIdx + 1);
-    const item = Zotero.Items.getByLibraryAndKey(libraryID, key);
+    const ref = resolveObjectId(itemId);
+    if (!ref) return null;
+    const item = Zotero.Items.getByLibraryAndKey(ref.library_id, ref.zotero_key);
     if (!item || typeof item === 'boolean') return null;
     const citeItem = item.isAttachment?.() && item.parentItemID
         ? Zotero.Items.get(item.parentItemID)
@@ -877,7 +880,7 @@ function recoverCitationLabelForSearch(tag: string): string | null {
     const attrs = parseRawCitationAttributes(openTag?.[1] || '');
     const normalized = normalizeCitationTag(attrs);
     if (normalized.ok && normalized.ref.kind === 'zotero') {
-        const ci = lookupCitationItemForSearch(`${normalized.ref.library_id}-${normalized.ref.zotero_key}`);
+        const ci = lookupCitationItemForSearch(modelObjectIdFromReference(normalized.ref));
         return ci ? formatCitationTextForSearch([ci]) : null;
     }
     if (attrs.items) {

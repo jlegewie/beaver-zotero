@@ -23,17 +23,22 @@
 import { AgentAction } from '../agents/agentActions';
 import type { ManageTagsProposedData, ManageTagsResultData, TagColorSnapshot } from '../types/agentActions/base';
 import { logger } from '../../src/utils/logger';
-import { libraryRefForLibraryID, resolveWriteTargetLibrary } from '../../src/utils/libraryIdentity';
+import {
+    libraryRefForLibraryID,
+    resolveObjectId,
+    resolveWriteTargetLibrary,
+    UNRESOLVED_LIBRARY_ID,
+} from '../../src/utils/libraryIdentity';
 
 const MAX_SNAPSHOT_ITEMS = 5000;
 
 
 function splitItemId(itemId: string): { libraryId: number; zoteroKey: string } | null {
-    const parts = itemId.split('-');
-    if (parts.length < 2) return null;
-    const libraryId = parseInt(parts[0], 10);
-    if (isNaN(libraryId)) return null;
-    return { libraryId, zoteroKey: parts.slice(1).join('-') };
+    // Snapshots are written by this client in the numeric form, but parse the
+    // portable form too so a snapshot written under either grammar restores.
+    const parsed = resolveObjectId(itemId);
+    if (!parsed || parsed.library_id === UNRESOLVED_LIBRARY_ID) return null;
+    return { libraryId: parsed.library_id, zoteroKey: parsed.zotero_key };
 }
 
 

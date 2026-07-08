@@ -37,6 +37,9 @@ import {
 import { PARENT_ITEM, NORMAL_PDF } from '../helpers/fixtures';
 
 const LIBRARY_ID = Number(process.env.ZOTERO_TEST_LIBRARY_ID ?? 1);
+// Simplified note output emits portable citation ids ("u-KEY" for the personal
+// library); assertions must use the same grammar.
+const LIBRARY_PREFIX = LIBRARY_ID === 1 ? 'u' : String(LIBRARY_ID);
 
 let zoteroAvailable = false;
 const createdNotes: Array<{ library_id: number; zotero_key: string }> = [];
@@ -173,7 +176,7 @@ describe('edit_note validate — unified id="" attribute', () => {
             zotero_key: ref.zotero_key,
             operation: 'str_replace',
             old_string: 'Body to edit.',
-            new_string: `Body with <citation id="${LIBRARY_ID}-${PARENT_ITEM.zotero_key}" label="(Legewie, 2024)"/>.`,
+            new_string: `Body with <citation id="${LIBRARY_PREFIX}-${PARENT_ITEM.zotero_key}" label="(Legewie, 2024)"/>.`,
         });
 
         expect(res.valid, res.error ?? '').toBe(true);
@@ -188,14 +191,14 @@ describe('edit_note validate — unified id="" attribute', () => {
             zotero_key: ref.zotero_key,
             operation: 'str_replace',
             old_string: 'Body to edit.',
-            new_string: `Body with <citation id="${LIBRARY_ID}-DOESNOTEX" label="(?)"/>.`,
+            new_string: `Body with <citation id="${LIBRARY_PREFIX}-DOESNOTEX" label="(?)"/>.`,
         });
 
         expect(res.valid).toBe(false);
         expect(res.error_code).toBe('citation_item_not_found');
         // The error mentions which attribute label was used — for unified
         // tags `checkNewCitationItemsExist` prints `id=`.
-        expect(res.error).toMatch(/id="\d+-DOESNOTEX"/);
+        expect(res.error).toMatch(/id="(u|g\d+|\d+)-DOESNOTEX"/);
     });
 });
 
@@ -214,7 +217,7 @@ describe('edit_note execute — loc="pageN" locator round-trip', () => {
             zotero_key: ref.zotero_key,
             operation: 'str_replace',
             old_string: 'Body to edit.',
-            new_string: `Body cited <citation id="${LIBRARY_ID}-${PARENT_ITEM.zotero_key}" loc="page42" label="(Legewie, 2024, p. 42)"/>.`,
+            new_string: `Body cited <citation id="${LIBRARY_PREFIX}-${PARENT_ITEM.zotero_key}" loc="page42" label="(Legewie, 2024, p. 42)"/>.`,
         };
 
         const res = await executeEditNote(actionData, { timeout: 20000 });
@@ -241,7 +244,7 @@ describe('edit_note execute — loc="pageN" locator round-trip', () => {
             zotero_key: ref.zotero_key,
             operation: 'str_replace',
             old_string: 'Body to edit.',
-            new_string: `Body cited <citation id="${LIBRARY_ID}-${PARENT_ITEM.zotero_key}" loc="page42" label="(Legewie, 2024, p. 42)"/>.`,
+            new_string: `Body cited <citation id="${LIBRARY_PREFIX}-${PARENT_ITEM.zotero_key}" loc="page42" label="(Legewie, 2024, p. 42)"/>.`,
         };
 
         const exec = await executeEditNote(actionData, { timeout: 20000 });
@@ -249,7 +252,7 @@ describe('edit_note execute — loc="pageN" locator round-trip', () => {
 
         const simplified = await readSimplified(`${ref.library_id}-${ref.zotero_key}`);
         // The simplifier re-emits in the new format: id="..." loc="pageN".
-        expect(simplified).toContain(`id="${LIBRARY_ID}-${PARENT_ITEM.zotero_key}"`);
+        expect(simplified).toContain(`id="${LIBRARY_PREFIX}-${PARENT_ITEM.zotero_key}"`);
         expect(simplified).toContain('loc="page42"');
         // No regression to the legacy page="42" / item_id= form.
         expect(simplified).not.toMatch(/\bpage="42"/);
@@ -422,7 +425,7 @@ describe('edit_note validate — enrichOldStringCitationRefs handles unified id=
             library_id: ref.library_id,
             zotero_key: ref.zotero_key,
             operation: 'str_replace',
-            old_string: `<citation id="${LIBRARY_ID}-${PARENT_ITEM.zotero_key}"/>`,
+            old_string: `<citation id="${LIBRARY_PREFIX}-${PARENT_ITEM.zotero_key}"/>`,
             new_string: 'REPLACED',
         });
 
@@ -440,7 +443,7 @@ describe('edit_note validate — enrichOldStringCitationRefs handles unified id=
             library_id: ref.library_id,
             zotero_key: ref.zotero_key,
             operation: 'str_replace',
-            old_string: `<citation item_id="${LIBRARY_ID}-${PARENT_ITEM.zotero_key}"/>`,
+            old_string: `<citation item_id="${LIBRARY_PREFIX}-${PARENT_ITEM.zotero_key}"/>`,
             new_string: 'REPLACED',
         });
 

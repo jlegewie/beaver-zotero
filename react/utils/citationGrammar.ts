@@ -1,5 +1,5 @@
 import { ID_PREFIXES } from '../../src/beaver-extract/schema/schema';
-import { libraryRefForLibraryID } from '../../src/utils/libraryIdentity';
+import { resolveObjectId } from '../../src/utils/libraryIdentity';
 import type { ZoteroItemReference } from '../types/zotero';
 
 export type LocatorKind =
@@ -197,26 +197,15 @@ export function locatorFromLegacyPage(page: string | undefined): Locator | undef
 }
 
 /**
- * Parse a Zotero object identity of the form "libraryID-zoteroKey".
+ * Parse a Zotero object identity: either a portable `<library_ref>-<zotero_key>`
+ * (`u-KEY`, `g<groupID>-KEY`) or a legacy `<libraryID>-zoteroKey`. Delegates to
+ * `resolveObjectId` after stripping the clobber prefix; returns `null` for
+ * `ext-<KEY>` external-file ids and other malformed input.
  */
 export function parseZoteroId(raw: string | undefined): ZoteroItemReference | null {
     if (!raw) return null;
     const clean = stripClobberPrefix(raw);
-    const dashIndex = clean.indexOf('-');
-    if (dashIndex <= 0) return null;
-
-    const libraryRaw = clean.slice(0, dashIndex);
-    if (!/^[1-9]\d*$/.test(libraryRaw)) return null;
-
-    const zoteroKey = clean.slice(dashIndex + 1);
-    if (!zoteroKey) return null;
-
-    const libraryID = Number(libraryRaw);
-    return {
-        library_id: libraryID,
-        zotero_key: zoteroKey,
-        library_ref: libraryRefForLibraryID(libraryID) ?? undefined,
-    };
+    return resolveObjectId(clean);
 }
 
 function getLocator(rawAttrs: Record<string, string>): Locator | undefined {

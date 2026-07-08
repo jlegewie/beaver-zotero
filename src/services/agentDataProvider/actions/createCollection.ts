@@ -9,7 +9,14 @@ import {
 
 } from '../../agentProtocol';
 import { checkLibraryExcluded, excludedLibraryMessage, getDeferredToolPreference } from '../utils';
-import { libraryRefForLibraryID, resolveWriteTargetLibrary, writeTargetLibraryError } from '../../../utils/libraryIdentity';
+import {
+    libraryRefForLibraryID,
+    resolveItemReference,
+    resolveObjectId,
+    resolveWriteTargetLibrary,
+    UNRESOLVED_LIBRARY_ID,
+    writeTargetLibraryError,
+} from '../../../utils/libraryIdentity';
 import { TimeoutContext, checkAborted } from '../timeout';
 import { TimeoutError } from '../timeout';
 
@@ -107,14 +114,37 @@ async function validateCreateCollectionAction(
         }
     }
 
-    // Validate item IDs if provided
+    // Validate item IDs if provided. Accepts both the portable
+    // "<library_ref>-<zotero_key>" grammar and the legacy
+    // "<library_id>-<zotero_key>" numeric grammar.
     if (item_ids && item_ids.length > 0) {
         for (const itemId of item_ids) {
-            const [libId, key] = itemId.split('-');
-            const itemLibraryId = parseInt(libId, 10);
-            
-            // Items must be in the same library
-            if (itemLibraryId !== library_id) {
+            const parsedRef = resolveObjectId(itemId);
+            if (!parsedRef) {
+                return {
+                    type: 'agent_action_validate_response',
+                    request_id: request.request_id,
+                    valid: false,
+                    error: `Invalid item_id format: ${itemId}. Expected "<library_ref>-<zotero_key>" or "<library_id>-<zotero_key>"`,
+                    error_code: 'invalid_item_id',
+                    preference: 'always_ask',
+                };
+            }
+
+            // Items must be in the same (resolved) library as the target
+            // collection. An unresolvable portable ref gets its own error
+            // rather than being reported as a library mismatch.
+            if (parsedRef.library_id !== library_id) {
+                if (parsedRef.library_id === UNRESOLVED_LIBRARY_ID) {
+                    return {
+                        type: 'agent_action_validate_response',
+                        request_id: request.request_id,
+                        valid: false,
+                        error: `Item ${itemId} is in a library that is not available on this computer.`,
+                        error_code: 'library_unavailable',
+                        preference: 'always_ask',
+                    };
+                }
                 return {
                     type: 'agent_action_validate_response',
                     request_id: request.request_id,
@@ -124,8 +154,8 @@ async function validateCreateCollectionAction(
                     preference: 'always_ask',
                 };
             }
-            
-            const item = await Zotero.Items.getByLibraryAndKeyAsync(itemLibraryId, key);
+
+            const item = await Zotero.Items.getByLibraryAndKeyAsync(parsedRef.library_id, parsedRef.zotero_key);
             if (!item) {
                 return {
                     type: 'agent_action_validate_response',
@@ -250,9 +280,12 @@ async function executeCreateCollectionAction(
                 const itemIdsToAdd: number[] = [];
 
                 for (const itemIdStr of item_ids) {
-                    const [libId, key] = itemIdStr.split('-');
-                    const item = await Zotero.Items.getByLibraryAndKeyAsync(parseInt(libId, 10), key);
-                    if (item && !item.isAttachment() && !item.isNote() && !item.isAnnotation()) {
+                    const parsedRef = resolveObjectId(itemIdStr);
+                    if (!parsedRef) continue;
+                    const resolved = await resolveItemReference(parsedRef);
+                    if (resolved.status !== 'found') continue;
+                    const item = resolved.item;
+                    if (!item.isAttachment() && !item.isNote() && !item.isAnnotation()) {
                         itemIdsToAdd.push(item.id);
                     }
                 }

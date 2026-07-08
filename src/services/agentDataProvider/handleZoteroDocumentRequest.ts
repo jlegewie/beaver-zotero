@@ -41,7 +41,7 @@ import { checkLibraryExcluded, notifyRemoteDownloadFailure, notifyRemoteFileNotS
 import { EXTERNAL_LIBRARY_ID, resolveExternalFile } from '../externalFiles';
 import type { ExternalFileRecord } from '../database';
 import { serializeAttachmentStub, serializeItemStub } from '../../utils/zoteroSerializers';
-import { libraryRefForLibraryID, resolveLibraryRef } from '../../utils/libraryIdentity';
+import { libraryRefForLibraryID, modelObjectIdFromReference, resolveLibraryRef } from '../../utils/libraryIdentity';
 import {
     createPreparedJsonMessage,
     type PreparedJsonMessage,
@@ -261,7 +261,7 @@ export async function handleZoteroDocumentRequest(
             'invalid_format',
         );
     }
-    const requestKey = `${attachment.library_id}-${attachment.zotero_key}`;
+    const requestKey = modelObjectIdFromReference(attachment);
 
     const formatError = validateZoteroItemReference(attachment);
     if (formatError) {

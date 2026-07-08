@@ -17,6 +17,7 @@ import { normalizeNoteHtml } from '../prosemirror/normalize';
 import { parseZoteroCitationLinkHref } from './zoteroLinkCitation';
 import { translatePageLabelToNumber } from './pageLabelTranslation';
 import { extractItemKeyFromUri } from './zoteroUri';
+import { modelObjectId } from './libraryIdentity';
 import type { PageLabels } from '../services/documentCache';
 
 export { normalizeNoteHtml };
@@ -295,7 +296,7 @@ export function simplifyNoteHtml(
                     const ci = citationItems[0];
                     const uri = ci.uris?.[0] || '';
                     const itemKey = extractItemKeyFromUri(uri) || 'unknown';
-                    const itemId = `${libraryID}-${itemKey}`;
+                    const itemId = modelObjectId(libraryID, itemKey);
                     const rawPage = ci.locator != null ? String(ci.locator) : '';
                     let page = rawPage;
                     let pageConvention: 'number' | 'label' | undefined = page ? 'label' : undefined;
@@ -345,7 +346,7 @@ export function simplifyNoteHtml(
                     const itemsAttr = citationItems.map((ci: any) => {
                         const uri = ci.uris?.[0] || '';
                         const key = extractItemKeyFromUri(uri) || 'unknown';
-                        const itemId = `${libraryID}-${key}`;
+                        const itemId = modelObjectId(libraryID, key);
                         let page = ci.locator != null ? String(ci.locator) : '';
                         const pageLabels = pageLabelsByItemId?.[itemId];
                         if (page && pageLabels && (ci.label == null || ci.label === 'page')) {
@@ -395,7 +396,7 @@ export function simplifyNoteHtml(
                 const parsed = parseZoteroCitationLinkHref(rawHref);
                 if (!parsed) return match;
 
-                const itemId = `${parsed.libraryId}-${parsed.itemKey}`;
+                const itemId = modelObjectId(parsed.libraryId, parsed.itemKey);
                 const occurrence = citationKeyCounts.get(parsed.itemKey) || 0;
                 citationKeyCounts.set(parsed.itemKey, occurrence + 1);
                 const ref = `c_${parsed.itemKey}_${occurrence}`;

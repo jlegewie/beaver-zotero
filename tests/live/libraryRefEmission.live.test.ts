@@ -173,11 +173,11 @@ describe('/beaver/zotero-data (serializeItem / serializeAttachment)', () => {
 
     it('stamps the group ref on a serialized group item and its attachments', async (ctx) => {
         if (!groupItemId) return ctx.skip();
-        const dash = groupItemId.indexOf('-');
-        const library_id = parseInt(groupItemId.slice(0, dash), 10);
-        const zotero_key = groupItemId.slice(dash + 1);
+        // item ids are emitted in the portable "g<groupID>-<key>" form, so take
+        // the key from the id and address the library by its device-local id.
+        const zotero_key = groupItemId.slice(groupItemId.indexOf('-') + 1);
         const res = await post<ZoteroDataResponse>('/beaver/zotero-data', {
-            items: [{ library_id, zotero_key }],
+            items: [{ library_id: topo.group!.library_id, zotero_key }],
             include_attachments: true,
             include_parents: false,
         });

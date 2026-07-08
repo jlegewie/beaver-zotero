@@ -72,7 +72,10 @@ export function extractItemReferencesFromAgentActions(actions: AgentAction[]): Z
             const parentItemId = action.proposed_data.parent_item_id as string | undefined;
             const parsedParent = parseZoteroId(parentItemId);
             if (parsedParent) {
-                const key = `${parsedParent.library_id}-${parsedParent.zotero_key}`;
+                // Key on library_ref when available: an unresolved portable ref
+                // collapses library_id to UNRESOLVED_LIBRARY_ID, and two refs from
+                // different groups would otherwise collide on the same key.
+                const key = `${parsedParent.library_ref ?? parsedParent.library_id}-${parsedParent.zotero_key}`;
                 if (!refs.has(key)) {
                     refs.set(key, parsedParent);
                 }

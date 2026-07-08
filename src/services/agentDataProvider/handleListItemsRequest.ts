@@ -17,7 +17,7 @@ import {
 } from '../agentProtocol';
 import { ItemStub } from '../../../react/types/zotero';
 import { serializeNote, serializeItemStub } from '../../utils/zoteroSerializers';
-import { libraryRefForLibraryID } from '../../utils/libraryIdentity';
+import { libraryRefForLibraryID, modelObjectId } from '../../utils/libraryIdentity';
 import { getCollectionByIdOrName, validateLibraryAccess, isLibrarySearchable, getSearchableLibraries, extractYear, formatCreatorsString, getAttachmentInfoForItem } from './utils';
 
 function isAnnotationItem(item: Zotero.Item): boolean {
@@ -354,7 +354,7 @@ export async function handleListItemsRequest(
 
                 const resultItem: RegularListResultItem = {
                     result_type: 'regular',
-                    item_id: `${library.libraryID}-${item.key}`,
+                    item_id: modelObjectId(library.libraryID, item.key),
                     library_ref: libraryRef,
                     item_type: item.itemType,
                     title,

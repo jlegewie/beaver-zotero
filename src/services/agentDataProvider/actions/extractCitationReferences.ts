@@ -10,6 +10,7 @@
 import { CITATION_TAG_PATTERN } from '../../../../react/utils/citationPreprocessing';
 import { ZoteroItemReference } from '../../../../react/types/zotero';
 import { normalizeCitationTag, parseRawCitationAttributes } from '../../../../react/utils/citationGrammar';
+import { modelObjectIdFromReference } from '../../../utils/libraryIdentity';
 
 
 /**
@@ -53,15 +54,19 @@ export function extractCitationReferences(content: string): ExtractedCitationRef
         }
         if (normalized.ref.kind !== 'zotero') continue;
 
-        const key = `${normalized.ref.library_id}-${normalized.ref.zotero_key}`;
-        if (seen.has(key)) continue;  // duplicate
-        seen.add(key);
+        // Internal dedup key only — stays on the numeric library_id form.
+        const dedupKey = `${normalized.ref.library_id}-${normalized.ref.zotero_key}`;
+        if (seen.has(dedupKey)) continue;  // duplicate
+        seen.add(dedupKey);
 
-        // Validate Zotero key format — track invalid keys separately
+        // Validate Zotero key format — track invalid keys separately. Echoed
+        // back to the model, so use the portable form it wrote rather than
+        // the device-local library_id.
         if (!Zotero.Utilities.isValidObjectKey(normalized.ref.zotero_key)) {
-            if (!seenInvalid.has(key)) {
-                seenInvalid.add(key);
-                invalidKeys.push(key);
+            const modelKey = modelObjectIdFromReference(normalized.ref);
+            if (!seenInvalid.has(modelKey)) {
+                seenInvalid.add(modelKey);
+                invalidKeys.push(modelKey);
             }
             continue;
         }

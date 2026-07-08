@@ -16,7 +16,7 @@ import {
     ViewImagesErrorCode,
 } from '../agentProtocol';
 import { ZoteroItemReference, ItemStub, AttachmentStub } from '../../../react/types/zotero';
-import { libraryRefForLibraryID, resolveLibraryRef } from '../../utils/libraryIdentity';
+import { libraryRefForLibraryID, modelObjectIdFromReference, resolveLibraryRef } from '../../utils/libraryIdentity';
 import {
     getReadableContentKind,
     resolveToImageAttachment,
@@ -199,7 +199,7 @@ export async function handleZoteroViewImagesRequest(
         ...attachment,
         library_ref: attachment.library_ref ?? libraryRefForLibraryID(attachment.library_id) ?? undefined,
     };
-    const requestKey = `${attachment.library_id}-${attachment.zotero_key}`;
+    const requestKey = modelObjectIdFromReference(attachment);
 
     // Captured once the target attachment is resolved so error responses can
     // report which child was actually targeted and carry the same view-row

@@ -15,7 +15,7 @@ import {
     AttachmentImageErrorCode,
 } from '../agentProtocol';
 import { ZoteroItemReference } from '../../../react/types/zotero';
-import { libraryRefForLibraryID, resolveLibraryRef } from '../../utils/libraryIdentity';
+import { libraryRefForLibraryID, modelObjectIdFromReference, resolveLibraryRef } from '../../utils/libraryIdentity';
 import { makeRemoteFilePath } from '../documentFileIdentity';
 import {
     checkLibraryExcluded,
@@ -62,7 +62,7 @@ export async function handleZoteroAttachmentImageRequest(
         ...attachment,
         library_ref: attachment.library_ref ?? libraryRefForLibraryID(attachment.library_id) ?? undefined,
     };
-    const requestKey = `${attachment.library_id}-${attachment.zotero_key}`;
+    const requestKey = modelObjectIdFromReference(attachment);
     let errorKey = requestKey;
 
     // Captured by errorResponse so every post-resolution error reports which

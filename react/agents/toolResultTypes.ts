@@ -10,7 +10,7 @@ import { ExternalReference } from "../types/externalReferences";
 import { ZoteroItemReference, CollectionReference, AttachmentInfo } from "../types/zotero";
 import { ToolReturnPart } from "./types";
 import { logger } from "../../src/utils/logger";
-import { libraryRefForLibraryID } from "../../src/utils/libraryIdentity";
+import { libraryRefForLibraryID, resolveObjectId } from "../../src/utils/libraryIdentity";
 
 // ============================================================================
 // Summary Types (from backend)
@@ -1311,16 +1311,13 @@ function isZoteroItemReference(value: unknown): value is ZoteroItemReference {
     return typeof obj.library_id === 'number' && typeof obj.zotero_key === 'string';
 }
 
+/**
+ * Parses a model-facing note/item id: either a portable `<library_ref>-<zotero_key>`
+ * (`u-KEY`, `g<groupID>-KEY`) or a legacy `<libraryID>-zoteroKey`. Returns
+ * `null` for `ext-<KEY>` external-file ids and other malformed input.
+ */
 function parseZoteroUniqueKey(uniqueKey: string): ZoteroItemReference | null {
-    const [libraryIdStr, ...keyParts] = uniqueKey.split('-');
-    const libraryId = parseInt(libraryIdStr, 10);
-    const zoteroKey = keyParts.join('-');
-    if (isNaN(libraryId) || !zoteroKey) return null;
-    return {
-        library_id: libraryId,
-        zotero_key: zoteroKey,
-        library_ref: libraryRefForLibraryID(libraryId) ?? undefined,
-    };
+    return resolveObjectId(uniqueKey);
 }
 
 /**
@@ -1950,6 +1947,24 @@ export interface ZoteroSearchViewData {
  * Extract zotero search data from content or metadata.summary.
  * Uses metadata.summary (which contains ZoteroItemReference[]) for dehydrated results.
  */
+/**
+ * Builds a ZoteroItemReference from a result row's composite id (portable
+ * "u-KEY" / "g<groupID>-KEY" or legacy numeric form). An explicit
+ * `library_ref` field on the row wins over the ref derived from the id.
+ */
+function referenceFromResultRowId(itemId: string, explicitLibraryRef?: unknown): ZoteroItemReference | null {
+    const parsed = resolveObjectId(itemId);
+    if (!parsed) return null;
+    const library_ref = typeof explicitLibraryRef === 'string' && explicitLibraryRef
+        ? explicitLibraryRef
+        : parsed.library_ref;
+    return {
+        library_id: parsed.library_id,
+        zotero_key: parsed.zotero_key,
+        ...(library_ref ? { library_ref } : {}),
+    };
+}
+
 export function extractZoteroSearchData(
     content: unknown,
     metadata?: Record<string, unknown>
@@ -1965,23 +1980,10 @@ export function extractZoteroSearchData(
                         ? (item.attachment_id ?? item.item_id)
                         : item.item_id;
                     if (!itemId) return null;
-                    const parts = itemId.split('-');
-                    if (parts.length < 2) return null;
-                    const libraryId = parseInt(parts[0], 10);
-                    const zoteroKey = parts.slice(1).join('-');
-                    if (isNaN(libraryId) || !zoteroKey) return null;
-                    return {
-                        library_id: libraryId,
-                        zotero_key: zoteroKey,
-                        ...(typeof item.library_ref === 'string' && item.library_ref
-                            ? { library_ref: item.library_ref }
-                            : libraryRefForLibraryID(libraryId)
-                                ? { library_ref: libraryRefForLibraryID(libraryId)! }
-                                : {}),
-                    };
+                    return referenceFromResultRowId(itemId, item.library_ref);
                 })
                 .filter((ref): ref is ZoteroItemReference => ref !== null);
-            
+
             if (items.length > 0) {
                 return { items, totalCount: obj.total_count };
             }
@@ -2035,20 +2037,7 @@ export function extractListItemsData(
                         ? (item.attachment_id ?? item.item_id)
                         : item.item_id;
                     if (!itemId) return null;
-                    const parts = itemId.split('-');
-                    if (parts.length < 2) return null;
-                    const libraryId = parseInt(parts[0], 10);
-                    const zoteroKey = parts.slice(1).join('-');
-                    if (isNaN(libraryId) || !zoteroKey) return null;
-                    return {
-                        library_id: libraryId,
-                        zotero_key: zoteroKey,
-                        ...(typeof item.library_ref === 'string' && item.library_ref
-                            ? { library_ref: item.library_ref }
-                            : libraryRefForLibraryID(libraryId)
-                                ? { library_ref: libraryRefForLibraryID(libraryId)! }
-                                : {}),
-                    };
+                    return referenceFromResultRowId(itemId, item.library_ref);
                 })
                 .filter((ref): ref is ZoteroItemReference => ref !== null);
             
@@ -2352,20 +2341,7 @@ export function extractGetMetadataData(
                         };
                     }
                     if (typeof item?.item_id !== 'string') return null;
-                    const parts = item.item_id.split('-');
-                    if (parts.length < 2) return null;
-                    const libraryId = parseInt(parts[0], 10);
-                    const zoteroKey = parts.slice(1).join('-');
-                    if (isNaN(libraryId) || !zoteroKey) return null;
-                    return {
-                        library_id: libraryId,
-                        zotero_key: zoteroKey,
-                        ...(typeof item.library_ref === 'string' && item.library_ref
-                            ? { library_ref: item.library_ref }
-                            : libraryRefForLibraryID(libraryId)
-                                ? { library_ref: libraryRefForLibraryID(libraryId)! }
-                                : {}),
-                    };
+                    return referenceFromResultRowId(item.item_id, item.library_ref);
                 })
                 .filter((ref): ref is ZoteroItemReference => ref !== null);
             

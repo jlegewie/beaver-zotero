@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 // Mock noteHtmlSimplifier
 vi.mock('../../../src/utils/noteHtmlSimplifier', () => ({
@@ -508,5 +508,78 @@ describe('handleReadNoteRequest — read-only path', () => {
 
         await handleReadNoteRequest(makeRequest());
         expect(setNote).not.toHaveBeenCalled();
+    });
+});
+
+
+// =============================================================================
+// Portable note ids
+// =============================================================================
+
+describe('handleReadNoteRequest — portable note ids', () => {
+    let savedLibraries: any;
+    let savedGroups: any;
+
+    beforeEach(() => {
+        const Z = (globalThis as any).Zotero;
+        savedLibraries = Z.Libraries;
+        savedGroups = Z.Groups;
+        Z.Libraries = { ...Z.Libraries, userLibraryID: 1 };
+        Z.Groups = {
+            getLibraryIDFromGroupID: vi.fn((groupID: number) => (groupID === 4321 ? 7 : false)),
+            getGroupIDFromLibraryID: vi.fn((libraryID: number) => {
+                if (libraryID === 7) return 4321;
+                throw new Error('Group not found');
+            }),
+        };
+    });
+
+    afterEach(() => {
+        const Z = (globalThis as any).Zotero;
+        Z.Libraries = savedLibraries;
+        Z.Groups = savedGroups;
+    });
+
+    it('resolves a personal-library portable note_id and echoes it back', async () => {
+        const response = await handleReadNoteRequest(makeRequest({ note_id: 'u-ABCD1234' }));
+        expect(response.success).toBe(true);
+        expect((globalThis as any).Zotero.Items.getByLibraryAndKeyAsync).toHaveBeenCalledWith(1, 'ABCD1234');
+        expect(response.note_id).toBe('u-ABCD1234');
+    });
+
+    it('resolves a group portable note_id via the local group mapping', async () => {
+        const item = makeMockItem({ libraryID: 7 });
+        (globalThis as any).Zotero.Items.getByLibraryAndKeyAsync = vi.fn().mockResolvedValue(item);
+
+        const response = await handleReadNoteRequest(makeRequest({ note_id: 'g4321-ABCD1234' }));
+        expect(response.success).toBe(true);
+        expect((globalThis as any).Zotero.Items.getByLibraryAndKeyAsync).toHaveBeenCalledWith(7, 'ABCD1234');
+    });
+
+    it('reports an unavailable library for an unmapped group ref without a lookup', async () => {
+        const response = await handleReadNoteRequest(makeRequest({ note_id: 'g9999-ABCD1234' }));
+        expect(response.success).toBe(false);
+        expect(response.error).toContain('not available on this computer');
+        expect((globalThis as any).Zotero.Items.getByLibraryAndKeyAsync).not.toHaveBeenCalled();
+    });
+
+    it('keys the simplification cache by the device-local id regardless of the requested grammar', async () => {
+        await handleReadNoteRequest(makeRequest({ note_id: 'u-ABCD1234' }));
+        expect(vi.mocked(getOrSimplify).mock.calls[0][0]).toBe('1-ABCD1234');
+    });
+
+    it('emits a portable parent_item_id when the parent library maps', async () => {
+        const parentItem = {
+            libraryID: 1,
+            key: 'PARENT01',
+            loadDataType: vi.fn().mockResolvedValue(undefined),
+            getField: vi.fn(() => 'Parent Article'),
+        };
+        const item = makeMockItem({ parentItem });
+        (globalThis as any).Zotero.Items.getByLibraryAndKeyAsync = vi.fn().mockResolvedValue(item);
+
+        const response = await handleReadNoteRequest(makeRequest());
+        expect(response.success).toBe(true);
+        expect(response.parent_item_id).toBe('u-PARENT01');
     });
 });

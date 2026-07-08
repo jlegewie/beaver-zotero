@@ -1,5 +1,5 @@
 import { logger } from '../../../utils/logger';
-import { libraryRefForLibraryID, resolveItemReference } from '../../../utils/libraryIdentity';
+import { libraryRefForLibraryID, modelObjectIdFromReference, resolveItemReference } from '../../../utils/libraryIdentity';
 import { searchableLibraryIdsAtom } from '../../../../react/atoms/profile';
 import { EditNoteProposedData, type EditNoteOperation } from '../../../../react/types/agentActions/editNote';
 import {
@@ -466,7 +466,9 @@ async function validateEditNoteAction(
 
     // 4. Item is a note
     if (!item.isNote()) {
-        const itemId = `${resolvedLibraryId}-${zotero_key}`;
+        // Echo the id in the grammar the model used: its own library_ref when
+        // provided, else the resolved library_id (legacy numeric grammar).
+        const itemId = modelObjectIdFromReference({ library_id: resolvedLibraryId, library_ref, zotero_key });
         const resp = {
             type: 'agent_action_validate_response',
             request_id: request.request_id,

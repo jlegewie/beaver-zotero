@@ -7,7 +7,7 @@ import {
     ZOTERO_ANNOTATION_PALETTE_COLORS,
 } from '../../constants/annotations';
 import { logger } from '../../utils/logger';
-import { resolveItemReference } from '../../utils/libraryIdentity';
+import { modelObjectId, resolveItemReference, resolveObjectId } from '../../utils/libraryIdentity';
 import {
     formatZoteroCreatorsString,
     getCreatorsFromItem,
@@ -230,16 +230,6 @@ function buildSqlNearestPaletteColorCondition(colorColumn: string, paletteName: 
     )`;
 }
 
-function parseAttachmentId(attachmentId: string | null): { libraryId: number; key: string } | null {
-    if (!attachmentId) return null;
-    const dashIndex = attachmentId.indexOf('-');
-    if (dashIndex === -1) return null;
-    const libraryId = parseInt(attachmentId.substring(0, dashIndex), 10);
-    const key = attachmentId.substring(dashIndex + 1);
-    if (!Number.isFinite(libraryId) || !key) return null;
-    return { libraryId, key };
-}
-
 function getDateSortValue(annotation: Zotero.Item, sortBy: string): number {
     const raw = sortBy === 'date_added' ? annotation.dateAdded : annotation.dateModified;
     const time = raw ? new Date(raw).getTime() : 0;
@@ -417,7 +407,7 @@ async function buildParentInfo(
 
     for (const attachment of attachments) {
         attachmentInfoByID.set(itemID(attachment), {
-            item_id: `${attachment.libraryID}-${attachment.key}`,
+            item_id: modelObjectId(attachment.libraryID, attachment.key),
         });
 
         const parent = attachment.parentID ? regularByID.get(attachment.parentID) : null;
@@ -433,7 +423,7 @@ async function buildParentInfo(
             title = parent.getDisplayTitle?.() || '';
         }
         itemInfoByAttachmentID.set(itemID(attachment), {
-            item_id: `${parent.libraryID}-${parent.key}`,
+            item_id: modelObjectId(parent.libraryID, parent.key),
             item_type: parent.itemType ?? null,
             title,
             creators: formatZoteroCreatorsString(getCreatorsFromItem(parent)),
@@ -631,11 +621,11 @@ export async function handleFindAnnotationsRequest(
 
         const attachmentInput = cleanString(request.attachment_id);
         if (attachmentInput) {
-            const parsed = parseAttachmentId(attachmentInput);
-            if (!parsed) {
+            const parsedRef = resolveObjectId(attachmentInput);
+            if (!parsedRef) {
                 return invalidResponse(request, 'Invalid attachment_id format', 'invalid_attachment_id');
             }
-            const resolved = await resolveItemReference({ library_id: parsed.libraryId, zotero_key: parsed.key });
+            const resolved = await resolveItemReference(parsedRef);
             if (resolved.status === 'library_unavailable') {
                 return invalidResponse(
                     request,

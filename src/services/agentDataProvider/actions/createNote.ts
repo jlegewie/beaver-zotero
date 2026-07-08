@@ -19,7 +19,13 @@ import {
 } from '../../agentProtocol';
 import { ItemDataWithStatus, AttachmentDataWithStatus } from '../../../../react/types/zotero';
 import { checkLibraryExcluded, excludedLibraryMessage, getDeferredToolPreference, getLibraryByIdOrName, getCollectionByIdOrName } from '../utils';
-import { libraryRefForLibraryID, resolveWriteTargetLibrary, writeTargetLibraryError } from '../../../utils/libraryIdentity';
+import {
+    libraryRefForLibraryID,
+    resolveObjectId,
+    resolveWriteTargetLibrary,
+    UNRESOLVED_LIBRARY_ID,
+    writeTargetLibraryError,
+} from '../../../utils/libraryIdentity';
 import { TimeoutContext, checkAborted } from '../timeout';
 import { extractCitationReferences } from './extractCitationReferences';
 import { lookupZoteroReferences, LookupZoteroReferencesResult } from '../lookupZoteroReferences';
@@ -136,19 +142,16 @@ async function validateCreateNoteAction(
     let collectionDerivedLibraryId: number | null = null;
 
     if (parentItemIdInput) {
-        const dashIdx = parentItemIdInput.indexOf('-');
+        // Accepts both the portable "<library_ref>-<zotero_key>" grammar and the
+        // legacy numeric grammar; a bare key or name falls through unsplit.
+        const parsedInput = resolveObjectId(parentItemIdInput);
         let candidateKey: string;
         let candidateLibraryId: number | null = null;
-        if (dashIdx > 0) {
-            const libIdPart = parentItemIdInput.substring(0, dashIdx);
-            const keyPart = parentItemIdInput.substring(dashIdx + 1);
-            const parsedLibId = parseInt(libIdPart, 10);
-            if (!isNaN(parsedLibId) && keyPart) {
-                candidateLibraryId = parsedLibId;
-                candidateKey = keyPart;
-            } else {
-                candidateKey = parentItemIdInput;
-            }
+        if (parsedInput) {
+            candidateLibraryId = parsedInput.library_id === UNRESOLVED_LIBRARY_ID
+                ? null
+                : parsedInput.library_id;
+            candidateKey = parsedInput.zotero_key;
         } else {
             candidateKey = parentItemIdInput;
         }

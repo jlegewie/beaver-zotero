@@ -43,6 +43,12 @@ import type { PageLabels } from '../services/documentCache';
 import type { StructuredExtractResult } from '../beaver-extract/schema/schema';
 import { translatePageNumberToLabel } from './pageLabelTranslation';
 import { extractItemKeyFromUri } from './zoteroUri';
+import {
+    modelObjectId,
+    modelObjectIdFromReference,
+    resolveObjectId,
+    UNRESOLVED_LIBRARY_ID,
+} from './libraryIdentity';
 
 export { translatePageNumberToLabel } from './pageLabelTranslation';
 
@@ -138,7 +144,8 @@ export async function preloadPageLabelsForNewCitations(str: string): Promise<Pag
  * agent-facing note simplification needs read/edit views to resolve page
  * locators consistently. Remote-only attachments stay cache-only unless
  * `allowRemoteDownloads` is explicitly enabled.
- * The returned map is keyed by the simplifier's `LIBRARYID-ITEMKEY` item id.
+ * The returned map is keyed by the simplifier's model-facing item id (see
+ * `modelObjectId`).
  */
 export async function preloadNotePageLabels(
     rawHtml: string,
@@ -167,7 +174,10 @@ export async function preloadNotePageLabels(
                 const uri = ci?.uris?.[0] || '';
                 const itemKey = extractItemKeyFromUri(uri);
                 if (!itemKey) continue;
-                const itemId = `${libraryID}-${itemKey}`;
+                // Keyed with the simplifier's portable item id so lookups in
+                // `simplifyNoteHtml` (which builds the same id via `modelObjectId`)
+                // resolve to the labels seeded here.
+                const itemId = modelObjectId(libraryID, itemKey);
                 if (seen.has(itemId)) continue;
                 seen.add(itemId);
 
@@ -259,7 +269,7 @@ export async function preloadStructuralLocatorPages(str: string): Promise<Struct
         if (seen.has(citationKey)) continue;
         seen.add(citationKey);
 
-        const describe = `id="${normalized.ref.library_id}-${normalized.ref.zotero_key}" loc="${loc.raw}"`;
+        const describe = `id="${modelObjectIdFromReference(normalized.ref)}" loc="${loc.raw}"`;
         try {
             const item = Zotero.Items.getByLibraryAndKey(normalized.ref.library_id, normalized.ref.zotero_key);
             // Use the async helper so a regular parent item's child attachments
@@ -423,7 +433,7 @@ function parseSimplifiedCitationAttrs(
     if (!normalized.ok || normalized.ref.kind !== 'zotero') {
         throw new Error('Citation must have an "id" attribute. Legacy "item_id" / "att_id" are also accepted.');
     }
-    const item_id = `${normalized.ref.library_id}-${normalized.ref.zotero_key}`;
+    const item_id = modelObjectIdFromReference(normalized.ref);
     const { page, pageIsResolvedLabel } = resolveLocatorPageAttr(normalized.ref, resolvedLocatorPages);
     return { item_id, ...(page ? { page, pageIsResolvedLabel } : {}) };
 }
@@ -465,19 +475,20 @@ function resolvePageForCitation(
     return resolved;
 }
 
-/** Build a new citation from simplified attributes (item_id format: "LIB-KEY") */
+/** Build a new citation from simplified attributes (item_id: portable "u-KEY" / "gGROUP-KEY", or legacy "LIB-KEY") */
 function buildCitationFromSimplifiedAttrs(
     attrs: SimplifiedCitationAttrs,
     shouldTranslatePage: boolean,
     pageLabels?: PageLabelsByAttachmentId,
 ): string {
-    const dashIdx = attrs.item_id.indexOf('-');
-    if (dashIdx === -1) {
+    const ref = resolveObjectId(attrs.item_id);
+    if (!ref) {
         throw new Error(`Invalid item_id format: "${attrs.item_id}". Expected "libraryID-itemKey".`);
     }
-    const libId = parseInt(attrs.item_id.substring(0, dashIdx), 10);
-    const key = attrs.item_id.substring(dashIdx + 1);
-    const item = Zotero.Items.getByLibraryAndKey(libId, key);
+    if (ref.library_id === UNRESOLVED_LIBRARY_ID) {
+        throw new Error(`Cannot cite item_id="${attrs.item_id}": its library is not available on this computer.`);
+    }
+    const item = Zotero.Items.getByLibraryAndKey(ref.library_id, ref.zotero_key);
     if (!item) {
         throw new Error(`Item not found: ${attrs.item_id}`);
     }
@@ -492,7 +503,7 @@ function buildCitationFromSimplifiedAttrs(
     return stripInlineItemDataFromDataCitations(createCitationHTML(item, resolvedPage));
 }
 
-/** Build a new citation from an attachment ID (att_id format: "LIB-KEY") */
+/** Build a new citation from an attachment ID (att_id: portable "u-KEY" / "gGROUP-KEY", or legacy "LIB-KEY") */
 function buildCitationFromAttId(
     attId: string,
     page?: string,
@@ -500,13 +511,14 @@ function buildCitationFromAttId(
     pageLabels?: PageLabelsByAttachmentId,
     pageIsResolvedLabel = false,
 ): string {
-    const dashIdx = attId.indexOf('-');
-    if (dashIdx === -1) {
+    const ref = resolveObjectId(attId);
+    if (!ref) {
         throw new Error(`Invalid att_id format: "${attId}". Expected "libraryID-itemKey".`);
     }
-    const libId = parseInt(attId.substring(0, dashIdx), 10);
-    const key = attId.substring(dashIdx + 1);
-    const item = Zotero.Items.getByLibraryAndKey(libId, key);
+    if (ref.library_id === UNRESOLVED_LIBRARY_ID) {
+        throw new Error(`Cannot cite att_id="${attId}": its library is not available on this computer.`);
+    }
+    const item = Zotero.Items.getByLibraryAndKey(ref.library_id, ref.zotero_key);
     if (!item) {
         throw new Error(`Attachment not found: ${attId}`);
     }
@@ -753,7 +765,7 @@ export function expandToRawHtml(
                 // the library. Best outcome — produces a real Zotero citation.
                 const mappedItemRef = externalRefContext?.externalItemMapping?.[externalId];
                 if (mappedItemRef) {
-                    const itemIdStr = `${mappedItemRef.library_id}-${mappedItemRef.zotero_key}`;
+                    const itemIdStr = modelObjectIdFromReference(mappedItemRef);
                     return buildCitationFromSimplifiedAttrs({ item_id: itemIdStr, page }, true, pageLabels);
                 }
 

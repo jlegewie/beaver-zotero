@@ -2605,3 +2605,101 @@ describe('MCP bridge script utilities', () => {
         expect(writtenContent).toContain('JSON.parse');
     });
 });
+
+// ---------------------------------------------------------------------------
+// Portable ids ("u-KEY" / "g<groupID>-KEY") across the MCP surface
+// ---------------------------------------------------------------------------
+
+describe('MCP portable ids', () => {
+    let endpoint: Endpoint;
+
+    beforeEach(() => {
+        vi.clearAllMocks();
+        zotero.Libraries.userLibraryID = 1;
+        zotero.Groups = {
+            getLibraryIDFromGroupID: vi.fn((groupID: number) => (groupID === 4321 ? 7 : false)),
+            getGroupIDFromLibraryID: vi.fn((libraryID: number) => {
+                if (libraryID === 7) return 4321;
+                throw new Error('Group not found');
+            }),
+        };
+        endpoint = setupMcpEndpoint();
+    });
+
+    it('read_attachment resolves a portable personal-library id', async () => {
+        mockHandleZoteroDocumentRequest.mockResolvedValue({
+            type: 'zotero_document',
+            result: { mode: 'markdown', document: { pageCount: 1, pages: [{ index: 0, markdown: 'Hello' }] } },
+        });
+
+        await callTool(endpoint, 'read_attachment', { attachment_id: 'u-ABC12345' });
+
+        const req = mockHandleZoteroDocumentRequest.mock.calls[0][0];
+        expect(req.attachment).toEqual({ library_id: 1, zotero_key: 'ABC12345', library_ref: 'u' });
+    });
+
+    it('read_attachment resolves a portable group id via the local mapping', async () => {
+        mockHandleZoteroDocumentRequest.mockResolvedValue({
+            type: 'zotero_document',
+            result: { mode: 'markdown', document: { pageCount: 1, pages: [{ index: 0, markdown: 'Hello' }] } },
+        });
+
+        await callTool(endpoint, 'read_attachment', { attachment_id: 'g4321-ABC12345' });
+
+        const req = mockHandleZoteroDocumentRequest.mock.calls[0][0];
+        expect(req.attachment).toEqual({ library_id: 7, zotero_key: 'ABC12345', library_ref: 'g4321' });
+    });
+
+    it('read_attachment reports an unavailable library for an unmapped group ref', async () => {
+        const result = await callTool(endpoint, 'read_attachment', { attachment_id: 'g999-ABC12345' });
+
+        expect(result.isError).toBe(true);
+        expect(result.content[0].text).toContain('not available on this computer');
+        expect(mockHandleZoteroDocumentRequest).not.toHaveBeenCalled();
+    });
+
+    it('read_attachment still accepts the legacy numeric form', async () => {
+        mockHandleZoteroDocumentRequest.mockResolvedValue({
+            type: 'zotero_document',
+            result: { mode: 'markdown', document: { pageCount: 1, pages: [{ index: 0, markdown: 'Hello' }] } },
+        });
+
+        await callTool(endpoint, 'read_attachment', { attachment_id: '1-ABC12345' });
+
+        const req = mockHandleZoteroDocumentRequest.mock.calls[0][0];
+        expect(req.attachment).toEqual({ library_id: 1, zotero_key: 'ABC12345', library_ref: 'u' });
+    });
+
+    it('search results emit the portable item id when the row carries a library_ref', async () => {
+        mockHandleItemSearchByTopicRequest.mockResolvedValue({
+            type: 'item_search_by_topic',
+            items: [makeSearchResultItem({ item: { library_ref: 'u' } })],
+        });
+
+        const result = await callTool(endpoint, 'search_by_topic', { topic_query: 'test' });
+        const data = JSON.parse(result.content[0].text);
+
+        expect(data.results[0].item_id).toBe('u-ABC12345');
+    });
+
+    it('create_note returns portable note ids', async () => {
+        mockMcpCreateNoteToolEnabled.value = true;
+        endpoint = setupMcpEndpoint();
+        mockValidateCreateNoteAction.mockResolvedValue({ valid: true });
+        mockExecuteCreateNoteAction.mockResolvedValue({
+            success: true,
+            result_data: {
+                library_id: 1,
+                zotero_key: 'NOTE0001',
+                parent_key: 'PARENT01',
+                note_content: '<p>x</p>',
+            },
+        });
+
+        const result = await callTool(endpoint, 'create_note', { title: 'T', content: 'C' });
+        const data = JSON.parse(result.content[0].text);
+
+        expect(data.note_id).toBe('u-NOTE0001');
+        expect(data.parent_item_id).toBe('u-PARENT01');
+    });
+});

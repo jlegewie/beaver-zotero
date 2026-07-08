@@ -30,6 +30,9 @@ import { createNote, deleteNote } from './helpers/noteTestClient';
 import { PARENT_ITEM, SMALL_PDF, NORMAL_PDF } from '../helpers/fixtures';
 
 const LIBRARY_ID = Number(process.env.ZOTERO_TEST_LIBRARY_ID ?? 1);
+// Simplified note output emits portable citation ids ("u-KEY" for the personal
+// library); assertions must use the same grammar.
+const LIBRARY_PREFIX = LIBRARY_ID === 1 ? 'u' : String(LIBRARY_ID);
 
 let zoteroAvailable = false;
 const createdNotes: Array<{ library_id: number; zotero_key: string }> = [];
@@ -131,7 +134,7 @@ describe('/beaver/note/read — single citation simplified output', () => {
 
         const res = await readNote(`${ref.library_id}-${ref.zotero_key}`);
         expect(res.success, res.error).toBe(true);
-        expect(res.content).toContain(`id="${LIBRARY_ID}-${PARENT_ITEM.zotero_key}"`);
+        expect(res.content).toContain(`id="${LIBRARY_PREFIX}-${PARENT_ITEM.zotero_key}"`);
         // Legacy attrs must not appear in the new simplified format.
         expect(res.content).not.toMatch(/\bitem_id="/);
         expect(res.content).not.toMatch(/\bpage="\d/);
@@ -178,8 +181,8 @@ describe('/beaver/note/read — single citation simplified output', () => {
         const itemsMatch = res.content!.match(/items="([^"]+)"/);
         expect(itemsMatch).not.toBeNull();
         const itemsValue = itemsMatch![1];
-        expect(itemsValue).toContain(`${LIBRARY_ID}-${PARENT_ITEM.zotero_key}`);
-        expect(itemsValue).toContain(`${LIBRARY_ID}-${NORMAL_PDF.zotero_key}:page=7`);
+        expect(itemsValue).toContain(`${LIBRARY_PREFIX}-${PARENT_ITEM.zotero_key}`);
+        expect(itemsValue).toContain(`${LIBRARY_PREFIX}-${NORMAL_PDF.zotero_key}:page=7`);
     });
 });
 

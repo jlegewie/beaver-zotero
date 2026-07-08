@@ -1675,6 +1675,7 @@ export const CLIENT_FEATURES = {
     EDIT_METADATA_CREATORS: 'edit_metadata_creators',
     EXTERNAL_FILES: 'external_files',
     ASK_USER_QUESTION: 'ask_user_question',
+    PORTABLE_IDS: 'portable_ids',
 } as const;
 
 /** Client type identifier for the Zotero plugin. */

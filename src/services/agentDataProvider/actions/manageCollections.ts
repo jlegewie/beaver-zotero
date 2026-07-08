@@ -21,21 +21,33 @@ import {
     WSAgentActionExecuteResponse,
 } from '../../agentProtocol';
 import { checkLibraryExcluded, excludedLibraryMessage, getDeferredToolPreference, isLibrarySearchable, getCollectionByIdOrName } from '../utils';
-import { libraryRefForLibraryID, resolveWriteTargetLibrary, writeTargetLibraryError } from '../../../utils/libraryIdentity';
+import {
+    libraryRefForLibraryID,
+    parseItemReference,
+    resolveLibraryRef,
+    resolveWriteTargetLibrary,
+    UNRESOLVED_LIBRARY_ID,
+    writeTargetLibraryError,
+} from '../../../utils/libraryIdentity';
 import { TimeoutContext, checkAborted, TimeoutError } from '../timeout';
 import { logger } from '../../../utils/logger';
 
 /**
  * Parse a collection identifier that may be a plain 8-char Zotero key or a
- * compound '<libraryID>-<key>' string. Returns { libraryId, key } where
- * libraryId is null if the input was a plain key.
+ * compound '<library_ref>-<key>' / '<libraryID>-<key>' string. Returns
+ * { libraryId, key } where libraryId is null if the input was a plain key,
+ * or `UNRESOLVED_LIBRARY_ID` if it embedded a portable ref this device
+ * can't resolve (the caller's existing "not found" path handles that).
  */
 function parseCollectionRef(ref: string): { libraryId: number | null; key: string } {
-    const compound = ref.match(/^(\d+)-(.+)$/);
-    if (compound) {
-        return { libraryId: parseInt(compound[1], 10), key: compound[2] };
+    const parsed = parseItemReference(ref);
+    if (!parsed) {
+        return { libraryId: null, key: ref };
     }
-    return { libraryId: null, key: ref };
+    const libraryId = parsed.library_ref
+        ? resolveLibraryRef(parsed) ?? UNRESOLVED_LIBRARY_ID
+        : parsed.library_id!;
+    return { libraryId, key: parsed.zotero_key };
 }
 
 

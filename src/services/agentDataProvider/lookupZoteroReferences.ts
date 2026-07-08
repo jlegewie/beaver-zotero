@@ -6,7 +6,7 @@
  */
 
 import { logger } from '../../utils/logger';
-import { libraryRefForLibraryID, resolveItemReference, resolveLibraryRef } from '../../utils/libraryIdentity';
+import { libraryRefForLibraryID, modelObjectId, resolveItemReference, resolveLibraryRef } from '../../utils/libraryIdentity';
 import { ItemDataWithStatus, AttachmentDataWithStatus, ZoteroItemReference, ItemStub } from '../../../react/types/zotero';
 import { searchableLibraryIdsAtom, syncWithZoteroAtom } from '../../../react/atoms/profile';
 import { userIdAtom } from '../../../react/atoms/auth';
@@ -525,7 +525,7 @@ export async function lookupZoteroReferences(
         try {
             const parentAttachment = annotation.parentID ? attachmentItemsById.get(annotation.parentID) : null;
             const attachmentInfo = parentAttachment
-                ? { item_id: `${parentAttachment.libraryID}-${parentAttachment.key}` }
+                ? { item_id: modelObjectId(parentAttachment.libraryID, parentAttachment.key) }
                 : null;
 
             const regularItem = parentAttachment?.parentID
@@ -543,7 +543,7 @@ export async function lookupZoteroReferences(
                 try { itemTitle = (regularItem.getField('title', false, true) as string) || ''; }
                 catch { itemTitle = regularItem.getDisplayTitle?.() || ''; }
                 itemInfo = {
-                    item_id: `${regularItem.libraryID}-${regularItem.key}`,
+                    item_id: modelObjectId(regularItem.libraryID, regularItem.key),
                     item_type: regularItem.itemType ?? null,
                     title: itemTitle,
                     creators: formatZoteroCreatorsString(getCreatorsFromItem(regularItem)),

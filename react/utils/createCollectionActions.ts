@@ -6,7 +6,13 @@
 import { AgentAction } from '../agents/agentActions';
 import { CreateCollectionResultData } from '../types/agentActions/base';
 import { logger } from '../../src/utils/logger';
-import { libraryRefForLibraryID, resolveLibraryRef, resolveWriteTargetLibrary } from '../../src/utils/libraryIdentity';
+import {
+    libraryRefForLibraryID,
+    resolveItemReference,
+    resolveLibraryRef,
+    resolveObjectId,
+    resolveWriteTargetLibrary,
+} from '../../src/utils/libraryIdentity';
 
 /**
  * Execute a create_collection agent action by creating the collection in Zotero.
@@ -59,10 +65,16 @@ export async function executeCreateCollectionAction(
         await Zotero.DB.executeTransaction(async () => {
             const itemIdsToAdd: number[] = [];
             
+            // Accepts both the portable "<library_ref>-<zotero_key>" grammar and
+            // the legacy numeric grammar; unresolved or missing items are skipped
+            // (mirrors the WS executor in agentDataProvider/actions/createCollection.ts).
             for (const itemIdStr of item_ids) {
-                const [libId, key] = itemIdStr.split('-');
-                const item = await Zotero.Items.getByLibraryAndKeyAsync(parseInt(libId, 10), key);
-                if (item && !item.isAttachment() && !item.isNote() && !item.isAnnotation()) {
+                const parsedRef = resolveObjectId(itemIdStr);
+                if (!parsedRef) continue;
+                const resolved = await resolveItemReference(parsedRef);
+                if (resolved.status !== 'found') continue;
+                const item = resolved.item;
+                if (!item.isAttachment() && !item.isNote() && !item.isAnnotation()) {
                     itemIdsToAdd.push(item.id);
                 }
             }

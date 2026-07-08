@@ -14,7 +14,7 @@ import {
 } from '../agentProtocol';
 import { ItemStub } from '../../../react/types/zotero';
 import { serializeNote, serializeAnnotation, serializeItemStub } from '../../utils/zoteroSerializers';
-import { libraryRefForLibraryID } from '../../utils/libraryIdentity';
+import { libraryRefForLibraryID, modelObjectId, resolveItemReference, resolveObjectId, UNRESOLVED_LIBRARY_ID } from '../../utils/libraryIdentity';
 import { checkLibraryExcluded, getAttachmentInfoForItem, formatCreatorsString, extractYear } from './utils';
 
 
@@ -52,35 +52,34 @@ export async function handleGetMetadataRequest(
     
     for (const itemId of request.item_ids) {
         try {
-            // Parse item_id format: "<library_id>-<zotero_key>"
-            const dashIndex = itemId.indexOf('-');
-            if (dashIndex === -1) {
-                notFound.push(itemId);
-                continue;
-            }
-            
-            const libraryId = parseInt(itemId.substring(0, dashIndex), 10);
-            const key = itemId.substring(dashIndex + 1);
-            
-            if (isNaN(libraryId) || !key) {
+            // Parse item_id format: either the portable "<library_ref>-<zotero_key>"
+            // or the legacy "<library_id>-<zotero_key>".
+            const parsedRef = resolveObjectId(itemId);
+            if (!parsedRef) {
                 notFound.push(itemId);
                 continue;
             }
 
             // Never serve metadata for items in libraries the user excluded from
-            // Beaver; report them as not found so no data leaks.
-            if (checkLibraryExcluded(libraryId)) {
+            // Beaver; report them as not found so no data leaks. Skip the check
+            // for an unresolved portable ref (no local library to check yet) —
+            // the lookup below reports it as not found either way.
+            if (parsedRef.library_id !== UNRESOLVED_LIBRARY_ID && checkLibraryExcluded(parsedRef.library_id)) {
                 notFound.push(itemId);
                 continue;
             }
 
-            // Get the item
-            const item = await Zotero.Items.getByLibraryAndKeyAsync(libraryId, key);
-            if (!item) {
+            // Get the item. This response shape only carries a flat not_found
+            // list, so an unavailable library and a genuinely missing key are
+            // both reported as not found.
+            const resolved = await resolveItemReference(parsedRef);
+            if (resolved.status !== 'found') {
                 notFound.push(itemId);
                 continue;
             }
-            
+            const item = resolved.item;
+            const libraryId = item.libraryID;
+
             // Load necessary data types before accessing item data
             // Always load itemData and creators for basic fields
             const dataTypesToLoad: string[] = ['itemData', 'creators', 'relations', 'tags', 'collections', 'childItems'];
@@ -97,7 +96,7 @@ export async function handleGetMetadataRequest(
                 let parentSummary: ItemStub | null = null;
                 let isPrimary = false;
                 if (parent) {
-                    parentItemId = `${parent.libraryID}-${parent.key}`;
+                    parentItemId = modelObjectId(parent.libraryID, parent.key);
                     await Zotero.Items.loadDataTypes([parent], ['primaryData', 'itemData', 'creators']);
                     parentSummary = serializeItemStub(parent);
                     try {
@@ -168,13 +167,13 @@ export async function handleGetMetadataRequest(
                     year?: number | null;
                 } | null = null;
                 if (attachment) {
-                    attachmentInfo = { item_id: `${attachment.libraryID}-${attachment.key}` };
+                    attachmentInfo = { item_id: modelObjectId(attachment.libraryID, attachment.key) };
                     const regularId = attachment.parentItemID;
                     const regular = regularId ? await Zotero.Items.getAsync(regularId) : null;
                     if (regular) {
                         await Zotero.Items.loadDataTypes([regular], ['itemData', 'creators']);
                         itemInfo = {
-                            item_id: `${regular.libraryID}-${regular.key}`,
+                            item_id: modelObjectId(regular.libraryID, regular.key),
                             item_type: regular.itemType,
                             title: regular.getDisplayTitle?.() || '',
                             creators: formatCreatorsString(regular.getCreators?.()),

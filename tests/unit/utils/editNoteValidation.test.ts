@@ -468,6 +468,72 @@ describe('enrichOldStringCitationRefs (att_id)', () => {
 });
 
 // =============================================================================
+// enrichOldStringCitationRefs — portable ids (dual-form parsing)
+// =============================================================================
+// The rest of this file leaves `Zotero.Libraries.userLibraryID` unmocked, so
+// `modelObjectId`/`modelObjectIdFromReference` never compute a portable ref
+// there and fall back to the legacy numeric form untouched — exercising the
+// fallback path. This block mocks a real personal-library mapping to prove
+// old_string ids in EITHER form (legacy numeric or portable) still match
+// metadata built with the portable form `simplifyNoteHtml` now emits.
+
+describe('enrichOldStringCitationRefs (portable ids)', () => {
+    beforeEach(() => {
+        (globalThis as any).Zotero.Libraries = { userLibraryID: 1 };
+    });
+
+    afterEach(() => {
+        delete (globalThis as any).Zotero.Libraries;
+    });
+
+    it('matches portable metadata against a legacy numeric item_id in old_string', () => {
+        const metadata = buildMetadata([
+            { ref: 'c_AAAA_0', itemId: 'u-AAAAAAAA', page: '12' },
+        ]);
+        const result = enrichOldStringCitationRefs(
+            '<p>Body <citation item_id="1-AAAAAAAA" page="12"/></p>',
+            metadata,
+        );
+        expect(result).toBe(
+            '<p>Body <citation item_id="1-AAAAAAAA" page="12" ref="c_AAAA_0"/></p>',
+        );
+    });
+
+    it('matches portable metadata against a portable unified id in old_string', () => {
+        const metadata = buildMetadata([
+            { ref: 'c_AAAA_0', itemId: 'u-AAAAAAAA', page: '12' },
+        ]);
+        const result = enrichOldStringCitationRefs(
+            '<p>Body <citation id="u-AAAAAAAA" loc="page12"/></p>',
+            metadata,
+        );
+        expect(result).toBe(
+            '<p>Body <citation id="u-AAAAAAAA" loc="page12" ref="c_AAAA_0"/></p>',
+        );
+    });
+
+    it('rewrites att_id to the portable parent item_id when a portable ref is computable', () => {
+        installZoteroItems(new Map([
+            ['1-ATTKEY000', {
+                libraryID: 1,
+                parentKey: 'PARENT1234',
+                isAttachment: () => true,
+            }],
+        ]));
+        const metadata = buildMetadata([
+            { ref: 'c_PARENT_0', itemId: 'u-PARENT1234' },
+        ]);
+        const result = enrichOldStringCitationRefs(
+            '<p><citation att_id="1-ATTKEY000"/></p>',
+            metadata,
+        );
+        expect(result).toBe(
+            '<p><citation item_id="u-PARENT1234" ref="c_PARENT_0"/></p>',
+        );
+    });
+});
+
+// =============================================================================
 // enrichOldStringCitationRefs — combined + edge cases
 // =============================================================================
 

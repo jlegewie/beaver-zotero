@@ -1,7 +1,7 @@
 import { logger } from '../../utils/logger';
 import { ZoteroItemStatus, FrontendFileStatus, AttachmentInfo } from '../../../react/types/zotero';
 import { safeIsInTrash, safeFileExists, isLinkedUrlAttachment } from '../../utils/zoteroUtils';
-import { libraryRefForLibraryID } from '../../utils/libraryIdentity';
+import { libraryRefForLibraryID, parseItemReference, resolveLibraryRef } from '../../utils/libraryIdentity';
 import { syncingItemFilterAsync } from '../../utils/sync';
 import { getPref } from '../../utils/prefs';
 
@@ -468,11 +468,12 @@ export interface CollectionLookupResult {
  *
  * Supports:
  * - Number: Looks up by collection ID
- * - String: Checks for a key (8 alphanumeric chars), then "<libraryID>-<key>" compound format
- *   (e.g. "1-ABCD1234"), then numeric ID (digits only), then searches by name
+ * - String: Checks for a key (8 alphanumeric chars), then a compound "<library_ref>-<key>"
+ *   or "<libraryID>-<key>" format (e.g. "u-ABCD1234", "g123-ABCD1234", "1-ABCD1234"), then
+ *   numeric ID (digits only), then searches by name
  * - null/undefined: Returns null
  *
- * The "<libraryID>-<key>" format is resolved only in the embedded library, ignoring the
+ * The compound format is resolved only in the embedded library, ignoring the
  * libraryId parameter.
  *
  * When libraryId is provided, does a full lookup (key + name) in that library first.
@@ -498,13 +499,15 @@ export function getCollectionByIdOrName(
         return collection ? { collection, libraryID: collection.libraryID } : null;
     }
 
-    // Try "<libraryID>-<key>" compound format (e.g. "1-ABCD1234")
-    const compoundMatch = collectionIdOrName.match(/^(\d+)-(.+)$/);
-    if (compoundMatch) {
-        const compoundLibId = parseInt(compoundMatch[1], 10);
-        const compoundKey = compoundMatch[2];
-        if (Zotero.Utilities.isValidObjectKey(compoundKey)) {
-            const collection = Zotero.Collections.getByLibraryAndKey(compoundLibId, compoundKey);
+    // Try a compound "<library_ref>-<key>" or "<libraryID>-<key>" format
+    // (e.g. "u-ABCD1234", "g123-ABCD1234", "1-ABCD1234")
+    const compoundParsed = parseItemReference(collectionIdOrName);
+    if (compoundParsed) {
+        const compoundLibId = compoundParsed.library_ref
+            ? resolveLibraryRef(compoundParsed)
+            : compoundParsed.library_id!;
+        if (compoundLibId != null && Zotero.Utilities.isValidObjectKey(compoundParsed.zotero_key)) {
+            const collection = Zotero.Collections.getByLibraryAndKey(compoundLibId, compoundParsed.zotero_key);
             if (collection) return { collection, libraryID: collection.libraryID };
         }
     }

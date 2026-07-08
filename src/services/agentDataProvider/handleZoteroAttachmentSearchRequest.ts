@@ -8,7 +8,7 @@
  */
 
 import { logger } from '../../utils/logger';
-import { libraryRefForLibraryID, resolveLibraryRef } from '../../utils/libraryIdentity';
+import { libraryRefForLibraryID, modelObjectIdFromReference, resolveLibraryRef } from '../../utils/libraryIdentity';
 
 import { isAttachmentAvailableRemotely } from '../../utils/webAPI';  // kept for file_missing message check
 import {
@@ -74,7 +74,7 @@ export async function handleZoteroAttachmentSearchRequest(
     });
 
     // 0. Validate attachment reference format
-    const unique_key = `${attachment.library_id}-${attachment.zotero_key}`;
+    const unique_key = modelObjectIdFromReference(attachment);
     const formatError = validateZoteroItemReference(attachment);
     if (formatError) {
         return errorResponse(

@@ -8,7 +8,7 @@
 
 import { ToolCallPart } from './types';
 import { ZoteroItemReference } from '../types/zotero';
-import { libraryRefForLibraryID } from '../../src/utils/libraryIdentity';
+import { resolveObjectId } from '../../src/utils/libraryIdentity';
 
 /**
  * Parse args from a {@link ToolCallPart} — handles both string and object formats.
@@ -26,16 +26,8 @@ export function parseArgs(part: ToolCallPart): Record<string, unknown> {
 }
 
 function zoteroReferenceFromCompoundId(id: string): ZoteroItemReference | null {
-    const [libraryIdStr, ...keyParts] = id.split('-');
-    const zoteroKey = keyParts.join('-');
-    if (!libraryIdStr || !zoteroKey) return null;
-    const libraryId = parseInt(libraryIdStr, 10);
-    if (isNaN(libraryId)) return null;
-    return {
-        library_id: libraryId,
-        zotero_key: zoteroKey,
-        library_ref: libraryRefForLibraryID(libraryId) ?? undefined,
-    };
+    // Portable ("u-KEY" / "g<groupID>-KEY") or legacy numeric compound id.
+    return resolveObjectId(id);
 }
 
 /**
@@ -55,10 +47,11 @@ export function extractZoteroReferencesFromToolCall(part: ToolCallPart): ZoteroI
         if (ref) references.push(ref);
     }
 
-    // Extract file id if present (used by read). Zotero attachment ids use
-    // '<library_id>-<zotero_key>'; external file ids ('ext-1') carry no Zotero reference.
+    // Extract file id if present (used by read). Zotero attachment ids use the
+    // portable or legacy compound form; external file ids ('ext-1') carry no
+    // Zotero reference and parse to null.
     const file = args.file as string | undefined;
-    if (file && /^\d+-/.test(file)) {
+    if (file) {
         const ref = zoteroReferenceFromCompoundId(file);
         if (ref) references.push(ref);
     }

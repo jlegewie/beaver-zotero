@@ -283,3 +283,64 @@ describe('resolveToPdfAttachment', () => {
         });
     });
 });
+
+describe('resolveToPdfAttachment (portable ids)', () => {
+    // The rest of the file leaves `Zotero.Libraries.userLibraryID` unset, so
+    // `modelObjectId` falls back to the legacy numeric form (also valid
+    // coverage — no computable portable ref). This block sets up a real
+    // library mapping to prove the composite ids resolveToPdfAttachment
+    // builds for the model (recursive-resolution keys, error-string labels)
+    // come out in portable form when a portable ref IS computable.
+    let itemsById: Map<number, MockItem>;
+    let itemsByLibraryAndKey: Map<string, MockItem>;
+
+    beforeEach(() => {
+        vi.clearAllMocks();
+        itemsById = new Map();
+        itemsByLibraryAndKey = new Map();
+
+        (globalThis as any).Zotero.Attachments = { LINK_MODE_LINKED_URL: 2 };
+        (globalThis as any).Zotero.Items = {
+            loadDataTypes: vi.fn(async () => undefined),
+            getAsync: vi.fn(async (ids: number[]) =>
+                ids.map((id) => itemsById.get(id)).filter(Boolean),
+            ),
+            getByLibraryAndKeyAsync: vi.fn(async (libraryID: number, key: string) =>
+                itemsByLibraryAndKey.get(`${libraryID}-${key}`) ?? false,
+            ),
+        };
+        (globalThis as any).Zotero.Libraries = { userLibraryID: 1 };
+    });
+
+    it('embeds portable ids in the multi-attachment ambiguity error', async () => {
+        const primaryPdf = makeAttachment({ id: 10, key: 'PDF00001', filename: 'primary.pdf' });
+        const otherPdf = makeAttachment({ id: 11, key: 'PDF00002', filename: 'other.pdf' });
+        const regular = makeRegularItem({
+            attachmentIds: [10, 11],
+            bestAttachment: primaryPdf,
+        });
+        itemsById.set(10, primaryPdf);
+        itemsById.set(11, otherPdf);
+
+        const result = await resolveToPdfAttachment(regular, 'u-REG00001');
+
+        expect(result).toMatchObject({ resolved: false, error_code: 'not_attachment' });
+        if (result.resolved) expect.fail('expected unresolved result');
+        expect(result.error).toContain("'primary.pdf' (u-PDF00001, primary)");
+        expect(result.error).toContain("'other.pdf' (u-PDF00002)");
+    });
+
+    it('embeds a portable id when a single resolved PDF attachment cannot be re-fetched', async () => {
+        const pdf = makeAttachment({ id: 10, key: 'PDF00001', filename: 'paper.pdf' });
+        const regular = makeRegularItem({ attachmentIds: [10], bestAttachment: pdf });
+        itemsById.set(10, pdf);
+
+        const result = await resolveToPdfAttachment(regular, 'u-REG00001');
+
+        expect(result).toMatchObject({
+            resolved: false,
+            error_code: 'not_attachment',
+            error: "The id 'u-REG00001' is a regular item with one attachment ('paper.pdf' (u-PDF00001, primary)) but it could not be resolved.",
+        });
+    });
+});

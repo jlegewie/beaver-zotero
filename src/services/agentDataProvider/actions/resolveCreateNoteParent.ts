@@ -12,7 +12,7 @@
  * path in react/utils/createNoteActions.ts so both flows behave identically.
  */
 
-import { resolveItemReference } from '../../../utils/libraryIdentity';
+import { parseItemReference, resolveItemReference } from '../../../utils/libraryIdentity';
 
 export type CreateNoteParentErrorCode =
     | 'invalid_parent_id'
@@ -62,29 +62,25 @@ export async function resolveCreateNoteParent(
         };
     }
 
-    const dashIdx = rawParentItemId.indexOf('-');
-    if (dashIdx <= 0) {
+    // Accept both the portable "<library_ref>-<zotero_key>" grammar and the
+    // legacy "<library_id>-<zotero_key>" numeric grammar.
+    const parsedId = parseItemReference(rawParentItemId);
+    if (!parsedId) {
         return {
             ok: false,
-            error: `Invalid parent_item_id format: "${rawParentItemId}". Expected "<library_id>-<zotero_key>"`,
-            errorCode: 'invalid_parent_id',
-        };
-    }
-    const parentLibraryId = parseInt(rawParentItemId.substring(0, dashIdx), 10);
-    const parentZoteroKey = rawParentItemId.substring(dashIdx + 1);
-
-    if (isNaN(parentLibraryId) || !parentZoteroKey) {
-        return {
-            ok: false,
-            error: `Invalid parent_item_id format: "${rawParentItemId}". Expected "<library_id>-<zotero_key>"`,
+            error: `Invalid parent_item_id format: "${rawParentItemId}". Expected "<library_ref>-<zotero_key>" or "<library_id>-<zotero_key>"`,
             errorCode: 'invalid_parent_id',
         };
     }
 
+    // A library_ref embedded in the id string is what the model actually
+    // said, so it wins over the separately-supplied parentLibraryRef. The
+    // parameter only applies as a fallback for a legacy numeric id, which
+    // carries no ref of its own.
     const resolved = await resolveItemReference({
-        library_ref: parentLibraryRef,
-        library_id: parentLibraryId,
-        zotero_key: parentZoteroKey,
+        library_ref: parsedId.library_ref ?? parentLibraryRef,
+        library_id: parsedId.library_id,
+        zotero_key: parsedId.zotero_key,
     });
     if (resolved.status === 'library_unavailable') {
         return {
@@ -106,7 +102,7 @@ export async function resolveCreateNoteParent(
     if (item.isRegularItem()) {
         return {
             ok: true,
-            parentKey: parentZoteroKey,
+            parentKey: item.key,
             resolvedLibraryId,
             relatedItemKey: null,
             warning: null,

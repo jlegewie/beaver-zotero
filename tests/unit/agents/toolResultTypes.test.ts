@@ -1,10 +1,11 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
     extractAnnotationAttachmentId,
     extractFindInAttachmentsData,
     extractGetAnnotationsData,
     extractListCollectionsData,
+    extractGetMetadataData,
     extractListItemsData,
     extractZoteroSearchData,
     isFindInAttachmentsResult,
@@ -567,5 +568,75 @@ describe('lookup_work results', () => {
                 }],
             }],
         });
+    });
+});
+
+describe('portable result-row ids', () => {
+    let savedLibraries: any;
+    let savedGroups: any;
+
+    beforeEach(() => {
+        const Z = (globalThis as any).Zotero;
+        savedLibraries = Z.Libraries;
+        savedGroups = Z.Groups;
+        Z.Libraries = { ...Z.Libraries, userLibraryID: 1 };
+        Z.Groups = {
+            getLibraryIDFromGroupID: vi.fn((groupID: number) => (groupID === 4321 ? 7 : false)),
+            getGroupIDFromLibraryID: vi.fn((libraryID: number) => {
+                if (libraryID === 7) return 4321;
+                throw new Error('Group not found');
+            }),
+        };
+    });
+
+    afterEach(() => {
+        const Z = (globalThis as any).Zotero;
+        Z.Libraries = savedLibraries;
+        Z.Groups = savedGroups;
+    });
+
+    it('extractZoteroSearchData resolves a portable item_id', () => {
+        const result = extractZoteroSearchData({
+            items: [{ result_type: 'item', item_id: 'u-ABCD1234', title: 'Paper' }],
+            total_count: 1,
+        });
+
+        expect(result?.items).toEqual([{ library_id: 1, zotero_key: 'ABCD1234', library_ref: 'u' }]);
+    });
+
+    it('extractZoteroSearchData keeps an unmapped group row instead of dropping it', () => {
+        const result = extractZoteroSearchData({
+            items: [{ result_type: 'attachment', attachment_id: 'g999-ATTACH1', title: 'Attachment' }],
+            total_count: 1,
+        });
+
+        expect(result?.items).toEqual([{ library_id: 0, zotero_key: 'ATTACH1', library_ref: 'g999' }]);
+    });
+
+    it('extractZoteroSearchData lets an explicit row library_ref win over the id-derived one', () => {
+        const result = extractZoteroSearchData({
+            items: [{ result_type: 'item', item_id: '7-ABCD1234', library_ref: 'g4321', title: 'Paper' }],
+            total_count: 1,
+        });
+
+        expect(result?.items).toEqual([{ library_id: 7, zotero_key: 'ABCD1234', library_ref: 'g4321' }]);
+    });
+
+    it('extractListItemsData resolves a portable group item_id via the local mapping', () => {
+        const result = extractListItemsData({
+            items: [{ result_type: 'item', item_id: 'g4321-ABCD1234', title: 'Paper' }],
+            total_count: 1,
+        });
+
+        expect(result?.items).toEqual([{ library_id: 7, zotero_key: 'ABCD1234', library_ref: 'g4321' }]);
+    });
+
+    it('extractGetMetadataData resolves a portable item_id', () => {
+        const result = extractGetMetadataData({
+            items: [{ item_id: 'u-ABCD1234', title: 'Paper' }],
+            not_found: [],
+        });
+
+        expect(result?.items).toEqual([{ library_id: 1, zotero_key: 'ABCD1234', library_ref: 'u' }]);
     });
 });

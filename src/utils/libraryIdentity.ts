@@ -59,6 +59,15 @@ export function parseLibraryRef(ref: string): ParsedLibraryRef | null {
     return { type: 'group', groupID: parseInt(ref.slice(1), 10) };
 }
 
+/**
+ * Sentinel `library_id` for a reference whose portable `library_ref` names a
+ * library this device cannot map (e.g. a group the user isn't a member of
+ * here). Zotero rowids start at 1 and `-1` is the external-file sentinel, so
+ * `0` is unambiguous. Resolution helpers treat such references as
+ * `library_unavailable` via their `library_ref`; never look up library `0`.
+ */
+export const UNRESOLVED_LIBRARY_ID = 0;
+
 /** A model-facing item id parsed into its portable-or-legacy library reference + key. */
 export type ParsedItemReference = { library_ref?: string; library_id?: number; zotero_key: string };
 
@@ -82,6 +91,62 @@ export function parseItemReference(itemId: string): ParsedItemReference | null {
     // violates the malformed → null contract, so gate on a digits-only prefix first.
     if (!/^[1-9][0-9]*$/.test(prefix)) return null;
     return { library_id: parseInt(prefix, 10), zotero_key };
+}
+
+/** A fully resolved item reference: local `library_id` (or `UNRESOLVED_LIBRARY_ID`), portable `library_ref` when known, and the item key. */
+export type ObjectIdReference = { library_id: number; library_ref?: string; zotero_key: string };
+
+/**
+ * Parses a model-facing object id (`u-KEY`, `g<groupID>-KEY`, or legacy
+ * `<libraryID>-KEY`) into a reference with a device-local `library_id`.
+ *
+ * - Portable prefixes are resolved to the local library; when this device has
+ *   no such library, `library_id` is `UNRESOLVED_LIBRARY_ID` and callers must
+ *   treat the reference as `library_unavailable` (the `library_ref` is kept so
+ *   resolution helpers classify it correctly).
+ * - Legacy numeric prefixes are kept verbatim (device-local semantics) and
+ *   best-effort stamped with the portable ref they denote *on this device*.
+ * - Returns `null` on malformed input, including `ext-<KEY>` external-file ids,
+ *   which are not Zotero references and must be handled by the caller first.
+ */
+export function resolveObjectId(objectId: string): ObjectIdReference | null {
+    const parsed = parseItemReference(objectId);
+    if (!parsed) return null;
+    if (parsed.library_ref) {
+        return {
+            library_id: resolveLibraryRef(parsed) ?? UNRESOLVED_LIBRARY_ID,
+            library_ref: parsed.library_ref,
+            zotero_key: parsed.zotero_key,
+        };
+    }
+    return {
+        library_id: parsed.library_id!,
+        library_ref: libraryRefForLibraryID(parsed.library_id!) ?? undefined,
+        zotero_key: parsed.zotero_key,
+    };
+}
+
+/**
+ * Builds the model-facing object id for an item on this device:
+ * `<library_ref>-<key>` when a portable ref is computable, else the legacy
+ * `<libraryID>-<key>`. Use for every composite id emitted toward the model
+ * (tool results, action results, error messages echoing ids). Do NOT use for
+ * internal cache/dedup/map keys — those stay on the numeric form.
+ */
+export function modelObjectId(libraryID: number, zoteroKey: string): string {
+    return `${libraryRefForLibraryID(libraryID) ?? libraryID}-${zoteroKey}`;
+}
+
+/**
+ * Builds the model-facing object id from an already-structured reference,
+ * preferring its stored `library_ref` over the device-local `library_id`.
+ */
+export function modelObjectIdFromReference(ref: {
+    library_id: number;
+    library_ref?: string | null;
+    zotero_key: string;
+}): string {
+    return `${ref.library_ref ?? ref.library_id}-${ref.zotero_key}`;
 }
 
 /**

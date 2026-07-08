@@ -1,4 +1,4 @@
-import { libraryRefForLibraryID } from "../../src/utils/libraryIdentity";
+import { libraryRefForLibraryID, resolveObjectId } from "../../src/utils/libraryIdentity";
 
 /**
  * ZoteroLibrary is a reference to a Zotero library.
@@ -53,20 +53,13 @@ export interface FailedFileReference extends FileHashReference {
     buttonIcon?: React.ComponentType<React.SVGProps<SVGSVGElement>>;
 }
 
+/**
+ * Parses a model-facing item id: either a portable `<library_ref>-<zotero_key>`
+ * (`u-KEY`, `g<groupID>-KEY`) or a legacy `<libraryID>-zoteroKey`. Returns
+ * `null` for `ext-<KEY>` external-file ids and other malformed input.
+ */
 export function createZoteroItemReference(id: string): ZoteroItemReference | null {
-    const [libraryId, zoteroKey] = id.split('-');
-    if (!libraryId || !zoteroKey) {
-        return null;
-    }
-    const parsedLibraryId = parseInt(libraryId, 10);
-    if (!Number.isFinite(parsedLibraryId)) {
-        return null;
-    }
-    return {
-        zotero_key: zoteroKey,
-        library_id: parsedLibraryId,
-        library_ref: libraryRefForLibraryID(parsedLibraryId) ?? undefined,
-    };
+    return resolveObjectId(id);
 }
 
 /**

@@ -1,10 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
     LIBRARY_REF_PATTERN,
+    UNRESOLVED_LIBRARY_ID,
     libraryRefForLibraryID,
+    modelObjectId,
+    modelObjectIdFromReference,
     parseLibraryRef,
     parseItemReference,
     resolveLibraryRef,
+    resolveObjectId,
     resolveItemReference,
     resolveWriteTargetLibrary,
 } from '../../../src/utils/libraryIdentity';
@@ -204,6 +208,105 @@ describe('libraryIdentity', () => {
             const result = await resolveItemReference({ library_id: 0, zotero_key: 'AAAAAAA1' });
             expect(result).toEqual({ status: 'library_unavailable' });
             expect(getByLibraryAndKeyAsync).not.toHaveBeenCalled();
+        });
+    });
+
+    describe('resolveObjectId', () => {
+        it('resolves a portable personal-library id to this device\'s library', () => {
+            expect(resolveObjectId('u-ABCD1234')).toEqual({
+                library_id: 1,
+                library_ref: 'u',
+                zotero_key: 'ABCD1234',
+            });
+        });
+
+        it('resolves a portable group id with a local mapping', () => {
+            getLibraryIDFromGroupID.mockReturnValue(7);
+            expect(resolveObjectId('g42-ABCD1234')).toEqual({
+                library_id: 7,
+                library_ref: 'g42',
+                zotero_key: 'ABCD1234',
+            });
+        });
+
+        it('resolves a portable group id without a local mapping to UNRESOLVED_LIBRARY_ID, keeping library_ref', () => {
+            getLibraryIDFromGroupID.mockReturnValue(false);
+            expect(resolveObjectId('g42-ABCD1234')).toEqual({
+                library_id: UNRESOLVED_LIBRARY_ID,
+                library_ref: 'g42',
+                zotero_key: 'ABCD1234',
+            });
+        });
+
+        it('keeps a legacy numeric id verbatim and best-effort stamps library_ref', () => {
+            getGroupIDFromLibraryID.mockReturnValue(42);
+            expect(resolveObjectId('5-ABCD1234')).toEqual({
+                library_id: 5,
+                library_ref: 'g42',
+                zotero_key: 'ABCD1234',
+            });
+        });
+
+        it('omits library_ref for a legacy numeric id this device cannot stamp', () => {
+            getGroupIDFromLibraryID.mockImplementation(() => {
+                throw new Error('Group not found');
+            });
+            expect(resolveObjectId('5-ABCD1234')).toEqual({
+                library_id: 5,
+                zotero_key: 'ABCD1234',
+            });
+        });
+
+        it('returns null for an external-file id', () => {
+            expect(resolveObjectId('ext-ABCD1234')).toBeNull();
+        });
+
+        it.each([
+            ['a mixed alphanumeric prefix', '5abc-ABCD1234'],
+            ['a leading hyphen', '-ABCD1234'],
+            ['no hyphen', 'ABCD1234'],
+            ['a zero group id', 'g0-ABCD1234'],
+            ['a leading-zero numeric prefix', '01-ABCD1234'],
+            ['an empty string', ''],
+        ])('returns null for malformed input: %s', (_label, input) => {
+            expect(resolveObjectId(input)).toBeNull();
+        });
+
+        it('splits a key containing a hyphen on the first hyphen only', () => {
+            expect(resolveObjectId('u-ABCD-1234')).toEqual({
+                library_id: 1,
+                library_ref: 'u',
+                zotero_key: 'ABCD-1234',
+            });
+        });
+    });
+
+    describe('modelObjectId', () => {
+        it('builds a portable id for the personal library', () => {
+            expect(modelObjectId(1, 'ABCD1234')).toBe('u-ABCD1234');
+        });
+
+        it('builds a portable id for a mapped group library', () => {
+            getGroupIDFromLibraryID.mockReturnValue(42);
+            expect(modelObjectId(7, 'ABCD1234')).toBe('g42-ABCD1234');
+        });
+
+        it('falls back to the legacy numeric id when no portable ref is computable', () => {
+            getGroupIDFromLibraryID.mockImplementation(() => {
+                throw new Error('Group not found');
+            });
+            expect(modelObjectId(99, 'ABCD1234')).toBe('99-ABCD1234');
+        });
+    });
+
+    describe('modelObjectIdFromReference', () => {
+        it('prefers the stored library_ref over library_id', () => {
+            expect(modelObjectIdFromReference({ library_id: 5, library_ref: 'g42', zotero_key: 'ABCD1234' }))
+                .toBe('g42-ABCD1234');
+        });
+
+        it('falls back to library_id when library_ref is absent', () => {
+            expect(modelObjectIdFromReference({ library_id: 5, zotero_key: 'ABCD1234' })).toBe('5-ABCD1234');
         });
     });
 

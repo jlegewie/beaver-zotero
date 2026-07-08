@@ -1,6 +1,6 @@
 import { calculateObjectHash } from '../utils/hash';
 import { logger } from './logger';
-import { libraryRefForLibraryID } from './libraryIdentity';
+import { libraryRefForLibraryID, modelObjectId } from './libraryIdentity';
 import { ItemDataHashedFields, AttachmentDataHashedFields, ItemData, ItemStub, ItemSummary, CollectionSummary, ZoteroCreator, ZoteroCollection, BibliographicIdentifier, AttachmentDataWithMimeType, ZoteroLibrary, AttachmentStub } from '../../react/types/zotero';
 import { getCollectionClientDateModifiedAsISOString, getCitationKeyFromItem, getMimeType, safeIsInTrash, safeFileExists } from './zoteroUtils';
 import { syncingItemFilterAsync } from './sync';
@@ -400,7 +400,7 @@ export async function serializeItemSummary(item: Zotero.Item): Promise<ItemSumma
  */
 export function serializeItemStub(item: Zotero.Item): ItemStub {
     return {
-        item_id: `${item.libraryID}-${item.key}`,
+        item_id: modelObjectId(item.libraryID, item.key),
         library_ref: libraryRefForLibraryID(item.libraryID) ?? undefined,
         item_type: item.itemType,
         title: item.getField('title', false, true) || null,
@@ -431,9 +431,9 @@ export function safeStub<T>(build: () => T): T | undefined {
  */
 export function serializeAttachmentStub(item: Zotero.Item, contentKind?: ContentKind): AttachmentStub {
     return {
-        attachment_id: `${item.libraryID}-${item.key}`,
+        attachment_id: modelObjectId(item.libraryID, item.key),
         library_ref: libraryRefForLibraryID(item.libraryID) ?? undefined,
-        parent_item_id: item.parentKey ? `${item.libraryID}-${item.parentKey}` : null,
+        parent_item_id: item.parentKey ? modelObjectId(item.libraryID, item.parentKey) : null,
         title: item.getField?.('title') || item.getDisplayTitle?.() || null,
         filename: item.attachmentFilename || null,
         content_kind: contentKind ?? getContentKind(item),
@@ -691,7 +691,7 @@ export function serializeNote(
 ): NoteResultItem {
     return {
         result_type: 'note',
-        item_id: `${note.libraryID}-${note.key}`,
+        item_id: modelObjectId(note.libraryID, note.key),
         library_ref: libraryRefForLibraryID(note.libraryID) ?? undefined,
         title: note.getDisplayTitle?.() || '',
         parent_item_id: parent?.item_id ?? null,
@@ -755,7 +755,7 @@ export function serializeAnnotation(
 
     return {
         result_type: 'annotation',
-        annotation_id: `${annotation.libraryID}-${annotation.key}`,
+        annotation_id: modelObjectId(annotation.libraryID, annotation.key),
         library_ref: libraryRefForLibraryID(annotation.libraryID) ?? undefined,
         annotation_type: ann.annotationType ?? null,
         text: ann.annotationText ?? null,

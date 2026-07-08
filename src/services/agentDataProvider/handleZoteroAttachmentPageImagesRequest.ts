@@ -8,7 +8,7 @@
  */
 
 import { logger } from '../../utils/logger';
-import { libraryRefForLibraryID, resolveLibraryRef } from '../../utils/libraryIdentity';
+import { libraryRefForLibraryID, modelObjectIdFromReference, resolveLibraryRef } from '../../utils/libraryIdentity';
 
 import { isAttachmentAvailableRemotely } from '../../utils/webAPI';  // kept for file_missing message check
 import {
@@ -59,7 +59,7 @@ export async function handleZoteroAttachmentPageImagesRequest(
         ...attachment,
         library_ref: attachment.library_ref ?? libraryRefForLibraryID(attachment.library_id) ?? undefined,
     };
-    const requestKey = `${attachment.library_id}-${attachment.zotero_key}`;
+    const requestKey = modelObjectIdFromReference(attachment);
     let errorKey = requestKey;
 
     let resolvedCachedPageCount: number | null = null;
