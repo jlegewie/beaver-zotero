@@ -2,6 +2,7 @@ import { getPageLabelsForItem } from './itemData';
 import { getPageLocator } from '../../utils/citationGrammar';
 import { resolvePageLabelFromLabels, translatePageNumberToLabelFromLabels } from '../../utils/pageLabels';
 import { buildZoteroCitationLinkHTML, isLinkCitationItem } from '../../../src/utils/zoteroLinkCitation';
+import { resolveLibraryRef } from '../../../src/utils/libraryIdentity';
 import { logger } from '../../../src/utils/logger';
 import type {
     CitationExportRequest,
@@ -27,10 +28,15 @@ function escapeHtml(value: string): string {
  * Pre-formatted "link" citation items are returned as raw HTML.
  */
 function renderCitation(request: CitationExportRequest): CitationExportRender | null {
-    const { effectiveLibraryID, effectiveItemKey, requestedRef, pages, metadata, pageLabelsByAttachmentId } = request;
-    if (!effectiveLibraryID || !effectiveItemKey) return null;
+    const { effectiveLibraryID, effectiveItemKey, effectiveLibraryRef, requestedRef, pages, metadata, pageLabelsByAttachmentId } = request;
+    if (!effectiveItemKey) return null;
+    // Group citations carry a device-local libraryID of 0 — their identity is the
+    // portable `library_ref` (e.g. "g287629"). Resolve it to a local libraryID so
+    // the item lookup (and thus the exported citation) works for group items too.
+    const libraryID = effectiveLibraryID || resolveLibraryRef({ library_ref: effectiveLibraryRef, library_id: effectiveLibraryID });
+    if (!libraryID) return null;
     try {
-        const item = Zotero.Items.getByLibraryAndKey(effectiveLibraryID, effectiveItemKey);
+        const item = Zotero.Items.getByLibraryAndKey(libraryID, effectiveItemKey);
         if (!item) return null;
         if (isLinkCitationItem(item)) {
             return { kind: 'html', html: buildZoteroCitationLinkHTML(item) };

@@ -194,6 +194,7 @@ const Citation: React.FC<CitationProps> = (props) => {
         const exported = getHost().documentExport?.renderCitation({
             effectiveLibraryID,
             effectiveItemKey,
+            effectiveLibraryRef,
             requestedRef,
             pages,
             metadata: citationMetadata,

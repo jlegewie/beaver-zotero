@@ -182,6 +182,12 @@ export interface ItemDataHost {
 export interface CitationExportRequest {
     effectiveLibraryID: number;
     effectiveItemKey: string;
+    /**
+     * Portable library ref (`"u"` / `"g<groupID>"`). For group citations the
+     * device-local `effectiveLibraryID` is 0 (identity lives here), so the host
+     * must resolve this to a local libraryID before looking the item up.
+     */
+    effectiveLibraryRef?: string | null;
     /** Identity as cited by the model, for page-locator fallback. */
     requestedRef: CitationRef | null;
     /** 1-based cited page numbers. */
