@@ -224,9 +224,16 @@ export const CreateAnnotationsPreview: React.FC<CreateAnnotationsPreviewProps> =
 
             // firstCreated.library_id comes from the action's result_data and
             // may carry UNRESOLVED_LIBRARY_ID; fall through to the attachment
-            // navigation below when it can't be resolved on this device.
+            // navigation below when it can't be resolved on this device. Also
+            // enforce the excluded-library boundary — the library may have been
+            // excluded after the annotation was created — so we never open an
+            // annotation in the reader from a now-excluded library.
             const firstCreated = createdEntries[0];
-            if (firstCreated && firstCreated.library_id !== UNRESOLVED_LIBRARY_ID) {
+            if (
+                firstCreated
+                && firstCreated.library_id !== UNRESOLVED_LIBRARY_ID
+                && isLibrarySearchable(firstCreated.library_id)
+            ) {
                 const annotationItem = await Zotero.Items.getByLibraryAndKeyAsync(
                     firstCreated.library_id,
                     firstCreated.zotero_key,
