@@ -48,6 +48,15 @@ import {
 import { userIdAtom, isAuthenticatedAtom } from '../../atoms/auth';
 import { collectionToReference, type CollectionReference } from '../../types/zotero';
 import { resolveItemReference } from '../../../src/utils/libraryIdentity';
+import { undoEditMetadataAction } from '../../utils/editMetadataActions';
+import { undoCreateCollectionAction } from '../../utils/createCollectionActions';
+import { undoOrganizeItemsAction } from '../../utils/organizeItemsActions';
+import { undoManageTagsAction } from '../../utils/manageTagsActions';
+import { undoManageCollectionsAction } from '../../utils/manageCollectionsActions';
+import { undoCreateNoteAction } from '../../utils/createNoteActions';
+import { undoEditNoteAction } from '../../utils/editNoteActions';
+import { undoCreateAnnotationsAction } from '../../utils/createAnnotationsActions';
+import { undoCreateItemActions } from '../../utils/createItemActions';
 
 // ---------------------------------------------------------------------------
 // Shared helpers
@@ -193,6 +202,19 @@ export async function handleTestChatSendHttpRequest(request: any) {
 
     if (request?.newThread === true) {
         await store.set(newThreadAtom, { skipActiveRunConfirm: true, skipAutoPopulate: true });
+    } else {
+        // Continue a specific existing thread: load it first if it isn't already the
+        // current one. Without this, the send targets whatever thread happens to be
+        // current in the store (e.g. the last one reopened via load-thread), NOT the
+        // requested `threadId`.
+        const threadId = request?.threadId ?? request?.thread_id;
+        if (typeof threadId === 'string' && threadId && store.get(currentThreadIdAtom) !== threadId) {
+            const userId = request?.user_id ?? store.get(userIdAtom);
+            if (!userId) {
+                return { ok: false, error: 'No user_id to load requested threadId (not logged in?)' };
+            }
+            await store.set(loadThreadAtom, { user_id: userId, threadId });
+        }
     }
 
     if (store.get(isWSChatPendingAtom)) {
@@ -337,17 +359,76 @@ export async function handleTestApproveActionHttpRequest(request: any) {
     return { ok: true, approved, actedOn: targetIds, settle, ...currentIds() };
 }
 
-/** Undo an applied action (reverts the Zotero-side change + backend status). */
+/**
+ * Undo an applied action. Mirrors the UI undo path (`AgentActionView.handleUndo`
+ * / `useEditNoteActions.handleUndo`): first perform the Zotero-side revert via the
+ * per-action-type undo helper, THEN flip UI + backend status via
+ * `undoAgentActionAtom`. The state atom alone only changes status — it does NOT
+ * revert the Zotero change — so dispatching by `action_type` here is required for
+ * the revert to actually land in the library.
+ */
 export async function handleTestUndoActionHttpRequest(request: any) {
     const actionId = request?.actionId;
     if (typeof actionId !== 'string' || !actionId) {
         return { ok: false, error: 'actionId is required' };
     }
-    store.set(undoAgentActionAtom, actionId);
     const action = threadActions().find((a) => a.id === actionId);
+    if (!action) {
+        return { ok: false, error: `action ${actionId} not found in current thread (load the thread first)` };
+    }
+    let reverted: string | Record<string, unknown> = action.action_type;
+    try {
+        switch (action.action_type) {
+            case 'edit_metadata': {
+                const result = await undoEditMetadataAction(action, true); // force-revert manual edits
+                reverted = { fieldsReverted: result.fieldsReverted };
+                break;
+            }
+            case 'create_collection':
+                await undoCreateCollectionAction(action);
+                break;
+            case 'organize_items':
+                await undoOrganizeItemsAction(action);
+                break;
+            case 'manage_tags':
+                await undoManageTagsAction(action);
+                break;
+            case 'manage_collections':
+                await undoManageCollectionsAction(action);
+                break;
+            case 'zotero_note':
+            case 'create_note':
+                await undoCreateNoteAction(action);
+                break;
+            case 'edit_note':
+                await undoEditNoteAction(action);
+                break;
+            case 'create_highlight_annotations':
+            case 'create_note_annotations':
+            case 'highlight_annotation':
+            case 'note_annotation':
+                await undoCreateAnnotationsAction(action);
+                break;
+            case 'create_item': {
+                const batch = await undoCreateItemActions([action]);
+                if (batch.failures.length > 0) {
+                    return { ok: false, actionId, error: batch.failures[0].error };
+                }
+                break;
+            }
+            default:
+                return { ok: false, actionId, error: `undo not supported for action_type ${action.action_type}` };
+        }
+    } catch (error: any) {
+        return { ok: false, actionId, error: error?.message || 'undo failed' };
+    }
+    // Zotero revert succeeded — now flip UI + backend status.
+    store.set(undoAgentActionAtom, actionId);
+    const updated = threadActions().find((a) => a.id === actionId);
     return {
         ok: true,
         actionId,
-        status: action?.status ?? null,
+        status: updated?.status ?? null,
+        reverted,
     };
 }
