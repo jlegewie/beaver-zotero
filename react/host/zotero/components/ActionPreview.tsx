@@ -83,6 +83,14 @@ export const ActionPreview: React.FC<{
         const parentKey = previewData.actionData.parent_key;
         const itemIds = previewData.actionData.item_ids || [];
 
+        // Resolve the library id from the sources that survive into stored
+        // actions (current_value is only present while an approval is pending).
+        // Without this the preview cannot reveal collections in group libraries.
+        const rawLibraryId = previewData.resultData?.library_id
+            ?? previewData.currentValue?.library_id
+            ?? previewData.actionData.library_id;
+        const libraryId = typeof rawLibraryId === 'number' && rawLibraryId > 0 ? rawLibraryId : null;
+
         // Get library name and item count from current_value
         const libraryName = previewData.currentValue?.library_name;
         const itemCount = previewData.currentValue?.item_count ?? itemIds.length;
@@ -90,6 +98,7 @@ export const ActionPreview: React.FC<{
         return (
             <CreateCollectionPreview
                 name={name}
+                libraryId={libraryId}
                 libraryName={libraryName}
                 parentKey={parentKey}
                 itemCount={itemCount}
