@@ -3,8 +3,8 @@ import { useAtomValue, useSetAtom } from 'jotai';
 import { SearchIcon, EditIcon, DeleteIcon, TickIcon, CancelIcon } from './icons/icons';
 import Spinner from './icons/Spinner';
 import IconButton from './ui/IconButton';
-import { isThreadListViewAtom } from '../atoms/ui';
-import { ThreadData, loadThreadAtom, newThreadAtom, threadListFilterAtom } from '../atoms/threads';
+import { isThreadListViewAtom, threadListFilterAtom } from '../atoms/ui';
+import { ThreadData, loadThreadAtom, newThreadAtom } from '../atoms/threads';
 import { currentThreadIdAtom } from '../agents/atoms';
 import { userAtom } from '../atoms/auth';
 import { searchableLibraryIdsAtom } from '../atoms/profile';
@@ -105,10 +105,6 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
     useEffect(() => {
         activeQueryRef.current = activeQuery;
     }, [activeQuery]);
-
-    // The view unmounts when the overlay closes, so each open starts
-    // unfiltered unless a caller (e.g. RecentChats "View All") preseeds it.
-    useEffect(() => () => setFilter(null), []);
 
     // Fetch threads (initial load or after search)
     const fetchThreads = useCallback(async (query: string) => {

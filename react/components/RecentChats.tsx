@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { userAtom } from '../atoms/auth';
-import { isThreadListViewAtom, isLibraryTabAtom, selectedZoteroTabIdAtom, hasPopupMessagesAtom } from '../atoms/ui';
-import { ThreadData, loadThreadAtom, threadListFilterAtom, ThreadItemFilter } from '../atoms/threads';
+import { isThreadListViewAtom, isLibraryTabAtom, selectedZoteroTabIdAtom, hasPopupMessagesAtom, threadListFilterAtom, ThreadItemFilter } from '../atoms/ui';
+import { ThreadData, loadThreadAtom } from '../atoms/threads';
 import { currentThreadIdAtom } from '../agents/atoms';
 import { searchableLibraryIdsAtom } from '../atoms/profile';
 import { threadService } from '../../src/services/threadService';

@@ -4,7 +4,7 @@ import { FilterIcon, ArrowDownIcon, Icon } from '../../icons/icons';
 import SearchMenu, { MenuPosition, SearchMenuItem } from './SearchMenu';
 import { ChipButton } from '../../agentRuns/requestChips/ChipButton';
 import { createThreadFilterMenuItem, ThreadFilterMenuItemContext } from './utils/menuItemFactories';
-import { ThreadItemFilter } from '../../../atoms/threads';
+import { ThreadItemFilter } from '../../../atoms/ui';
 import { isLibraryTabAtom, selectedZoteroTabIdAtom } from '../../../atoms/ui';
 import { selectedZoteroItemsAtom } from '../../../atoms/zoteroContext';
 import { searchableLibraryIdsAtom } from '../../../atoms/profile';
@@ -29,7 +29,7 @@ interface RecentItemRef {
  * an unresolved portable library ref (library_id 0) are skipped since
  * looking them up throws synchronously.
  */
-const getRecentItemsFromPref = async (): Promise<Zotero.Item[]> => {
+const getRecentItemsFromPref = async (searchableLibraryIds: number[]): Promise<Zotero.Item[]> => {
     const recentItemsPref = getPref('recentItems');
     if (!recentItemsPref) return [];
 
@@ -43,7 +43,8 @@ const getRecentItemsFromPref = async (): Promise<Zotero.Item[]> => {
                 entry !== null &&
                 'zotero_key' in entry &&
                 'library_id' in entry &&
-                entry.library_id !== UNRESOLVED_LIBRARY_ID
+                entry.library_id !== UNRESOLVED_LIBRARY_ID &&
+                searchableLibraryIds.includes(entry.library_id)
             )
             .map((entry) => Zotero.Items.getByLibraryAndKeyAsync(entry.library_id, entry.zotero_key))
     );
@@ -96,7 +97,7 @@ const ThreadFilterMenu: React.FC<ThreadFilterMenuProps> = ({ activeFilter, onSel
                 ? rawContextItem
                 : null;
 
-            const recentFromPref = await getRecentItemsFromPref();
+            const recentFromPref = await getRecentItemsFromPref(searchableLibraryIds);
 
             // Prefer the active library for "recently modified" items; fall
             // back to the user library only if it's searchable, otherwise

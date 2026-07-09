@@ -1,4 +1,4 @@
-import { ThreadItemFilter } from '../atoms/threads';
+import { ThreadItemFilter } from '../atoms/ui';
 import { loadFullItemData } from '../../src/utils/zoteroUtils';
 import { libraryRefForLibraryID } from '../../src/utils/libraryIdentity';
 import { getDisplayNameFromItem } from './sourceUtils';

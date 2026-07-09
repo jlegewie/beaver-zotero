@@ -3,7 +3,7 @@ import { Icon, TickIcon, CSSItemTypeIcon, CSSIcon } from '../../../icons/icons';
 import { SearchMenuItem } from '../SearchMenu';
 import { getDisplayNameFromItem, isValidZoteroItem } from '../../../../utils/sourceUtils';
 import { ZoteroTag } from '../../../../types/zotero';
-import { ThreadItemFilter } from '../../../../atoms/threads';
+import { ThreadItemFilter } from '../../../../atoms/ui';
 
 /**
  * Context for creating source menu items
