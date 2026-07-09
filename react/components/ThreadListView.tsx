@@ -101,6 +101,13 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
 
     const containerRef = useRef<HTMLDivElement | null>(null);
     const menuPortalContainer = containerRef.current?.closest('[id^="beaver-react-root-"], #beaver-pane-window') as HTMLElement | null;
+    const searchInputRef = useRef<HTMLInputElement | null>(null);
+
+    // The filter menu's own search input holds focus while the menu is open
+    // and nothing restores it on close, so refocus after the close settles.
+    const focusSearchInput = () => {
+        setTimeout(() => searchInputRef.current?.focus(), 5);
+    };
 
     useEffect(() => {
         activeQueryRef.current = activeQuery;
@@ -264,6 +271,7 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
     const handleSelectFilterItem = async (item: Zotero.Item) => {
         const f = await buildThreadItemFilter(item, searchableLibraryIds);
         if (f) setFilter(f);
+        focusSearchInput();
     };
 
     // Load more
@@ -421,6 +429,7 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
                         onChange={e => setSearchQuery(e.target.value)}
                         onKeyDown={handleSearchKeyDown}
                         autoFocus
+                        ref={searchInputRef}
                     />
                     {isLoading && (
                         <div className="thread-search-spinner">
@@ -451,7 +460,7 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
                                 role="button"
                                 aria-label="Remove filter"
                                 className="thread-filter-chip-remove"
-                                onClick={(e) => { e.stopPropagation(); setFilter(null); }}
+                                onClick={(e) => { e.stopPropagation(); setFilter(null); focusSearchInput(); }}
                             >
                                 <CSSIcon name="x-8" className="icon-16 scale-80" />
                             </span>
