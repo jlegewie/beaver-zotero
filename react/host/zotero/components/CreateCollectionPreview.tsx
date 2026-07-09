@@ -2,6 +2,8 @@ import React, { useEffect, useState } from 'react';
 import { CSSIcon, Icon, PlusSignIcon } from '../../../components/icons/icons';
 import { getHost } from '../..';
 import { libraryRefForLibraryID } from '../../../../src/utils/libraryIdentity';
+import { isLibrarySearchable } from '../../../../src/services/agentDataProvider/utils';
+import { resolveSearchableLibraryId } from '../libraryAccess';
 
 type ActionStatus = 'pending' | 'applied' | 'rejected' | 'undone' | 'error' | 'awaiting';
 
@@ -16,6 +18,8 @@ interface CreateCollectionPreviewProps {
     name: string;
     /** Resolved library id (from result_data, current_value, or action data) */
     libraryId?: number | null;
+    /** Device-portable library identity, authoritative when present. */
+    libraryRef?: string | null;
     /** Library name, used only to resolve the library when no id is available */
     libraryName?: string;
     /** Parent collection key (optional, for subcollections) */
@@ -40,6 +44,7 @@ interface CreateCollectionPreviewProps {
 export const CreateCollectionPreview: React.FC<CreateCollectionPreviewProps> = ({
     name,
     libraryId: libraryIdProp,
+    libraryRef,
     libraryName,
     parentKey,
     itemCount = 0,
@@ -55,21 +60,29 @@ export const CreateCollectionPreview: React.FC<CreateCollectionPreviewProps> = (
         if (typeof Zotero === 'undefined') return;
 
         try {
-            // Prefer the explicit library id: the collection may live in a group
-            // library, and name lookup is unavailable for stored actions (which
-            // carry no current_value) and ambiguous across same-named libraries.
-            let library = (libraryIdProp != null ? Zotero.Libraries.get(libraryIdProp) : undefined) || undefined;
+            setLibraryId(null);
+            setParentName(null);
+
+            const resolvedLibraryId = resolveSearchableLibraryId({
+                library_ref: libraryRef,
+                library_id: libraryIdProp,
+            });
+            let library = resolvedLibraryId
+                ? Zotero.Libraries.get(resolvedLibraryId) || undefined
+                : undefined;
 
             // Name match is case-insensitive to mirror the action handler's resolution.
-            if (!library && libraryName) {
+            if (!library && !libraryRef && libraryName) {
                 library = Zotero.Libraries.getAll().find(
-                    l => l.name.toLowerCase() === libraryName.toLowerCase()
+                    l => isLibrarySearchable(l.libraryID)
+                        && l.name.toLowerCase() === libraryName.toLowerCase()
                 );
             }
 
             // Collections without any library reference belong to the user library.
-            if (!library && libraryIdProp == null && !libraryName) {
-                library = Zotero.Libraries.userLibrary;
+            if (!library && !libraryRef && libraryIdProp == null && !libraryName) {
+                const userLibrary = Zotero.Libraries.userLibrary;
+                library = isLibrarySearchable(userLibrary.libraryID) ? userLibrary : undefined;
             }
 
             if (library) {
@@ -84,7 +97,7 @@ export const CreateCollectionPreview: React.FC<CreateCollectionPreviewProps> = (
         } catch (e) {
             console.warn('Failed to resolve collection library/parent name:', e);
         }
-    }, [parentKey, libraryIdProp, libraryName]);
+    }, [parentKey, libraryIdProp, libraryRef, libraryName]);
 
     const isApplied = status === 'applied';
     const isError = status === 'error';
@@ -101,7 +114,7 @@ export const CreateCollectionPreview: React.FC<CreateCollectionPreviewProps> = (
         getHost().navigation?.revealCollection({
             library_id: libraryId,
             zotero_key: collectionKey,
-            library_ref: resultData?.library_ref ?? libraryRefForLibraryID(libraryId) ?? undefined,
+            library_ref: libraryRef ?? resultData?.library_ref ?? libraryRefForLibraryID(libraryId) ?? undefined,
         });
     };
 

@@ -3,6 +3,7 @@ import { Icon, ArrowRightIcon } from '../../../components/icons/icons';
 import type { ManageTagsResultData } from '../../../types/agentActions/base';
 import { shortenActionError } from './agentActionViewHelpers';
 import { TagPill } from '../../../components/agentRuns/TagPill';
+import { resolveSearchableLibraryId } from '../libraryAccess';
 
 type ActionStatus = 'pending' | 'applied' | 'rejected' | 'undone' | 'error' | 'awaiting';
 
@@ -14,6 +15,7 @@ interface ManageTagsPreviewProps {
         new_name?: string | null;
         is_merge?: boolean | null;
         library_id?: number;
+        library_ref?: string;
     };
     /** current_value returned from validation */
     currentValue?: {
@@ -56,7 +58,10 @@ export const ManageTagsPreview: React.FC<ManageTagsPreviewProps> = ({
     const action: 'rename' | 'delete' = actionData.action ?? 'rename';
     const name = actionData.name ?? '';
     const newName = actionData.new_name ?? undefined;
-    const libraryId = actionData.library_id;
+    const libraryId = resolveSearchableLibraryId({
+        library_ref: resultData?.library_ref ?? actionData.library_ref,
+        library_id: resultData?.library_id ?? actionData.library_id,
+    });
 
     const isApplied = status === 'applied';
     const isError = status === 'error';

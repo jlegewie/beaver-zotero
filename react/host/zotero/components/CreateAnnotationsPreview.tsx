@@ -11,6 +11,7 @@ import { logger } from '../../../../src/utils/logger';
 import { BEAVER_ANNOTATION_COLORS } from '../../../../src/constants/annotations';
 import { UNRESOLVED_LIBRARY_ID, resolveLibraryRef } from '../../../../src/utils/libraryIdentity';
 import { isLibrarySearchable } from '../../../../src/services/agentDataProvider/utils';
+import { resolveSearchableLibraryId } from '../libraryAccess';
 import { TagPill } from '../../../components/agentRuns/TagPill';
 import { AnnotationTooltip, getAnnotationTooltipIcon } from '../../../components/agentRuns/AnnotationTooltip';
 import type {
@@ -222,20 +223,19 @@ export const CreateAnnotationsPreview: React.FC<CreateAnnotationsPreviewProps> =
         try {
             await BeaverTemporaryAnnotations.cleanupAll();
 
-            // firstCreated.library_id comes from the action's result_data and
-            // may carry UNRESOLVED_LIBRARY_ID; fall through to the attachment
-            // navigation below when it can't be resolved on this device. Also
-            // enforce the excluded-library boundary — the library may have been
-            // excluded after the annotation was created — so we never open an
-            // annotation in the reader from a now-excluded library.
             const firstCreated = createdEntries[0];
+            const createdLibraryId = firstCreated
+                ? resolveSearchableLibraryId({
+                    library_ref: firstCreated.library_ref,
+                    library_id: firstCreated.library_id,
+                })
+                : null;
             if (
                 firstCreated
-                && firstCreated.library_id !== UNRESOLVED_LIBRARY_ID
-                && isLibrarySearchable(firstCreated.library_id)
+                && createdLibraryId
             ) {
                 const annotationItem = await Zotero.Items.getByLibraryAndKeyAsync(
-                    firstCreated.library_id,
+                    createdLibraryId,
                     firstCreated.zotero_key,
                 );
                 if (annotationItem) {

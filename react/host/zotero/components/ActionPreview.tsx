@@ -102,6 +102,9 @@ export const ActionPreview: React.FC<{
             ?? previewData.currentValue?.library_id
             ?? previewData.actionData.library_id;
         const libraryId = typeof rawLibraryId === 'number' && rawLibraryId > 0 ? rawLibraryId : null;
+        const libraryRef = previewData.resultData?.library_ref
+            ?? previewData.currentValue?.library_ref
+            ?? previewData.actionData.library_ref;
 
         // Get library name and item count from current_value
         const libraryName = previewData.currentValue?.library_name;
@@ -111,6 +114,7 @@ export const ActionPreview: React.FC<{
             <CreateCollectionPreview
                 name={name}
                 libraryId={libraryId}
+                libraryRef={libraryRef}
                 libraryName={libraryName}
                 parentKey={parentKey}
                 itemCount={itemCount}
