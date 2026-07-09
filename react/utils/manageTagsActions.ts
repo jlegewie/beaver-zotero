@@ -25,20 +25,18 @@ import type { ManageTagsProposedData, ManageTagsResultData, TagColorSnapshot } f
 import { logger } from '../../src/utils/logger';
 import {
     libraryRefForLibraryID,
-    resolveObjectId,
+    modelObjectId,
+    parseItemReference,
     resolveWriteTargetLibrary,
-    UNRESOLVED_LIBRARY_ID,
 } from '../../src/utils/libraryIdentity';
 
 const MAX_SNAPSHOT_ITEMS = 5000;
 
 
-function splitItemId(itemId: string): { libraryId: number; zoteroKey: string } | null {
-    // Snapshots are written by this client in the numeric form, but parse the
-    // portable form too so a snapshot written under either grammar restores.
-    const parsed = resolveObjectId(itemId);
-    if (!parsed || parsed.library_id === UNRESOLVED_LIBRARY_ID) return null;
-    return { libraryId: parsed.library_id, zoteroKey: parsed.zotero_key };
+function snapshotItemKey(itemId: string): string | null {
+    // The action's resolved target library is authoritative. Snapshot prefixes
+    // may be stale device-local rowids, so only retain the stable Zotero key.
+    return parseItemReference(itemId)?.zotero_key ?? null;
 }
 
 
@@ -49,7 +47,7 @@ async function itemIdsToKeys(libraryID: number, itemIDs: number[]): Promise<stri
     if (valid.length > 0) {
         await Zotero.Items.loadDataTypes(valid, ['primaryData']);
     }
-    return valid.map((item) => `${libraryID}-${item.key}`);
+    return valid.map((item) => modelObjectId(libraryID, item.key));
 }
 
 
@@ -208,16 +206,17 @@ export async function undoManageTagsAction(
 async function retagItems(libraryId: number, itemIds: string[], tagName: string): Promise<void> {
     const items: Zotero.Item[] = [];
     for (const itemId of itemIds) {
-        const parts = splitItemId(itemId);
-        if (!parts) continue;
+        const zoteroKey = snapshotItemKey(itemId);
+        if (!zoteroKey) continue;
         try {
-            const item = await Zotero.Items.getByLibraryAndKeyAsync(parts.libraryId, parts.zoteroKey);
+            const item = await Zotero.Items.getByLibraryAndKeyAsync(libraryId, zoteroKey);
             if (item) items.push(item);
         } catch (_) {
             // skip
         }
     }
     if (items.length === 0) return;
+    await Zotero.Items.loadDataTypes(items, ['tags']);
 
     await Zotero.DB.executeTransaction(async () => {
         for (const item of items) {

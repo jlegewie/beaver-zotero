@@ -30,10 +30,13 @@ function escapeHtml(value: string): string {
 function renderCitation(request: CitationExportRequest): CitationExportRender | null {
     const { effectiveLibraryID, effectiveItemKey, effectiveLibraryRef, requestedRef, pages, metadata, pageLabelsByAttachmentId } = request;
     if (!effectiveItemKey) return null;
-    // Group citations carry a device-local libraryID of 0 — their identity is the
-    // portable `library_ref` (e.g. "g287629"). Resolve it to a local libraryID so
-    // the item lookup (and thus the exported citation) works for group items too.
-    const libraryID = effectiveLibraryID || resolveLibraryRef({ library_ref: effectiveLibraryRef, library_id: effectiveLibraryID });
+    // `library_ref` is the portable identity and must win over a device-local
+    // libraryID when both are present. The numeric id may be 0 (unresolved) or
+    // may point at an unrelated library after the citation moves devices.
+    const libraryID = resolveLibraryRef({
+        library_ref: effectiveLibraryRef,
+        library_id: effectiveLibraryID,
+    });
     if (!libraryID) return null;
     try {
         const item = Zotero.Items.getByLibraryAndKey(libraryID, effectiveItemKey);
@@ -69,7 +72,7 @@ function renderCitation(request: CitationExportRequest): CitationExportRender | 
             citationData: encodeURIComponent(JSON.stringify(citationObj)),
         };
     } catch (e) {
-        logger(`zoteroDocumentExport: Item not loaded for ${effectiveLibraryID}/${effectiveItemKey}: ${e}`);
+        logger(`zoteroDocumentExport: Item not loaded for ${libraryID}/${effectiveItemKey}: ${e}`);
         return null;
     }
 }
