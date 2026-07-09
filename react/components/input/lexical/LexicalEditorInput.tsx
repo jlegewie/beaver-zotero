@@ -131,6 +131,60 @@ function getDomFlatSelectionOffsets(root: HTMLElement, sel: Selection): { anchor
     return { anchor, focus };
 }
 
+/** Client rect of the selection's moving edge (its focus point). A collapsed
+ *  range has no client rect at some node boundaries, so widen it by one
+ *  character before falling back to the containing element's box. */
+function getFocusRect(sel: Selection): DOMRect | null {
+    const node = sel.focusNode;
+    const doc = node?.ownerDocument;
+    if (!node || !doc) return null;
+    const offset = sel.focusOffset;
+    const range = doc.createRange();
+    try {
+        range.setStart(node, offset);
+        range.setEnd(node, offset);
+    } catch {
+        return null;
+    }
+    let rect: DOMRect | null = range.getClientRects()?.[0] ?? null;
+    if (!rect && node.nodeType === Node.TEXT_NODE) {
+        const length = (node as Text).length;
+        try {
+            if (offset < length) range.setEnd(node, offset + 1);
+            else if (offset > 0) range.setStart(node, offset - 1);
+            rect = range.getClientRects()?.[0] ?? null;
+        } catch { /* the offsets may not be addressable */ }
+    }
+    if (!rect) {
+        const el = node.nodeType === Node.ELEMENT_NODE ? (node as Element) : node.parentElement;
+        rect = el?.getBoundingClientRect() ?? null;
+    }
+    return rect;
+}
+
+/** Scroll the caret (the selection's moving edge) back into view inside the
+ *  editor's scroll host.
+ *
+ *  The browser does this automatically for native caret movement, but
+ *  CaretNavigationPlugin moves the caret through the Selection API, which never
+ *  scrolls, and Lexical only scrolls when it writes the DOM selection itself.
+ *  Without this an Arrow/Cmd+Arrow/Home/End move in a scrolled editor leaves
+ *  the viewport behind the caret. */
+function scrollFocusIntoView(root: HTMLElement, sel: Selection): void {
+    const scroller = root.closest('.beaver-lexical-scroll') as HTMLElement | null;
+    if (!scroller || scroller.scrollHeight <= scroller.clientHeight) return;
+    const rect = getFocusRect(sel);
+    if (!rect) return;
+    const view = scroller.getBoundingClientRect();
+    // A sliver of margin keeps the caret clear of the host's edges.
+    const margin = 2;
+    if (rect.top < view.top + margin) {
+        scroller.scrollTop -= view.top + margin - rect.top;
+    } else if (rect.bottom > view.bottom - margin) {
+        scroller.scrollTop += rect.bottom - (view.bottom - margin);
+    }
+}
+
 /** Flattened plain-text offsets of the current selection's anchor and focus
  *  points (offsets are relative to the concatenated text-node content), or
  *  null when there is no range selection or a point sits outside the text
@@ -697,6 +751,10 @@ const TypeOverSelectionPlugin: React.FC = () => {
  * line/document boundary. Vertical document-boundary and paragraph movement is
  * done by hand because Gecko's Selection.modify() silently ignores the
  * 'documentboundary' and 'paragraph' granularities.
+ *
+ * Because the caret moves through the Selection API rather than natively, the
+ * editor's scroll host never follows it; every handled key therefore ends with
+ * an explicit scrollFocusIntoView().
  */
 const CaretNavigationPlugin: React.FC<{
     suspendedRef: React.MutableRefObject<boolean>;
@@ -820,6 +878,10 @@ const CaretNavigationPlugin: React.FC<{
                     docEdge(true);
                     break;
             }
+            // The Selection API moves above never scroll (the browser only does
+            // that for native caret movement, which preventDefault suppresses),
+            // so follow the caret ourselves.
+            scrollFocusIntoView(root, sel);
             // Lexical only adopts this native caret move on the next (async)
             // selectionchange. Snapshot it so SelectionGuardPlugin re-asserts
             // THIS position - not the stale editor-state one - if a document
