@@ -117,6 +117,24 @@ export interface ThreadData {
     updatedAt: string;
 }
 
+/**
+ * Serializable descriptor of a Zotero item used to filter the thread list
+ * view (`ThreadListView`) to chats related to that item.
+ */
+export interface ThreadItemFilter {
+    libraryId: number;
+    libraryRef?: string;   // libraryRefForLibraryID(item.libraryID)
+    itemKey: string;       // identity for chip + active-row checkmark
+    keys: string[];        // expanded keys sent to /by-item
+    itemType: string;      // item.getItemTypeIconName() → CSSItemTypeIcon
+    label: string;         // getDisplayNameFromItem(item)
+}
+
+/**
+ * Active item filter for the thread list view, or null when unfiltered.
+ */
+export const threadListFilterAtom = atom<ThreadItemFilter | null>(null);
+
 // Thread messages and attachments
 export const currentThreadIdAtom = atom<string | null>(null);
 export const currentThreadNameAtom = atom<string | null>(null);

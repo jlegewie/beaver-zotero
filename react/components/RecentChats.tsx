@@ -2,10 +2,14 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { userAtom } from '../atoms/auth';
 import { isThreadListViewAtom, isLibraryTabAtom, selectedZoteroTabIdAtom, hasPopupMessagesAtom } from '../atoms/ui';
-import { ThreadData, loadThreadAtom } from '../atoms/threads';
+import { ThreadData, loadThreadAtom, threadListFilterAtom, ThreadItemFilter } from '../atoms/threads';
 import { currentThreadIdAtom } from '../agents/atoms';
-import { threadService, ThreadRunMatch } from '../../src/services/threadService';
+import { searchableLibraryIdsAtom } from '../atoms/profile';
+import { threadService } from '../../src/services/threadService';
 import { convertUTCToLocal } from '../utils/dateUtils';
+import { deduplicateByThread } from '../utils/threadMatches';
+import { getReaderOrNoteContextItem } from '../utils/zoteroTabContext';
+import { buildThreadItemFilter } from '../utils/threadItemFilter';
 import Spinner from './icons/Spinner';
 import { logger } from '../../src/utils/logger';
 import Button from './ui/Button';
@@ -76,31 +80,16 @@ function formatCompactTime(utcDateString: string): string {
     return `${Math.floor(diffDays / 30)}mo`;
 }
 
-/** Deduplicate ThreadRunMatch[] by thread ID, keeping the most-recent updated_at per thread, then sort newest-first. */
-function deduplicateByThread(matches: ThreadRunMatch[]): ThreadData[] {
-    const seen = new Map<string, ThreadData>();
-    for (const m of matches) {
-        const existing = seen.get(m.id);
-        if (!existing || m.updated_at > existing.updatedAt) {
-            seen.set(m.id, {
-                id: m.id,
-                name: m.name || '',
-                createdAt: m.created_at,
-                updatedAt: m.updated_at,
-            });
-        }
-    }
-    return Array.from(seen.values()).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
-}
-
 const RecentChats: React.FC = () => {
     const user = useAtomValue(userAtom);
     const isLibraryTab = useAtomValue(isLibraryTabAtom);
     const selectedTabId = useAtomValue(selectedZoteroTabIdAtom);
     const setIsThreadListView = useSetAtom(isThreadListViewAtom);
     const loadThread = useSetAtom(loadThreadAtom);
+    const setFilter = useSetAtom(threadListFilterAtom);
     const currentThreadId = useAtomValue(currentThreadIdAtom);
     const hasPopupMessages = useAtomValue(hasPopupMessagesAtom);
+    const searchableLibraryIds = useAtomValue(searchableLibraryIdsAtom);
 
     const [threads, setThreads] = useState<ThreadData[]>([]);
     const [contextType, setContextType] = useState<ContextType>('recent');
@@ -122,52 +111,14 @@ const RecentChats: React.FC = () => {
         const itemKeys: string[] = [];
 
         if (!isLibraryTab && selectedTabId) {
-            // Try reader tab first
-            try {
-                const reader = Zotero.Reader.getByTabID(selectedTabId);
-                if (reader && reader.itemID) {
-                    const item = Zotero.Items.get(reader.itemID);
-                    if (item) {
-                        attachmentKey = item.key;
-                        libraryId = item.libraryID;
-                        itemKeys.push(item.key);
-                        // Also include parent item key so we find threads
-                        // associated with either the attachment or its parent
-                        if (item.parentItemID) {
-                            const parent = Zotero.Items.get(item.parentItemID);
-                            if (parent) {
-                                itemKeys.push(parent.key);
-                            }
-                        }
-                    }
-                }
-            } catch (e) {
-                console.error('RecentChats: error getting reader info:', e);
-            }
-
-            // If not a reader tab, check for note tab
-            if (itemKeys.length === 0) {
-                try {
-                    const mainWindow = Zotero.getMainWindow();
-                    const tab = mainWindow?.Zotero_Tabs?._tabs?.find(
-                        (t: any) => t.id === selectedTabId,
-                    );
-                    if (tab && (tab.type === 'note' || tab.type === 'note-unloaded' || tab.type === 'note-loading') && tab.data?.itemID) {
-                        const item = Zotero.Items.get(tab.data.itemID);
-                        if (item) {
-                            noteKey = item.key;
-                            libraryId = item.libraryID;
-                            itemKeys.push(item.key);
-                            if (item.parentItemID) {
-                                const parent = Zotero.Items.get(item.parentItemID);
-                                if (parent) {
-                                    itemKeys.push(parent.key);
-                                }
-                            }
-                        }
-                    }
-                } catch (e) {
-                    console.error('RecentChats: error getting note tab info:', e);
+            const ctx = getReaderOrNoteContextItem(selectedTabId);
+            if (ctx) {
+                libraryId = ctx.libraryId;
+                itemKeys.push(...ctx.keys);
+                if (ctx.source === 'reader') {
+                    attachmentKey = ctx.item.key;
+                } else {
+                    noteKey = ctx.item.key;
                 }
             }
         }
@@ -203,8 +154,10 @@ const RecentChats: React.FC = () => {
             let resultThreads: ThreadData[] = [];
             let resultContextType: ContextType = 'recent';
 
-            // Reader/note context: try item-specific threads first
-            if (!isLibraryTab && itemKeys.length > 0 && libraryId != null) {
+            // Reader/note context: try item-specific threads first. Excluded
+            // libraries must not be read (privacy boundary) — fall through
+            // to the generic recents path instead.
+            if (!isLibraryTab && itemKeys.length > 0 && libraryId != null && searchableLibraryIds.includes(libraryId)) {
                 try {
                     const matches = await threadService.findThreadsByItem(
                         libraryId, itemKeys, 'both'
@@ -252,7 +205,7 @@ const RecentChats: React.FC = () => {
                 setIsFetching(false);
             }
         }
-    }, [user, isLibraryTab, selectedTabId]);
+    }, [user, isLibraryTab, selectedTabId, searchableLibraryIds]);
 
     // Fetch on mount and when context changes (e.g. library ↔ reader tab switch)
     useEffect(() => {
@@ -280,7 +233,15 @@ const RecentChats: React.FC = () => {
         }
     };
 
-    const handleViewAll = () => {
+    const handleViewAll = async () => {
+        let filter: ThreadItemFilter | null = null;
+        if (contextType === 'file' || contextType === 'note') {
+            const ctx = getReaderOrNoteContextItem(selectedTabId);
+            // buildThreadItemFilter returns null for excluded/invalid items
+            if (ctx) filter = await buildThreadItemFilter(ctx.item, searchableLibraryIds);
+        }
+        // Explicit null for the generic "Recent" case opens the view unfiltered
+        setFilter(filter);
         setIsThreadListView(true);
     };
 

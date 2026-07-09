@@ -2797,6 +2797,42 @@
     pointer-events: none;
 }
 
+[id^="beaver-pane-"] .thread-filter-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 0 12px 8px;
+}
+
+[id^="beaver-pane-"] .thread-filter-divider {
+    width: 1px;
+    height: 16px;
+    background-color: var(--fill-quinary);
+}
+
+[id^="beaver-pane-"] .thread-filter-chip {
+    max-width: 180px;
+}
+
+[id^="beaver-pane-"] .thread-filter-chip-remove {
+    display: flex;
+    align-items: center;
+    cursor: pointer;
+    color: var(--fill-tertiary);
+}
+
+[id^="beaver-pane-"] .thread-filter-count {
+    padding: 0 12px 6px;
+    font-size: 0.85rem;
+    color: var(--fill-tertiary);
+}
+
+[id^="beaver-pane-"] .thread-filter-footer-note {
+    padding: 4px 12px;
+    font-size: 0.85rem;
+    color: var(--fill-tertiary);
+    text-align: center;
+}
 
 [id^="beaver-pane-"] .thread-group-header {
     padding: 8px 12px 4px;
