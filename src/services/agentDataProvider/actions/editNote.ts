@@ -1,5 +1,5 @@
 import { logger } from '../../../utils/logger';
-import { libraryRefForLibraryID, modelObjectIdFromReference, resolveItemReference } from '../../../utils/libraryIdentity';
+import { libraryRefForLibraryID, modelObjectIdFromReference, resolveItemReference, resolveLibraryRef } from '../../../utils/libraryIdentity';
 import { searchableLibraryIdsAtom } from '../../../../react/atoms/profile';
 import { EditNoteProposedData, type EditNoteOperation } from '../../../../react/types/agentActions/editNote';
 import {
@@ -414,6 +414,21 @@ async function validateEditNoteAction(
             : undefined;
     };
 
+    // Enforce the exclusion boundary before resolving/loading the note.
+    // library_ref is authoritative when the numeric library_id is stale.
+    const targetLibraryId = resolveLibraryRef({ library_id, library_ref });
+    const excluded = targetLibraryId === null ? null : checkLibraryExcluded(targetLibraryId);
+    if (excluded) {
+        return {
+            type: 'agent_action_validate_response',
+            request_id: request.request_id,
+            valid: false,
+            error: excluded.message,
+            error_code: 'library_not_searchable',
+            preference: 'always_ask',
+        };
+    }
+
     const resolved = await resolveItemReference({ library_id, library_ref, zotero_key });
     if (resolved.status === 'library_unavailable') {
         return {
@@ -820,6 +835,18 @@ async function executeEditNoteAction(
 
     // TOCTOU guard: never edit a note in a library the user excluded from Beaver,
     // even if validation passed earlier or the execute request skipped it.
+    // Resolve and gate the library before resolving/loading the note.
+    const targetLibraryId = resolveLibraryRef({ library_id, library_ref });
+    const targetExcluded = targetLibraryId === null ? null : checkLibraryExcluded(targetLibraryId);
+    if (targetExcluded) {
+        return {
+            type: 'agent_action_execute_response',
+            request_id: request.request_id,
+            success: false,
+            error: targetExcluded.message,
+            error_code: 'library_not_searchable',
+        };
+    }
     const resolved = await resolveItemReference({ library_id, library_ref, zotero_key });
     if (resolved.status !== 'found') {
         return {

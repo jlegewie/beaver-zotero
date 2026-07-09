@@ -26,7 +26,7 @@ import type { ZoteroItemReference } from '../../../../react/types/zotero';
 import { normalizePageLocations } from '../../../../react/types/agentActions/annotations';
 import { normalizeAnnotationTags } from '../../../../react/types/agentActions/createAnnotations';
 import { shortItemTitle } from '../../../utils/zoteroUtils';
-import { libraryRefForLibraryID, resolveItemReference } from '../../../utils/libraryIdentity';
+import { libraryRefForLibraryID, resolveItemReference, resolveLibraryRef } from '../../../utils/libraryIdentity';
 import { logger } from '../../../utils/logger';
 
 function mapAnnotationErrorCode(error: unknown): string {
@@ -141,6 +141,21 @@ export async function validateCreateHighlightAnnotationsAction(
         };
     }
 
+    // Enforce the exclusion boundary before resolving/loading the attachment.
+    // library_ref is authoritative when the numeric library_id is stale.
+    const targetLibraryId = resolveLibraryRef(resolved_ref);
+    const excluded = targetLibraryId === null ? null : checkLibraryExcluded(targetLibraryId);
+    if (excluded) {
+        return {
+            type: 'agent_action_validate_response',
+            request_id: request.request_id,
+            valid: false,
+            error: excluded.message,
+            error_code: 'library_not_searchable',
+            preference: 'always_ask',
+        };
+    }
+
     const attachment = await resolveAttachment(resolved_ref);
     const contentKind = attachment ? getAnnotationContentKind(attachment) : null;
     if (!attachment || !contentKind) {
@@ -232,6 +247,18 @@ export async function executeCreateHighlightAnnotationsAction(
 
     // TOCTOU guard: never annotate an attachment in a library the user excluded
     // from Beaver, even if validation passed earlier or the request skipped it.
+    // Resolve and gate the library before resolving/loading the attachment.
+    const targetLibraryId = resolveLibraryRef(resolved_ref);
+    const targetExcluded = targetLibraryId === null ? null : checkLibraryExcluded(targetLibraryId);
+    if (targetExcluded) {
+        return {
+            type: 'agent_action_execute_response',
+            request_id: request.request_id,
+            success: false,
+            error: targetExcluded.message,
+            error_code: 'library_not_searchable',
+        };
+    }
     const attachment = await resolveAttachment(resolved_ref);
     const contentKind = attachment ? getAnnotationContentKind(attachment) : null;
     if (!attachment || !contentKind) {

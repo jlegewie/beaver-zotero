@@ -12,7 +12,7 @@ import {
 import { checkLibraryExcluded, excludedLibraryMessage, getDeferredToolPreference } from '../utils';
 import { TimeoutContext, checkAborted } from '../timeout';
 import { TimeoutError } from '../timeout';
-import { libraryRefForLibraryID, resolveItemReference } from '../../../utils/libraryIdentity';
+import { libraryRefForLibraryID, resolveItemReference, resolveLibraryRef } from '../../../utils/libraryIdentity';
 
 
 /**
@@ -334,6 +334,21 @@ async function validateEditMetadataAction(
         creators?: CreatorJSON[] | null;
     };
 
+    // Enforce the exclusion boundary before resolving/loading the item.
+    // library_ref is authoritative when the numeric library_id is stale.
+    const targetLibraryId = resolveLibraryRef({ library_id, library_ref });
+    const excluded = targetLibraryId === null ? null : checkLibraryExcluded(targetLibraryId);
+    if (excluded) {
+        return {
+            type: 'agent_action_validate_response',
+            request_id: request.request_id,
+            valid: false,
+            error: excluded.message,
+            error_code: 'library_not_searchable',
+            preference: 'always_ask',
+        };
+    }
+
     const resolved = await resolveItemReference({ library_id, library_ref, zotero_key });
     if (resolved.status === 'library_unavailable') {
         return {
@@ -562,6 +577,18 @@ async function executeEditMetadataAction(
 
     // TOCTOU guard: never edit an item in a library the user excluded from Beaver,
     // even if validation passed earlier or the execute request skipped it.
+    // Resolve and gate the library before resolving/loading the item.
+    const targetLibraryId = resolveLibraryRef({ library_id, library_ref });
+    const targetExcluded = targetLibraryId === null ? null : checkLibraryExcluded(targetLibraryId);
+    if (targetExcluded) {
+        return {
+            type: 'agent_action_execute_response',
+            request_id: request.request_id,
+            success: false,
+            error: targetExcluded.message,
+            error_code: 'library_not_searchable',
+        };
+    }
     const resolved = await resolveItemReference({ library_id, library_ref, zotero_key });
     if (resolved.status !== 'found') {
         return {
