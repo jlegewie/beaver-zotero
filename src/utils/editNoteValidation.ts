@@ -26,6 +26,7 @@ import {
 } from '../../react/utils/citationGrammar';
 import type { PageLabelsByAttachmentId } from '../../react/atoms/citations';
 import { modelObjectId, modelObjectIdFromReference, resolveObjectId, UNRESOLVED_LIBRARY_ID } from './libraryIdentity';
+import { checkLibraryExcluded } from '../services/agentDataProvider/utils';
 
 // =============================================================================
 // New-string validation
@@ -108,6 +109,12 @@ export function checkNewCitationItemsExist(
         const label = extractAttr(attrStr, 'id') ? 'id' : extractAttr(attrStr, 'item_id') ? 'item_id' : 'att_id';
         if (normalized.ref.library_id === UNRESOLVED_LIBRARY_ID) {
             return `Citation ${label}="${id}" references an item in a library that is not available on this computer.`;
+        }
+        // Reject before the existence lookup: an excluded library's items must
+        // not be cited, and the response must not reveal whether the item exists.
+        const excluded = checkLibraryExcluded(normalized.ref.library_id);
+        if (excluded) {
+            return `Citation ${label}="${id}": ${excluded.message}`;
         }
         const item = Zotero.Items.getByLibraryAndKey(normalized.ref.library_id, normalized.ref.zotero_key);
         if (!item) {

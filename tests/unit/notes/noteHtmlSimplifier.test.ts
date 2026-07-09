@@ -29,6 +29,14 @@ vi.mock('../../../src/services/supabaseClient', () => ({
     },
 }));
 
+// noteCitationExpand gates citation targets on the library-exclusion check,
+// which reads the Jotai store; stub it so unit tests treat every library as
+// searchable.
+vi.mock('../../../src/services/agentDataProvider/utils', () => ({
+    getAttachmentFileStatus: vi.fn().mockResolvedValue(undefined),
+    checkLibraryExcluded: vi.fn(() => null),
+}));
+
 import {
     simplifyNoteHtml,
     normalizeNoteHtml,
@@ -882,6 +890,21 @@ describe('expandToRawHtml', () => {
         const metadata: SimplificationMetadata = { elements: new Map() };
         const input = '<citation att_id="1-MISSING" label="Missing"/>';
         expect(() => expandToRawHtml(input, metadata, 'new')).toThrow(/Attachment not found/);
+    });
+
+    it('throws for a new citation into an excluded library without a Zotero lookup', async () => {
+        const { checkLibraryExcluded } = await import('../../../src/services/agentDataProvider/utils');
+        vi.mocked(checkLibraryExcluded).mockReturnValueOnce({
+            message: 'The library "Private" is excluded from Beaver, so Beaver cannot read or modify its items.',
+        });
+        const lookup = vi.fn(() => null);
+        (globalThis as any).Zotero.Items.getByLibraryAndKey = lookup;
+        const metadata: SimplificationMetadata = { elements: new Map() };
+        const input = '<citation item_id="1-ABCD1234" label="Private item"/>';
+        // The gate must fire before the item lookup so no metadata of the
+        // excluded library's item is read or embedded.
+        expect(() => expandToRawHtml(input, metadata, 'new')).toThrow(/excluded from Beaver/);
+        expect(lookup).not.toHaveBeenCalled();
     });
 
     // ---- external_id citations ----

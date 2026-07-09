@@ -3,6 +3,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 vi.mock('../../../src/services/agentDataProvider/utils', () => ({
     getAttachmentFileStatus: vi.fn().mockResolvedValue(undefined),
     isRemoteAccessAvailable: vi.fn(() => false),
+    isLibrarySearchable: vi.fn(() => true),
+    checkLibraryExcluded: vi.fn(() => null),
 }));
 
 import { preloadPageLabelsForCitations, preloadPageLabelsForContent } from '../../../react/utils/pageLabels';

@@ -14,6 +14,7 @@ vi.mock('../../../src/services/supabaseClient', () => ({
 vi.mock('../../../src/services/agentDataProvider/utils', () => ({
     getAttachmentFileStatus: vi.fn(() => 'unavailable'),
     getDeferredToolPreference: vi.fn(() => 'always_ask'),
+    checkLibraryExcluded: vi.fn(() => null),
 }));
 
 vi.mock('../../../src/utils/zoteroUtils', () => ({
@@ -725,5 +726,23 @@ describe('checkNewCitationItemsExist (portable ids)', () => {
         );
 
         expect(error).toBeNull();
+    });
+
+    it('rejects a citation into an excluded library without a Zotero lookup', async () => {
+        const { checkLibraryExcluded } = await import('../../../src/services/agentDataProvider/utils');
+        vi.mocked(checkLibraryExcluded).mockReturnValueOnce({
+            message: 'The library "Private" is excluded from Beaver, so Beaver cannot read or modify its items.',
+        });
+        installZoteroItems(new Map([['1-ABCD1234', { libraryID: 1 }]]));
+
+        const error = checkNewCitationItemsExist(
+            'New text <citation id="u-ABCD1234"/>.',
+            buildMetadata([]),
+        );
+
+        // The gate must fire before the existence lookup so the response can't
+        // reveal whether the item exists in the excluded library.
+        expect(error).toContain('excluded from Beaver');
+        expect((globalThis as any).Zotero.Items.getByLibraryAndKey).not.toHaveBeenCalled();
     });
 });

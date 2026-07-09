@@ -14,7 +14,7 @@
 
 import { createCitationHTML } from './zoteroUtils';
 import { getBestPDFAttachment, getBestPDFAttachmentAsync } from './zoteroItemHelpers';
-import { getAttachmentFileStatus } from '../services/agentDataProvider/utils';
+import { getAttachmentFileStatus, checkLibraryExcluded } from '../services/agentDataProvider/utils';
 import { isRemoteFilePath, makeRemoteFilePath } from '../services/documentFileIdentity';
 import { logger } from './logger';
 import {
@@ -104,6 +104,10 @@ export async function preloadPageLabelsForNewCitations(str: string): Promise<Pag
         // up (and Zotero throws on the unresolved sentinel); expansion reports
         // the unavailable library with a proper error later.
         if (normalized.ref.library_id === UNRESOLVED_LIBRARY_ID) continue;
+        // Skip citations into libraries the user excluded from Beaver — page
+        // label preloading would read (and possibly extract) their attachments.
+        // Expansion rejects such citations with a proper error.
+        if (checkLibraryExcluded(normalized.ref.library_id)) continue;
 
         let attachmentItem: any = null;
         const item = Zotero.Items.getByLibraryAndKey(normalized.ref.library_id, normalized.ref.zotero_key);
@@ -278,6 +282,10 @@ export async function preloadStructuralLocatorPages(str: string): Promise<Struct
         // expansion rejects the citation with a proper unavailable-library
         // error.
         if (normalized.ref.library_id === UNRESOLVED_LIBRARY_ID) continue;
+        // Skip citations into libraries the user excluded from Beaver — locator
+        // resolution would read their cached extractions. Expansion rejects
+        // such citations with a proper error.
+        if (checkLibraryExcluded(normalized.ref.library_id)) continue;
 
         const describe = `id="${modelObjectIdFromReference(normalized.ref)}" loc="${loc.raw}"`;
         try {
@@ -498,6 +506,12 @@ function buildCitationFromSimplifiedAttrs(
     if (ref.library_id === UNRESOLVED_LIBRARY_ID) {
         throw new Error(`Cannot cite item_id="${attrs.item_id}": its library is not available on this computer.`);
     }
+    // Never resolve a citation target in a library the user excluded from
+    // Beaver — building the citation would embed the item's metadata.
+    const excluded = checkLibraryExcluded(ref.library_id);
+    if (excluded) {
+        throw new Error(`Cannot cite item_id="${attrs.item_id}": ${excluded.message}`);
+    }
     const item = Zotero.Items.getByLibraryAndKey(ref.library_id, ref.zotero_key);
     if (!item) {
         throw new Error(`Item not found: ${attrs.item_id}`);
@@ -527,6 +541,12 @@ function buildCitationFromAttId(
     }
     if (ref.library_id === UNRESOLVED_LIBRARY_ID) {
         throw new Error(`Cannot cite att_id="${attId}": its library is not available on this computer.`);
+    }
+    // Never resolve a citation target in a library the user excluded from
+    // Beaver — building the citation would embed the item's metadata.
+    const excluded = checkLibraryExcluded(ref.library_id);
+    if (excluded) {
+        throw new Error(`Cannot cite att_id="${attId}": ${excluded.message}`);
     }
     const item = Zotero.Items.getByLibraryAndKey(ref.library_id, ref.zotero_key);
     if (!item) {
