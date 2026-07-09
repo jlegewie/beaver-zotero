@@ -2840,7 +2840,8 @@
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.04em;
-    color: var(--fill-tertiary);
+    color: var(--fill-primary);
+    opacity: 0.8;
 }
 
 [id^="beaver-pane-"] .thread-list-item {
