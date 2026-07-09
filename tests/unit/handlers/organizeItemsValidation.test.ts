@@ -190,6 +190,35 @@ describe("validateOrganizeItemsAction", () => {
     expect(res.error_code).toBe("library_unavailable");
   });
 
+  it("reports a collection that only exists in a non-searchable library as not found, without naming it", async () => {
+    const zotero = (globalThis as any).Zotero;
+    // Library 200 exists locally but is not searchable (user excluded it).
+    zotero.Libraries.getAll = vi.fn(() => [
+      { libraryID: 1, name: "My Library" },
+      { libraryID: 100, name: "Group" },
+      { libraryID: 200, name: "Secret Group" },
+    ]);
+    zotero.Collections.getByLibraryAndKeyAsync = vi.fn(
+      async (libId: number, key: string) =>
+        libId === 200 && key === "EXCLKEY1" ? { key } : null,
+    );
+
+    const res = await validateOrganizeItemsAction(
+      buildRequest({
+        item_ids: ["1-REGULARKEY"],
+        tags: null,
+        collections: { add: ["EXCLKEY1"], remove: [] },
+      }),
+    );
+
+    expect(res.valid).toBe(false);
+    // The excluded library's match must read as "not found" — confirming the
+    // collection exists there (or naming the library) would leak it.
+    expect(res.error_code).toBe("collection_not_found");
+    expect(res.error).not.toContain("Secret Group");
+    expect(res.error).not.toContain("200");
+  });
+
   it("rejects a malformed item id", async () => {
     const res = await validateOrganizeItemsAction(
       buildRequest({

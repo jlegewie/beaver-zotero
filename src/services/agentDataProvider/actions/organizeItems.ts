@@ -271,6 +271,7 @@ export async function validateOrganizeItemsAction(
         // so the agent doesn't loop calling create_collection for a key we just returned.
         const findCollectionLibrary = async (collKey: string): Promise<number | null> => {
             for (const lib of Zotero.Libraries.getAll()) {
+                if (!searchableLibraryIds.includes(lib.libraryID)) continue;
                 const found = await Zotero.Collections.getByLibraryAndKeyAsync(lib.libraryID, collKey);
                 if (found) return lib.libraryID;
             }
