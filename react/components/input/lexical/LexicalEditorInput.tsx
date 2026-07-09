@@ -20,7 +20,10 @@ import {
     $isElementNode,
     $isLineBreakNode,
     $isRangeSelection,
+    BEFORE_INPUT_COMMAND,
     COMMAND_PRIORITY_HIGH,
+    COMMAND_PRIORITY_LOW,
+    CONTROLLED_TEXT_INSERTION_COMMAND,
     KEY_ENTER_COMMAND,
     LexicalNode,
     SKIP_SELECTION_FOCUS_TAG,
@@ -246,11 +249,13 @@ export interface LexicalEditorInputProps {
 // surrounding InputArea can keep its existing imperative usage.
 const EditorApi = forwardRef<LexicalEditorInputHandle, {
     pinnedEndCaretRef: React.MutableRefObject<boolean>;
+    blurSelectionRef: React.MutableRefObject<{ anchor: number; focus: number } | null>;
 }>(
-    function EditorApi({ pinnedEndCaretRef }, ref) {
+    function EditorApi({ pinnedEndCaretRef, blurSelectionRef }, ref) {
         const [editor] = useLexicalComposerContext();
         const setPlainText = useCallback((text: string, selectionStart = text.length, selectionEnd = selectionStart) => {
             pinnedEndCaretRef.current = false;
+            blurSelectionRef.current = null;
             editor.update(() => {
                 const root = $getRoot();
                 root.clear();
@@ -268,12 +273,30 @@ const EditorApi = forwardRef<LexicalEditorInputHandle, {
                     p.select();
                 }
             });
-        }, [editor, pinnedEndCaretRef]);
+        }, [editor, pinnedEndCaretRef, blurSelectionRef]);
 
         useImperativeHandle(
             ref,
             () => ({
                 focus: () => {
+                    const root = editor.getRootElement();
+                    const doc = root?.ownerDocument;
+                    const snap = blurSelectionRef.current;
+                    if (root && doc && doc.activeElement !== root && snap) {
+                        // While blurred, Lexical may have adopted a chrome-doc-collapsed
+                        // (offset 0) selection into the editor state (see
+                        // BlurSelectionSnapshotPlugin); editor.focus() would re-assert it.
+                        // Restore the snapshot taken at blur instead.
+                        blurSelectionRef.current = null;
+                        pinnedEndCaretRef.current = false;
+                        const start = Math.min(snap.anchor, snap.focus);
+                        const end = Math.max(snap.anchor, snap.focus);
+                        editor.update(() => $selectFlatRange(start, end));
+                    }
+                    // Runs in both branches: on the restore path Lexical flushes the
+                    // queued update first, so focus() re-asserts the restored
+                    // selection; it also handles non-chrome documents where a
+                    // selection update alone does not move DOM focus.
                     editor.focus(
                         () => {
                             /* noop */
@@ -289,6 +312,7 @@ const EditorApi = forwardRef<LexicalEditorInputHandle, {
                 },
                 deleteTrailingCharacter: () => {
                     pinnedEndCaretRef.current = false;
+                    blurSelectionRef.current = null;
                     editor.update(() => {
                         const root = $getRoot();
                         const textNodes = root.getAllTextNodes();
@@ -305,6 +329,7 @@ const EditorApi = forwardRef<LexicalEditorInputHandle, {
                 },
                 selectRange: (start, end, options) => {
                     pinnedEndCaretRef.current = false;
+                    blurSelectionRef.current = null;
                     editor.update(
                         () => $selectFlatRange(start, end),
                         options?.skipFocus ? { tag: SKIP_SELECTION_FOCUS_TAG } : undefined,
@@ -318,6 +343,7 @@ const EditorApi = forwardRef<LexicalEditorInputHandle, {
                     return offset;
                 },
                 insertSlashCommand: (descriptor, queryLength) => {
+                    blurSelectionRef.current = null;
                     editor.update(() => {
                         const root = $getRoot();
                         if (queryLength !== null) {
@@ -410,7 +436,7 @@ const EditorApi = forwardRef<LexicalEditorInputHandle, {
                     return result;
                 },
             }),
-            [editor, setPlainText, pinnedEndCaretRef],
+            [editor, setPlainText, pinnedEndCaretRef, blurSelectionRef],
         );
         return null;
     },
@@ -432,7 +458,8 @@ const PlainTextSync: React.FC<{
     onChange: (text: string) => void;
     pills?: SlashCommandDescriptor[];
     onPillsChange?: (pills: SlashCommandDescriptor[]) => void;
-}> = ({ value, onChange, pills, onPillsChange }) => {
+    blurSelectionRef: React.MutableRefObject<{ anchor: number; focus: number } | null>;
+}> = ({ value, onChange, pills, onPillsChange, blurSelectionRef }) => {
     const [editor] = useLexicalComposerContext();
     // Tracks the last values we emitted upward to avoid echoes.
     const lastEmitted = useRef<string>('');
@@ -456,7 +483,10 @@ const PlainTextSync: React.FC<{
             root.append(p);
         });
         lastEmitted.current = value;
-    }, [editor, value]);
+        // A rebuild replaces the content wholesale, superseding any blur
+        // snapshot the imperative focus() would otherwise restore.
+        blurSelectionRef.current = null;
+    }, [editor, value, blurSelectionRef]);
 
     const handleChange = useCallback(() => {
         let text = '';
@@ -621,6 +651,34 @@ const SubmitOnEnterPlugin: React.FC<{ onSubmit: () => void }> = ({ onSubmit }) =
             COMMAND_PRIORITY_HIGH,
         );
     }, [editor, onSubmit]);
+    return null;
+};
+
+/**
+ * Replaces a non-collapsed selection with typed text through Lexical's
+ * controlled insertion path instead of the browser's native contenteditable
+ * edit.
+ */
+const TypeOverSelectionPlugin: React.FC = () => {
+    const [editor] = useLexicalComposerContext();
+    useEffect(() => {
+        return editor.registerCommand<InputEvent>(
+            BEFORE_INPUT_COMMAND,
+            (event) => {
+                if (event.inputType !== 'insertText') return false;
+                const data = event.data;
+                // Line breaks have dedicated commands; let Lexical route them.
+                if (data == null || data === '\n' || data === '\n\n') return false;
+                if (editor.isComposing()) return false;
+                const selection = $getSelection();
+                if (!$isRangeSelection(selection) || selection.isCollapsed()) return false;
+                event.preventDefault();
+                editor.dispatchCommand(CONTROLLED_TEXT_INSERTION_COMMAND, data);
+                return true;
+            },
+            COMMAND_PRIORITY_LOW,
+        );
+    }, [editor]);
     return null;
 };
 
@@ -997,6 +1055,28 @@ const SelectionPersistencePlugin: React.FC = () => {
 };
 
 /**
+ * Snapshots the editor's selection offsets on element blur (focusout), for
+ * the imperative focus() handle to restore.
+ */
+const BlurSelectionSnapshotPlugin: React.FC<{
+    blurSelectionRef: React.MutableRefObject<{ anchor: number; focus: number } | null>;
+}> = ({ blurSelectionRef }) => {
+    const [editor] = useLexicalComposerContext();
+    useEffect(() => {
+        const onFocusOut = () => {
+            editor.getEditorState().read(() => {
+                blurSelectionRef.current = $getFlatSelectionOffsets();
+            });
+        };
+        return editor.registerRootListener((rootElement, prevRootElement) => {
+            if (prevRootElement) prevRootElement.removeEventListener('focusout', onFocusOut);
+            if (rootElement) rootElement.addEventListener('focusout', onFocusOut);
+        });
+    }, [editor, blurSelectionRef]);
+    return null;
+};
+
+/**
  * Keeps the caret pinned to the end of the content after a programmatic
  * /command pill insert, until the user interacts with the editor.
  *
@@ -1161,6 +1241,14 @@ export const LexicalEditorInput = forwardRef<LexicalEditorInputHandle, LexicalEd
         // resets. Written by EditorApi, read by PinnedEndCaretPlugin.
         const pinnedEndCaretRef = useRef(false);
 
+        // The editor state's selection offsets captured at the last element
+        // blur (focusout), used by EditorApi's imperative focus() to restore
+        // the caret if Lexical adopted a chrome-doc-collapsed selection while
+        // blurred. Written by BlurSelectionSnapshotPlugin, consumed and
+        // invalidated by EditorApi; also invalidated by PlainTextSync's
+        // external rebuild path.
+        const blurSelectionRef = useRef<{ anchor: number; focus: number } | null>(null);
+
         // The ContentEditable ref callback MUST keep a stable identity across
         // renders. Lexical memoizes its root-element ref on this callback, so a
         // changing identity makes it re-run editor.setRootElement() on every
@@ -1216,17 +1304,19 @@ export const LexicalEditorInput = forwardRef<LexicalEditorInputHandle, LexicalEd
                         />
                     </div>
                     <HistoryPlugin />
-                    <PlainTextSync value={value} onChange={onChange} pills={pills} onPillsChange={onPillsChange} />
+                    <PlainTextSync value={value} onChange={onChange} pills={pills} onPillsChange={onPillsChange} blurSelectionRef={blurSelectionRef} />
                     <SlashCommandRevertPlugin />
+                    <TypeOverSelectionPlugin />
                     <ArgumentHintPlugin />
                     <CaretNavigationPlugin suspendedRef={suspendNavRef} pendingDomSelectionRef={pendingDomSelectionRef} />
                     <SelectionGuardPlugin pendingDomSelectionRef={pendingDomSelectionRef} />
                     <SelectionPersistencePlugin />
+                    <BlurSelectionSnapshotPlugin blurSelectionRef={blurSelectionRef} />
                     <PinnedEndCaretPlugin pinnedRef={pinnedEndCaretRef} />
                     <SlashCommandClickPlugin />
                     <SlashCommandHoverCardPlugin />
                     <SubmitOnEnterPlugin onSubmit={onSubmit} />
-                    <EditorApi ref={ref} pinnedEndCaretRef={pinnedEndCaretRef} />
+                    <EditorApi ref={ref} pinnedEndCaretRef={pinnedEndCaretRef} blurSelectionRef={blurSelectionRef} />
                 </div>
             </LexicalComposer>
         );
