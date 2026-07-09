@@ -461,7 +461,7 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
             </div>
             {filter && !isLoading && (
                 <div className="thread-filter-count">
-                    Showing {displayedThreads.length} chat{displayedThreads.length === 1 ? '' : 's'}
+                    Showing {displayedThreads.length} chat{displayedThreads.length === 1 ? '' : 's'} related to {filter.label}
                 </div>
             )}
 
@@ -633,13 +633,6 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
                         >
                             Try again
                         </Button>
-                    </div>
-                )}
-
-                {/* Filtered mode has no pagination — the full match set is fetched once */}
-                {filter && !isLoading && displayedThreads.length > 0 && (
-                    <div className="thread-filter-footer-note">
-                        Chats are filtered by {filter.label}
                     </div>
                 )}
 

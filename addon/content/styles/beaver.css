@@ -2822,9 +2822,9 @@
 }
 
 [id^="beaver-pane-"] .thread-filter-count {
-    padding: 0 12px 6px;
+    padding: 0 14px 6px;
     font-size: 0.85rem;
-    color: var(--fill-tertiary);
+    color: var(--fill-secondary);
 }
 
 [id^="beaver-pane-"] .thread-filter-footer-note {
