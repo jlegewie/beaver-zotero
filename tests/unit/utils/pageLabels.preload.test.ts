@@ -403,7 +403,6 @@ describe('preloadPageLabelsForCitations', () => {
 
         const labels = await preloadPageLabelsForCitations([
             {
-                parts: [],
                 requested_ref: {
                     kind: 'zotero',
                     library_id: 1,
@@ -435,7 +434,6 @@ describe('preloadPageLabelsForCitations', () => {
 
         const labels = await preloadPageLabelsForCitations([
             {
-                parts: [],
                 resolved_ref: {
                     kind: 'zotero',
                     library_id: 1,
