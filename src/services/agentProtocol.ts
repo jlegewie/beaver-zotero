@@ -1602,18 +1602,18 @@ export interface WSAuthMessage {
  * several installs connected. The rest are best-effort context/labels (`user_id`/
  * `account_name` are absent when Zotero sync is off).
  *
- * `libraries` carries the install's searchable index scope — canonical library
- * refs for libraries not excluded in Beaver Preferences.
+ * `index_scope_refs` carries the install's searchable index scope — search-
+ * index scope refs for libraries not excluded in Beaver Preferences.
  */
 export interface ZoteroInstanceWire {
     local_user_key: string;
     user_id?: string;
     account_name?: string;
     device_name?: string;
-    /** Canonical library refs in scope: `u<userID>`/`l<localUserKey>` and
+    /** Search-index scope refs in scope: `l<localUserKey>` (personal, always) and
      * `g<groupID>` values for searchable libraries.
      */
-    libraries?: string[];
+    index_scope_refs?: string[];
 }
 
 /**
