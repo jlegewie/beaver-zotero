@@ -39,6 +39,11 @@ import {
 import { citationMapAtom } from '../../../atoms/citations';
 import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '../../../atoms/externalReferences';
 import { isLibraryTabAtom } from '../../../atoms/ui';
+import {
+    annotationPanelStateAtom,
+    defaultAnnotationPanelState,
+    toggleAnnotationPanelVisibilityAtom,
+} from '../../../atoms/messageUIState';
 import { logger } from '../../../../src/utils/logger';
 import Button from '../../../components/ui/Button';
 import { textWithTrailingNoWrap } from '../../../utils/textWithTrailingNoWrap';
@@ -314,7 +319,10 @@ interface NoteAgentActionGroupProps {
  * is shown.
  */
 const NoteAgentActionGroup: React.FC<NoteAgentActionGroupProps> = ({ runId, actions, noteBlocks }) => {
-    const [isExpanded, setIsExpanded] = useState(false);
+    const groupId = `${runId}:notes`;
+    const panelStates = useAtomValue(annotationPanelStateAtom);
+    const isExpanded = (panelStates[groupId] ?? defaultAnnotationPanelState).resultsVisible;
+    const togglePanelVisibility = useSetAtom(toggleAnnotationPanelVisibilityAtom);
     const [isHovered, setIsHovered] = useState(false);
     const [isProcessing, setIsProcessing] = useState(false);
     const [clickedButton, setClickedButton] = useState<'undo' | 'dismiss' | null>(null);
@@ -339,8 +347,8 @@ const NoteAgentActionGroup: React.FC<NoteAgentActionGroupProps> = ({ runId, acti
 
     const toggleExpanded = useCallback(() => {
         if (isProcessing) return;
-        setIsExpanded(prev => !prev);
-    }, [isProcessing]);
+        togglePanelVisibility(groupId);
+    }, [groupId, isProcessing, togglePanelVisibility]);
 
     const handleUndoAll = useCallback(async () => {
         if (isProcessing) return;
