@@ -33,13 +33,6 @@ import { useSyncSuppression } from './hooks/useSyncSuppression';
 import { BeaverTemporaryAnnotations } from './utils/annotationUtils';
 import { registerZoteroHost } from './host/zotero';
 import { notifyWorkerStartFailure } from './utils/workerUnavailableNotice';
-import { searchableLibraryIdsAtom } from './atoms/profile';
-
-// Expose the webpack-owned atom value to lifecycle/background services without
-// making those services instantiate a second copy of the atom in the esbuild
-// bundle. This is intentionally a live read so queued work rechecks exclusions
-// when it actually starts executing.
-Zotero.__beaverGetSearchableLibraryIds = () => store.get(searchableLibraryIdsAtom);
 
 // Configure the PDF package (webpack bundle copy). The esbuild bundle
 // configures its own copy from `src/hooks.ts`. Both must run because each

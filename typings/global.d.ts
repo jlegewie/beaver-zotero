@@ -54,8 +54,6 @@ interface ZoteroSearchWritable extends Zotero.Search {
 declare namespace Zotero {
     /** Shared Jotai store for Beaver plugin across all windows */
     let __beaverJotaiStore: any;
-    /** Live cross-bundle accessor for searchableLibraryIdsAtom. */
-    let __beaverGetSearchableLibraryIds: (() => number[]) | undefined;
     /** Set to true at the start of shutdown to signal all in-flight operations to bail out */
     let __beaverShuttingDown: boolean | undefined;
 

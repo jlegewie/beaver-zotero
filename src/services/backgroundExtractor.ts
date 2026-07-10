@@ -45,7 +45,6 @@ import { createAbortController } from '../utils/abortController';
 import { getPref } from '../utils/prefs';
 import { getSystemIdleTimeMs, registerIdleObserver } from '../utils/idleService';
 import { UNRESOLVED_LIBRARY_ID } from '../utils/libraryIdentity';
-import { isLibrarySearchableForBackgroundWork } from './searchableLibraryAccess';
 
 const IDLE_INTERVAL_MS = 30_000;
 const BUSY_INTERVAL_MS = 10;
@@ -548,18 +547,6 @@ export class BackgroundExtractor {
                 `BackgroundExtractor: library not available on this device for ${record.libraryId}-${record.zoteroKey}`,
                 1,
             );
-        } else if (!isLibrarySearchableForBackgroundWork(record.libraryId)) {
-            logger(
-                `BackgroundExtractor: library excluded for ${record.libraryId}-${record.zoteroKey}`,
-                1,
-            );
-            if (this.shouldSkipDbWrites()) return;
-            await db.completeBackgroundJob(record.id);
-            dispatchBackgroundEvent('background-job:done', {
-                id: record.id,
-                reason: 'library_excluded',
-            });
-            return;
         } else {
             try {
                 const lookup = await Zotero.Items.getByLibraryAndKeyAsync(

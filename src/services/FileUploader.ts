@@ -22,7 +22,6 @@ import { getMimeType, getMimeTypeFromData, safeFileExists } from '../utils/zoter
 import { isAttachmentOnServer, getAttachmentDataInMemory } from '../utils/webAPI';
 import { PlanFeatures } from '../../react/types/profile';
 import { UNRESOLVED_LIBRARY_ID } from '../utils/libraryIdentity';
-import { isLibrarySearchableForBackgroundWork } from './searchableLibraryAccess';
 
 /**
  * Manages file uploads from a backend-managed queue of pending uploads.
@@ -575,16 +574,6 @@ export class FileUploader {
                     'failed_user', // permanent failure
                     'attachment_not_found',
                     `Library not available on this device (library_id: ${item.library_id}, zotero_key: ${item.zotero_key})`
-                );
-                return;
-            }
-            if (!isLibrarySearchableForBackgroundWork(item.library_id)) {
-                logger(`File Uploader uploadFile ${item.library_id}-${item.zotero_key}: Library excluded`, 1);
-                await this.handleUploadFailure(
-                    item,
-                    'failed_user',
-                    'attachment_not_found',
-                    `Library excluded from Beaver (library_id: ${item.library_id}, zotero_key: ${item.zotero_key})`
                 );
                 return;
             }
