@@ -97,9 +97,26 @@ export const allUserAttachmentsAtom = atom((get) => {
     for (const run of runs) {
         const runAttachments = run.user_prompt.attachments || [];
         for (const attachment of runAttachments) {
-            if (Array.from(attachmentsMap.values()).some(
-                existing => messageAttachmentsHaveSameIdentity(existing, attachment)
-            )) continue;
+            const matchingEntry = Array.from(attachmentsMap.entries()).find(
+                ([, existing]) =>
+                    messageAttachmentsHaveSameIdentity(existing, attachment)
+            );
+            if (matchingEntry) {
+                const [existingKey, existing] = matchingEntry;
+                const existingHasPortableRef =
+                    'library_ref' in existing && Boolean(existing.library_ref);
+                const attachmentHasPortableRef =
+                    'library_ref' in attachment && Boolean(attachment.library_ref);
+
+                // A legacy record may appear first in persisted history. Replace
+                // it with the portable representative so thread-level identity
+                // remains stable when local library IDs differ across devices.
+                if (!existingHasPortableRef && attachmentHasPortableRef) {
+                    attachmentsMap.delete(existingKey);
+                    attachmentsMap.set(messageAttachmentKey(attachment), attachment);
+                }
+                continue;
+            }
             attachmentsMap.set(messageAttachmentKey(attachment), attachment);
         }
     }
