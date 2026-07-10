@@ -16,14 +16,17 @@ import {
     ViewImagesErrorCode,
 } from '../agentProtocol';
 import { ZoteroItemReference, ItemStub, AttachmentStub } from '../../../react/types/zotero';
-import { libraryRefForLibraryID, modelObjectIdFromReference, resolveLibraryRef } from '../../utils/libraryIdentity';
+import { libraryRefForLibraryID, modelObjectIdFromReference } from '../../utils/libraryIdentity';
 import {
     getReadableContentKind,
     resolveToImageAttachment,
     resolveToPdfAttachment,
 } from '../documentExtraction/attachmentResolution';
 import { isLinkedUrlAttachment } from '../../utils/attachmentFiles';
-import { checkLibraryExcluded, validateZoteroItemReference } from './utils';
+import {
+    preflightZoteroAttachmentRequest,
+    validateZoteroItemReference,
+} from './utils';
 import { handleZoteroAttachmentPageImagesRequest } from './handleZoteroAttachmentPageImagesRequest';
 import { handleZoteroAttachmentImageRequest } from './handleZoteroAttachmentImageRequest';
 import { resolveExternalFile } from '../externalFiles';
@@ -195,11 +198,8 @@ export async function handleZoteroViewImagesRequest(
             error_code: 'invalid_format',
         };
     }
-    const responseAttachment = {
-        ...attachment,
-        library_ref: attachment.library_ref ?? libraryRefForLibraryID(attachment.library_id) ?? undefined,
-    };
-    const requestKey = modelObjectIdFromReference(attachment);
+    const preflight = preflightZoteroAttachmentRequest(attachment, validateZoteroItemReference);
+    const { responseAttachment, requestKey } = preflight;
 
     // Captured once the target attachment is resolved so error responses can
     // report which child was actually targeted and carry the same view-row
@@ -229,24 +229,10 @@ export async function handleZoteroViewImagesRequest(
     });
 
     // 0. Validate request shape
-    const formatError = validateZoteroItemReference(attachment);
-    if (formatError) {
-        return errorResponse(
-            `Invalid attachment reference '${requestKey}': ${formatError}`,
-            'invalid_format'
-        );
+    if (!preflight.ok) {
+        return errorResponse(preflight.error, preflight.errorCode);
     }
-    const resolvedLibraryId = resolveLibraryRef(attachment);
-    if (!resolvedLibraryId) {
-        return errorResponse(
-            "Attachment is in a library that isn't available on this computer.",
-            'library_unavailable'
-        );
-    }
-    const excluded = checkLibraryExcluded(resolvedLibraryId);
-    if (excluded) {
-        return errorResponse(excluded.message, 'library_excluded');
-    }
+    const { resolvedLibraryId } = preflight;
     if (start_page != null && (!Number.isInteger(start_page) || start_page < 1)) {
         return errorResponse(
             `Invalid start_page '${start_page}': must be a positive integer`,

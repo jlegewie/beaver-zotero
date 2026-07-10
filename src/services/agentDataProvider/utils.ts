@@ -1,7 +1,18 @@
 import { logger } from '../../utils/logger';
-import { ZoteroItemStatus, FrontendFileStatus, AttachmentInfo } from '../../../react/types/zotero';
+import {
+    ZoteroItemStatus,
+    FrontendFileStatus,
+    AttachmentInfo,
+    type ZoteroItemReference,
+} from '../../../react/types/zotero';
 import { safeIsInTrash, safeFileExists, isLinkedUrlAttachment } from '../../utils/zoteroUtils';
-import { libraryRefForLibraryID, parseItemReference, parseLibraryRef, resolveLibraryRef } from '../../utils/libraryIdentity';
+import {
+    libraryRefForLibraryID,
+    modelObjectIdFromReference,
+    parseItemReference,
+    parseLibraryRef,
+    resolveLibraryRef,
+} from '../../utils/libraryIdentity';
 import { syncingItemFilterAsync } from '../../utils/sync';
 import { getPref } from '../../utils/prefs';
 
@@ -26,6 +37,7 @@ export type { AttachmentInfoBatchData } from '../documentExtraction/attachmentIn
 import {
     loadPdfData as loadPdfDataPrimitive,
     isRemoteAccessAvailable,
+    validateZoteroItemReference as validateAttachmentReference,
 } from '../documentExtraction';
 export {
     isRemoteAccessAvailable,
@@ -724,6 +736,82 @@ export function checkLibraryExcluded(libraryId: number): { message: string } | n
     if (!Zotero.Libraries?.get?.(libraryId)) return null;
     if (isLibrarySearchable(libraryId)) return null;
     return { message: excludedLibraryMessage(libraryId) };
+}
+
+export type ZoteroAttachmentRequestPreflight =
+    | {
+        ok: true;
+        responseAttachment: ZoteroItemReference;
+        requestKey: string;
+        resolvedLibraryId: number;
+    }
+    | {
+        ok: false;
+        responseAttachment: ZoteroItemReference;
+        requestKey: string;
+        error: string;
+        errorCode: 'invalid_format' | 'library_unavailable' | 'library_excluded';
+    };
+
+/**
+ * Validate and authorize an attachment reference before any Zotero item lookup.
+ *
+ * This is the shared privacy boundary for attachment-serving handlers: it
+ * stamps the portable response reference, validates the request shape,
+ * resolves the device-local library id, and rejects excluded libraries.
+ */
+export function preflightZoteroAttachmentRequest(
+    attachment: ZoteroItemReference,
+    validateReference: (reference: ZoteroItemReference) => string | null = validateAttachmentReference,
+): ZoteroAttachmentRequestPreflight {
+    const responseAttachment = {
+        ...attachment,
+        library_ref:
+            attachment.library_ref ??
+            libraryRefForLibraryID(attachment.library_id) ??
+            undefined,
+    };
+    const requestKey = modelObjectIdFromReference(attachment);
+
+    const formatError = validateReference(attachment);
+    if (formatError) {
+        return {
+            ok: false,
+            responseAttachment,
+            requestKey,
+            error: `Invalid attachment reference '${requestKey}': ${formatError}`,
+            errorCode: 'invalid_format',
+        };
+    }
+
+    const resolvedLibraryId = resolveLibraryRef(attachment);
+    if (!resolvedLibraryId) {
+        return {
+            ok: false,
+            responseAttachment,
+            requestKey,
+            error: "Attachment is in a library that isn't available on this computer.",
+            errorCode: 'library_unavailable',
+        };
+    }
+
+    const excluded = checkLibraryExcluded(resolvedLibraryId);
+    if (excluded) {
+        return {
+            ok: false,
+            responseAttachment,
+            requestKey,
+            error: excluded.message,
+            errorCode: 'library_excluded',
+        };
+    }
+
+    return {
+        ok: true,
+        responseAttachment,
+        requestKey,
+        resolvedLibraryId,
+    };
 }
 
 /**

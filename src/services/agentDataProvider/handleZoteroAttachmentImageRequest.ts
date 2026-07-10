@@ -15,10 +15,10 @@ import {
     AttachmentImageErrorCode,
 } from '../agentProtocol';
 import { ZoteroItemReference } from '../../../react/types/zotero';
-import { libraryRefForLibraryID, modelObjectIdFromReference, resolveLibraryRef } from '../../utils/libraryIdentity';
+import { libraryRefForLibraryID } from '../../utils/libraryIdentity';
 import { makeRemoteFilePath } from '../documentFileIdentity';
 import {
-    checkLibraryExcluded,
+    preflightZoteroAttachmentRequest,
     resolveToImageAttachment,
     validateZoteroItemReference,
     loadPdfData,
@@ -58,11 +58,8 @@ export async function handleZoteroAttachmentImageRequest(
     request: WSZoteroAttachmentImageRequest
 ): Promise<WSZoteroAttachmentImageResponse> {
     const { attachment, max_width, max_height, format, jpeg_quality, request_id, timeout_seconds } = request;
-    const responseAttachment = {
-        ...attachment,
-        library_ref: attachment.library_ref ?? libraryRefForLibraryID(attachment.library_id) ?? undefined,
-    };
-    const requestKey = modelObjectIdFromReference(attachment);
+    const preflight = preflightZoteroAttachmentRequest(attachment, validateZoteroItemReference);
+    const { responseAttachment, requestKey } = preflight;
     let errorKey = requestKey;
 
     // Captured by errorResponse so every post-resolution error reports which
@@ -83,12 +80,8 @@ export async function handleZoteroAttachmentImageRequest(
     });
 
     // 0. Validate request shape
-    const formatError = validateZoteroItemReference(attachment);
-    if (formatError) {
-        return errorResponse(
-            `Invalid attachment reference '${requestKey}': ${formatError}`,
-            'invalid_format'
-        );
+    if (!preflight.ok && preflight.errorCode === 'invalid_format') {
+        return errorResponse(preflight.error, preflight.errorCode);
     }
     if (format !== undefined && !['png', 'jpeg', 'auto'].includes(format)) {
         return errorResponse(
@@ -96,17 +89,10 @@ export async function handleZoteroAttachmentImageRequest(
             'invalid_format'
         );
     }
-    const resolvedLibraryId = resolveLibraryRef(attachment);
-    if (!resolvedLibraryId) {
-        return errorResponse(
-            "Attachment is in a library that isn't available on this computer.",
-            'library_unavailable'
-        );
+    if (!preflight.ok) {
+        return errorResponse(preflight.error, preflight.errorCode);
     }
-    const excluded = checkLibraryExcluded(resolvedLibraryId);
-    if (excluded) {
-        return errorResponse(excluded.message, 'library_excluded');
-    }
+    const { resolvedLibraryId } = preflight;
 
     const maxWidth = effectiveMaxDimension(max_width);
     const maxHeight = effectiveMaxDimension(max_height);
