@@ -62,6 +62,39 @@ describe('MuPDFWorkerClient', () => {
         await expect(promise).resolves.toBe(42);
     });
 
+    it('tracks the oldest in-flight operation timestamp without scanning on read', async () => {
+        vi.useFakeTimers();
+        vi.setSystemTime(10_000);
+        try {
+            const client = getMuPDFWorkerClient();
+            const first = client.getPageCount(new Uint8Array([1]));
+            const worker = MockWorker.instances[0];
+
+            expect(client.inFlight).toBe(1);
+            expect(client.oldestInFlightStartedAt).toBe(10_000);
+
+            await vi.advanceTimersByTimeAsync(250);
+            const second = client.getPageCount(new Uint8Array([2]));
+            expect(client.inFlight).toBe(2);
+            expect(client.oldestInFlightStartedAt).toBe(10_000);
+
+            const firstId = worker.posted[0].message.id;
+            worker.onmessage?.({
+                data: { id: firstId, ok: true, result: { count: 1 } },
+            });
+            await expect(first).resolves.toBe(1);
+            expect(client.inFlight).toBe(1);
+            expect(client.oldestInFlightStartedAt).toBe(10_250);
+
+            worker.replyToLast({ ok: true, result: { count: 2 } });
+            await expect(second).resolves.toBe(2);
+            expect(client.inFlight).toBe(0);
+            expect(client.oldestInFlightStartedAt).toBe(0);
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
     it('returns transferred JSON bytes from extractSerialized', async () => {
         const client = getMuPDFWorkerClient();
         const jsonBytes = new TextEncoder().encode('{"mode":"structured","schemaVersion":"4","document":{"pageCount":1,"pages":[]}}');

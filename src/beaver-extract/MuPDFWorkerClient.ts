@@ -97,6 +97,8 @@ interface PendingEntry {
     resolve: (value: any) => void;
     reject: (reason: any) => void;
     fatalCandidate?: FatalOperationCandidate;
+    /** Epoch-ms when this operation entered the worker's FIFO queue. */
+    startedAt: number;
 }
 
 interface StartupEntry {
@@ -224,6 +226,8 @@ export class MuPDFWorkerClient {
     private startup: StartupEntry | null = null;
     private nextId = 1;
     private pending = new Map<number, PendingEntry>();
+    /** Cached for O(1) busy-context reads on every backend request. */
+    private oldestPendingStartedAt: number | null = null;
     /**
      * Once true, the client refuses to spawn a new worker. Set by `dispose()`.
      * Distinguishes a stale-but-recoverable worker (transparent retry OK) from
@@ -283,6 +287,48 @@ export class MuPDFWorkerClient {
      */
     get inFlight(): number {
         return this.pending.size;
+    }
+
+    /** Epoch-ms for the oldest in-flight operation, or 0 while idle. */
+    get oldestInFlightStartedAt(): number {
+        return this.oldestPendingStartedAt ?? 0;
+    }
+
+    /** Add an operation and update the cached oldest timestamp. */
+    private addPending(
+        id: number,
+        entry: Omit<PendingEntry, "startedAt">,
+    ): void {
+        const startedAt = Date.now();
+        this.pending.set(id, { ...entry, startedAt });
+        this.oldestPendingStartedAt = this.oldestPendingStartedAt === null
+            ? startedAt
+            : Math.min(this.oldestPendingStartedAt, startedAt);
+    }
+
+    /** Remove an operation and refresh age tracking outside the stats hot path. */
+    private deletePending(id: number): boolean {
+        const removed = this.pending.get(id);
+        if (!removed || !this.pending.delete(id)) return false;
+
+        if (this.pending.size === 0) {
+            this.oldestPendingStartedAt = null;
+        } else if (removed.startedAt === this.oldestPendingStartedAt) {
+            let oldest = Infinity;
+            for (const entry of this.pending.values()) {
+                oldest = Math.min(oldest, entry.startedAt);
+            }
+            this.oldestPendingStartedAt = oldest;
+        }
+        return true;
+    }
+
+    /** Clear all operations and reset the cached oldest timestamp. */
+    private clearPending(): PendingEntry[] {
+        const entries = Array.from(this.pending.values());
+        this.pending.clear();
+        this.oldestPendingStartedAt = null;
+        return entries;
     }
 
     /** Test-only: change the idle timeout on a live instance. */
@@ -477,7 +523,7 @@ export class MuPDFWorkerClient {
             );
             return;
         }
-        this.pending.delete(reply.id);
+        this.deletePending(reply.id);
 
         if (reply.ok) {
             entry.resolve(reply.result);
@@ -582,8 +628,7 @@ export class MuPDFWorkerClient {
         if (startup && startup.worker === w) {
             startup.reject(stale);
         }
-        const pending = Array.from(this.pending.values());
-        this.pending.clear();
+        const pending = this.clearPending();
         for (const entry of pending) {
             entry.reject(stale);
         }
@@ -760,19 +805,19 @@ export class MuPDFWorkerClient {
             if (signal) {
                 onAbort = () => {
                     if (!this.pending.has(id)) return;
-                    this.pending.delete(id);
+                    this.deletePending(id);
                     rejectWithCleanup(new WorkerAbortError());
                     this.markStale("op aborted by caller");
                 };
                 signal.addEventListener("abort", onAbort, { once: true });
             }
-            this.pending.set(id, {
+            this.addPending(id, {
                 resolve: resolveWithCleanup,
                 reject: rejectWithCleanup,
                 fatalCandidate: fatalCandidate ?? undefined,
             });
             if (signal?.aborted) {
-                this.pending.delete(id);
+                this.deletePending(id);
                 rejectWithCleanup(new WorkerAbortError());
                 return;
             }
@@ -780,7 +825,7 @@ export class MuPDFWorkerClient {
                 this.clearIdleTimer();
                 worker.postMessage({ id, op, args });
             } catch (e) {
-                this.pending.delete(id);
+                this.deletePending(id);
                 this.markStale(
                     `postMessage threw: ${e instanceof Error ? e.message : String(e)}`,
                 );
@@ -1291,12 +1336,12 @@ export class MuPDFWorkerClient {
         }
         const id = this.nextId++;
         return new Promise<T>((resolve, reject) => {
-            this.pending.set(id, { resolve, reject });
+            this.addPending(id, { resolve, reject });
             try {
                 this.clearIdleTimer();
                 worker.postMessage({ id, op, args });
             } catch (e) {
-                this.pending.delete(id);
+                this.deletePending(id);
                 this.armIdleTimer();
                 reject(
                     new Error(
