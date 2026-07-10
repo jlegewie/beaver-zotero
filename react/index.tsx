@@ -59,10 +59,10 @@ const GlobalContextInitializer = () => {
     // Handle embedding index
     useEmbeddingIndex();
 
-    // Handle plugin upgrade tasks
-    useUpgradeHandler();
+    // Handle plugin upgrade tasks (legacy cloud processing beta)
+    // useUpgradeHandler();
 
-    // Handle Zotero sync
+    // Handle Zotero sync (legacy cloud processing beta)
     // useZoteroSync();
 
     // Suppress Zotero auto-sync while mutating agent runs are active.
