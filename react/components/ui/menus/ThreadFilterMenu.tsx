@@ -223,10 +223,10 @@ const ThreadFilterMenu: React.FC<ThreadFilterMenuProps> = ({ activeFilter, onSel
 
     return (
         <>
-            <Tooltip content="Filter chats by item" disabled={isMenuOpen}>
+            <Tooltip content="Filter chats by Zotero item" disabled={isMenuOpen}>
                 <ChipButton
                     onClick={handleButtonClick}
-                    aria-label="Filter chats by item"
+                    aria-label="Filter chats by Zotero item"
                     aria-haspopup="menu"
                     aria-expanded={isMenuOpen}
                 >
