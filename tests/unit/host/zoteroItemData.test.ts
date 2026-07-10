@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const resolveSearchableLibraryId = vi.hoisted(() => vi.fn());
+const resolveLibraryRef = vi.hoisted(() => vi.fn());
 
-vi.mock('../../../react/host/zotero/libraryAccess', () => ({
-    resolveSearchableLibraryId,
+vi.mock('../../../src/utils/libraryIdentity', () => ({
+    resolveLibraryRef,
 }));
 
 vi.mock('../../../src/services/agentDataProvider/utils', () => ({
@@ -32,7 +32,7 @@ describe('zoteroItemData.resolveItemDisplay', () => {
     });
 
     it('loads display metadata from the resolved local library', async () => {
-        resolveSearchableLibraryId.mockReturnValue(7);
+        resolveLibraryRef.mockReturnValue(7);
         getByLibraryAndKeyAsync.mockResolvedValue({
             isNote: () => false,
             isAttachment: () => false,
@@ -61,8 +61,8 @@ describe('zoteroItemData.resolveItemDisplay', () => {
         });
     });
 
-    it('does not read Zotero data when the library is unavailable or excluded', async () => {
-        resolveSearchableLibraryId.mockReturnValue(null);
+    it('does not read Zotero data when the library is unavailable on this device', async () => {
+        resolveLibraryRef.mockReturnValue(null);
 
         await expect(zoteroItemData.resolveItemDisplay({
             library_id: 99,
@@ -88,7 +88,7 @@ describe('zoteroItemData.resolveItemDisplay', () => {
             getField: (field: string) => field === 'date' ? '2022' : '',
             itemType: 'book',
         };
-        resolveSearchableLibraryId.mockReturnValue(7);
+        resolveLibraryRef.mockReturnValue(7);
         getByLibraryAndKeyAsync.mockResolvedValue(attachment);
         getAsync.mockResolvedValue(parent);
 

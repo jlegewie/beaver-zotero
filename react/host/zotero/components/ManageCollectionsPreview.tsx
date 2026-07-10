@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { CSSIcon, Icon, ArrowRightIcon } from '../../../components/icons/icons';
 import type { ManageCollectionsResultData } from '../../../types/agentActions/base';
 import { shortenActionError } from './agentActionViewHelpers';
-import { resolveSearchableLibraryId } from '../libraryAccess';
+import { resolveLibraryRef } from '../../../../src/utils/libraryIdentity';
 
 type ActionStatus = 'pending' | 'applied' | 'rejected' | 'undone' | 'error' | 'awaiting';
 
@@ -78,7 +78,7 @@ export const ManageCollectionsPreview: React.FC<ManageCollectionsPreviewProps> =
     const action: 'rename' | 'move' | 'delete' = actionData.action ?? 'rename';
     const newName = actionData.new_name ?? undefined;
     const newParentKey = actionData.new_parent_key ?? null;
-    const libraryId = resolveSearchableLibraryId({
+    const libraryId = resolveLibraryRef({
         library_ref: resultData?.library_ref ?? actionData.library_ref,
         library_id: resultData?.library_id ?? currentValue?.library_id ?? actionData.library_id,
     });

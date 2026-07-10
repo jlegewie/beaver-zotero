@@ -3,7 +3,7 @@ import { Icon, ArrowRightIcon } from '../../../components/icons/icons';
 import type { ManageTagsResultData } from '../../../types/agentActions/base';
 import { shortenActionError } from './agentActionViewHelpers';
 import { TagPill } from '../../../components/agentRuns/TagPill';
-import { resolveSearchableLibraryId } from '../libraryAccess';
+import { resolveLibraryRef } from '../../../../src/utils/libraryIdentity';
 
 type ActionStatus = 'pending' | 'applied' | 'rejected' | 'undone' | 'error' | 'awaiting';
 
@@ -58,7 +58,7 @@ export const ManageTagsPreview: React.FC<ManageTagsPreviewProps> = ({
     const action: 'rename' | 'delete' = actionData.action ?? 'rename';
     const name = actionData.name ?? '';
     const newName = actionData.new_name ?? undefined;
-    const libraryId = resolveSearchableLibraryId({
+    const libraryId = resolveLibraryRef({
         library_ref: resultData?.library_ref ?? actionData.library_ref,
         library_id: resultData?.library_id ?? actionData.library_id,
     });

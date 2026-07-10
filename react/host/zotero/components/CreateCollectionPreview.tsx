@@ -2,8 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { CSSIcon, Icon, PlusSignIcon } from '../../../components/icons/icons';
 import { getHost } from '../..';
 import { libraryRefForLibraryID } from '../../../../src/utils/libraryIdentity';
-import { isLibrarySearchable } from '../../../../src/services/agentDataProvider/utils';
-import { resolveSearchableLibraryId } from '../libraryAccess';
+import { resolveLibraryRef } from '../../../../src/utils/libraryIdentity';
 
 type ActionStatus = 'pending' | 'applied' | 'rejected' | 'undone' | 'error' | 'awaiting';
 
@@ -63,7 +62,7 @@ export const CreateCollectionPreview: React.FC<CreateCollectionPreviewProps> = (
             setLibraryId(null);
             setParentName(null);
 
-            const resolvedLibraryId = resolveSearchableLibraryId({
+            const resolvedLibraryId = resolveLibraryRef({
                 library_ref: libraryRef,
                 library_id: libraryIdProp,
             });
@@ -74,15 +73,13 @@ export const CreateCollectionPreview: React.FC<CreateCollectionPreviewProps> = (
             // Name match is case-insensitive to mirror the action handler's resolution.
             if (!library && !libraryRef && libraryName) {
                 library = Zotero.Libraries.getAll().find(
-                    l => isLibrarySearchable(l.libraryID)
-                        && l.name.toLowerCase() === libraryName.toLowerCase()
+                    l => l.name.toLowerCase() === libraryName.toLowerCase()
                 );
             }
 
             // Collections without any library reference belong to the user library.
             if (!library && !libraryRef && libraryIdProp == null && !libraryName) {
-                const userLibrary = Zotero.Libraries.userLibrary;
-                library = isLibrarySearchable(userLibrary.libraryID) ? userLibrary : undefined;
+                library = Zotero.Libraries.userLibrary;
             }
 
             if (library) {

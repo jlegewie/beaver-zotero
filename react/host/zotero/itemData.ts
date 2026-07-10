@@ -4,7 +4,7 @@ import { getLibraryByIdOrName, getCollectionByIdOrName } from '../../../src/serv
 import type { CitationRef } from '../../utils/citationGrammar';
 import type { ZoteroItemReference } from '../../types/zotero';
 import { logger } from '../../../src/utils/logger';
-import { resolveSearchableLibraryId } from './libraryAccess';
+import { resolveLibraryRef } from '../../../src/utils/libraryIdentity';
 import type { ItemDataHost, ResolvedItemDisplay } from '../types';
 
 /**
@@ -63,10 +63,12 @@ export const zoteroItemData: ItemDataHost = {
         // A group citation carries a device-local library_id of
         // UNRESOLVED_LIBRARY_ID — its identity is the portable library_ref.
         // Resolve to this device's local library id (null when the library
-        // isn't on this device) so group citations still get page labels, and
-        // enforce the excluded-library boundary (the exclusion set is global
-        // config, so this holds under the isolated note-export store too).
-        const libraryId = resolveSearchableLibraryId(ref);
+        // isn't on this device) so group citations still get page labels.
+        // No exclusion gate here: rendering persisted history is not gated on
+        // library exclusion, and as a render-time host method this must not
+        // read the module-global store (resolveLibraryRef only touches Zotero
+        // globals, so it is safe under the isolated note-export store).
+        const libraryId = resolveLibraryRef(ref);
         if (!libraryId) return null;
         try {
             const item = Zotero.Items.getByLibraryAndKey(libraryId, ref.zotero_key);
@@ -82,7 +84,7 @@ export const zoteroItemData: ItemDataHost = {
     },
 
     async resolveItemDisplay(ref: ZoteroItemReference): Promise<ResolvedItemDisplay | null> {
-        const libraryId = resolveSearchableLibraryId(ref);
+        const libraryId = resolveLibraryRef(ref);
         if (!libraryId) return null;
         try {
             const item = await Zotero.Items.getByLibraryAndKeyAsync(libraryId, ref.zotero_key);

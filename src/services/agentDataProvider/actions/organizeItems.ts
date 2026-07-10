@@ -2,7 +2,7 @@ import { WSAgentActionValidateRequest, WSAgentActionValidateResponse, WSAgentAct
 import { store } from '../../../../react/store';
 import { searchableLibraryIdsAtom } from '../../../../react/atoms/profile';
 import { checkLibraryExcluded, excludedLibraryMessage, getDeferredToolPreference } from '../utils';
-import { resolveItemReference, resolveLibraryRef, parseItemReference, libraryRefForLibraryID } from '../../../utils/libraryIdentity';
+import { resolveItemReference, resolveLibraryRef, parseItemReference, modelObjectId } from '../../../utils/libraryIdentity';
 import { TimeoutContext, checkAborted } from '../timeout';
 import { TimeoutError } from '../timeout';
 import { logger } from '../../../utils/logger';
@@ -184,7 +184,7 @@ export async function validateOrganizeItemsAction(
         // Portable id derived from the resolved item (authoritative). Falls back
         // to the numeric libraryID only for non-portable libraries (e.g. feeds),
         // which can't reach here anyway (not searchable/editable).
-        const normalizedId = `${libraryRefForLibraryID(item.libraryID) ?? item.libraryID}-${item.key}`;
+        const normalizedId = modelObjectId(item.libraryID, item.key);
 
         // Tags: allowed on regular items, attachments, notes, and annotations
         if (hasTagChanges && !item.isRegularItem() && !item.isAttachment() && !item.isNote() && !item.isAnnotation()) {
