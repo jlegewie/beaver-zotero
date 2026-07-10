@@ -25,6 +25,7 @@ import {
 } from "../../react/atoms/zoteroContext";
 import { currentReaderAttachmentAtom } from "../../react/atoms/messageComposition";
 import { isLibraryTabAtom } from "../../react/atoms/ui";
+import { searchableLibraryIdsAtom } from "../../react/atoms/profile";
 
 export interface GetSuggestionsOptions {
     /** Library to draw signals from. Defaults to the currently-viewed library. */
@@ -57,7 +58,13 @@ export class LibrarySuggestionsService extends ApiService {
     async getSuggestions(
         options: GetSuggestionsOptions = {},
     ): Promise<LibrarySuggestionsResponse> {
-        const payload = await this.buildPayload(options);
+        const { payload, libraryId } = await this.buildPayloadForLibrary(options);
+        // Exclusions can change while the asynchronous signal queries run.
+        // Re-check immediately before the network boundary so a payload already
+        // in flight locally is never posted after its library is excluded.
+        if (!store.get(searchableLibraryIdsAtom).includes(libraryId)) {
+            throw new Error("The suggestions library was excluded from Beaver.");
+        }
         logger(
             `librarySuggestionsService.getSuggestions: library=${payload.library_size} items, `
             + `${payload.active_items.length} active, ${payload.top_collections.length} top collections, `
@@ -76,21 +83,54 @@ export class LibrarySuggestionsService extends ApiService {
     async buildPayload(
         options: GetSuggestionsOptions = {},
     ): Promise<LibrarySuggestionsRequest> {
+        return (await this.buildPayloadForLibrary(options)).payload;
+    }
+
+    private async buildPayloadForLibrary(
+        options: GetSuggestionsOptions,
+    ): Promise<{ payload: LibrarySuggestionsRequest; libraryId: number }> {
         // 1. UI state (Jotai)
         const view = store.get(libraryViewAtom);
         const selectedItems = store.get(selectedZoteroItemsAtom);
         const readerItem = store.get(currentReaderAttachmentAtom);
         const filterTags = store.get(selectedTagsAtom);
         const isLibraryTab = store.get(isLibraryTabAtom);
+        const searchableLibraryIds = store.get(searchableLibraryIdsAtom);
 
         // 2. Resolve target library
-        const libraryId = options.libraryId
+        const preferredLibraryId = options.libraryId
             ?? view.libraryId
             ?? Zotero.Libraries.userLibraryID;
+        const preferredIsSearchable = searchableLibraryIds.includes(preferredLibraryId);
+
+        // An explicitly requested library must never silently resolve to a
+        // different library. More importantly, fail before any Zotero item or
+        // collection lookup when that requested library is excluded.
+        if (options.libraryId !== undefined && !preferredIsSearchable) {
+            throw new Error("The requested library is excluded from Beaver.");
+        }
+
+        // The currently viewed/default library may be excluded. In that case,
+        // draw suggestions from another searchable library rather than reading
+        // the excluded one. The atom is the privacy boundary's source of truth.
+        const libraryId = preferredIsSearchable
+            ? preferredLibraryId
+            : searchableLibraryIds[0];
+        if (libraryId === undefined) {
+            throw new Error("No searchable Zotero libraries are available.");
+        }
+
+        // View-derived collection and tag signals are only safe and meaningful
+        // when the view belongs to the resolved target library.
+        const useLibraryViewContext = view.libraryId === libraryId;
 
         // 3. Current collection key (force-include in top_collections)
         let currentCollectionKey: string | null = null;
-        if (view.treeRowType === "collection" && view.collectionId !== null) {
+        if (
+            useLibraryViewContext
+            && view.treeRowType === "collection"
+            && view.collectionId !== null
+        ) {
             const coll = Zotero.Collections.get(view.collectionId);
             currentCollectionKey = coll && (coll as any).key ? (coll as any).key : null;
         }
@@ -121,7 +161,7 @@ export class LibrarySuggestionsService extends ApiService {
             getLibraryShape(libraryId),
         ]);
 
-        return {
+        const payload: LibrarySuggestionsRequest = {
             active_items: active,
             top_collections: topColls,
             recent_items: recent,
@@ -131,8 +171,10 @@ export class LibrarySuggestionsService extends ApiService {
             library_size: shape.library_size,
             reader_item: readerSignal,
             selected_item: selectedSignal,
-            ui_view_type: isLibraryTab ? mapTreeRowType(view.treeRowType) : null,
-            ui_filter_tags: filterTags,
+            ui_view_type: isLibraryTab && useLibraryViewContext
+                ? mapTreeRowType(view.treeRowType)
+                : null,
+            ui_filter_tags: useLibraryViewContext ? filterTags : [],
             purpose: options.purpose ?? null,
             // Lets the backend gate version-dependent cards (e.g. the Skim card,
             // which needs frontend annotation-creation handlers). Mirrors the
@@ -140,6 +182,7 @@ export class LibrarySuggestionsService extends ApiService {
             // suggestions endpoint.
             client_version: Zotero.Beaver?.pluginVersion ?? null,
         };
+        return { payload, libraryId };
     }
 
     /**
