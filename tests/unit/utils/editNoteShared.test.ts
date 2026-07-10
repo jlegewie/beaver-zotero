@@ -44,6 +44,37 @@ describe('editNoteShared', () => {
                 zoteroKey: 'FGHIJ',
             });
         });
+
+        it('resolves a portable "u-<key>" note_id to the local personal library', () => {
+            const original = (globalThis as any).Zotero.Libraries;
+            (globalThis as any).Zotero.Libraries = { ...original, userLibraryID: 5 };
+            try {
+                expect(resolveEditNoteTargetFromData({ note_id: 'u-ABCDE' })).toEqual({
+                    libraryId: 5,
+                    zoteroKey: 'ABCDE',
+                });
+            } finally {
+                (globalThis as any).Zotero.Libraries = original;
+            }
+        });
+
+        it('resolves a portable "g<groupID>-<key>" note_id via the local group registry', () => {
+            const originalLibraries = (globalThis as any).Zotero.Libraries;
+            const originalGroups = (globalThis as any).Zotero.Groups;
+            (globalThis as any).Zotero.Libraries = { ...originalLibraries, userLibraryID: 5 };
+            (globalThis as any).Zotero.Groups = {
+                getLibraryIDFromGroupID: (groupID: number) => (groupID === 42 ? 12 : null),
+            };
+            try {
+                expect(resolveEditNoteTargetFromData({ note_id: 'g42-FGHIJ' })).toEqual({
+                    libraryId: 12,
+                    zoteroKey: 'FGHIJ',
+                });
+            } finally {
+                (globalThis as any).Zotero.Libraries = originalLibraries;
+                (globalThis as any).Zotero.Groups = originalGroups;
+            }
+        });
     });
 
     describe('parseEditNoteToolCallArgs', () => {

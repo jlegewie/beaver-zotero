@@ -25,6 +25,7 @@ import {
     getExistingMuPDFWorkerClient,
     disposeMuPDFWorker,
     WorkerAbortError,
+    WorkerSpawnError,
     __setIdleTimeoutForTest,
     __resetIdleTimeoutForTest,
 } from '../../../src/beaver-extract/MuPDFWorkerClient';
@@ -32,6 +33,7 @@ import {
     ExtractionError,
     ExtractionErrorCode,
 } from '../../../src/beaver-extract/types';
+import type { WorkerStartFailureInfo } from '../../../src/beaver-extract/config';
 
 describe('MuPDFWorkerClient', () => {
     beforeEach(() => {
@@ -194,6 +196,96 @@ describe('MuPDFWorkerClient', () => {
             await disposeMuPDFWorker();
             vi.useRealTimers();
         }
+    });
+
+    it('counts a start-phase configure timeout and fires onWorkerStartFailure', async () => {
+        vi.useFakeTimers();
+        const startFailures: WorkerStartFailureInfo[] = [];
+        setupZoteroMainWindowWithMockWorker({
+            onWorkerStartFailure: (info) => startFailures.push(info),
+        });
+        try {
+            // First worker never acks the configure handshake.
+            MockWorker.dropNextConfigureAck = true;
+            const client = getMuPDFWorkerClient();
+            const promise = client.getPageCount(new Uint8Array([0]));
+
+            // Advance past the 15s startup timeout without a `configured` ack —
+            // the worker died before it ever configured (a start-phase failure).
+            await vi.advanceTimersByTimeAsync(15000);
+
+            // The hook fired with the streak at 1. The retry (also driven by the
+            // timer advance) spawns a fresh worker that acks, so by now the live
+            // streak has already reset — the hook payload is the reliable record.
+            expect(startFailures).toHaveLength(1);
+            expect(startFailures[0]).toMatchObject({
+                slotName: 'hot',
+                consecutiveFailures: 1,
+            });
+            expect(startFailures[0].reason).toContain('configure handshake timed out');
+
+            const second = MockWorker.instances[1];
+            expect(second).toBeDefined();
+            second.replyToLast({ ok: true, result: { count: 3 } });
+            await expect(promise).resolves.toBe(3);
+            // The fresh worker's successful handshake cleared the streak.
+            expect(client.getStats().consecutiveStartFailures).toBe(0);
+        } finally {
+            await disposeMuPDFWorker();
+            vi.useRealTimers();
+        }
+    });
+
+    it('does not count a post-configure worker.onerror as a start failure', async () => {
+        const startFailures: WorkerStartFailureInfo[] = [];
+        setupZoteroMainWindowWithMockWorker({
+            onWorkerStartFailure: (info) => startFailures.push(info),
+        });
+        const client = getMuPDFWorkerClient();
+        const promise = client.getPageCount(new Uint8Array([0]));
+
+        // The first worker configured (MockWorker acks synchronously) and the op
+        // is in flight; a crash now is a runtime failure, not a start failure.
+        const first = MockWorker.instances[0];
+        first.onerror?.({ message: 'runtime boom' });
+
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        const second = MockWorker.instances[1];
+        expect(second).toBeDefined();
+        second.replyToLast({ ok: true, result: { count: 9 } });
+
+        await expect(promise).resolves.toBe(9);
+        expect(startFailures).toHaveLength(0);
+        expect(client.getStats().consecutiveStartFailures).toBe(0);
+    });
+
+    it('reports a pre-spawn WorkerSpawnError (no host window) to onWorkerStartFailure', async () => {
+        // A spawn failure throws before any StartupEntry exists, so it never
+        // reaches markStale. It must still count + notify so repeated hot-slot
+        // spawn failures eventually raise the restart prompt.
+        const startFailures: WorkerStartFailureInfo[] = [];
+        configurePDFForTests({
+            slotHost: (globalThis as any).Zotero,
+            slotKey: '__beaverMuPDFWorkerClient_hot',
+            backgroundSlotKey: '__beaverMuPDFWorkerClient_background',
+            getWorkerHost: () => null,
+            onWorkerStartFailure: (info) => startFailures.push(info),
+        });
+        const client = getMuPDFWorkerClient();
+
+        await expect(client.getPageCount(new Uint8Array([0]))).rejects.toBeInstanceOf(
+            WorkerSpawnError,
+        );
+        expect(startFailures).toHaveLength(1);
+        expect(startFailures[0]).toMatchObject({ slotName: 'hot', consecutiveFailures: 1 });
+        expect(client.getStats().consecutiveStartFailures).toBe(1);
+
+        // A second failed spawn bumps the streak toward the popup threshold.
+        await expect(client.getPageCount(new Uint8Array([0]))).rejects.toBeInstanceOf(
+            WorkerSpawnError,
+        );
+        expect(startFailures).toHaveLength(2);
+        expect(startFailures[1].consecutiveFailures).toBe(2);
     });
 
     it('passes the PDF bytes to the worker WITHOUT a transfer list', async () => {

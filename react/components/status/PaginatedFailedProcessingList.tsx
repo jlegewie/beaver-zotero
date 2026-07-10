@@ -10,6 +10,7 @@ import Tooltip from '../ui/Tooltip';
 import { FailedFileReference } from '../../types/zotero';
 import { Icon, ArrowDownIcon, ArrowRightIcon, RepeatIcon } from '../icons/icons';
 import { getMimeType, loadFullItemData } from '../../../src/utils/zoteroUtils';
+import { UNRESOLVED_LIBRARY_ID } from '../../../src/utils/libraryIdentity';
 import IconButton from '../ui/IconButton';
 import { retryUploads } from '../../../src/services/FileUploader';
 
@@ -73,7 +74,11 @@ const PaginatedFailedProcessingList: React.FC<PaginatedFailedProcessingListProps
             const newItems = await Promise.all(result.items.map(async (item) => {
                 let enableRetry = false;
                 let fileHash: string | undefined = undefined;
-                const zoteroItem = await Zotero.Items.getByLibraryAndKeyAsync(item.library_id, item.zotero_key);
+                // A portable library ref that couldn't be resolved on this device
+                // carries library_id 0, which throws synchronously if looked up.
+                const zoteroItem = item.library_id === UNRESOLVED_LIBRARY_ID
+                    ? null
+                    : await Zotero.Items.getByLibraryAndKeyAsync(item.library_id, item.zotero_key);
                 if (zoteroItem) await loadFullItemData([zoteroItem]);
                 if (zoteroItem && zoteroItem.isAttachment()) {
                     try {
@@ -92,6 +97,7 @@ const PaginatedFailedProcessingList: React.FC<PaginatedFailedProcessingListProps
                     errorCode: errorCode,
                     buttonText: enableRetry && fileHash ? 'Retry' : undefined,
                     buttonAction: enableRetry && fileHash ? async () => {
+                        if (item.library_id === UNRESOLVED_LIBRARY_ID) return;
                         const zoteroItem = await Zotero.Items.getByLibraryAndKeyAsync(item.library_id, item.zotero_key);
                         if (zoteroItem) await loadFullItemData([zoteroItem]);
                         if(!zoteroItem || !zoteroItem.isAttachment()) return;

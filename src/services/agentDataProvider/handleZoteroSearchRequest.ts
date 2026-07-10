@@ -18,6 +18,7 @@ import {
 } from '../agentProtocol';
 import { ItemStub } from '../../../react/types/zotero';
 import { serializeNote, serializeItemStub } from '../../utils/zoteroSerializers';
+import { libraryRefForLibraryID, modelObjectId } from '../../utils/libraryIdentity';
 import { validateLibraryAccess, extractYear, formatCreatorsString, getAttachmentInfoForItem } from './utils';
 
 
@@ -362,7 +363,8 @@ export async function handleZoteroSearchRequest(
 
                 const resultItem: RegularSearchResultItem = {
                     result_type: 'regular',
-                    item_id: `${item.libraryID}-${item.key}`,
+                    item_id: modelObjectId(item.libraryID, item.key),
+                    library_ref: libraryRefForLibraryID(item.libraryID) ?? undefined,
                     item_type: item.itemType,
                     title,
                     creators: formatCreatorsString(creators),

@@ -48,6 +48,9 @@ import { createNote, deleteNote, executeEditNote } from './helpers/noteTestClien
 import { SMALL_PDF, PARENT_ITEM } from '../helpers/fixtures';
 
 const LIBRARY_ID = Number(process.env.ZOTERO_TEST_LIBRARY_ID ?? 1);
+// Simplified note output emits portable citation ids ("u-KEY" for the personal
+// library); assertions must use the same grammar.
+const LIBRARY_PREFIX = LIBRARY_ID === 1 ? 'u' : String(LIBRARY_ID);
 
 let zoteroAvailable = false;
 const createdNotes: Array<{ library_id: number; zotero_key: string }> = [];
@@ -132,7 +135,7 @@ describe('/beaver/note/read — page-label translation', () => {
         const ref = await seedNote(`<p>Cited ${citation}.</p>`);
 
         const content = await readSimplified(`${ref.library_id}-${ref.zotero_key}`);
-        expect(content).toContain(`id="${LIBRARY_ID}-${SMALL_PDF.zotero_key}"`);
+        expect(content).toContain(`id="${LIBRARY_PREFIX}-${SMALL_PDF.zotero_key}"`);
         // Stored label "iv" → physical page 2.
         expect(content).toContain('loc="page2"');
         // The raw label must not leak through untranslated.
@@ -149,7 +152,7 @@ describe('/beaver/note/read — page-label translation', () => {
         const ref = await seedNote(`<p>Cited ${citation}.</p>`);
 
         const content = await readSimplified(`${ref.library_id}-${ref.zotero_key}`);
-        expect(content).toContain(`id="${LIBRARY_ID}-${PARENT_ITEM.zotero_key}"`);
+        expect(content).toContain(`id="${LIBRARY_PREFIX}-${PARENT_ITEM.zotero_key}"`);
         // Stored label "iii" → physical page 1.
         expect(content).toContain('loc="page1"');
         expect(content).not.toContain('loc="pageiii"');
@@ -191,7 +194,7 @@ describe('/beaver/note/read — page-label translation', () => {
         const noteId = `${ref.library_id}-${ref.zotero_key}`;
 
         const content = await readSimplified(noteId);
-        expect(content).toContain(`id="${LIBRARY_ID}-${SMALL_PDF.zotero_key}"`);
+        expect(content).toContain(`id="${LIBRARY_PREFIX}-${SMALL_PDF.zotero_key}"`);
 
         const exec = await executeEditNote({
             library_id: ref.library_id,
@@ -336,7 +339,7 @@ describe('edit_note — physical page edit stores the Zotero page label', () => 
 
         // The agent sees the citation as physical page 2; copy its exact tag.
         const content = await readSimplified(noteId);
-        const tagMatch = content.match(new RegExp(`<citation id="${LIBRARY_ID}-${SMALL_PDF.zotero_key}"[^>]*/>`));
+        const tagMatch = content.match(new RegExp(`<citation id="${LIBRARY_PREFIX}-${SMALL_PDF.zotero_key}"[^>]*/>`));
         expect(tagMatch, `no citation tag in:\n${content}`).not.toBeNull();
         const oldTag = tagMatch![0];
         expect(oldTag).toContain('loc="page2"');

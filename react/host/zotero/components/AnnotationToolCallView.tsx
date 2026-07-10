@@ -20,6 +20,8 @@ import { currentReaderAttachmentKeyAtom } from '../../../atoms/messageCompositio
 import { isLibraryEditable, shortItemTitle } from '../../../../src/utils/zoteroUtils';
 import { ZoteroReader } from '../../../utils/annotationUtils';
 import { logger } from '../../../../src/utils/logger';
+import { resolveItemReference, resolveLibraryRef } from '../../../../src/utils/libraryIdentity';
+import { notifyReferenceUnavailable } from '../sourceActions';
 import { ZoteroIcon, ZOTERO_ICONS } from '../../../components/icons/ZoteroIcon';
 import {
     Spinner,
@@ -55,6 +57,7 @@ type AnnotationAgentAction = AgentAction & {
         comment?: string;
         color?: string;
         library_id: number;
+        library_ref?: string;
         attachment_key: string;
         highlight_locations?: any[];
         note_position?: any;
@@ -94,7 +97,7 @@ async function delay(ms: number): Promise<void> {
 async function navigateToNewlyAppliedAnnotation(
     reader: ZoteroReader | undefined,
     annotation: AnnotationAgentAction,
-    result: { zotero_key: string; library_id: number }
+    result: Pick<AnnotationResultData, 'library_id' | 'zotero_key' | 'library_ref'>
 ): Promise<void> {
     try {
         if (reader) {
@@ -144,12 +147,13 @@ async function navigateToNewlyAppliedAnnotation(
 
     // Fallback: look up the annotation item and navigate using the existing helper
     try {
-        const annotationItem = await Zotero.Items.getByLibraryAndKeyAsync(
-            result.library_id,
-            result.zotero_key
-        );
-        if (annotationItem) {
-            await navigateToAnnotation(annotationItem);
+        const resolved = await resolveItemReference({
+            library_ref: result.library_ref,
+            library_id: result.library_id,
+            zotero_key: result.zotero_key,
+        });
+        if (resolved.status === 'found') {
+            await navigateToAnnotation(resolved.item);
         }
     } catch {
         // No-op: navigation is best-effort
@@ -370,9 +374,15 @@ export const AnnotationToolCallView: React.FC<AnnotationToolCallViewProps> = ({ 
     const isAttachmentOpen = annotations.some(
         (action) => action.proposed_data.attachment_key === currentReaderAttachmentKey
     );
-    const readOnlyLibrary = annotations.some(
-        (action) => !isLibraryEditable(action.proposed_data.library_id)
-    );
+    const readOnlyLibrary = annotations.some((action) => {
+        // Resolve through the device-portable library_ref (legacy library_id
+        // fallback) so a cross-device group annotation is gated on the library it
+        // actually targets, not a stale device-local id that may look read-only or
+        // missing here. Unresolvable (group not on this device) is surfaced with a
+        // clear message at apply time, so don't hide the button on that basis.
+        const libraryId = resolveLibraryRef(action.proposed_data);
+        return libraryId != null && !isLibraryEditable(libraryId);
+    });
 
     // UI state from atoms (shared across panes)
     const panelStates = useAtomValue(annotationPanelStateAtom);
@@ -414,12 +424,13 @@ export const AnnotationToolCallView: React.FC<AnnotationToolCallViewProps> = ({ 
         const fetchTitle = async () => {
             if (annotations.length === 0) return;
             const firstAnnotation = annotations[0];
-            const item = await Zotero.Items.getByLibraryAndKeyAsync(
-                firstAnnotation.proposed_data.library_id,
-                firstAnnotation.proposed_data.attachment_key
-            );
-            if (item) {
-                const title = await shortItemTitle(item);
+            const resolved = await resolveItemReference({
+                library_ref: firstAnnotation.proposed_data.library_ref,
+                library_id: firstAnnotation.proposed_data.library_id,
+                zotero_key: firstAnnotation.proposed_data.attachment_key,
+            });
+            if (resolved.status === 'found') {
+                const title = await shortItemTitle(resolved.item);
                 setAnnotationAttachmentTitle({ key: toolCallId, title });
             }
         };
@@ -448,18 +459,23 @@ export const AnnotationToolCallView: React.FC<AnnotationToolCallViewProps> = ({ 
             // Open attachment if not already open
             if (!isAttachmentOpen) {
                 const firstAnnotation = annotations[0];
-                const attachmentItem = await Zotero.Items.getByLibraryAndKeyAsync(
-                    firstAnnotation.proposed_data.library_id,
-                    firstAnnotation.proposed_data.attachment_key
-                );
+                const resolvedAttachment = await resolveItemReference({
+                    library_ref: firstAnnotation.proposed_data.library_ref,
+                    library_id: firstAnnotation.proposed_data.library_id,
+                    zotero_key: firstAnnotation.proposed_data.attachment_key,
+                });
 
-                if (!attachmentItem) {
-                    setAgentActionsToError(annotations.map((a) => a.id), 'Attachment not found', {
+                if (resolvedAttachment.status !== 'found') {
+                    const message = resolvedAttachment.status === 'library_unavailable'
+                        ? "The attachment's library isn't available on this computer"
+                        : 'Attachment not found';
+                    setAgentActionsToError(annotations.map((a) => a.id), message, {
                         error_name: 'AttachmentNotFoundError',
                     });
                     setAnnotationPanelState({ key: toolCallId, updates: { isApplying: false } });
                     return;
                 }
+                const attachmentItem = resolvedAttachment.item;
 
                 // Calculate the page to navigate to
                 const pageIndexes = annotations
@@ -546,12 +562,15 @@ export const AnnotationToolCallView: React.FC<AnnotationToolCallViewProps> = ({ 
      */
     const handleAnnotationClick = useCallback(async (annotation: AnnotationAgentAction) => {
         if (annotation.status === 'applied' && annotation.result_data?.zotero_key) {
-            const item = await Zotero.Items.getByLibraryAndKeyAsync(
-                annotation.result_data.library_id,
-                annotation.result_data.zotero_key
-            );
-            if (item) {
-                await navigateToAnnotation(item);
+            const resolved = await resolveItemReference({
+                library_ref: annotation.result_data.library_ref,
+                library_id: annotation.result_data.library_id,
+                zotero_key: annotation.result_data.zotero_key,
+            });
+            if (resolved.status === 'found') {
+                await navigateToAnnotation(resolved.item);
+            } else {
+                notifyReferenceUnavailable('annotation', resolved.status === 'library_unavailable' ? 'library_unavailable' : 'missing');
             }
         } else if (annotation.status !== 'applied') {
             await handleApplyAnnotations(annotation.id);
@@ -730,4 +749,3 @@ export const AnnotationToolCallView: React.FC<AnnotationToolCallViewProps> = ({ 
 };
 
 export default AnnotationToolCallView;
-

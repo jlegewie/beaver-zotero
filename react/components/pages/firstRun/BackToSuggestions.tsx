@@ -1,31 +1,39 @@
 import React, { useEffect, useRef } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { firstRunReturnRequestedAtom } from '../../../atoms/firstRun';
+import { whereToStartVisibleAtom } from '../../../atoms/whereToStart';
 import { currentMessageContentAtom } from '../../../atoms/messageComposition';
 import { Icon, IdeaIcon, PlusSignIcon } from '../../icons/icons';
 import ArrowLeftIcon from '../../icons/ArrowLeftIcon';
 import Button from '../../ui/Button';
 
 
+/** Which onboarding surface produced this panel */
+export type FirstRunBackTarget = 'suggestions' | 'launcher';
+
 interface BackToSuggestionsProps {
     onDismiss: () => void;
+    backTarget: FirstRunBackTarget;
 }
 
 /**
- * Rendered once below the first agent run that originated from a
- * first-run suggestion card (matched by run id). "Back to suggestions"
- * re-renders the FirstRunPage from the persisted
- * `profile.library_suggestions` (no regeneration, no second `complete`
- * call).
+ * Rendered once below the first agent run of a first-run thread. The back link
+ * reopens the surface the run came from: the suggestion grid (FirstRunPage, via
+ * the first-run return flag) or the launcher (WhereToStartPage, via its own
+ * visibility flag).
  *
  * Auto-dismisses when:
  *   - the back link is clicked
  *   - the user types in the input (follow-up path)
  *   - parent stops rendering it (origin run id changes / new run starts)
  */
-const BackToSuggestions: React.FC<BackToSuggestionsProps> = ({ onDismiss }) => {
+const BackToSuggestions: React.FC<BackToSuggestionsProps> = ({ onDismiss, backTarget }) => {
     const setReturnRequested = useSetAtom(firstRunReturnRequestedAtom);
+    const setWhereToStartVisible = useSetAtom(whereToStartVisibleAtom);
     const messageContent = useAtomValue(currentMessageContentAtom);
+
+    const isLauncher = backTarget === 'launcher';
+    const backLabel = isLauncher ? 'Back to starting points' : 'Back to suggestions';
 
     // Auto-dismiss when the user types a follow-up. Capture the initial value
     // so we don't dismiss on the first render if the input is already non-empty
@@ -40,7 +48,13 @@ const BackToSuggestions: React.FC<BackToSuggestionsProps> = ({ onDismiss }) => {
     const newChatShortcut = Zotero.isMac ? '⌘N' : 'Ctrl+N';
 
     const handleTryAnother = () => {
-        setReturnRequested(true);
+        // Reopen the surface this thread came from: the launcher (its own
+        // visibility flag) or the suggestion grid (the first-run return flag).
+        if (isLauncher) {
+            setWhereToStartVisible(true);
+        } else {
+            setReturnRequested(true);
+        }
         onDismiss();
     };
 
@@ -54,7 +68,7 @@ const BackToSuggestions: React.FC<BackToSuggestionsProps> = ({ onDismiss }) => {
                 style={{fontSize: '1rem', paddingLeft: '0px'}}
                 onClick={handleTryAnother}
             >
-                Back to suggestions
+                {backLabel}
             </Button>
             <div
                 className="display-flex flex-row items-center gap-1 ml-1 text-start font-color-secondary"

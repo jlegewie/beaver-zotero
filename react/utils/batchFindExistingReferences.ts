@@ -25,6 +25,7 @@
 import { FindReferenceData } from './findExistingReference';
 import { ZoteroItemReference } from '../types/zotero';
 import { logger } from '../../src/utils/logger';
+import { libraryRefForLibraryID } from '../../src/utils/libraryIdentity';
 
 /**
  * Lightweight representation of a title-matched candidate from Zotero DB.
@@ -211,7 +212,11 @@ async function batchFindByIdentifiers(
                     if (requestItemIds) {
                         for (const requestItemId of requestItemIds) {
                             if (!results.has(requestItemId)) {
-                                results.set(requestItemId, { library_id: row.library_id, zotero_key: row.zotero_key });
+                                results.set(requestItemId, {
+                                    library_id: row.library_id,
+                                    zotero_key: row.zotero_key,
+                                    library_ref: libraryRefForLibraryID(row.library_id) ?? undefined,
+                                });
                             }
                         }
                     }
@@ -261,7 +266,11 @@ async function batchFindByIdentifiers(
                 if (requestItemIds) {
                     for (const requestItemId of requestItemIds) {
                         if (!results.has(requestItemId)) {
-                            results.set(requestItemId, { library_id: row.library_id, zotero_key: row.zotero_key });
+                            results.set(requestItemId, {
+                                library_id: row.library_id,
+                                zotero_key: row.zotero_key,
+                                library_ref: libraryRefForLibraryID(row.library_id) ?? undefined,
+                            });
                         }
                     }
                 }
@@ -744,7 +753,11 @@ export async function batchFindExistingReferences(
         if (!item.data.title) continue;
         const match = findMatchInCandidates(item, titleCandidates);
         if (match) {
-            results.set(item.id, { library_id: match.libraryID, zotero_key: match.key });
+            results.set(item.id, {
+                library_id: match.libraryID,
+                zotero_key: match.key,
+                library_ref: libraryRefForLibraryID(match.libraryID) ?? undefined,
+            });
             fuzzyMatches++;
         }
     }

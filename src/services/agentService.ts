@@ -26,6 +26,7 @@ import {
     WSReadyData,
     WSRequestAckData,
     WSRequestReceivedAck,
+    AskUserQuestionAnswer,
 } from './agentProtocol';
 import { getBusyContext } from './busyContext';
 import {
@@ -567,6 +568,23 @@ export class AgentService {
                     }
                     break;
 
+                case 'ask_user_question_request':
+                    logger("AgentService: Received ask_user_question_request", event, 1);
+                    // This event is handled by the UI via callback
+                    if (this.callbacks?.onAskUserQuestionRequest) {
+                        this.callbacks.onAskUserQuestionRequest(event);
+                    } else {
+                        // No handler - auto-cancel so the agent never hangs
+                        logger("AgentService: No ask_user_question handler, auto-cancelling", 1);
+                        this.send({
+                            type: 'ask_user_question_response',
+                            question_id: event.question_id,
+                            answers: [],
+                            cancelled: true,
+                        });
+                    }
+                    break;
+
                 default: {
                     // Data-request events are dispatched through the injectable
                     // data-provider map rather than hardcoded cases. The handler
@@ -689,6 +707,29 @@ export class AgentService {
             action_id: actionId,
             approved,
             user_instructions: userInstructions,
+        });
+    }
+
+    /**
+     * Send a response to an ask_user_question request.
+     * Called by the UI when the user submits their answers or skips the card.
+     * Note: like deferred_approval_response, this carries no request_id — the
+     * backend correlates by question_id.
+     * @param questionId The question ID from the request
+     * @param answers The user's answers (empty when cancelled)
+     * @param cancelled Whether the user skipped the question(s)
+     */
+    sendAskUserQuestionResponse(
+        questionId: string,
+        answers: AskUserQuestionAnswer[],
+        cancelled: boolean = false,
+    ): void {
+        logger(`AgentService: Sending ask_user_question response for ${questionId}: ${cancelled ? 'cancelled' : `${answers.length} answer(s)`}`, 1);
+        this.send({
+            type: 'ask_user_question_response',
+            question_id: questionId,
+            answers,
+            cancelled,
         });
     }
 

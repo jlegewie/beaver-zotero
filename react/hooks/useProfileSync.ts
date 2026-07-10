@@ -147,14 +147,6 @@ export const useProfileSync = () => {
                 setPref("userEmail", currentUser.email);
             }
 
-            setIsProfileLoaded(true);
-            setIsProfileInvalid(false);
-            setIsWaitingForProfile(false);
-            setProfileSyncStatus({ kind: 'ok' });
-            retryAttemptsRef.current = 0;
-            lastRefreshRef.current = new Date();
-            logger(`useProfileSync: Successfully fetched profile and plan for ${userId}.`, profileData.profile);
-
             try {
                 const allLibraries = Zotero.Libraries.getAll();
                 const localLibraries = allLibraries
@@ -166,6 +158,14 @@ export const useProfileSync = () => {
             } catch (libError) {
                 logger(`useProfileSync: Failed to populate local libraries: ${libError}`, 2);
             }
+
+            setIsProfileLoaded(true);
+            setIsProfileInvalid(false);
+            setIsWaitingForProfile(false);
+            setProfileSyncStatus({ kind: 'ok' });
+            retryAttemptsRef.current = 0;
+            lastRefreshRef.current = new Date();
+            logger(`useProfileSync: Successfully fetched profile and plan for ${userId}.`, profileData.profile);
 
             if (profileData.profile.plan.upload_files && profileData.profile.has_authorized_access) {
                 await fileUploader.start();

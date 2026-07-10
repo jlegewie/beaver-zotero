@@ -9,6 +9,7 @@ import {
     type CreateHighlightInput,
     type CreateNoteInput,
 } from "../../../src/services/annotations/createAnnotation";
+import { UNRESOLVED_LIBRARY_ID } from "../../../src/utils/libraryIdentity";
 
 type AnnotationCreateKind = "highlight" | "note";
 
@@ -91,7 +92,7 @@ export async function handleTestAnnotationCreateHttpRequest(
     request: AnnotationCreateRequest,
 ) {
     const { library_id, zotero_key, type, input } = request || {};
-    if (library_id == null || zotero_key == null) {
+    if (library_id == null || zotero_key == null || library_id === UNRESOLVED_LIBRARY_ID) {
         return { ok: false, error: "Provide library_id + zotero_key" };
     }
     if (type !== "highlight" && type !== "note") {

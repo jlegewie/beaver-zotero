@@ -7,6 +7,7 @@ vi.mock('../../../src/services/agentDataProvider/utils', () => ({
     getDeferredToolPreference: vi.fn(() => 'always_ask'),
     isLibrarySearchable: vi.fn(() => true),
     getCollectionByIdOrName: vi.fn(),
+    checkLibraryExcluded: vi.fn(() => null),
 }));
 
 vi.mock('../../../src/utils/logger', () => ({
@@ -80,16 +81,20 @@ beforeEach(() => {
     // on this persists across tests, so re-install the default each time).
     Zot.Items.getByLibraryAndKeyAsync.mockImplementation(async () => null);
     // Default: getCollectionByIdOrName resolves the plain key or the matching
-    // compound '<lib>-<key>' form. Compound form with a wrong library returns
-    // null, mirroring the real utils function's strict compound lookup.
+    // compound '<lib>-<key>' form, portable ("u-<key>") or legacy numeric
+    // ("<libraryID>-<key>"). Compound form with a wrong/unresolvable library
+    // returns null, mirroring the real utils function's strict compound lookup.
     (getCollectionByIdOrName as any).mockImplementation((input: string | number, _libId?: number) => {
         if (typeof input !== 'string') return null;
         if (input === mockCollection.key) {
             return { collection: mockCollection, libraryID: mockCollection.libraryID };
         }
-        const m = input.match(/^(\d+)-(.+)$/);
-        if (m && parseInt(m[1], 10) === mockCollection.libraryID && m[2] === mockCollection.key) {
-            return { collection: mockCollection, libraryID: mockCollection.libraryID };
+        const m = input.match(/^(u|\d+)-(.+)$/);
+        if (m) {
+            const compoundLibId = m[1] === 'u' ? Zot.Libraries.userLibraryID : parseInt(m[1], 10);
+            if (compoundLibId === mockCollection.libraryID && m[2] === mockCollection.key) {
+                return { collection: mockCollection, libraryID: mockCollection.libraryID };
+            }
         }
         return null;
     });
@@ -257,6 +262,79 @@ describe('validateManageCollectionsAction', () => {
             },
         } as any);
         expect(resp.valid).toBe(true);
+    });
+
+    it('accepts portable "u-<key>" collection_key and normalizes to plain key', async () => {
+        const resp = await validateManageCollectionsAction({
+            event: 'agent_action_validate',
+            request_id: 'r7f',
+            action_type: 'manage_collections',
+            action_data: { action: 'rename', collection_key: `u-${mockCollection.key}`, new_name: 'Updated' },
+        } as any);
+        expect(resp.valid).toBe(true);
+        expect(resp.normalized_action_data?.library_id).toBe(1);
+        expect(resp.normalized_action_data?.collection_key).toBe(mockCollection.key);
+        // Resolved scope hint (library 1, from the "u" ref) is passed through
+        // alongside the raw compound string.
+        expect((getCollectionByIdOrName as any)).toHaveBeenCalledWith(`u-${mockCollection.key}`, 1);
+    });
+
+    it('rejects when portable collection_key library disagrees with separate library_id', async () => {
+        const resp = await validateManageCollectionsAction({
+            event: 'agent_action_validate',
+            request_id: 'r7f2',
+            action_type: 'manage_collections',
+            action_data: {
+                action: 'rename',
+                // "u" resolves to library 1, but library_id says 2 — conflict.
+                collection_key: `u-${mockCollection.key}`,
+                new_name: 'Updated',
+                library_id: 2,
+            },
+        } as any);
+        expect(resp.valid).toBe(false);
+        expect(resp.error_code).toBe('invalid_library_id');
+    });
+
+    it('accepts portable new_parent_key from the same library and normalizes to plain key', async () => {
+        const parentKey = 'PRNT0001';
+        const parentCollection = { id: 43, key: parentKey, libraryID: 1 };
+        Zot.Collections.getByLibraryAndKeyAsync.mockImplementation(async (_lib: number, key: string) => {
+            if (key === parentKey) return parentCollection;
+            return null;
+        });
+        const resp = await validateManageCollectionsAction({
+            event: 'agent_action_validate',
+            request_id: 'r7g',
+            action_type: 'manage_collections',
+            action_data: {
+                action: 'move',
+                collection_key: mockCollection.key,
+                new_parent_key: `u-${parentKey}`,
+            },
+        } as any);
+        expect(resp.valid).toBe(true);
+        expect(resp.normalized_action_data?.new_parent_key).toBe(parentKey);
+    });
+
+    it('rejects a new_parent_key naming an unresolvable portable group ref instead of silently treating the whole string as a key', async () => {
+        // No Zotero.Groups mock is installed in this suite, so "g5" can't be
+        // resolved locally — this must be rejected as a cross-library/
+        // unavailable reference, not misread as a literal collection key.
+        const resp = await validateManageCollectionsAction({
+            event: 'agent_action_validate',
+            request_id: 'r7h',
+            action_type: 'manage_collections',
+            action_data: {
+                action: 'move',
+                collection_key: mockCollection.key,
+                new_parent_key: 'g5-PARENTKEY',
+            },
+        } as any);
+        expect(resp.valid).toBe(false);
+        expect(resp.error_code).toBe('invalid_parent');
+        // The malformed-whole-string lookup must never have been attempted.
+        expect(Zot.Collections.getByLibraryAndKeyAsync).not.toHaveBeenCalledWith(1, 'g5-PARENTKEY');
     });
 
     it('rejects compound new_parent_key from a different library', async () => {

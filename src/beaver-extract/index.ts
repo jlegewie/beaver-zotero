@@ -34,6 +34,7 @@ export type {
     PDFWorkerClientSlots,
     PDFWorkerSlotName,
     PDFWorkerUrls,
+    WorkerStartFailureInfo,
 } from "./config";
 export {
     MuPDFWorkerClient,

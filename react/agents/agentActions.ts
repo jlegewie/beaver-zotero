@@ -1,5 +1,6 @@
 import { atom } from 'jotai';
 import { logger } from '../../src/utils/logger';
+import { isLibraryReferencePortable, resolveItemReference } from '../../src/utils/libraryIdentity';
 import { dismissDiffPreview } from '../utils/noteEditorDiffPreview';
 import { updateDiffPreviewForNote, diffPreviewNoteKeyAtom } from '../utils/diffPreviewCoordinator';
 import { makeNoteKey } from '../atoms/editNoteAutoApprove';
@@ -229,7 +230,8 @@ export const getZoteroItemReferenceFromAgentAction = (action: AgentAction): Zote
     }
     return {
         library_id: action.result_data!.library_id,
-        zotero_key: action.result_data!.zotero_key
+        zotero_key: action.result_data!.zotero_key,
+        library_ref: action.result_data!.library_ref,
     } as ZoteroItemReference;
 };
 
@@ -239,36 +241,63 @@ export const getZoteroItemReferenceFromAgentAction = (action: AgentAction): Zote
 export const getZoteroItemFromAgentAction = async (action: AgentAction): Promise<Zotero.Item | null> => {
     const ref = getZoteroItemReferenceFromAgentAction(action);
     if (!ref) return null;
-    return (await Zotero.Items.getByLibraryAndKeyAsync(ref.library_id, ref.zotero_key)) || null;
+    const resolved = await resolveItemReference(ref);
+    return resolved.status === 'found' ? resolved.item : null;
 };
 
 /**
- * Validates that an applied agent action is still valid.
- * @param action - The agent action to validate
- * @returns True if the action is valid, false otherwise
+ * Validation result for an applied agent action.
+ *
+ * - 'valid': the applied item was found and matches expectations.
+ * - 'invalid': the item is verifiably gone (or has the wrong type). The user
+ *   reverted the action in Zotero.
+ * - 'unverifiable': the reference cannot be checked on this device.
  */
-export const validateAppliedAgentAction = async (action: AgentAction): Promise<boolean> => {
+export type AppliedActionValidity = 'valid' | 'invalid' | 'unverifiable';
+
+const checkAppliedReference = async (
+    ref: ZoteroItemReference,
+    mustBeAnnotation: boolean
+): Promise<AppliedActionValidity> => {
+    const resolved = await resolveItemReference(ref);
+    if (resolved.status === 'library_unavailable') return 'unverifiable';
+    if (resolved.status === 'not_found') {
+        // "Not found" is only proof of deletion when the reference identifies
+        // its library portably. A legacy reference (no library_ref) into a
+        // group library resolves through a device-local library_id, so a miss
+        // may just mean that id maps to a different group on this device — not
+        // that the item is gone. Treat that as unverifiable, never a revert.
+        return isLibraryReferencePortable(ref) ? 'invalid' : 'unverifiable';
+    }
+    return mustBeAnnotation && !resolved.item.isAnnotation() ? 'invalid' : 'valid';
+};
+
+/**
+ * Validates that an applied agent action is still valid on this device.
+ * @param action - The agent action to validate
+ * @returns 'valid', 'invalid' (verifiably reverted), or 'unverifiable'
+ */
+export const validateAppliedAgentAction = async (action: AgentAction): Promise<AppliedActionValidity> => {
     if (isCreateAnnotationsAgentAction(action)) {
-        if (!hasAppliedBulkAnnotations(action)) return true;
+        if (!hasAppliedBulkAnnotations(action)) return 'valid';
         const created = action.result_data?.created ?? [];
+        let unverifiable = false;
         for (const ref of created) {
-            const item = await Zotero.Items.getByLibraryAndKeyAsync(ref.library_id, ref.zotero_key);
-            if (!item || !item.isAnnotation()) return false;
+            const validity = await checkAppliedReference(ref, true);
+            if (validity === 'invalid') return 'invalid';
+            if (validity === 'unverifiable') unverifiable = true;
         }
-        return true;
+        return unverifiable ? 'unverifiable' : 'valid';
     }
 
     // If action doesn't have an applied Zotero item, it's valid (nothing to check)
-    if (!hasAppliedZoteroItem(action)) return true;
+    if (!hasAppliedZoteroItem(action)) return 'valid';
 
-    // Get the Zotero item from the agent action
-    const item = await getZoteroItemFromAgentAction(action);
-    if (!item) return false;
+    const ref = getZoteroItemReferenceFromAgentAction(action);
+    if (!ref) return 'valid';
 
-    // For annotation actions, verify the item is still an annotation
-    if (isAnnotationAgentAction(action) && !item.isAnnotation()) return false;
-
-    return true;
+    // For annotation actions, the resolved item must still be an annotation
+    return checkAppliedReference(ref, isAnnotationAgentAction(action));
 };
 
 // =============================================================================
@@ -278,9 +307,13 @@ export const validateAppliedAgentAction = async (action: AgentAction): Promise<b
 function normalizeZoteroItemReference(raw: any): ZoteroItemReference {
     const libraryId = raw?.library_id ?? raw?.libraryId;
     const zoteroKey = raw?.zotero_key ?? raw?.zoteroKey;
+    // Carry the device-portable library_ref through unchanged when the
+    // backend sent one
+    const libraryRef = raw?.library_ref ?? raw?.libraryRef;
     return {
         library_id: typeof libraryId === 'number' ? libraryId : Number(libraryId ?? 0),
         zotero_key: typeof zoteroKey === 'string' ? zoteroKey : String(zoteroKey ?? ''),
+        ...(typeof libraryRef === 'string' && libraryRef ? { library_ref: libraryRef } : {}),
     };
 }
 
@@ -374,12 +407,14 @@ export function toAgentAction(raw: Record<string, any>): AgentAction {
     if (actionType === 'highlight_annotation' || actionType === 'note_annotation') {
         const libraryIdRaw = proposedData.library_id ?? proposedData.libraryId;
         const attachmentKeyRaw = proposedData.attachment_key ?? proposedData.attachmentKey;
+        const libraryRef = proposedData.library_ref ?? proposedData.libraryRef;
         const sentenceIds = normalizeSentenceIdList(proposedData.sentence_ids ?? proposedData.sentenceIds);
         
         const normalizedData: any = {
             title: proposedData.title ?? '',
             comment: proposedData.comment ?? '',
             library_id: typeof libraryIdRaw === 'number' ? libraryIdRaw : Number(libraryIdRaw ?? 0),
+            ...(typeof libraryRef === 'string' && libraryRef ? { library_ref: libraryRef } : {}),
             attachment_key: typeof attachmentKeyRaw === 'string' ? attachmentKeyRaw : String(attachmentKeyRaw ?? ''),
             raw_sentence_ids: proposedData.raw_sentence_ids ?? proposedData.rawSentenceIds ?? null,
             sentence_ids: sentenceIds,
@@ -432,12 +467,23 @@ export function toAgentAction(raw: Record<string, any>): AgentAction {
             zotero_key: typeof zoteroKeyRaw === 'string'
                 ? zoteroKeyRaw
                 : (zoteroKeyRaw !== undefined && zoteroKeyRaw !== null ? String(zoteroKeyRaw) : undefined),
+            library_ref: typeof proposedData.library_ref === 'string'
+                ? proposedData.library_ref
+                : (typeof proposedData.libraryRef === 'string' ? proposedData.libraryRef : undefined),
             library: typeof proposedData.library === 'string' ? proposedData.library : undefined,
             collection: typeof proposedData.collection === 'string' ? proposedData.collection : undefined,
             raw_tag: typeof rawTag === 'string' ? rawTag : undefined,
         } as NoteProposedData;
     } else if (actionType === 'create_item') {
+        const libraryIdRaw = proposedData.library_id ?? proposedData.libraryId;
+        const parsedLibraryId = libraryIdRaw == null || libraryIdRaw === ''
+            ? undefined
+            : (typeof libraryIdRaw === 'number' ? libraryIdRaw : Number(libraryIdRaw));
+
         proposedData = {
+            library_id: parsedLibraryId,
+            library_ref: proposedData.library_ref ?? proposedData.libraryRef,
+            library_name: proposedData.library_name ?? proposedData.libraryName,
             item: proposedData.item ?? {},
             reason: proposedData.reason,
             relevance_score: proposedData.relevance_score ?? proposedData.relevanceScore,
@@ -464,6 +510,7 @@ export function toAgentAction(raw: Record<string, any>): AgentAction {
                 ? proposedData.library_id
                 : Number(proposedData.library_id ?? proposedData.libraryId ?? 0),
             zotero_key: proposedData.zotero_key ?? proposedData.zoteroKey ?? '',
+            library_ref: proposedData.library_ref ?? proposedData.libraryRef,
             edits: edits.map((edit: any) => ({
                 field: edit.field ?? '',
                 old_value: edit.old_value ?? edit.oldValue ?? null,
@@ -473,11 +520,14 @@ export function toAgentAction(raw: Record<string, any>): AgentAction {
             old_creators: oldCreators,
         } as EditMetadataProposedData;
     } else if (actionType === 'create_collection') {
-        // Normalize create_collection proposed data
+        // Normalize create_collection proposed data. library_id always names a
+        // resolved library: the agent may target a library by name, but the name
+        // is resolved to an id during validation, before the action is emitted.
         proposedData = {
-            library_id: typeof proposedData.library_id === 'number' 
-                ? proposedData.library_id 
+            library_id: typeof proposedData.library_id === 'number'
+                ? proposedData.library_id
                 : Number(proposedData.library_id ?? proposedData.libraryId ?? 0),
+            library_ref: proposedData.library_ref ?? proposedData.libraryRef,
             name: proposedData.name ?? '',
             parent_key: proposedData.parent_key ?? proposedData.parentKey ?? null,
             item_ids: proposedData.item_ids ?? proposedData.itemIds ?? [],
@@ -514,12 +564,14 @@ export function toAgentAction(raw: Record<string, any>): AgentAction {
     if (resultData && (actionType === 'highlight_annotation' || actionType === 'note_annotation')) {
         const zoteroKey = resultData.zotero_key ?? resultData.zoteroKey;
         const libraryId = resultData.library_id ?? resultData.libraryId;
+        const libraryRef = resultData.library_ref ?? resultData.libraryRef;
         const attachmentKey = resultData.attachment_key ?? resultData.attachmentKey;
         
         if (zoteroKey) {
             resultData = {
                 zotero_key: zoteroKey,
                 library_id: typeof libraryId === 'number' ? libraryId : Number(libraryId ?? 0),
+                ...(typeof libraryRef === 'string' && libraryRef ? { library_ref: libraryRef } : {}),
                 attachment_key: typeof attachmentKey === 'string' ? attachmentKey : String(attachmentKey ?? ''),
             };
         }
@@ -528,22 +580,26 @@ export function toAgentAction(raw: Record<string, any>): AgentAction {
     } else if (resultData && actionType === 'zotero_note') {
         const zoteroKey = resultData.zotero_key ?? resultData.zoteroKey;
         const libraryId = resultData.library_id ?? resultData.libraryId;
+        const libraryRef = resultData.library_ref ?? resultData.libraryRef;
         const parentKey = resultData.parent_key ?? resultData.parentKey;
         if (zoteroKey) {
             resultData = {
                 zotero_key: String(zoteroKey),
                 library_id: typeof libraryId === 'number' ? libraryId : Number(libraryId ?? 0),
+                ...(typeof libraryRef === 'string' && libraryRef ? { library_ref: libraryRef } : {}),
                 ...(parentKey ? { parent_key: String(parentKey) } : {})
             };
         }
     } else if (resultData && actionType === 'create_item') {
         const zoteroKey = resultData.zotero_key ?? resultData.zoteroKey ?? resultData.item_key ?? resultData.itemKey;
         const libraryId = resultData.library_id ?? resultData.libraryId;
+        const libraryRef = resultData.library_ref ?? resultData.libraryRef;
         
         if (zoteroKey) {
             resultData = {
                 zotero_key: String(zoteroKey),
                 library_id: typeof libraryId === 'number' ? libraryId : Number(libraryId ?? 0),
+                ...(typeof libraryRef === 'string' && libraryRef ? { library_ref: libraryRef } : {}),
                 attachment_status: resultData.attachment_status ?? resultData.attachmentStatus ?? 'none',
                 attachment_key: resultData.attachment_key ?? resultData.attachmentKey,
                 attachment_resolved_at: resultData.attachment_resolved_at ?? resultData.attachmentResolvedAt,
@@ -1018,6 +1074,10 @@ export const clearAllPendingApprovalsAtom = atom(
     }
 );
 
+// Note: the run-blocking ask_user_question state (PendingQuestion,
+// pendingQuestionsAtom, ...) lives in `./pendingQuestions.ts` — questions are
+// deliberately NOT agent actions (no apply/undo/validate lifecycle).
+
 /**
  * Get pending approval for a specific toolcall_id.
  * Searches the map for an approval matching the toolcall_id.
@@ -1065,8 +1125,13 @@ export async function buildPendingApprovalFromAction(action: AgentAction): Promi
         const hasCreators = Array.isArray(actionData.creators) && actionData.creators.length > 0;
 
         if (libraryId && zoteroKey && (edits.length > 0 || hasCreators)) {
-            const item = await Zotero.Items.getByLibraryAndKeyAsync(libraryId, zoteroKey);
-            if (item) {
+            const resolved = await resolveItemReference({
+                library_id: libraryId,
+                library_ref: typeof actionData.library_ref === 'string' ? actionData.library_ref : undefined,
+                zotero_key: zoteroKey,
+            });
+            if (resolved.status === 'found') {
+                const item = resolved.item;
                 const values: Record<string, any> = {};
                 for (const edit of edits) {
                     const field = typeof edit?.field === 'string' ? edit.field : null;
@@ -1087,6 +1152,7 @@ export async function buildPendingApprovalFromAction(action: AgentAction): Promi
         if (libraryId) {
             const library = Zotero.Libraries.get(libraryId);
             currentValue = {
+                library_id: libraryId,
                 library_name: library ? library.name : 'Unknown Library',
                 parent_key: actionData.parent_key ?? null,
                 item_count: actionData.item_ids?.length ?? 0,

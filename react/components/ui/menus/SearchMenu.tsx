@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState, ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { Icon, SearchIcon } from '../../icons/icons';
 import { getWindowFromElement, getDocumentFromElement } from '../../../utils/windowContext';
 
@@ -78,6 +79,17 @@ export interface SearchMenuProps {
     showSearchInput?: boolean;
     /** Optional callback when backspace/delete is pressed with empty search. Defaults to onClose. */
     onEmptyBackspace?: () => void;
+    /** When true, Tab selects the focused item like Enter. Meant for menus
+     *  without a rendered search input (e.g. the slash menu, where typing
+     *  stays in the chat editor); menus with a real input keep Tab's normal
+     *  focus-navigation semantics. */
+    selectOnTab?: boolean;
+    /** Optional container for rendering overlay DOM away from the trigger. */
+    portalContainer?: HTMLElement | null;
+    /** Called after the menu performs its initial focus behavior. */
+    onAfterInitialFocus?: () => void;
+    /** Optional CSS class name for group headers */
+    groupHeaderClassName?: string;
 }
 
 /**
@@ -102,7 +114,11 @@ const SearchMenu: React.FC<SearchMenuProps> = ({
     searchQuery,
     setSearchQuery,
     showSearchInput = true,
-    onEmptyBackspace
+    onEmptyBackspace,
+    selectOnTab = false,
+    portalContainer,
+    onAfterInitialFocus,
+    groupHeaderClassName = 'font-color-secondary'
 }) => {
     const menuRef = useRef<HTMLDivElement | null>(null);
     const scrollContainerRef = useRef<HTMLDivElement | null>(null);
@@ -294,9 +310,11 @@ const SearchMenu: React.FC<SearchMenuProps> = ({
                     });
                     break;
                 case 'Enter':
+                case 'Tab':
+                    if (e.key === 'Tab' && !selectOnTab) break;
                     e.preventDefault();
-                    if (focusedIndex >= 0 && 
-                        focusedIndex < displayOrderMenuItems.length && 
+                    if (focusedIndex >= 0 &&
+                        focusedIndex < displayOrderMenuItems.length &&
                         isFocusableItem(displayOrderMenuItems[focusedIndex])
                     ) {
                         displayOrderMenuItems[focusedIndex].onClick();
@@ -312,7 +330,7 @@ const SearchMenu: React.FC<SearchMenuProps> = ({
         const doc = getDocumentFromElement(menuRef.current);
         doc.addEventListener('keydown', handleKeyNav);
         return () => doc.removeEventListener('keydown', handleKeyNav);
-    }, [isOpen, menuItems, focusedIndex, onClose, closeOnSelect, verticalPosition]);
+    }, [isOpen, menuItems, focusedIndex, onClose, closeOnSelect, verticalPosition, selectOnTab]);
     
     // Scroll to bottom when menu opens in 'above' mode so items nearest the search input are visible
     useEffect(() => {
@@ -326,6 +344,7 @@ const SearchMenu: React.FC<SearchMenuProps> = ({
         if (isOpen) {
             // Focus the input
             inputRef.current?.focus();
+            onAfterInitialFocus?.();
 
             const displayOrderMenuItems = verticalPosition === 'above' 
                 ? [...menuItems].reverse() 
@@ -357,7 +376,7 @@ const SearchMenu: React.FC<SearchMenuProps> = ({
             setFocusedIndex(-1);
             setHoveredIndex(-1);
         }
-    }, [isOpen, menuItems, verticalPosition]);
+    }, [isOpen, menuItems, onAfterInitialFocus, verticalPosition]);
     
     // Modified search input handler
     const handleSearchInput = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -415,7 +434,7 @@ const SearchMenu: React.FC<SearchMenuProps> = ({
                 <div
                     key={index}
                     role="presentation"
-                    className="px-2 py-1 font-color-secondary text-sm font-semibold mt-1 first:mt-0"
+                    className={`px-2 py-1 text-sm font-semibold mt-1 first:mt-0 ${groupHeaderClassName}`}
                 >
                     {item.customContent ?? <span className="truncate">{item.label}</span>}
                 </div>
@@ -497,7 +516,7 @@ const SearchMenu: React.FC<SearchMenuProps> = ({
         </div>
     )
 
-    return (
+    const menu = (
         <div
             ref={menuRef}
             className={`bg-quaternary border-popup rounded-md outline-none z-1000 shadow-md display-flex flex-col ${className}`}
@@ -558,6 +577,8 @@ const SearchMenu: React.FC<SearchMenuProps> = ({
             )}
         </div>
     );
+
+    return portalContainer ? createPortal(menu, portalContainer) : menu;
 };
 
 export default SearchMenu; 

@@ -27,6 +27,7 @@ import {
 } from '../../utils/epubVisualizer/epubReaderView';
 import { BeaverTemporaryAnnotations } from '../../utils/annotationUtils';
 import type { SymbolicLocation } from '../../types/citations';
+import { UNRESOLVED_LIBRARY_ID } from '../../../src/utils/libraryIdentity';
 
 const ELEMENT_NODE = 1;
 
@@ -54,6 +55,7 @@ export async function handleTestReaderStateHttpRequest(request: any): Promise<an
 
     let reader: any | undefined;
     if (library_id != null && zotero_key != null) {
+        if (library_id === UNRESOLVED_LIBRARY_ID) return { ok: false, error: 'library_unavailable' };
         const item = await Zotero.Items.getByLibraryAndKeyAsync(library_id, zotero_key);
         if (!item) return { ok: false, error: 'not_found' };
         if (!item.isAttachment()) return { ok: false, error: 'not_an_attachment' };
@@ -104,7 +106,7 @@ export async function handleTestEpubCitationNavigateHttpRequest(request: any): P
         use_temporary_annotations,
         cleanup,
     } = request || {};
-    if (library_id == null || zotero_key == null) {
+    if (library_id == null || zotero_key == null || library_id === UNRESOLVED_LIBRARY_ID) {
         return { ok: false, error: 'Provide library_id + zotero_key' };
     }
     const item = await Zotero.Items.getByLibraryAndKeyAsync(library_id, zotero_key);

@@ -1018,3 +1018,144 @@ export async function resolveItemDisplay(
     if (!res.ok) throw new Error(`resolve-item-display failed: ${res.error ?? 'unknown'}`);
     return res.display;
 }
+
+// -------------------------------------------------------------------------
+// Library exclusion (/beaver/test/excluded-libraries)
+// -------------------------------------------------------------------------
+
+/** One entry in the profile's excluded-libraries list. */
+export interface ExcludedLibraryEntry {
+    type: 'user' | 'group';
+    group_id?: number | null;
+}
+
+export interface ExclusionStateResponse {
+    ok: boolean;
+    has_profile: boolean;
+    excluded_libraries: ExcludedLibraryEntry[];
+    searchable_library_ids: number[];
+    local_library_ids: number[];
+    error?: string;
+}
+
+/** Read the current in-memory exclusion state (excluded entries + derived ids). */
+export async function getExcludedLibraries(): Promise<ExclusionStateResponse> {
+    return post('/beaver/test/excluded-libraries', { action: 'get' });
+}
+
+/**
+ * Overwrite the in-memory excluded set so exactly `libraryIds` are excluded.
+ * In-memory only (no backend write); pair with a restore in teardown.
+ */
+export async function setExcludedLibraries(libraryIds: number[]): Promise<ExclusionStateResponse> {
+    return post('/beaver/test/excluded-libraries', {
+        action: 'set',
+        exclude_library_ids: libraryIds,
+    });
+}
+
+/** Restore the excluded set to a captured list of raw entries (verbatim). */
+export async function restoreExcludedLibraries(
+    entries: ExcludedLibraryEntry[],
+): Promise<ExclusionStateResponse> {
+    return post('/beaver/test/excluded-libraries', {
+        action: 'set',
+        excluded_libraries: entries,
+    });
+}
+
+// -------------------------------------------------------------------------
+// Exclusion-gated handlers without a production HTTP route
+// -------------------------------------------------------------------------
+
+export interface GetAnnotationsResponse {
+    type?: string;
+    annotations?: unknown[];
+    total_count?: number;
+    error?: string | null;
+    error_code?: string | null;
+}
+
+/** Invoke `handleGetAnnotationsRequest` via `/beaver/test/get-annotations`. */
+export async function getAnnotations(
+    attachment: AttachmentFixture,
+    extra?: { limit?: number; offset?: number },
+): Promise<GetAnnotationsResponse> {
+    return post('/beaver/test/get-annotations', {
+        attachment_id: `${attachment.library_id}-${attachment.zotero_key}`,
+        limit: extra?.limit,
+        offset: extra?.offset,
+    });
+}
+
+export interface HandlerImageResponse {
+    type?: string;
+    kind?: string | null;
+    images?: unknown[];
+    error?: string | null;
+    error_code?: string | null;
+}
+
+/** Invoke `handleZoteroViewImagesRequest` for a Zotero attachment reference. */
+export async function viewAttachmentImages(
+    attachment: AttachmentFixture,
+    extra?: { start_page?: number; end_page?: number; dpi?: number },
+): Promise<HandlerImageResponse> {
+    return post('/beaver/test/view-images', {
+        attachment: { library_id: attachment.library_id, zotero_key: attachment.zotero_key },
+        ...extra,
+    });
+}
+
+/** Invoke `handleZoteroAttachmentImageRequest` for a Zotero attachment reference. */
+export async function fetchAttachmentImage(
+    attachment: AttachmentFixture,
+    extra?: { max_width?: number; max_height?: number },
+): Promise<HandlerImageResponse> {
+    return post('/beaver/test/attachment-image', {
+        attachment: { library_id: attachment.library_id, zotero_key: attachment.zotero_key },
+        ...extra,
+    });
+}
+
+// =============================================================================
+// Device-portable library identity (/beaver/test/library-identity)
+// =============================================================================
+
+/** Structured `library_ref` returned by `parseLibraryRef`. */
+export type ParsedLibraryRef = { type: 'user' } | { type: 'group'; groupID: number };
+
+export interface ResolveItemReferenceResponse {
+    status: 'found' | 'library_unavailable' | 'not_found';
+    resolved_library_id?: number;
+    item_id?: string;
+    item_type?: string;
+}
+
+/** `libraryRefForLibraryID(library_id)` — portable ref for a local library id (null if none). */
+export async function libraryRefForId(
+    library_id: number,
+): Promise<{ library_ref: string | null; error?: string }> {
+    return post('/beaver/test/library-identity', { op: 'ref_for_id', library_id });
+}
+
+/** `parseLibraryRef(library_ref)` + `LIBRARY_REF_PATTERN.test(library_ref)`. */
+export async function parseLibraryRefViaHttp(
+    library_ref: string,
+): Promise<{ parsed: ParsedLibraryRef | null; matches_pattern: boolean }> {
+    return post('/beaver/test/library-identity', { op: 'parse', library_ref });
+}
+
+/** `resolveLibraryRef({ library_ref, library_id })` — local library id or null. */
+export async function resolveLibraryRefViaHttp(
+    ref: { library_ref?: string | null; library_id?: number },
+): Promise<{ resolved_library_id: number | null }> {
+    return post('/beaver/test/library-identity', { op: 'resolve_ref', ...ref });
+}
+
+/** `resolveItemReference({ library_ref, library_id, zotero_key })` — tri-state resolution. */
+export async function resolveItemReferenceViaHttp(
+    ref: { library_ref?: string | null; library_id?: number; zotero_key?: string },
+): Promise<ResolveItemReferenceResponse> {
+    return post('/beaver/test/library-identity', { op: 'resolve_item', ...ref });
+}

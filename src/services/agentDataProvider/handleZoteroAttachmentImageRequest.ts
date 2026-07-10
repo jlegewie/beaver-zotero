@@ -15,8 +15,10 @@ import {
     AttachmentImageErrorCode,
 } from '../agentProtocol';
 import { ZoteroItemReference } from '../../../react/types/zotero';
+import { libraryRefForLibraryID } from '../../utils/libraryIdentity';
 import { makeRemoteFilePath } from '../documentFileIdentity';
 import {
+    preflightZoteroAttachmentRequest,
     resolveToImageAttachment,
     validateZoteroItemReference,
     loadPdfData,
@@ -56,7 +58,8 @@ export async function handleZoteroAttachmentImageRequest(
     request: WSZoteroAttachmentImageRequest
 ): Promise<WSZoteroAttachmentImageResponse> {
     const { attachment, max_width, max_height, format, jpeg_quality, request_id, timeout_seconds } = request;
-    const requestKey = `${attachment.library_id}-${attachment.zotero_key}`;
+    const preflight = preflightZoteroAttachmentRequest(attachment, validateZoteroItemReference);
+    const { responseAttachment, requestKey } = preflight;
     let errorKey = requestKey;
 
     // Captured by errorResponse so every post-resolution error reports which
@@ -69,7 +72,7 @@ export async function handleZoteroAttachmentImageRequest(
     ): WSZoteroAttachmentImageResponse => ({
         type: 'zotero_attachment_image',
         request_id,
-        attachment,
+        attachment: responseAttachment,
         resolved_attachment: resolvedRef,
         image: null,
         error,
@@ -77,12 +80,8 @@ export async function handleZoteroAttachmentImageRequest(
     });
 
     // 0. Validate request shape
-    const formatError = validateZoteroItemReference(attachment);
-    if (formatError) {
-        return errorResponse(
-            `Invalid attachment reference '${requestKey}': ${formatError}`,
-            'invalid_format'
-        );
+    if (!preflight.ok && preflight.errorCode === 'invalid_format') {
+        return errorResponse(preflight.error, preflight.errorCode);
     }
     if (format !== undefined && !['png', 'jpeg', 'auto'].includes(format)) {
         return errorResponse(
@@ -90,6 +89,10 @@ export async function handleZoteroAttachmentImageRequest(
             'invalid_format'
         );
     }
+    if (!preflight.ok) {
+        return errorResponse(preflight.error, preflight.errorCode);
+    }
+    const { resolvedLibraryId } = preflight;
 
     const maxWidth = effectiveMaxDimension(max_width);
     const maxHeight = effectiveMaxDimension(max_height);
@@ -98,9 +101,8 @@ export async function handleZoteroAttachmentImageRequest(
     const { signal, timeoutSeconds, throwIfTimedOut, dispose } = timeout;
 
     try {
-        // 1. Get the attachment item from Zotero
         const zoteroItem = await Zotero.Items.getByLibraryAndKeyAsync(
-            attachment.library_id,
+            resolvedLibraryId,
             attachment.zotero_key
         );
         throwIfTimedOut('zotero_item_lookup');
@@ -123,7 +125,11 @@ export async function handleZoteroAttachmentImageRequest(
         }
         const { item: imageItem, key: imageKey } = resolveResult;
         errorKey = imageKey;
-        resolvedRef = { library_id: imageItem.libraryID, zotero_key: imageItem.key };
+        resolvedRef = {
+            library_id: imageItem.libraryID,
+            zotero_key: imageItem.key,
+            library_ref: libraryRefForLibraryID(imageItem.libraryID) ?? undefined,
+        };
 
         // 3. Get the file path — returns false if missing or nonexistent
         const rawFilePath = await imageItem.getFilePathAsync();
@@ -218,7 +224,7 @@ export async function handleZoteroAttachmentImageRequest(
         return {
             type: 'zotero_attachment_image',
             request_id,
-            attachment,
+            attachment: responseAttachment,
             resolved_attachment: resolvedRef,
             image: {
                 image_data: uint8ToBase64(processed.data),

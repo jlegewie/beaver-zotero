@@ -33,8 +33,8 @@ export interface ChipPopupStatus {
 }
 
 export interface ChipPopupContent {
-    /** Pre-rendered icon node — mirrors the icon shown on the chip itself. */
-    icon: React.ReactNode;
+    /** Pre-rendered icon node — mirrors the icon shown on the chip itself. Omit for text-only headers (e.g. action pills). */
+    icon?: React.ReactNode;
     /** Primary line: bibliographic display name / attachment title / note title. */
     title: string;
     /** Optional relationship/second line. */
@@ -69,10 +69,10 @@ export interface ChipListPopupContent {
 
 const POPUP_WIDTH = '260px';
 
-const ChipPopupCard: React.FC<ChipPopupContent> = ({ icon, title, subtitle, status, media, action }) => (
+export const ChipPopupCard: React.FC<ChipPopupContent> = ({ icon, title, subtitle, status, media, action }) => (
     <span className="block" style={{ overflow: 'hidden' }}>
         <span className="px-3 py-15 mt-1 display-flex flex-row items-start gap-2">
-            <span className="flex-shrink-0">{icon}</span>
+            {icon && <span className="flex-shrink-0">{icon}</span>}
             <span className="display-flex flex-col gap-1 min-w-0">
                 <span
                     className="font-color-primary"

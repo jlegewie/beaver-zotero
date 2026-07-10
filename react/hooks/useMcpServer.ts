@@ -28,6 +28,13 @@ import {
 } from '../../src/services/agentDataProvider';
 import type { TimeoutContext } from '../../src/services/agentDataProvider/timeout';
 import { getCitationKeyFromItem, getZoteroSelectURI } from '../../src/utils/zoteroUtils';
+import {
+    libraryRefForLibraryID,
+    modelObjectId,
+    modelObjectIdFromReference,
+    resolveObjectId,
+    UNRESOLVED_LIBRARY_ID,
+} from '../../src/utils/libraryIdentity';
 import { logger } from '../../src/utils/logger';
 import { isAuthenticatedAtom } from '../atoms/auth';
 import { mcpCreateNoteToolEnabledAtom, mcpServerEnabledAtom } from '../atoms/ui';
@@ -312,7 +319,7 @@ const READ_ATTACHMENT_TOOL = {
             attachment_id: {
                 type: 'string',
                 description:
-                    'The attachment ID in format `<library_id>-<zotero_key>` (e.g., "1-ABC12345"). Obtain this from search results.',
+                    'The attachment ID as returned by other tools, in the form `<library>-<zotero_key>` (e.g., "u-ABC12345"; legacy numeric ids like "1-ABC12345" are also accepted). Obtain this from search results.',
             },
             start_page: {
                 type: 'integer',
@@ -347,7 +354,7 @@ const READ_NOTE_TOOL = {
             note_id: {
                 type: 'string',
                 description:
-                    'The note ID in format `<library_id>-<zotero_key>` (e.g., "1-ABC12345"). Obtain this from tool results.',
+                    'The note ID as returned by other tools, in the form `<library>-<zotero_key>` (e.g., "u-ABC12345"; legacy numeric ids are also accepted). Obtain this from tool results.',
             },
             offset: {
                 type: 'integer',
@@ -388,12 +395,12 @@ const CREATE_NOTE_TOOL = {
             content: {
                 type: 'string',
                 description:
-                    'Markdown content with `<citation>` tags, e.g. `<citation id="1-ABC12345" loc="page5"/>`. Use IDs and locators from tool results only.',
+                    'Markdown content with `<citation>` tags, e.g. `<citation id="u-ABC12345" loc="page5"/>`. Use IDs and locators from tool results only.',
             },
             parent_id: {
                 type: 'string',
                 description:
-                    'Optional parent item ID in `<library_id>-<zotero_key>` format. Creates the note as a child of that item.',
+                    'Optional parent item ID in `<library>-<zotero_key>` form as returned by other tools. Creates the note as a child of that item.',
             },
             library: {
                 type: 'string',
@@ -432,7 +439,7 @@ const GET_ITEM_DETAILS_TOOL = {
                 type: 'array',
                 items: { type: 'string' },
                 description:
-                    'Item IDs in format `<library_id>-<zotero_key>` (e.g., ["1-ABC12345"]). Maximum 25 items.',
+                    'Item IDs in `<library>-<zotero_key>` form as returned by other tools (e.g., ["u-ABC12345"]; legacy numeric ids are also accepted). Maximum 25 items.',
             },
             include_attachments: {
                 type: 'boolean',
@@ -625,21 +632,23 @@ function generateRequestId(): string {
     return `${Date.now()}-${Math.random().toString(36).substring(2, 10)}`;
 }
 
-function parseItemId(itemId: string | null | undefined): { libraryId: number; key: string } | null {
+/**
+ * Parses an MCP item/attachment id in the portable ("u-KEY" / "g<groupID>-KEY")
+ * or legacy numeric ("<libraryID>-KEY") form. `libraryId` is resolved to this
+ * device; `UNRESOLVED_LIBRARY_ID` means the library isn't available here.
+ */
+function parseItemId(itemId: string | null | undefined): { libraryId: number; key: string; libraryRef?: string } | null {
     if (!itemId) return null;
-    const dashIndex = itemId.indexOf('-');
-    if (dashIndex === -1) return null;
-    const libraryId = parseInt(itemId.substring(0, dashIndex), 10);
-    const key = itemId.substring(dashIndex + 1);
-    if (isNaN(libraryId) || !key) return null;
-    return { libraryId, key };
+    const resolved = resolveObjectId(itemId);
+    if (!resolved) return null;
+    return { libraryId: resolved.library_id, key: resolved.zotero_key, libraryRef: resolved.library_ref };
 }
 
 function getMcpAttachmentId(attachment: any): string | null {
     if (attachment.attachment_id) return attachment.attachment_id;
     if (attachment.item_id) return attachment.item_id;
     if (attachment.attachment?.library_id != null && attachment.attachment?.zotero_key) {
-        return `${attachment.attachment.library_id}-${attachment.attachment.zotero_key}`;
+        return modelObjectIdFromReference(attachment.attachment);
     }
     return null;
 }
@@ -705,7 +714,7 @@ function normalizeTags(tags: any[] | null | undefined): string[] {
 function formatSearchResultItem(entry: ItemSearchFrontendResultItem, includeSimilarity: boolean): any {
     const item = entry.item;
     const result: any = {
-        item_id: `${item.library_id}-${item.zotero_key}`,
+        item_id: modelObjectIdFromReference(item),
         item_type: item.item_type,
         title: item.title ?? 'Untitled',
         authors: formatAuthors(item.creators),
@@ -844,7 +853,12 @@ export async function handleReadAttachment(args: any): Promise<any> {
     const parsed = parseItemId(args.attachment_id);
     if (!parsed) {
         return mcpError(
-            `Invalid attachment_id format: "${args.attachment_id}". Expected format: <library_id>-<zotero_key> (e.g., "1-ABC12345").`,
+            `Invalid attachment_id format: "${args.attachment_id}". Expected format: <library>-<zotero_key> (e.g., "u-ABC12345" or "1-ABC12345").`,
+        );
+    }
+    if (parsed.libraryId === UNRESOLVED_LIBRARY_ID) {
+        return mcpError(
+            `The library for attachment "${args.attachment_id}" is not available on this computer.`,
         );
     }
 
@@ -868,7 +882,11 @@ export async function handleReadAttachment(args: any): Promise<any> {
     const wsRequest: WSZoteroDocumentRequest = {
         event: 'zotero_document_request',
         request_id: generateRequestId(),
-        attachment: { library_id: parsed.libraryId, zotero_key: parsed.key },
+        attachment: {
+            library_id: parsed.libraryId,
+            zotero_key: parsed.key,
+            library_ref: parsed.libraryRef ?? libraryRefForLibraryID(parsed.libraryId) ?? undefined,
+        },
         mode: 'markdown',
     };
 
@@ -1043,7 +1061,7 @@ export async function handleReadNote(args: any): Promise<any> {
         next_offset: response.next_offset ?? null,
         content: response.content ?? '',
         cited_items: (response.cited_items ?? []).map((item) => ({
-            item_id: `${item.library_id}-${item.zotero_key}`,
+            item_id: modelObjectIdFromReference(item),
             item_type: item.item_type,
             title: item.title ?? null,
         })),
@@ -1124,9 +1142,9 @@ export async function handleCreateNote(args: any): Promise<any> {
     const citedItemsData = result.cited_items_data ?? {};
 
     return {
-        note_id: libraryId != null && noteKey ? `${libraryId}-${noteKey}` : null,
-        parent_item_id: libraryId != null && result.parent_key ? `${libraryId}-${result.parent_key}` : null,
-        related_item_id: libraryId != null && result.related_item_key ? `${libraryId}-${result.related_item_key}` : null,
+        note_id: libraryId != null && noteKey ? modelObjectId(libraryId, noteKey) : null,
+        parent_item_id: libraryId != null && result.parent_key ? modelObjectId(libraryId, result.parent_key) : null,
+        related_item_id: libraryId != null && result.related_item_key ? modelObjectId(libraryId, result.related_item_key) : null,
         collection_key: result.collection_key ?? null,
         note_content: result.note_content ?? null,
         warning: result.warning ?? null,
@@ -1160,9 +1178,12 @@ async function handleGetItemDetails(args: any): Promise<any> {
         return mcpError(`Failed to get item details: ${response.error}`);
     }
 
-    // Enrich items with zotero_uri, citation keys, and transform attachments
+    // Enrich items with zotero_uri, citation keys, and transform attachments.
+    // An unresolvable portable id (library not on this device) skips the
+    // device-local enrichment; the row itself still passes through.
     const items = await Promise.all(response.items.map(async (item) => {
-        const parsed = parseItemId(item.item_id);
+        const parsedRaw = parseItemId(item.item_id);
+        const parsed = parsedRaw && parsedRaw.libraryId !== UNRESOLVED_LIBRARY_ID ? parsedRaw : null;
 
         // Add zotero://select URI
         if (parsed) {
@@ -1361,7 +1382,9 @@ async function handleListItems(args: any): Promise<any> {
                 ? (item.attachment_id ?? (item as any).item_id)
                 : item.item_id;
             const parsed = parseItemId(rowItemId);
-            const zoteroUri = parsed ? getZoteroSelectURI(parsed.libraryId, parsed.key) : null;
+            const zoteroUri = parsed && parsed.libraryId !== UNRESOLVED_LIBRARY_ID
+                ? getZoteroSelectURI(parsed.libraryId, parsed.key)
+                : null;
             const uriField = zoteroUri ? { zotero_uri: zoteroUri } : {};
 
             if (item.result_type === 'note') {

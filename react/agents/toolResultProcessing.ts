@@ -1,6 +1,7 @@
 import { Setter } from "jotai";
 import { addExternalReferencesToMappingAtom, checkExternalReferencesAtom } from "../atoms/externalReferences";
 import { loadFullItemDataWithAllTypes } from "../../src/utils/zoteroUtils";
+import { resolveItemReference } from "../../src/utils/libraryIdentity";
 import { extractExternalSearchData, extractLookupWorkData, isExternalSearchResult, isLookupWorkResult } from "./toolResultTypes";
 import { ToolReturnPart } from "./types";
 import { extractZoteroReferences } from "./toolResultTypes";
@@ -46,8 +47,13 @@ export async function processToolReturnResults(
         const itemReferences = extractZoteroReferences(part);
         if (itemReferences) {
             logger(`processToolReturnResults: Loading ${itemReferences.length} item data`, 1);
-            const itemPromises = itemReferences.map(ref => Zotero.Items.getByLibraryAndKeyAsync(ref.library_id, ref.zotero_key));
-            const items = (await Promise.all(itemPromises)).filter(Boolean) as Zotero.Item[];
+            // Resolve through the tri-state helper: refs whose library isn't
+            // available on this device (or whose key is gone) are skipped
+            // instead of hitting Zotero with an unresolvable library id.
+            const resolutions = await Promise.all(itemReferences.map(ref => resolveItemReference(ref)));
+            const items = resolutions
+                .filter((res): res is Extract<typeof res, { status: 'found' }> => res.status === 'found')
+                .map(res => res.item);
             await loadFullItemDataWithAllTypes(items);
         }
     }

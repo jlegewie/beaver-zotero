@@ -12,8 +12,11 @@
  * path in react/utils/createNoteActions.ts so both flows behave identically.
  */
 
+import { parseItemReference, resolveItemReference } from '../../../utils/libraryIdentity';
+
 export type CreateNoteParentErrorCode =
     | 'invalid_parent_id'
+    | 'library_unavailable'
     | 'item_not_found'
     | 'invalid_parent_type';
 
@@ -47,6 +50,7 @@ export type CreateNoteParentResult =
  */
 export async function resolveCreateNoteParent(
     rawParentItemId: string | null | undefined,
+    parentLibraryRef?: string | null,
 ): Promise<CreateNoteParentResult> {
     if (!rawParentItemId) {
         return {
@@ -58,39 +62,48 @@ export async function resolveCreateNoteParent(
         };
     }
 
-    const dashIdx = rawParentItemId.indexOf('-');
-    if (dashIdx <= 0) {
+    // Accept both the portable "<library_ref>-<zotero_key>" grammar and the
+    // legacy "<library_id>-<zotero_key>" numeric grammar.
+    const parsedId = parseItemReference(rawParentItemId);
+    if (!parsedId) {
         return {
             ok: false,
-            error: `Invalid parent_item_id format: "${rawParentItemId}". Expected "<library_id>-<zotero_key>"`,
-            errorCode: 'invalid_parent_id',
-        };
-    }
-    const parentLibraryId = parseInt(rawParentItemId.substring(0, dashIdx), 10);
-    const parentZoteroKey = rawParentItemId.substring(dashIdx + 1);
-
-    if (isNaN(parentLibraryId) || !parentZoteroKey) {
-        return {
-            ok: false,
-            error: `Invalid parent_item_id format: "${rawParentItemId}". Expected "<library_id>-<zotero_key>"`,
+            error: `Invalid parent_item_id format: "${rawParentItemId}". Expected "<library_ref>-<zotero_key>" or "<library_id>-<zotero_key>"`,
             errorCode: 'invalid_parent_id',
         };
     }
 
-    const item = await Zotero.Items.getByLibraryAndKeyAsync(parentLibraryId, parentZoteroKey);
-    if (!item) {
+    // A library_ref embedded in the id string is what the model actually
+    // said, so it wins over the separately-supplied parentLibraryRef. The
+    // parameter only applies as a fallback for a legacy numeric id, which
+    // carries no ref of its own.
+    const resolved = await resolveItemReference({
+        library_ref: parsedId.library_ref ?? parentLibraryRef,
+        library_id: parsedId.library_id,
+        zotero_key: parsedId.zotero_key,
+    });
+    if (resolved.status === 'library_unavailable') {
+        return {
+            ok: false,
+            error: `Parent item library is not available on this computer: ${rawParentItemId}`,
+            errorCode: 'library_unavailable',
+        };
+    }
+    if (resolved.status === 'not_found') {
         return {
             ok: false,
             error: `Parent item not found: ${rawParentItemId}`,
             errorCode: 'item_not_found',
         };
     }
+    const item = resolved.item;
+    const resolvedLibraryId = item.libraryID;
 
     if (item.isRegularItem()) {
         return {
             ok: true,
-            parentKey: parentZoteroKey,
-            resolvedLibraryId: parentLibraryId,
+            parentKey: item.key,
+            resolvedLibraryId,
             relatedItemKey: null,
             warning: null,
         };
@@ -101,7 +114,7 @@ export async function resolveCreateNoteParent(
             return {
                 ok: true,
                 parentKey: item.parentKey,
-                resolvedLibraryId: parentLibraryId,
+                resolvedLibraryId,
                 relatedItemKey: null,
                 warning: null,
             };
@@ -110,7 +123,7 @@ export async function resolveCreateNoteParent(
         return {
             ok: true,
             parentKey: null,
-            resolvedLibraryId: parentLibraryId,
+            resolvedLibraryId,
             relatedItemKey: item.key,
             warning: `Parent ${rawParentItemId} is a standalone ${kind} and cannot have child notes; created a standalone note related to it instead.`,
         };
@@ -146,7 +159,7 @@ export async function resolveCreateNoteParent(
             return {
                 ok: true,
                 parentKey: parentAttachment.parentKey,
-                resolvedLibraryId: parentLibraryId,
+                resolvedLibraryId,
                 relatedItemKey: null,
                 warning: null,
             };
@@ -154,7 +167,7 @@ export async function resolveCreateNoteParent(
         return {
             ok: true,
             parentKey: null,
-            resolvedLibraryId: parentLibraryId,
+            resolvedLibraryId,
             relatedItemKey: parentAttachment.key,
             warning: `Parent ${rawParentItemId} is an annotation on a standalone attachment and cannot have child notes; created a standalone note related to the attachment instead.`,
         };

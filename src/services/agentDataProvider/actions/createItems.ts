@@ -9,7 +9,8 @@ import {
     WSAgentActionExecuteResponse,
     FrontendTimingMetadata,
 } from '../../agentProtocol';
-import { getDeferredToolPreference } from '../utils';
+import { checkLibraryExcluded, excludedLibraryMessage, getDeferredToolPreference } from '../utils';
+import { libraryRefForLibraryID, resolveWriteTargetLibrary, writeTargetLibraryError } from '../../../utils/libraryIdentity';
 import { TimeoutContext, checkAborted } from '../timeout';
 import { TimeoutError } from '../timeout';
 import { TimingAccumulator } from '../../../utils/timing';
@@ -38,8 +39,9 @@ interface CreateItemValidationItem {
 async function validateCreateItemAction(
     request: WSAgentActionValidateRequest
 ): Promise<WSAgentActionValidateResponse> {
-    const { library_id: rawLibraryId, library_name, items, collections, tags } = request.action_data as {
+    const { library_id: rawLibraryId, library_ref, library_name, items, collections, tags } = request.action_data as {
         library_id?: number | null;
+        library_ref?: string | null;
         library_name?: string | null;
         items: CreateItemValidationItem[];
         collections?: string[];
@@ -71,44 +73,17 @@ async function validateCreateItemAction(
         };
     }
 
-    // Resolve target library: use provided ID, resolve name, or default to user's main library
-    let targetLibraryId: number;
-
-    if (rawLibraryId == null || rawLibraryId === 0) {
-        // Not provided or normalized to 0 — try library_name, then default
-        if (library_name) {
-            const allLibraries = Zotero.Libraries.getAll();
-            const matchedLibrary = allLibraries.find(
-                (lib) => lib.name.toLowerCase() === library_name.toLowerCase()
-            );
-            if (!matchedLibrary) {
-                const availableNames = allLibraries.map((lib) => lib.name).join(', ');
-                return {
-                    type: 'agent_action_validate_response',
-                    request_id: request.request_id,
-                    valid: false,
-                    error: `Library not found: "${library_name}". Omit the library parameter to use the default library. Available libraries: ${availableNames}`,
-                    error_code: 'library_not_found',
-                    preference: 'always_ask',
-                };
-            }
-            targetLibraryId = matchedLibrary.libraryID;
-        } else {
-            targetLibraryId = Zotero.Libraries.userLibraryID;
-        }
-    } else if (typeof rawLibraryId === 'number' && rawLibraryId > 0) {
-        targetLibraryId = rawLibraryId;
-    } else {
-        // Explicitly provided but invalid (negative, NaN, fractional, etc.)
+    const targetResolution = resolveWriteTargetLibrary({ library_ref, library_id: rawLibraryId, library_name });
+    if (!targetResolution.ok) {
         return {
             type: 'agent_action_validate_response',
             request_id: request.request_id,
             valid: false,
-            error: `Invalid library ID: ${rawLibraryId}`,
-            error_code: 'library_not_found',
+            ...writeTargetLibraryError(targetResolution),
             preference: 'always_ask',
         };
     }
+    const targetLibraryId = targetResolution.libraryID;
 
     // Validate library exists
     const targetLibrary = Zotero.Libraries.get(targetLibraryId);
@@ -129,7 +104,7 @@ async function validateCreateItemAction(
             type: 'agent_action_validate_response',
             request_id: request.request_id,
             valid: false,
-            error: `Library "${targetLibrary.name}" is not synced with Beaver.`,
+            error: excludedLibraryMessage(targetLibraryId),
             error_code: 'library_not_searchable',
             preference: 'always_ask',
         };
@@ -206,6 +181,7 @@ async function validateCreateItemAction(
         valid: true,
         current_value: {
             library_id: targetLibraryId,
+            library_ref: libraryRefForLibraryID(targetLibraryId) ?? undefined,
             library_name: targetLibrary.name,
             items_count: items.length,
             existing_items: existingItems,
@@ -253,43 +229,32 @@ async function executeCreateItemAction(
 
     // Resolve target library: use provided ID, resolve name, or default to user's main library
     const libResolveStart = Date.now();
-    let library_id: number;
-
-    if (proposedData.library_id != null && proposedData.library_id !== 0) {
-        if (typeof proposedData.library_id === 'number' && proposedData.library_id > 0) {
-            library_id = proposedData.library_id;
-        } else {
-            ta.record('resolve_library_ms', Date.now() - libResolveStart);
-            return {
-                type: 'agent_action_execute_response',
-                request_id: request.request_id,
-                success: false,
-                error: `Invalid library ID: ${proposedData.library_id}`,
-                error_code: 'library_not_found',
-                timing: buildTiming(),
-            };
-        }
-    } else if (proposedData.library_name) {
-        const allLibraries = Zotero.Libraries.getAll();
-        const matchedLibrary = allLibraries.find(
-            (lib) => lib.name.toLowerCase() === proposedData.library_name!.toLowerCase()
-        );
-        if (!matchedLibrary) {
-            ta.record('resolve_library_ms', Date.now() - libResolveStart);
-            return {
-                type: 'agent_action_execute_response',
-                request_id: request.request_id,
-                success: false,
-                error: `Library not found: "${proposedData.library_name}"`,
-                error_code: 'library_not_found',
-                timing: buildTiming(),
-            };
-        }
-        library_id = matchedLibrary.libraryID;
-    } else {
-        library_id = Zotero.Libraries.userLibraryID;
-    }
+    const targetResolution = resolveWriteTargetLibrary(proposedData);
     ta.record('resolve_library_ms', Date.now() - libResolveStart);
+    if (!targetResolution.ok) {
+        return {
+            type: 'agent_action_execute_response',
+            request_id: request.request_id,
+            success: false,
+            ...writeTargetLibraryError(targetResolution),
+            timing: buildTiming(),
+        };
+    }
+    const library_id = targetResolution.libraryID;
+
+    // TOCTOU guard: never create in a library the user excluded from Beaver,
+    // even if validation passed earlier or the execute request skipped it.
+    const excluded = checkLibraryExcluded(library_id);
+    if (excluded) {
+        return {
+            type: 'agent_action_execute_response',
+            request_id: request.request_id,
+            success: false,
+            error: excluded.message,
+            error_code: 'library_not_searchable',
+            timing: buildTiming(),
+        };
+    }
 
     try {
         logger(`executeCreateItemAction: Creating item "${proposedData.item.title}" in library ${library_id}`, 1);

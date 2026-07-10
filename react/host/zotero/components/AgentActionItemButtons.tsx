@@ -26,6 +26,8 @@ import {
 import { ButtonVariant } from '../../../components/ui/Button';
 import { CreateItemAgentAction } from '../../../agents/agentActions';
 import { ZoteroItemReference } from '../../../types/zotero';
+import { resolveSearchableLibraryId } from '../libraryAccess';
+import { searchableLibraryIdsAtom } from '../../../atoms/profile';
 
 const CITED_BY_URL = 'https://openalex.org/works?page=1&filter=cites:';
 
@@ -68,6 +70,7 @@ const AgentActionItemButtons: React.FC<AgentActionItemButtonsProps> = ({
     const checkReference = useSetAtom(checkExternalReferenceAtom);
     const getCachedReference = useAtomValue(getCachedReferenceForObjectAtom);
     const isChecking = useAtomValue(isCheckingReferenceObjectAtom);
+    const searchableLibraryIds = useAtomValue(searchableLibraryIdsAtom);
     
     // Local state for library item reference
     const [existingItemRef, setExistingItemRef] = useState<ZoteroItemReference | null>(null);
@@ -80,7 +83,8 @@ const AgentActionItemButtons: React.FC<AgentActionItemButtonsProps> = ({
         if (action.status === 'applied' && action.result_data?.zotero_key) {
             return {
                 library_id: action.result_data.library_id,
-                zotero_key: action.result_data.zotero_key
+                zotero_key: action.result_data.zotero_key,
+                library_ref: action.result_data.library_ref,
             };
         }
         // Otherwise use existing library match if found
@@ -139,27 +143,40 @@ const AgentActionItemButtons: React.FC<AgentActionItemButtonsProps> = ({
 
     // Fetch best attachment when we have an item reference
     useEffect(() => {
+        let cancelled = false;
         const fetchAttachment = async () => {
             if (!effectiveItemRef) {
                 setBestAttachment(null);
                 return;
             }
-            
+            const libraryId = resolveSearchableLibraryId(
+                effectiveItemRef,
+                searchableLibraryIds,
+            );
+            if (!libraryId) {
+                setBestAttachment(null);
+                return;
+            }
+
             const zoteroItem = await Zotero.Items.getByLibraryAndKeyAsync(
-                effectiveItemRef.library_id,
+                libraryId,
                 effectiveItemRef.zotero_key
             );
             
             if (zoteroItem && zoteroItem.isRegularItem()) {
+                await Zotero.Items.loadDataTypes([zoteroItem], ['itemData', 'childItems']);
                 const attachment = await zoteroItem.getBestAttachment();
-                setBestAttachment(attachment || null);
+                if (!cancelled) setBestAttachment(attachment || null);
             } else {
-                setBestAttachment(null);
+                if (!cancelled) setBestAttachment(null);
             }
         };
         
-        fetchAttachment();
-    }, [effectiveItemRef]);
+        void fetchAttachment().catch(() => {
+            if (!cancelled) setBestAttachment(null);
+        });
+        return () => { cancelled = true; };
+    }, [effectiveItemRef, searchableLibraryIds]);
 
     const handleShowDetails = useCallback(() => {
         setSelectedReference(item);
@@ -331,4 +348,3 @@ const AgentActionItemButtons: React.FC<AgentActionItemButtonsProps> = ({
 };
 
 export default AgentActionItemButtons;
-

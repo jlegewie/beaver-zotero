@@ -9,9 +9,10 @@ import {
     WSAgentActionExecuteRequest,
     WSAgentActionExecuteResponse,
 } from '../../agentProtocol';
-import { getDeferredToolPreference } from '../utils';
+import { checkLibraryExcluded, excludedLibraryMessage, getDeferredToolPreference } from '../utils';
 import { TimeoutContext, checkAborted } from '../timeout';
 import { TimeoutError } from '../timeout';
+import { libraryRefForLibraryID, resolveItemReference, resolveLibraryRef } from '../../../utils/libraryIdentity';
 
 
 /**
@@ -325,21 +326,61 @@ function restoreCreatorSnapshots(item: any, originalCreators: any[] | null): voi
 async function validateEditMetadataAction(
     request: WSAgentActionValidateRequest
 ): Promise<WSAgentActionValidateResponse> {
-    const { library_id, zotero_key, edits, creators } = request.action_data as {
+    const { library_id, library_ref, zotero_key, edits, creators } = request.action_data as {
         library_id: number;
+        library_ref?: string;
         zotero_key: string;
         edits: MetadataEdit[];
         creators?: CreatorJSON[] | null;
     };
 
+    // Enforce the exclusion boundary before resolving/loading the item.
+    // library_ref is authoritative when the numeric library_id is stale.
+    const targetLibraryId = resolveLibraryRef({ library_id, library_ref });
+    const excluded = targetLibraryId === null ? null : checkLibraryExcluded(targetLibraryId);
+    if (excluded) {
+        return {
+            type: 'agent_action_validate_response',
+            request_id: request.request_id,
+            valid: false,
+            error: excluded.message,
+            error_code: 'library_not_searchable',
+            preference: 'always_ask',
+        };
+    }
+
+    const resolved = await resolveItemReference({ library_id, library_ref, zotero_key });
+    if (resolved.status === 'library_unavailable') {
+        return {
+            type: 'agent_action_validate_response',
+            request_id: request.request_id,
+            valid: false,
+            error: `Library not available for item: ${library_ref || library_id}-${zotero_key}`,
+            error_code: 'library_unavailable',
+            preference: 'always_ask',
+        };
+    }
+    if (resolved.status === 'not_found') {
+        return {
+            type: 'agent_action_validate_response',
+            request_id: request.request_id,
+            valid: false,
+            error: `Item not found: ${library_id}-${zotero_key}`,
+            error_code: 'item_not_found',
+            preference: 'always_ask',
+        };
+    }
+    const item = resolved.item;
+    const resolvedLibraryId = item.libraryID;
+
     // Validate library exists
-    const library = Zotero.Libraries.get(library_id);
+    const library = Zotero.Libraries.get(resolvedLibraryId);
     if (!library) {
         return {
             type: 'agent_action_validate_response',
             request_id: request.request_id,
             valid: false,
-            error: `Library not found: ${library_id}`,
+            error: `Library not found: ${resolvedLibraryId}`,
             error_code: 'library_not_found',
             preference: 'always_ask',
         };
@@ -347,26 +388,13 @@ async function validateEditMetadataAction(
 
     // Validate library is searchable
     const searchableLibraryIds = store.get(searchableLibraryIdsAtom);
-    if (!searchableLibraryIds.includes(library_id)) {
+    if (!searchableLibraryIds.includes(resolvedLibraryId)) {
         return {
             type: 'agent_action_validate_response',
             request_id: request.request_id,
             valid: false,
-            error: `Library exists but is not synced with Beaver. The user can update this setting in Beaver Preferences. Library: ${library.name} (ID: ${library_id})`,
+            error: excludedLibraryMessage(resolvedLibraryId),
             error_code: 'library_not_searchable',
-            preference: 'always_ask',
-        };
-    }
-
-    // Validate item exists
-    const item = await Zotero.Items.getByLibraryAndKeyAsync(library_id, zotero_key);
-    if (!item) {
-        return {
-            type: 'agent_action_validate_response',
-            request_id: request.request_id,
-            valid: false,
-            error: `Item not found: ${library_id}-${zotero_key}`,
-            error_code: 'item_not_found',
             preference: 'always_ask',
         };
     }
@@ -539,22 +567,51 @@ async function executeEditMetadataAction(
     request: WSAgentActionExecuteRequest,
     ctx: TimeoutContext,
 ): Promise<WSAgentActionExecuteResponse> {
-    const { library_id, zotero_key, edits, creators } = request.action_data as {
+    const { library_id, library_ref, zotero_key, edits, creators } = request.action_data as {
         library_id: number;
+        library_ref?: string;
         zotero_key: string;
         edits: MetadataEdit[];
         creators?: Array<{ firstName?: string; lastName?: string; name?: string; creatorType: string }> | null;
     };
 
-    // Get the item
-    const item = await Zotero.Items.getByLibraryAndKeyAsync(library_id, zotero_key);
-    if (!item) {
+    // TOCTOU guard: never edit an item in a library the user excluded from Beaver,
+    // even if validation passed earlier or the execute request skipped it.
+    // Resolve and gate the library before resolving/loading the item.
+    const targetLibraryId = resolveLibraryRef({ library_id, library_ref });
+    const targetExcluded = targetLibraryId === null ? null : checkLibraryExcluded(targetLibraryId);
+    if (targetExcluded) {
         return {
             type: 'agent_action_execute_response',
             request_id: request.request_id,
             success: false,
-            error: `Item not found: ${library_id}-${zotero_key}`,
-            error_code: 'item_not_found',
+            error: targetExcluded.message,
+            error_code: 'library_not_searchable',
+        };
+    }
+    const resolved = await resolveItemReference({ library_id, library_ref, zotero_key });
+    if (resolved.status !== 'found') {
+        return {
+            type: 'agent_action_execute_response',
+            request_id: request.request_id,
+            success: false,
+            error: resolved.status === 'library_unavailable'
+                ? `Library not available for item: ${library_ref || library_id}-${zotero_key}`
+                : `Item not found: ${library_id}-${zotero_key}`,
+            error_code: resolved.status === 'library_unavailable' ? 'library_unavailable' : 'item_not_found',
+        };
+    }
+    const item = resolved.item;
+    const resolvedLibraryId = item.libraryID;
+
+    const excluded = checkLibraryExcluded(resolvedLibraryId);
+    if (excluded) {
+        return {
+            type: 'agent_action_execute_response',
+            request_id: request.request_id,
+            success: false,
+            error: excluded.message,
+            error_code: 'library_not_searchable',
         };
     }
 
@@ -643,6 +700,9 @@ async function executeEditMetadataAction(
 
         // Build result data
         const resultData: Record<string, any> = {
+            library_id: resolvedLibraryId,
+            zotero_key,
+            library_ref: libraryRefForLibraryID(resolvedLibraryId) ?? undefined,
             applied_edits: appliedEdits,
             failed_edits: failedEdits,
         };

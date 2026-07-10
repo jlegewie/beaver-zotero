@@ -13,7 +13,8 @@ import {
     WSListCollectionsResponse,
     CollectionInfo,
 } from '../agentProtocol';
-import { getCollectionByIdOrName, validateLibraryAccess, isLibrarySearchable, getSearchableLibraries } from './utils';
+import { getCollectionByIdOrName, validateLibraryAccess, isLibrarySearchable, getSearchableLibraries, excludedLibraryMessage } from './utils';
+import { libraryRefForLibraryID } from '../../utils/libraryIdentity';
 
 
 /**
@@ -67,7 +68,9 @@ export async function handleListCollectionsRequest(
                         request_id: request.request_id,
                         collections: [],
                         total_count: 0,
-                        error: `Collection "${result.collection.name}" is in library "${(resolvedLib && resolvedLib.name) || result.libraryID}" which is not synced with Beaver.`,
+                        // Do not echo the collection's name: it is content from a
+                        // library the user excluded from Beaver.
+                        error: excludedLibraryMessage(result.libraryID),
                         error_code: 'library_not_searchable',
                         available_libraries: getSearchableLibraries(),
                     };
@@ -181,8 +184,13 @@ export async function handleListCollectionsRequest(
             }
         }
         
+        // Constant for the whole request; computed once.
+        const libraryRef = libraryRefForLibraryID(library.libraryID) ?? undefined;
+
         // Build results
         const allResults: CollectionInfo[] = filteredCollections.map((collection: any) => ({
+            library_id: library.libraryID,
+            library_ref: libraryRef,
             collection_key: collection.key,
             name: collection.name,
             parent_key: collection.parentKey || null,
@@ -210,6 +218,7 @@ export async function handleListCollectionsRequest(
             collections,
             total_count: totalCount,
             library_id: library.libraryID,
+            library_ref: libraryRef,
             library_name: libraryName,
         };
     } catch (error) {

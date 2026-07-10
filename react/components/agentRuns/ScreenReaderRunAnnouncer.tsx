@@ -6,7 +6,7 @@ import { buildRunCompletionAnnouncement, extractAssistantResponseText } from '..
 import { getPref } from '../../../src/utils/prefs';
 
 interface ScreenReaderRunAnnouncerProps {
-    inputRef?: React.RefObject<HTMLTextAreaElement | null>;
+    inputRef?: React.RefObject<HTMLElement | null>;
     surface: ScreenReaderSurface;
 }
 

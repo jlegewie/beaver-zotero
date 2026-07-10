@@ -10,6 +10,7 @@ import { ExternalReference } from "../types/externalReferences";
 import { ZoteroItemReference, CollectionReference, AttachmentInfo } from "../types/zotero";
 import { ToolReturnPart } from "./types";
 import { logger } from "../../src/utils/logger";
+import { libraryRefForLibraryID, resolveObjectId } from "../../src/utils/libraryIdentity";
 
 // ============================================================================
 // Summary Types (from backend)
@@ -22,6 +23,7 @@ import { logger } from "../../src/utils/logger";
 export interface ChunkReference {
     library_id: number;
     zotero_key: string;
+    library_ref?: string;
     page?: number;
     sequence?: number;
 }
@@ -33,6 +35,7 @@ export interface ChunkReference {
 export interface PageReference {
     library_id: number;
     zotero_key: string;
+    library_ref?: string;
     page_number: number;
 }
 
@@ -43,6 +46,7 @@ export interface PageReference {
 export interface PageImageReference {
     library_id: number;
     zotero_key: string;
+    library_ref?: string;
     page_number: number;
     format: "png" | "jpeg";
     width: number;
@@ -109,6 +113,7 @@ export interface ReadPagesFrontendResultSummary {
 export interface LineReference {
     library_id: number;
     zotero_key: string;
+    library_ref?: string;
     start_line: number;
     end_line: number;
 }
@@ -141,6 +146,7 @@ export interface ViewPageImagesResultSummary {
 export interface ViewImageReference {
     library_id: number;
     zotero_key: string;
+    library_ref?: string;
     page_number?: number | null;
     page_label?: string | null;
     format: "png" | "jpeg";
@@ -176,6 +182,7 @@ export interface SearchInDocumentsToolResultSummary {
 export interface PageSearchReference {
     library_id: number;
     zotero_key: string;
+    library_ref?: string;
     page_number: number;
     match_count: number;
     score: number;
@@ -239,6 +246,7 @@ export interface AttachmentMatchSummary {
 export interface AttachmentSearchReference {
     library_id: number;
     zotero_key: string;
+    library_ref?: string;
     status: 'ok' | 'no_matches' | 'error';
     /** Total matches in this attachment; `matches` is the top-ranked subset. */
     match_count: number;
@@ -319,6 +327,7 @@ export interface ExternalReferenceResultSupplement {
     library_items?: Array<{
         library_id: number;
         zotero_key: string;
+        library_ref?: string;
         item_id: string;
     }>;
 }
@@ -752,6 +761,7 @@ export function extractItemSearchData(
     const items: ZoteroItemReference[] = summary.items.map(item => ({
         library_id: item.library_id,
         zotero_key: item.zotero_key,
+        library_ref: item.library_ref,
     }));
 
     return { items };
@@ -806,6 +816,7 @@ export function extractReadPagesData(
             pages.push({
                 library_id: chunk.library_id,
                 zotero_key: chunk.zotero_key,
+                library_ref: chunk.library_ref,
                 page_number: chunk.page,
             });
         }
@@ -833,6 +844,7 @@ export function extractReadPagesFrontendData(
             pages.push({
                 library_id: page.library_id,
                 zotero_key: page.zotero_key,
+                library_ref: page.library_ref,
                 page_number: page.page_number,
             });
         }
@@ -976,6 +988,7 @@ export function extractFindInAttachmentsData(
         return {
             library_id: att.library_id,
             zotero_key: att.zotero_key,
+            library_ref: att.library_ref,
             status: att.status ?? 'ok',
             match_count: typeof att.match_count === 'number' ? att.match_count : matches.length,
             pages: Array.isArray(att.pages) ? att.pages : [],
@@ -1175,6 +1188,7 @@ const EXTRACT_TOOL_NAMES: readonly string[] = [
 export interface ItemExtractionReference {
     library_id: number;
     zotero_key: string;
+    library_ref?: string;
     // "success" | "error" is the current backend vocabulary. "relevant" /
     // "not_relevant" are legacy values still present in older thread history.
     status: "success" | "error" | "relevant" | "not_relevant";
@@ -1285,8 +1299,8 @@ const READ_NOTE_TOOL_NAMES: readonly string[] = [
  * View data for read_note results.
  */
 export interface ReadNoteViewData {
-    noteReference: { library_id: number; zotero_key: string };
-    parentReference?: { library_id: number; zotero_key: string };
+    noteReference: ZoteroItemReference;
+    parentReference?: ZoteroItemReference;
     totalLines?: number;
     linesReturned?: string;
 }
@@ -1297,12 +1311,13 @@ function isZoteroItemReference(value: unknown): value is ZoteroItemReference {
     return typeof obj.library_id === 'number' && typeof obj.zotero_key === 'string';
 }
 
+/**
+ * Parses a model-facing note/item id: either a portable `<library_ref>-<zotero_key>`
+ * (`u-KEY`, `g<groupID>-KEY`) or a legacy `<libraryID>-zoteroKey`. Returns
+ * `null` for `ext-<KEY>` external-file ids and other malformed input.
+ */
 function parseZoteroUniqueKey(uniqueKey: string): ZoteroItemReference | null {
-    const [libraryIdStr, ...keyParts] = uniqueKey.split('-');
-    const libraryId = parseInt(libraryIdStr, 10);
-    const zoteroKey = keyParts.join('-');
-    if (isNaN(libraryId) || !zoteroKey) return null;
-    return { library_id: libraryId, zotero_key: zoteroKey };
+    return resolveObjectId(uniqueKey);
 }
 
 /**
@@ -1368,7 +1383,7 @@ export function extractReadNoteData(
     if (!noteReference) return null;
 
     // Parse parent_item_id if present
-    let parentReference: { library_id: number; zotero_key: string } | undefined;
+    let parentReference: ZoteroItemReference | undefined;
     const parentItemId = obj.parent_item_id as string | undefined;
     if (parentItemId) {
         parentReference = parseZoteroUniqueKey(parentItemId) ?? undefined;
@@ -1425,6 +1440,7 @@ export function extractZoteroReferences(part: ToolReturnPart): ZoteroItemReferen
         return data?.lines.map(range => ({
             library_id: range.library_id,
             zotero_key: range.zotero_key,
+            library_ref: range.library_ref,
         })) ?? [];
     }
 
@@ -1440,6 +1456,7 @@ export function extractZoteroReferences(part: ToolReturnPart): ZoteroItemReferen
         return data?.attachments.map(att => ({
             library_id: att.library_id,
             zotero_key: att.zotero_key,
+            library_ref: att.library_ref,
         })) ?? [];
     }
 
@@ -1449,6 +1466,7 @@ export function extractZoteroReferences(part: ToolReturnPart): ZoteroItemReferen
         return data?.items?.map(item => ({
             library_id: item.library_id,
             zotero_key: item.zotero_key,
+            library_ref: item.library_ref,
         })) ?? [];
     }
 
@@ -1499,7 +1517,7 @@ const GET_METADATA_TOOL_NAMES: readonly string[] = [
  *
  * The current backend omits library scope here; `extractListCollectionsData`
  * normalizes it into the canonical `CollectionReference`. The optional fields
- * forward-support a backend that later emits a per-collection `library_id` or
+ * forward-support a backend that later emits per-collection library identity or
  * a compound `collection_key` ("<library_id>-<key>").
  */
 export interface BackendCollectionRef {
@@ -1507,6 +1525,8 @@ export interface BackendCollectionRef {
     name: string;
     /** Optional per-collection library scope (future backend format). */
     library_id?: number | null;
+    /** Optional per-collection portable library identity. */
+    library_ref?: string | null;
     /** Optional parent collection key (future backend format). */
     parent_key?: string | null;
 }
@@ -1564,6 +1584,7 @@ export interface ListCollectionsResultSummary {
     total_count: number;
     has_more: boolean;
     library_id?: number | null;
+    library_ref?: string | null;
     library_name?: string | null;
     collections: BackendCollectionRef[];
     /** Set on a failed list_collections response (no library scope in that case). */
@@ -1603,6 +1624,7 @@ export interface GetMetadataResultSummary {
 export interface RegularSearchResultItem {
     result_type: 'regular';
     item_id: string;
+    library_ref?: string;
     item_type: string;
     title?: string | null;
     creators?: string | null;
@@ -1614,6 +1636,7 @@ export interface RegularSearchResultItem {
 export interface NoteResultItem {
     result_type: 'note';
     item_id: string;
+    library_ref?: string;
     title?: string | null;
     parent_item_id?: string | null;
     parent_title?: string | null;
@@ -1638,6 +1661,7 @@ export type ZoteroSearchResultItem = RegularSearchResultItem | NoteResultItem | 
 export interface RegularListResultItem {
     result_type: 'regular';
     item_id: string;
+    library_ref?: string;
     item_type: string;
     title?: string | null;
     creators?: string | null;
@@ -1658,6 +1682,8 @@ export interface CollectionInfo {
     name: string;
     /** Optional per-collection library scope (future backend format). */
     library_id?: number | null;
+    /** Device-portable library identity ("u" | "g<groupID>"). */
+    library_ref?: string | null;
     parent_key?: string | null;
     parent_name?: string | null;
     item_count: number;
@@ -1723,6 +1749,7 @@ export interface ListCollectionsResultContent {
     collections: CollectionInfo[];
     total_count: number;
     library_id?: number | null;
+    library_ref?: string | null;
     library_name?: string | null;
     /** Set on a failed list_collections response (no library scope in that case). */
     error?: string | null;
@@ -1920,6 +1947,24 @@ export interface ZoteroSearchViewData {
  * Extract zotero search data from content or metadata.summary.
  * Uses metadata.summary (which contains ZoteroItemReference[]) for dehydrated results.
  */
+/**
+ * Builds a ZoteroItemReference from a result row's composite id (portable
+ * "u-KEY" / "g<groupID>-KEY" or legacy numeric form). An explicit
+ * `library_ref` field on the row wins over the ref derived from the id.
+ */
+function referenceFromResultRowId(itemId: string, explicitLibraryRef?: unknown): ZoteroItemReference | null {
+    const parsed = resolveObjectId(itemId);
+    if (!parsed) return null;
+    const library_ref = typeof explicitLibraryRef === 'string' && explicitLibraryRef
+        ? explicitLibraryRef
+        : parsed.library_ref;
+    return {
+        library_id: parsed.library_id,
+        zotero_key: parsed.zotero_key,
+        ...(library_ref ? { library_ref } : {}),
+    };
+}
+
 export function extractZoteroSearchData(
     content: unknown,
     metadata?: Record<string, unknown>
@@ -1935,15 +1980,10 @@ export function extractZoteroSearchData(
                         ? (item.attachment_id ?? item.item_id)
                         : item.item_id;
                     if (!itemId) return null;
-                    const parts = itemId.split('-');
-                    if (parts.length < 2) return null;
-                    const libraryId = parseInt(parts[0], 10);
-                    const zoteroKey = parts.slice(1).join('-');
-                    if (isNaN(libraryId) || !zoteroKey) return null;
-                    return { library_id: libraryId, zotero_key: zoteroKey };
+                    return referenceFromResultRowId(itemId, item.library_ref);
                 })
                 .filter((ref): ref is ZoteroItemReference => ref !== null);
-            
+
             if (items.length > 0) {
                 return { items, totalCount: obj.total_count };
             }
@@ -1958,6 +1998,7 @@ export function extractZoteroSearchData(
                 items: summary.items.map(item => ({
                     library_id: item.library_id,
                     zotero_key: item.zotero_key,
+                    library_ref: item.library_ref,
                 })),
                 totalCount: summary.total_count 
             };
@@ -1996,12 +2037,7 @@ export function extractListItemsData(
                         ? (item.attachment_id ?? item.item_id)
                         : item.item_id;
                     if (!itemId) return null;
-                    const parts = itemId.split('-');
-                    if (parts.length < 2) return null;
-                    const libraryId = parseInt(parts[0], 10);
-                    const zoteroKey = parts.slice(1).join('-');
-                    if (isNaN(libraryId) || !zoteroKey) return null;
-                    return { library_id: libraryId, zotero_key: zoteroKey };
+                    return referenceFromResultRowId(itemId, item.library_ref);
                 })
                 .filter((ref): ref is ZoteroItemReference => ref !== null);
             
@@ -2024,6 +2060,7 @@ export function extractListItemsData(
                 items: summary.items.map(item => ({
                     library_id: item.library_id,
                     zotero_key: item.zotero_key,
+                    library_ref: item.library_ref,
                 })),
                 totalCount: summary.total_count,
                 libraryName: summary.library_name,
@@ -2044,21 +2081,27 @@ export interface ListCollectionsViewData {
     collections: CollectionReference[];
     totalCount: number;
     libraryId?: number | null;
+    libraryRef?: string | null;
     libraryName?: string | null;
 }
 
 /**
- * Parse a compound collection key of the form "<library_id>-<key>"
- * (e.g. "6-ABCD1234") into its parts. Returns null for a plain Zotero key, so
- * callers never pass a compound string to Zotero.Collections.getByLibraryAndKey.
+ * Parse a compound collection key in the portable ("u-<key>" / "g<groupID>-<key>")
+ * or legacy numeric ("<library_id>-<key>") form into its parts. Returns null
+ * for a plain Zotero key, so callers never pass a compound string to
+ * Zotero.Collections.getByLibraryAndKey.
  * Zotero object keys are 8-character uppercase alphanumeric strings.
  */
 function parseCompoundCollectionKey(
     collectionKey: string
-): { library_id: number; zotero_key: string } | null {
-    const match = collectionKey.match(/^(\d+)-([A-Z0-9]{8})$/);
-    if (!match) return null;
-    return { library_id: parseInt(match[1], 10), zotero_key: match[2] };
+): ZoteroItemReference | null {
+    const parsed = resolveObjectId(collectionKey);
+    if (!parsed || !/^[A-Z0-9]{8}$/.test(parsed.zotero_key)) return null;
+    return {
+        library_id: parsed.library_id,
+        zotero_key: parsed.zotero_key,
+        library_ref: parsed.library_ref,
+    };
 }
 
 /**
@@ -2076,7 +2119,8 @@ function parseCompoundCollectionKey(
  */
 function normalizeBackendCollection(
     coll: BackendCollectionRef,
-    containerLibraryId: number | null | undefined
+    containerLibraryId: number | null | undefined,
+    containerLibraryRef?: string | null,
 ): CollectionReference | null {
     const compound = parseCompoundCollectionKey(coll.collection_key);
     const zoteroKey = compound ? compound.zotero_key : coll.collection_key;
@@ -2095,10 +2139,20 @@ function normalizeBackendCollection(
     }
 
     if (libraryId == null) return null;
+    const containerLibraryRefForResolvedLibrary = containerLibraryId === libraryId
+        ? containerLibraryRef
+        : undefined;
+    const libraryRef = compound
+        ? (compound.library_ref ?? libraryRefForLibraryID(libraryId) ?? undefined)
+        : (coll.library_ref
+            ?? containerLibraryRefForResolvedLibrary
+            ?? libraryRefForLibraryID(libraryId)
+            ?? undefined);
 
     return {
         library_id: libraryId,
         zotero_key: zoteroKey,
+        library_ref: libraryRef,
         name: coll.name,
         parent_key: coll.parent_key ?? null,
     };
@@ -2112,10 +2166,11 @@ function normalizeBackendCollection(
  */
 function normalizeCollections(
     rawCollections: BackendCollectionRef[],
-    containerLibraryId: number | null | undefined
+    containerLibraryId: number | null | undefined,
+    containerLibraryRef?: string | null,
 ): CollectionReference[] | null {
     const collections = rawCollections
-        .map(coll => normalizeBackendCollection(coll, containerLibraryId))
+        .map(coll => normalizeBackendCollection(coll, containerLibraryId, containerLibraryRef))
         .filter((c): c is CollectionReference => c !== null);
     if (rawCollections.length > 0 && collections.length === 0) return null;
     return collections;
@@ -2152,7 +2207,7 @@ export function extractListCollectionsData(
     if (content && typeof content === 'object') {
         const obj = content as ListCollectionsResultContent;
         if (Array.isArray(obj.collections) && !isListCollectionsError(obj)) {
-            const collections = normalizeCollections(obj.collections, obj.library_id);
+            const collections = normalizeCollections(obj.collections, obj.library_id, obj.library_ref);
             if (collections == null || (collections.length === 0 && obj.library_id == null)) {
                 return null;
             }
@@ -2160,6 +2215,7 @@ export function extractListCollectionsData(
                 collections,
                 totalCount: obj.total_count,
                 libraryId: obj.library_id,
+                libraryRef: obj.library_ref,
                 libraryName: obj.library_name,
             };
         }
@@ -2169,7 +2225,7 @@ export function extractListCollectionsData(
     if (metadata?.summary && typeof metadata.summary === 'object') {
         const summary = metadata.summary as ListCollectionsResultSummary;
         if (Array.isArray(summary.collections) && !isListCollectionsError(summary)) {
-            const collections = normalizeCollections(summary.collections, summary.library_id);
+            const collections = normalizeCollections(summary.collections, summary.library_id, summary.library_ref);
             if (collections == null || (collections.length === 0 && summary.library_id == null)) {
                 return null;
             }
@@ -2177,6 +2233,7 @@ export function extractListCollectionsData(
                 collections,
                 totalCount: summary.total_count,
                 libraryId: summary.library_id,
+                libraryRef: summary.library_ref,
                 libraryName: summary.library_name,
             };
         }
@@ -2275,16 +2332,16 @@ export function extractGetMetadataData(
                     // Some results carry library_id/zotero_key directly instead of a composite item_id.
                     const libId = (item as Record<string, unknown>)?.library_id;
                     const key = (item as Record<string, unknown>)?.zotero_key;
+                    const libraryRef = (item as Record<string, unknown>)?.library_ref;
                     if (typeof libId === 'number' && typeof key === 'string' && key) {
-                        return { library_id: libId, zotero_key: key };
+                        return {
+                            library_id: libId,
+                            zotero_key: key,
+                            ...(typeof libraryRef === 'string' && libraryRef ? { library_ref: libraryRef } : {}),
+                        };
                     }
                     if (typeof item?.item_id !== 'string') return null;
-                    const parts = item.item_id.split('-');
-                    if (parts.length < 2) return null;
-                    const libraryId = parseInt(parts[0], 10);
-                    const zoteroKey = parts.slice(1).join('-');
-                    if (isNaN(libraryId) || !zoteroKey) return null;
-                    return { library_id: libraryId, zotero_key: zoteroKey };
+                    return referenceFromResultRowId(item.item_id, item.library_ref);
                 })
                 .filter((ref): ref is ZoteroItemReference => ref !== null);
             
@@ -2305,6 +2362,7 @@ export function extractGetMetadataData(
                 items: summary.items.map(item => ({
                     library_id: item.library_id,
                     zotero_key: item.zotero_key,
+                    library_ref: item.library_ref,
                 })),
                 notFound: [], // not_found list is not in summary
             };
@@ -2437,6 +2495,7 @@ export function extractGetAnnotationsData(
         annotations: summary.annotations.map(ref => ({
             library_id: ref.library_id,
             zotero_key: ref.zotero_key,
+            library_ref: ref.library_ref,
         })),
         totalCount: typeof summary.total_count === 'number' ? summary.total_count : summary.annotations.length,
         toolName: summary.tool_name,

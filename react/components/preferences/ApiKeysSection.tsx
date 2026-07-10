@@ -182,6 +182,7 @@ const ApiKeysSection: React.FC = () => {
                         icon={PlusSignIcon}
                         className="text-base mb-15"
                         onClick={handleAddProvider}
+                        style={{ padding: '4px 6px' }}
                     >
                         Add Provider
                     </Button>
@@ -195,8 +196,8 @@ const ApiKeysSection: React.FC = () => {
                 </div>
 
                 {customProviders.length > 0 ? (
-                    <SettingsGroup className="bg-senary">
-                        {customProviders.map((entry, index) => (
+                    <div className="display-flex flex-col" style={{ gap: '4px' }}>
+                        {customProviders.map((entry) => (
                             <CustomProviderCard
                                 key={entry._id}
                                 model={entry.model}
@@ -205,11 +206,10 @@ const ApiKeysSection: React.FC = () => {
                                 onDuplicate={() => handleDuplicateProvider(entry._id)}
                                 isExpanded={entry._id === expandedProviderId}
                                 onToggleExpand={() => handleToggleExpand(entry._id)}
-                                hasBorder={index > 0}
                                 autoFocusName={entry._id === autoFocusProviderId}
                             />
                         ))}
-                    </SettingsGroup>
+                    </div>
                 ) : (
                     <div className="text-base font-color-tertiary" style={{ paddingLeft: '2px' }}>
                         Click <span className="font-semibold" onClick={handleAddProvider}>Add Provider</span> to add custom endpoints
@@ -276,7 +276,7 @@ const ApiKeysSection: React.FC = () => {
                             </>
                         }
                         control={
-                            <Button variant="outline" className="mt-1" onClick={handleRequestPlusToolsToggle}>
+                            <Button variant="outline" className="mt-1" onClick={handleRequestPlusToolsToggle} style={{ padding: '4px 6px' }}>
                                 Disable
                             </Button>
                         }
@@ -292,13 +292,13 @@ const ApiKeysSection: React.FC = () => {
                                 Add credits for external search, batch extraction, and AI ranking.
                                 <br />
                                 <br />
-                                <Button variant="outline" className="mt-1" onClick={handleRequestPlusToolsToggle}>
+                                <Button variant="outline" className="mt-1" onClick={handleRequestPlusToolsToggle} style={{ padding: '4px 6px' }}>
                                     Disable Plus Tools
                                 </Button>
                             </>
                         }
                         control={
-                            <Button variant="solid" className="mt-1" onClick={() => setActiveTab('billing')}>
+                            <Button variant="solid" className="mt-1" onClick={() => setActiveTab('billing')} style={{ padding: '4px 6px' }}>
                                 Get credits &rarr;
                             </Button>
                         }
@@ -323,7 +323,7 @@ const ApiKeysSection: React.FC = () => {
                             </>
                         }
                         control={
-                            <Button variant="solid" className="mt-1" onClick={handleRequestPlusToolsToggle}>
+                            <Button variant="solid" className="mt-1" onClick={handleRequestPlusToolsToggle} style={{ padding: '4px 6px' }}>
                                 Enable
                             </Button>
                         }
@@ -341,7 +341,7 @@ const ApiKeysSection: React.FC = () => {
                             </>
                         }
                         control={
-                            <Button variant="solid" className="mt-1" onClick={() => {handleRequestPlusToolsToggle(); setActiveTab('billing')}}>
+                            <Button variant="solid" className="mt-1" onClick={() => {handleRequestPlusToolsToggle(); setActiveTab('billing')}} style={{ padding: '4px 6px' }}>
                                 Get credits &rarr;
                             </Button>
                         }

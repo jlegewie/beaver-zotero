@@ -208,12 +208,14 @@ const AdvancedSection: React.FC = () => {
                                 onClick={handleDeleteAllExternalFiles}
                                 disabled={isDeletingExternalFiles || !externalFileStats || externalFileStats.count === 0}
                                 loading={isDeletingExternalFiles}
+                                style={{ padding: '4px 6px' }}
                             >
                                 Delete All…
                             </Button>
                             <Button
                                 variant="outline"
                                 onClick={handleShowExternalFilesFolder}
+                                style={{ padding: '4px 6px' }}
                             >
                                 Show Folder
                             </Button>
@@ -231,6 +233,7 @@ const AdvancedSection: React.FC = () => {
                             onClick={handleDeleteDocumentCache}
                             disabled={isDeletingCache}
                             loading={isDeletingCache}
+                            style={{ padding: '4px 6px' }}
                         >
                             {cacheDeleted ? 'Deleted' : 'Delete Cache'}
                         </Button>
@@ -341,6 +344,7 @@ const AdvancedSection: React.FC = () => {
                             icon={mcpHttpCopied ? TickIcon : CopyIcon}
                             onClick={handleCopyMcpHttpConfig}
                             disabled={!mcpServerEnabled}
+                            style={{ padding: '4px 6px' }}
                         >
                             {mcpHttpCopied ? 'Copied' : 'Copy'}
                         </Button>
@@ -361,6 +365,7 @@ const AdvancedSection: React.FC = () => {
                             icon={mcpCopied ? TickIcon : CopyIcon}
                             onClick={handleCopyMcpConfig}
                             disabled={!mcpServerEnabled}
+                            style={{ padding: '4px 6px' }}
                         >
                             {mcpCopied ? 'Copied' : 'Copy'}
                         </Button>

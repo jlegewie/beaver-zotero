@@ -21,6 +21,7 @@ import { showFileStatusDetailsAtom, zoteroServerCredentialsErrorAtom, zoteroServ
 import { getMimeType, getMimeTypeFromData, safeFileExists } from '../utils/zoteroUtils';
 import { isAttachmentOnServer, getAttachmentDataInMemory } from '../utils/webAPI';
 import { PlanFeatures } from '../../react/types/profile';
+import { UNRESOLVED_LIBRARY_ID } from '../utils/libraryIdentity';
 
 /**
  * Manages file uploads from a backend-managed queue of pending uploads.
@@ -566,6 +567,16 @@ export class FileUploader {
             }
 
             // Retrieve file path from Zotero
+            if (item.library_id === UNRESOLVED_LIBRARY_ID) {
+                logger(`File Uploader uploadFile ${item.library_id}-${item.zotero_key}: Library not available on this device`, 1);
+                await this.handleUploadFailure(
+                    item,
+                    'failed_user', // permanent failure
+                    'attachment_not_found',
+                    `Library not available on this device (library_id: ${item.library_id}, zotero_key: ${item.zotero_key})`
+                );
+                return;
+            }
             const attachment = await Zotero.Items.getByLibraryAndKeyAsync(item.library_id, item.zotero_key);
             this.throwIfCancellationRequested(uploadSignal);
             if (!attachment) {

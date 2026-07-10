@@ -22,6 +22,7 @@ import { isWebSearchAllowedAtom, isWebSearchEnabledAtom } from './ui';
 import { beaverDefaultModelAtom, updateSelectedModelAtom } from './models';
 import { ChargingPermissions } from '../../src/services/agentProtocol';
 import { logger } from '../../src/utils/logger';
+import { UNRESOLVED_LIBRARY_ID } from '../../src/utils/libraryIdentity';
 
 export const firstRunSuggestionsAtom = atom<LibrarySuggestionsResponse | null>(null);
 export const firstRunSuggestionsLoadingAtom = atom<boolean>(false);
@@ -34,7 +35,7 @@ export const MAX_VISIBLE_FIRST_RUN_CARDS = 5;
 /**
  * Hand-authored fallback cards used when the backend fails or returns fewer
  * than 3 cards. Prompts must work without item/collection attachments — they
- * mirror the `targetType: 'global'` builtins in `react/types/builtinActions.ts`.
+ * mirror the global-target builtins in `react/types/builtinActions.ts`.
  */
 const FALLBACK_FIRST_RUN_CARDS: SuggestionCard[] = [
     {
@@ -259,6 +260,9 @@ async function hydrateAttachments(
             // External files are not Zotero objects; nothing to hydrate.
             continue;
         }
+        // A library_id whose library isn't available on this device resolves
+        // to the unresolved sentinel; skip it (the lookup would throw).
+        if (a.library_id === UNRESOLVED_LIBRARY_ID) continue;
         if (a.type === 'collection') {
             const c = await Zotero.Collections.getByLibraryAndKeyAsync(a.library_id, a.zotero_key);
             if (c) {
@@ -320,18 +324,16 @@ export const submitFirstRunCardAtom = atom(
         const collectionAttachment = card.attachments?.find(isCollectionAttachment);
         const collectionName = collectionAttachment?.name ?? null;
 
-        return set(
-            sendWSMessageAtom,
-            card.prompt,
-            runId,
+        return set(sendWSMessageAtom, card.prompt, {
+            runIdOverride: runId,
             permissionsOverride,
-            {
+            origin: {
                 kind: 'first_run_card',
                 card_kind: card.kind,
                 topic_label: card.topic_label ?? null,
                 collection_name: collectionName,
             },
-        );
+        });
     },
 );
 
@@ -410,19 +412,17 @@ export const submitEmptyLibraryDiscoverAtom = atom(
 
             const prompt = buildEmptyLibraryDiscoverPrompt(interest);
 
-            await set(
-                sendWSMessageAtom,
-                prompt,
-                runId,
-                FIRST_RUN_DISCOVER_PERMISSIONS_OVERRIDE,
-                {
+            await set(sendWSMessageAtom, prompt, {
+                runIdOverride: runId,
+                permissionsOverride: FIRST_RUN_DISCOVER_PERMISSIONS_OVERRIDE,
+                origin: {
                     kind: 'first_run_card',
                     card_kind: 'discover_research',
                     topic_label: interest,
                     collection_name: null,
                     empty_library: true,
                 },
-            );
+            });
 
             set(emptyLibraryDiscoverInputAtom, '');
         } finally {

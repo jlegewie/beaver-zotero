@@ -8,7 +8,15 @@ import {
     WSAgentActionExecuteResponse,
 
 } from '../../agentProtocol';
-import { getDeferredToolPreference } from '../utils';
+import { checkLibraryExcluded, excludedLibraryMessage, getDeferredToolPreference } from '../utils';
+import {
+    libraryRefForLibraryID,
+    resolveItemReference,
+    resolveObjectId,
+    resolveWriteTargetLibrary,
+    UNRESOLVED_LIBRARY_ID,
+    writeTargetLibraryError,
+} from '../../../utils/libraryIdentity';
 import { TimeoutContext, checkAborted } from '../timeout';
 import { TimeoutError } from '../timeout';
 
@@ -20,52 +28,26 @@ import { TimeoutError } from '../timeout';
 async function validateCreateCollectionAction(
     request: WSAgentActionValidateRequest
 ): Promise<WSAgentActionValidateResponse> {
-    const { library_id: rawLibraryId, library_name, name, parent_key, item_ids } = request.action_data as {
+    const { library_id: rawLibraryId, library_ref, library_name, name, parent_key, item_ids } = request.action_data as {
         library_id?: number | null;
+        library_ref?: string | null;
         library_name?: string | null;
         name: string;
         parent_key?: string | null;
         item_ids?: string[];
     };
 
-    // Resolve target library: use provided ID, resolve name, or default to user's main library
-    let library_id: number;
-
-    if (rawLibraryId == null || rawLibraryId === 0) {
-        // Not provided or normalized to 0 — try library_name, then default
-        if (library_name) {
-            const allLibraries = Zotero.Libraries.getAll();
-            const matchedLibrary = allLibraries.find(
-                (lib) => lib.name.toLowerCase() === library_name.toLowerCase()
-            );
-            if (!matchedLibrary) {
-                const availableNames = allLibraries.map((lib) => lib.name).join(', ');
-                return {
-                    type: 'agent_action_validate_response',
-                    request_id: request.request_id,
-                    valid: false,
-                    error: `Library not found: "${library_name}". Omit the library parameter to use the default library. Available libraries: ${availableNames}`,
-                    error_code: 'library_not_found',
-                    preference: 'always_ask',
-                };
-            }
-            library_id = matchedLibrary.libraryID;
-        } else {
-            library_id = Zotero.Libraries.userLibraryID;
-        }
-    } else if (typeof rawLibraryId === 'number' && rawLibraryId > 0) {
-        library_id = rawLibraryId;
-    } else {
-        // Explicitly provided but invalid (negative, NaN, fractional, etc.)
+    const targetResolution = resolveWriteTargetLibrary({ library_ref, library_id: rawLibraryId, library_name });
+    if (!targetResolution.ok) {
         return {
             type: 'agent_action_validate_response',
             request_id: request.request_id,
             valid: false,
-            error: `Invalid library ID: ${rawLibraryId}`,
-            error_code: 'library_not_found',
+            ...writeTargetLibraryError(targetResolution),
             preference: 'always_ask',
         };
     }
+    const library_id = targetResolution.libraryID;
 
     // Validate library exists
     const library = Zotero.Libraries.get(library_id);
@@ -87,7 +69,7 @@ async function validateCreateCollectionAction(
             type: 'agent_action_validate_response',
             request_id: request.request_id,
             valid: false,
-            error: `Library exists but is not synced with Beaver. The user can update this setting in Beaver Preferences. Library: ${library.name} (ID: ${library_id})`,
+            error: excludedLibraryMessage(library_id),
             error_code: 'library_not_searchable',
             preference: 'always_ask',
         };
@@ -132,14 +114,37 @@ async function validateCreateCollectionAction(
         }
     }
 
-    // Validate item IDs if provided
+    // Validate item IDs if provided. Accepts both the portable
+    // "<library_ref>-<zotero_key>" grammar and the legacy
+    // "<library_id>-<zotero_key>" numeric grammar.
     if (item_ids && item_ids.length > 0) {
         for (const itemId of item_ids) {
-            const [libId, key] = itemId.split('-');
-            const itemLibraryId = parseInt(libId, 10);
-            
-            // Items must be in the same library
-            if (itemLibraryId !== library_id) {
+            const parsedRef = resolveObjectId(itemId);
+            if (!parsedRef) {
+                return {
+                    type: 'agent_action_validate_response',
+                    request_id: request.request_id,
+                    valid: false,
+                    error: `Invalid item_id format: ${itemId}. Expected "<library_ref>-<zotero_key>" or "<library_id>-<zotero_key>"`,
+                    error_code: 'invalid_item_id',
+                    preference: 'always_ask',
+                };
+            }
+
+            // Items must be in the same (resolved) library as the target
+            // collection. An unresolvable portable ref gets its own error
+            // rather than being reported as a library mismatch.
+            if (parsedRef.library_id !== library_id) {
+                if (parsedRef.library_id === UNRESOLVED_LIBRARY_ID) {
+                    return {
+                        type: 'agent_action_validate_response',
+                        request_id: request.request_id,
+                        valid: false,
+                        error: `Item ${itemId} is in a library that is not available on this computer.`,
+                        error_code: 'library_unavailable',
+                        preference: 'always_ask',
+                    };
+                }
                 return {
                     type: 'agent_action_validate_response',
                     request_id: request.request_id,
@@ -149,8 +154,8 @@ async function validateCreateCollectionAction(
                     preference: 'always_ask',
                 };
             }
-            
-            const item = await Zotero.Items.getByLibraryAndKeyAsync(itemLibraryId, key);
+
+            const item = await Zotero.Items.getByLibraryAndKeyAsync(parsedRef.library_id, parsedRef.zotero_key);
             if (!item) {
                 return {
                     type: 'agent_action_validate_response',
@@ -170,6 +175,7 @@ async function validateCreateCollectionAction(
     // Build current value for preview (includes resolved library_id)
     const currentValue = {
         library_id: library_id,
+        library_ref: libraryRefForLibraryID(library_id) ?? undefined,
         library_name: library.name,
         parent_key: parent_key || null,
         item_count: item_ids?.length || 0,
@@ -193,47 +199,36 @@ async function executeCreateCollectionAction(
     request: WSAgentActionExecuteRequest,
     ctx: TimeoutContext,
 ): Promise<WSAgentActionExecuteResponse> {
-    const { library_id: rawLibraryId, library_name, name, parent_key, item_ids } = request.action_data as {
+    const { library_id: rawLibraryId, library_ref, library_name, name, parent_key, item_ids } = request.action_data as {
         library_id?: number | null;
+        library_ref?: string | null;
         library_name?: string | null;
         name: string;
         parent_key?: string | null;
         item_ids?: string[];
     };
 
-    // Resolve target library: use provided ID, resolve name, or default to user's main library
-    let library_id: number;
-
-    if (rawLibraryId == null || rawLibraryId === 0) {
-        // Not provided or normalized to 0 — try library_name, then default
-        if (library_name) {
-            const allLibraries = Zotero.Libraries.getAll();
-            const matchedLibrary = allLibraries.find(
-                (lib) => lib.name.toLowerCase() === library_name.toLowerCase()
-            );
-            if (!matchedLibrary) {
-                return {
-                    type: 'agent_action_execute_response',
-                    request_id: request.request_id,
-                    success: false,
-                    error: `Library not found: "${library_name}"`,
-                    error_code: 'library_not_found',
-                };
-            }
-            library_id = matchedLibrary.libraryID;
-        } else {
-            library_id = Zotero.Libraries.userLibraryID;
-        }
-    } else if (typeof rawLibraryId === 'number' && rawLibraryId > 0) {
-        library_id = rawLibraryId;
-    } else {
-        // Explicitly provided but invalid (negative, NaN, fractional, etc.)
+    const targetResolution = resolveWriteTargetLibrary({ library_ref, library_id: rawLibraryId, library_name });
+    if (!targetResolution.ok) {
         return {
             type: 'agent_action_execute_response',
             request_id: request.request_id,
             success: false,
-            error: `Invalid library ID: ${rawLibraryId}`,
-            error_code: 'library_not_found',
+            ...writeTargetLibraryError(targetResolution),
+        };
+    }
+    const library_id = targetResolution.libraryID;
+
+    // TOCTOU guard: never create in a library the user excluded from Beaver,
+    // even if validation passed earlier or the execute request skipped it.
+    const excluded = checkLibraryExcluded(library_id);
+    if (excluded) {
+        return {
+            type: 'agent_action_execute_response',
+            request_id: request.request_id,
+            success: false,
+            error: excluded.message,
+            error_code: 'library_not_searchable',
         };
     }
 
@@ -285,9 +280,12 @@ async function executeCreateCollectionAction(
                 const itemIdsToAdd: number[] = [];
 
                 for (const itemIdStr of item_ids) {
-                    const [libId, key] = itemIdStr.split('-');
-                    const item = await Zotero.Items.getByLibraryAndKeyAsync(parseInt(libId, 10), key);
-                    if (item && !item.isAttachment() && !item.isNote() && !item.isAnnotation()) {
+                    const parsedRef = resolveObjectId(itemIdStr);
+                    if (!parsedRef) continue;
+                    const resolved = await resolveItemReference(parsedRef);
+                    if (resolved.status !== 'found') continue;
+                    const item = resolved.item;
+                    if (!item.isAttachment() && !item.isNote() && !item.isAnnotation()) {
                         itemIdsToAdd.push(item.id);
                     }
                 }
@@ -306,6 +304,7 @@ async function executeCreateCollectionAction(
             success: true,
             result_data: {
                 library_id,
+                library_ref: libraryRefForLibraryID(library_id) ?? undefined,
                 collection_key: collection.key,
                 items_added: itemsAdded,
             },

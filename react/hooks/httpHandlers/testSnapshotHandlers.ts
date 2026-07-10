@@ -16,6 +16,7 @@ import type {
     DomItemKind,
     DomSection,
 } from '../../../src/services/documentExtraction/dom/schema';
+import { UNRESOLVED_LIBRARY_ID } from '../../../src/utils/libraryIdentity';
 
 const DEFAULT_SHORT_SENTENCE_CHARS = 15;
 const DEFAULT_LONG_SENTENCE_CHARS = 600;
@@ -169,6 +170,9 @@ export async function handleTestSnapshotExtractHttpRequest(request: any): Promis
                 language: typeof request?.language === 'string' ? request.language : undefined,
             });
         } else if (request?.library_id != null && request?.zotero_key != null) {
+            if (request.library_id === UNRESOLVED_LIBRARY_ID) {
+                return { ok: false, error: { name: 'Error', message: 'Library not available on this device' } };
+            }
             const item = await Zotero.Items.getByLibraryAndKeyAsync(request.library_id, request.zotero_key);
             if (!item || !item.isAttachment()) {
                 return { ok: false, error: { name: 'Error', message: 'Item is not an attachment' } };

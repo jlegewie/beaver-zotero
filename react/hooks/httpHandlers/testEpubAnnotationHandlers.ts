@@ -31,6 +31,7 @@ import {
     getCurrentReaderAndWaitForView,
     waitForReaderForItem,
 } from '../../utils/readerUtils';
+import { UNRESOLVED_LIBRARY_ID } from '../../../src/utils/libraryIdentity';
 
 async function openReaderForAttachment(item: Zotero.Item): Promise<any | undefined> {
     const current = await getCurrentReaderAndWaitForView(undefined, false);
@@ -58,7 +59,7 @@ interface ParityTargetInput {
 
 export async function handleTestEpubAnnotationParityHttpRequest(request: any): Promise<any> {
     const { library_id, zotero_key, items } = request || {};
-    if (library_id == null || zotero_key == null || !Array.isArray(items)) {
+    if (library_id == null || zotero_key == null || !Array.isArray(items) || library_id === UNRESOLVED_LIBRARY_ID) {
         return { ok: false, error: 'Provide library_id, zotero_key, items[]' };
     }
 

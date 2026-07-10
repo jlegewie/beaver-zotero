@@ -67,6 +67,8 @@ export interface EditMetadataProposedData {
     library_id: number;
     /** Zotero key of the item to edit */
     zotero_key: string;
+    /** Device-portable library identity ("u" | "g<groupID>"). See `src/utils/libraryIdentity.ts`. */
+    library_ref?: string;
     /** List of field edits to apply */
     edits: MetadataEdit[];
     /** New creators list (replaces all existing creators when provided) */
@@ -106,6 +108,8 @@ export interface EditMetadataResultData {
     library_id: number;
     /** Zotero key of the edited item */
     zotero_key: string;
+    /** Device-portable library identity ("u" | "g<groupID>"). See `src/utils/libraryIdentity.ts`. */
+    library_ref?: string;
     /** List of field edits that were successfully applied */
     applied_edits: AppliedMetadataEdit[];
     /** List of field names that were rejected by the user */
@@ -128,6 +132,8 @@ export interface EditMetadataResultData {
 export interface CreateCollectionProposedData {
     /** Library ID where the collection will be created */
     library_id: number;
+    /** Device-portable library identity ("u" | "g<groupID>"). See `src/utils/libraryIdentity.ts`. */
+    library_ref?: string;
     /** Name of the collection to create */
     name: string;
     /** Parent collection key (optional, for subcollections) */
@@ -142,6 +148,8 @@ export interface CreateCollectionProposedData {
 export interface CreateCollectionResultData {
     /** Library ID of the created collection */
     library_id: number;
+    /** Device-portable library identity ("u" | "g<groupID>"). See `src/utils/libraryIdentity.ts`. */
+    library_ref?: string;
     /** Zotero key of the created collection */
     collection_key: string;
     /** Number of items added to the collection (if any were requested) */
@@ -172,13 +180,18 @@ export interface CollectionChanges {
  * Proposed data for organizing items (tags and collections)
  */
 export interface OrganizeItemsProposedData {
-    /** List of item IDs to organize (format: "library_id-zotero_key") */
+    /**
+     * List of item IDs to organize. Portable form "<library_ref>-<zotero_key>"
+     * (e.g. "u-ABCD1234", "g12345-ABCD1234"); legacy rows may still hold the
+     * device-local "<library_id>-<zotero_key>" form. Both parse via
+     * `parseItemReference`.
+     */
     item_ids: string[];
     /** Tags to add/remove */
     tags?: TagChanges | null;
     /** Collections to add/remove */
     collections?: CollectionChanges | null;
-    /** Current state of items for undo (item_id -> {tags: [...], collections: [...]}) */
+    /** Current state of items for undo (item_id -> {tags: [...], collections: [...]}), keyed by the same item ids as item_ids */
     current_state?: Record<string, { tags: string[]; collections: string[] }>;
 }
 
@@ -221,6 +234,8 @@ export interface TagColorSnapshot {
  */
 export interface ManageTagsProposedData {
     library_id: number;
+    /** Device-portable library identity ("u" | "g<groupID>"). See `src/utils/libraryIdentity.ts`. */
+    library_ref?: string;
     action: 'rename' | 'delete';
     name: string;
     new_name?: string | null;
@@ -235,6 +250,8 @@ export interface ManageTagsProposedData {
  */
 export interface ManageTagsResultData {
     library_id: number;
+    /** Device-portable library identity ("u" | "g<groupID>"). See `src/utils/libraryIdentity.ts`. */
+    library_ref?: string;
     action: 'rename' | 'delete';
     name: string;
     new_name?: string | null;
@@ -261,6 +278,8 @@ export interface ManageTagsResultData {
  */
 export interface ManageCollectionsProposedData {
     library_id: number;
+    /** Device-portable library identity ("u" | "g<groupID>"). See `src/utils/libraryIdentity.ts`. */
+    library_ref?: string;
     action: 'rename' | 'move' | 'delete';
     collection_key: string;
     new_name?: string | null;
@@ -277,6 +296,8 @@ export interface ManageCollectionsProposedData {
  */
 export interface ManageCollectionsResultData {
     library_id: number;
+    /** Device-portable library identity ("u" | "g<groupID>"). See `src/utils/libraryIdentity.ts`. */
+    library_ref?: string;
     action: 'rename' | 'move' | 'delete';
     collection_key: string;
     new_name?: string | null;
@@ -342,6 +363,8 @@ export interface NoteProposedData {
     content?: string | null;
     library_id?: number | null;
     zotero_key?: string | null;
+    /** Device-portable library identity ("u" | "g<groupID>"). See `src/utils/libraryIdentity.ts`. */
+    library_ref?: string;
     /** Library name or ID string (resolved by frontend via getLibraryByIdOrName) */
     library?: string | null;
     /** Collection name or key (resolved by frontend via getCollectionByIdOrName) */
@@ -353,6 +376,8 @@ export interface NoteProposedData {
 export interface NoteResultData {
     library_id: number;
     zotero_key: string;
+    /** Device-portable library identity ("u" | "g<groupID>"). See `src/utils/libraryIdentity.ts`. */
+    library_ref?: string;
     parent_key?: string;
 }
 

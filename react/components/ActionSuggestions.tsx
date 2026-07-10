@@ -1,14 +1,10 @@
 import React from "react";
 import Button from "./ui/Button";
-import { useAtomValue, useSetAtom } from "jotai";
-import { isStreamingAtom } from "../agents/atoms";
-import { isWSChatPendingAtom } from "../atoms/agentRunAtoms";
-import { Action, ActionTargetType } from "../types/actions";
-import { actionsForContextAtom, actionContextAtom, markActionUsedAtom, sendResolvedActionAtom, stageActionInInputAtom } from "../atoms/actions";
-import { hasUserInputVariables } from "../utils/userInputVariables";
-import { getDisplayNameFromItem } from "../utils/sourceUtils";
-import { truncateText } from "../utils/stringUtils";
-import { ActionContext, GroupIconInfo, getIconInfoForItem, isActionableItem } from "../utils/actionVisibility";
+import { useAtomValue } from "jotai";
+import { Action } from "../types/actions";
+import { actionsForContextAtom, actionContextAtom } from "../atoms/actions";
+import { useActionRunner } from "../hooks/useActionRunner";
+import { getActiveTarget } from "../utils/actionVisibility";
 import { searchableLibraryIdsAtom } from "../atoms/profile";
 import { CSSIcon, CSSItemTypeIcon } from "./icons/zotero";
 import Icon from "./icons/Icon";
@@ -16,149 +12,26 @@ import { AlertIcon, SettingsIcon, ZapIcon } from './icons/icons';
 import { openPreferencesWindow } from "../../src/ui/openPreferencesWindow";
 import IconButton from "./ui/IconButton";
 
-const MAX_CONTEXT_ITEM_LENGTH = 50;
-const MAX_VISIBLE_ITEMS = 1;
-
-interface ActiveTarget {
-    targetType: ActionTargetType;
-    label: string | null;
-    iconInfo?: GroupIconInfo;
-}
-
-/**
- * Priority chain for determining the single winning action target type.
- *
- * 1. Reader (non-library tab + supported PDF) → 'attachment'
- * 2. Note (non-library tab + note) → 'note'
- * 3. Manual items (currentMessageItemsAtom has supported items):
- *    - All attachments → 'attachment'
- *    - Has regular items → 'items'
- * 4. Selected items (items_selected context with supported items):
- *    - All attachments → 'attachment'
- *    - Has regular items → 'items'
- * 5. Collection (treeRowType === 'collection') → 'collection'
- * 6. Fallback → null (global only)
- */
-function getActiveTarget(ctx: ActionContext): ActiveTarget | null {
-    const { zotero, manualItems } = ctx;
-
-    // 1. Reader
-    if (zotero.type === 'reader') {
-        const att = zotero.readerAttachment;
-        if (att && isActionableItem(att)) {
-            return { targetType: 'attachment', label: getItemLabel(att), iconInfo: getIconInfoForItem(att) };
-        }
-    }
-
-    // 2. Note
-    if (zotero.type === 'note') {
-        const noteItem = zotero.noteItem;
-        const label = noteItem
-            ? truncateText(noteItem.getNoteTitle(), MAX_CONTEXT_ITEM_LENGTH)
-            : null;
-        return { targetType: 'note', label, iconInfo: { type: 'css-icon', name: 'note' } };
-    }
-
-    // 3. Manual items
-    const manualSupported = manualItems.filter(i => isActionableItem(i));
-    if (manualSupported.length > 0) {
-        const allAttachments = manualSupported.every(i => i.isAttachment());
-        const targetType: ActionTargetType = allAttachments ? 'attachment' : 'items';
-        return { targetType, label: getManualItemsLabel(manualSupported), iconInfo: getIconInfoForItem(manualSupported[0]) };
-    }
-
-    // 4. Selected items
-    if (zotero.type === 'items_selected') {
-        const supported = zotero.selectedItems.filter(i => isActionableItem(i));
-        if (supported.length > 0) {
-            const allAttachments = supported.every(i => i.isAttachment());
-            const targetType: ActionTargetType = allAttachments ? 'attachment' : 'items';
-            const labelItems = targetType === 'attachment'
-                ? supported.filter(i => i.isAttachment())
-                : supported.filter(i => i.isRegularItem());
-            const displayItems = labelItems.length > 0 ? labelItems : supported;
-            return { targetType, label: getSelectedItemsLabel(displayItems), iconInfo: getIconInfoForItem(displayItems[0]) };
-        }
-    }
-
-    // 4b. Selected notes (when no actionable items found in step 4)
-    if (zotero.type === 'items_selected') {
-        const selectedNotes = zotero.selectedItems.filter(i => i.isNote());
-        if (selectedNotes.length > 0) {
-            const label = selectedNotes.length === 1
-                ? truncateText(selectedNotes[0].getNoteTitle(), MAX_CONTEXT_ITEM_LENGTH)
-                : `${selectedNotes.length} selected notes`;
-            return { targetType: 'note', label, iconInfo: { type: 'css-icon', name: 'note' } };
-        }
-    }
-
-    // 5. Collection
-    if (zotero.libraryView.treeRowType === 'collection') {
-        return {
-            targetType: 'collection',
-            label: zotero.libraryView.collectionName ?? null,
-            iconInfo: { type: 'css-icon', name: 'collection' },
-        };
-    }
-
-    // 6. No specific context
-    return null;
-}
-
-/** Display name for any item type — regular items use author/year, others use parent or display title */
-function getItemLabel(item: Zotero.Item): string {
-    if (item.isRegularItem()) {
-        return truncateText(getDisplayNameFromItem(item), MAX_CONTEXT_ITEM_LENGTH);
-    }
-    return truncateText(item.getDisplayTitle(), MAX_CONTEXT_ITEM_LENGTH);
-}
-
-function formatItemNames(items: Zotero.Item[], source: 'selected' | 'attached'): string {
-    const prefix = source === 'selected' ? 'selected' : 'attached';
-    if (items.length > MAX_VISIBLE_ITEMS) {
-        if (source === 'attached' && items.some(i => i.isAttachment()) && items.some(i => i.isRegularItem())) {
-            return `${items.length} ${prefix} items and attachments`;
-        }
-        if (items.every(i => i.isAttachment())) {
-            return `${items.length} ${prefix} attachments`;
-        }
-        if (items.every(i => i.isNote())) {
-            return `${items.length} ${prefix} notes`;
-        }
-        return `${items.length} ${prefix} items`;
-    }
-    const names = items
-        .slice(0, MAX_VISIBLE_ITEMS)
-        .map(i => getItemLabel(i));
-    const remaining = items.length - MAX_VISIBLE_ITEMS;
-    if (remaining > 0) names.push(`+${remaining} more`);
-    return names.join(', ');
-}
-
-function getManualItemsLabel(items: Zotero.Item[]): string {
-    return formatItemNames(items, 'attached');
-}
-
-function getSelectedItemsLabel(items: Zotero.Item[]): string {
-    return formatItemNames(items, 'selected');
-}
-
 interface ActionSuggestionsProps {
     /** When true, global actions are always shown. When false, global actions only appear if no context-specific actions match. */
     showGlobal?: boolean;
     style?: React.CSSProperties;
+    /**
+     * Layout variant.
+     * - `default`: self-contained block with an "Actions for …" header on top.
+     * - `panel`:   the header is omitted (the caller renders its own category
+     *              control) and the target-item label is moved to a footer
+     *              below the action list.
+     */
+    variant?: 'default' | 'panel';
 }
 
 
-const ActionSuggestions: React.FC<ActionSuggestionsProps> = ({ showGlobal = true, style }) => {
-    const isStreaming = useAtomValue(isStreamingAtom);
-    const isPending = useAtomValue(isWSChatPendingAtom);
+const ActionSuggestions: React.FC<ActionSuggestionsProps> = ({ showGlobal = true, style, variant = 'default' }) => {
     const contextActions = useAtomValue(actionsForContextAtom);
-    const sendResolvedAction = useSetAtom(sendResolvedActionAtom);
-    const stageActionInInput = useSetAtom(stageActionInInputAtom);
-    const markActionUsed = useSetAtom(markActionUsedAtom);
     const ctx = useAtomValue(actionContextAtom);
     const searchableLibraryIds = useAtomValue(searchableLibraryIdsAtom);
+    const { runAction, isBusy } = useActionRunner();
 
     // Check if the current library is supported
     const currentLibraryId = ctx.zotero.isLibraryTab
@@ -166,13 +39,15 @@ const ActionSuggestions: React.FC<ActionSuggestionsProps> = ({ showGlobal = true
         : ctx.zotero.readerAttachment?.libraryID ?? ctx.zotero.noteItem?.libraryID ?? null;
     const isLibrarySupported = currentLibraryId && searchableLibraryIds.includes(currentLibraryId);
 
-    // Determine the single winning target type — never mix types
+    // Determine the single active target type the surface binds to
     const active = getActiveTarget(ctx);
 
     const targetActions = active
-        ? contextActions.filter(a => a.targetType === active.targetType)
+        ? contextActions.filter(a => a.targets.includes(active.targetType))
         : [];
-    const globalActions = contextActions.filter(a => a.targetType === 'global');
+    const globalActions = contextActions.filter(a =>
+        a.targets.includes('global') && !targetActions.includes(a)
+    );
 
     let actions: Action[];
     if (targetActions.length > 0) {
@@ -181,21 +56,10 @@ const ActionSuggestions: React.FC<ActionSuggestionsProps> = ({ showGlobal = true
         actions = globalActions;
     }
 
-    const handleAction = async (action: Action) => {
-        if (isPending || isStreaming || action.text.length === 0) return;
-        if (hasUserInputVariables(action.text)) {
-            await stageActionInInput({
-                actionId: action.id,
-                text: action.text,
-                targetType: action.targetType,
-            });
-            return;
-        }
-        markActionUsed(action.id);
-        await sendResolvedAction({ text: action.text, targetType: action.targetType });
-    };
-
-    if (actions.length === 0) return null;
+    // The default variant renders nothing when there are no actions. The panel
+    // variant always renders so the expanded category shows an empty hint and
+    // its footer (target item + edit control).
+    if (variant === 'default' && actions.length === 0) return null;
 
     // Only show context label when context-specific actions are displayed
     const contextLabel = targetActions.length > 0 ? active?.label ?? null : null;
@@ -203,11 +67,11 @@ const ActionSuggestions: React.FC<ActionSuggestionsProps> = ({ showGlobal = true
 
     const contextLabelElement = contextLabel ? (
         <div
-            className="font-color-tertiary font-medium display-flex items-center gap-1 min-w-0"
+            className="font-color-secondary display-flex items-center gap-1 min-w-0"
             style={{ fontSize: '0.925rem' }}
         >
             {active?.iconInfo && (
-                <span className="scale-80 flex-shrink-0 opacity-70" style={{ filter: 'grayscale(1)' }}>
+                <span className="scale-80 flex-shrink-0" style={{ filter: 'grayscale(1)' }}>
                     {active.iconInfo.type === 'item-type'
                         ? <CSSItemTypeIcon itemType={active.iconInfo.name} className="icon-16" />
                         : <CSSIcon name={active.iconInfo.name} className="icon-16" />}
@@ -218,56 +82,79 @@ const ActionSuggestions: React.FC<ActionSuggestionsProps> = ({ showGlobal = true
         </div>
     ) : null;
 
+    const actionButtons = actions.map((action) => (
+        <Button
+            key={action.id}
+            variant="ghost"
+            onClick={(e) => runAction(action, e.currentTarget.ownerDocument.defaultView)}
+            disabled={isBusy || !isLibrarySupported}
+            className="w-full justify-between"
+            style={{ padding: '6px 6px' }}
+        >
+            <span className="text-base truncate">
+                {action.title}
+            </span>
+        </Button>
+    ));
+
+    const notSyncedWarning = !isLibrarySupported ? (
+        <div className="display-flex flex-row gap-1 items-start font-color-tertiary mt-3">
+            <Icon icon={AlertIcon} className="mt-010" />
+            <div className="text-sm">
+                This library is not synced with Beaver
+            </div>
+        </div>
+    ) : null;
+
+    // Panel variant: no header (the launcher row owns the category control) and
+    // the target item is shown in a footer below the actions ("the item the
+    // action applies to" moves to the bottom).
+    if (variant === 'panel') {
+        return (
+            <div className="display-flex flex-col gap-05 px-1" style={style}>
+                {actions.length > 0 ? actionButtons : (
+                    <div className="font-color-tertiary text-sm px-1 py-2">
+                        No actions available for the current selection.
+                    </div>
+                )}
+                <div className="display-flex flex-row items-center gap-2 mt-2 pt-2 border-top-quinary">
+                    <div className="flex-1 min-w-0">
+                        {contextLabelElement}
+                    </div>
+                    <IconButton
+                        variant="ghost-tertiary"
+                        onClick={() => openPreferencesWindow('actions')}
+                        icon={SettingsIcon}
+                        ariaLabel="Edit actions"
+                        title="Edit actions"
+                    />
+                </div>
+                {notSyncedWarning}
+            </div>
+        );
+    }
+
     return (
         <div className="display-flex flex-col gap-05 mt-3 ml-1" style={style}>
             <div className="display-flex flex-row gap-1 items-center mb-1 font-color-tertiary" style={style}>
                 <Icon icon={ZapIcon} />
-                {/* <div className="text-base font-medium"> */}
-                {/* <div className="font-color-tertiary text-sm font-semibold uppercase" style={{ letterSpacing: '0.05em' }}>
-                    Suggestions
-                </div> */}
                 <div className="display-flex flex-row gap-1 items-center min-w-0">
                     <div className="font-color-tertiary font-semibold flex-shrink-0" style={{ whiteSpace: 'nowrap', fontSize: '0.925rem' }}>
                         Actions {contextLabel ? `for` : ''}
                     </div>
                     {contextLabelElement}
                 </div>
-                
+
                 <div className="flex-1" />
-                {/* <Button variant="ghost-tertiary" onClick={() => openPreferencesWindow('prompts')}>
-                    <span className="text-sm font-medium">
-                        Edit
-                    </span>
-                </Button> */}
                 <IconButton
                     variant="ghost-tertiary"
                     onClick={() => openPreferencesWindow('actions')}
                     icon={SettingsIcon}
                 />
-                
+
             </div>
-            {actions.map((action) => (
-                <Button
-                    key={action.id}
-                    variant="ghost"
-                    onClick={() => handleAction(action)}
-                    disabled={isPending || isStreaming || !isLibrarySupported}
-                    className="w-full justify-between"
-                    style={{ padding: '6px 6px' }}
-                >
-                    <span className="text-base truncate">
-                        {action.title}
-                    </span>
-                </Button>
-            ))}
-            {!isLibrarySupported && (
-                <div className="display-flex flex-row gap-1 items-start font-color-tertiary mt-3">
-                    <Icon icon={AlertIcon} className="mt-010" />
-                    <div className="text-sm">
-                        This library is not synced with Beaver
-                    </div>
-                </div>
-            )}
+            {actionButtons}
+            {notSyncedWarning}
         </div>
     );
 };

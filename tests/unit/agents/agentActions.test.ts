@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 // `toAgentAction` transitively imports the Supabase client and Zotero-aware
 // profile atoms, which require live globals at import time. Stub the leaf
@@ -13,12 +13,115 @@ vi.mock('../../../src/utils/zoteroUtils', () => ({
 }));
 
 import type { AgentAction } from '../../../react/agents/agentActions';
-import { toAgentAction } from '../../../react/agents/agentActions';
+import { toAgentAction, validateAppliedAgentAction } from '../../../react/agents/agentActions';
 import { getAppliedPdfAnnotationCount } from '../../../react/agents/agentActionCounts';
 import type {
     CreateHighlightAnnotationsProposedData,
     CreateNoteAnnotationsProposedData,
 } from '../../../react/types/agentActions/createAnnotations';
+import type { CreateItemProposedData } from '../../../react/types/agentActions/items';
+
+describe('validateAppliedAgentAction', () => {
+    const zotero = (globalThis as any).Zotero;
+    const getByLibraryAndKeyAsync = vi.fn();
+
+    const appliedAction = (library_id: number, overrides: Partial<AgentAction> = {}): AgentAction => ({
+        id: 'action-1',
+        run_id: 'run-1',
+        action_type: 'edit_metadata',
+        status: 'applied',
+        proposed_data: {},
+        result_data: { library_id, zotero_key: 'AAAAAAA1' },
+        ...overrides,
+    } as AgentAction);
+
+    beforeEach(() => {
+        getByLibraryAndKeyAsync.mockReset();
+        zotero.Items = { ...zotero.Items, getByLibraryAndKeyAsync };
+        zotero.Libraries = { ...zotero.Libraries, userLibraryID: 1 };
+        zotero.Groups = {
+            ...zotero.Groups,
+            getLibraryIDFromGroupID: vi.fn((groupID: number) => groupID === 50 ? 5 : null),
+        };
+    });
+
+    it('returns valid when the applied item resolves', async () => {
+        getByLibraryAndKeyAsync.mockResolvedValue({ isAnnotation: () => false });
+        expect(await validateAppliedAgentAction(appliedAction(1))).toBe('valid');
+    });
+
+    it('returns valid for actions without an applied Zotero item', async () => {
+        const action = appliedAction(1, { status: 'pending' });
+        expect(await validateAppliedAgentAction(action)).toBe('valid');
+        expect(getByLibraryAndKeyAsync).not.toHaveBeenCalled();
+    });
+
+    it('returns invalid when a personal-library item is gone', async () => {
+        getByLibraryAndKeyAsync.mockResolvedValue(null);
+        expect(await validateAppliedAgentAction(appliedAction(1))).toBe('invalid');
+    });
+
+    it('returns invalid when a resolved group-library item is gone', async () => {
+        getByLibraryAndKeyAsync.mockResolvedValue(null);
+        expect(await validateAppliedAgentAction(appliedAction(5, {
+            result_data: { library_id: 99, library_ref: 'g50', zotero_key: 'AAAAAAA1' },
+        }))).toBe('invalid');
+        expect(getByLibraryAndKeyAsync).toHaveBeenCalledWith(5, 'AAAAAAA1');
+    });
+
+    it('returns unverifiable when a group library is unavailable on this device', async () => {
+        getByLibraryAndKeyAsync.mockResolvedValue(null);
+        expect(await validateAppliedAgentAction(appliedAction(5, {
+            result_data: { library_id: 5, library_ref: 'g999', zotero_key: 'AAAAAAA1' },
+        }))).toBe('unverifiable');
+        expect(getByLibraryAndKeyAsync).not.toHaveBeenCalled();
+    });
+
+    it('returns valid when a group-library item resolves', async () => {
+        getByLibraryAndKeyAsync.mockResolvedValue({ isAnnotation: () => false });
+        expect(await validateAppliedAgentAction(appliedAction(5))).toBe('valid');
+    });
+
+    it('returns unverifiable when a legacy group-library item (no library_ref) is not found', async () => {
+        // A device-local group library_id is not a portable identity: a miss
+        // may just mean that id maps to a different group here, so it must not
+        // be treated as a revert. This covers all data written before library_ref.
+        getByLibraryAndKeyAsync.mockResolvedValue(null);
+        expect(await validateAppliedAgentAction(appliedAction(5))).toBe('unverifiable');
+        expect(getByLibraryAndKeyAsync).toHaveBeenCalledWith(5, 'AAAAAAA1');
+    });
+
+    it('returns invalid when an annotation action resolves to a non-annotation', async () => {
+        getByLibraryAndKeyAsync.mockResolvedValue({ isAnnotation: () => false });
+        const action = appliedAction(1, { action_type: 'highlight_annotation' } as Partial<AgentAction>);
+        expect(await validateAppliedAgentAction(action)).toBe('invalid');
+    });
+
+    it('returns unverifiable for bulk annotations in an unavailable group library', async () => {
+        getByLibraryAndKeyAsync.mockResolvedValue(null);
+        const action = appliedAction(5, {
+            action_type: 'create_highlight_annotations',
+            result_data: {
+                created: [
+                    { library_id: 5, library_ref: 'g999', zotero_key: 'AAAAAAA1' },
+                    { library_id: 5, library_ref: 'g999', zotero_key: 'AAAAAAA2' },
+                ],
+            },
+        } as Partial<AgentAction>);
+        expect(await validateAppliedAgentAction(action)).toBe('unverifiable');
+    });
+
+    it('returns invalid for bulk annotations when a personal-library annotation is gone', async () => {
+        getByLibraryAndKeyAsync.mockResolvedValue(null);
+        const action = appliedAction(1, {
+            action_type: 'create_highlight_annotations',
+            result_data: {
+                created: [{ library_id: 1, zotero_key: 'AAAAAAA1' }],
+            },
+        } as Partial<AgentAction>);
+        expect(await validateAppliedAgentAction(action)).toBe('invalid');
+    });
+});
 
 describe('getAppliedPdfAnnotationCount', () => {
     it('counts unique logical annotations for bulk annotation actions', () => {
@@ -79,6 +182,36 @@ describe('getAppliedPdfAnnotationCount', () => {
     });
 });
 
+describe('toAgentAction create_item normalization', () => {
+    it('parses a string library_id into a numeric library_id', () => {
+        const action = toAgentAction({
+            action_type: 'create_item',
+            proposed_data: {
+                library_id: '42',
+                item: { title: 'Imported item' },
+                file_available: false,
+            },
+        });
+
+        const data = action.proposed_data as CreateItemProposedData;
+        expect(data.library_id).toBe(42);
+    });
+
+    it('parses a camelCase string libraryId into a numeric library_id', () => {
+        const action = toAgentAction({
+            action_type: 'create_item',
+            proposed_data: {
+                libraryId: '43',
+                item: { title: 'Imported item' },
+                fileAvailable: true,
+            },
+        });
+
+        const data = action.proposed_data as CreateItemProposedData;
+        expect(data.library_id).toBe(43);
+    });
+});
+
 describe('toAgentAction reading_order_offset plumbing', () => {
     it('preserves reading_order_offset on bulk highlight page_locations', () => {
         const action = toAgentAction({
@@ -106,7 +239,7 @@ describe('toAgentAction reading_order_offset plumbing', () => {
             },
         });
         const data = action.proposed_data as CreateHighlightAnnotationsProposedData;
-        expect(data.items[0].page_locations[0].reading_order_offset).toBe(7);
+        expect(data.items[0]?.page_locations?.[0]?.reading_order_offset).toBe(7);
     });
 
     it('accepts camelCase readingOrderOffset on the wire for highlights', () => {
@@ -129,7 +262,7 @@ describe('toAgentAction reading_order_offset plumbing', () => {
             },
         });
         const data = action.proposed_data as CreateHighlightAnnotationsProposedData;
-        expect(data.items[0].page_locations[0].reading_order_offset).toBe(3);
+        expect(data.items[0]?.page_locations?.[0]?.reading_order_offset).toBe(3);
     });
 
     it('preserves reading_order_offset on bulk note items', () => {

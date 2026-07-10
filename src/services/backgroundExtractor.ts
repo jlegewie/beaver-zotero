@@ -44,6 +44,7 @@ import { safeIsInTrash } from '../utils/zoteroItemUtils';
 import { createAbortController } from '../utils/abortController';
 import { getPref } from '../utils/prefs';
 import { getSystemIdleTimeMs, registerIdleObserver } from '../utils/idleService';
+import { UNRESOLVED_LIBRARY_ID } from '../utils/libraryIdentity';
 
 const IDLE_INTERVAL_MS = 30_000;
 const BUSY_INTERVAL_MS = 10;
@@ -541,17 +542,24 @@ export class BackgroundExtractor {
         dispatchBackgroundEvent('background-job:start', { id: record.id, record });
 
         let item: Zotero.Item | null = null;
-        try {
-            const lookup = await Zotero.Items.getByLibraryAndKeyAsync(
-                record.libraryId,
-                record.zoteroKey,
-            );
-            item = lookup || null;
-        } catch (e) {
+        if (record.libraryId === UNRESOLVED_LIBRARY_ID) {
             logger(
-                `BackgroundExtractor: getByLibraryAndKeyAsync failed for ${record.libraryId}-${record.zoteroKey}: ${e}`,
+                `BackgroundExtractor: library not available on this device for ${record.libraryId}-${record.zoteroKey}`,
                 1,
             );
+        } else {
+            try {
+                const lookup = await Zotero.Items.getByLibraryAndKeyAsync(
+                    record.libraryId,
+                    record.zoteroKey,
+                );
+                item = lookup || null;
+            } catch (e) {
+                logger(
+                    `BackgroundExtractor: getByLibraryAndKeyAsync failed for ${record.libraryId}-${record.zoteroKey}: ${e}`,
+                    1,
+                );
+            }
         }
         if (!item || safeIsInTrash(item) === true) {
             if (this.shouldSkipDbWrites()) return;
@@ -744,7 +752,12 @@ export class BackgroundExtractor {
 }
 
 function isTransientResponseError(code: string): boolean {
-    return code === 'download_failed' || code === 'extraction_failed';
+    return code === 'download_failed'
+        || code === 'extraction_failed'
+        // The local PDF engine failed to start / respawn — machine-local and
+        // transient, so a background job should retry rather than complete
+        // terminally (the worker host may recover before the next attempt).
+        || code === 'worker_unavailable';
 }
 
 function dispatchBackgroundEvent(name: string, detail: unknown): void {

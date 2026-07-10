@@ -14,6 +14,7 @@ vi.mock('../../../src/services/supabaseClient', () => ({
 vi.mock('../../../src/services/agentDataProvider/utils', () => ({
     getAttachmentFileStatus: vi.fn(() => 'unavailable'),
     getDeferredToolPreference: vi.fn(() => 'always_ask'),
+    checkLibraryExcluded: vi.fn(() => null),
 }));
 
 vi.mock('../../../src/utils/zoteroUtils', () => ({
@@ -28,6 +29,7 @@ vi.mock('../../../src/utils/logger', () => ({ logger: vi.fn() }));
 // =============================================================================
 
 import {
+    checkNewCitationItemsExist,
     enrichOldStringCitationRefs,
     detectPartialSimplifiedTag,
 } from '../../../src/utils/editNoteValidation';
@@ -62,6 +64,9 @@ function installZoteroItems(byKey: Map<string, ItemStub>) {
     (globalThis as any).Zotero = (globalThis as any).Zotero ?? {};
     (globalThis as any).Zotero.Items = {
         getByLibraryAndKey: vi.fn((libId: number, key: string) => {
+            // Mirrors Zotero's getIDFromLibraryAndKey: a falsy library id
+            // throws rather than returning false.
+            if (!libId) throw new Error('Library ID not provided');
             return byKey.get(`${libId}-${key}`) ?? false;
         }),
     };
@@ -468,6 +473,72 @@ describe('enrichOldStringCitationRefs (att_id)', () => {
 });
 
 // =============================================================================
+// enrichOldStringCitationRefs — portable ids (dual-form parsing)
+// =============================================================================
+// The rest of this file leaves `Zotero.Libraries.userLibraryID` unmocked, so
+// `modelObjectId`/`modelObjectIdFromReference` never compute a portable ref
+// there and fall back to the legacy numeric form untouched — exercising the
+// fallback path. This block mocks a real personal-library mapping to prove
+// old_string ids in EITHER form (legacy numeric or portable) still match
+// metadata built with the portable form `simplifyNoteHtml` now emits.
+
+describe('enrichOldStringCitationRefs (portable ids)', () => {
+    beforeEach(() => {
+        (globalThis as any).Zotero.Libraries = { userLibraryID: 1 };
+    });
+
+    afterEach(() => {
+        delete (globalThis as any).Zotero.Libraries;
+    });
+
+    it('matches portable metadata against a legacy numeric item_id in old_string', () => {
+        const metadata = buildMetadata([
+            { ref: 'c_AAAA_0', itemId: 'u-AAAAAAAA', page: '12' },
+        ]);
+        const result = enrichOldStringCitationRefs(
+            '<p>Body <citation item_id="1-AAAAAAAA" page="12"/></p>',
+            metadata,
+        );
+        expect(result).toBe(
+            '<p>Body <citation item_id="1-AAAAAAAA" page="12" ref="c_AAAA_0"/></p>',
+        );
+    });
+
+    it('matches portable metadata against a portable unified id in old_string', () => {
+        const metadata = buildMetadata([
+            { ref: 'c_AAAA_0', itemId: 'u-AAAAAAAA', page: '12' },
+        ]);
+        const result = enrichOldStringCitationRefs(
+            '<p>Body <citation id="u-AAAAAAAA" loc="page12"/></p>',
+            metadata,
+        );
+        expect(result).toBe(
+            '<p>Body <citation id="u-AAAAAAAA" loc="page12" ref="c_AAAA_0"/></p>',
+        );
+    });
+
+    it('rewrites att_id to the portable parent item_id when a portable ref is computable', () => {
+        installZoteroItems(new Map([
+            ['1-ATTKEY000', {
+                libraryID: 1,
+                parentKey: 'PARENT1234',
+                isAttachment: () => true,
+            }],
+        ]));
+        const metadata = buildMetadata([
+            { ref: 'c_PARENT_0', itemId: 'u-PARENT1234' },
+        ]);
+        const result = enrichOldStringCitationRefs(
+            '<p><citation att_id="1-ATTKEY000"/></p>',
+            metadata,
+        );
+        expect(result).toBe(
+            '<p><citation item_id="u-PARENT1234" ref="c_PARENT_0"/></p>',
+        );
+    });
+});
+
+// =============================================================================
 // enrichOldStringCitationRefs — combined + edge cases
 // =============================================================================
 
@@ -609,5 +680,69 @@ describe('detectPartialSimplifiedTag', () => {
         const result = detectPartialSimplifiedTag(`<citation ${longAttrs}`);
         expect(result).not.toBeNull();
         expect(result!.snippet.length).toBeLessThanOrEqual(60);
+    });
+});
+
+// =============================================================================
+// checkNewCitationItemsExist — unavailable-library refs
+// =============================================================================
+
+describe('checkNewCitationItemsExist (portable ids)', () => {
+    beforeEach(() => {
+        (globalThis as any).Zotero.Libraries = { userLibraryID: 1 };
+        (globalThis as any).Zotero.Groups = {
+            getLibraryIDFromGroupID: vi.fn(() => false),
+            getGroupIDFromLibraryID: vi.fn(() => {
+                throw new Error('Group not found');
+            }),
+        };
+    });
+
+    it('reports an unavailable library distinctly, without a Zotero lookup', () => {
+        const error = checkNewCitationItemsExist(
+            'New text <citation id="g999-ABCD1234"/>.',
+            buildMetadata([]),
+        );
+
+        expect(error).toContain('not available on this computer');
+        expect(error).toContain('g999-ABCD1234');
+        expect((globalThis as any).Zotero.Items.getByLibraryAndKey).not.toHaveBeenCalled();
+    });
+
+    it('reports a genuinely missing item in an available library as nonexistent', () => {
+        const error = checkNewCitationItemsExist(
+            'New text <citation id="u-MISSING1"/>.',
+            buildMetadata([]),
+        );
+
+        expect(error).toContain('does not exist');
+    });
+
+    it('accepts a new citation whose item exists', () => {
+        installZoteroItems(new Map([['1-ABCD1234', { libraryID: 1 }]]));
+        const error = checkNewCitationItemsExist(
+            'New text <citation id="u-ABCD1234"/>.',
+            buildMetadata([]),
+        );
+
+        expect(error).toBeNull();
+    });
+
+    it('rejects a citation into an excluded library without a Zotero lookup', async () => {
+        const { checkLibraryExcluded } = await import('../../../src/services/agentDataProvider/utils');
+        vi.mocked(checkLibraryExcluded).mockReturnValueOnce({
+            message: 'The library "Private" is excluded from Beaver, so Beaver cannot read or modify its items.',
+        });
+        installZoteroItems(new Map([['1-ABCD1234', { libraryID: 1 }]]));
+
+        const error = checkNewCitationItemsExist(
+            'New text <citation id="u-ABCD1234"/>.',
+            buildMetadata([]),
+        );
+
+        // The gate must fire before the existence lookup so the response can't
+        // reveal whether the item exists in the excluded library.
+        expect(error).toContain('excluded from Beaver');
+        expect((globalThis as any).Zotero.Items.getByLibraryAndKey).not.toHaveBeenCalled();
     });
 });

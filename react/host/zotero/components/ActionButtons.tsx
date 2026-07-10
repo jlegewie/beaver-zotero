@@ -27,6 +27,7 @@ import { createZoteroItem, stampBeaverProvenanceExtra } from '../../../utils/add
 import { logger } from '../../../../src/utils/logger';
 import { ensureItemSynced } from '../../../../src/utils/sync';
 import { getPref } from '../../../../src/utils/prefs';
+import { libraryRefForLibraryID } from '../../../../src/utils/libraryIdentity';
 import { createProvenanceNote } from '../../../utils/noteActions';
 import {
     getPendingCreateItemActionBySourceIdAtom,
@@ -34,7 +35,10 @@ import {
 } from '../../../agents/agentActions';
 import { CreateItemResultData } from '../../../types/agentActions/items';
 import { currentThreadIdAtom } from '../../../atoms/threads';
+import { searchableLibraryIdsAtom } from '../../../atoms/profile';
+import type { ZoteroItemReference } from '../../../types/zotero';
 import type { ExternalReferenceActionMode, ExternalReferenceActionsProps } from '../../types';
+import { resolveSearchableLibraryId } from '../libraryAccess';
 
 const CITED_BY_URL = 'https://openalex.org/works?page=1&filter=cites:';
 
@@ -60,6 +64,7 @@ const ActionButtons: React.FC<ExternalReferenceActionsProps> = ({
     // Active thread ID — used to stamp the background PDF fetch so the
     // attachment_resolved ws event can route back to the live agent run.
     const threadId = useAtomValue(currentThreadIdAtom);
+    const searchableLibraryIds = useAtomValue(searchableLibraryIdsAtom);
 
     // Get cached reference directly from the cache for this item's source_id
     const sourceId = item.source_id;
@@ -69,9 +74,13 @@ const ActionButtons: React.FC<ExternalReferenceActionsProps> = ({
 
     // Track the actual item existence state
     const [itemExists, setItemExists] = useState(item.library_items && item.library_items.length > 0);
-    const [zoteroItemRef, setZoteroItemRef] = useState(
+    const [zoteroItemRef, setZoteroItemRef] = useState<ZoteroItemReference | null>(
         item.library_items && item.library_items.length > 0
-            ? { library_id: item.library_items[0].library_id, zotero_key: item.library_items[0].zotero_key }
+            ? {
+                library_id: item.library_items[0].library_id,
+                zotero_key: item.library_items[0].zotero_key,
+                library_ref: item.library_items[0].library_ref,
+            }
             : null
     );
     const [isLoading, setIsLoading] = useState(false);
@@ -106,9 +115,11 @@ const ActionButtons: React.FC<ExternalReferenceActionsProps> = ({
 
             // Use the item's actual library ID (may differ from user library if in group)
             const libraryId = newItem.libraryID;
+            const libraryRef = libraryRefForLibraryID(libraryId) ?? undefined;
             const newZoteroRef = {
                 library_id: libraryId,
-                zotero_key: newItem.key
+                zotero_key: newItem.key,
+                library_ref: libraryRef,
             };
 
             const provenanceReason = matchingAction?.proposed_data?.reason;
@@ -117,7 +128,7 @@ const ActionButtons: React.FC<ExternalReferenceActionsProps> = ({
             }
             if (getPref('addBeaverProvenanceNote') === true) {
                 await createProvenanceNote(
-                    { library_id: libraryId, zotero_key: newItem.key },
+                    newZoteroRef,
                     {
                         reason: provenanceReason,
                         threadId: threadId ?? undefined,
@@ -151,6 +162,7 @@ const ActionButtons: React.FC<ExternalReferenceActionsProps> = ({
                     const resultData: CreateItemResultData = {
                         library_id: libraryId,
                         zotero_key: newItem.key,
+                        library_ref: libraryRef,
                         attachment_status: attachmentStatus,
                         attachment_key: attachmentKey,
                     };
@@ -195,6 +207,7 @@ const ActionButtons: React.FC<ExternalReferenceActionsProps> = ({
 
     // React to cache changes (e.g., when item is deleted and cache is invalidated)
     useEffect(() => {
+        let cancelled = false;
         if (cachedRef === undefined) {
             // Not in cache yet - will be handled by the check effect below
             return;
@@ -204,26 +217,38 @@ const ActionButtons: React.FC<ExternalReferenceActionsProps> = ({
         setItemExists(cachedRef !== null);
         setZoteroItemRef(cachedRef);
 
-        // Check for best attachment if item exists
-        if (cachedRef !== null) {
-            try {
-                const zoteroItem = Zotero.Items.getByLibraryAndKey(cachedRef.library_id, cachedRef.zotero_key);
-                if (zoteroItem && zoteroItem.isRegularItem()) {
-                    zoteroItem.getBestAttachment().then(attachment => {
-                        setBestAttachment(attachment || null);
-                    });
+        const libraryId = cachedRef
+            ? resolveSearchableLibraryId(cachedRef, searchableLibraryIds)
+            : null;
+        if (cachedRef && libraryId) {
+            void (async () => {
+                try {
+                    const zoteroItem = Zotero.Items.getByLibraryAndKey(
+                        libraryId,
+                        cachedRef.zotero_key,
+                    );
+                    if (zoteroItem && zoteroItem.isRegularItem()) {
+                        await Zotero.Items.loadDataTypes([zoteroItem], ['itemData', 'childItems']);
+                        const attachment = await zoteroItem.getBestAttachment();
+                        if (!cancelled) setBestAttachment(attachment || null);
+                    } else if (!cancelled) {
+                        setBestAttachment(null);
+                    }
+                } catch (e) {
+                    logger(`ActionButtons: Item not loaded for ${cachedRef.library_id}/${cachedRef.zotero_key}: ${e}`);
+                    if (!cancelled) setBestAttachment(null);
                 }
-            } catch (e) {
-                logger(`ActionButtons: Item not loaded for ${cachedRef.library_id}/${cachedRef.zotero_key}: ${e}`);
-            }
+            })();
         } else {
-            // Item was deleted, clear attachment
+            // Item was deleted, or its library isn't available here; clear attachment
             setBestAttachment(null);
         }
-    }, [cachedRef]);
+        return () => { cancelled = true; };
+    }, [cachedRef, searchableLibraryIds]);
 
     // Check cache and validate on mount
     useEffect(() => {
+        let cancelled = false;
         if (!sourceId) return;
 
         // If we have cached data, the above effect handles it
@@ -234,31 +259,39 @@ const ActionButtons: React.FC<ExternalReferenceActionsProps> = ({
         // If not cached and not currently checking, start a check
         if (!isChecking(item)) {
             setIsLoading(true);
-            checkReference(item).then(result => {
+            checkReference(item).then(async result => {
                 setItemExists(result !== null);
                 setZoteroItemRef(result);
 
-                // Check for best attachment if item exists
-                if (result !== null) {
+                const libraryId = result
+                    ? resolveSearchableLibraryId(result, searchableLibraryIds)
+                    : null;
+                if (result && libraryId) {
                     try {
-                        const zoteroItem = Zotero.Items.getByLibraryAndKey(result.library_id, result.zotero_key);
+                        const zoteroItem = Zotero.Items.getByLibraryAndKey(libraryId, result.zotero_key);
                         if (zoteroItem && zoteroItem.isRegularItem()) {
-                            zoteroItem.getBestAttachment().then(attachment => {
-                                setBestAttachment(attachment || null);
-                            });
+                            await Zotero.Items.loadDataTypes([zoteroItem], ['itemData', 'childItems']);
+                            const attachment = await zoteroItem.getBestAttachment();
+                            if (!cancelled) setBestAttachment(attachment || null);
+                        } else if (!cancelled) {
+                            setBestAttachment(null);
                         }
                     } catch (e) {
                         logger(`ActionButtons: Item not loaded for ${result.library_id}/${result.zotero_key}: ${e}`);
+                        if (!cancelled) setBestAttachment(null);
                     }
+                } else {
+                    if (!cancelled) setBestAttachment(null);
                 }
-                setIsLoading(false);
+                if (!cancelled) setIsLoading(false);
             }).catch(() => {
-                setIsLoading(false);
+                if (!cancelled) setIsLoading(false);
             });
         } else {
             setIsLoading(true);
         }
-    }, [item, sourceId, cachedRef, checkReference, isChecking]);
+        return () => { cancelled = true; };
+    }, [item, sourceId, cachedRef, checkReference, isChecking, searchableLibraryIds]);
 
     // Update loading state when checking state changes
     useEffect(() => {

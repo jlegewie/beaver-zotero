@@ -17,10 +17,11 @@ function notifyExternalFileUnavailable(): void {
 }
 
 /**
- * A navigation target (item, collection, annotation) that was rendered from
- * persisted run history but is no longer in the Zotero library.
+ * A navigation target (item, collection, annotation, saved action) that was
+ * rendered from persisted run history but no longer exists on this computer.
  */
-export type UnavailableReferenceKind = 'item' | 'collection' | 'annotation';
+export type UnavailableReferenceKind = 'item' | 'collection' | 'annotation' | 'action';
+export type UnavailableReferenceCause = 'missing' | 'library_unavailable';
 
 const UNAVAILABLE_REFERENCE_COPY: Record<UnavailableReferenceKind, { title: string; text: string }> = {
     item: {
@@ -35,6 +36,25 @@ const UNAVAILABLE_REFERENCE_COPY: Record<UnavailableReferenceKind, { title: stri
         title: 'Annotation Not Available',
         text: 'This annotation is no longer in your Zotero library. It may have been deleted.',
     },
+    action: {
+        title: 'Action Not Found',
+        text: 'This action is not available on this computer. It may have been deleted or created on another device.',
+    },
+};
+
+const LIBRARY_UNAVAILABLE_COPY: Record<Exclude<UnavailableReferenceKind, 'action'>, { title: string; text: string }> = {
+    item: {
+        title: 'Item Not Available',
+        text: "This item is in a library that isn't available on this computer. It may be a group library you haven't joined on this device.",
+    },
+    collection: {
+        title: 'Collection Not Available',
+        text: "This collection is in a library that isn't available on this computer. It may be a group library you haven't joined on this device.",
+    },
+    annotation: {
+        title: 'Annotation Not Available',
+        text: "This annotation is in a library that isn't available on this computer. It may be a group library you haven't joined on this device.",
+    },
 };
 
 /**
@@ -44,11 +64,17 @@ const UNAVAILABLE_REFERENCE_COPY: Record<UnavailableReferenceKind, { title: stri
  * data, so their targets can be deleted between when a run was saved and when
  * the user clicks. Mirrors {@link notifyExternalFileUnavailable}.
  */
-export function notifyReferenceUnavailable(kind: UnavailableReferenceKind): void {
-    const { title, text } = UNAVAILABLE_REFERENCE_COPY[kind];
+export function notifyReferenceUnavailable(
+    kind: UnavailableReferenceKind,
+    cause: UnavailableReferenceCause = 'missing',
+): void {
+    const copy = cause === 'library_unavailable' && kind !== 'action'
+        ? LIBRARY_UNAVAILABLE_COPY[kind]
+        : UNAVAILABLE_REFERENCE_COPY[kind];
+    const { title, text } = copy;
     try {
         store.set(addPopupMessageAtom, {
-            id: `reference-unavailable-${kind}`,
+            id: `reference-unavailable-${kind}-${cause}`,
             type: 'warning',
             title,
             text,

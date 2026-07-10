@@ -5,15 +5,18 @@ import { createElement } from 'react';
 import { logger } from "../../src/utils/logger";
 import { addPopupMessageAtom, addRegularItemPopupAtom, addRegularItemsSummaryPopupAtom, removePopupMessageAtom, safeChildAttachments } from "../utils/popupMessageUtils";
 import { getItemValidationAtom, isHardBlockedValidation, isRejectedItemValidation, validateItemsAtom, validateRegularItemAtom } from './itemValidation';
+import { searchableLibraryIdsAtom } from './profile';
 import type { ItemValidationState } from './itemValidation';
 import { toReadabilityInfo, summarizeRegularItemReadability } from '../utils/attachmentReadabilityCopy';
 import { InvalidItemsMessageContent } from '../components/ui/popup/InvalidItemsMessageContent';
 import { agentItemFilter } from "../../src/utils/agentItemSupport";
 import { getCurrentReader } from "../utils/readerUtils";
-import { TextSelection } from "../types/attachments/apiTypes";
+import { TextSelection, zoteroReferenceLookupKeys } from "../types/attachments/apiTypes";
 import { ZoteroTag, CollectionReference } from "../types/zotero";
 import type { ExternalFileRecord } from "../../src/services/database";
 import { currentNoteItemAtom } from "./zoteroContext";
+import type { SlashCommandDescriptor } from "../utils/slashCommands";
+import { libraryRefForLibraryID } from "../../src/utils/libraryIdentity";
 
 
 /**
@@ -140,11 +143,31 @@ export const removeExternalFileFromMessageAtom = atom(
 );
 
 /**
- * Counter that increments whenever an action with user-input variables is
- * staged in the input. The InputArea listens for changes and selects the
- * first `[[name]]` placeholder so the user can start typing immediately.
+ * A /command pill waiting to be inserted into the chat input. Set by
+ * `stageActionPillAtom` (home launcher, context menu, reader toolbar) and
+ * consumed by InputArea, which owns the editor handle: it inserts the pill,
+ * focuses the editor, and clears this atom. The `nonce` distinguishes
+ * consecutive requests for the same action.
+ *
+ * `targetWindow` names the surface where the user triggered the action, so
+ * that when several InputAreas are mounted (main-window sidebar + separate
+ * Beaver window) the pill deterministically lands in the right editor.
  */
-export const pendingActionInputFocusAtom = atom<number>(0);
+export const pendingPillInsertAtom = atom<{
+    descriptor: SlashCommandDescriptor;
+    targetWindow?: Window;
+    nonce: number;
+} | null>(null);
+
+/**
+ * The /command pills currently in the message, in document order — the shared
+ * companion to `currentMessageContentAtom` (which only carries plain text).
+ * The editor the user edits in pushes its pills here; other mounted editors
+ * (main sidebar vs separate Beaver window) use it to rebuild real pill nodes
+ * when they sync the shared content string, so pills render and submit
+ * correctly from every surface.
+ */
+export const currentMessagePillsAtom = atom<SlashCommandDescriptor[]>([]);
 
 /**
 * Current reader attachment
@@ -344,7 +367,9 @@ async function validateItemsInBackground(
     get: any,
     set: any,
     items: Zotero.Item[],
-    isReaderAttachment: boolean = false
+    // Tab-context items (the open reader attachment / note tab) stay on screen
+    // for as long as the tab is open, so their invalid popup should not auto-expire.
+    isTabContext: boolean = false
 ) {
     const getValidation = get(getItemValidationAtom);
     logger(`validateItemsInBackground: Validating ${items.length} items`, 3);
@@ -475,8 +500,8 @@ async function validateItemsInBackground(
                 customContent: createElement(InvalidItemsMessageContent, { 
                     invalidItems: invalidItemsData 
                 }),
-                expire: isReaderAttachment ? false : true,
-                duration: 3000
+                expire: isTabContext ? false : true,
+                duration: 5000
             });
         }
 
@@ -507,11 +532,20 @@ export const updateMessageItemsFromZoteroSelectionAtom = atom(
     null,
     async (get, set, limit?: number) => {
         const items = Zotero.getActiveZoteroPane().getSelectedItems();
-        const itemsFiltered = items.filter((item) => item.isRegularItem() || item.isAttachment() || item.isNote());
-        
+        // Never stage items from libraries the user excluded from Beaver.
+        const searchableLibraryIds = get(searchableLibraryIdsAtom);
+        const itemsFiltered = items.filter((item) =>
+            (item.isRegularItem() || item.isAttachment() || item.isNote()) &&
+            searchableLibraryIds.includes(item.libraryID)
+        );
+
         // Filter out items already in the thread
         const existingKeys = get(allUserAttachmentKeysAtom);
-        const newItems = itemsFiltered.filter((item) => !existingKeys.has(`${item.libraryID}-${item.key}`));
+        const newItems = itemsFiltered.filter((item) => !zoteroReferenceLookupKeys({
+            library_id: item.libraryID,
+            zotero_key: item.key,
+            library_ref: libraryRefForLibraryID(item.libraryID),
+        }).some(key => existingKeys.has(key)));
         
         if (!limit || newItems.length <= limit) {
             await set(addItemsToCurrentMessageItemsAtom, newItems.slice(0, limit));
@@ -547,6 +581,27 @@ export const updateReaderAttachmentAtom = atom(
         if (item) {
             set(currentReaderAttachmentAtom, item);
             validateItemsInBackground(get, set, [item], true);
+        }
+    }
+);
+
+/**
+* Update the current note tab item and validate it in the background.
+*/
+export const updateNoteItemAtom = atom(
+    null,
+    (get, set, item: Zotero.Item | null) => {
+        // Remove the previous note's invalid popup before switching
+        const previousNoteKey = get(currentNoteTabItemKeyAtom);
+        if (previousNoteKey) {
+            set(removePopupMessageAtom, previousNoteKey);
+        }
+
+        set(currentNoteItemAtom, item);
+        if (item) {
+            // Fire-and-forget: the note tab stays open, so treat it as a
+            // persistent tab context (isTabContext=true).
+            void validateItemsInBackground(get, set, [item], true);
         }
     }
 );

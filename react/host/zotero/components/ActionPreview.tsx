@@ -12,6 +12,7 @@ import { CreateNotePreview } from './CreateNotePreview';
 import { ManageTagsPreview } from './ManageTagsPreview';
 import { ManageCollectionsPreview } from './ManageCollectionsPreview';
 import { CreateAnnotationsPreview } from './CreateAnnotationsPreview';
+import { resolveLibraryRef } from '../../../../src/utils/libraryIdentity';
 import type { ActionStatus, PreviewData } from './agentActionViewHelpers';
 
 /**
@@ -58,9 +59,18 @@ export const ActionPreview: React.FC<{
         // to the type's equivalent field). Falls back to the agent-supplied
         // label when the item is not loaded.
         let itemTypeID: number | undefined;
-        const libraryId = previewData.actionData.library_id;
         const zoteroKey = previewData.actionData.zotero_key;
-        if (typeof libraryId === 'number' && zoteroKey) {
+        // Resolve the portable library_ref to a local library id first: a group
+        // item's device-local library_id is UNRESOLVED_LIBRARY_ID (0) — its
+        // identity is the ref — so keying off library_id alone would skip the
+        // lookup for an available group item. resolveLibraryRef returns the
+        // local id (or null when the library isn't on this device); fall back
+        // to the agent-supplied label when the item isn't available here.
+        const libraryId = resolveLibraryRef({
+            library_ref: previewData.actionData.library_ref,
+            library_id: previewData.actionData.library_id,
+        });
+        if (libraryId && zoteroKey) {
             const item = Zotero.Items.getByLibraryAndKey(libraryId, zoteroKey);
             if (item) itemTypeID = item.itemTypeID;
         }
@@ -83,6 +93,17 @@ export const ActionPreview: React.FC<{
         const parentKey = previewData.actionData.parent_key;
         const itemIds = previewData.actionData.item_ids || [];
 
+        // Resolve the library id from the sources that survive into stored
+        // actions (current_value is only present while an approval is pending).
+        // Without this the preview cannot reveal collections in group libraries.
+        const rawLibraryId = previewData.resultData?.library_id
+            ?? previewData.currentValue?.library_id
+            ?? previewData.actionData.library_id;
+        const libraryId = typeof rawLibraryId === 'number' && rawLibraryId > 0 ? rawLibraryId : null;
+        const libraryRef = previewData.resultData?.library_ref
+            ?? previewData.currentValue?.library_ref
+            ?? previewData.actionData.library_ref;
+
         // Get library name and item count from current_value
         const libraryName = previewData.currentValue?.library_name;
         const itemCount = previewData.currentValue?.item_count ?? itemIds.length;
@@ -90,6 +111,8 @@ export const ActionPreview: React.FC<{
         return (
             <CreateCollectionPreview
                 name={name}
+                libraryId={libraryId}
+                libraryRef={libraryRef}
                 libraryName={libraryName}
                 parentKey={parentKey}
                 itemCount={itemCount}
@@ -220,6 +243,16 @@ export const ActionPreview: React.FC<{
             ? (previewData.currentValue?.old_content || previewData.resultData?.undo_full_html)
             : undefined;
 
+        // Resolve the portable library_ref to a local id before handing it to
+        // EditNotePreview, which fetches note HTML + page labels. Pass
+        // undefined when unresolvable so the preview's own guard treats it as
+        // unavailable.
+        const resolvedNoteLibraryId = resolveLibraryRef({
+            library_ref: previewData.actionData.library_ref,
+            library_id: previewData.actionData.library_id,
+        });
+        const noteLibraryId = resolvedNoteLibraryId ?? undefined;
+
         return (
             <EditNotePreview
                 oldString={oldString}
@@ -229,7 +262,7 @@ export const ActionPreview: React.FC<{
                 occurrencesReplaced={occurrencesReplaced}
                 warnings={warnings}
                 status={status}
-                libraryId={previewData.actionData.library_id}
+                libraryId={noteLibraryId}
                 zoteroKey={previewData.actionData.zotero_key}
             />
         );

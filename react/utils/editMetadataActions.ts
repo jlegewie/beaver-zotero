@@ -7,6 +7,7 @@ import { AgentAction } from '../agents/agentActions';
 import { EditMetadataResultData, AppliedMetadataEdit, FailedMetadataEdit, MetadataEdit, CreatorJSON } from '../types/agentActions/base';
 import { logger } from '../../src/utils/logger';
 import { sanitizeCreators } from '../../src/utils/zoteroUtils';
+import { libraryRefForLibraryID, resolveItemReference } from '../../src/utils/libraryIdentity';
 
 /**
  * Result of an undo operation
@@ -64,16 +65,20 @@ export async function executeEditMetadataAction(
 ): Promise<EditMetadataResultData> {
     const { library_id, zotero_key, edits, creators } = action.proposed_data as {
         library_id: number;
+        library_ref?: string;
         zotero_key: string;
         edits: MetadataEdit[];
         creators?: CreatorJSON[] | null;
     };
 
-    // Get the item
-    const item = await Zotero.Items.getByLibraryAndKeyAsync(library_id, zotero_key);
-    if (!item) {
+    const resolved = await resolveItemReference(action.proposed_data as any);
+    if (resolved.status === 'library_unavailable') {
+        throw new Error(`Library unavailable for item: ${library_id}-${zotero_key}`);
+    }
+    if (resolved.status === 'not_found') {
         throw new Error(`Item not found: ${library_id}-${zotero_key}`);
     }
+    const item = resolved.item;
 
     const appliedEdits: AppliedMetadataEdit[] = [];
     const failedEdits: FailedMetadataEdit[] = [];
@@ -127,7 +132,7 @@ export async function executeEditMetadataAction(
     if (appliedEdits.length > 0 || creatorsApplied) {
         try {
             await item.saveTx();
-            logger(`executeEditMetadataAction: Saved ${appliedEdits.length} edits${creatorsApplied ? ' + creators' : ''} to ${library_id}-${zotero_key}`, 1);
+            logger(`executeEditMetadataAction: Saved ${appliedEdits.length} edits${creatorsApplied ? ' + creators' : ''} to ${item.libraryID}-${zotero_key}`, 1);
         } catch (error) {
             throw new Error(`Failed to save item: ${error}`);
         }
@@ -142,8 +147,9 @@ export async function executeEditMetadataAction(
     }
 
     return {
-        library_id,
+        library_id: item.libraryID,
         zotero_key,
+        library_ref: libraryRefForLibraryID(item.libraryID) ?? undefined,
         applied_edits: appliedEdits,
         rejected_edits: [],
         failed_edits: failedEdits,
@@ -172,14 +178,24 @@ export async function undoEditMetadataAction(
 ): Promise<UndoResult> {
     const { library_id, zotero_key } = action.proposed_data as {
         library_id: number;
+        library_ref?: string;
         zotero_key: string;
     };
 
-    // Get the item
-    const item = await Zotero.Items.getByLibraryAndKeyAsync(library_id, zotero_key);
-    if (!item) {
+    const resolved = await resolveItemReference(action.proposed_data as any);
+    if (resolved.status === 'library_unavailable') {
+        logger(`undoEditMetadataAction: Library unavailable for ${library_id}-${zotero_key}`, 1);
+        return {
+            fieldsReverted: 0,
+            alreadyReverted: [],
+            manuallyModified: [],
+            needsConfirmation: false,
+        };
+    }
+    if (resolved.status === 'not_found') {
         throw new Error(`Item not found: ${library_id}-${zotero_key}`);
     }
+    const item = resolved.item;
 
     // Prefer result_data.applied_edits (has old_value captured at apply-time)
     // Fall back to proposed_data.edits if result_data is not available

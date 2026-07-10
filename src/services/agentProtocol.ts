@@ -638,8 +638,11 @@ export type ZoteroDocumentErrorCode =
     | 'page_out_of_range'   // Requested pages are out of range
     | 'download_failed'     // Remote file download failed
     | 'timeout'             // Extraction timed out
+    | 'worker_unavailable'  // The local PDF engine could not start / died and could not be respawned (transient, retryable)
     | 'extraction_failed'  // General extraction failure
     | 'recursion_limit'     // Extraction overflowed the JS stack ("too much recursion" / "Maximum call stack")
+    | 'library_excluded'    // Attachment is in a library the user excluded from Beaver
+    | 'library_unavailable' // Attachment is in a library unavailable on this computer
     | 'document_too_large'  // Serialized extraction result exceeds the WebSocket transfer budget
     | 'schema_version_mismatch'
     | 'mode_mismatch';
@@ -689,6 +692,8 @@ export type AttachmentPageImagesErrorCode =
     | 'download_failed'     // Remote file download failed
     | 'invalid_page_value'  // Non-parseable string or unresolved label
     | 'timeout'             // Rendering timed out
+    | 'library_excluded'    // Attachment is in a library the user excluded from Beaver
+    | 'library_unavailable' // Attachment is in a library unavailable on this computer
     | 'render_failed';      // General rendering failure
 
 /** Response to zotero attachment page images request */
@@ -719,6 +724,8 @@ export type AttachmentImageErrorCode =
     | 'download_failed'            // Remote file download failed
     | 'decode_failed'              // Image could not be decoded (corrupt/truncated)
     | 'timeout'                    // Processing timed out
+    | 'library_excluded'           // Attachment is in a library the user excluded from Beaver
+    | 'library_unavailable'        // Attachment is in a library unavailable on this computer
     | 'image_processing_failed';   // General resize/encode failure
 
 /** A processed attachment image. Field shapes align with WSPageImage. */
@@ -830,6 +837,8 @@ export type AttachmentSearchErrorCode =
     | 'too_many_pages'      // PDF exceeds page count limit
     | 'download_failed'     // Remote file download failed
     | 'timeout'             // Search timed out
+    | 'library_excluded'    // Attachment is in a library the user excluded from Beaver
+    | 'library_unavailable' // Attachment is in a library unavailable on this computer
     | 'search_failed';      // General search failure
 
 /** Request from backend to search text within an attachment */
@@ -921,6 +930,12 @@ export interface WSReadNoteResponse {
     error?: string;
     /** Note metadata */
     note_id?: string;
+    /** Device-local Zotero library ID of the note. */
+    library_id?: number;
+    /** Zotero key of the note. */
+    zotero_key?: string;
+    /** Device-portable library identity ("u" | "g<groupID>") of the note. */
+    library_ref?: string;
     title?: string;
     /** @deprecated Superseded by `parent_item`. Still emitted for clients/backends predating `parent_item`; remove once the backend reads `parent_item`. */
     parent_item_id?: string;
@@ -982,6 +997,8 @@ export interface WSZoteroSearchRequest extends WSBaseEvent {
 export interface RegularSearchResultItem {
     result_type: 'regular';
     item_id: string;
+    /** Device-portable library identity ("u" | "g<groupID>") of the item referenced by `item_id`. */
+    library_ref?: string;
     item_type: string;
     title?: string | null;
     creators?: string | null;
@@ -993,6 +1010,8 @@ export interface RegularSearchResultItem {
 export interface NoteResultItem {
     result_type: 'note';
     item_id: string;
+    /** Device-portable library identity ("u" | "g<groupID>") of the note referenced by `item_id`. */
+    library_ref?: string;
     title?: string | null;
     /** @deprecated Superseded by `parent_item`. Still emitted for clients/backends predating `parent_item`; remove once the backend reads `parent_item`. */
     parent_item_id?: string | null;
@@ -1028,6 +1047,8 @@ export interface AnnotationResultItem {
     result_type: 'annotation';
     /** Annotation id, format "library_id-zotero_key". */
     annotation_id: string;
+    /** Device-portable library identity ("u" | "g<groupID>") of the annotation referenced by `annotation_id`. */
+    library_ref?: string;
     /** "highlight" | "underline" | "note" | "image" | "ink" | "text" */
     annotation_type?: string | null;
     /** Highlighted/selected text, when present. */
@@ -1069,6 +1090,8 @@ export type ListItemsResultItem = RegularListResultItem | NoteResultItem | Attac
 /** Brief library info for error responses */
 export interface AvailableLibraryInfo {
     library_id: number;
+    /** Device-portable library identity ("u" | "g<groupID>"). See `src/utils/libraryIdentity.ts`. */
+    library_ref?: string;
     name: string;
 }
 
@@ -1107,6 +1130,8 @@ export interface WSListItemsRequest extends WSBaseEvent {
 export interface RegularListResultItem {
     result_type: 'regular';
     item_id: string;
+    /** Device-portable library identity ("u" | "g<groupID>") of the item referenced by `item_id`. */
+    library_ref?: string;
     item_type: string;
     title?: string | null;
     creators?: string | null;
@@ -1217,6 +1242,9 @@ export interface WSListCollectionsRequest extends WSBaseEvent {
 
 /** Collection information */
 export interface CollectionInfo {
+    library_id?: number;
+    /** Device-portable library identity ("u" | "g<groupID>"). */
+    library_ref?: string;
     collection_key: string;
     name: string;
     parent_key?: string | null;
@@ -1232,6 +1260,8 @@ export interface WSListCollectionsResponse {
     collections: CollectionInfo[];
     total_count: number;
     library_id?: number | null;
+    /** Device-portable library identity ('u' / 'g<groupID>') of the listed library. */
+    library_ref?: string;
     library_name?: string | null;
     error?: string | null;
     error_code?: string | null;
@@ -1275,6 +1305,8 @@ export interface WSListTagsResponse {
     tags: TagInfo[];
     total_count: number;
     library_id?: number | null;
+    /** Device-portable library identity ('u' / 'g<groupID>') of the listed library. */
+    library_ref?: string;
     library_name?: string | null;
     error?: string | null;
     error_code?: string | null;
@@ -1295,6 +1327,8 @@ export interface WSListLibrariesRequest extends WSBaseEvent {
 /** Per-library count snapshot */
 export interface LibrarySummary {
     library_id: number;
+    /** Device-portable library identity ("u" | "g<groupID>"). See `src/utils/libraryIdentity.ts`. */
+    library_ref?: string;
     name: string;
     is_group: boolean;
     read_only: boolean;
@@ -1446,6 +1480,71 @@ export interface WSDeferredApprovalResponse {
     user_instructions?: string | null;
 }
 
+/** One selectable option of an ask_user_question item (ids are server-assigned) */
+export interface AskUserQuestionOption {
+    /** Server-assigned option id (e.g. 'q0-o1') */
+    id: string;
+    /** Display text for the option */
+    label: string;
+    /** Optional one-line explanation or tradeoff */
+    description?: string | null;
+}
+
+/** One question of an ask_user_question request */
+export interface AskUserQuestionItem {
+    /** Server-assigned question id (e.g. 'q0') */
+    id: string;
+    /** Very short chip label for the question (max ~12 chars) */
+    header?: string | null;
+    /** The complete question to show the user */
+    question: string;
+    /** Selectable options, recommended option first */
+    options: AskUserQuestionOption[];
+    /** Whether multiple options may be selected */
+    allow_multiple?: boolean;
+    /** Whether a free-text 'Other' answer is offered */
+    allow_custom?: boolean;
+}
+
+/**
+ * Request from backend to ask the user structured multiple-choice question(s).
+ * The agent run blocks until the frontend sends a WSAskUserQuestionResponse
+ * with the matching question_id (or the backend-side timeout elapses).
+ *
+ * Like deferred_approval_request, this event carries no request_id — the
+ * response is correlated by question_id.
+ */
+export interface WSAskUserQuestionRequest extends WSBaseEvent {
+    event: 'ask_user_question_request';
+    /** Correlation id for the response */
+    question_id: string;
+    /** The tool call ID this question belongs to (for inline UI matching) */
+    toolcall_id: string;
+    /** Optional card title */
+    title?: string | null;
+    /** The questions to present (1-4) */
+    questions: AskUserQuestionItem[];
+}
+
+/** The user's answer to a single question of an ask_user_question request */
+export interface AskUserQuestionAnswer {
+    /** Matches AskUserQuestionItem.id (e.g. 'q0') */
+    item_id: string;
+    /** Ids of the selected options */
+    selected_option_ids: string[];
+    /** Free-text 'Other' answer the user typed, if any */
+    custom_text?: string | null;
+}
+
+/** Response to an ask_user_question request (user's answers, or a skip) */
+export interface WSAskUserQuestionResponse {
+    type: 'ask_user_question_response';
+    question_id: string;
+    answers: AskUserQuestionAnswer[];
+    /** True when the user skipped the question(s) (or no handler is registered) */
+    cancelled: boolean;
+}
+
 /** Union type for all WebSocket events */
 export type WSEvent =
     | WSReadyEvent
@@ -1487,7 +1586,9 @@ export type WSEvent =
     // Deferred tool events
     | WSAgentActionValidateRequest
     | WSAgentActionExecuteRequest
-    | WSDeferredApprovalRequest;
+    | WSDeferredApprovalRequest
+    // User interaction events
+    | WSAskUserQuestionRequest;
 
 
 // =============================================================================
@@ -1529,12 +1630,19 @@ export interface WSAuthMessage {
  * present and unique per install — the discriminator when one Beaver account has
  * several installs connected. The rest are best-effort context/labels (`user_id`/
  * `account_name` are absent when Zotero sync is off).
+ *
+ * `libraries` carries the install's searchable index scope — canonical library
+ * refs for libraries not excluded in Beaver Preferences.
  */
 export interface ZoteroInstanceWire {
     local_user_key: string;
     user_id?: string;
     account_name?: string;
     device_name?: string;
+    /** Canonical library refs in scope: `u<userID>`/`l<localUserKey>` and
+     * `g<groupID>` values for searchable libraries.
+     */
+    libraries?: string[];
 }
 
 /**
@@ -1566,6 +1674,8 @@ export const CLIENT_FEATURES = {
     EXTERNAL_SEARCH_SURCHARGE: 'external_search_surcharge',
     EDIT_METADATA_CREATORS: 'edit_metadata_creators',
     EXTERNAL_FILES: 'external_files',
+    ASK_USER_QUESTION: 'ask_user_question',
+    PORTABLE_IDS: 'portable_ids',
 } as const;
 
 /** Client type identifier for the Zotero plugin. */
@@ -1584,6 +1694,8 @@ export const ZOTERO_PLUGIN_FEATURES: string[] = Object.values(CLIENT_FEATURES);
 export interface CurrentLibrary {
     /** Library ID */
     library_id: number;
+    /** Device-portable library identity ("u" | "g<groupID>"). See `src/utils/libraryIdentity.ts`. */
+    library_ref?: string;
     /** Library name (e.g., "My Library" or group name) */
     name: string;
     /** Whether this is a group library */
@@ -1602,6 +1714,8 @@ export interface CurrentCollection {
     name: string;
     /** Library ID this collection belongs to */
     library_id: number;
+    /** Device-portable library identity ("u" | "g<groupID>"). See `src/utils/libraryIdentity.ts`. */
+    library_ref?: string;
     /** Parent collection key, if this is a subcollection */
     parent_key?: string | null;
 }
@@ -1814,6 +1928,14 @@ export interface WSCallbacks {
      * @param event The deferred approval request with action details
      */
     onDeferredApprovalRequest?: (event: WSDeferredApprovalRequest) => void;
+
+    /**
+     * Called when the backend asks the user structured multiple-choice
+     * question(s). The frontend should render the question card and send a
+     * WSAskUserQuestionResponse when the user submits or skips.
+     * @param event The question request with questions and correlation id
+     */
+    onAskUserQuestionRequest?: (event: WSAskUserQuestionRequest) => void;
 
     /**
      * Called when the WebSocket connection is established

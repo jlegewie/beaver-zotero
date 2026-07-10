@@ -7,6 +7,7 @@ import { NotePosition } from "../../../react/types/agentActions/annotations";
 import { PageGeometry } from "../../beaver-extract/types";
 import { getAttachmentFileStatus } from "../agentDataProvider/utils";
 import { isRemoteFilePath } from "../documentFileIdentity";
+import { libraryRefForLibraryID } from "../../utils/libraryIdentity";
 import {
     BEAVER_ANNOTATION_AUTHOR,
     resolveBeaverAnnotationColor,
@@ -31,6 +32,14 @@ import {
 
 const NOTE_RECT_SIZE = 18;
 const NOTE_SIDE_MARGIN = 12;
+
+function createdAnnotationReference(attachment: Zotero.Item, item: Zotero.Item): ZoteroItemReference {
+    return {
+        library_id: attachment.libraryID,
+        zotero_key: item.key,
+        library_ref: libraryRefForLibraryID(attachment.libraryID) ?? undefined,
+    };
+}
 
 export type MissingPageGeometryReason = "unavailable" | "extraction_failed";
 
@@ -371,7 +380,7 @@ export async function createHighlightAnnotation(
     }
     await item.saveTx();
 
-    return { library_id: attachment.libraryID, zotero_key: item.key };
+    return createdAnnotationReference(attachment, item);
 }
 
 /**
@@ -415,7 +424,7 @@ export async function createNoteAnnotation(
     }
     await item.saveTx();
 
-    return { library_id: attachment.libraryID, zotero_key: item.key };
+    return createdAnnotationReference(attachment, item);
 }
 
 // ---------------------------------------------------------------------------
@@ -523,7 +532,7 @@ export async function createEpubHighlightAnnotation(
     }
     await item.saveTx();
 
-    return { library_id: attachment.libraryID, zotero_key: item.key };
+    return createdAnnotationReference(attachment, item);
 }
 
 /**
@@ -562,7 +571,7 @@ export async function createEpubNoteAnnotation(
     }
     await item.saveTx();
 
-    return { library_id: attachment.libraryID, zotero_key: item.key };
+    return createdAnnotationReference(attachment, item);
 }
 
 // ---------------------------------------------------------------------------
@@ -692,7 +701,7 @@ export async function createSnapshotHighlightAnnotation(
     }
     await item.saveTx();
 
-    return { library_id: attachment.libraryID, zotero_key: item.key };
+    return createdAnnotationReference(attachment, item);
 }
 
 /**
@@ -729,5 +738,5 @@ export async function createSnapshotNoteAnnotation(
     }
     await item.saveTx();
 
-    return { library_id: attachment.libraryID, zotero_key: item.key };
+    return createdAnnotationReference(attachment, item);
 }

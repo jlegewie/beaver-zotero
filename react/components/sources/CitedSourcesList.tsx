@@ -268,6 +268,7 @@ function getZoteroReference(citation: CitedSource): ZoteroItemReference | undefi
         return {
             library_id: ref.library_id,
             zotero_key: ref.zotero_key,
+            library_ref: ref.library_ref,
         };
     }
     return undefined;

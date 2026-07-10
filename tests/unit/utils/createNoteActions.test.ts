@@ -120,7 +120,7 @@ describe('executeCreateNoteAction', () => {
             },
         } as any, 'run-1');
 
-        expect(vi.mocked(resolveCreateNoteParent)).toHaveBeenCalledWith('1-RELKEY');
+        expect(vi.mocked(resolveCreateNoteParent)).toHaveBeenCalledWith('1-RELKEY', undefined);
         expect((globalThis as any).Zotero.Items.loadDataTypes).toHaveBeenCalledWith([relatedItem], ['collections']);
         expect(relatedItem.getCollections).toHaveBeenCalled();
         expect(noteInstances).toHaveLength(1);
@@ -187,5 +187,39 @@ describe('executeCreateNoteAction', () => {
         } as any, 'run-1');
 
         expect((globalThis as any).Zotero.Items.getByLibraryAndKeyAsync).toHaveBeenCalledTimes(1);
+    });
+
+    it('passes library_ref through parent resolution and targets the resolved group library', async () => {
+        (globalThis as any).Zotero.Groups = {
+            getLibraryIDFromGroupID: vi.fn(() => 7),
+            getGroupIDFromLibraryID: vi.fn(() => 42),
+        };
+        vi.mocked(resolveCreateNoteParent).mockResolvedValueOnce({
+            ok: true,
+            parentKey: 'PARENTKEY',
+            resolvedLibraryId: 7,
+            relatedItemKey: null,
+            warning: null,
+        });
+
+        const result = await executeCreateNoteAction({
+            proposed_data: {
+                title: 'Title',
+                content: 'Body',
+                parent_item_id: '99-PARENTKEY',
+                library_id: 99,
+                library_ref: 'g42',
+            },
+        } as any, 'run-1');
+
+        expect(vi.mocked(resolveCreateNoteParent)).toHaveBeenCalledWith('99-PARENTKEY', 'g42');
+        expect(noteInstances).toHaveLength(1);
+        expect(noteInstances[0].libraryID).toBe(7);
+        expect(noteInstances[0].parentKey).toBe('PARENTKEY');
+        expect(result).toMatchObject({
+            library_id: 7,
+            library_ref: 'g42',
+            parent_key: 'PARENTKEY',
+        });
     });
 });

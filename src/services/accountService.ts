@@ -1,6 +1,6 @@
 import { ApiService } from './apiService';
 import API_BASE_URL from '../utils/getAPIBaseURL';
-import { SafeProfileWithPlan } from '../../react/types/profile';
+import { ExcludedLibrary, SafeProfileWithPlan } from '../../react/types/profile';
 import { getZoteroUserIdentifier } from '../utils/zoteroUtils';
 import { ApiError, ZoteroInstanceMismatchError } from '../../react/types/apiErrors';
 import { ModelConfig } from '../../react/atoms/models';
@@ -48,6 +48,11 @@ interface OnboardingRequest {
 
 interface SyncLibrariesRequest {
     libraries: ZoteroLibrary[];
+}
+
+
+interface ExcludedLibrariesRequest {
+    excluded_libraries: ExcludedLibrary[];
 }
 
 
@@ -300,6 +305,17 @@ export class AccountService extends ApiService {
         return this.post<{ message: string }>('/api/v1/account/update-sync-libraries', {
             libraries,
         } as SyncLibrariesRequest);
+    }
+
+    /**
+     * Updates the user's excluded libraries.
+     * @param excludedLibraries Libraries Beaver should not index, search, read, or write
+     * @returns Promise with the response message
+     */
+    async updateExcludedLibraries(excludedLibraries: ExcludedLibrary[]): Promise<{ message: string }> {
+        return this.post<{ message: string }>('/api/v1/account/update-excluded-libraries', {
+            excluded_libraries: excludedLibraries,
+        } as ExcludedLibrariesRequest);
     }
 
     /**

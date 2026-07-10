@@ -8,7 +8,6 @@
  */
 
 import { logger } from '../../utils/logger';
-
 import { isAttachmentAvailableRemotely } from '../../utils/webAPI';  // kept for file_missing message check
 import {
     WSZoteroAttachmentPageImagesRequest,
@@ -19,6 +18,7 @@ import {
 import { BeaverExtractor, ExtractionError, ExtractionErrorCode, WorkerAbortError } from '../../beaver-extract';
 import { makeRemoteFilePath } from '../documentFileIdentity';
 import {
+    preflightZoteroAttachmentRequest,
     resolveToPdfAttachment,
     validateZoteroItemReference,
     loadPdfData,
@@ -53,7 +53,8 @@ export async function handleZoteroAttachmentPageImagesRequest(
     request: WSZoteroAttachmentPageImagesRequest
 ): Promise<WSZoteroAttachmentPageImagesResponse> {
     const { attachment, pages, scale, dpi, format, jpeg_quality, prefer_page_labels, request_id, timeout_seconds } = request;
-    const requestKey = `${attachment.library_id}-${attachment.zotero_key}`;
+    const preflight = preflightZoteroAttachmentRequest(attachment, validateZoteroItemReference);
+    const { responseAttachment, requestKey } = preflight;
     let errorKey = requestKey;
 
     let resolvedCachedPageCount: number | null = null;
@@ -66,7 +67,7 @@ export async function handleZoteroAttachmentPageImagesRequest(
     ): WSZoteroAttachmentPageImagesResponse => ({
         type: 'zotero_attachment_page_images',
         request_id,
-        attachment,
+        attachment: responseAttachment,
         pages: [],
         total_pages,
         error,
@@ -74,21 +75,17 @@ export async function handleZoteroAttachmentPageImagesRequest(
     });
 
     // 0. Validate attachment reference format
-    const formatError = validateZoteroItemReference(attachment);
-    if (formatError) {
-        return errorResponse(
-            `Invalid attachment reference '${requestKey}': ${formatError}`,
-            'invalid_format'
-        );
+    if (!preflight.ok) {
+        return errorResponse(preflight.error, preflight.errorCode);
     }
+    const { resolvedLibraryId } = preflight;
 
     const timeout = createTimeoutController(timeout_seconds, DEFAULT_IMAGES_TIMEOUT_SECONDS);
     const { signal, timeoutSeconds, throwIfTimedOut, dispose } = timeout;
 
     try {
-        // 1. Get the attachment item from Zotero
         const zoteroItem = await Zotero.Items.getByLibraryAndKeyAsync(
-            attachment.library_id,
+            resolvedLibraryId,
             attachment.zotero_key
         );
         throwIfTimedOut('zotero_item_lookup');
@@ -382,7 +379,7 @@ export async function handleZoteroAttachmentPageImagesRequest(
         return {
             type: 'zotero_attachment_page_images',
             request_id,
-            attachment,
+            attachment: responseAttachment,
             pages: pageImages,
             total_pages: renderResult.pageCount,
         };

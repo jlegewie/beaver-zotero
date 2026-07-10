@@ -6,6 +6,8 @@ import {
 } from '../../../src/services/database';
 import { MockDBConnection } from '../../mocks/mockDBConnection';
 
+declare const Zotero: any;
+
 const mockState = {
     extractCalls: [] as any[],
     nextResult: { kind: 'ok' } as any,
@@ -426,6 +428,7 @@ describe('BackgroundExtractor', () => {
     it.each([
         ['download_failed'],
         ['extraction_failed'],
+        ['worker_unavailable'],
     ])('transient response_error %s bumps attempt_count and slides availability out', async (code: string) => {
         await db.enqueueBackgroundJob({
             jobType: 'document_timeout_retry',
@@ -1094,7 +1097,9 @@ describe('BackgroundExtractor', () => {
 
         it('pref observer flipping back to true triggers a wake and re-arms claiming', async () => {
             (Zotero as any).Prefs.get = vi.fn(() => false);
-            const registerObserver = vi.fn(() => Symbol('pref-obs'));
+            const registerObserver = vi.fn(
+                (_pref: string, _handler: (v: unknown) => void, _global?: boolean) => Symbol('pref-obs'),
+            );
             (Zotero as any).Prefs.registerObserver = registerObserver;
 
             const { BackgroundExtractor } = await loadProcessor();
@@ -1102,7 +1107,7 @@ describe('BackgroundExtractor', () => {
             await proc.start();
             try {
                 expect(registerObserver).toHaveBeenCalled();
-                const handler = registerObserver.mock.calls[0][1] as (v: unknown) => void;
+                const handler = registerObserver.mock.calls[0]![1]!;
                 // Pref flips back to true — handler must re-enable the loop.
                 handler(true);
 
@@ -1148,7 +1153,13 @@ describe('BackgroundExtractor', () => {
 
         it('sync stop notifier clears the in-progress flag and schedules a wake', async () => {
             (Zotero as any).Sync.Runner.syncInProgress = true;
-            const registerObserver = vi.fn(() => 'beaver-bg-extractor');
+            const registerObserver = vi.fn(
+                (
+                    _observer: { notify: (event: string, type: string, ids: number[], extra: unknown) => void },
+                    _types: string[],
+                    _id: string,
+                ) => 'beaver-bg-extractor',
+            );
             (Zotero as any).Notifier.registerObserver = registerObserver;
 
             const { BackgroundExtractor } = await loadProcessor();
@@ -1156,9 +1167,7 @@ describe('BackgroundExtractor', () => {
             await proc.start();
             try {
                 expect(registerObserver).toHaveBeenCalled();
-                const observer = registerObserver.mock.calls[0][0] as {
-                    notify: (event: string, type: string, ids: number[], extra: unknown) => void;
-                };
+                const observer = registerObserver.mock.calls[0]![0]!;
                 observer.notify('stop', 'sync', [], {});
 
                 await db.enqueueBackgroundJob({

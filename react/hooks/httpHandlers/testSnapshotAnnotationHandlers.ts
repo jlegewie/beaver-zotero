@@ -14,6 +14,7 @@ import {
     getCurrentReaderAndWaitForView,
     waitForReaderForItem,
 } from '../../utils/readerUtils';
+import { UNRESOLVED_LIBRARY_ID } from '../../../src/utils/libraryIdentity';
 
 const PARITY_HIGHLIGHT_COLOR = '#ffd400';
 
@@ -41,7 +42,7 @@ function stableStringify(value: unknown): string {
 
 export async function handleTestSnapshotAnnotationParityHttpRequest(request: any): Promise<any> {
     const { library_id, zotero_key, items } = request || {};
-    if (library_id == null || zotero_key == null || !Array.isArray(items)) {
+    if (library_id == null || zotero_key == null || !Array.isArray(items) || library_id === UNRESOLVED_LIBRARY_ID) {
         return { ok: false, error: 'Provide library_id, zotero_key, items[]' };
     }
 

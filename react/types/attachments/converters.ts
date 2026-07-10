@@ -9,6 +9,7 @@ import {
 } from './apiTypes';
 import { ZoteroItemReference } from '../zotero';
 import { safeStub, serializeAttachmentStub, serializeItemStub } from '../../../src/utils/zoteroSerializers';
+import { libraryRefForLibraryID } from '../../../src/utils/libraryIdentity';
 
 
 export function toAnnotation(item: Zotero.Item): Annotation | null {
@@ -23,6 +24,7 @@ export function toAnnotation(item: Zotero.Item): Annotation | null {
     return {
         library_id: item.libraryID,
         zotero_key: item.key,
+        library_ref: libraryRefForLibraryID(item.libraryID) ?? undefined,
         parent_key: item.parentKey,
         annotation_type: item.annotationType,
         ...(item.annotationText && { text: item.annotationText }),
@@ -39,7 +41,8 @@ export function toMessageAttachment(item: Zotero.Item): MessageAttachment | null
     // Convert to MessageAttachment (backend models)
     const zoteroItemReference = {
         library_id: item.libraryID,
-        zotero_key: item.key
+        zotero_key: item.key,
+        library_ref: libraryRefForLibraryID(item.libraryID) ?? undefined,
     } as ZoteroItemReference;
     
     if(item.isRegularItem()) {

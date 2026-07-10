@@ -4,6 +4,7 @@ import type { TagChanges, CollectionChanges, OrganizeItemsResultData } from '../
 import { MessageItemButton } from '../../../components/input/MessageItemButton';
 import { ChipWithListPopup } from '../../../components/agentRuns/requestChips/ChipPopup';
 import { buildItemsSummaryListPopup } from '../../../components/input/MessageItemChipPopup';
+import { parseItemReference, resolveItemReference, resolveLibraryRef } from '../../../../src/utils/libraryIdentity';
 
 type ActionStatus = 'pending' | 'applied' | 'rejected' | 'undone' | 'error' | 'awaiting';
 
@@ -44,12 +45,12 @@ export const OrganizeItemsPreview: React.FC<OrganizeItemsPreviewProps> = ({
             const items: Zotero.Item[] = [];
             for (const itemId of itemIds) {
                 try {
-                    const parts = itemId.split('-');
-                    const libraryId = parseInt(parts[0], 10);
-                    const zoteroKey = parts.slice(1).join('-');
-                    const item = await Zotero.Items.getByLibraryAndKeyAsync(libraryId, zoteroKey);
-                    if (item) {
-                        items.push(item);
+                    // Accept both portable "<library_ref>-<key>" and legacy numeric ids.
+                    const parsed = parseItemReference(itemId);
+                    if (!parsed) continue;
+                    const resolved = await resolveItemReference(parsed);
+                    if (resolved.status === 'found') {
+                        items.push(resolved.item);
                     }
                 } catch (e) {
                     console.warn(`Failed to resolve item ${itemId}:`, e);
@@ -71,11 +72,13 @@ export const OrganizeItemsPreview: React.FC<OrganizeItemsPreviewProps> = ({
 
             const names: Record<string, string> = {};
             
-            // Get library ID from first item
-            if (itemIds.length > 0) {
-                const parts = itemIds[0].split('-');
-                const libraryId = parseInt(parts[0], 10);
-
+            // Get library ID from the first item id (portable or legacy).
+            // resolveLibraryRef can legitimately return UNRESOLVED_LIBRARY_ID
+            // (0), which the lookup below would throw on, so guard on falsy
+            // rather than `!= null`.
+            const parsedFirst = itemIds.length > 0 ? parseItemReference(itemIds[0]) : null;
+            const libraryId = parsedFirst ? resolveLibraryRef(parsedFirst) : null;
+            if (libraryId) {
                 for (const key of keys) {
                     try {
                         const collection = await Zotero.Collections.getByLibraryAndKeyAsync(libraryId, key);

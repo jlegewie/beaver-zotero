@@ -1,6 +1,7 @@
 import { ToolCallPart } from '../../agents/types';
 import type { ToolCallStatus } from '../../agents/atoms';
 import type { AgentAction, PendingApproval } from '../../agents/agentActions';
+import { resolveObjectId } from '../../../src/utils/libraryIdentity';
 
 export interface EditNoteResolvedTarget {
     libraryId: number;
@@ -72,13 +73,9 @@ export function resolveEditNoteTargetFromData(
 
     const noteId = parsedArgs.note_id;
     if (typeof noteId === 'string' && noteId) {
-        const dashIdx = noteId.indexOf('-');
-        if (dashIdx > 0 && dashIdx < noteId.length - 1) {
-            const libraryId = parseInt(noteId.substring(0, dashIdx), 10);
-            const zoteroKey = noteId.substring(dashIdx + 1);
-            if (Number.isFinite(libraryId) && zoteroKey) {
-                return { libraryId, zoteroKey };
-            }
+        const ref = resolveObjectId(noteId);
+        if (ref) {
+            return { libraryId: ref.library_id, zoteroKey: ref.zotero_key };
         }
     }
 

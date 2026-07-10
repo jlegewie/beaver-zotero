@@ -3,6 +3,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 vi.mock('../../../src/services/agentDataProvider/utils', () => ({
     getAttachmentFileStatus: vi.fn().mockResolvedValue(undefined),
     isRemoteAccessAvailable: vi.fn(() => false),
+    isLibrarySearchable: vi.fn(() => true),
+    checkLibraryExcluded: vi.fn(() => null),
 }));
 
 import { preloadPageLabelsForCitations, preloadPageLabelsForContent } from '../../../react/utils/pageLabels';
@@ -401,7 +403,6 @@ describe('preloadPageLabelsForCitations', () => {
 
         const labels = await preloadPageLabelsForCitations([
             {
-                parts: [],
                 requested_ref: {
                     kind: 'zotero',
                     library_id: 1,
@@ -433,7 +434,6 @@ describe('preloadPageLabelsForCitations', () => {
 
         const labels = await preloadPageLabelsForCitations([
             {
-                parts: [],
                 resolved_ref: {
                     kind: 'zotero',
                     library_id: 1,

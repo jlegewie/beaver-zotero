@@ -174,7 +174,11 @@ export const AttachmentSearchResultView: React.FC<{ view: AttachmentSearchView }
             getHost().navigation?.launchExternalFile(row.zotero_key);
             return;
         }
-        getHost().navigation?.revealInLibrary({ library_id: row.library_id, zotero_key: row.zotero_key });
+        getHost().navigation?.revealInLibrary({
+            library_id: row.library_id,
+            zotero_key: row.zotero_key,
+            library_ref: row.library_ref,
+        });
     };
 
     const handleMatchClick = (
@@ -190,6 +194,7 @@ export const AttachmentSearchResultView: React.FC<{ view: AttachmentSearchView }
         getHost().navigation?.navigateToAttachmentMatch({
             library_id: row.library_id,
             zotero_key: row.zotero_key,
+            library_ref: row.library_ref,
             content_kind: row.content_kind,
             page_number: match.page_number,
             page_label: match.page_label,

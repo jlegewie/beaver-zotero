@@ -10,6 +10,13 @@ vi.mock('../../../src/services/documentExtraction/attachmentResolution', () => (
 
 vi.mock('../../../src/services/agentDataProvider/utils', () => ({
     validateZoteroItemReference: vi.fn(() => null),
+    checkLibraryExcluded: vi.fn(() => null),
+    preflightZoteroAttachmentRequest: vi.fn((attachment: any) => ({
+        ok: true,
+        responseAttachment: attachment,
+        requestKey: `${attachment.library_id}-${attachment.zotero_key}`,
+        resolvedLibraryId: attachment.library_id,
+    })),
 }));
 
 vi.mock(

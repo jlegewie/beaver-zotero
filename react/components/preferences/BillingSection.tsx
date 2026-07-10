@@ -42,6 +42,7 @@ const CreditPackCard: React.FC<{
                 variant="outline"
                 onClick={() => buyCredits(pack.sku)}
                 disabled={isBillingLoading}
+                style={{ padding: '4px 6px' }}
             >
                 Buy Pack
             </Button>
@@ -135,6 +136,7 @@ const PlanCards: React.FC<{ plans: PlanInfo[], subscribe: (sku: string) => Promi
                                     variant={plan.highlight ? 'solid' : 'surface'}
                                     onClick={() => subscribe(plan.sku)}
                                     disabled={isBillingLoading}
+                                    style={{ padding: '4px 6px' }}
                                 >
                                     Subscribe
                                 </Button>
@@ -222,7 +224,7 @@ const BillingSection: React.FC = () => {
                             Payment failed. Update your payment method to keep your subscription.
                         </span>
                         <div className="flex-1" />
-                        <Button variant="outline" onClick={manageSubscription} disabled={isBillingLoading}>
+                        <Button variant="outline" onClick={manageSubscription} disabled={isBillingLoading} style={{ padding: '4px 6px' }}>
                             Update Payment
                         </Button>
                     </div>
@@ -250,7 +252,7 @@ const BillingSection: React.FC = () => {
                         {plansError && (
                             <div className="display-flex flex-row items-center gap-3 flex-wrap ml-1 -mt-3" style={{ padding: '12px 0' }}>
                                 <span className="font-color-secondary">{plansError}</span>
-                                <Button variant="ghost-secondary" onClick={fetchPlans}>Retry</Button>
+                                <Button variant="ghost-secondary" onClick={fetchPlans} style={{ padding: '4px 6px' }}>Retry</Button>
                             </div>
                         )}
 
@@ -310,11 +312,11 @@ const BillingSection: React.FC = () => {
                             </div>
                             <div className="flex-1" />
                             {upgradePlan && (
-                                <Button variant="outline" onClick={() => upgradeSubscription(upgradePlan.sku)} loading={isBillingLoading}>
+                                <Button variant="outline" onClick={() => upgradeSubscription(upgradePlan.sku)} loading={isBillingLoading} style={{ padding: '4px 6px' }}>
                                     Upgrade
                                 </Button>
                             )}
-                            <Button variant="surface-light" onClick={manageSubscription} disabled={isBillingLoading} style={{ padding: '2px 6px' }}>
+                            <Button variant="surface-light" onClick={manageSubscription} disabled={isBillingLoading} style={{ padding: '4px 6px' }}>
                                 {creditPlan.cancelAtPeriodEnd ? 'Resubscribe' : 'Manage'}
                             </Button>
                         </div>
@@ -414,7 +416,7 @@ const BillingSection: React.FC = () => {
                         }
                         hasBorder
                         control={
-                            <Button variant="outline" onClick={() => buyCredits(creditPacks[0]?.sku)} loading={isBillingLoading} disabled={creditPacks.length === 0}>Buy Credits</Button>
+                            <Button variant="outline" onClick={() => buyCredits(creditPacks[0]?.sku)} loading={isBillingLoading} disabled={creditPacks.length === 0} style={{ padding: '4px 6px' }}>Buy Credits</Button>
                         }
                     />
                 )}

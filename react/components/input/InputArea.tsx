@@ -1,9 +1,8 @@
-import React, { useState, useEffect, useCallback, useId } from 'react';
+import React, { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { StopIcon, GlobalSearchIcon } from '../icons/icons';
-import { useAtom, useSetAtom, useAtomValue } from 'jotai';
+import { useAtom, useSetAtom, useAtomValue, useStore } from 'jotai';
 import { newThreadAtom, currentThreadIdAtom } from '../../atoms/threads';
-import { currentMessageContentAtom, currentMessageItemsAtom, pendingActionInputFocusAtom } from '../../atoms/messageComposition';
-import { findNextUserInputVariable } from '../../utils/userInputVariables';
+import { currentMessageContentAtom, currentMessagePillsAtom, pendingPillInsertAtom } from '../../atoms/messageComposition';
 import { sendWSMessageAtom, isWSChatPendingAtom, closeWSConnectionAtom, sendApprovalResponseAtom } from '../../atoms/agentRunAtoms';
 import { pendingApprovalsAtom, removePendingApprovalAtom } from '../../agents/agentActions';
 import Button from '../ui/Button';
@@ -20,19 +19,23 @@ import PendingActionsBar from './PendingActionsBar';
 import HighTokenUsageWarningBar from './HighTokenUsageWarningBar';
 import SoftCapWarningBar from './SoftCapWarningBar';
 import NextStepsPanel from '../pages/firstRun/NextStepsPanel';
-import BackToSuggestions from '../pages/firstRun/BackToSuggestions';
+import BackToSuggestions, { FirstRunBackTarget } from '../pages/firstRun/BackToSuggestions';
 import { allRunsAtom } from '../../agents/atoms';
 import { PromptOrigin } from '../../agents/types';
 import { firstRunNextStepsDismissedAtom } from '../../atoms/firstRun';
 import { dismissHighTokenWarningForThreadAtom, dismissedHighTokenWarningByThreadAtom, dismissSoftCapWarningForThreadAtom, dismissedSoftCapWarningByThreadAtom, backendHighTokenUsageRunsAtom, softCapTriggeredRunsAtom } from '../../atoms/messageUIState';
 import { getLastRequestInputTokens } from '../../utils/runUsage';
 import { getPref, setPref } from '../../../src/utils/prefs';
+import { LexicalEditorInput, LexicalEditorInputHandle, SlashCommandDescriptor } from './lexical/LexicalEditorInput';
 import { useSlashMenu } from '../../hooks/useSlashMenu';
+import { sendComposedMessageAtom } from '../../atoms/actions';
 
 const HIGH_INPUT_TOKEN_WARNING_THRESHOLD = 100_000;
 
 interface InputAreaProps {
-    inputRef: React.RefObject<HTMLTextAreaElement | null>;
+    // Kept for backward-compat with callers that only need `.focus()`.
+    // The underlying element is now a contenteditable div managed by Lexical.
+    inputRef: React.RefObject<HTMLElement | null>;
     verticalPosition?: 'above' | 'below';
     placeholder?: string;
     hideModelSelector?: boolean;
@@ -47,12 +50,13 @@ const InputArea: React.FC<InputAreaProps> = ({
     hideAttachmentMenu = false,
 }) => {
     const [messageContent, setMessageContent] = useAtom(currentMessageContentAtom);
-    const [currentMessageItems, setCurrentMessageItems] = useAtom(currentMessageItemsAtom);
+    const [messagePills, setMessagePills] = useAtom(currentMessagePillsAtom);
     const selectedModel = useAtomValue(selectedModelAtom);
     const isUsingBeaverCredits = useAtomValue(isUsingBeaverCreditsAtom);
     const newThread = useSetAtom(newThreadAtom);
     const [isAddAttachmentMenuOpen, setIsAddAttachmentMenuOpen] = useState(false);
     const [menuPosition, setMenuPosition] = useState<MenuPosition>({ x: 0, y: 0 });
+    const [selectionRestoreTick, setSelectionRestoreTick] = useState(0);
     const isLibraryTab = useAtomValue(isLibraryTabAtom);
     const [isWebSearchEnabled, setIsWebSearchEnabled] = useAtom(isWebSearchEnabledAtom);
     const allRuns = useAtomValue(allRunsAtom);
@@ -65,11 +69,26 @@ const InputArea: React.FC<InputAreaProps> = ({
     const softCapTriggeredRuns = useAtomValue(softCapTriggeredRunsAtom);
     const isWebSearchAllowed = useAtomValue(isWebSearchAllowedAtom);
     const currentNoteItem = useAtomValue(currentNoteItemAtom);
-    const pendingActionFocus = useAtomValue(pendingActionInputFocusAtom);
+    const pendingPillInsert = useAtomValue(pendingPillInsertAtom);
+    const store = useStore();
     const webSearchDescriptionId = useId();
+
+    // Imperative handle exposed by the Lexical editor (focus / clear).
+    const editorHandleRef = useRef<LexicalEditorInputHandle | null>(null);
+    const pendingSelectionRestoreRef = useRef<{ offset: number; skipFocus: boolean } | null>(null);
+    const sourceMenuSelectionRestoreRef = useRef<{ offset: number } | null>(null);
+    const focusEditor = useCallback(() => {
+        editorHandleRef.current?.focus();
+    }, []);
+    // Stable forwarder so the slash menu can insert a command pill into the
+    // Lexical editor (the editor handle isn't available until after mount).
+    const insertSlashCommand = useCallback((descriptor: SlashCommandDescriptor, queryLength: number) => {
+        editorHandleRef.current?.insertSlashCommand(descriptor, queryLength);
+    }, []);
 
     // WebSocket state
     const sendWSMessage = useSetAtom(sendWSMessageAtom);
+    const sendComposedMessage = useSetAtom(sendComposedMessageAtom);
     const closeWSConnection = useSetAtom(closeWSConnectionAtom);
     const isPending = useAtomValue(isWSChatPendingAtom);
 
@@ -79,6 +98,9 @@ const InputArea: React.FC<InputAreaProps> = ({
     const sendApprovalResponse = useSetAtom(sendApprovalResponseAtom);
     const removePendingApproval = useSetAtom(removePendingApprovalAtom);
     const isAwaitingApproval = pendingApprovalsMap.size > 0;
+    // Note: while an ask_user_question request is pending (and no approval is),
+    // Sidebar renders AskUserQuestionPanel INSTEAD of this component, so no
+    // question-mode handling is needed here.
 
     const lastRun = allRuns.length > 0 ? allRuns[allRuns.length - 1] : null;
     const lastRunUsage = lastRun?.total_usage;
@@ -121,10 +143,13 @@ const InputArea: React.FC<InputAreaProps> = ({
             return next;
         });
     }, [setNextStepsDismissedRunIds, lastRunId]);
+    // Guided next steps surface after a suggestion-card run or a "Where should
+    // we start?" launcher run — both carry the context NextStepsPanel needs.
+    const lastRunOriginKind = lastRun?.user_prompt.origin?.kind;
     const showNextSteps = Boolean(
         !isAwaitingApproval &&
         lastRun &&
-        lastRun.user_prompt.origin?.kind === 'first_run_card' &&
+        (lastRunOriginKind === 'first_run_card' || lastRunOriginKind === 'where_to_start') &&
         lastRun.status === 'completed' &&
         !nextStepsDismissedRunIds.has(lastRun.id)
     );
@@ -135,6 +160,10 @@ const InputArea: React.FC<InputAreaProps> = ({
         lastRun.status === 'completed' &&
         !nextStepsDismissedRunIds.has(lastRun.id)
     );
+    // The follow-up run's origin
+    const firstRunBackTarget: FirstRunBackTarget = allRuns.some(
+        (r) => r.user_prompt?.origin?.kind === 'where_to_start',
+    ) ? 'launcher' : 'suggestions';
 
     // Mutual exclusion: NextSteps/BackToSuggestions take precedence over the
     // token/soft-cap warning bars; HighToken takes precedence over SoftCap.
@@ -143,7 +172,6 @@ const InputArea: React.FC<InputAreaProps> = ({
     const canRenderHighTokenWarningBar = showHighTokenWarningBar && lastRequestInputTokens !== null;
     const showSoftCapWarningBar = shouldShowSoftCapWarning && !firstRunPanelVisible && !canRenderHighTokenWarningBar;
 
-    // Slash menu hook
     const {
         isSlashMenuOpen,
         slashMenuPosition,
@@ -154,53 +182,144 @@ const InputArea: React.FC<InputAreaProps> = ({
         handleSlashMenuChange,
         handleSlashTrigger,
         handleSlashMenuKeyDown,
-    } = useSlashMenu(inputRef, verticalPosition);
+    } = useSlashMenu(inputRef, verticalPosition, focusEditor, insertSlashCommand);
 
     useEffect(() => {
         if (isPending && getPref('focusResponseForScreenReaders')) {
             return;
         }
-        inputRef.current?.focus();
+        // Focus on mount via the Lexical handle.
+        focusEditor();
     }, []);
 
+    // Consume a staged /command pill (home launcher, context menu, reader
+    // toolbar). This component owns the editor handle, so the pill is inserted
+    // here; running on mount as well covers the sidebar-just-opened case.
+    // The user submits the message themselves (no auto-send).
+    //
+    // Multiple InputAreas can be mounted at once (main-window sidebar + the
+    // separate Beaver window), all subscribed to the same atom. Consumption is
+    // therefore a CLAIM: the editor in the payload's `targetWindow` (where the
+    // user triggered the action) claims immediately; other editors act only as
+    // a delayed fallback in case the target never consumes (e.g. its editor is
+    // not mounted). The synchronous re-check + clear of the live atom value
+    // guarantees exactly one editor inserts the pill.
     useEffect(() => {
-        if (inputRef.current) {
-            inputRef.current.style.height = 'auto';
-            inputRef.current.style.height = `${inputRef.current.scrollHeight}px`;
-        }
-    }, [messageContent]);
-
-    // When an action with `[[name]]` placeholders is staged, focus the textarea
-    // and select the first placeholder so the user can replace it by typing.
-    useEffect(() => {
-        if (pendingActionFocus === 0) return;
-        const ta = inputRef.current;
-        if (!ta) return;
-        // Defer to next tick so messageContent has propagated to the textarea value.
-        const timer = setTimeout(() => {
-            const first = findNextUserInputVariable(ta.value, 0);
-            ta.focus();
-            if (first) {
-                ta.setSelectionRange(first.start, first.end);
-            } else {
-                const end = ta.value.length;
-                ta.setSelectionRange(end, end);
-            }
-        }, 0);
+        if (!pendingPillInsert) return;
+        const claim = () => {
+            // Another editor may have claimed this pill already.
+            if (store.get(pendingPillInsertAtom) !== pendingPillInsert) return;
+            store.set(pendingPillInsertAtom, null);
+            editorHandleRef.current?.insertSlashCommand(pendingPillInsert.descriptor, null);
+            focusEditor();
+        };
+        const ownWindow = inputRef.current?.ownerDocument.defaultView ?? null;
+        const isTarget = pendingPillInsert.targetWindow
+            ? pendingPillInsert.targetWindow === ownWindow
+            : (inputRef.current?.ownerDocument.hasFocus() ?? false);
+        const timer = setTimeout(claim, isTarget ? 0 : 150);
         return () => clearTimeout(timer);
-    }, [pendingActionFocus]);
+    }, [focusEditor, inputRef, pendingPillInsert, store]);
 
-    /** Tab → select the next `[[name]]` after the cursor, or fall through. */
-    const handleVariableTab = (e: React.KeyboardEvent<HTMLTextAreaElement>): boolean => {
-        if (e.key !== 'Tab' || e.shiftKey) return false;
-        const ta = e.currentTarget;
-        const cursor = ta.selectionEnd;
-        const next = findNextUserInputVariable(ta.value, cursor);
-        if (!next) return false;
-        e.preventDefault();
-        ta.setSelectionRange(next.start, next.end);
-        return true;
-    };
+    const queueSelectionRestore = useCallback((offset: number, skipFocus: boolean) => {
+        pendingSelectionRestoreRef.current = { offset, skipFocus };
+        setSelectionRestoreTick((tick) => tick + 1);
+    }, []);
+
+    // Runs when the attachment menu closes (its search input owned DOM focus
+    // while open). Refocuses the editor and puts the caret back where the `@`
+    // trigger was typed. Restoring while the menu is still open would fight
+    // its search input: even a skip-focus selection update moves the native
+    // DOM selection into the contenteditable, which Zotero's chrome focus
+    // manager treats as focus movement, yanking focus out of the menu.
+    const restoreSourceMenuSelection = useCallback(() => {
+        const pendingRestore = sourceMenuSelectionRestoreRef.current;
+        if (pendingRestore) {
+            editorHandleRef.current?.selectRange(pendingRestore.offset, pendingRestore.offset);
+            return;
+        }
+        // Menu was opened without an `@` trigger (e.g. the "+" button).
+        focusEditor();
+    }, [focusEditor]);
+
+    useEffect(() => {
+        if (!isAddAttachmentMenuOpen) {
+            sourceMenuSelectionRestoreRef.current = null;
+        }
+    }, [isAddAttachmentMenuOpen]);
+
+    useEffect(() => {
+        const pendingRestore = pendingSelectionRestoreRef.current;
+        if (!pendingRestore) return;
+        pendingSelectionRestoreRef.current = null;
+        const win = inputRef.current?.ownerDocument.defaultView;
+        const timer = win?.setTimeout(() => {
+            editorHandleRef.current?.selectRange(
+                pendingRestore.offset,
+                pendingRestore.offset,
+                { skipFocus: pendingRestore.skipFocus },
+            );
+        }, 0);
+        return () => {
+            if (timer !== undefined) win?.clearTimeout(timer);
+        };
+    }, [inputRef, selectionRestoreTick]);
+
+    const handleEditorChange = useCallback((value: string) => {
+        if (handleSlashMenuChange(value)) {
+            queueSelectionRestore(value.length, false);
+            return;
+        }
+
+        const inputEl = inputRef.current;
+        if (
+            inputEl &&
+            !isAddAttachmentMenuOpen &&
+            handleSlashTrigger(value, inputEl.getBoundingClientRect())
+        ) {
+            queueSelectionRestore(value.length, false);
+            return;
+        }
+
+        if (value.endsWith('@') && !isAwaitingApproval && !hideAttachmentMenu) {
+            const nextValue = value.slice(0, -1);
+            if (inputEl) {
+                const rect = inputEl.getBoundingClientRect();
+                const y = verticalPosition === 'above' ? rect.top - 5 : rect.bottom - 10;
+                setMenuPosition({
+                    x: rect.left,
+                    y,
+                });
+            }
+            setIsAddAttachmentMenuOpen(true);
+            setMessageContent(nextValue);
+            // Delete just the trailing `@` in place rather than rebuilding the
+            // editor from the string, so any colored /command nodes survive.
+            editorHandleRef.current?.deleteTrailingCharacter();
+            sourceMenuSelectionRestoreRef.current = { offset: nextValue.length };
+            return;
+        }
+
+        setMessageContent(value);
+    }, [
+        handleSlashMenuChange,
+        handleSlashTrigger,
+        hideAttachmentMenu,
+        inputRef,
+        isAddAttachmentMenuOpen,
+        isAwaitingApproval,
+        queueSelectionRestore,
+        setMessageContent,
+        verticalPosition,
+    ]);
+
+    const handleEditorKeyDown = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
+        if (handleSlashMenuKeyDown(e)) return;
+        if ((e.key === 'n' || e.key === 'N') && ((Zotero.isMac && e.metaKey) || (!Zotero.isMac && e.ctrlKey))) {
+            e.preventDefault();
+            newThread();
+        }
+    }, [handleSlashMenuKeyDown, newThread]);
 
     const handleSubmit = async (
         e: React.FormEvent<HTMLFormElement> | React.MouseEvent<HTMLButtonElement>
@@ -216,6 +335,14 @@ const InputArea: React.FC<InputAreaProps> = ({
 
     const sendMessage = (message: string) => {
         if (isPending || message.length === 0) return;
+        // If the message contains /command pills, resolve each back to its
+        // action's prompt (and attach its items/collection) before sending.
+        const pills = editorHandleRef.current?.getSlashCommands() ?? [];
+        if (pills.length > 0) {
+            logger(`Sending composed message with ${pills.length} action pill(s)`);
+            sendComposedMessage({ baseText: message, pills });
+            return;
+        }
         logger(`Sending message: ${message}`);
         sendWSMessage(message);
     };
@@ -248,23 +375,32 @@ const InputArea: React.FC<InputAreaProps> = ({
         setMessageContent('');
     };
 
-    const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-        // Handle ⌘N (Mac) or Ctrl+N (Windows/Linux) for new thread
-        if ((e.key === 'n' || e.key === 'N') && ((Zotero.isMac && e.metaKey) || (!Zotero.isMac && e.ctrlKey))) {
-            e.preventDefault();
-            newThread();
-        }
-    };
-
     const handleContainerClick = (e: React.MouseEvent<HTMLDivElement>) => {
         // Check if the click target is a button or within a button
-        const isButtonClick = (e.target as Element).closest('button') !== null;
+        const target = e.target as Element;
+        const isButtonClick = target.closest('button') !== null;
+        const isEditorClick = target.closest('.beaver-lexical-content') !== null;
 
         // Only focus if not clicking a button and editing is enabled
-        if (!isButtonClick && inputRef.current) {
-            inputRef.current.focus();
+        if (!isButtonClick && !isEditorClick) {
+            focusEditor();
         }
     };
+
+    // Handle the editor's submit signal (Enter without Shift).
+    const handleEditorSubmit = useCallback(() => {
+        if (isPending) {
+            logger('handleEditorSubmit: Blocked - request already in progress');
+            return;
+        }
+        if (isAwaitingApproval) {
+            // Mirror old behavior: Enter does not reject-with-instructions,
+            // users must click the button.
+            return;
+        }
+        if (isSlashMenuOpen) return;
+        sendMessage(messageContent);
+    }, [isPending, isAwaitingApproval, isSlashMenuOpen, messageContent]);
 
     const handleDismissHighTokenWarning = (e: React.MouseEvent) => {
         e.preventDefault();
@@ -315,6 +451,7 @@ const InputArea: React.FC<InputAreaProps> = ({
     const webSearchDescription = isWebSearchAllowed
         ? (isWebSearchEnabled ? 'Web search is enabled.' : 'Web search is disabled.')
         : 'Web search is unavailable. It requires Beaver credits. Use a Beaver model, or enable Plus Tools in Settings, API Keys.';
+    const menuPortalContainer = inputRef.current?.closest('[id^="beaver-react-root-"], #beaver-pane-window') as HTMLElement | null;
 
     return (
         <div
@@ -346,16 +483,16 @@ const InputArea: React.FC<InputAreaProps> = ({
                 from a first-run suggestion card. Auto-dismisses on type. */}
             {showNextSteps && lastRun && (
                 <NextStepsPanel
-                    origin={lastRun.user_prompt.origin as Extract<PromptOrigin, { kind: 'first_run_card' }>}
+                    origin={lastRun.user_prompt.origin as Extract<PromptOrigin, { kind: 'first_run_card' | 'where_to_start' }>}
                     onDismiss={handleDismissNextSteps}
                 />
             )}
 
             {/* After a first-run follow-up run, offer a path back to the
-                suggestion grid. */}
+                originating surface (suggestion grid or launcher). */}
             {showBackToSuggestions && (
                 <div className="next-steps-panel px-3 py-2">
-                    <BackToSuggestions onDismiss={handleDismissNextSteps} />
+                    <BackToSuggestions onDismiss={handleDismissNextSteps} backTarget={firstRunBackTarget} />
                 </div>
             )}
 
@@ -366,13 +503,14 @@ const InputArea: React.FC<InputAreaProps> = ({
                     setIsAddAttachmentMenuOpen={setIsAddAttachmentMenuOpen}
                     menuPosition={menuPosition}
                     setMenuPosition={setMenuPosition}
-                    inputRef={inputRef as React.RefObject<HTMLTextAreaElement>}
+                    inputRef={inputRef}
+                    focusInput={restoreSourceMenuSelection}
+                    menuPortalContainer={menuPortalContainer}
                     disabled={isAwaitingApproval}
                     verticalPosition={verticalPosition}
                 />
             )}
 
-            {/* Slash command menu */}
             <SearchMenu
                 menuItems={slashMenuItems}
                 isOpen={isSlashMenuOpen}
@@ -388,65 +526,39 @@ const InputArea: React.FC<InputAreaProps> = ({
                 placeholder="Search actions..."
                 closeOnSelect={false}
                 showSearchInput={false}
+                selectOnTab={true}
+                portalContainer={menuPortalContainer}
+                groupHeaderClassName="font-color-primary opacity-70"
             />
 
             {/* Input Form */}
             <form onSubmit={handleSubmit} className="display-flex flex-col">
-                {/* Message Input  */}
+                {/* Message Input - Lexical-backed rich input with inline pills */}
                 <div className="mb-2 -ml-1">
-                    <textarea
-                        ref={inputRef as React.RefObject<HTMLTextAreaElement>}
+                    <LexicalEditorInput
+                        ref={editorHandleRef}
                         value={messageContent}
-                        onChange={(e) => {
-                            const value = e.target.value;
-
-                            // When slash menu is open, track search query from typed text
-                            if (handleSlashMenuChange(value)) return;
-
-                            // Detect `/` trigger: at start or after whitespace/newline
-                            if (!isAddAttachmentMenuOpen && handleSlashTrigger(value, e.currentTarget.getBoundingClientRect())) return;
-
-                            // Don't open attachment menu when awaiting approval, or when explicitly hidden
-                            if (e.target.value.endsWith('@') && !isAwaitingApproval && !hideAttachmentMenu) {
-                                const rect = e.currentTarget.getBoundingClientRect();
-                                const y = verticalPosition === 'above' ? rect.top - 5 : rect.bottom - 10;
-                                setMenuPosition({
-                                    x: rect.left,
-                                    y,
-                                })
-                                setIsAddAttachmentMenuOpen(true);
-                            } else {
-                                setMessageContent(e.target.value);
-                            }
-                        }}
-                        onInput={(e) => {
-                            e.currentTarget.style.height = 'auto';
-                            e.currentTarget.style.height = `${e.currentTarget.scrollHeight}px`;
-                        }}
+                        onChange={handleEditorChange}
+                        pills={messagePills}
+                        onPillsChange={setMessagePills}
+                        onSubmit={handleEditorSubmit}
                         placeholder={getPlaceholderText()}
-                        aria-label="Message Beaver"
-                        className="chat-input"
-                        onKeyDown={(e) => {
-                            // When slash menu is open, handle navigation and dismiss keys
-                            if (handleSlashMenuKeyDown(e)) return;
-                            // Tab cycles through [[name]] placeholders before any other handling
-                            if (handleVariableTab(e)) return;
-                            handleKeyDown(e);
-                            // Submit on Enter (without Shift) - guard against pending to prevent race with button click
-                            // Don't trigger reject on Enter when awaiting approval (must click button)
-                            if (e.key === 'Enter' && !e.shiftKey && !isPending && !isAwaitingApproval && !isSlashMenuOpen) {
-                                e.preventDefault();
-                                handleSubmit(e as any);
-                            }
+                        ariaLabel="Message Beaver"
+                        disabled={isAwaitingApproval}
+                        onKeyDown={handleEditorKeyDown}
+                        suspendKeyboardNavigation={isSlashMenuOpen || isAddAttachmentMenuOpen}
+                        onContentEditableRef={(el) => {
+                            // Forward the Lexical content-editable element to the
+                            // parent's inputRef so legacy `.focus()` callers work.
+                            (inputRef as React.MutableRefObject<HTMLElement | null>).current = el;
                         }}
-                        rows={1}
                     />
                 </div>
 
                 {/* Button Row */}
                 <div className="display-flex flex-row items-center pt-2">
                     {!hideModelSelector && (
-                        <ModelSelectionButton inputRef={inputRef as React.RefObject<HTMLTextAreaElement>} disabled={isAwaitingApproval} />
+                        <ModelSelectionButton inputRef={inputRef} focusInput={focusEditor} disabled={isAwaitingApproval} />
                     )}
                     <div className="flex-1" />
                     <div className="display-flex flex-row items-center gap-4">

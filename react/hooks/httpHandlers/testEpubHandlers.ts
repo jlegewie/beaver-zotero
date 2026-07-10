@@ -17,6 +17,7 @@ import type {
     DomItemKind,
     DomSection,
 } from '../../../src/services/documentExtraction/dom/schema';
+import { UNRESOLVED_LIBRARY_ID } from '../../../src/utils/libraryIdentity';
 
 // Sentences at or below this length are flagged as likely fragments or
 // over-eager sentence splits; sentences at or above the long threshold likely
@@ -264,6 +265,12 @@ export async function handleTestEpubExtractHttpRequest(request: any): Promise<an
                 language: typeof request?.language === 'string' ? request.language : undefined,
             });
         } else if (request?.library_id != null && request?.zotero_key != null) {
+            if (request.library_id === UNRESOLVED_LIBRARY_ID) {
+                return {
+                    ok: false,
+                    error: { name: 'Error', message: 'Library not available on this device' },
+                };
+            }
             const item = await Zotero.Items.getByLibraryAndKeyAsync(
                 request.library_id,
                 request.zotero_key,

@@ -2,6 +2,15 @@ import { getDisplayNameFromItem } from "../../react/utils/sourceUtils";
 import { ZoteroItemReference } from "../../react/types/zotero";
 import type { CreatorJSON } from "../../react/types/agentActions/base";
 import { logger } from "./logger";
+import { libraryRefForLibraryID, UNRESOLVED_LIBRARY_ID } from "./libraryIdentity";
+
+function makeZoteroItemReference(libraryID: number, zoteroKey: string): ZoteroItemReference {
+    return {
+        library_id: libraryID,
+        zotero_key: zoteroKey,
+        library_ref: libraryRefForLibraryID(libraryID) ?? undefined,
+    };
+}
 
 /**
  * Context for determining where to create or insert a new Zotero item
@@ -34,7 +43,7 @@ export async function getZoteroTargetContext(): Promise<ZoteroTargetContext> {
             if (readerItem) {
                 targetLibraryId = readerItem.libraryID;
                 parentReference = readerItem.parentKey
-                    ? { library_id: readerItem.libraryID, zotero_key: readerItem.parentKey }
+                    ? makeZoteroItemReference(readerItem.libraryID, readerItem.parentKey)
                     : null;
                 return { targetLibraryId, parentReference, collectionToAddTo };
             }
@@ -51,11 +60,11 @@ export async function getZoteroTargetContext(): Promise<ZoteroTargetContext> {
         targetLibraryId = item.libraryID;
         
         if (item.isRegularItem()) {
-            parentReference = { library_id: item.libraryID, zotero_key: item.key };
+            parentReference = makeZoteroItemReference(item.libraryID, item.key);
         } else if (item.isNote() || item.isAttachment()) {
             // Add to parent (sibling)
             parentReference = item.parentKey
-                ? { library_id: item.libraryID, zotero_key: item.parentKey }
+                ? makeZoteroItemReference(item.libraryID, item.parentKey)
                 : null;
         }
     // No selection - add to current library/collection
@@ -93,7 +102,7 @@ export function getZoteroTargetContextSync(): ZoteroTargetContext {
             if (readerItem) {
                 targetLibraryId = readerItem.libraryID;
                 parentReference = readerItem.parentKey
-                    ? { library_id: readerItem.libraryID, zotero_key: readerItem.parentKey }
+                    ? makeZoteroItemReference(readerItem.libraryID, readerItem.parentKey)
                     : null;
                 return { targetLibraryId, parentReference, collectionToAddTo };
             }
@@ -110,11 +119,11 @@ export function getZoteroTargetContextSync(): ZoteroTargetContext {
         targetLibraryId = item.libraryID;
         
         if (item.isRegularItem()) {
-            parentReference = { library_id: item.libraryID, zotero_key: item.key };
+            parentReference = makeZoteroItemReference(item.libraryID, item.key);
         } else if (item.isNote() || item.isAttachment()) {
             // Add to parent (sibling)
             parentReference = item.parentKey
-                ? { library_id: item.libraryID, zotero_key: item.parentKey }
+                ? makeZoteroItemReference(item.libraryID, item.parentKey)
                 : null;
         }
     // No selection - add to current library/collection
@@ -377,6 +386,68 @@ export function getZoteroUserIdentifier(): ZoteroInstanceIdentity {
         localUserKey: `${localUserKey}`,
         accountName,
         deviceName,
+    }
+}
+
+/**
+ * Search-index scope ref — the compact spelling of Zotero's object-URI scheme
+ * the backend search index keys rows on:
+ *
+ *   group    → `g${groupID}`                     (global, server-assigned group id)
+ *   personal → synced ? `u${userID}` : `l${localUserKey}`
+ *
+ * NOT the same as the agent-facing `library_ref` (`"u"` | `"g<groupID>"`, see
+ * `libraryIdentity.ts`): index rows live in a namespace where two physically
+ * distinct personal libraries must not collide, so the personal ref is scoped by
+ * account/device. Output of this function will NOT satisfy `LIBRARY_REF_PATTERN`
+ * and must never be passed to `parseLibraryRef` / `resolveLibraryRef`.
+ *
+ * Returns null for feed libraries (never indexed) or an unknown libraryID. The
+ * local `libraryID` (sequential per Zotero DB) is deliberately NEVER used on the
+ * wire — it is not portable across installs.
+ */
+export function getIndexScopeRef(libraryID: number): string | null {
+    const library = Zotero.Libraries.get(libraryID);
+    if (!library) return null;
+    if (library.libraryType === 'group') {
+        const groupID = Zotero.Groups.getGroupIDFromLibraryID(libraryID);
+        return groupID ? `g${groupID}` : null;
+    }
+    if (library.libraryType === 'user') {
+        const { userID, localUserKey } = getZoteroUserIdentifier();
+        return userID ? `u${userID}` : `l${localUserKey}`;
+    }
+    // Feed (or any other) library type — not part of the indexable scope.
+    return null;
+}
+
+/**
+ * Searchable index scope of the running Zotero install: the personal library ref
+ * plus one `g<groupID>` per group library that is not excluded in Beaver
+ * Preferences. Sent in the auth handshake so the backend can scope search-index
+ * queries over the shared per-user namespace to exactly the libraries this
+ * install may search. Feed libraries are excluded, the list is de-duplicated,
+ * and any failure is swallowed (returns []) so scope computation never blocks
+ * auth.
+ */
+export function getInstanceLibraryRefs(searchableLibraryIds: number[]): string[] {
+    try {
+        const refs = new Set<string>();
+        for (const libraryID of searchableLibraryIds) {
+            const library = Zotero.Libraries.get(libraryID);
+            if (!library) {
+                continue;
+            }
+            if (library.libraryType !== 'user' && library.libraryType !== 'group') {
+                continue;
+            }
+            const ref = getIndexScopeRef(libraryID);
+            if (ref) refs.add(ref);
+        }
+        return Array.from(refs);
+    } catch (e) {
+        Zotero.logError(e as Error);
+        return [];
     }
 }
 
@@ -1106,6 +1177,7 @@ export async function getItemLanguage(
     libraryID: number,
     key: string
 ): Promise<string | null> {
+    if (libraryID === UNRESOLVED_LIBRARY_ID) return null;
     const item = await Zotero.Items.getByLibraryAndKeyAsync(libraryID, key);
     if (!item) return null;
 

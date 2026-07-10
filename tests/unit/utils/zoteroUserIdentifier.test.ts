@@ -17,7 +17,7 @@ vi.mock('../../../src/services/supabaseClient', () => ({
 }));
 vi.mock('../../../react/store', () => ({ store: { get: vi.fn(), set: vi.fn(), sub: vi.fn() } }));
 
-import { getZoteroUserIdentifier } from '../../../src/utils/zoteroUtils';
+import { getInstanceLibraryRefs, getZoteroUserIdentifier } from '../../../src/utils/zoteroUtils';
 
 /**
  * getZoteroUserIdentifier() identifies a Zotero install for the WS handshake.
@@ -79,5 +79,50 @@ describe('getZoteroUserIdentifier', () => {
         expect(id.deviceName).toBeUndefined();
         // The always-present discriminator survives regardless
         expect(id.localUserKey).toBe('28tUI2tp');
+    });
+});
+
+describe('getInstanceLibraryRefs', () => {
+    const Z = () => (globalThis as any).Zotero;
+    let savedLibraries: any;
+    let savedGroups: any;
+
+    beforeEach(() => {
+        savedLibraries = Z().Libraries;
+        savedGroups = Z().Groups;
+
+        Z().Users = {
+            getCurrentUserID: () => 17517181,
+            getLocalUserKey: () => '28tUI2tp',
+            getCurrentUsername: () => 'greg.hoch',
+            getCurrentName: () => 'greg.hoch',
+        };
+        Z().Libraries = {
+            get: vi.fn((libraryID: number) => {
+                if (libraryID === 1) return { libraryID: 1, libraryType: 'user' };
+                if (libraryID === 42) return { libraryID: 42, libraryType: 'group' };
+                if (libraryID === 99) return { libraryID: 99, libraryType: 'feed' };
+                return null;
+            }),
+            getAll: vi.fn(() => {
+                throw new Error('getAll should not be used for handshake scope');
+            }),
+        };
+        Z().Groups = {
+            getGroupIDFromLibraryID: vi.fn((libraryID: number) => libraryID === 42 ? 123 : null),
+        };
+    });
+
+    afterEach(() => {
+        Z().Libraries = savedLibraries;
+        Z().Groups = savedGroups;
+    });
+
+    it('returns canonical refs only for searchable libraries', () => {
+        expect(getInstanceLibraryRefs([1, 42, 99])).toEqual(['u17517181', 'g123']);
+        expect(Z().Libraries.getAll).not.toHaveBeenCalled();
+        expect(Z().Libraries.get).toHaveBeenCalledWith(1);
+        expect(Z().Libraries.get).toHaveBeenCalledWith(42);
+        expect(Z().Libraries.get).toHaveBeenCalledWith(99);
     });
 });

@@ -16,13 +16,17 @@ import {
     ViewImagesErrorCode,
 } from '../agentProtocol';
 import { ZoteroItemReference, ItemStub, AttachmentStub } from '../../../react/types/zotero';
+import { libraryRefForLibraryID, modelObjectIdFromReference } from '../../utils/libraryIdentity';
 import {
     getReadableContentKind,
     resolveToImageAttachment,
     resolveToPdfAttachment,
 } from '../documentExtraction/attachmentResolution';
 import { isLinkedUrlAttachment } from '../../utils/attachmentFiles';
-import { validateZoteroItemReference } from './utils';
+import {
+    preflightZoteroAttachmentRequest,
+    validateZoteroItemReference,
+} from './utils';
 import { handleZoteroAttachmentPageImagesRequest } from './handleZoteroAttachmentPageImagesRequest';
 import { handleZoteroAttachmentImageRequest } from './handleZoteroAttachmentImageRequest';
 import { resolveExternalFile } from '../externalFiles';
@@ -194,7 +198,8 @@ export async function handleZoteroViewImagesRequest(
             error_code: 'invalid_format',
         };
     }
-    const requestKey = `${attachment.library_id}-${attachment.zotero_key}`;
+    const preflight = preflightZoteroAttachmentRequest(attachment, validateZoteroItemReference);
+    const { responseAttachment, requestKey } = preflight;
 
     // Captured once the target attachment is resolved so error responses can
     // report which child was actually targeted and carry the same view-row
@@ -212,7 +217,7 @@ export async function handleZoteroViewImagesRequest(
     ): WSZoteroViewImagesResponse => ({
         type: 'zotero_view_images',
         request_id,
-        attachment,
+        attachment: responseAttachment,
         resolved_attachment: resolvedRef,
         kind: resolvedKind,
         images: [],
@@ -224,13 +229,10 @@ export async function handleZoteroViewImagesRequest(
     });
 
     // 0. Validate request shape
-    const formatError = validateZoteroItemReference(attachment);
-    if (formatError) {
-        return errorResponse(
-            `Invalid attachment reference '${requestKey}': ${formatError}`,
-            'invalid_format'
-        );
+    if (!preflight.ok) {
+        return errorResponse(preflight.error, preflight.errorCode);
     }
+    const { resolvedLibraryId } = preflight;
     if (start_page != null && (!Number.isInteger(start_page) || start_page < 1)) {
         return errorResponse(
             `Invalid start_page '${start_page}': must be a positive integer`,
@@ -263,9 +265,8 @@ export async function handleZoteroViewImagesRequest(
     }
 
     try {
-        // 1. Look up the requested item
         const zoteroItem = await Zotero.Items.getByLibraryAndKeyAsync(
-            attachment.library_id,
+            resolvedLibraryId,
             attachment.zotero_key
         );
         if (!zoteroItem) {
@@ -285,9 +286,13 @@ export async function handleZoteroViewImagesRequest(
         const targetRef: ZoteroItemReference = {
             library_id: target.item.libraryID,
             zotero_key: target.item.key,
+            library_ref: libraryRefForLibraryID(target.item.libraryID) ?? undefined,
         };
+        // Compare against the resolved library, not the request's raw
+        // library_id: a library_ref-resolved request legitimately maps to a
+        // different local library id, and that alone is not a redirect.
         if (
-            targetRef.library_id !== attachment.library_id
+            targetRef.library_id !== resolvedLibraryId
             || targetRef.zotero_key !== attachment.zotero_key
         ) {
             resolvedRef = targetRef;
@@ -349,7 +354,7 @@ export async function handleZoteroViewImagesRequest(
             return {
                 type: 'zotero_view_images',
                 request_id,
-                attachment,
+                attachment: responseAttachment,
                 resolved_attachment: resolvedRef,
                 kind: 'pdf',
                 images,
@@ -381,7 +386,7 @@ export async function handleZoteroViewImagesRequest(
         return {
             type: 'zotero_view_images',
             request_id,
-            attachment,
+            attachment: responseAttachment,
             resolved_attachment: resolvedRef,
             kind: 'image',
             images: [{

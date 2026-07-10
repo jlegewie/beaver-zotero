@@ -17,11 +17,15 @@ import { navigateToEpubCitation } from './epubVisualizer/epubCitationNavigation'
 import { navigateToSnapshotCitation } from './snapshotVisualizer/snapshotCitationNavigation';
 import { getCurrentReaderAndWaitForView } from './readerUtils';
 import { revealSource } from './sourceUtils';
+import { resolveItemReference } from '../../src/utils/libraryIdentity';
+import { notifyReferenceUnavailable } from '../host/zotero/sourceActions';
 
 /** One find_in_attachments match to navigate to. */
 export interface AttachmentMatchNavRequest {
     library_id: number;
     zotero_key: string;
+    /** Device-portable library identity ("u" | "g<groupID>"). */
+    library_ref?: string;
     content_kind: 'pdf' | 'epub' | 'text' | 'snapshot';
     /** 1-based page number (EPUB: 1-based section ordinal). */
     page_number?: number;
@@ -51,15 +55,21 @@ export async function navigateToAttachmentMatch(nav: AttachmentMatchNavRequest):
     // Cleanup any existing temporary annotations
     await BeaverTemporaryAnnotations.cleanupAll();
 
-    const item = await Zotero.Items.getByLibraryAndKeyAsync(nav.library_id, nav.zotero_key);
-    if (!item) {
-        logger(`navigateToAttachmentMatch: item not found (${nav.library_id}-${nav.zotero_key})`);
+    const resolved = await resolveItemReference(nav);
+    if (resolved.status !== 'found') {
+        logger(`navigateToAttachmentMatch: item not found (${nav.library_ref || nav.library_id}-${nav.zotero_key})`);
+        notifyReferenceUnavailable('item', resolved.status === 'library_unavailable' ? 'library_unavailable' : 'missing');
         return;
     }
+    const item = resolved.item;
     await item.loadAllData();
 
     if (!item.isAttachment()) {
-        revealSource({ library_id: nav.library_id, zotero_key: nav.zotero_key } as ZoteroItemReference);
+        revealSource({
+            library_id: nav.library_id,
+            zotero_key: nav.zotero_key,
+            library_ref: nav.library_ref,
+        } as ZoteroItemReference);
         return;
     }
 
@@ -95,7 +105,11 @@ export async function navigateToAttachmentMatch(nav: AttachmentMatchNavRequest):
         });
         logger(`navigateToAttachmentMatch: EPUB navigation outcome: ${outcome}`);
         if (outcome === 'failed') {
-            revealSource({ library_id: nav.library_id, zotero_key: nav.zotero_key } as ZoteroItemReference);
+            revealSource({
+                library_id: nav.library_id,
+                zotero_key: nav.zotero_key,
+                library_ref: nav.library_ref,
+            } as ZoteroItemReference);
         }
         return;
     }
@@ -122,7 +136,11 @@ export async function navigateToAttachmentMatch(nav: AttachmentMatchNavRequest):
         });
         logger(`navigateToAttachmentMatch: snapshot navigation outcome: ${outcome}`);
         if (outcome === 'failed') {
-            revealSource({ library_id: nav.library_id, zotero_key: nav.zotero_key } as ZoteroItemReference);
+            revealSource({
+                library_id: nav.library_id,
+                zotero_key: nav.zotero_key,
+                library_ref: nav.library_ref,
+            } as ZoteroItemReference);
         }
         return;
     }

@@ -24,7 +24,6 @@ import {
     loadAttachmentData,
     resolveToReadableAttachment,
     resolveAttachmentFileSource,
-    validateZoteroItemReference,
 } from '../documentExtraction';
 import { readableToExtractKind, type ExtractContentKind, type ReadableContentKind } from '../documentExtraction/shared/contentKinds';
 import {
@@ -37,10 +36,16 @@ import {
 // Hot-path handler keeps the remote-download-failed popup behavior by
 // passing the popup notifier through `onRemoteDownloadFailure`. The
 // background extractor deliberately omits it.
-import { notifyRemoteDownloadFailure, notifyRemoteFileNotSynced } from './utils';
+import {
+    notifyRemoteDownloadFailure,
+    notifyRemoteFileNotSynced,
+    preflightZoteroAttachmentRequest,
+    validateZoteroItemReference,
+} from './utils';
 import { EXTERNAL_LIBRARY_ID, resolveExternalFile } from '../externalFiles';
 import type { ExternalFileRecord } from '../database';
 import { serializeAttachmentStub, serializeItemStub } from '../../utils/zoteroSerializers';
+import { libraryRefForLibraryID, modelObjectIdFromReference } from '../../utils/libraryIdentity';
 import {
     createPreparedJsonMessage,
     type PreparedJsonMessage,
@@ -260,15 +265,12 @@ export async function handleZoteroDocumentRequest(
             'invalid_format',
         );
     }
-    const requestKey = `${attachment.library_id}-${attachment.zotero_key}`;
-
-    const formatError = validateZoteroItemReference(attachment);
-    if (formatError) {
-        return errorResponse(
-            `Invalid attachment reference '${requestKey}': ${formatError}`,
-            'invalid_format',
-        );
+    const preflight = preflightZoteroAttachmentRequest(attachment, validateZoteroItemReference);
+    const { requestKey } = preflight;
+    if (!preflight.ok) {
+        return errorResponse(preflight.error, preflight.errorCode);
     }
+    const { resolvedLibraryId } = preflight;
 
     const timeout = createTimeoutController(
         timeout_seconds,
@@ -286,7 +288,7 @@ export async function handleZoteroDocumentRequest(
     try {
         const item = await withRequestDeadline(
             Zotero.Items.getByLibraryAndKeyAsync(
-                attachment.library_id,
+                resolvedLibraryId,
                 attachment.zotero_key,
             ),
             'zotero_item_lookup',
@@ -402,6 +404,7 @@ export async function handleZoteroDocumentRequest(
                 resolved_attachment: {
                     library_id: resolvedItem.libraryID,
                     zotero_key: resolvedItem.key,
+                    library_ref: libraryRefForLibraryID(resolvedItem.libraryID) ?? undefined,
                 },
                 content_type: contentType,
                 content_kind: 'text',
@@ -436,6 +439,7 @@ export async function handleZoteroDocumentRequest(
                     resolved_attachment: {
                         library_id: result.resolvedAttachment.libraryId,
                         zotero_key: result.resolvedAttachment.zoteroKey,
+                        library_ref: libraryRefForLibraryID(result.resolvedAttachment.libraryId) ?? undefined,
                     },
                     content_type: result.contentType,
                     content_kind: 'epub',
@@ -473,6 +477,7 @@ export async function handleZoteroDocumentRequest(
                     resolved_attachment: {
                         library_id: result.resolvedAttachment.libraryId,
                         zotero_key: result.resolvedAttachment.zoteroKey,
+                        library_ref: libraryRefForLibraryID(result.resolvedAttachment.libraryId) ?? undefined,
                     },
                     content_type: result.contentType,
                     content_kind: 'snapshot',
@@ -530,6 +535,7 @@ export async function handleZoteroDocumentRequest(
                     resolved_attachment: {
                         library_id: result.resolvedAttachment.libraryId,
                         zotero_key: result.resolvedAttachment.zoteroKey,
+                        library_ref: libraryRefForLibraryID(result.resolvedAttachment.libraryId) ?? undefined,
                     },
                     content_type: result.contentType,
                     content_kind: 'pdf',
@@ -543,6 +549,7 @@ export async function handleZoteroDocumentRequest(
                 resolved_attachment: {
                     library_id: result.resolvedAttachment.libraryId,
                     zotero_key: result.resolvedAttachment.zoteroKey,
+                    library_ref: libraryRefForLibraryID(result.resolvedAttachment.libraryId) ?? undefined,
                 },
                 content_type: result.contentType,
                 content_kind: 'pdf',

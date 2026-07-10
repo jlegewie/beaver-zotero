@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { CSSIcon, Icon, PlusSignIcon } from '../../../components/icons/icons';
 import { getHost } from '../..';
+import { libraryRefForLibraryID } from '../../../../src/utils/libraryIdentity';
+import { resolveLibraryRef } from '../../../../src/utils/libraryIdentity';
 
 type ActionStatus = 'pending' | 'applied' | 'rejected' | 'undone' | 'error' | 'awaiting';
 
@@ -13,7 +15,11 @@ const CHILD_ROW_PADDING = '32px';
 interface CreateCollectionPreviewProps {
     /** Name of the collection to create */
     name: string;
-    /** Library name (from current_value) */
+    /** Resolved library id (from result_data, current_value, or action data) */
+    libraryId?: number | null;
+    /** Device-portable library identity, authoritative when present. */
+    libraryRef?: string | null;
+    /** Library name, used only to resolve the library when no id is available */
     libraryName?: string;
     /** Parent collection key (optional, for subcollections) */
     parentKey?: string | null;
@@ -25,6 +31,7 @@ interface CreateCollectionPreviewProps {
     resultData?: {
         collection_key?: string;
         collection_id?: number;
+        library_ref?: string;
         items_added?: number;
     };
 }
@@ -35,6 +42,8 @@ interface CreateCollectionPreviewProps {
  */
 export const CreateCollectionPreview: React.FC<CreateCollectionPreviewProps> = ({
     name,
+    libraryId: libraryIdProp,
+    libraryRef,
     libraryName,
     parentKey,
     itemCount = 0,
@@ -50,11 +59,26 @@ export const CreateCollectionPreview: React.FC<CreateCollectionPreviewProps> = (
         if (typeof Zotero === 'undefined') return;
 
         try {
-            const libraries = Zotero.Libraries.getAll();
-            let library = libraries.find(l => l.name === libraryName);
+            setLibraryId(null);
+            setParentName(null);
 
-            // Fallback to user library if not found by name (or if name not provided)
-            if (!library && (!libraryName || libraryName === 'My Library')) {
+            const resolvedLibraryId = resolveLibraryRef({
+                library_ref: libraryRef,
+                library_id: libraryIdProp,
+            });
+            let library = resolvedLibraryId
+                ? Zotero.Libraries.get(resolvedLibraryId) || undefined
+                : undefined;
+
+            // Name match is case-insensitive to mirror the action handler's resolution.
+            if (!library && !libraryRef && libraryName) {
+                library = Zotero.Libraries.getAll().find(
+                    l => l.name.toLowerCase() === libraryName.toLowerCase()
+                );
+            }
+
+            // Collections without any library reference belong to the user library.
+            if (!library && !libraryRef && libraryIdProp == null && !libraryName) {
                 library = Zotero.Libraries.userLibrary;
             }
 
@@ -70,7 +94,7 @@ export const CreateCollectionPreview: React.FC<CreateCollectionPreviewProps> = (
         } catch (e) {
             console.warn('Failed to resolve collection library/parent name:', e);
         }
-    }, [parentKey, libraryName]);
+    }, [parentKey, libraryIdProp, libraryRef, libraryName]);
 
     const isApplied = status === 'applied';
     const isError = status === 'error';
@@ -84,7 +108,11 @@ export const CreateCollectionPreview: React.FC<CreateCollectionPreviewProps> = (
 
     const revealCollection = (collectionKey: string) => {
         if (libraryId == null) return;
-        getHost().navigation?.revealCollection({ library_id: libraryId, zotero_key: collectionKey });
+        getHost().navigation?.revealCollection({
+            library_id: libraryId,
+            zotero_key: collectionKey,
+            library_ref: libraryRef ?? resultData?.library_ref ?? libraryRefForLibraryID(libraryId) ?? undefined,
+        });
     };
 
     const getNewItemStyles = () => {

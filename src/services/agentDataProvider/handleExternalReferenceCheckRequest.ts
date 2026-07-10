@@ -16,6 +16,8 @@ import {
     ExternalReferenceCheckResult,
 
 } from '../agentProtocol';
+import { getSearchableLibraryIds } from './utils';
+import { libraryRefForLibraryID } from '../../utils/libraryIdentity';
 
 
 /**
@@ -34,10 +36,13 @@ import {
 export async function handleExternalReferenceCheckRequest(request: WSExternalReferenceCheckRequest): Promise<WSExternalReferenceCheckResponse> {
     const startTime = Date.now();
 
-    // Determine which libraries to search
-    const libraryIds: number[] = request.library_ids && request.library_ids.length > 0
+    // Determine which libraries to search. Never search libraries the user
+    // excluded from Beaver.
+    const searchableLibraryIds = getSearchableLibraryIds();
+    const requestedLibraryIds = request.library_ids && request.library_ids.length > 0
         ? request.library_ids
-        : Zotero.Libraries.getAll().map(lib => lib.libraryID);
+        : searchableLibraryIds;
+    const libraryIds: number[] = requestedLibraryIds.filter(id => searchableLibraryIds.includes(id));
 
     // Convert request items to batch format
     const batchItems: BatchReferenceCheckItem[] = request.items.map(item => ({
@@ -81,7 +86,8 @@ export async function handleExternalReferenceCheckRequest(request: WSExternalRef
                 exists: true,
                 item: {
                     library_id: result.item.library_id,
-                    zotero_key: result.item.zotero_key
+                    zotero_key: result.item.zotero_key,
+                    library_ref: libraryRefForLibraryID(result.item.library_id) ?? undefined,
                 }
             };
         } else {

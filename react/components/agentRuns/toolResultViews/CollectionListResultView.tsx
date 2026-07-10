@@ -20,8 +20,12 @@ export const CollectionListResultView: React.FC<{ view: CollectionListView }> = 
         );
     }
 
-    const revealCollection = (libraryId: number, collectionKey: string) => {
-        getHost().navigation?.revealCollection({ library_id: libraryId, zotero_key: collectionKey });
+    const revealCollection = (collection: CollectionListView['collections'][number]) => {
+        getHost().navigation?.revealCollection({
+            library_id: collection.library_id,
+            zotero_key: collection.collection_key,
+            library_ref: collection.library_ref,
+        });
     };
 
     return (
@@ -36,7 +40,7 @@ export const CollectionListResultView: React.FC<{ view: CollectionListView }> = 
                         className={`display-flex flex-row items-start gap-25 p-2 min-w-0 cursor-pointer transition-colors ${
                             isHovered ? 'bg-quinary' : ''
                         }`}
-                        onClick={() => revealCollection(collection.library_id, collection.collection_key)}
+                        onClick={() => revealCollection(collection)}
                         onMouseEnter={() => setHoveredKey(compositeKey)}
                         onMouseLeave={() => setHoveredKey(null)}
                         title="Click to reveal in Zotero"

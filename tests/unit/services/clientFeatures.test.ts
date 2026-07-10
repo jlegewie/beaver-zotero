@@ -34,8 +34,13 @@ const VERSION_GATES: { feature: string; minVersion: string; op: Op }[] = [
     { feature: 'edit_metadata_creators', minVersion: '0.11.2', op: 'gte' },
 ];
 
-// Features the backend never derives from version
-const DECLARATION_ONLY_FEATURES = ['external_files'];
+// Features the backend never derives from version. ask_user_question is
+// declaration-only because client-feature declaration predates it — every
+// client that ships the question card also declares features explicitly.
+// portable_ids is declaration-only because it gates emission of the
+// device-portable model-facing id format, which every declaring client both
+// emits and resolves — there is no version threshold to derive it from.
+const DECLARATION_ONLY_FEATURES = ['external_files', 'ask_user_question', 'portable_ids'];
 
 // The full backend feature vocabulary (ALL_FEATURES in version_gates.py): every
 // version-gated feature plus the declaration-only ones.
@@ -47,16 +52,25 @@ const ALL_BACKEND_FEATURES = [
 // =============================================================================
 // PEP 440 version comparison (subset) — reproduces packaging.version.Version
 // ordering for the release + pre-release forms used by the thresholds above
-// (e.g. "0.20.0b4" is a beta that sorts below the "0.20.0" final).
+// (e.g. "0.20.0b4" is a beta that sorts below the "0.20.0" final) as well as
+// the npm/semver-style pre-release suffix the package.json version uses (e.g.
+// "0.22.0-beta.1"). `packaging.version.Version` normalizes both spellings to
+// the same pre-release representation, so this mirrors that normalization.
 // =============================================================================
 const PRE_ORDER: Record<string, number> = { a: 0, b: 1, rc: 2 };
+const PRE_ALIASES: Record<string, keyof typeof PRE_ORDER> = {
+    a: 'a', alpha: 'a',
+    b: 'b', beta: 'b',
+    c: 'rc', rc: 'rc', pre: 'rc', preview: 'rc',
+};
 
 function parseVersion(v: string): { release: number[]; pre: { stage: number; num: number } | null } {
-    const m = /^(\d+)\.(\d+)\.(\d+)(?:(a|b|rc)(\d+))?$/.exec(v);
+    const m = /^(\d+)\.(\d+)\.(\d+)(?:[-_.]?(alpha|beta|preview|pre|rc|a|b|c)[-_.]?(\d+))?$/i.exec(v);
     if (!m) throw new Error(`Unparseable version: ${v}`);
+    const preLabel = m[4] ? PRE_ALIASES[m[4].toLowerCase()] : undefined;
     return {
         release: [Number(m[1]), Number(m[2]), Number(m[3])],
-        pre: m[4] ? { stage: PRE_ORDER[m[4]], num: Number(m[5]) } : null,
+        pre: preLabel ? { stage: PRE_ORDER[preLabel], num: Number(m[5]) } : null,
     };
 }
 
@@ -144,5 +158,13 @@ describe('version-gate mirror integrity', () => {
         expect(compareVersions('0.19.4', '0.19.4')).toBe(0);
         // The `>` gates exclude an exact-threshold match; `>=` gates include it.
         expect(compareVersions('0.20.999', '0.20.999')).toBe(0);
+    });
+
+    it('normalizes the npm/semver pre-release spelling used by package.json', () => {
+        // "0.22.0-beta.1" (package.json) and "0.22.0b1" (PEP 440 compact form used
+        // in the gate table) must compare equal, matching packaging.version.Version.
+        expect(compareVersions('0.22.0-beta.1', '0.22.0b1')).toBe(0);
+        expect(compareVersions('0.22.0-beta.1', '0.22.0')).toBe(-1);
+        expect(compareVersions('0.22.0-beta.2', '0.22.0-beta.1')).toBe(1);
     });
 });

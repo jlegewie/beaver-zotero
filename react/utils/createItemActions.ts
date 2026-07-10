@@ -11,6 +11,7 @@ import { applyCreateItemData } from './addItemActions';
 import { logger } from '../../src/utils/logger';
 import { ensureItemSynced } from '../../src/utils/sync';
 import { scheduleBackgroundTask, generateTaskId, cancelTasksForItem, deduplicatedSync } from '../../src/utils/backgroundTasks';
+import { resolveItemReference, resolveWriteTargetLibrary } from '../../src/utils/libraryIdentity';
 
 /** Maximum concurrent item creations in batch operations */
 const BATCH_CONCURRENCY_LIMIT = 3;
@@ -35,27 +36,9 @@ export async function executeCreateItemAction(
         throw new Error('Invalid action: missing item data');
     }
 
-    // Resolve target library: use provided ID, resolve name, or default to user's main library
-    let libraryId: number;
-
-    if (proposedData.library_id != null && proposedData.library_id !== 0) {
-        if (typeof proposedData.library_id === 'number' && proposedData.library_id > 0) {
-            libraryId = proposedData.library_id;
-        } else {
-            throw new Error(`Invalid library ID: ${proposedData.library_id}`);
-        }
-    } else if (proposedData.library_name) {
-        const allLibraries = Zotero.Libraries.getAll();
-        const matchedLibrary = allLibraries.find(
-            (lib: any) => lib.name.toLowerCase() === proposedData.library_name!.toLowerCase()
-        );
-        if (!matchedLibrary) {
-            throw new Error(`Library not found: "${proposedData.library_name}"`);
-        }
-        libraryId = matchedLibrary.libraryID;
-    } else {
-        libraryId = Zotero.Libraries.userLibraryID;
-    }
+    const targetLibrary = resolveWriteTargetLibrary(proposedData);
+    if (!targetLibrary.ok) throw new Error(targetLibrary.message);
+    const libraryId = targetLibrary.libraryID;
 
     logger(`executeCreateItemAction: Creating item "${proposedData.item.title}" in library ${libraryId}`, 1);
 
@@ -118,20 +101,21 @@ export async function undoCreateItemAction(action: AgentAction): Promise<void> {
     // Cancel any background tasks (PDF fetch, sync) for this item before deletion
     cancelTasksForItem(resultData.library_id, resultData.zotero_key);
 
-    // Get the item
-    const item = await Zotero.Items.getByLibraryAndKeyAsync(
-        resultData.library_id,
-        resultData.zotero_key
-    );
+    const resolved = await resolveItemReference(resultData);
 
-    if (!item) {
+    if (resolved.status === 'library_unavailable') {
+        logger(`undoCreateItemAction: Library unavailable for ${resultData.library_ref || resultData.library_id}-${resultData.zotero_key}`, 1);
+        return;
+    }
+
+    if (resolved.status === 'not_found') {
         // Item doesn't exist (may have been manually deleted)
         logger(`undoCreateItemAction: Item not found, may have been already deleted`, 1);
         return;
     }
 
     // Erase the item
-    await item.eraseTx();
+    await resolved.item.eraseTx();
 
     logger(`undoCreateItemAction: Successfully deleted item ${resultData.library_id}-${resultData.zotero_key}`, 1);
 }

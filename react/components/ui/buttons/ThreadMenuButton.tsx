@@ -8,13 +8,16 @@ import { renderToMarkdown, renderToHTML, preprocessNoteContent } from '../../../
 import { getBeaverNoteFooterHTML } from '../../../utils/noteActions';
 import { extractThreadContent, ExtractThreadContentOptions } from '../../../utils/threadContent';
 import { allRunsAtom, toolResultsMapAtom } from '../../../agents/atoms';
-import { currentThreadIdAtom, currentThreadNameAtom, recentThreadsAtom, ThreadData } from '../../../atoms/threads';
+import { currentThreadIdAtom, currentThreadNameAtom, newThreadAtom, recentThreadsAtom, ThreadData } from '../../../atoms/threads';
 import { citationMapAtom } from '../../../atoms/citations';
 import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '../../../atoms/externalReferences';
 import { getZoteroTargetContextSync } from '../../../../src/utils/zoteroUtils';
 import { selectItem, selectItemById } from '../../../../src/utils/selectItem';
 import { store } from '../../../store';
 import { prepareCitationRenderContext } from '../../../utils/citationRenderContext';
+import { threadService } from '../../../../src/services/threadService';
+import { clearRecentChatsCache } from '../../RecentChats';
+import { clearThreadListCache } from '../../ThreadListView';
 
 interface ThreadMenuButtonProps {
     className?: string;
@@ -149,13 +152,75 @@ const ThreadMenuButton: React.FC<ThreadMenuButtonProps> = ({
         await copyToClipboard(`zotero://beaver/thread/${threadId}`);
     };
 
+    const handleRenameChat = async () => {
+        const { threadId, threadName } = getThreadMeta();
+        if (!threadId) return;
+
+        // Native text-input dialog for renaming (no in-panel edit UI needed here).
+        const input = { value: threadName || 'Unnamed conversation' };
+        const confirmed = Services.prompt.prompt(
+            Zotero.getMainWindow() as any,
+            'Rename chat',
+            'Enter a new name for this chat:',
+            input,
+            null as unknown as string,
+            { value: false },
+        );
+        if (!confirmed) return;
+
+        const newName = input.value.trim();
+        if (!newName || newName === threadName) return;
+
+        try {
+            await threadService.renameThread(threadId, newName);
+            // Reflect the new name immediately in the current-thread and recent-thread state
+            store.set(currentThreadNameAtom, newName);
+            store.set(recentThreadsAtom, (prev: ThreadData[]) =>
+                prev.map(t => (t.id === threadId ? { ...t, name: newName } : t)),
+            );
+            // Invalidate caches so chat lists refetch fresh names
+            clearThreadListCache();
+            clearRecentChatsCache();
+        } catch (error) {
+            console.error('Error renaming thread:', error);
+        }
+    };
+
+    const handleDeleteChat = async () => {
+        const threadId = store.get(currentThreadIdAtom);
+        if (!threadId) return;
+
+        const buttonIndex = Zotero.Prompt.confirm({
+            window: Zotero.getMainWindow(),
+            title: 'Delete chat?',
+            text: 'Are you sure you want to delete this chat? This action cannot be undone.',
+            button0: Zotero.Prompt.BUTTON_TITLE_YES,
+            button1: Zotero.Prompt.BUTTON_TITLE_NO,
+            defaultButton: 1,
+        });
+        if (buttonIndex !== 0) return;
+
+        try {
+            await threadService.deleteThread(threadId);
+            // Drop it from the recent-thread list and invalidate caches
+            store.set(recentThreadsAtom, (prev: ThreadData[]) => prev.filter(t => t.id !== threadId));
+            clearThreadListCache();
+            clearRecentChatsCache(threadId);
+            // This menu always targets the current thread, so switch to a new chat.
+            // The delete was already confirmed above, so skip the active-run confirmation.
+            await store.set(newThreadAtom, { skipActiveRunConfirm: true });
+        } catch (error) {
+            console.error('Error deleting thread:', error);
+        }
+    };
+
     const getMenuItems = (): MenuItem[] => {
         const threadId = store.get(currentThreadIdAtom);
         const hasRuns = runs.length > 0;
         const context = getZoteroTargetContextSync();
         const hasParent = context.parentReference !== null;
 
-        const items = [
+        const items: MenuItem[] = [
             {
                 label: 'Copy entire chat',
                 onClick: handleCopyThread,
@@ -174,6 +239,21 @@ const ThreadMenuButton: React.FC<ThreadMenuButtonProps> = ({
             {
                 label: 'Copy link to chat',
                 onClick: handleCopyThreadUrl,
+                disabled: !threadId,
+            },
+            {
+                label: 'thread-actions-divider',
+                onClick: () => {},
+                isDivider: true,
+            },
+            {
+                label: 'Rename chat',
+                onClick: handleRenameChat,
+                disabled: !threadId,
+            },
+            {
+                label: 'Delete chat',
+                onClick: handleDeleteChat,
                 disabled: !threadId,
             },
         ];

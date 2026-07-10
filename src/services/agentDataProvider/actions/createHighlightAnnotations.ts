@@ -14,7 +14,7 @@ import {
     prepareSnapshotAnnotationDocument,
 } from '../../annotations/createAnnotation';
 import { getReadableContentKind } from '../../documentExtraction/attachmentResolution';
-import { getAttachmentFileStatus, getDeferredToolPreference, validateLibraryAccess } from '../utils';
+import { checkLibraryExcluded, getAttachmentFileStatus, getDeferredToolPreference, validateLibraryAccess } from '../utils';
 import { TimeoutContext, checkAborted, TimeoutError } from '../timeout';
 import type {
     CreatedAnnotationResult,
@@ -26,6 +26,7 @@ import type { ZoteroItemReference } from '../../../../react/types/zotero';
 import { normalizePageLocations } from '../../../../react/types/agentActions/annotations';
 import { normalizeAnnotationTags } from '../../../../react/types/agentActions/createAnnotations';
 import { shortItemTitle } from '../../../utils/zoteroUtils';
+import { libraryRefForLibraryID, resolveItemReference, resolveLibraryRef } from '../../../utils/libraryIdentity';
 import { logger } from '../../../utils/logger';
 
 function mapAnnotationErrorCode(error: unknown): string {
@@ -52,9 +53,12 @@ function epubSectionOrdinal(pageLabel: string | null | undefined): number | unde
 }
 
 function normalizeRef(raw: any): ZoteroItemReference {
+    const libraryRef = raw?.library_ref ?? raw?.libraryRef;
     return {
         library_id: typeof raw?.library_id === 'number' ? raw.library_id : Number(raw?.libraryId ?? raw?.library_id ?? 0),
         zotero_key: String(raw?.zotero_key ?? raw?.zoteroKey ?? ''),
+        // Carry the device-portable library_ref through unchanged when present.
+        ...(typeof libraryRef === 'string' && libraryRef ? { library_ref: libraryRef } : {}),
     };
 }
 
@@ -88,8 +92,8 @@ function normalizeItem(raw: any): HighlightAnnotationItem {
 
 async function resolveAttachment(ref: ZoteroItemReference): Promise<Zotero.Item | null> {
     if (!ref.library_id || !ref.zotero_key) return null;
-    const item = await Zotero.Items.getByLibraryAndKeyAsync(ref.library_id, ref.zotero_key);
-    return item || null;
+    const resolved = await resolveItemReference(ref);
+    return resolved.status === 'found' ? resolved.item : null;
 }
 
 async function getAttachmentTitle(attachment: Zotero.Item): Promise<string> {
@@ -137,7 +141,34 @@ export async function validateCreateHighlightAnnotationsAction(
         };
     }
 
-    const libValidation = validateLibraryAccess(resolved_ref.library_id);
+    // Enforce the exclusion boundary before resolving/loading the attachment.
+    // library_ref is authoritative when the numeric library_id is stale.
+    const targetLibraryId = resolveLibraryRef(resolved_ref);
+    const excluded = targetLibraryId === null ? null : checkLibraryExcluded(targetLibraryId);
+    if (excluded) {
+        return {
+            type: 'agent_action_validate_response',
+            request_id: request.request_id,
+            valid: false,
+            error: excluded.message,
+            error_code: 'library_not_searchable',
+            preference: 'always_ask',
+        };
+    }
+
+    const attachment = await resolveAttachment(resolved_ref);
+    const contentKind = attachment ? getAnnotationContentKind(attachment) : null;
+    if (!attachment || !contentKind) {
+        return {
+            type: 'agent_action_validate_response',
+            request_id: request.request_id,
+            valid: false,
+            error: 'Resolved item is not a local PDF or EPUB attachment',
+            error_code: 'invalid_attachment',
+            preference: 'always_ask',
+        };
+    }
+    const libValidation = validateLibraryAccess(attachment.libraryID);
     if (!libValidation.valid) {
         return {
             type: 'agent_action_validate_response',
@@ -156,19 +187,6 @@ export async function validateCreateHighlightAnnotationsAction(
             valid: false,
             error: `Library '${library.name}' is read-only and cannot be modified`,
             error_code: 'library_not_editable',
-            preference: 'always_ask',
-        };
-    }
-
-    const attachment = await resolveAttachment(resolved_ref);
-    const contentKind = attachment ? getAnnotationContentKind(attachment) : null;
-    if (!attachment || !contentKind) {
-        return {
-            type: 'agent_action_validate_response',
-            request_id: request.request_id,
-            valid: false,
-            error: 'Resolved item is not a local PDF or EPUB attachment',
-            error_code: 'invalid_attachment',
             preference: 'always_ask',
         };
     }
@@ -227,6 +245,20 @@ export async function executeCreateHighlightAnnotationsAction(
     const data = getActionData(request);
     const { requested_ref, resolved_ref, items, tags } = data;
 
+    // TOCTOU guard: never annotate an attachment in a library the user excluded
+    // from Beaver, even if validation passed earlier or the request skipped it.
+    // Resolve and gate the library before resolving/loading the attachment.
+    const targetLibraryId = resolveLibraryRef(resolved_ref);
+    const targetExcluded = targetLibraryId === null ? null : checkLibraryExcluded(targetLibraryId);
+    if (targetExcluded) {
+        return {
+            type: 'agent_action_execute_response',
+            request_id: request.request_id,
+            success: false,
+            error: targetExcluded.message,
+            error_code: 'library_not_searchable',
+        };
+    }
     const attachment = await resolveAttachment(resolved_ref);
     const contentKind = attachment ? getAnnotationContentKind(attachment) : null;
     if (!attachment || !contentKind) {
@@ -236,6 +268,16 @@ export async function executeCreateHighlightAnnotationsAction(
             success: false,
             error: 'Resolved item is not a local PDF or EPUB attachment',
             error_code: 'invalid_attachment',
+        };
+    }
+    const excluded = checkLibraryExcluded(attachment.libraryID);
+    if (excluded) {
+        return {
+            type: 'agent_action_execute_response',
+            request_id: request.request_id,
+            success: false,
+            error: excluded.message,
+            error_code: 'library_not_searchable',
         };
     }
 
@@ -273,6 +315,7 @@ export async function executeCreateHighlightAnnotationsAction(
                         loc_raw: item.loc_raw,
                         library_id: ref.library_id,
                         zotero_key: ref.zotero_key,
+                        library_ref: libraryRefForLibraryID(ref.library_id) ?? undefined,
                     });
                 } catch (error: any) {
                     failed.push({
@@ -301,6 +344,7 @@ export async function executeCreateHighlightAnnotationsAction(
                         loc_raw: item.loc_raw,
                         library_id: ref.library_id,
                         zotero_key: ref.zotero_key,
+                        library_ref: libraryRefForLibraryID(ref.library_id) ?? undefined,
                     });
                 } catch (error: any) {
                     failed.push({
@@ -351,6 +395,7 @@ export async function executeCreateHighlightAnnotationsAction(
                         loc_raw: item.loc_raw,
                         library_id: ref.library_id,
                         zotero_key: ref.zotero_key,
+                        library_ref: libraryRefForLibraryID(ref.library_id) ?? undefined,
                     });
                 } catch (error: any) {
                     failed.push({

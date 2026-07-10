@@ -2,7 +2,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../../../src/beaver-extract', () => ({
     ExtractionError: class MockExtractionError extends Error {},
+    StaleWorkerError: class MockStaleWorkerError extends Error {},
     WorkerAbortError: class MockWorkerAbortError extends Error {},
+    WorkerSpawnError: class MockWorkerSpawnError extends Error {},
     ExtractionErrorCode: {
         ENCRYPTED: 'encrypted',
         NO_TEXT_LAYER: 'no_text_layer',

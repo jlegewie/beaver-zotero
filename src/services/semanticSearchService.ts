@@ -58,9 +58,13 @@ export class semanticSearchService {
             return [];
         }
 
+        if (libraryIds && libraryIds.length === 0) {
+            return [];
+        }
+
         // 1. Start query embedding generation and DB loading in parallel.
         const queryEmbeddingPromise = embeddingsService.generateQueryEmbeddingWithRetry(query);
-        const embeddingsPromise = (libraryIds && libraryIds.length > 0)
+        const embeddingsPromise = libraryIds
             ? this.db.getEmbeddingsByLibraries(libraryIds)
             : this.db.getAllEmbeddings();
 
@@ -98,6 +102,10 @@ export class semanticSearchService {
     async findSimilar(itemId: number, options: SearchOptions = {}): Promise<SearchResult[]> {
         const { topK = 20, minSimilarity = 0.4, libraryIds } = options;
 
+        if (libraryIds && libraryIds.length === 0) {
+            return [];
+        }
+
         // 1. Get the embedding for the source item
         const sourceEmbedding = await this.db.getEmbedding(itemId);
         if (!sourceEmbedding) {
@@ -109,7 +117,7 @@ export class semanticSearchService {
 
         // 2. Load embeddings from database
         let embeddings: EmbeddingRecord[];
-        if (libraryIds && libraryIds.length > 0) {
+        if (libraryIds) {
             embeddings = await this.db.getEmbeddingsByLibraries(libraryIds);
         } else {
             embeddings = await this.db.getAllEmbeddings();

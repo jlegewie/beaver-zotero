@@ -4,6 +4,7 @@ import { ZoteroItemReference } from '../types/zotero';
 import { findExistingReference, FindReferenceData } from '../utils/findExistingReference';
 import { logger } from '../../src/utils/logger';
 import { loadFullItemDataWithAllTypes } from '../../src/utils/zoteroUtils';
+import { libraryRefForLibraryID, modelObjectIdFromReference, resolveItemReference, resolveLibraryRef } from '../../src/utils/libraryIdentity';
 
 /**
  * Cache mapping external reference source IDs to ExternalReference objects
@@ -74,18 +75,23 @@ export const checkExternalReferenceAtom = atom(
                 const firstItem = externalRef.library_items[0];
                 logger(`checkExternalReference: Validating backend data for ${refId}`, 1);
                 try {
-                    const item = await Zotero.Items.getByLibraryAndKeyAsync(
-                        firstItem.library_id,
-                        firstItem.zotero_key
-                    );
-                    
-                    if (item && !item.deleted) {
+                    // Resolve through library_ref when present: a numeric
+                    // library_id written on another device is stale for group
+                    // libraries, but the portable ref still maps to this
+                    // device's local library. Unavailable libraries fall
+                    // through to the search-based fallback below.
+                    const resolved = await resolveItemReference(firstItem);
+                    if (resolved.status === 'found' && !resolved.item.deleted) {
+                        const item = resolved.item;
                         result = {
-                            library_id: firstItem.library_id,
-                            zotero_key: firstItem.zotero_key
+                            library_id: item.libraryID,
+                            zotero_key: item.key,
+                            library_ref: firstItem.library_ref ?? libraryRefForLibraryID(item.libraryID) ?? undefined,
                         };
                         foundItem = item;
                         logger(`checkExternalReference: Backend data validated for ${refId}`, 1);
+                    } else if (resolved.status === 'library_unavailable') {
+                        logger(`checkExternalReference: Library unavailable for ${refId}`, 1);
                     } else {
                         logger(`checkExternalReference: Backend data invalid for ${refId}, item not found`, 1);
                     }
@@ -109,7 +115,8 @@ export const checkExternalReferenceAtom = atom(
                     if (existingItem) {
                         result = {
                             library_id: existingItem.libraryID,
-                            zotero_key: existingItem.key
+                            zotero_key: existingItem.key,
+                            library_ref: libraryRefForLibraryID(existingItem.libraryID) ?? undefined,
                         };
                         foundItem = existingItem;
                         logger(`checkExternalReference: Found match for ${refId}: ${result.library_id}-${result.zotero_key}`, 1);
@@ -190,30 +197,34 @@ export const checkExternalReferencesAtom = atom(
                         
                         // Validate backend data first
                         if (ref.library_items && ref.library_items.length > 0) {
-                            const libraryItems = ref.library_items.map(element => `${element.library_id}-${element.zotero_key}`);
+                            const libraryItems = ref.library_items.map(element => modelObjectIdFromReference(element));
                             logger(`checkExternalReferences: Checking ${refId} backend data (${libraryItems.join(', ')})`, 1);
-                            const mainLibraryItems = ref.library_items.filter(element => element.library_id === 1);
+                            const isPersonal = (element: typeof ref.library_items[number]) =>
+                                resolveLibraryRef(element) === Zotero.Libraries.userLibraryID;
+                            const mainLibraryItems = ref.library_items.filter(isPersonal);
                             const itemsToTry = mainLibraryItems.length > 0
-                                ? [...mainLibraryItems, ...ref.library_items.filter(element => element.library_id !== 1)]
+                                ? [...mainLibraryItems, ...ref.library_items.filter(element => !isPersonal(element))]
                                 : ref.library_items;
                             for (const itemRef of itemsToTry) {
                                 try {
-                                    const item = await Zotero.Items.getByLibraryAndKeyAsync(
-                                        itemRef.library_id,
-                                        itemRef.zotero_key
-                                    );
-                                    
-                                    if (item) {
+                                    // Resolve through library_ref when present: a
+                                    // numeric library_id written on another device
+                                    // is stale for group libraries. Unavailable
+                                    // libraries skip to the next candidate.
+                                    const resolved = await resolveItemReference(itemRef);
+                                    if (resolved.status === 'found') {
+                                        const item = resolved.item;
                                         result = {
-                                            library_id: itemRef.library_id,
-                                            zotero_key: itemRef.zotero_key
+                                            library_id: item.libraryID,
+                                            zotero_key: item.key,
+                                            library_ref: itemRef.library_ref ?? libraryRefForLibraryID(item.libraryID) ?? undefined,
                                         };
                                         foundItems.push(item);
                                         logger(`checkExternalReferences: Backend data validated for ${refId}: ${result.library_id}-${result.zotero_key}`, 1);
                                         break;
                                     }
                                 } catch (backendError) {
-                                    logger(`checkExternalReferences: Backend validation failed for ${refId} (${itemRef.library_id}-${itemRef.zotero_key}): ${backendError}`, 2);
+                                    logger(`checkExternalReferences: Backend validation failed for ${refId} (${modelObjectIdFromReference(itemRef)}): ${backendError}`, 2);
                                 }
                             }
                         }
@@ -232,7 +243,8 @@ export const checkExternalReferencesAtom = atom(
                                 if (existingItem) {
                                     result = {
                                         library_id: existingItem.libraryID,
-                                        zotero_key: existingItem.key
+                                        zotero_key: existingItem.key,
+                                        library_ref: libraryRefForLibraryID(existingItem.libraryID) ?? undefined,
                                     };
                                     foundItems.push(existingItem);
                                     logger(`checkExternalReferences: Found match for ${refId}: ${result.library_id}-${result.zotero_key}`, 1);

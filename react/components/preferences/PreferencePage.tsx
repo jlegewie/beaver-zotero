@@ -29,6 +29,7 @@ import ApiKeysSection from "./ApiKeysSection";
 import AdvancedSection from "./AdvancedSection";
 import PermissionsSection from "./PermissionsSection";
 import EmbeddingIndexProgress from "../pages/onboarding/EmbeddingIndexProgress";
+import ExcludedLibrariesList from "./ExcludedLibrariesList";
 
 
 const PreferencePage: React.FC = () => {
@@ -357,7 +358,7 @@ const PreferencePage: React.FC = () => {
             icon: RepeatIcon,
             iconClassName: '',
             disabled: false,
-            text: 'Sync'
+            text: 'Check & Repair'
         };
     };
 
@@ -503,7 +504,7 @@ const PreferencePage: React.FC = () => {
                             borderRadius: 0,
                             background: tab.id === effectiveActiveTab ? 'var(--fill-quinary)' : 'transparent',
                             color: tab.id === effectiveActiveTab ? 'var(--fill-primary)' : 'var(--fill-secondary)',
-                            padding: '4px 12px',
+                            padding: '6px 12px',
                             minHeight: '20px',
                             display: 'inline-flex',
                             alignItems: 'center',
@@ -542,6 +543,7 @@ const PreferencePage: React.FC = () => {
                                             variant="outline"
                                             icon={UserIcon}
                                             onClick={() => Zotero.launchURL(process.env.WEBAPP_BASE_URL + '/login')}
+                                            style={{ padding: '4px 6px' }}
                                         >
                                             Open
                                         </Button>
@@ -564,7 +566,7 @@ const PreferencePage: React.FC = () => {
                                     description="End your current session"
                                     hasBorder
                                     control={
-                                        <Button variant="outline" icon={LogoutIcon} onClick={logout}>
+                                        <Button variant="outline" icon={LogoutIcon} onClick={logout} style={{ padding: '4px 6px' }}>
                                             Logout
                                         </Button>
                                     }
@@ -861,41 +863,49 @@ const PreferencePage: React.FC = () => {
                             </SettingsGroup>
                         </span>
                     ) : (
-                        <SettingsGroup>
-                            {isEmbeddingIndexing && embeddingIndexState.phase === 'initial' && embeddingIndexState.totalItems > 0 && (
-                                <EmbeddingIndexProgress />
-                            )}
-                            <SettingsRow
-                                title="Search Index"
-                                description={
-                                    <>
-                                        Syncing the search index ensures that all your library items are indexed and searchable.
-                                        {embeddingIndexState.failedItems > 0 && (
-                                            <span className="display-flex font-color-yellow mt-1">
-                                                {embeddingIndexState.failedItems} items failed to index
-                                            </span>
-                                        )}
-                                        {embeddingIndexState.status === 'error' && embeddingIndexState.error && (
-                                            <span className="display-flex font-color-red mt-1">
-                                                Error: {embeddingIndexState.error}
-                                            </span>
-                                        )}
-                                    </>
-                                }
-                                control={
-                                    <Button
-                                        variant="outline"
-                                        rightIcon={rebuildIndexButtonProps.icon}
-                                        iconClassName={rebuildIndexButtonProps.iconClassName}
-                                        onClick={handleRebuildSearchIndex}
-                                        disabled={rebuildIndexButtonProps.disabled}
-                                        loading={isEmbeddingIndexing}
-                                    >
-                                        {rebuildIndexButtonProps.text}
-                                    </Button>
-                                }
-                            />
-                        </SettingsGroup>
+                        <>
+                            <SectionLabel>Libraries</SectionLabel>
+                            <ExcludedLibrariesList />
+
+                            <SectionLabel>Search Index</SectionLabel>
+                            <SettingsGroup>
+                                <SettingsRow
+                                    title="Search Index"
+                                    description={
+                                        <>
+                                            Check that the local search index matches your Zotero libraries.
+                                            This usually happens automatically, but you can run a manual check if search results look out of date.
+                                            {embeddingIndexState.failedItems > 0 && (
+                                                <span className="display-flex font-color-yellow mt-1">
+                                                    {embeddingIndexState.failedItems} items failed to index
+                                                </span>
+                                            )}
+                                            {embeddingIndexState.status === 'error' && embeddingIndexState.error && (
+                                                <span className="display-flex font-color-red mt-1">
+                                                    Error: {embeddingIndexState.error}
+                                                </span>
+                                            )}
+                                        </>
+                                    }
+                                    control={
+                                        <Button
+                                            variant="outline"
+                                            rightIcon={!isEmbeddingIndexing ? rebuildIndexButtonProps.icon : undefined}
+                                            iconClassName={rebuildIndexButtonProps.iconClassName}
+                                            onClick={handleRebuildSearchIndex}
+                                            disabled={rebuildIndexButtonProps.disabled}
+                                            loading={isEmbeddingIndexing}
+                                            style={{ padding: '4px 6px' }}
+                                        >
+                                            {rebuildIndexButtonProps.text}
+                                        </Button>
+                                    }
+                                />
+                                {isEmbeddingIndexing && embeddingIndexState.phase === 'initial' && embeddingIndexState.totalItems > 0 && (
+                                    <EmbeddingIndexProgress />
+                                )}
+                            </SettingsGroup>
+                        </>
                     )}
 
                     {isDatabaseSyncSupported && (

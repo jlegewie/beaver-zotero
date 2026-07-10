@@ -14,6 +14,14 @@ import { safeFileExists } from '../../src/utils/zoteroUtils';
 import { getNoteContentPreviewText } from './noteText';
 import type { EditNoteOperation } from '../types/agentActions/editNote';
 import { getBeaverFooterAppendPoint } from '../../src/utils/noteEditFooter';
+import { notifyReferenceUnavailable } from '../host/zotero/sourceActions';
+import {
+    resolveItemReference,
+    resolveLibraryRef,
+    resolveObjectId,
+    modelObjectIdFromReference,
+    UNRESOLVED_LIBRARY_ID,
+} from '../../src/utils/libraryIdentity';
 import {
     getPageLocator,
     normalizeCitationTag,
@@ -61,17 +69,10 @@ export function getReferenceFromItem(item: Zotero.Item): string {
 */
 export function getZoteroItem(source: SourceAttachment | ZoteroItemReference): Zotero.Item | null {
     try {
-        let libId: number;
-        let itemKeyValue: string;
-        if (!source.library_id || !source.zotero_key) return null;
-
-        if ('library_id' in source && 'zotero_key' in source) {
-            libId = source.library_id;
-            itemKeyValue = source.zotero_key;
-        } else {
-            console.error("getZoteroItem: Source object does not have expected key structure (libraryID/itemKey or library_id/zotero_key):", source);
-            return null;
-        }
+        if (!source.zotero_key) return null;
+        const libId = resolveLibraryRef(source);
+        if (!libId) return null;
+        const itemKeyValue = source.zotero_key;
         const item = Zotero.Items.getByLibraryAndKey(libId, itemKeyValue);
         return item || null;
     } catch (error) {
@@ -134,8 +135,8 @@ export async function isValidZoteroItem(item: Zotero.Item): Promise<{valid: bool
         return {
             valid: false,
             error: library_name
-                ? `The library "${library_name}" is not synced with Beaver.`
-                : "This library is not synced with Beaver."};
+                ? `The library "${library_name}" is excluded from Beaver. You can update this setting in Beaver Preferences.`
+                : "This library is excluded from Beaver. You can update this setting in Beaver Preferences."};
     }
 
     // Is the library valid for sync?
@@ -260,13 +261,24 @@ export async function isValidZoteroItem(item: Zotero.Item): Promise<{valid: bool
  * @param collectionKey - Optional collection key to navigate to before revealing
  */
 export function revealSource(source: ZoteroItemReference | SourceAttachment, collectionKey?: string) {
-    if (!source.library_id || !source.zotero_key) return;
-    const itemID = Zotero.Items.getIDFromLibraryAndKey(source.library_id, source.zotero_key);
-    if (itemID && Zotero.getActiveZoteroPane()) {
+    if (!source.zotero_key) return;
+    const libraryID = resolveLibraryRef(source);
+    if (!libraryID) {
+        logger(`revealSource: library unavailable (${source.library_ref || source.library_id}, ${source.zotero_key})`);
+        notifyReferenceUnavailable('item', 'library_unavailable');
+        return;
+    }
+    const itemID = Zotero.Items.getIDFromLibraryAndKey(libraryID, source.zotero_key);
+    if (!itemID) {
+        logger(`revealSource: item not found (${libraryID}, ${source.zotero_key})`);
+        notifyReferenceUnavailable('item');
+        return;
+    }
+    if (Zotero.getActiveZoteroPane()) {
         // Convert collection key to collection ID if provided
         let collectionId: number | undefined;
         if (collectionKey) {
-            const id = Zotero.Collections.getIDFromLibraryAndKey(source.library_id, collectionKey);
+            const id = Zotero.Collections.getIDFromLibraryAndKey(libraryID, collectionKey);
             if (id !== false) {
                 collectionId = id;
             }
@@ -288,6 +300,7 @@ export async function getCurrentCollectionKeyForItem(
     libraryId: number,
     zoteroKey: string,
 ): Promise<string | undefined> {
+    if (libraryId === UNRESOLVED_LIBRARY_ID) return undefined;
     try {
         const selectedCollection = Zotero.getActiveZoteroPane()?.getSelectedCollection?.();
         if (!selectedCollection || selectedCollection.libraryID !== libraryId) return undefined;
@@ -315,8 +328,13 @@ export async function getCurrentCollectionKeyForItem(
 }
 
 export async function openSource(source: SourceAttachment | ZoteroItemReference) {
-    const item = getZoteroItem(source);
-    if (!item) return;
+    const resolved = await resolveItemReference(source);
+    if (resolved.status !== 'found') {
+        logger(`openSource: item not found (${source.library_ref || source.library_id}, ${source.zotero_key})`);
+        notifyReferenceUnavailable('item', resolved.status === 'library_unavailable' ? 'library_unavailable' : 'missing');
+        return;
+    }
+    const item = resolved.item;
     
     // Regular items
     if (item.isRegularItem()) {
@@ -833,11 +851,9 @@ function formatCitationTextForSearch(citationItems: any[]): string | null {
 }
 
 function lookupCitationItemForSearch(itemId: string, locator?: string): any | null {
-    const dashIdx = itemId.indexOf('-');
-    if (dashIdx === -1) return null;
-    const libraryID = parseInt(itemId.substring(0, dashIdx), 10);
-    const key = itemId.substring(dashIdx + 1);
-    const item = Zotero.Items.getByLibraryAndKey(libraryID, key);
+    const ref = resolveObjectId(itemId);
+    if (!ref || ref.library_id === UNRESOLVED_LIBRARY_ID) return null;
+    const item = Zotero.Items.getByLibraryAndKey(ref.library_id, ref.zotero_key);
     if (!item || typeof item === 'boolean') return null;
     const citeItem = item.isAttachment?.() && item.parentItemID
         ? Zotero.Items.get(item.parentItemID)
@@ -866,7 +882,7 @@ function recoverCitationLabelForSearch(tag: string): string | null {
     const attrs = parseRawCitationAttributes(openTag?.[1] || '');
     const normalized = normalizeCitationTag(attrs);
     if (normalized.ok && normalized.ref.kind === 'zotero') {
-        const ci = lookupCitationItemForSearch(`${normalized.ref.library_id}-${normalized.ref.zotero_key}`);
+        const ci = lookupCitationItemForSearch(modelObjectIdFromReference(normalized.ref));
         return ci ? formatCitationTextForSearch([ci]) : null;
     }
     if (attrs.items) {

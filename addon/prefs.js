@@ -116,3 +116,6 @@ pref("pendingVersionNotifications", "[]");
 // Library suggestions cache (JSON-encoded LibrarySuggestionsResponse + ISO timestamp)
 pref("librarySuggestions", "");
 pref("librarySuggestionsGeneratedAt", "");
+
+// Account-scoped first-run assignment map, keyed by Beaver user id.
+pref("firstRunAssignments", "{}");

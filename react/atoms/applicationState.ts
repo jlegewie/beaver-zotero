@@ -20,6 +20,7 @@ import {
 import { currentReaderAttachmentAtom, readerTextSelectionAtom } from './messageComposition';
 import { currentNoteItemAtom } from './zoteroContext';
 import { getCurrentPage, getCurrentReader, getEpubReaderPage } from '../utils/readerUtils';
+import { libraryRefForLibraryID } from '../../src/utils/libraryIdentity';
 import { searchableLibraryIdsAtom, processingModeAtom } from './profile';
 import { ProcessingMode } from '../types/profile';
 import { isLibraryTabAtom } from './ui';
@@ -41,10 +42,14 @@ const MAX_LIBRARY_SELECTION = 5;
  *
  * EPUB pages come from the open reader so the reported coordinate matches the
  * visible reader position.
+ *
+ * Excluded libraries are never shared: if the open attachment lives in a
+ * non-searchable library, no reader state is emitted.
  */
-export async function getReaderState(get: Getter): Promise<ReaderState | null> {
+export async function getReaderState(get: Getter, searchableLibraryIds: Set<number>): Promise<ReaderState | null> {
     const readerAttachment = get(currentReaderAttachmentAtom);
     if (!readerAttachment) return null;
+    if (!searchableLibraryIds.has(readerAttachment.libraryID)) return null;
 
     const reader = getCurrentReader();
     const contentKind = reader?.type === 'pdf' || reader?.type === 'epub' || reader?.type === 'snapshot'
@@ -65,6 +70,7 @@ export async function getReaderState(get: Getter): Promise<ReaderState | null> {
     return {
         library_id: readerAttachment.libraryID,
         zotero_key: readerAttachment.key,
+        library_ref: libraryRefForLibraryID(readerAttachment.libraryID) ?? undefined,
         current_page: currentPage,
         ...(contentKind && { content_kind: contentKind }),
         ...(currentTextSelection && { text_selection: currentTextSelection })
@@ -73,13 +79,18 @@ export async function getReaderState(get: Getter): Promise<ReaderState | null> {
 
 /**
  * Build note state for the current note tab item.
+ *
+ * Note state for an item in an excluded (non-searchable) library is never
+ * shared, so its id and title cannot reach the backend or seed a `read_note`.
  */
-export function getNoteState(get: Getter): NoteState | null {
+export function getNoteState(get: Getter, searchableLibraryIds: Set<number>): NoteState | null {
     const noteItem = get(currentNoteItemAtom);
     if (!noteItem) return null;
+    if (!searchableLibraryIds.has(noteItem.libraryID)) return null;
     return {
         library_id: noteItem.libraryID,
         zotero_key: noteItem.key,
+        library_ref: libraryRefForLibraryID(noteItem.libraryID) ?? undefined,
         ...(noteItem.parentKey && { parent_key: noteItem.parentKey }),
         ...(noteItem.getNoteTitle?.() && { title: noteItem.getNoteTitle() }),
     };
@@ -91,16 +102,22 @@ export function getNoteState(get: Getter): NoteState | null {
  * embedding-index status, and per-library summaries).
  */
 export async function buildZoteroApplicationState(get: Getter): Promise<ApplicationStateInput> {
-    const readerState = await getReaderState(get);
-    const noteState = getNoteState(get);
+    // Excluded libraries must never appear in application state
+    const searchableLibraryIds = get(searchableLibraryIdsAtom);
+    const searchableLibrarySet = new Set(searchableLibraryIds);
+
+    const readerState = await getReaderState(get, searchableLibrarySet);
+    const noteState = getNoteState(get, searchableLibrarySet);
 
     // Get current library and collection context
     let currentLibrary: CurrentLibrary | undefined = undefined;
     let currentCollection: CurrentCollection | undefined = undefined;
     let librarySelection: ZoteroItemReference[] | undefined = undefined;
 
-    const searchableLibraryIds = get(searchableLibraryIdsAtom);
-    const currentView: 'library' | 'file_reader' | 'note_editor' = get(isLibraryTabAtom) ? 'library' : noteState ? 'note_editor' : 'file_reader';
+    // Detect the note-editor view from the raw tab context, NOT from the
+    // exclusion-filtered noteState
+    const isNoteTabActive = !!get(currentNoteItemAtom);
+    const currentView: 'library' | 'file_reader' | 'note_editor' = get(isLibraryTabAtom) ? 'library' : isNoteTabActive ? 'note_editor' : 'file_reader';
 
     if (currentView === 'file_reader' && readerState) {
         // In reader view, use the library from the reader attachment
@@ -108,6 +125,7 @@ export async function buildZoteroApplicationState(get: Getter): Promise<Applicat
         if (library) {
             currentLibrary = {
                 library_id: library.libraryID,
+                library_ref: libraryRefForLibraryID(library.libraryID) ?? undefined,
                 name: library.name,
                 is_group: library.isGroup,
                 read_only: !library.editable,
@@ -120,6 +138,7 @@ export async function buildZoteroApplicationState(get: Getter): Promise<Applicat
         if (library) {
             currentLibrary = {
                 library_id: library.libraryID,
+                library_ref: libraryRefForLibraryID(library.libraryID) ?? undefined,
                 name: library.name,
                 is_group: library.isGroup,
                 read_only: !library.editable,
@@ -132,33 +151,41 @@ export async function buildZoteroApplicationState(get: Getter): Promise<Applicat
         if (zp) {
             const libraryId = zp.getSelectedLibraryID();
             const library = Zotero.Libraries.get(libraryId);
-            if (library) {
+            // Omit the current library entirely when it is excluded, rather than
+            // reporting it with is_synced=false — excluded libraries are not
+            // shared at all.
+            if (library && searchableLibrarySet.has(library.libraryID)) {
                 currentLibrary = {
                     library_id: library.libraryID,
+                    library_ref: libraryRefForLibraryID(library.libraryID) ?? undefined,
                     name: library.name,
                     is_group: library.isGroup,
                     read_only: !library.editable,
-                    is_synced: searchableLibraryIds.includes(library.libraryID),
+                    is_synced: true,
                 };
             }
 
             const collection = zp.getSelectedCollection();
-            if (collection) {
+            if (collection && searchableLibrarySet.has(collection.libraryID)) {
                 currentCollection = {
                     collection_key: collection.key,
                     name: collection.name,
                     library_id: collection.libraryID,
+                    library_ref: libraryRefForLibraryID(collection.libraryID) ?? undefined,
                     parent_key: collection.parentKey || null,
                 };
             }
 
-            const selectedItems = zp.getSelectedItems();
+            // Drop any selected items that belong to an excluded library.
+            const selectedItems = zp.getSelectedItems()
+                .filter((item: Zotero.Item) => searchableLibrarySet.has(item.libraryID));
             if (selectedItems.length > 0) {
                 librarySelection = selectedItems
                     .slice(0, MAX_LIBRARY_SELECTION)
                     .map((item: Zotero.Item) => ({
                         library_id: item.libraryID,
                         zotero_key: item.key,
+                        library_ref: libraryRefForLibraryID(item.libraryID) ?? undefined,
                     }));
             }
         }

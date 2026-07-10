@@ -16,7 +16,11 @@
  * possible; otherwise a separate suffix is appended.
  */
 
-import { configurePDF, type PDFConfig } from "../../src/beaver-extract/config";
+import {
+    configurePDF,
+    type PDFConfig,
+    type WorkerStartFailureInfo,
+} from "../../src/beaver-extract/config";
 
 interface ConfigureForTestsOptions {
     /**
@@ -33,6 +37,8 @@ interface ConfigureForTestsOptions {
     getWorkerHost?: () => Window | null;
     /** Override the log sink (default: no-op). */
     log?: (msg: string, level: number) => void;
+    /** Host hook for worker start-phase failures (default: unset). */
+    onWorkerStartFailure?: (info: WorkerStartFailureInfo) => void;
 }
 
 export function configurePDFForTests(opts: ConfigureForTestsOptions = {}): {
@@ -64,6 +70,7 @@ export function configurePDFForTests(opts: ConfigureForTestsOptions = {}): {
             background: makeSlot(backgroundSlotKey),
         },
         log: opts.log ?? (() => {}),
+        onWorkerStartFailure: opts.onWorkerStartFailure,
         worker: {
             mupdfWasmFactoryUrl: "test://mupdf-factory.mjs",
             mupdfWasmBinaryUrl: "test://mupdf.wasm",

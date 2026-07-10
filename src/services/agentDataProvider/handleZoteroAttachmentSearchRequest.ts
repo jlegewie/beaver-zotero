@@ -8,7 +8,6 @@
  */
 
 import { logger } from '../../utils/logger';
-
 import { isAttachmentAvailableRemotely } from '../../utils/webAPI';  // kept for file_missing message check
 import {
     WSZoteroAttachmentSearchRequest,
@@ -20,6 +19,7 @@ import {
 import { BeaverExtractor, ExtractionError, ExtractionErrorCode, WorkerAbortError } from '../../beaver-extract';
 import { makeRemoteFilePath } from '../documentFileIdentity';
 import {
+    preflightZoteroAttachmentRequest,
     validateZoteroItemReference,
     loadPdfData,
     checkRemotePdfSize,
@@ -42,6 +42,8 @@ export async function handleZoteroAttachmentSearchRequest(
     request: WSZoteroAttachmentSearchRequest
 ): Promise<WSZoteroAttachmentSearchResponse> {
     const { attachment, query, max_hits_per_page, request_id, timeout_seconds } = request;
+    const preflight = preflightZoteroAttachmentRequest(attachment, validateZoteroItemReference);
+    const { responseAttachment, requestKey: unique_key } = preflight;
 
     // Hoisted for catch-block metadata backfill
     let resolvedItem: Zotero.Item | null = null;
@@ -57,7 +59,7 @@ export async function handleZoteroAttachmentSearchRequest(
     ): WSZoteroAttachmentSearchResponse => ({
         type: 'zotero_attachment_search',
         request_id,
-        attachment,
+        attachment: responseAttachment,
         query,
         total_matches: 0,
         pages_with_matches: 0,
@@ -68,22 +70,17 @@ export async function handleZoteroAttachmentSearchRequest(
     });
 
     // 0. Validate attachment reference format
-    const unique_key = `${attachment.library_id}-${attachment.zotero_key}`;
-    const formatError = validateZoteroItemReference(attachment);
-    if (formatError) {
-        return errorResponse(
-            `Invalid attachment reference '${unique_key}': ${formatError}`,
-            'invalid_format'
-        );
+    if (!preflight.ok) {
+        return errorResponse(preflight.error, preflight.errorCode);
     }
+    const { resolvedLibraryId } = preflight;
 
     const timeout = createTimeoutController(timeout_seconds, DEFAULT_SEARCH_TIMEOUT_SECONDS);
     const { signal, timeoutSeconds, throwIfTimedOut, dispose } = timeout;
 
     try {
-        // 1. Get the attachment item from Zotero
         const zoteroItem = await Zotero.Items.getByLibraryAndKeyAsync(
-            attachment.library_id,
+            resolvedLibraryId,
             attachment.zotero_key
         );
         throwIfTimedOut('zotero_item_lookup');
@@ -277,7 +274,7 @@ export async function handleZoteroAttachmentSearchRequest(
         return {
             type: 'zotero_attachment_search',
             request_id,
-            attachment,
+            attachment: responseAttachment,
             query,
             total_matches: searchResult.totalMatches,
             pages_with_matches: searchResult.pagesWithMatches,

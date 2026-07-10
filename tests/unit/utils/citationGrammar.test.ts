@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
     baseCitationKey,
     citationIndexCandidateIdsForLocator,
@@ -62,6 +62,8 @@ describe('citationGrammar', () => {
         expect(parseZoteroId('0-ABC')).toBeNull();
         expect(parseZoteroId('ABC')).toBeNull();
         expect(parseZoteroId('1-')).toBeNull();
+        // ext-<KEY> is not a Zotero reference; the caller must match it first.
+        expect(parseZoteroId('ext-AB12CD34')).toBeNull();
     });
 
     it('normalizes new, legacy, external, and invalid citation tags', () => {
@@ -150,6 +152,63 @@ describe('citationGrammar', () => {
             zotero_key: 'PARENT',
             loc: { kind: 'page', value: '4', raw: 'page4' },
         });
+    });
+});
+
+describe('portable Zotero ids (u-<KEY> / g<groupID>-<KEY>)', () => {
+    const zotero = (globalThis as any).Zotero;
+    const originalLibraries = zotero.Libraries;
+    const originalGroups = zotero.Groups;
+    const getLibraryIDFromGroupID = vi.fn();
+
+    beforeEach(() => {
+        getLibraryIDFromGroupID.mockReset();
+        zotero.Libraries = { ...originalLibraries, userLibraryID: 1 };
+        zotero.Groups = { getLibraryIDFromGroupID };
+    });
+
+    afterEach(() => {
+        zotero.Libraries = originalLibraries;
+        zotero.Groups = originalGroups;
+    });
+
+    it('resolves a portable personal-library id to this device\'s library', () => {
+        expect(parseZoteroId('u-ABCD1234')).toEqual({ library_id: 1, library_ref: 'u', zotero_key: 'ABCD1234' });
+    });
+
+    it('resolves a portable group id with a local mapping', () => {
+        getLibraryIDFromGroupID.mockReturnValue(7);
+        expect(parseZoteroId('g42-ABCD1234')).toEqual({ library_id: 7, library_ref: 'g42', zotero_key: 'ABCD1234' });
+    });
+
+    it('marks a portable group id without a local mapping as unresolved, keeping library_ref', () => {
+        getLibraryIDFromGroupID.mockReturnValue(false);
+        expect(parseZoteroId('g42-ABCD1234')).toEqual({ library_id: 0, library_ref: 'g42', zotero_key: 'ABCD1234' });
+    });
+
+    it('flows a portable group id through normalizeCitationTag', () => {
+        getLibraryIDFromGroupID.mockReturnValue(7);
+        expect(normalizeCitationTag({ id: 'g42-ABCD1234', loc: 'page3' })).toMatchObject({
+            ok: true,
+            ref: { kind: 'zotero', library_id: 7, library_ref: 'g42', zotero_key: 'ABCD1234', loc: { kind: 'page', value: '3', raw: 'page3' } },
+        });
+    });
+
+    it('keys portable references by stable library_ref instead of local library_id', () => {
+        const onFirstDevice = { kind: 'zotero' as const, library_id: 7, library_ref: 'g42', zotero_key: 'ABCD1234' };
+        const onSecondDevice = { ...onFirstDevice, library_id: 19 };
+        const unavailable = { ...onFirstDevice, library_id: 0 };
+        const differentUnavailableGroup = { ...unavailable, library_ref: 'g99' };
+
+        expect(baseCitationKey(onFirstDevice)).toBe('zotero:g42-ABCD1234');
+        expect(baseCitationKey(onSecondDevice)).toBe(baseCitationKey(onFirstDevice));
+        expect(baseCitationKey(unavailable)).toBe(baseCitationKey(onFirstDevice));
+        expect(baseCitationKey(differentUnavailableGroup)).not.toBe(baseCitationKey(unavailable));
+    });
+
+    it('keeps legacy numeric keys when no portable library_ref is available', () => {
+        expect(baseCitationKey({ kind: 'zotero', library_id: 7, zotero_key: 'ABCD1234' }))
+            .toBe('zotero:7-ABCD1234');
     });
 });
 

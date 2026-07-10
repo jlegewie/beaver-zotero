@@ -2,12 +2,14 @@ import { v4 as uuidv4 } from 'uuid';
 import { ApiService } from './apiService';
 import API_BASE_URL from '../utils/getAPIBaseURL';
 import { getYearFromItem } from '../utils/zoteroSerializers'
+import { libraryRefForLibraryID } from '../utils/libraryIdentity';
 
 // Type for metadata search results that matches the ItemSearchResult from backend
 export interface ItemSearchResult {
     id: string;    // itemUUID
     library_id: number;
     zotero_key: string;
+    library_ref?: string;
     item_type: string;
     deleted: boolean;
     title?: string;
@@ -22,6 +24,7 @@ export function itemSearchResultFromZoteroItem(item: Zotero.Item): ItemSearchRes
         id: uuidv4(),
         library_id: item.libraryID,
         zotero_key: item.key,
+        library_ref: libraryRefForLibraryID(item.libraryID) ?? undefined,
         item_type: item.itemType,
         // @ts-ignore - Add proper types later
         deleted: typeof item.isInTrash === 'function' ? item.isInTrash() : (item.deleted ?? false),
@@ -109,4 +112,4 @@ export class SearchService extends ApiService {
 }
 
 // Export searchService
-export const searchService = new SearchService(API_BASE_URL); 
+export const searchService = new SearchService(API_BASE_URL);

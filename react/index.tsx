@@ -11,6 +11,7 @@ import WindowSidebar from './components/WindowSidebar';
 import FloatingPopupRoot from './components/FloatingPopupRoot';
 import PreferencesWindow from './components/PreferencesWindow';
 import { PreferencePageTab } from './atoms/ui';
+import type { ActionCategoryFilter } from './types/actions';
 import { useZoteroTabSelection } from './hooks/useZoteroTabSelection';
 import { useZoteroContext } from './hooks/useZoteroContext';
 import { useProfileSync } from './hooks/useProfileSync';
@@ -31,13 +32,16 @@ import { useBackgroundWorkerStatus } from './hooks/useBackgroundWorkerStatus';
 import { useSyncSuppression } from './hooks/useSyncSuppression';
 import { BeaverTemporaryAnnotations } from './utils/annotationUtils';
 import { registerZoteroHost } from './host/zotero';
+import { notifyWorkerStartFailure } from './utils/workerUnavailableNotice';
 
 // Configure the PDF package (webpack bundle copy). The esbuild bundle
 // configures its own copy from `src/hooks.ts`. Both must run because each
 // bundle has its own module-scope config in `src/beaver-extract/config.ts`.
 // The cross-bundle `MuPDFWorkerClient` per-name singletons are shared via
 // `Zotero.__beaverMuPDFWorkerClient_hot` / `_background` regardless.
-configurePDFForBeaver();
+//
+// Only the webpack copy wires `onWorkerStartFailure` to an in-app popup (hot worker only)
+configurePDFForBeaver({ onWorkerStartFailure: notifyWorkerStartFailure });
 
 // Register the Zotero client host so rendered chat-history components can
 // resolve host-specific navigation and data lookups. Non-Zotero clients omit
@@ -222,7 +226,7 @@ export function renderFloatingPopup(domElement: HTMLElement) {
  * Renders the PreferencesWindow into the separate preferences window.
  * Uses the shared Jotai store for consistent state.
  */
-export function renderPreferencesWindow(domElement: HTMLElement, initialTab?: PreferencePageTab | null) {
+export function renderPreferencesWindow(domElement: HTMLElement, initialTab?: PreferencePageTab | null, initialActionsCategoryFilter?: ActionCategoryFilter | null, initialActionId?: string | null) {
     // Clean up any existing root first
     const existingRoot = rootsMap.get(domElement);
     if (existingRoot) {
@@ -235,7 +239,11 @@ export function renderPreferencesWindow(domElement: HTMLElement, initialTab?: Pr
 
     root.render(
         <Provider store={store}>
-            <PreferencesWindow initialTab={initialTab ?? undefined} />
+            <PreferencesWindow
+                initialTab={initialTab ?? undefined}
+                initialActionsCategoryFilter={initialActionsCategoryFilter ?? undefined}
+                initialActionId={initialActionId ?? undefined}
+            />
         </Provider>
     );
 

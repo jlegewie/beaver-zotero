@@ -18,6 +18,7 @@
 import { ToolReturnPart } from "../agents/types";
 import { ZoteroItemReference } from "../types/zotero";
 import { logger } from "../../src/utils/logger";
+import { resolveItemReference } from "../../src/utils/libraryIdentity";
 import { truncateText, formatNumberRanges } from "../utils/stringUtils";
 import { EXTERNAL_LIBRARY_ID } from "../../src/services/externalFiles";
 import {
@@ -96,13 +97,19 @@ const ANNOTATION_PREVIEW_MAX_LENGTH = 300;
 // stays unit-testable with mocked items).
 // ===========================================================================
 
-/** Resolve a (library, key) reference to a live item, or null. */
-async function loadItem(libraryId: number, key: string): Promise<Zotero.Item | null> {
+/**
+ * Resolve a reference to a live item, or null. Prefers the device-portable
+ * `library_ref` (falling back to the device-local `library_id` when absent,
+ * matching every reference written before `library_ref` existed).
+ */
+async function loadItem(
+    ref: { library_ref?: string; library_id: number; zotero_key: string },
+): Promise<Zotero.Item | null> {
     try {
-        const item = await Zotero.Items.getByLibraryAndKeyAsync(libraryId, key);
-        return item || null;
+        const resolved = await resolveItemReference(ref);
+        return resolved.status === "found" ? resolved.item : null;
     } catch (error) {
-        logger(`legacyToolResults: failed to resolve ${libraryId}-${key}: ${error}`, 1);
+        logger(`legacyToolResults: failed to resolve ${ref.library_id}-${ref.zotero_key}: ${error}`, 1);
         return null;
     }
 }
@@ -227,6 +234,7 @@ async function hydrateAnnotationRow(
         kind: "annotation",
         library_id: ref.library_id,
         zotero_key: ref.zotero_key,
+        library_ref: ref.library_ref,
         annotation_type: item.annotationType ?? null,
         // Store a bounded preview; result rows and tooltips do not need the full
         // annotation body.
@@ -259,6 +267,7 @@ type RowBase = {
     kind: "item";
     library_id: number;
     zotero_key: string;
+    library_ref?: string;
     location_label: string | null;
     status: "ok" | "error";
 };
@@ -303,13 +312,14 @@ function selfRow(base: RowBase, item: Zotero.Item, parent: Zotero.Item | null): 
  */
 async function hydrateRow(spec: RowSpec): Promise<ItemListRow> {
     const { ref, headline, locationLabel = null, status = "ok" } = spec;
-    const item = await loadItem(ref.library_id, ref.zotero_key);
+    const item = await loadItem(ref);
 
     if (!item) {
         return {
             kind: "item",
             library_id: ref.library_id,
             zotero_key: ref.zotero_key,
+            library_ref: ref.library_ref,
             display_name: ref.zotero_key,
             location_label: locationLabel,
             status,
@@ -326,6 +336,7 @@ async function hydrateRow(spec: RowSpec): Promise<ItemListRow> {
         kind: "item",
         library_id: ref.library_id,
         zotero_key: ref.zotero_key,
+        library_ref: ref.library_ref,
         location_label: locationLabel,
         status,
     };
@@ -333,7 +344,7 @@ async function hydrateRow(spec: RowSpec): Promise<ItemListRow> {
     // Resolve the bibliographic parent (explicit override for read_note, else
     // the item's own). Regular items have none → resolveParent returns null.
     const parent = spec.parentRefOverride
-        ? await loadItem(spec.parentRefOverride.library_id, spec.parentRefOverride.zotero_key)
+        ? await loadItem(spec.parentRefOverride)
         : await resolveParent(item);
     if (parent) await ensureItemData(parent);
 
@@ -377,7 +388,7 @@ function pageLabel(pages: number[]): string | undefined {
  * build a parent-centric (P) row spec per attachment with a "Page …" label.
  */
 function pageRowSpecs(
-    refs: { library_id: number; zotero_key: string }[],
+    refs: ZoteroItemReference[],
     pageOf: (ref: any) => number | undefined,
 ): RowSpec[] {
     const order: string[] = [];
@@ -385,7 +396,14 @@ function pageRowSpecs(
     for (const ref of refs) {
         const key = `${ref.library_id}-${ref.zotero_key}`;
         if (!grouped.has(key)) {
-            grouped.set(key, { ref: { library_id: ref.library_id, zotero_key: ref.zotero_key }, pages: [] });
+            grouped.set(key, {
+                ref: {
+                    library_id: ref.library_id,
+                    zotero_key: ref.zotero_key,
+                    library_ref: ref.library_ref,
+                },
+                pages: [],
+            });
             order.push(key);
         }
         const page = pageOf(ref);
@@ -404,7 +422,14 @@ function lineRowSpecs(lines: LineReference[]): RowSpec[] {
     for (const line of lines) {
         const key = `${line.library_id}-${line.zotero_key}`;
         if (!grouped.has(key)) {
-            grouped.set(key, { ref: { library_id: line.library_id, zotero_key: line.zotero_key }, ranges: [] });
+            grouped.set(key, {
+                ref: {
+                    library_id: line.library_id,
+                    zotero_key: line.zotero_key,
+                    library_ref: line.library_ref,
+                },
+                ranges: [],
+            });
             order.push(key);
         }
         grouped.get(key)!.ranges.push(
@@ -460,6 +485,7 @@ async function hydrateAttachmentSearchRow(
     const baseRow: AttachmentSearchRowView = {
         library_id: att.library_id,
         zotero_key: att.zotero_key,
+        library_ref: att.library_ref,
         display_name: att.zotero_key,
         item_type: null,
         content_kind: att.content_kind,
@@ -483,7 +509,7 @@ async function hydrateAttachmentSearchRow(
         };
     }
 
-    const item = await loadItem(att.library_id, att.zotero_key);
+    const item = await loadItem(att);
     if (!item) {
         return baseRow; // not in library — key as display name, item_type null
     }
@@ -538,6 +564,7 @@ function buildCollectionListView(part: ToolReturnPart): CollectionListView | nul
         tool_name: "list_collections",
         collections: data.collections.map((c) => ({
             library_id: c.library_id,
+            library_ref: c.library_ref,
             collection_key: c.zotero_key,
             name: c.name,
         })),
@@ -571,7 +598,7 @@ async function buildAnnotationListView(
 
     const rows: AnnotationRowView[] = [];
     for (const ref of data.annotations) {
-        const item = await loadItem(ref.library_id, ref.zotero_key);
+        const item = await loadItem(ref);
         if (item && item.isAnnotation?.()) {
             rows.push(await hydrateAnnotationRow(ref, item));
         }
@@ -600,7 +627,11 @@ async function buildExtractView(part: ToolReturnPart): Promise<ItemListView | nu
     if (!data) return null;
     const rows = await hydrateRows(
         data.items.map((item) => ({
-            ref: { library_id: item.library_id, zotero_key: item.zotero_key },
+            ref: {
+                library_id: item.library_id,
+                zotero_key: item.zotero_key,
+                library_ref: item.library_ref,
+            },
             // Parent-centric like the legacy ExtractResultView (showParentItem):
             // an attachment-backed item headlines its bibliographic parent; a
             // top-level item headlines itself.
@@ -746,7 +777,11 @@ export async function buildLegacyView(
                 const specs = data.kind === "pdf"
                     ? pageRowSpecs(data.images, (img) => img.page_number ?? undefined)
                     : data.images.map((img) => ({
-                        ref: { library_id: img.library_id, zotero_key: img.zotero_key },
+                        ref: {
+                            library_id: img.library_id,
+                            zotero_key: img.zotero_key,
+                            library_ref: img.library_ref,
+                        },
                         headline: "parent" as const,
                     }));
                 // Collapse duplicate attachment refs for the image case.
