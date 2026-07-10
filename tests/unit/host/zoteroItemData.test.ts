@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+declare const Zotero: any;
+
 const resolveLibraryRef = vi.hoisted(() => vi.fn());
 
 vi.mock('../../../src/utils/libraryIdentity', () => ({
