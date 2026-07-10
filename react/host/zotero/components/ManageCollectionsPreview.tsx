@@ -48,6 +48,33 @@ interface Fallback {
     oldItemCount?: number;
 }
 
+/**
+ * Resolve the pre-action collection snapshot shown by the preview.
+ *
+ * Persisted result data is authoritative once an action has been applied.
+ * Live Zotero data is only a legacy/rejected-action fallback because it may
+ * already reflect the rename or move being previewed.
+ */
+export function resolveManageCollectionsSnapshot(
+    currentValue: ManageCollectionsPreviewProps['currentValue'],
+    resultData: ManageCollectionsResultData | undefined,
+    fallback: Fallback,
+): { collectionName: string; oldParentKey: string | null } {
+    return {
+        collectionName:
+            currentValue?.collection_name
+            ?? currentValue?.old_name
+            ?? resultData?.old_name
+            ?? fallback.collectionName
+            ?? '(unknown)',
+        oldParentKey: currentValue?.old_parent_key !== undefined
+            ? currentValue.old_parent_key
+            : resultData?.old_parent_key !== undefined
+                ? resultData.old_parent_key
+                : fallback.oldParentKey ?? null,
+    };
+}
+
 function buildCollectionErrorText(
     action: 'rename' | 'move' | 'delete',
     errorMessage: string | undefined,
@@ -89,9 +116,9 @@ export const ManageCollectionsPreview: React.FC<ManageCollectionsPreviewProps> =
     const isError = status === 'error';
 
     // currentValue is only available while awaiting approval. After a final
-    // state (rejected/applied/…) it is gone, so fall back to live Zotero
-    // lookups so the rejected view still shows the collection/library/impact
-    // (the user may still re-apply).
+    // state it is gone. Persisted resultData supplies the authoritative
+    // pre-action snapshot for applied actions; live Zotero lookups fill in
+    // library/impact context and support rejected or legacy actions.
     const [fallback, setFallback] = useState<Fallback>({});
     const [newParentName, setNewParentName] = useState<string | null>(null);
     const [oldParentName, setOldParentName] = useState<string | null>(null);
@@ -121,14 +148,12 @@ export const ManageCollectionsPreview: React.FC<ManageCollectionsPreviewProps> =
         return () => { cancelled = true; };
     }, [currentValue, libraryId, collectionKey, status]);
 
-    const collectionName =
-        currentValue?.collection_name
-        ?? currentValue?.old_name
-        ?? fallback.collectionName
-        ?? resultData?.old_name
-        ?? '(unknown)';
+    const { collectionName, oldParentKey } = resolveManageCollectionsSnapshot(
+        currentValue,
+        resultData,
+        fallback,
+    );
     const libraryName = currentValue?.library_name ?? fallback.libraryName;
-    const oldParentKey = currentValue?.old_parent_key ?? fallback.oldParentKey ?? null;
     const itemCount =
         resultData?.items_affected
         ?? currentValue?.old_item_count
