@@ -10,6 +10,7 @@ import { convertUTCToLocal } from '../utils/dateUtils';
 import { deduplicateByThread } from '../utils/threadMatches';
 import { getReaderOrNoteContextItem } from '../utils/zoteroTabContext';
 import { buildThreadItemFilter } from '../utils/threadItemFilter';
+import { buildRecentChatsItemLookup } from '../utils/recentChatsLookup';
 import Spinner from './icons/Spinner';
 import { logger } from '../../src/utils/logger';
 import Button from './ui/Button';
@@ -154,13 +155,17 @@ const RecentChats: React.FC = () => {
             let resultThreads: ThreadData[] = [];
             let resultContextType: ContextType = 'recent';
 
+            const itemLookup = !isLibraryTab
+                ? buildRecentChatsItemLookup(libraryId, itemKeys, searchableLibraryIds)
+                : null;
+
             // Reader/note context: try item-specific threads first. Excluded
-            // libraries must not be read (privacy boundary) — fall through
-            // to the generic recents path instead.
-            if (!isLibraryTab && itemKeys.length > 0 && libraryId != null && searchableLibraryIds.includes(libraryId)) {
+            // libraries produce no lookup payload (privacy boundary), so neither
+            // their stable identity nor item keys reach the backend.
+            if (itemLookup) {
                 try {
                     const matches = await threadService.findThreadsByItem(
-                        libraryId, itemKeys, 'both'
+                        itemLookup.libraryId, itemLookup.zoteroKeys, 'both'
                     );
                     if (isCancelled()) return;
                     const deduped = deduplicateByThread(matches);
