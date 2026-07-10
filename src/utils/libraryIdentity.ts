@@ -10,6 +10,10 @@
  *   - `"g<groupID>"` for a group library, where `groupID` is Zotero's
  *     server-assigned group id.
  *
+ * Distinct from the search-index scope ref (`getIndexScopeRef` in
+ * `zoteroUtils.ts`), which scopes the personal library by account/device
+ * (`u<userID>` / `l<localUserKey>`). The two grammars are not interchangeable.
+ *
  * This module is esbuild-safe (no `react/*` imports, no Jotai, no
  * supabase) so it can be used from both the esbuild and webpack bundles.
  */

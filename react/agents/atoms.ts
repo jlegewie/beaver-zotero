@@ -18,7 +18,7 @@ import {
     WSToolCallProgressEvent,
     WSToolCallArgsStreamEvent,
 } from "../../src/services/agentProtocol";
-import { MessageAttachment, messageAttachmentKey } from "../types/attachments/apiTypes";
+import { MessageAttachment, messageAttachmentKey, messageAttachmentsHaveSameIdentity } from "../types/attachments/apiTypes";
 
 // =============================================================================
 // Core Atoms
@@ -86,9 +86,9 @@ export const toolResultsMapAtom = atom((get) => {
 });
 
 /**
- * Map of user attachments in all runs, keyed by messageAttachmentKey
- * (`<library_id>-<zotero_key>`, or `ext-<KEY>` for external files).
- * Uses Map for proper deduplication (Set with objects uses reference equality).
+ * Map of user attachments in all runs, keyed by the canonical
+ * messageAttachmentKey. Identity comparison falls back to numeric IDs when a
+ * pre-library_ref record is involved, while distinct portable refs stay apart.
  */
 export const allUserAttachmentsAtom = atom((get) => {
     const runs = get(allRunsAtom);
@@ -97,17 +97,17 @@ export const allUserAttachmentsAtom = atom((get) => {
     for (const run of runs) {
         const runAttachments = run.user_prompt.attachments || [];
         for (const attachment of runAttachments) {
-            const key = messageAttachmentKey(attachment);
-            if (!attachmentsMap.has(key)) {
-                attachmentsMap.set(key, attachment);
-            }
+            if (Array.from(attachmentsMap.values()).some(
+                existing => messageAttachmentsHaveSameIdentity(existing, attachment)
+            )) continue;
+            attachmentsMap.set(messageAttachmentKey(attachment), attachment);
         }
     }
 
     return attachmentsMap;
 });
 
-/** Set of messageAttachmentKey strings for all user attachments in the thread */
+/** Set of canonical identity keys for all deduplicated thread attachments. */
 export const allUserAttachmentKeysAtom = atom((get) => {
     const attachmentsMap = get(allUserAttachmentsAtom);
     return new Set(Array.from(attachmentsMap.values()).map(messageAttachmentKey));

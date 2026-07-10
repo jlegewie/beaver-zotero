@@ -26,7 +26,7 @@ import { isRejectedItemValidation, itemValidationResultsAtom } from './itemValid
 import { searchableLibraryIdsAtom } from './profile';
 import { getActionCommand, toSlashToken, type SlashCommandDescriptor } from '../utils/slashCommands';
 import type { PromptAction } from '../agents/types';
-import { MessageAttachment, messageAttachmentKey } from '../types/attachments/apiTypes';
+import { MessageAttachment, messageAttachmentKey, messageAttachmentLookupKeys } from '../types/attachments/apiTypes';
 import { toMessageAttachment } from '../types/attachments/converters';
 
 // ---------------------------------------------------------------------------
@@ -548,9 +548,9 @@ export const buildEditedPromptActionsAtom = atom(
             for (const item of resolved.items) {
                 const attachment = toMessageAttachment(item);
                 if (!attachment) continue;
-                const key = messageAttachmentKey(attachment);
-                if (existingKeys.has(key)) continue;
-                existingKeys.add(key);
+                const aliases = messageAttachmentLookupKeys(attachment);
+                if (aliases.some(key => existingKeys.has(key))) continue;
+                existingKeys.add(messageAttachmentKey(attachment));
                 addedAttachments.push(attachment);
             }
         }

@@ -38,6 +38,7 @@ import {
     ChattingIcon,
 } from '../icons/icons';
 import { toolExpandedAtom, toggleToolExpandedAtom, setToolExpandedAtom } from '../../atoms/messageUIState';
+import { parseLibraryRef, resolveLibraryRef } from '../../../src/utils/libraryIdentity';
 
 type IconComponent = React.FC<React.SVGProps<SVGSVGElement>>;
 
@@ -243,9 +244,15 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
             if (needs.scope) {
                 const args = parseArgs(part);
                 const libParam = args.library as string | number | undefined;
+                // A portable library_ref ("u"/"g<groupID>") resolves directly to a local
+                // libraryID for collection scoping; a plain numeric-ID string still parses
+                // with parseInt. Library name resolution below passes libParam through raw.
+                const refParsed = typeof libParam === 'string' ? parseLibraryRef(libParam) : null;
                 const libId = typeof libParam === 'number'
                     ? libParam
-                    : (typeof libParam === 'string' ? parseInt(libParam, 10) : undefined);
+                    : refParsed
+                        ? resolveLibraryRef({ library_ref: libParam }) ?? undefined
+                        : (typeof libParam === 'string' ? parseInt(libParam, 10) : undefined);
                 const collParam = (args.collection_key ?? args.collection ?? args.parent_collection) as string | undefined;
                 if (collParam && itemData.resolveCollectionName) {
                     const name = await itemData.resolveCollectionName(collParam, Number.isNaN(libId as number) ? undefined : libId);

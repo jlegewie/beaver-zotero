@@ -265,7 +265,7 @@ function getDisplayRef(citation: Citation): CitationRef | null {
  * - Key includes loc/page for unique identification of citation instances
  *
  * Key format:
- * - Zotero citations: "zotero:{library_id}-{zotero_key}" or with location: "zotero:1-ABC:sid=s0-s8"
+ * - Zotero citations: "zotero:{library_ref|library_id}-{zotero_key}" or with location
  * - Structured-document locators use the raw token, e.g. "zotero:1-ABC:heading3"
  * - External citations: "external:{external_source_id}" or with location
  * - External files: "extfile:{ext_key}" or with location

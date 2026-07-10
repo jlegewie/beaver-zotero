@@ -69,7 +69,7 @@ export function getReferenceFromItem(item: Zotero.Item): string {
 */
 export function getZoteroItem(source: SourceAttachment | ZoteroItemReference): Zotero.Item | null {
     try {
-        if (!source.library_id || !source.zotero_key) return null;
+        if (!source.zotero_key) return null;
         const libId = resolveLibraryRef(source);
         if (!libId) return null;
         const itemKeyValue = source.zotero_key;
@@ -261,7 +261,7 @@ export async function isValidZoteroItem(item: Zotero.Item): Promise<{valid: bool
  * @param collectionKey - Optional collection key to navigate to before revealing
  */
 export function revealSource(source: ZoteroItemReference | SourceAttachment, collectionKey?: string) {
-    if (!source.library_id || !source.zotero_key) return;
+    if (!source.zotero_key) return;
     const libraryID = resolveLibraryRef(source);
     if (!libraryID) {
         logger(`revealSource: library unavailable (${source.library_ref || source.library_id}, ${source.zotero_key})`);

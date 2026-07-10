@@ -4,8 +4,7 @@ import { getLibraryByIdOrName, getCollectionByIdOrName } from '../../../src/serv
 import type { CitationRef } from '../../utils/citationGrammar';
 import type { ZoteroItemReference } from '../../types/zotero';
 import { logger } from '../../../src/utils/logger';
-import { UNRESOLVED_LIBRARY_ID, resolveLibraryRef } from '../../../src/utils/libraryIdentity';
-import { isLibrarySearchable } from '../../../src/services/agentDataProvider/utils';
+import { resolveLibraryRef } from '../../../src/utils/libraryIdentity';
 import type { ItemDataHost, ResolvedItemDisplay } from '../types';
 
 /**
@@ -27,7 +26,10 @@ async function resolveDisplayName(item: Zotero.Item): Promise<string | undefined
         const title = item.getNoteTitle?.();
         return title || undefined;
     }
-    const target = item.isAttachment() ? (item.parentItem || item) : item;
+    let target = item;
+    if (item.isAttachment() && item.parentItemID) {
+        target = await Zotero.Items.getAsync(item.parentItemID) || item;
+    }
     await Zotero.Items.loadDataTypes([target], ['itemData', 'creators']).catch(() => {});
     const firstCreator = target.firstCreator || 'Unknown';
     const year = target.getField('date')?.match(/\d{4}/)?.[0] || '';
@@ -61,11 +63,13 @@ export const zoteroItemData: ItemDataHost = {
         // A group citation carries a device-local library_id of
         // UNRESOLVED_LIBRARY_ID — its identity is the portable library_ref.
         // Resolve to this device's local library id (null when the library
-        // isn't on this device) so group citations still get page labels, and
-        // enforce the excluded-library boundary (the exclusion set is global
-        // config, so this holds under the isolated note-export store too).
-        const libraryId = resolveLibraryRef({ library_ref: ref.library_ref, library_id: ref.library_id });
-        if (!libraryId || !isLibrarySearchable(libraryId)) return null;
+        // isn't on this device) so group citations still get page labels.
+        // No exclusion gate here: rendering persisted history is not gated on
+        // library exclusion, and as a render-time host method this must not
+        // read the module-global store (resolveLibraryRef only touches Zotero
+        // globals, so it is safe under the isolated note-export store).
+        const libraryId = resolveLibraryRef(ref);
+        if (!libraryId) return null;
         try {
             const item = Zotero.Items.getByLibraryAndKey(libraryId, ref.zotero_key);
             if (!item || typeof item === 'boolean') return null;
@@ -80,12 +84,16 @@ export const zoteroItemData: ItemDataHost = {
     },
 
     async resolveItemDisplay(ref: ZoteroItemReference): Promise<ResolvedItemDisplay | null> {
-        if (ref.library_id === UNRESOLVED_LIBRARY_ID) return null;
+        const libraryId = resolveLibraryRef(ref);
+        if (!libraryId) return null;
         try {
-            const item = Zotero.Items.getByLibraryAndKey(ref.library_id, ref.zotero_key);
+            const item = await Zotero.Items.getByLibraryAndKeyAsync(libraryId, ref.zotero_key);
             if (!item || typeof item === 'boolean') return null;
             let hasReadableAttachment = false;
             if (item.isRegularItem()) {
+                // getBestAttachment() may inspect the parent item's URL via
+                // getField(), so itemData must be loaded as well as childItems.
+                await Zotero.Items.loadDataTypes([item], ['itemData', 'childItems']);
                 hasReadableAttachment = !!(await item.getBestAttachment());
             } else if (item.isAttachment()) {
                 hasReadableAttachment = true;

@@ -29,6 +29,14 @@ vi.mock('../../../src/services/supabaseClient', () => ({
     },
 }));
 
+// noteCitationExpand gates citation targets on the library-exclusion check,
+// which reads the Jotai store; stub it so unit tests treat every library as
+// searchable.
+vi.mock('../../../src/services/agentDataProvider/utils', () => ({
+    getAttachmentFileStatus: vi.fn().mockResolvedValue(undefined),
+    checkLibraryExcluded: vi.fn(() => null),
+}));
+
 import {
     simplifyNoteHtml,
     normalizeNoteHtml,
@@ -618,7 +626,7 @@ describe('expandToRawHtml', () => {
         const { metadata } = makeMetadata();
         // Sentence locator s4 was pre-resolved to page "9".
         const input = '<citation id="1-EX1" loc="s4" label="(Author, 2024)" ref="c_EX1_new"/>';
-        const resolvedLocatorPages = { 'zotero:1-EX1:s4': '9' };
+        const resolvedLocatorPages = { 'zotero:u-EX1:s4': '9' };
         expandToRawHtml(input, metadata, 'new', undefined, undefined, resolvedLocatorPages);
         expect(createCitationHTML).toHaveBeenCalledWith(
             expect.objectContaining({ key: 'EX1' }),
@@ -643,7 +651,7 @@ describe('expandToRawHtml', () => {
         // page is already a final label and must be stored verbatim.
         const input = '<citation id="1-EX1" loc="s4" label="(Author, 2024)" ref="c_EX1_new"/>';
         const pageLabels = { '1-EX1': { 8: 'ix' } };
-        const resolvedLocatorPages = { 'zotero:1-EX1:s4': '9' };
+        const resolvedLocatorPages = { 'zotero:u-EX1:s4': '9' };
         expandToRawHtml(input, metadata, 'new', undefined, pageLabels as any, resolvedLocatorPages);
         expect(createCitationHTML).toHaveBeenCalledWith(
             expect.objectContaining({ key: 'EX1' }),
@@ -655,7 +663,7 @@ describe('expandToRawHtml', () => {
         const { metadata } = makeMetadata();
         // c_EX1_1 originally has page="10"; change its locator to sentence s4.
         const input = '<citation id="1-EX1" loc="s4" label="(Author, 2024, p. 10)" ref="c_EX1_1"/>';
-        const resolvedLocatorPages = { 'zotero:1-EX1:s4': '3' };
+        const resolvedLocatorPages = { 'zotero:u-EX1:s4': '3' };
         expandToRawHtml(input, metadata, 'new', undefined, undefined, resolvedLocatorPages);
         expect(createCitationHTML).toHaveBeenCalledWith(
             expect.objectContaining({ key: 'EX1' }),
@@ -666,7 +674,7 @@ describe('expandToRawHtml', () => {
     it('substitutes a resolved page for a legacy att_id structural locator', () => {
         const { metadata } = makeMetadata();
         const input = '<citation att_id="1-ATT1" loc="s4" label="(Author, 2024)"/>';
-        const resolvedLocatorPages = { 'zotero:1-ATT1:s4': '9' };
+        const resolvedLocatorPages = { 'zotero:u-ATT1:s4': '9' };
         expandToRawHtml(input, metadata, 'new', undefined, undefined, resolvedLocatorPages);
         expect(createCitationHTML).toHaveBeenCalledWith(
             expect.objectContaining({ key: 'ATT1' }),
@@ -678,7 +686,7 @@ describe('expandToRawHtml', () => {
         const { metadata } = makeMetadata();
         // The `sid` attribute is the legacy alias for a structural locator.
         const input = '<citation att_id="1-ATT1" sid="s4" label="(Author, 2024)"/>';
-        const resolvedLocatorPages = { 'zotero:1-ATT1:s4': '9' };
+        const resolvedLocatorPages = { 'zotero:u-ATT1:s4': '9' };
         expandToRawHtml(input, metadata, 'new', undefined, undefined, resolvedLocatorPages);
         expect(createCitationHTML).toHaveBeenCalledWith(
             expect.objectContaining({ key: 'ATT1' }),
@@ -882,6 +890,21 @@ describe('expandToRawHtml', () => {
         const metadata: SimplificationMetadata = { elements: new Map() };
         const input = '<citation att_id="1-MISSING" label="Missing"/>';
         expect(() => expandToRawHtml(input, metadata, 'new')).toThrow(/Attachment not found/);
+    });
+
+    it('throws for a new citation into an excluded library without a Zotero lookup', async () => {
+        const { checkLibraryExcluded } = await import('../../../src/services/agentDataProvider/utils');
+        vi.mocked(checkLibraryExcluded).mockReturnValueOnce({
+            message: 'The library "Private" is excluded from Beaver, so Beaver cannot read or modify its items.',
+        });
+        const lookup = vi.fn(() => null);
+        (globalThis as any).Zotero.Items.getByLibraryAndKey = lookup;
+        const metadata: SimplificationMetadata = { elements: new Map() };
+        const input = '<citation item_id="1-ABCD1234" label="Private item"/>';
+        // The gate must fire before the item lookup so no metadata of the
+        // excluded library's item is read or embedded.
+        expect(() => expandToRawHtml(input, metadata, 'new')).toThrow(/excluded from Beaver/);
+        expect(lookup).not.toHaveBeenCalled();
     });
 
     // ---- external_id citations ----

@@ -36,6 +36,7 @@ vi.mock('../../../src/services/agentDataProvider/imageProcessing', async () => {
 });
 
 import { handleZoteroAttachmentImageRequest } from '../../../src/services/agentDataProvider/handleZoteroAttachmentImageRequest';
+import { validateZoteroItemReference as validateReferenceShape } from '../../../src/services/documentExtraction/referenceValidation';
 import {
     resolveToImageAttachment,
     validateZoteroItemReference,
@@ -159,6 +160,27 @@ describe('handleZoteroAttachmentImageRequest', () => {
             resized: true,
             converted: false,
         });
+    });
+
+    it('resolves a portable group ref when the backend has no local library id', async () => {
+        setupZoteroEnv();
+        vi.mocked(validateZoteroItemReference).mockImplementation(validateReferenceShape);
+        (globalThis as any).Zotero.Groups = {
+            getLibraryIDFromGroupID: vi.fn(() => 42),
+            getGroupIDFromLibraryID: vi.fn(() => false),
+        };
+        (globalThis as any).Zotero.Utilities.isValidObjectKey = vi.fn(() => true);
+
+        const response = await handleZoteroAttachmentImageRequest(baseRequest({
+            attachment: {
+                library_id: 0,
+                library_ref: 'g123',
+                zotero_key: 'PARENT01',
+            },
+        }) as any);
+
+        expect(response.error).toBeUndefined();
+        expect(Zotero.Items.getByLibraryAndKeyAsync).toHaveBeenCalledWith(42, 'PARENT01');
     });
 
     it('wires the timeout checker into the processing checkpoint', async () => {

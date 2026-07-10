@@ -19,7 +19,7 @@ import {
     WSAgentActionExecuteResponse,
 } from '../../agentProtocol';
 import { checkLibraryExcluded, getDeferredToolPreference, validateLibraryAccess } from '../utils';
-import { libraryRefForLibraryID, resolveWriteTargetLibrary, writeTargetLibraryError } from '../../../utils/libraryIdentity';
+import { libraryRefForLibraryID, modelObjectId, resolveWriteTargetLibrary, writeTargetLibraryError } from '../../../utils/libraryIdentity';
 import { TimeoutContext, checkAborted, TimeoutError } from '../timeout';
 import { logger } from '../../../utils/logger';
 
@@ -30,7 +30,7 @@ const MAX_SNAPSHOT_ITEMS = 5000;
 
 
 /**
- * Convert a list of Zotero numeric item IDs to "<libraryID>-<key>" strings.
+ * Convert Zotero numeric item IDs to device-portable model-facing IDs.
  */
 async function itemIdsToKeys(libraryID: number, itemIDs: number[]): Promise<string[]> {
     if (itemIDs.length === 0) return [];
@@ -39,7 +39,7 @@ async function itemIdsToKeys(libraryID: number, itemIDs: number[]): Promise<stri
     if (valid.length > 0) {
         await Zotero.Items.loadDataTypes(valid, ['primaryData']);
     }
-    return valid.map((item) => `${libraryID}-${item.key}`);
+    return valid.map((item) => modelObjectId(libraryID, item.key));
 }
 
 

@@ -399,6 +399,12 @@ export function getZoteroUserIdentifier(): ZoteroInstanceIdentity {
  * This is NOT an agent-facing / model-facing identifier — it is a wire value
  * scoped to the search index alone.
  *
+ * NOT the same as the agent-facing `library_ref` (`"u"` | `"g<groupID>"`, see
+ * `libraryIdentity.ts`): index rows live in a namespace where two physically
+ * distinct personal libraries must not collide, so the personal ref is scoped by
+ * account/device. Output of this function will NOT satisfy `LIBRARY_REF_PATTERN`
+ * and must never be passed to `parseLibraryRef` / `resolveLibraryRef`.
+ *
  * Returns null for feed libraries (never indexed) or an unknown libraryID. The
  * local `libraryID` (sequential per Zotero DB) is deliberately NEVER used on the
  * wire — it is not portable across installs.

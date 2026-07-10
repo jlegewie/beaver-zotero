@@ -9,7 +9,7 @@ import { ModelMessage } from '../agents/types';
 import { ZoteroItemReference } from '../types/zotero';
 import { activeRunAtom } from '../agents/atoms';
 import { loadFullItemDataWithAllTypes, isLibraryEditable } from '../../src/utils/zoteroUtils';
-import { getLibraryByIdOrName, getCollectionByIdOrName } from '../../src/services/agentDataProvider/utils';
+import { getLibraryByIdOrName, getCollectionByIdOrName, isLibrarySearchable } from '../../src/services/agentDataProvider/utils';
 import { getPref } from '../../src/utils/prefs';
 import { store } from '../store';
 import { currentReaderAttachmentKeyAtom } from '../atoms/messageComposition';
@@ -20,7 +20,7 @@ import { saveStreamingNote } from './noteActions';
 import { currentThreadIdAtom } from '../atoms/threads';
 import { logger } from '../../src/utils/logger';
 import { parseZoteroId } from './citationGrammar';
-import { libraryRefForLibraryID, resolveItemReference } from '../../src/utils/libraryIdentity';
+import { libraryRefForLibraryID, resolveItemReference, resolveWriteTargetLibrary } from '../../src/utils/libraryIdentity';
 
 /**
  * Extract all Zotero item references from agent actions that need to be loaded.
@@ -371,7 +371,7 @@ export async function autoCreateNoteAgentActions(
         let parentReference: ZoteroItemReference | undefined;
         let targetLibraryId: number | undefined;
 
-        if (proposed.library_id != null && proposed.zotero_key) {
+        if ((proposed.library_id != null || proposed.library_ref) && proposed.zotero_key) {
             const resolved = await resolveItemReference({
                 library_id: proposed.library_id,
                 library_ref: proposed.library_ref,
@@ -389,20 +389,39 @@ export async function autoCreateNoteAgentActions(
             }
         }
 
-        // If no target library from item_id, try resolving from library attribute
-        if (!targetLibraryId && proposed.library) {
-            const libraryResult = getLibraryByIdOrName(proposed.library);
-            if (libraryResult.library) {
-                targetLibraryId = libraryResult.library.libraryID;
+        // Resolve a standalone-note target library, but only when no parent
+        // item was requested: a proposed zotero_key whose resolution failed
+        // must not silently become an unattached note — the action stays
+        // pending for the normal approval flow instead.
+        if (!targetLibraryId && !proposed.zotero_key) {
+            if (proposed.library_ref || proposed.library_id != null) {
+                // Structured fields: a portable library_ref is authoritative and
+                // never falls back to the name field when it doesn't resolve here.
+                const libraryResolution = resolveWriteTargetLibrary({
+                    library_ref: proposed.library_ref,
+                    library_id: proposed.library_id,
+                });
+                if (libraryResolution.ok) {
+                    targetLibraryId = libraryResolution.libraryID;
+                }
+            } else if (proposed.library) {
+                // `library` is a name-or-ID string; getLibraryByIdOrName also
+                // parses numeric-ID strings and portable refs.
+                const libraryResult = getLibraryByIdOrName(proposed.library);
+                if (libraryResult.library) {
+                    targetLibraryId = libraryResult.library.libraryID;
+                }
+            } else {
+                // No target info at all: default to the user's library,
+                // mirroring the resolution used at note-creation time.
+                targetLibraryId = Zotero.Libraries.userLibraryID;
             }
         }
 
-        // Fallback to user's default library if no library specified but collection is
-        if (!targetLibraryId && proposed.collection) {
-            targetLibraryId = Zotero.Libraries.userLibraryID;
-        }
-
         if (!targetLibraryId) continue;
+        // Libraries excluded from Beaver are an access-control boundary: never
+        // auto-create a note in one, regardless of how the target was resolved.
+        if (!isLibrarySearchable(targetLibraryId)) continue;
         if (!isLibraryEditable(targetLibraryId)) continue;
 
         // Resolve collection if specified
@@ -413,9 +432,14 @@ export async function autoCreateNoteAgentActions(
                 collectionKey = collectionResult.collection.key;
                 // If collection is in a different library than targetLibraryId
                 // (e.g. library was not specified but collection was found elsewhere),
-                // update targetLibraryId to match
-                if (!proposed.library_id && !proposed.zotero_key && !proposed.library) {
-                    targetLibraryId = collectionResult.libraryID;
+                // update targetLibraryId to match — but never into an excluded or
+                // read-only library; such a collection is unusable here.
+                if (!proposed.library_ref && !proposed.library_id && !proposed.zotero_key && !proposed.library) {
+                    if (isLibrarySearchable(collectionResult.libraryID) && isLibraryEditable(collectionResult.libraryID)) {
+                        targetLibraryId = collectionResult.libraryID;
+                    } else {
+                        collectionKey = undefined;
+                    }
                 }
             } else {
                 logger(`autoCreateNoteAgentActions: Collection "${proposed.collection}" not found, creating note without collection`, 1);

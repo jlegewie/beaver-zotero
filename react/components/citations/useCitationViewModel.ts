@@ -87,7 +87,8 @@ export function readCitationProps(props: Record<string, unknown>): CitationProps
 
     if (libraryIDRaw && zoteroKey) {
         const libraryID = Number(libraryIDRaw);
-        if (Number.isInteger(libraryID) && libraryID > 0) {
+        const hasUsableLibraryIdentity = libraryID > 0 || (libraryID === 0 && !!libraryRef);
+        if (Number.isInteger(libraryID) && hasUsableLibraryIdentity) {
             const ref: CitationRef = {
                 kind: 'zotero',
                 library_id: libraryID,

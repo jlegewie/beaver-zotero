@@ -1,7 +1,18 @@
 import { logger } from '../../utils/logger';
-import { ZoteroItemStatus, FrontendFileStatus, AttachmentInfo } from '../../../react/types/zotero';
+import {
+    ZoteroItemStatus,
+    FrontendFileStatus,
+    AttachmentInfo,
+    type ZoteroItemReference,
+} from '../../../react/types/zotero';
 import { safeIsInTrash, safeFileExists, isLinkedUrlAttachment } from '../../utils/zoteroUtils';
-import { libraryRefForLibraryID, parseItemReference, resolveLibraryRef } from '../../utils/libraryIdentity';
+import {
+    libraryRefForLibraryID,
+    modelObjectIdFromReference,
+    parseItemReference,
+    parseLibraryRef,
+    resolveLibraryRef,
+} from '../../utils/libraryIdentity';
 import { syncingItemFilterAsync } from '../../utils/sync';
 import { getPref } from '../../utils/prefs';
 
@@ -26,6 +37,7 @@ export type { AttachmentInfoBatchData } from '../documentExtraction/attachmentIn
 import {
     loadPdfData as loadPdfDataPrimitive,
     isRemoteAccessAvailable,
+    validateZoteroItemReference as validateAttachmentReference,
 } from '../documentExtraction';
 export {
     isRemoteAccessAvailable,
@@ -430,7 +442,21 @@ export function getLibraryByIdOrName(libraryIdOrName: number | string | null | u
         };
     }
     
-    // It's a string - try to parse as ID first
+    // It's a string - a portable library_ref ("u" | "g<groupID>") is authoritative:
+    // resolve it directly and never fall through to numeric/name lookup, even when
+    // it doesn't resolve on this device (e.g. a group the user isn't a member of here).
+    const parsedRef = parseLibraryRef(libraryIdOrName);
+    if (parsedRef) {
+        const resolvedId = resolveLibraryRef({ library_ref: libraryIdOrName });
+        const lib = resolvedId != null ? Zotero.Libraries.get(resolvedId) : null;
+        return {
+            library: lib || null,
+            wasExplicitlyRequested: true,
+            searchInput: libraryIdOrName,
+        };
+    }
+
+    // Otherwise try to parse as a legacy numeric ID first
     const parsedId = parseInt(libraryIdOrName, 10);
     if (!isNaN(parsedId)) {
         const lib = Zotero.Libraries.get(parsedId);
@@ -633,6 +659,55 @@ export function isLibrarySearchable(libraryId: number): boolean {
 }
 
 /**
+ * Resolves a request-supplied `libraries_filter` array to the local, searchable
+ * library IDs it denotes. Each entry may be a numeric ID, a numeric ID string, a
+ * portable library_ref ("u" | "g<groupID>"), or a library name (case-insensitive
+ * substring match). A `library_ref` that doesn't resolve on this device (e.g. a
+ * group the user isn't a member of here) contributes nothing — it never falls
+ * back to name matching. The result is always intersected with the searchable
+ * libraries and deduplicated.
+ */
+export function resolveLibrariesFilterToSearchableIds(filters: Array<string | number>): number[] {
+    const searchableLibraryIds = getSearchableLibraryIds();
+    const resolvedIds = new Set<number>();
+
+    for (const filter of filters) {
+        if (typeof filter === 'number') {
+            if (searchableLibraryIds.includes(filter)) resolvedIds.add(filter);
+            continue;
+        }
+        // Request payloads are external JSON: skip anything that isn't a string
+        // or number rather than letting one malformed entry fail the search.
+        if (typeof filter !== 'string') continue;
+
+        const parsedRef = parseLibraryRef(filter);
+        if (parsedRef) {
+            const libraryID = resolveLibraryRef({ library_ref: filter });
+            if (libraryID != null && searchableLibraryIds.includes(libraryID)) {
+                resolvedIds.add(libraryID);
+            }
+            continue;
+        }
+
+        const numericId = parseInt(filter, 10);
+        if (!isNaN(numericId)) {
+            if (searchableLibraryIds.includes(numericId)) resolvedIds.add(numericId);
+            continue;
+        }
+
+        // Name lookup: case-insensitive substring match against searchable libraries
+        const needle = filter.toLowerCase();
+        for (const lib of Zotero.Libraries.getAll()) {
+            if (searchableLibraryIds.includes(lib.libraryID) && lib.name.toLowerCase().includes(needle)) {
+                resolvedIds.add(lib.libraryID);
+            }
+        }
+    }
+
+    return Array.from(resolvedIds);
+}
+
+/**
  * Model-facing message for a library the user has excluded from Beaver via the
  * excluded-libraries preference.
  */
@@ -661,6 +736,82 @@ export function checkLibraryExcluded(libraryId: number): { message: string } | n
     if (!Zotero.Libraries?.get?.(libraryId)) return null;
     if (isLibrarySearchable(libraryId)) return null;
     return { message: excludedLibraryMessage(libraryId) };
+}
+
+export type ZoteroAttachmentRequestPreflight =
+    | {
+        ok: true;
+        responseAttachment: ZoteroItemReference;
+        requestKey: string;
+        resolvedLibraryId: number;
+    }
+    | {
+        ok: false;
+        responseAttachment: ZoteroItemReference;
+        requestKey: string;
+        error: string;
+        errorCode: 'invalid_format' | 'library_unavailable' | 'library_excluded';
+    };
+
+/**
+ * Validate and authorize an attachment reference before any Zotero item lookup.
+ *
+ * This is the shared privacy boundary for attachment-serving handlers: it
+ * stamps the portable response reference, validates the request shape,
+ * resolves the device-local library id, and rejects excluded libraries.
+ */
+export function preflightZoteroAttachmentRequest(
+    attachment: ZoteroItemReference,
+    validateReference: (reference: ZoteroItemReference) => string | null = validateAttachmentReference,
+): ZoteroAttachmentRequestPreflight {
+    const responseAttachment = {
+        ...attachment,
+        library_ref:
+            attachment.library_ref ??
+            libraryRefForLibraryID(attachment.library_id) ??
+            undefined,
+    };
+    const requestKey = modelObjectIdFromReference(attachment);
+
+    const formatError = validateReference(attachment);
+    if (formatError) {
+        return {
+            ok: false,
+            responseAttachment,
+            requestKey,
+            error: `Invalid attachment reference '${requestKey}': ${formatError}`,
+            errorCode: 'invalid_format',
+        };
+    }
+
+    const resolvedLibraryId = resolveLibraryRef(attachment);
+    if (!resolvedLibraryId) {
+        return {
+            ok: false,
+            responseAttachment,
+            requestKey,
+            error: "Attachment is in a library that isn't available on this computer.",
+            errorCode: 'library_unavailable',
+        };
+    }
+
+    const excluded = checkLibraryExcluded(resolvedLibraryId);
+    if (excluded) {
+        return {
+            ok: false,
+            responseAttachment,
+            requestKey,
+            error: excluded.message,
+            errorCode: 'library_excluded',
+        };
+    }
+
+    return {
+        ok: true,
+        responseAttachment,
+        requestKey,
+        resolvedLibraryId,
+    };
 }
 
 /**

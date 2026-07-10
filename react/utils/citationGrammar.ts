@@ -293,7 +293,7 @@ export function normalizeCitationTag(rawAttrs: Record<string, string>): Normaliz
 }
 
 export function baseCitationKey(ref: CitationRef): string {
-    if (ref.kind === 'zotero') return `zotero:${ref.library_id}-${ref.zotero_key}`;
+    if (ref.kind === 'zotero') return `zotero:${ref.library_ref ?? ref.library_id}-${ref.zotero_key}`;
     if (ref.kind === 'external_file') return `extfile:${ref.ext_key}`;
     if (ref.kind === 'external') {
         return ref.source ? `external:${ref.source}:${ref.external_id}` : externalCompatKey(ref.external_id);

@@ -26,7 +26,8 @@ import {
 import { ButtonVariant } from '../../../components/ui/Button';
 import { CreateItemAgentAction } from '../../../agents/agentActions';
 import { ZoteroItemReference } from '../../../types/zotero';
-import { UNRESOLVED_LIBRARY_ID } from '../../../../src/utils/libraryIdentity';
+import { resolveSearchableLibraryId } from '../libraryAccess';
+import { searchableLibraryIdsAtom } from '../../../atoms/profile';
 
 const CITED_BY_URL = 'https://openalex.org/works?page=1&filter=cites:';
 
@@ -69,6 +70,7 @@ const AgentActionItemButtons: React.FC<AgentActionItemButtonsProps> = ({
     const checkReference = useSetAtom(checkExternalReferenceAtom);
     const getCachedReference = useAtomValue(getCachedReferenceForObjectAtom);
     const isChecking = useAtomValue(isCheckingReferenceObjectAtom);
+    const searchableLibraryIds = useAtomValue(searchableLibraryIdsAtom);
     
     // Local state for library item reference
     const [existingItemRef, setExistingItemRef] = useState<ZoteroItemReference | null>(null);
@@ -141,30 +143,40 @@ const AgentActionItemButtons: React.FC<AgentActionItemButtonsProps> = ({
 
     // Fetch best attachment when we have an item reference
     useEffect(() => {
+        let cancelled = false;
         const fetchAttachment = async () => {
-            // effectiveItemRef may come from persisted action result_data, whose
-            // library_id resolves to UNRESOLVED_LIBRARY_ID when the library isn't
-            // available on this device; the lookup below would throw on it.
-            if (!effectiveItemRef || effectiveItemRef.library_id === UNRESOLVED_LIBRARY_ID) {
+            if (!effectiveItemRef) {
+                setBestAttachment(null);
+                return;
+            }
+            const libraryId = resolveSearchableLibraryId(
+                effectiveItemRef,
+                searchableLibraryIds,
+            );
+            if (!libraryId) {
                 setBestAttachment(null);
                 return;
             }
 
             const zoteroItem = await Zotero.Items.getByLibraryAndKeyAsync(
-                effectiveItemRef.library_id,
+                libraryId,
                 effectiveItemRef.zotero_key
             );
             
             if (zoteroItem && zoteroItem.isRegularItem()) {
+                await Zotero.Items.loadDataTypes([zoteroItem], ['itemData', 'childItems']);
                 const attachment = await zoteroItem.getBestAttachment();
-                setBestAttachment(attachment || null);
+                if (!cancelled) setBestAttachment(attachment || null);
             } else {
-                setBestAttachment(null);
+                if (!cancelled) setBestAttachment(null);
             }
         };
         
-        fetchAttachment();
-    }, [effectiveItemRef]);
+        void fetchAttachment().catch(() => {
+            if (!cancelled) setBestAttachment(null);
+        });
+        return () => { cancelled = true; };
+    }, [effectiveItemRef, searchableLibraryIds]);
 
     const handleShowDetails = useCallback(() => {
         setSelectedReference(item);

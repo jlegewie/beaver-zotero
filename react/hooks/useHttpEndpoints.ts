@@ -1087,7 +1087,6 @@ function registerEndpoints(): boolean {
         // personal + group libraries.
         Zotero.Server.Endpoints['/beaver/test/library-identity'] =
             createEndpoint(handleTestLibraryIdentityHttpRequest);
-
         // Headless chat/run lifecycle (dev-only): trigger the real send/approval/
         // undo path over HTTP by writing the same Jotai action atoms the UI writes,
         // so an automated agent can drive full agent runs without poking the

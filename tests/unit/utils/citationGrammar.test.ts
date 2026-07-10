@@ -193,6 +193,23 @@ describe('portable Zotero ids (u-<KEY> / g<groupID>-<KEY>)', () => {
             ref: { kind: 'zotero', library_id: 7, library_ref: 'g42', zotero_key: 'ABCD1234', loc: { kind: 'page', value: '3', raw: 'page3' } },
         });
     });
+
+    it('keys portable references by stable library_ref instead of local library_id', () => {
+        const onFirstDevice = { kind: 'zotero' as const, library_id: 7, library_ref: 'g42', zotero_key: 'ABCD1234' };
+        const onSecondDevice = { ...onFirstDevice, library_id: 19 };
+        const unavailable = { ...onFirstDevice, library_id: 0 };
+        const differentUnavailableGroup = { ...unavailable, library_ref: 'g99' };
+
+        expect(baseCitationKey(onFirstDevice)).toBe('zotero:g42-ABCD1234');
+        expect(baseCitationKey(onSecondDevice)).toBe(baseCitationKey(onFirstDevice));
+        expect(baseCitationKey(unavailable)).toBe(baseCitationKey(onFirstDevice));
+        expect(baseCitationKey(differentUnavailableGroup)).not.toBe(baseCitationKey(unavailable));
+    });
+
+    it('keeps legacy numeric keys when no portable library_ref is available', () => {
+        expect(baseCitationKey({ kind: 'zotero', library_id: 7, zotero_key: 'ABCD1234' }))
+            .toBe('zotero:7-ABCD1234');
+    });
 });
 
 describe('external file citations (ext-<KEY>)', () => {

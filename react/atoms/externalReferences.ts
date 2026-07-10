@@ -4,7 +4,7 @@ import { ZoteroItemReference } from '../types/zotero';
 import { findExistingReference, FindReferenceData } from '../utils/findExistingReference';
 import { logger } from '../../src/utils/logger';
 import { loadFullItemDataWithAllTypes } from '../../src/utils/zoteroUtils';
-import { libraryRefForLibraryID, modelObjectIdFromReference, resolveItemReference } from '../../src/utils/libraryIdentity';
+import { libraryRefForLibraryID, modelObjectIdFromReference, resolveItemReference, resolveLibraryRef } from '../../src/utils/libraryIdentity';
 
 /**
  * Cache mapping external reference source IDs to ExternalReference objects
@@ -200,7 +200,7 @@ export const checkExternalReferencesAtom = atom(
                             const libraryItems = ref.library_items.map(element => modelObjectIdFromReference(element));
                             logger(`checkExternalReferences: Checking ${refId} backend data (${libraryItems.join(', ')})`, 1);
                             const isPersonal = (element: typeof ref.library_items[number]) =>
-                                element.library_ref === 'u' || element.library_id === 1;
+                                resolveLibraryRef(element) === Zotero.Libraries.userLibraryID;
                             const mainLibraryItems = ref.library_items.filter(isPersonal);
                             const itemsToTry = mainLibraryItems.length > 0
                                 ? [...mainLibraryItems, ...ref.library_items.filter(element => !isPersonal(element))]

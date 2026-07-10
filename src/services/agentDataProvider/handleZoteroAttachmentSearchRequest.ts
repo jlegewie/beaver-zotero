@@ -8,8 +8,6 @@
  */
 
 import { logger } from '../../utils/logger';
-import { libraryRefForLibraryID, modelObjectIdFromReference, resolveLibraryRef } from '../../utils/libraryIdentity';
-
 import { isAttachmentAvailableRemotely } from '../../utils/webAPI';  // kept for file_missing message check
 import {
     WSZoteroAttachmentSearchRequest,
@@ -21,7 +19,7 @@ import {
 import { BeaverExtractor, ExtractionError, ExtractionErrorCode, WorkerAbortError } from '../../beaver-extract';
 import { makeRemoteFilePath } from '../documentFileIdentity';
 import {
-    checkLibraryExcluded,
+    preflightZoteroAttachmentRequest,
     validateZoteroItemReference,
     loadPdfData,
     checkRemotePdfSize,
@@ -44,10 +42,8 @@ export async function handleZoteroAttachmentSearchRequest(
     request: WSZoteroAttachmentSearchRequest
 ): Promise<WSZoteroAttachmentSearchResponse> {
     const { attachment, query, max_hits_per_page, request_id, timeout_seconds } = request;
-    const responseAttachment = {
-        ...attachment,
-        library_ref: attachment.library_ref ?? libraryRefForLibraryID(attachment.library_id) ?? undefined,
-    };
+    const preflight = preflightZoteroAttachmentRequest(attachment, validateZoteroItemReference);
+    const { responseAttachment, requestKey: unique_key } = preflight;
 
     // Hoisted for catch-block metadata backfill
     let resolvedItem: Zotero.Item | null = null;
@@ -74,25 +70,10 @@ export async function handleZoteroAttachmentSearchRequest(
     });
 
     // 0. Validate attachment reference format
-    const unique_key = modelObjectIdFromReference(attachment);
-    const formatError = validateZoteroItemReference(attachment);
-    if (formatError) {
-        return errorResponse(
-            `Invalid attachment reference '${unique_key}': ${formatError}`,
-            'invalid_format'
-        );
+    if (!preflight.ok) {
+        return errorResponse(preflight.error, preflight.errorCode);
     }
-    const resolvedLibraryId = resolveLibraryRef(attachment);
-    if (!resolvedLibraryId) {
-        return errorResponse(
-            "Attachment is in a library that isn't available on this computer.",
-            'library_unavailable'
-        );
-    }
-    const excluded = checkLibraryExcluded(resolvedLibraryId);
-    if (excluded) {
-        return errorResponse(excluded.message, 'library_excluded');
-    }
+    const { resolvedLibraryId } = preflight;
 
     const timeout = createTimeoutController(timeout_seconds, DEFAULT_SEARCH_TIMEOUT_SECONDS);
     const { signal, timeoutSeconds, throwIfTimedOut, dispose } = timeout;

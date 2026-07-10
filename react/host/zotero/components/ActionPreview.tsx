@@ -13,7 +13,6 @@ import { ManageTagsPreview } from './ManageTagsPreview';
 import { ManageCollectionsPreview } from './ManageCollectionsPreview';
 import { CreateAnnotationsPreview } from './CreateAnnotationsPreview';
 import { resolveLibraryRef } from '../../../../src/utils/libraryIdentity';
-import { isLibrarySearchable } from '../../../../src/services/agentDataProvider/utils';
 import type { ActionStatus, PreviewData } from './agentActionViewHelpers';
 
 /**
@@ -65,14 +64,13 @@ export const ActionPreview: React.FC<{
         // item's device-local library_id is UNRESOLVED_LIBRARY_ID (0) — its
         // identity is the ref — so keying off library_id alone would skip the
         // lookup for an available group item. resolveLibraryRef returns the
-        // local id (or null when the library isn't on this device); we also
-        // enforce the excluded-library boundary and fall back to the
-        // agent-supplied label when the item isn't readable here.
+        // local id (or null when the library isn't on this device); fall back
+        // to the agent-supplied label when the item isn't available here.
         const libraryId = resolveLibraryRef({
             library_ref: previewData.actionData.library_ref,
             library_id: previewData.actionData.library_id,
         });
-        if (libraryId && isLibrarySearchable(libraryId) && zoteroKey) {
+        if (libraryId && zoteroKey) {
             const item = Zotero.Items.getByLibraryAndKey(libraryId, zoteroKey);
             if (item) itemTypeID = item.itemTypeID;
         }
@@ -102,6 +100,9 @@ export const ActionPreview: React.FC<{
             ?? previewData.currentValue?.library_id
             ?? previewData.actionData.library_id;
         const libraryId = typeof rawLibraryId === 'number' && rawLibraryId > 0 ? rawLibraryId : null;
+        const libraryRef = previewData.resultData?.library_ref
+            ?? previewData.currentValue?.library_ref
+            ?? previewData.actionData.library_ref;
 
         // Get library name and item count from current_value
         const libraryName = previewData.currentValue?.library_name;
@@ -111,6 +112,7 @@ export const ActionPreview: React.FC<{
             <CreateCollectionPreview
                 name={name}
                 libraryId={libraryId}
+                libraryRef={libraryRef}
                 libraryName={libraryName}
                 parentKey={parentKey}
                 itemCount={itemCount}
@@ -241,18 +243,15 @@ export const ActionPreview: React.FC<{
             ? (previewData.currentValue?.old_content || previewData.resultData?.undo_full_html)
             : undefined;
 
-        // Resolve the portable library_ref to a local id and enforce the
-        // excluded-library boundary before handing it to EditNotePreview, which
-        // fetches note HTML + page labels: an excluded group present locally
-        // must not be read from the preview. Pass undefined when unresolvable or
-        // excluded so the preview's own guard treats it as unavailable.
+        // Resolve the portable library_ref to a local id before handing it to
+        // EditNotePreview, which fetches note HTML + page labels. Pass
+        // undefined when unresolvable so the preview's own guard treats it as
+        // unavailable.
         const resolvedNoteLibraryId = resolveLibraryRef({
             library_ref: previewData.actionData.library_ref,
             library_id: previewData.actionData.library_id,
         });
-        const noteLibraryId = resolvedNoteLibraryId && isLibrarySearchable(resolvedNoteLibraryId)
-            ? resolvedNoteLibraryId
-            : undefined;
+        const noteLibraryId = resolvedNoteLibraryId ?? undefined;
 
         return (
             <EditNotePreview

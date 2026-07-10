@@ -9,8 +9,7 @@ import { resolveEpubAnnotationTarget } from '../../../../src/services/annotation
 import { BeaverTemporaryAnnotations } from '../../../utils/annotationUtils';
 import { logger } from '../../../../src/utils/logger';
 import { BEAVER_ANNOTATION_COLORS } from '../../../../src/constants/annotations';
-import { UNRESOLVED_LIBRARY_ID, resolveLibraryRef } from '../../../../src/utils/libraryIdentity';
-import { isLibrarySearchable } from '../../../../src/services/agentDataProvider/utils';
+import { resolveLibraryRef } from '../../../../src/utils/libraryIdentity';
 import { TagPill } from '../../../components/agentRuns/TagPill';
 import { AnnotationTooltip, getAnnotationTooltipIcon } from '../../../components/agentRuns/AnnotationTooltip';
 import type {
@@ -180,16 +179,14 @@ export const CreateAnnotationsPreview: React.FC<CreateAnnotationsPreviewProps> =
     // A group attachment's device-local library_id is UNRESOLVED_LIBRARY_ID (0) —
     // its identity is the portable library_ref. Resolve to this device's local
     // library id (null when the library isn't on this device) so the content-kind
-    // and navigation lookups below work for available group attachments. Enforce
-    // the excluded-library boundary after resolving: an excluded group that is
-    // present locally must not be read or opened in the reader from a preview.
-    const rawResolvedLibraryId = resolveLibraryRef({
+    // and navigation lookups below work for available group attachments. No
+    // exclusion gate: rendering and user-initiated navigation from persisted
+    // actions are not gated on library exclusion (writes are gated in the
+    // action's validate/execute paths).
+    const resolvedLibraryId = resolveLibraryRef({
         library_ref: resolvedRef?.library_ref,
         library_id: resolvedRef?.library_id,
     });
-    const resolvedLibraryId = rawResolvedLibraryId && isLibrarySearchable(rawResolvedLibraryId)
-        ? rawResolvedLibraryId
-        : null;
     const noun = kind === 'highlight' ? 'highlight' : 'note';
 
     // Resolve the attachment's content kind once
@@ -222,20 +219,19 @@ export const CreateAnnotationsPreview: React.FC<CreateAnnotationsPreviewProps> =
         try {
             await BeaverTemporaryAnnotations.cleanupAll();
 
-            // firstCreated.library_id comes from the action's result_data and
-            // may carry UNRESOLVED_LIBRARY_ID; fall through to the attachment
-            // navigation below when it can't be resolved on this device. Also
-            // enforce the excluded-library boundary — the library may have been
-            // excluded after the annotation was created — so we never open an
-            // annotation in the reader from a now-excluded library.
             const firstCreated = createdEntries[0];
+            const createdLibraryId = firstCreated
+                ? resolveLibraryRef({
+                    library_ref: firstCreated.library_ref,
+                    library_id: firstCreated.library_id,
+                })
+                : null;
             if (
                 firstCreated
-                && firstCreated.library_id !== UNRESOLVED_LIBRARY_ID
-                && isLibrarySearchable(firstCreated.library_id)
+                && createdLibraryId
             ) {
                 const annotationItem = await Zotero.Items.getByLibraryAndKeyAsync(
-                    firstCreated.library_id,
+                    createdLibraryId,
                     firstCreated.zotero_key,
                 );
                 if (annotationItem) {

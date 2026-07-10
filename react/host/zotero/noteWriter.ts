@@ -13,6 +13,7 @@ import {
 } from '../../utils/noteActions';
 import { currentThreadIdAtom } from '../../atoms/threads';
 import { store } from '../../store';
+import { libraryRefForLibraryID } from '../../../src/utils/libraryIdentity';
 
 function isInReader(): boolean {
     const win = Zotero.getMainWindow();
@@ -96,6 +97,7 @@ export const zoteroNoteWriter: NoteWriterHost = {
         return {
             library_id: newNote.libraryID,
             zotero_key: newNote.key,
+            library_ref: libraryRefForLibraryID(newNote.libraryID) ?? undefined,
             ...(newNote.parentKey ? { parent_key: newNote.parentKey } : {}),
         };
     },

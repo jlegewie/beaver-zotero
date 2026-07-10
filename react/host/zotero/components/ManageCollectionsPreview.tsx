@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { CSSIcon, Icon, ArrowRightIcon } from '../../../components/icons/icons';
 import type { ManageCollectionsResultData } from '../../../types/agentActions/base';
 import { shortenActionError } from './agentActionViewHelpers';
-import { UNRESOLVED_LIBRARY_ID } from '../../../../src/utils/libraryIdentity';
+import { resolveLibraryRef } from '../../../../src/utils/libraryIdentity';
 
 type ActionStatus = 'pending' | 'applied' | 'rejected' | 'undone' | 'error' | 'awaiting';
 
@@ -13,6 +13,7 @@ interface ManageCollectionsPreviewProps {
         new_name?: string | null;
         new_parent_key?: string | null;
         library_id?: number;
+        library_ref?: string;
     };
     currentValue?: {
         library_id?: number;
@@ -77,7 +78,10 @@ export const ManageCollectionsPreview: React.FC<ManageCollectionsPreviewProps> =
     const action: 'rename' | 'move' | 'delete' = actionData.action ?? 'rename';
     const newName = actionData.new_name ?? undefined;
     const newParentKey = actionData.new_parent_key ?? null;
-    const libraryId = currentValue?.library_id ?? actionData.library_id;
+    const libraryId = resolveLibraryRef({
+        library_ref: resultData?.library_ref ?? actionData.library_ref,
+        library_id: resultData?.library_id ?? currentValue?.library_id ?? actionData.library_id,
+    });
     const collectionKey = actionData.collection_key;
 
     const isApplied = status === 'applied';
@@ -93,10 +97,7 @@ export const ManageCollectionsPreview: React.FC<ManageCollectionsPreviewProps> =
     const [oldParentName, setOldParentName] = useState<string | null>(null);
 
     useEffect(() => {
-        // libraryId is agent-supplied and may carry UNRESOLVED_LIBRARY_ID when
-        // its library isn't available on this device; the lookups below would
-        // throw on it. `== null` alone doesn't catch that, since 0 is not null.
-        if (currentValue || typeof Zotero === 'undefined' || libraryId == null || libraryId === UNRESOLVED_LIBRARY_ID || !collectionKey) return;
+        if (currentValue || typeof Zotero === 'undefined' || libraryId == null || !collectionKey) return;
         let cancelled = false;
         (async () => {
             try {
@@ -135,7 +136,7 @@ export const ManageCollectionsPreview: React.FC<ManageCollectionsPreviewProps> =
         ?? 0;
 
     useEffect(() => {
-        if (typeof Zotero === 'undefined' || libraryId == null || libraryId === UNRESOLVED_LIBRARY_ID) return;
+        if (typeof Zotero === 'undefined' || libraryId == null) return;
         const resolve = async (key: string | null, setter: (s: string | null) => void) => {
             if (!key) { setter(null); return; }
             try {

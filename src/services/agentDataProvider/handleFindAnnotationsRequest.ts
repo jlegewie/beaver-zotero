@@ -20,6 +20,7 @@ import {
     WSFindAnnotationsResponse,
 } from '../agentProtocol';
 import {
+    excludedLibraryMessage,
     getCollectionByIdOrName,
     getSearchableLibraries,
     isLibrarySearchable,
@@ -607,9 +608,11 @@ export async function handleFindAnnotationsRequest(
             if (result.libraryID !== library.libraryID) {
                 const resolvedLib = Zotero.Libraries.get(result.libraryID);
                 if (!resolvedLib || !isLibrarySearchable(result.libraryID)) {
+                    // Do not echo the collection's name: it is content from a
+                    // library the user excluded from Beaver.
                     return invalidResponse(
                         request,
-                        `Collection "${result.collection.name}" is in a library that is not synced with Beaver.`,
+                        excludedLibraryMessage(result.libraryID),
                         'library_not_searchable',
                         getSearchableLibraries(),
                     );
