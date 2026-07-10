@@ -91,7 +91,9 @@ export const zoteroItemData: ItemDataHost = {
             if (!item || typeof item === 'boolean') return null;
             let hasReadableAttachment = false;
             if (item.isRegularItem()) {
-                await Zotero.Items.loadDataTypes([item], ['childItems']);
+                // getBestAttachment() may inspect the parent item's URL via
+                // getField(), so itemData must be loaded as well as childItems.
+                await Zotero.Items.loadDataTypes([item], ['itemData', 'childItems']);
                 hasReadableAttachment = !!(await item.getBestAttachment());
             } else if (item.isAttachment()) {
                 hasReadableAttachment = true;

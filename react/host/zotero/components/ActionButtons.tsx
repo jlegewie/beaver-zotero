@@ -228,7 +228,7 @@ const ActionButtons: React.FC<ExternalReferenceActionsProps> = ({
                         cachedRef.zotero_key,
                     );
                     if (zoteroItem && zoteroItem.isRegularItem()) {
-                        await Zotero.Items.loadDataTypes([zoteroItem], ['childItems']);
+                        await Zotero.Items.loadDataTypes([zoteroItem], ['itemData', 'childItems']);
                         const attachment = await zoteroItem.getBestAttachment();
                         if (!cancelled) setBestAttachment(attachment || null);
                     } else if (!cancelled) {
@@ -270,7 +270,7 @@ const ActionButtons: React.FC<ExternalReferenceActionsProps> = ({
                     try {
                         const zoteroItem = Zotero.Items.getByLibraryAndKey(libraryId, result.zotero_key);
                         if (zoteroItem && zoteroItem.isRegularItem()) {
-                            await Zotero.Items.loadDataTypes([zoteroItem], ['childItems']);
+                            await Zotero.Items.loadDataTypes([zoteroItem], ['itemData', 'childItems']);
                             const attachment = await zoteroItem.getBestAttachment();
                             if (!cancelled) setBestAttachment(attachment || null);
                         } else if (!cancelled) {

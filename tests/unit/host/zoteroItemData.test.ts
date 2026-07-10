@@ -52,7 +52,7 @@ describe('zoteroItemData.resolveItemDisplay', () => {
         expect(getByLibraryAndKeyAsync).toHaveBeenCalledWith(7, 'ABCD1234');
         expect(loadDataTypes).toHaveBeenCalledWith(
             [expect.objectContaining({ itemType: 'journalArticle' })],
-            ['childItems'],
+            ['itemData', 'childItems'],
         );
         expect(display).toEqual({
             itemType: 'journalArticle',

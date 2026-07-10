@@ -164,7 +164,7 @@ const AgentActionItemButtons: React.FC<AgentActionItemButtonsProps> = ({
             );
             
             if (zoteroItem && zoteroItem.isRegularItem()) {
-                await Zotero.Items.loadDataTypes([zoteroItem], ['childItems']);
+                await Zotero.Items.loadDataTypes([zoteroItem], ['itemData', 'childItems']);
                 const attachment = await zoteroItem.getBestAttachment();
                 if (!cancelled) setBestAttachment(attachment || null);
             } else {
