@@ -16,6 +16,7 @@ import { processPartialContent } from '../../utils/markdownPartialContent';
 
 const citationDataAttributes = [
     'data-library-id', 'dataLibraryId',
+    'data-library-ref', 'dataLibraryRef',
     'data-zotero-key', 'dataZoteroKey',
     'data-external-id', 'dataExternalId',
     'data-external-source', 'dataExternalSource',
