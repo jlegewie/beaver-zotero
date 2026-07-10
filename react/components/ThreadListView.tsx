@@ -445,6 +445,7 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
             {/* Filter row */}
             <div className="thread-filter-row">
                 <ThreadFilterMenu
+                    disabled={isLoading}
                     activeFilter={filter}
                     onSelect={handleSelectFilterItem}
                     menuPortalContainer={menuPortalContainer}

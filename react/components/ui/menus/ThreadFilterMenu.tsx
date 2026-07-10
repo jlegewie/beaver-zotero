@@ -56,6 +56,7 @@ export interface ThreadFilterMenuProps {
     activeFilter: ThreadItemFilter | null;
     onSelect: (item: Zotero.Item) => void;
     menuPortalContainer?: HTMLElement | null;
+    disabled?: boolean;
 }
 
 /**
@@ -64,7 +65,7 @@ export interface ThreadFilterMenuProps {
  * current reader/note/library selection as the first row, followed by
  * recently used items; typing searches by title, creator, and year.
  */
-const ThreadFilterMenu: React.FC<ThreadFilterMenuProps> = ({ activeFilter, onSelect, menuPortalContainer }) => {
+const ThreadFilterMenu: React.FC<ThreadFilterMenuProps> = ({ activeFilter, onSelect, menuPortalContainer, disabled }) => {
     const [isMenuOpen, setIsMenuOpen] = useState(false);
     const [menuPosition, setMenuPosition] = useState<MenuPosition>({ x: 0, y: 0 });
     const [searchQuery, setSearchQuery] = useState('');
@@ -229,6 +230,7 @@ const ThreadFilterMenu: React.FC<ThreadFilterMenuProps> = ({ activeFilter, onSel
                     aria-label="Filter chats by Zotero item"
                     aria-haspopup="menu"
                     aria-expanded={isMenuOpen}
+                    disabled={disabled}
                 >
                     <Icon icon={FilterIcon} className="scale-12" />
                     <span>Filter</span>
