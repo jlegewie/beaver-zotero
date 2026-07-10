@@ -7,6 +7,10 @@ import type {
     NoteAttachment,
     SourceAttachment,
 } from '../../../react/types/attachments/apiTypes';
+import {
+    messageAttachmentKey,
+    zoteroReferenceKey,
+} from '../../../react/types/attachments/apiTypes';
 
 vi.mock('../../../src/utils/zoteroSerializers', () => ({
     safeStub: vi.fn((build: () => unknown) => {
@@ -36,6 +40,37 @@ import { enrichMessageAttachmentStub } from '../../../react/types/attachments/co
 import { serializeAttachmentStub, serializeItemStub } from '../../../src/utils/zoteroSerializers';
 
 type MockZoteroItem = Parameters<typeof enrichMessageAttachmentStub>[1];
+
+describe('attachment identity keys', () => {
+    it('prefers portable library_ref over the device-local library_id', () => {
+        expect(zoteroReferenceKey({
+            library_id: 5,
+            library_ref: 'g123',
+            zotero_key: 'SOURCE12',
+        })).toBe('g123-SOURCE12');
+        expect(zoteroReferenceKey({
+            library_id: 8,
+            library_ref: 'g123',
+            zotero_key: 'SOURCE12',
+        })).toBe('g123-SOURCE12');
+    });
+
+    it('falls back to the legacy local library_id and preserves external-file keys', () => {
+        expect(messageAttachmentKey({
+            type: 'item',
+            library_id: 5,
+            zotero_key: 'ITEM1234',
+        })).toBe('5-ITEM1234');
+        expect(messageAttachmentKey({
+            type: 'external_file',
+            ext_key: 'FILE1234',
+            filename: 'paper.pdf',
+            content_kind: 'pdf',
+            mime_type: 'application/pdf',
+            file_size: 123,
+        })).toBe('ext-FILE1234');
+    });
+});
 
 describe('enrichMessageAttachmentStub', () => {
     beforeEach(() => {

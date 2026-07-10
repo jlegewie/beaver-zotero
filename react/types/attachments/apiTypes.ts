@@ -191,16 +191,29 @@ export function isExternalFileAttachment(attachment: MessageAttachment): attachm
 }
 
 /**
+ * Stable identity key for a Zotero reference. Portable `library_ref` wins so
+ * references persisted on different devices deduplicate even when their local
+ * Zotero `library_id` values differ.
+ */
+export function zoteroReferenceKey(ref: {
+    library_id: number;
+    zotero_key: string;
+    library_ref?: string | null;
+}): string {
+    return `${ref.library_ref ?? ref.library_id}-${ref.zotero_key}`;
+}
+
+/**
  * Stable key for any message attachment: `ext-<KEY>` for external files,
- * `<library_id>-<zotero_key>` otherwise. Use this instead of reading
- * `library_id`/`zotero_key` off the union directly — external files have
- * neither.
+ * `<library_ref>-<zotero_key>` when portable identity is available, and the
+ * legacy `<library_id>-<zotero_key>` form otherwise. Use this instead of
+ * reading identity fields off the union directly — external files have none.
  */
 export function messageAttachmentKey(attachment: MessageAttachment): string {
     if (isExternalFileAttachment(attachment)) {
         return `ext-${attachment.ext_key}`;
     }
-    return `${attachment.library_id}-${attachment.zotero_key}`;
+    return zoteroReferenceKey(attachment);
 }
 
 /**

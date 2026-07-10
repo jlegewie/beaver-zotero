@@ -54,7 +54,7 @@ import {
 } from './messageComposition';
 import { isWebSearchEnabledAtom, removePopupMessagesByTypeAtom, isWebSearchAllowedAtom } from './ui';
 import { currentNoteItemAtom } from './zoteroContext';
-import { isAnnotationAttachment, messageAttachmentKey } from '../types/attachments/apiTypes';
+import { isAnnotationAttachment, messageAttachmentKey, zoteroReferenceKey } from '../types/attachments/apiTypes';
 import type { ExternalFileAttachment } from '../types/attachments/apiTypes';
 import { getApplicationStateProvider } from './applicationState';
 import { uint8ArrayToBase64 } from '../utils/fileUtils';
@@ -989,7 +989,9 @@ async function prevalidateExtractionApproval(
             const ref = createZoteroItemReference(attachmentId);
             if (!ref) continue;
 
-            const item = await Zotero.Items.getByLibraryAndKeyAsync(ref.library_id, ref.zotero_key);
+            const resolved = await resolveItemReference(ref);
+            if (resolved.status !== 'found') continue;
+            const item = resolved.item;
             if (item && item.isAttachment()) {
                 existingCount++;
             } else if (item && item.isRegularItem()) {
@@ -1800,7 +1802,11 @@ export const sendWSMessageAtom = atom(
                 ...allUserAttachmentKeys
             ]);
             logger(`sendWSMessageAtom: Handeling reader attachment - existingKeys: ${JSON.stringify(existingKeys)}`, 1);
-            const readerKey = `${readerAttachment.libraryID}-${readerAttachment.key}`;
+            const readerKey = zoteroReferenceKey({
+                library_id: readerAttachment.libraryID,
+                zotero_key: readerAttachment.key,
+                library_ref: libraryRefForLibraryID(readerAttachment.libraryID),
+            });
             if (!existingKeys.has(readerKey)) {
                 logger(`sendWSMessageAtom: Handeling reader attachment - Adding reader attachment: ${readerKey}`, 1);
                 await Zotero.Items.loadDataTypes([readerAttachment], ['itemData']);
@@ -1830,7 +1836,11 @@ export const sendWSMessageAtom = atom(
                 ...attachments.map(messageAttachmentKey),
                 ...allUserAttachmentKeys
             ]);
-            const noteKey = `${currentNoteTabItem.libraryID}-${currentNoteTabItem.key}`;
+            const noteKey = zoteroReferenceKey({
+                library_id: currentNoteTabItem.libraryID,
+                zotero_key: currentNoteTabItem.key,
+                library_ref: libraryRefForLibraryID(currentNoteTabItem.libraryID),
+            });
             if (!existingKeys.has(noteKey)) {
                 const noteAttachment = toMessageAttachment(currentNoteTabItem);
                 if (noteAttachment) {

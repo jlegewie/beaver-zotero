@@ -11,11 +11,12 @@ import { toReadabilityInfo, summarizeRegularItemReadability } from '../utils/att
 import { InvalidItemsMessageContent } from '../components/ui/popup/InvalidItemsMessageContent';
 import { agentItemFilter } from "../../src/utils/agentItemSupport";
 import { getCurrentReader } from "../utils/readerUtils";
-import { TextSelection } from "../types/attachments/apiTypes";
+import { TextSelection, zoteroReferenceKey } from "../types/attachments/apiTypes";
 import { ZoteroTag, CollectionReference } from "../types/zotero";
 import type { ExternalFileRecord } from "../../src/services/database";
 import { currentNoteItemAtom } from "./zoteroContext";
 import type { SlashCommandDescriptor } from "../utils/slashCommands";
+import { libraryRefForLibraryID } from "../../src/utils/libraryIdentity";
 
 
 /**
@@ -540,7 +541,11 @@ export const updateMessageItemsFromZoteroSelectionAtom = atom(
 
         // Filter out items already in the thread
         const existingKeys = get(allUserAttachmentKeysAtom);
-        const newItems = itemsFiltered.filter((item) => !existingKeys.has(`${item.libraryID}-${item.key}`));
+        const newItems = itemsFiltered.filter((item) => !existingKeys.has(zoteroReferenceKey({
+            library_id: item.libraryID,
+            zotero_key: item.key,
+            library_ref: libraryRefForLibraryID(item.libraryID),
+        })));
         
         if (!limit || newItems.length <= limit) {
             await set(addItemsToCurrentMessageItemsAtom, newItems.slice(0, limit));
