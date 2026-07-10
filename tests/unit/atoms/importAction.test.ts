@@ -53,15 +53,19 @@ vi.mock('../../../react/types/attachments/converters', () => ({
 
 // The write path calls into actionStorage; capture the persisted customizations.
 // `vi.hoisted` so the spy exists before the hoisted vi.mock factory runs.
-const { saveActionCustomizationsMock } = vi.hoisted(() => ({ saveActionCustomizationsMock: vi.fn() }));
+const { saveActionCustomizationsMock, getActionCustomizationsMock } = vi.hoisted(() => ({
+    saveActionCustomizationsMock: vi.fn(),
+    getActionCustomizationsMock: vi.fn(() => ({ version: 1, overrides: {}, custom: [] })),
+}));
 vi.mock('../../../react/types/actionStorage', () => ({
     // Return [] so saveActionsAtom's post-write refresh doesn't clobber the
     // seeded actions before we read importActionAtom's return value.
     getMergedActions: vi.fn(() => []),
-    getActionCustomizations: vi.fn(() => ({ version: 1, overrides: {}, custom: [] })),
+    getActionCustomizations: getActionCustomizationsMock,
     saveActionCustomizations: saveActionCustomizationsMock,
     saveActionLastUsed: vi.fn(),
     isBuiltinAction: vi.fn((id: string) => id.startsWith('builtin-')),
+    isLockedBuiltinAction: vi.fn((id: string) => id === 'builtin-color-code'),
 }));
 
 vi.mock('../../../react/atoms/profile', async () => {
@@ -73,8 +77,9 @@ vi.mock('../../../react/atoms/profile', async () => {
 // Imports (after mocks)
 // =============================================================================
 
-import { actionsAtom, importActionAtom } from '../../../react/atoms/actions';
+import { actionsAtom, hideActionAtom, importActionAtom, resetActionToDefaultAtom, restoreActionAtom, saveActionsAtom } from '../../../react/atoms/actions';
 import { getActionCommand } from '../../../react/utils/slashCommands';
+import { BUILTIN_ACTIONS } from '../../../react/types/builtinActions';
 import type { Action } from '../../../react/types/actions';
 
 const existing: Action = {
@@ -93,6 +98,35 @@ function makeStore(actions: Action[] = [existing]) {
 
 beforeEach(() => {
     vi.clearAllMocks();
+    getActionCustomizationsMock.mockReturnValue({ version: 1, overrides: {}, custom: [] });
+});
+
+describe('locked action mutation guards', () => {
+    const lockedBuiltin = BUILTIN_ACTIONS.find(a => a.id === 'builtin-color-code')!;
+
+    it('does not persist mutations or historical hidden overrides for a locked built-in', () => {
+        getActionCustomizationsMock.mockReturnValue({
+            version: 1,
+            overrides: { [lockedBuiltin.id]: { hidden: true, title: 'Old title' } },
+            custom: [],
+        });
+        const store = makeStore([{ ...lockedBuiltin, title: 'Mutated title' }]);
+
+        store.set(saveActionsAtom, [{ ...lockedBuiltin, title: 'Mutated title' }]);
+
+        const saved = saveActionCustomizationsMock.mock.calls[0][0];
+        expect(saved.overrides[lockedBuiltin.id]).toBeUndefined();
+    });
+
+    it('refuses direct hide, restore, and reset mutations for a locked built-in', () => {
+        const store = makeStore([lockedBuiltin]);
+
+        store.set(hideActionAtom, lockedBuiltin.id);
+        store.set(restoreActionAtom, lockedBuiltin.id);
+        store.set(resetActionToDefaultAtom, lockedBuiltin.id);
+
+        expect(saveActionCustomizationsMock).not.toHaveBeenCalled();
+    });
 });
 
 describe('importActionAtom — conflict handling', () => {

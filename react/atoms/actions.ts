@@ -13,6 +13,7 @@ import {
     saveActionCustomizations,
     saveActionLastUsed,
     isBuiltinAction,
+    isLockedBuiltinAction,
 } from '../types/actionStorage';
 import { zoteroContextAtom } from './zoteroContext';
 import { isActionVisible, ActionContext } from '../utils/actionVisibility';
@@ -55,6 +56,9 @@ export const saveActionsAtom = atom(
         for (const action of actions) {
             if (isBuiltinAction(action.id)) {
                 const base = builtinMap.get(action.id)!;
+                // Locked built-ins are entirely code-managed. Do not turn a
+                // mutated value from any caller into a persisted override.
+                if (base.locked) continue;
                 const override: ActionOverride = {};
                 let hasChange = false;
 
@@ -92,7 +96,7 @@ export const saveActionsAtom = atom(
 
         // Preserve overrides for hidden built-ins that aren't in the actions list
         for (const [id, override] of Object.entries(c.overrides)) {
-            if (override.hidden && !newOverrides[id]) {
+            if (override.hidden && !newOverrides[id] && !isLockedBuiltinAction(id)) {
                 newOverrides[id] = override;
             }
         }
@@ -178,6 +182,7 @@ export const importActionAtom = atom(
 export const hideActionAtom = atom(
     null,
     (_get, set, id: string) => {
+        if (isLockedBuiltinAction(id)) return;
         const c = getActionCustomizations();
         c.overrides[id] = { ...c.overrides[id], hidden: true };
         saveActionCustomizations(c);
@@ -192,6 +197,7 @@ export const hideActionAtom = atom(
 export const restoreActionAtom = atom(
     null,
     (_get, set, id: string) => {
+        if (isLockedBuiltinAction(id)) return;
         const c = getActionCustomizations();
         if (c.overrides[id]) {
             delete c.overrides[id].hidden;
@@ -212,6 +218,7 @@ export const restoreActionAtom = atom(
 export const resetActionToDefaultAtom = atom(
     null,
     (_get, set, id: string) => {
+        if (isLockedBuiltinAction(id)) return;
         const c = getActionCustomizations();
         delete c.overrides[id];
         saveActionCustomizations(c);

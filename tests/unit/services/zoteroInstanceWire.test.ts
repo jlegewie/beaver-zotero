@@ -1,12 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { mockGetInstanceLibraryRefs, mockGetZoteroUserIdentifier } = vi.hoisted(() => ({
-    mockGetInstanceLibraryRefs: vi.fn(),
+const { mockGetInstanceIndexScopeRefs, mockGetZoteroUserIdentifier } = vi.hoisted(() => ({
+    mockGetInstanceIndexScopeRefs: vi.fn(),
     mockGetZoteroUserIdentifier: vi.fn(),
 }));
 
 vi.mock('../../../src/utils/zoteroUtils', () => ({
-    getInstanceLibraryRefs: mockGetInstanceLibraryRefs,
+    getInstanceIndexScopeRefs: mockGetInstanceIndexScopeRefs,
     getZoteroUserIdentifier: mockGetZoteroUserIdentifier,
 }));
 
@@ -18,23 +18,23 @@ describe('buildZoteroInstanceWire', () => {
         mockGetZoteroUserIdentifier.mockReturnValue({
             localUserKey: 'local-user-key',
         });
-        mockGetInstanceLibraryRefs.mockReturnValue(['u123', 'g456']);
+        mockGetInstanceIndexScopeRefs.mockReturnValue(['l123', 'g456']);
     });
 
     it('includes the searchable library scope', () => {
         expect(buildZoteroInstanceWire([1, 2])).toEqual({
             local_user_key: 'local-user-key',
-            libraries: ['u123', 'g456'],
+            index_scope_refs: ['l123', 'g456'],
         });
-        expect(mockGetInstanceLibraryRefs).toHaveBeenCalledWith([1, 2]);
+        expect(mockGetInstanceIndexScopeRefs).toHaveBeenCalledWith([1, 2]);
     });
 
     it('preserves an explicitly empty searchable library scope', () => {
-        mockGetInstanceLibraryRefs.mockReturnValue([]);
+        mockGetInstanceIndexScopeRefs.mockReturnValue([]);
 
         expect(buildZoteroInstanceWire([])).toEqual({
             local_user_key: 'local-user-key',
-            libraries: [],
+            index_scope_refs: [],
         });
     });
 
@@ -51,7 +51,7 @@ describe('buildZoteroInstanceWire', () => {
             user_id: '42',
             account_name: 'Ada Lovelace',
             device_name: 'Research Mac',
-            libraries: ['u123', 'g456'],
+            index_scope_refs: ['l123', 'g456'],
         });
     });
 });

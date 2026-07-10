@@ -207,10 +207,11 @@ export const isStoredAction = (obj: unknown): boolean => {
 /** Normalize a stored action (either shape) to the current `targets` shape.
  *  Call only after `isStoredAction` has validated the value. */
 export const normalizeStoredAction = (raw: Record<string, unknown>): Action => {
-    const { targetType, minItems: _minItems, targets, ...rest } = raw as Record<string, unknown> & {
+    const { targetType, minItems: _minItems, targets, locked: _locked, ...rest } = raw as Record<string, unknown> & {
         targetType?: ActionTargetType;
         minItems?: number;
         targets?: ActionTargetType[];
+        locked?: unknown;
     };
     return {
         ...(rest as unknown as Omit<Action, 'targets'>),

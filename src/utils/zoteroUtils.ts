@@ -393,8 +393,11 @@ export function getZoteroUserIdentifier(): ZoteroInstanceIdentity {
  * Search-index scope ref — the compact spelling of Zotero's object-URI scheme
  * the backend search index keys rows on:
  *
- *   group    → `g${groupID}`                     (global, server-assigned group id)
- *   personal → synced ? `u${userID}` : `l${localUserKey}`
+ *   group    → `g${groupID}`      (global, server-assigned group id)
+ *   personal → `l${localUserKey}` (always — even when Zotero sync is on)
+ *
+ * This is NOT an agent-facing / model-facing identifier — it is a wire value
+ * scoped to the search index alone.
  *
  * NOT the same as the agent-facing `library_ref` (`"u"` | `"g<groupID>"`, see
  * `libraryIdentity.ts`): index rows live in a namespace where two physically
@@ -414,23 +417,23 @@ export function getIndexScopeRef(libraryID: number): string | null {
         return groupID ? `g${groupID}` : null;
     }
     if (library.libraryType === 'user') {
-        const { userID, localUserKey } = getZoteroUserIdentifier();
-        return userID ? `u${userID}` : `l${localUserKey}`;
+        const { localUserKey } = getZoteroUserIdentifier();
+        return `l${localUserKey}`;
     }
     // Feed (or any other) library type — not part of the indexable scope.
     return null;
 }
 
 /**
- * Searchable index scope of the running Zotero install: the personal library ref
- * plus one `g<groupID>` per group library that is not excluded in Beaver
- * Preferences. Sent in the auth handshake so the backend can scope search-index
- * queries over the shared per-user namespace to exactly the libraries this
- * install may search. Feed libraries are excluded, the list is de-duplicated,
- * and any failure is swallowed (returns []) so scope computation never blocks
- * auth.
+ * Searchable index scope of the running Zotero install: the personal library's
+ * index scope ref plus one `g<groupID>` per group library that is not excluded
+ * in Beaver Preferences. Sent in the auth handshake so the backend can scope
+ * search-index queries over the shared per-user namespace to exactly the
+ * libraries this install may search. Feed libraries are excluded, the list is
+ * de-duplicated, and any failure is swallowed (returns []) so scope computation
+ * never blocks auth.
  */
-export function getInstanceLibraryRefs(searchableLibraryIds: number[]): string[] {
+export function getInstanceIndexScopeRefs(searchableLibraryIds: number[]): string[] {
     try {
         const refs = new Set<string>();
         for (const libraryID of searchableLibraryIds) {
