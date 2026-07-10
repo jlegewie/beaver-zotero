@@ -235,7 +235,7 @@ export interface CitationKeyParams {
  * - Base identification of the cited item
  *
  * Key format:
- * - Zotero citations: "zotero:{library_id}-{zotero_key}"
+ * - Zotero citations: "zotero:{library_ref|library_id}-{zotero_key}"
  * - Structured external citations: "external:{source}:{external_id}"
  * - Legacy external citations: "external:{external_source_id}"
  * - External files: "extfile:{ext_key}"

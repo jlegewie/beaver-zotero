@@ -626,7 +626,7 @@ describe('expandToRawHtml', () => {
         const { metadata } = makeMetadata();
         // Sentence locator s4 was pre-resolved to page "9".
         const input = '<citation id="1-EX1" loc="s4" label="(Author, 2024)" ref="c_EX1_new"/>';
-        const resolvedLocatorPages = { 'zotero:1-EX1:s4': '9' };
+        const resolvedLocatorPages = { 'zotero:u-EX1:s4': '9' };
         expandToRawHtml(input, metadata, 'new', undefined, undefined, resolvedLocatorPages);
         expect(createCitationHTML).toHaveBeenCalledWith(
             expect.objectContaining({ key: 'EX1' }),
@@ -651,7 +651,7 @@ describe('expandToRawHtml', () => {
         // page is already a final label and must be stored verbatim.
         const input = '<citation id="1-EX1" loc="s4" label="(Author, 2024)" ref="c_EX1_new"/>';
         const pageLabels = { '1-EX1': { 8: 'ix' } };
-        const resolvedLocatorPages = { 'zotero:1-EX1:s4': '9' };
+        const resolvedLocatorPages = { 'zotero:u-EX1:s4': '9' };
         expandToRawHtml(input, metadata, 'new', undefined, pageLabels as any, resolvedLocatorPages);
         expect(createCitationHTML).toHaveBeenCalledWith(
             expect.objectContaining({ key: 'EX1' }),
@@ -663,7 +663,7 @@ describe('expandToRawHtml', () => {
         const { metadata } = makeMetadata();
         // c_EX1_1 originally has page="10"; change its locator to sentence s4.
         const input = '<citation id="1-EX1" loc="s4" label="(Author, 2024, p. 10)" ref="c_EX1_1"/>';
-        const resolvedLocatorPages = { 'zotero:1-EX1:s4': '3' };
+        const resolvedLocatorPages = { 'zotero:u-EX1:s4': '3' };
         expandToRawHtml(input, metadata, 'new', undefined, undefined, resolvedLocatorPages);
         expect(createCitationHTML).toHaveBeenCalledWith(
             expect.objectContaining({ key: 'EX1' }),
@@ -674,7 +674,7 @@ describe('expandToRawHtml', () => {
     it('substitutes a resolved page for a legacy att_id structural locator', () => {
         const { metadata } = makeMetadata();
         const input = '<citation att_id="1-ATT1" loc="s4" label="(Author, 2024)"/>';
-        const resolvedLocatorPages = { 'zotero:1-ATT1:s4': '9' };
+        const resolvedLocatorPages = { 'zotero:u-ATT1:s4': '9' };
         expandToRawHtml(input, metadata, 'new', undefined, undefined, resolvedLocatorPages);
         expect(createCitationHTML).toHaveBeenCalledWith(
             expect.objectContaining({ key: 'ATT1' }),
@@ -686,7 +686,7 @@ describe('expandToRawHtml', () => {
         const { metadata } = makeMetadata();
         // The `sid` attribute is the legacy alias for a structural locator.
         const input = '<citation att_id="1-ATT1" sid="s4" label="(Author, 2024)"/>';
-        const resolvedLocatorPages = { 'zotero:1-ATT1:s4': '9' };
+        const resolvedLocatorPages = { 'zotero:u-ATT1:s4': '9' };
         expandToRawHtml(input, metadata, 'new', undefined, undefined, resolvedLocatorPages);
         expect(createCitationHTML).toHaveBeenCalledWith(
             expect.objectContaining({ key: 'ATT1' }),
