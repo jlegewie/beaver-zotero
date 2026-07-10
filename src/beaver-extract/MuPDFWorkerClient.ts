@@ -97,7 +97,7 @@ interface PendingEntry {
     resolve: (value: any) => void;
     reject: (reason: any) => void;
     fatalCandidate?: FatalOperationCandidate;
-    /** Epoch-ms when this operation entered the worker's FIFO queue. */
+    /** Epoch-ms when the client accepted this operation. */
     startedAt: number;
 }
 
@@ -228,6 +228,10 @@ export class MuPDFWorkerClient {
     private pending = new Map<number, PendingEntry>();
     /** Cached for O(1) busy-context reads on every backend request. */
     private oldestPendingStartedAt: number | null = null;
+    private nextStartupWaiterId = 1;
+    private startupWaiters = new Map<number, number>();
+    /** Cached so startup-wait age is also an O(1) property read. */
+    private oldestStartupWaitStartedAt: number | null = null;
     /**
      * Once true, the client refuses to spawn a new worker. Set by `dispose()`.
      * Distinguishes a stale-but-recoverable worker (transparent retry OK) from
@@ -281,25 +285,64 @@ export class MuPDFWorkerClient {
     }
 
     /**
-     * Number of in-flight worker operations (PDF extraction work); 0 = idle.
+     * Number of accepted worker operations, including calls waiting for the
+     * configure handshake; 0 = idle.
      * Read cross-bundle via the `Zotero.__beaverMuPDFWorkerClient_*` globals to
      * feed `busy_extracting` in busy-context diagnostics.
      */
     get inFlight(): number {
-        return this.pending.size;
+        return this.pending.size + this.startupWaiters.size;
     }
 
     /** Epoch-ms for the oldest in-flight operation, or 0 while idle. */
     get oldestInFlightStartedAt(): number {
-        return this.oldestPendingStartedAt ?? 0;
+        if (this.oldestPendingStartedAt === null) {
+            return this.oldestStartupWaitStartedAt ?? 0;
+        }
+        if (this.oldestStartupWaitStartedAt === null) {
+            return this.oldestPendingStartedAt;
+        }
+        return Math.min(
+            this.oldestPendingStartedAt,
+            this.oldestStartupWaitStartedAt,
+        );
+    }
+
+    /** Track a call only while it waits for the worker configure handshake. */
+    private addStartupWaiter(): number {
+        const id = this.nextStartupWaiterId++;
+        const startedAt = Date.now();
+        this.startupWaiters.set(id, startedAt);
+        this.oldestStartupWaitStartedAt = this.oldestStartupWaitStartedAt === null
+            ? startedAt
+            : Math.min(this.oldestStartupWaitStartedAt, startedAt);
+        return id;
+    }
+
+    /** Remove a configure waiter and refresh its cached oldest timestamp. */
+    private deleteStartupWaiter(id: number): number | null {
+        const removedStartedAt = this.startupWaiters.get(id);
+        if (removedStartedAt === undefined || !this.startupWaiters.delete(id)) {
+            return null;
+        }
+        if (this.startupWaiters.size === 0) {
+            this.oldestStartupWaitStartedAt = null;
+        } else if (removedStartedAt === this.oldestStartupWaitStartedAt) {
+            let oldest = Infinity;
+            for (const startedAt of this.startupWaiters.values()) {
+                oldest = Math.min(oldest, startedAt);
+            }
+            this.oldestStartupWaitStartedAt = oldest;
+        }
+        return removedStartedAt;
     }
 
     /** Add an operation and update the cached oldest timestamp. */
     private addPending(
         id: number,
         entry: Omit<PendingEntry, "startedAt">,
+        startedAt: number = Date.now(),
     ): void {
-        const startedAt = Date.now();
         this.pending.set(id, { ...entry, startedAt });
         this.oldestPendingStartedAt = this.oldestPendingStartedAt === null
             ? startedAt
@@ -695,14 +738,23 @@ export class MuPDFWorkerClient {
         const worker = this.ensureWorker();
         const startup = this.pendingStartupFor(worker);
         if (startup) {
-            return this.waitForStartup(worker, startup, signal).then(() =>
-                this.dispatchConfigured<T>(
-                    worker,
-                    op,
-                    args,
-                    signal,
-                    fatalCandidate,
-                ),
+            const waiterId = this.addStartupWaiter();
+            return this.waitForStartup(worker, startup, signal).then(
+                () => {
+                    const startedAt = this.deleteStartupWaiter(waiterId);
+                    return this.dispatchConfigured<T>(
+                        worker,
+                        op,
+                        args,
+                        signal,
+                        fatalCandidate,
+                        startedAt ?? undefined,
+                    );
+                },
+                (error) => {
+                    this.deleteStartupWaiter(waiterId);
+                    throw error;
+                },
             );
         }
         return this.dispatchConfigured<T>(
@@ -772,6 +824,7 @@ export class MuPDFWorkerClient {
         args: Record<string, unknown>,
         signal: AbortSignal | undefined,
         fatalCandidate: FatalOperationCandidate | null,
+        startedAt?: number,
     ): Promise<T> {
         if (signal?.aborted) {
             return Promise.reject(new WorkerAbortError());
@@ -811,11 +864,15 @@ export class MuPDFWorkerClient {
                 };
                 signal.addEventListener("abort", onAbort, { once: true });
             }
-            this.addPending(id, {
-                resolve: resolveWithCleanup,
-                reject: rejectWithCleanup,
-                fatalCandidate: fatalCandidate ?? undefined,
-            });
+            this.addPending(
+                id,
+                {
+                    resolve: resolveWithCleanup,
+                    reject: rejectWithCleanup,
+                    fatalCandidate: fatalCandidate ?? undefined,
+                },
+                startedAt,
+            );
             if (signal?.aborted) {
                 this.deletePending(id);
                 rejectWithCleanup(new WorkerAbortError());

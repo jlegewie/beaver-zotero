@@ -154,22 +154,36 @@ describe('MuPDFWorkerClient', () => {
     });
 
     it('waits for a configured acknowledgement before posting ops', async () => {
+        vi.useFakeTimers();
+        vi.setSystemTime(12_000);
         MockWorker.dropNextConfigureAck = true;
-        const client = getMuPDFWorkerClient();
-        const promise = client.getPageCount(new Uint8Array([0]));
-        const worker = MockWorker.instances[0];
+        try {
+            const client = getMuPDFWorkerClient();
+            const promise = client.getPageCount(new Uint8Array([0]));
+            const worker = MockWorker.instances[0];
 
-        expect(worker.configureMessages).toHaveLength(1);
-        expect(worker.posted).toHaveLength(0);
+            expect(worker.configureMessages).toHaveLength(1);
+            expect(worker.posted).toHaveLength(0);
+            expect(client.inFlight).toBe(1);
+            expect(client.oldestInFlightStartedAt).toBe(12_000);
 
-        worker.sendReady();
-        await new Promise((resolve) => setTimeout(resolve, 0));
+            await vi.advanceTimersByTimeAsync(500);
+            expect(client.oldestInFlightStartedAt).toBe(12_000);
 
-        expect(worker.configureMessages).toHaveLength(2);
-        expect(worker.posted[0].message).toMatchObject({ op: 'getPageCount' });
+            worker.sendReady();
+            await vi.advanceTimersByTimeAsync(0);
 
-        worker.replyToLast({ ok: true, result: { count: 2 } });
-        await expect(promise).resolves.toBe(2);
+            expect(worker.configureMessages).toHaveLength(2);
+            expect(worker.posted[0].message).toMatchObject({ op: 'getPageCount' });
+            expect(client.inFlight).toBe(1);
+            expect(client.oldestInFlightStartedAt).toBe(12_000);
+
+            worker.replyToLast({ ok: true, result: { count: 2 } });
+            await expect(promise).resolves.toBe(2);
+            expect(client.inFlight).toBe(0);
+        } finally {
+            vi.useRealTimers();
+        }
     });
 
     it('aborting while waiting for startup terminates the worker without posting an op', async () => {
@@ -181,10 +195,13 @@ describe('MuPDFWorkerClient', () => {
 
         expect(worker.configureMessages).toHaveLength(1);
         expect(worker.posted).toHaveLength(0);
+        expect(client.inFlight).toBe(1);
 
         controller.abort();
 
         await expect(promise).rejects.toBeInstanceOf(WorkerAbortError);
+        expect(client.inFlight).toBe(0);
+        expect(client.oldestInFlightStartedAt).toBe(0);
         expect(worker.terminate).toHaveBeenCalledOnce();
         expect(worker.posted).toHaveLength(0);
         expect(client.getStats()).toMatchObject({
