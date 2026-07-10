@@ -34,8 +34,14 @@ export const getActionCustomizations = (): ActionCustomizations => {
             const parsed = JSON.parse(raw);
             if (isActionCustomizations(parsed)) {
                 // Validate custom actions and normalize legacy shapes
-                // (single `targetType` → `targets` array)
+                // (single `targetType` → `targets` array). Normalization also
+                // strips the built-in-only `locked` flag from custom actions.
                 parsed.custom = parsed.custom.filter(isStoredAction).map(a => normalizeStoredAction(a as unknown as Record<string, unknown>));
+                // Locked built-ins are fully code-managed. Ignore customization
+                // data from versions where the action was still editable.
+                for (const id of Object.keys(parsed.overrides)) {
+                    if (isLockedBuiltinAction(id)) delete parsed.overrides[id];
+                }
                 return parsed;
             }
         }
@@ -46,7 +52,17 @@ export const getActionCustomizations = (): ActionCustomizations => {
 };
 
 export const saveActionCustomizations = (c: ActionCustomizations): void => {
-    setPref('actions', JSON.stringify(c));
+    // Enforce the storage boundary even for callers that bypass the preferences
+    // UI: locked built-ins cannot acquire overrides, and custom actions cannot
+    // acquire the code-defined `locked` flag.
+    const overrides = Object.fromEntries(
+        Object.entries(c.overrides).filter(([id]) => !isLockedBuiltinAction(id)),
+    );
+    const custom = c.custom.map(action => {
+        const { locked: _locked, ...rest } = action;
+        return rest;
+    });
+    setPref('actions', JSON.stringify({ ...c, overrides, custom }));
 };
 
 // ---------------------------------------------------------------------------
@@ -78,12 +94,17 @@ export const saveActionLastUsed = (id: string, timestamp: string): void => {
 // Built-in helpers
 // ---------------------------------------------------------------------------
 
-const builtinIds = new Set(ALL_BUILTIN_ACTIONS.map(a => a.id));
+const builtinById = new Map(ALL_BUILTIN_ACTIONS.map(a => [a.id, a]));
+const builtinIds = new Set(builtinById.keys());
 
 export const isBuiltinAction = (id: string): boolean => builtinIds.has(id);
 
+/** Whether an id identifies a code-managed, immutable built-in action. */
+export const isLockedBuiltinAction = (id: string): boolean => builtinById.get(id)?.locked === true;
+
 export const isBuiltinOverridden = (id: string): boolean => {
     if (!isBuiltinAction(id)) return false;
+    if (isLockedBuiltinAction(id)) return false;
     const c = getActionCustomizations();
     const override = c.overrides[id];
     if (!override) return false;
@@ -93,7 +114,7 @@ export const isBuiltinOverridden = (id: string): boolean => {
 
 export const getHiddenBuiltinActions = (): Action[] => {
     const c = getActionCustomizations();
-    return ALL_BUILTIN_ACTIONS.filter(a => c.overrides[a.id]?.hidden === true);
+    return ALL_BUILTIN_ACTIONS.filter(a => !a.locked && c.overrides[a.id]?.hidden === true);
 };
 
 // ---------------------------------------------------------------------------
@@ -112,7 +133,10 @@ export const getMergedActions = (): Action[] => {
 
     // 1. Built-in actions with overrides applied
     for (const builtin of ALL_BUILTIN_ACTIONS) {
-        const override = c.overrides[builtin.id];
+        // A locked built-in always resolves exactly to its shipped definition.
+        // This also makes actions newly locked in an update immune to historical
+        // field overrides and hidden flags.
+        const override = builtin.locked ? undefined : c.overrides[builtin.id];
         if (override?.hidden) continue;
         if (builtin.deprecated && !override) continue;
 

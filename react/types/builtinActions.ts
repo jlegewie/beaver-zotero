@@ -101,6 +101,7 @@ export const BUILTIN_ACTIONS: Action[] = [
         argumentHint: 'Optional: your own color scheme or focus',
         targets: ['attachment'],
         category: 'annotate',
+        locked: true,
         sortOrder: 105,
     },
 
@@ -168,6 +169,7 @@ export const BUILTIN_ACTIONS: Action[] = [
         argumentHint: 'Name the project or research topic',
         targets: ['global'],
         category: 'research',
+        locked: true,
         sortOrder: 505,
     },
 
@@ -180,6 +182,7 @@ export const BUILTIN_ACTIONS: Action[] = [
         argumentHint: 'Name a topic or research question',
         targets: ['global'],
         category: 'research',
+        locked: true,
         sortOrder: 510,
     },
 
@@ -216,6 +219,7 @@ export const BUILTIN_ACTIONS: Action[] = [
         argumentHint: 'Optional: what to focus on (e.g. filing, tags, or metadata)',
         targets: ['global'],
         category: 'organize',
+        locked: true,
         sortOrder: 530,
     },
 
