@@ -152,7 +152,10 @@ const ActionsPreferenceSection: React.FC = () => {
     // Reuse the import path: it mints a fresh id (the source id always collides)
     // and a suffixed /command, appends a custom copy, and we open it in edit mode.
     const handleDuplicateAction = useCallback((action: Action) => {
-        const { action: copy } = importAction(action);
+        const { action: copy } = importAction({
+            ...action,
+            title: `${action.title} (copy)`,
+        });
         setPendingActionEdit({ actionId: copy.id, requestId: Date.now() });
     }, [importAction, setPendingActionEdit]);
 
