@@ -86,6 +86,7 @@ function setupZoteroGlobal() {
             getByLibraryAndKeyAsync: vi.fn(async (_libraryId: number, _key: string) => item),
         },
         Beaver: {} as any,
+        __beaverGetSearchableLibraryIds: vi.fn(() => [1]),
         // Reset shutdown flag explicitly: a previous test's leak would
         // otherwise cause processOnce to short-circuit with 'shutting_down'.
         __beaverShuttingDown: undefined,
@@ -158,6 +159,27 @@ describe('BackgroundExtractor', () => {
         expect(result.processed).toBe(false);
         expect(result.reason).toBe('hot_busy');
         expect(mockState.extractCalls).toHaveLength(0);
+    });
+
+    it('completes a queued job without looking up the item when its library was excluded', async () => {
+        await db.enqueueBackgroundJob({
+            jobType: 'document_timeout_retry',
+            libraryId: 1,
+            zoteroKey: 'AAAAAAAA',
+            contentKind: 'pdf',
+            payloadKind: 'structured',
+            payload: payload(),
+            now: 0,
+        });
+        (Zotero as any).__beaverGetSearchableLibraryIds = vi.fn(() => []);
+
+        const { BackgroundExtractor } = await loadProcessor();
+        const result = await new BackgroundExtractor().processOnce();
+
+        expect(result).toEqual({ processed: true, reason: 'job_done' });
+        expect((Zotero as any).Items.getByLibraryAndKeyAsync).not.toHaveBeenCalled();
+        expect(mockState.extractCalls).toHaveLength(0);
+        await expect(db.peekBackgroundJobs()).resolves.toHaveLength(0);
     });
 
     it('completes the job when the item is in the trash', async () => {
