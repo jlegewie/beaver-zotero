@@ -14,6 +14,7 @@ import { UNRESOLVED_LIBRARY_ID } from '../../../../src/utils/libraryIdentity';
 import { searchTitleCreatorYear, scoreSearchResult } from '../../../utils/search';
 import { getPref } from '../../../../src/utils/prefs';
 import { logger } from '../../../../src/utils/logger';
+import Tooltip from '../Tooltip';
 
 const RECENT_ITEMS_LIMIT = 5;
 const RECENTLY_MODIFIED_LIMIT = 15;
@@ -222,16 +223,18 @@ const ThreadFilterMenu: React.FC<ThreadFilterMenuProps> = ({ activeFilter, onSel
 
     return (
         <>
-            <ChipButton
-                onClick={handleButtonClick}
-                aria-label="Filter chats"
-                aria-haspopup="menu"
-                aria-expanded={isMenuOpen}
-            >
-                <Icon icon={FilterIcon} className="scale-12" />
-                <span>Filter</span>
-                <Icon icon={ArrowDownIcon} className="scale-11" />
-            </ChipButton>
+            <Tooltip content="Filter chats by item" disabled={isMenuOpen}>
+                <ChipButton
+                    onClick={handleButtonClick}
+                    aria-label="Filter chats by item"
+                    aria-haspopup="menu"
+                    aria-expanded={isMenuOpen}
+                >
+                    <Icon icon={FilterIcon} className="scale-12" />
+                    <span>Filter</span>
+                    <Icon icon={ArrowDownIcon} className="scale-11" />
+                </ChipButton>
+            </Tooltip>
             <SearchMenu
                 menuItems={menuItems}
                 isOpen={isMenuOpen}
