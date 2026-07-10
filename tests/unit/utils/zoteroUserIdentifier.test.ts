@@ -17,7 +17,7 @@ vi.mock('../../../src/services/supabaseClient', () => ({
 }));
 vi.mock('../../../react/store', () => ({ store: { get: vi.fn(), set: vi.fn(), sub: vi.fn() } }));
 
-import { getInstanceLibraryRefs, getZoteroUserIdentifier } from '../../../src/utils/zoteroUtils';
+import { getInstanceIndexScopeRefs, getZoteroUserIdentifier } from '../../../src/utils/zoteroUtils';
 
 /**
  * getZoteroUserIdentifier() identifies a Zotero install for the WS handshake.
@@ -82,7 +82,7 @@ describe('getZoteroUserIdentifier', () => {
     });
 });
 
-describe('getInstanceLibraryRefs', () => {
+describe('getInstanceIndexScopeRefs', () => {
     const Z = () => (globalThis as any).Zotero;
     let savedLibraries: any;
     let savedGroups: any;
@@ -118,8 +118,8 @@ describe('getInstanceLibraryRefs', () => {
         Z().Groups = savedGroups;
     });
 
-    it('returns canonical refs only for searchable libraries', () => {
-        expect(getInstanceLibraryRefs([1, 42, 99])).toEqual(['u17517181', 'g123']);
+    it('returns index scope refs only for searchable libraries (personal is always l<localUserKey>)', () => {
+        expect(getInstanceIndexScopeRefs([1, 42, 99])).toEqual(['l28tUI2tp', 'g123']);
         expect(Z().Libraries.getAll).not.toHaveBeenCalled();
         expect(Z().Libraries.get).toHaveBeenCalledWith(1);
         expect(Z().Libraries.get).toHaveBeenCalledWith(42);

@@ -853,9 +853,9 @@
 }
 /* Notice badge for prompts that still contain [[ ]] placeholders */
 [id^="beaver-pane-"] .action-target-badge[data-type="placeholder"] {
-    background-color: var(--tag-yellow-quinary);
-    color: var(--tag-yellow-secondary);
-    border-color: var(--tag-yellow-tertiary);
+    background-color: var(--tag-orange-quinary);
+    color: var(--tag-orange-secondary);
+    border-color: var(--tag-orange-tertiary);
 }
 
 

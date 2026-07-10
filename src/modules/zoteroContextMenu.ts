@@ -129,7 +129,10 @@ export function getMergedActions(): Action[] {
     const actions: Action[] = [];
 
     for (const builtin of ALL_BUILTIN_ACTIONS) {
-        const override = c.overrides[builtin.id];
+        // Keep this esbuild-side merge aligned with actionStorage: a locked
+        // built-in always uses its shipped definition, including when an older
+        // version left behind field overrides or a hidden flag.
+        const override = builtin.locked ? undefined : c.overrides[builtin.id];
         if (override?.hidden) continue;
         if (builtin.deprecated && !override) continue;
 

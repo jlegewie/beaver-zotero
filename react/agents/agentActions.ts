@@ -520,10 +520,12 @@ export function toAgentAction(raw: Record<string, any>): AgentAction {
             old_creators: oldCreators,
         } as EditMetadataProposedData;
     } else if (actionType === 'create_collection') {
-        // Normalize create_collection proposed data
+        // Normalize create_collection proposed data. library_id always names a
+        // resolved library: the agent may target a library by name, but the name
+        // is resolved to an id during validation, before the action is emitted.
         proposedData = {
-            library_id: typeof proposedData.library_id === 'number' 
-                ? proposedData.library_id 
+            library_id: typeof proposedData.library_id === 'number'
+                ? proposedData.library_id
                 : Number(proposedData.library_id ?? proposedData.libraryId ?? 0),
             library_ref: proposedData.library_ref ?? proposedData.libraryRef,
             name: proposedData.name ?? '',
@@ -1150,6 +1152,7 @@ export async function buildPendingApprovalFromAction(action: AgentAction): Promi
         if (libraryId) {
             const library = Zotero.Libraries.get(libraryId);
             currentValue = {
+                library_id: libraryId,
                 library_name: library ? library.name : 'Unknown Library',
                 parent_key: actionData.parent_key ?? null,
                 item_count: actionData.item_ids?.length ?? 0,

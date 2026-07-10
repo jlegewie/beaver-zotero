@@ -422,7 +422,7 @@ const ActionCard: React.FC<ActionCardProps> = ({
                         <Tooltip content="This action is managed by Beaver and can't be edited. Duplicate it to make an editable copy." width="220px">
                             <span className="action-target-badge display-flex flex-row items-center gap-1" data-type="placeholder">
                                 <Icon icon={LockIcon} size={11} />
-                                Managed
+                                Locked
                             </span>
                         </Tooltip>
                     )}

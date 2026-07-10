@@ -14,7 +14,9 @@ const CHILD_ROW_PADDING = '32px';
 interface CreateCollectionPreviewProps {
     /** Name of the collection to create */
     name: string;
-    /** Library name (from current_value) */
+    /** Resolved library id (from result_data, current_value, or action data) */
+    libraryId?: number | null;
+    /** Library name, used only to resolve the library when no id is available */
     libraryName?: string;
     /** Parent collection key (optional, for subcollections) */
     parentKey?: string | null;
@@ -37,6 +39,7 @@ interface CreateCollectionPreviewProps {
  */
 export const CreateCollectionPreview: React.FC<CreateCollectionPreviewProps> = ({
     name,
+    libraryId: libraryIdProp,
     libraryName,
     parentKey,
     itemCount = 0,
@@ -52,11 +55,20 @@ export const CreateCollectionPreview: React.FC<CreateCollectionPreviewProps> = (
         if (typeof Zotero === 'undefined') return;
 
         try {
-            const libraries = Zotero.Libraries.getAll();
-            let library = libraries.find(l => l.name === libraryName);
+            // Prefer the explicit library id: the collection may live in a group
+            // library, and name lookup is unavailable for stored actions (which
+            // carry no current_value) and ambiguous across same-named libraries.
+            let library = (libraryIdProp != null ? Zotero.Libraries.get(libraryIdProp) : undefined) || undefined;
 
-            // Fallback to user library if not found by name (or if name not provided)
-            if (!library && (!libraryName || libraryName === 'My Library')) {
+            // Name match is case-insensitive to mirror the action handler's resolution.
+            if (!library && libraryName) {
+                library = Zotero.Libraries.getAll().find(
+                    l => l.name.toLowerCase() === libraryName.toLowerCase()
+                );
+            }
+
+            // Collections without any library reference belong to the user library.
+            if (!library && libraryIdProp == null && !libraryName) {
                 library = Zotero.Libraries.userLibrary;
             }
 
@@ -72,7 +84,7 @@ export const CreateCollectionPreview: React.FC<CreateCollectionPreviewProps> = (
         } catch (e) {
             console.warn('Failed to resolve collection library/parent name:', e);
         }
-    }, [parentKey, libraryName]);
+    }, [parentKey, libraryIdProp, libraryName]);
 
     const isApplied = status === 'applied';
     const isError = status === 'error';

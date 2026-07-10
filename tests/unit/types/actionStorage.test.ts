@@ -6,7 +6,7 @@ vi.mock('../../../react/types/settings', () => ({
     getCustomPromptsFromPreferences: () => [],
 }));
 
-import { getMergedActions, saveActionCustomizations } from '../../../react/types/actionStorage';
+import { getActionCustomizations, getHiddenBuiltinActions, getMergedActions, saveActionCustomizations } from '../../../react/types/actionStorage';
 import { BUILTIN_ACTIONS, ALL_BUILTIN_ACTIONS } from '../../../react/types/builtinActions';
 import { ARCHIVED_ACTIONS } from '../../../react/types/archivedActions';
 import { getActionCommand, toSlashToken } from '../../../react/utils/slashCommands';
@@ -27,6 +27,7 @@ describe('actionStorage', () => {
     });
 
     const builtinWithName = BUILTIN_ACTIONS.find(a => a.name)!;
+    const lockedBuiltin = BUILTIN_ACTIONS.find(a => a.locked)!;
 
     it('built-in names are unique', () => {
         const commands = BUILTIN_ACTIONS.filter(a => !a.deprecated).map(getActionCommand);
@@ -100,6 +101,70 @@ describe('actionStorage', () => {
         const merged = getMergedActions().find(a => a.id === 'custom-1')!;
         expect(merged.name).toBe('my-action');
         expect(merged.argumentHint).toBe('what to do it to');
+    });
+
+    it('ignores historical overrides and hidden flags for locked built-ins', () => {
+        const c: ActionCustomizations = {
+            version: 1,
+            overrides: {
+                [lockedBuiltin.id]: {
+                    hidden: true,
+                    title: 'Old customized title',
+                    text: 'Old customized prompt',
+                },
+            },
+            custom: [],
+        };
+
+        // Seed the raw preference directly to simulate data written by a
+        // version where this built-in was still editable.
+        Prefs.set('extensions.zotero.beaver.actions', JSON.stringify(c));
+
+        const merged = getMergedActions().find(a => a.id === lockedBuiltin.id);
+        expect(merged).toMatchObject({
+            title: lockedBuiltin.title,
+            text: lockedBuiltin.text,
+            locked: true,
+        });
+        expect(getActionCustomizations().overrides[lockedBuiltin.id]).toBeUndefined();
+        expect(getHiddenBuiltinActions().some(a => a.id === lockedBuiltin.id)).toBe(false);
+    });
+
+    it('strips locked from custom actions read from persisted user data', () => {
+        const raw = {
+            version: 1,
+            overrides: {},
+            custom: [{
+                id: 'custom-locked',
+                title: 'Custom action',
+                text: 'Do the thing',
+                targets: ['global'],
+                locked: true,
+            }],
+        };
+        Prefs.set('extensions.zotero.beaver.actions', JSON.stringify(raw));
+
+        const custom = getMergedActions().find(a => a.id === 'custom-locked');
+        expect(custom).toBeDefined();
+        expect(custom?.locked).toBeUndefined();
+    });
+
+    it('does not persist locked built-in overrides or custom locked flags', () => {
+        saveActionCustomizations({
+            version: 1,
+            overrides: { [lockedBuiltin.id]: { title: 'Do not save' } },
+            custom: [{
+                id: 'custom-locked',
+                title: 'Custom action',
+                text: 'Do the thing',
+                targets: ['global'],
+                locked: true,
+            }],
+        });
+
+        const stored = JSON.parse(prefStore.get('extensions.zotero.beaver.actions') as string);
+        expect(stored.overrides[lockedBuiltin.id]).toBeUndefined();
+        expect(stored.custom[0].locked).toBeUndefined();
     });
 
     it('normalizes legacy custom actions (single targetType, minItems) to targets', () => {

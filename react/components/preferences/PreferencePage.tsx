@@ -358,7 +358,7 @@ const PreferencePage: React.FC = () => {
             icon: RepeatIcon,
             iconClassName: '',
             disabled: false,
-            text: 'Sync'
+            text: 'Check & Repair'
         };
     };
 
@@ -873,7 +873,8 @@ const PreferencePage: React.FC = () => {
                                     title="Search Index"
                                     description={
                                         <>
-                                            Syncing the search index ensures that all your library items are indexed and searchable.
+                                            Check that the local search index matches your Zotero libraries.
+                                            This usually happens automatically, but you can run a manual check if search results look out of date.
                                             {embeddingIndexState.failedItems > 0 && (
                                                 <span className="display-flex font-color-yellow mt-1">
                                                     {embeddingIndexState.failedItems} items failed to index

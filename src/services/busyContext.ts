@@ -28,6 +28,14 @@ export interface BusyContext {
     busy_indexing: number;
     /** 1 if Beaver's MuPDF worker has in-flight operations */
     busy_extracting: number;
+    /** Number of operations running or queued on the user-facing MuPDF worker */
+    extracting_hot_pending: number;
+    /** Number of operations running or queued on the background MuPDF worker */
+    extracting_background_pending: number;
+    /** Age in ms of the oldest hot-worker operation, or 0 while idle */
+    extracting_hot_oldest_ms: number;
+    /** Age in ms of the oldest background-worker operation, or 0 while idle */
+    extracting_background_oldest_ms: number;
     /**
      * 1 if the window is hidden/occluded. The platform throttles timers in
      * hidden/occluded windows, which can inflate `event_loop_lag_ms`, so the
@@ -124,11 +132,16 @@ export function stopBusyContextHeartbeat(): void {
 
 export function getBusyContext(): BusyContext {
     ensureHeartbeat();
+    const now = Date.now();
 
     let busySync = 0;
     let busyDbTx = 0;
     let busyLocked = 0;
     let busyExtracting = 0;
+    let extractingHotPending = 0;
+    let extractingBackgroundPending = 0;
+    let extractingHotOldestMs = 0;
+    let extractingBackgroundOldestMs = 0;
     let windowHidden = 0;
     try {
         // `as any`: syncInProgress is a defineProperty getter and may be
@@ -141,8 +154,19 @@ export function getBusyContext(): BusyContext {
         // slot (exposed cross-bundle via these globals).
         const hot = Z.__beaverMuPDFWorkerClient_hot;
         const background = Z.__beaverMuPDFWorkerClient_background;
-        const inFlight = (hot?.inFlight ?? 0) + (background?.inFlight ?? 0);
-        busyExtracting = inFlight > 0 ? 1 : 0;
+        extractingHotPending = hot?.inFlight ?? 0;
+        extractingBackgroundPending = background?.inFlight ?? 0;
+        busyExtracting = extractingHotPending + extractingBackgroundPending > 0 ? 1 : 0;
+
+        const hotStartedAt = hot?.oldestInFlightStartedAt ?? 0;
+        const backgroundStartedAt = background?.oldestInFlightStartedAt ?? 0;
+        extractingHotOldestMs = extractingHotPending > 0 && hotStartedAt > 0
+            ? Math.max(0, now - hotStartedAt)
+            : 0;
+        extractingBackgroundOldestMs =
+            extractingBackgroundPending > 0 && backgroundStartedAt > 0
+                ? Math.max(0, now - backgroundStartedAt)
+                : 0;
     } catch {
         // Never let diagnostics break request handling
     }
@@ -154,7 +178,7 @@ export function getBusyContext(): BusyContext {
         // Window/document may be unavailable during startup/shutdown
     }
 
-    const busyIndexing = Date.now() - lastIndexActivityAt < INDEXING_RECENCY_MS ? 1 : 0;
+    const busyIndexing = now - lastIndexActivityAt < INDEXING_RECENCY_MS ? 1 : 0;
 
     return {
         busy_sync: busySync,
@@ -162,7 +186,11 @@ export function getBusyContext(): BusyContext {
         busy_zotero_locked: busyLocked,
         busy_indexing: busyIndexing,
         busy_extracting: busyExtracting,
+        extracting_hot_pending: extractingHotPending,
+        extracting_background_pending: extractingBackgroundPending,
+        extracting_hot_oldest_ms: extractingHotOldestMs,
+        extracting_background_oldest_ms: extractingBackgroundOldestMs,
         window_hidden: windowHidden,
-        event_loop_lag_ms: Math.max(0, Date.now() - lastTick - HEARTBEAT_INTERVAL_MS),
+        event_loop_lag_ms: Math.max(0, now - lastTick - HEARTBEAT_INTERVAL_MS),
     };
 }
