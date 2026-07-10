@@ -9,7 +9,10 @@ import type {
 } from '../../../react/types/attachments/apiTypes';
 import {
     messageAttachmentKey,
+    messageAttachmentLookupKeys,
+    messageAttachmentsHaveSameIdentity,
     zoteroReferenceKey,
+    zoteroReferenceLookupKeys,
 } from '../../../react/types/attachments/apiTypes';
 
 vi.mock('../../../src/utils/zoteroSerializers', () => ({
@@ -53,6 +56,39 @@ describe('attachment identity keys', () => {
             library_ref: 'g123',
             zotero_key: 'SOURCE12',
         })).toBe('g123-SOURCE12');
+    });
+
+    it('exposes a numeric alias so new references match legacy persisted attachments', () => {
+        const legacyKeys = new Set(messageAttachmentLookupKeys({
+            type: 'source',
+            library_id: 1,
+            zotero_key: 'SOURCE12',
+            include: 'fulltext',
+        }));
+        const currentKeys = zoteroReferenceLookupKeys({
+            library_id: 1,
+            library_ref: 'u',
+            zotero_key: 'SOURCE12',
+        });
+
+        expect(currentKeys).toEqual(['u-SOURCE12', '1-SOURCE12']);
+        expect(currentKeys.some(key => legacyKeys.has(key))).toBe(true);
+    });
+
+    it('does not collapse distinct portable libraries that share a numeric id and item key', () => {
+        const first: SourceAttachment = {
+            type: 'source',
+            library_id: 5,
+            library_ref: 'g42',
+            zotero_key: 'SOURCE12',
+            include: 'fulltext',
+        };
+        const second: SourceAttachment = {
+            ...first,
+            library_ref: 'g99',
+        };
+
+        expect(messageAttachmentsHaveSameIdentity(first, second)).toBe(false);
     });
 
     it('falls back to the legacy local library_id and preserves external-file keys', () => {

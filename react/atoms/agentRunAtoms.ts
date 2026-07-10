@@ -54,7 +54,7 @@ import {
 } from './messageComposition';
 import { isWebSearchEnabledAtom, removePopupMessagesByTypeAtom, isWebSearchAllowedAtom } from './ui';
 import { currentNoteItemAtom } from './zoteroContext';
-import { isAnnotationAttachment, messageAttachmentKey, zoteroReferenceKey } from '../types/attachments/apiTypes';
+import { isAnnotationAttachment, messageAttachmentKey, zoteroReferenceLookupKeys } from '../types/attachments/apiTypes';
 import type { ExternalFileAttachment } from '../types/attachments/apiTypes';
 import { getApplicationStateProvider } from './applicationState';
 import { uint8ArrayToBase64 } from '../utils/fileUtils';
@@ -1802,13 +1802,13 @@ export const sendWSMessageAtom = atom(
                 ...allUserAttachmentKeys
             ]);
             logger(`sendWSMessageAtom: Handeling reader attachment - existingKeys: ${JSON.stringify(existingKeys)}`, 1);
-            const readerKey = zoteroReferenceKey({
+            const readerKeys = zoteroReferenceLookupKeys({
                 library_id: readerAttachment.libraryID,
                 zotero_key: readerAttachment.key,
                 library_ref: libraryRefForLibraryID(readerAttachment.libraryID),
             });
-            if (!existingKeys.has(readerKey)) {
-                logger(`sendWSMessageAtom: Handeling reader attachment - Adding reader attachment: ${readerKey}`, 1);
+            if (!readerKeys.some(key => existingKeys.has(key))) {
+                logger(`sendWSMessageAtom: Handeling reader attachment - Adding reader attachment: ${readerKeys[0]}`, 1);
                 await Zotero.Items.loadDataTypes([readerAttachment], ['itemData']);
                 if (readerAttachment.parentItem) {
                     await Zotero.Items.loadDataTypes([readerAttachment.parentItem], ['itemData', 'creators']);
@@ -1823,7 +1823,7 @@ export const sendWSMessageAtom = atom(
                     include: 'fulltext'
                 } as SourceAttachment);
             } else {
-                logger(`sendWSMessageAtom: Handeling reader attachment - Skipping reader attachment: ${readerKey}`, 1);
+                logger(`sendWSMessageAtom: Handeling reader attachment - Skipping reader attachment: ${readerKeys[0]}`, 1);
             }
         }
 
@@ -1836,12 +1836,12 @@ export const sendWSMessageAtom = atom(
                 ...attachments.map(messageAttachmentKey),
                 ...allUserAttachmentKeys
             ]);
-            const noteKey = zoteroReferenceKey({
+            const noteKeys = zoteroReferenceLookupKeys({
                 library_id: currentNoteTabItem.libraryID,
                 zotero_key: currentNoteTabItem.key,
                 library_ref: libraryRefForLibraryID(currentNoteTabItem.libraryID),
             });
-            if (!existingKeys.has(noteKey)) {
+            if (!noteKeys.some(key => existingKeys.has(key))) {
                 const noteAttachment = toMessageAttachment(currentNoteTabItem);
                 if (noteAttachment) {
                     attachments.push(noteAttachment);

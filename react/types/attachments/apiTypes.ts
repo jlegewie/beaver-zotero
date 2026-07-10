@@ -204,6 +204,21 @@ export function zoteroReferenceKey(ref: {
 }
 
 /**
+ * All identity aliases for a Zotero reference. New records with a portable
+ * `library_ref` also expose their numeric legacy alias so they match persisted
+ * attachments written before portable library identity was introduced.
+ */
+export function zoteroReferenceLookupKeys(ref: {
+    library_id: number;
+    zotero_key: string;
+    library_ref?: string | null;
+}): string[] {
+    const canonicalKey = zoteroReferenceKey(ref);
+    const legacyKey = `${ref.library_id}-${ref.zotero_key}`;
+    return canonicalKey === legacyKey ? [canonicalKey] : [canonicalKey, legacyKey];
+}
+
+/**
  * Stable key for any message attachment: `ext-<KEY>` for external files,
  * `<library_ref>-<zotero_key>` when portable identity is available, and the
  * legacy `<library_id>-<zotero_key>` form otherwise. Use this instead of
@@ -214,6 +229,35 @@ export function messageAttachmentKey(attachment: MessageAttachment): string {
         return `ext-${attachment.ext_key}`;
     }
     return zoteroReferenceKey(attachment);
+}
+
+/** Portable and legacy aliases used to look up an existing attachment. */
+export function messageAttachmentLookupKeys(attachment: MessageAttachment): string[] {
+    if (isExternalFileAttachment(attachment)) {
+        return [`ext-${attachment.ext_key}`];
+    }
+    return zoteroReferenceLookupKeys(attachment);
+}
+
+/**
+ * Whether two attachments identify the same object. When both carry portable
+ * identity it is authoritative; the numeric fallback is only used when at
+ * least one side is a legacy record without `library_ref`.
+ */
+export function messageAttachmentsHaveSameIdentity(
+    left: MessageAttachment,
+    right: MessageAttachment,
+): boolean {
+    if (isExternalFileAttachment(left) || isExternalFileAttachment(right)) {
+        return isExternalFileAttachment(left) &&
+            isExternalFileAttachment(right) &&
+            left.ext_key === right.ext_key;
+    }
+    if (left.zotero_key !== right.zotero_key) return false;
+    if (left.library_ref && right.library_ref) {
+        return left.library_ref === right.library_ref;
+    }
+    return left.library_id === right.library_id;
 }
 
 /**
