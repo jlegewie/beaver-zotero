@@ -63,7 +63,7 @@ const GlobalContextInitializer = () => {
     useUpgradeHandler();
 
     // Handle Zotero sync
-    useZoteroSync();
+    // useZoteroSync();
 
     // Suppress Zotero auto-sync while mutating agent runs are active.
     useSyncSuppression();
