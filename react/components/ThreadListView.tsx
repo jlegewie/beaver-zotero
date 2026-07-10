@@ -117,6 +117,10 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
     const fetchThreads = useCallback(async (query: string) => {
         if (!user) return;
 
+        // Invalidate any earlier request before taking a synchronous path
+        // (such as a cache hit) so stale results cannot overwrite it later.
+        const seq = ++fetchSeqRef.current;
+
         if (filter) {
             // Exclusions can change (Beaver Preferences) while the view is
             // open, so re-check at fetch time instead of trusting the atom.
@@ -125,7 +129,6 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
                 return;
             }
 
-            const seq = ++fetchSeqRef.current;
             setThreads([]);
             setIsLoading(true);
             try {
@@ -162,10 +165,10 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
             setHasMore(cached.hasMore);
             setNextCursor(cached.nextCursor);
             setFetchError(null);
+            setIsLoading(false);
             return;
         }
 
-        const seq = ++fetchSeqRef.current;
         setIsLoading(true);
         try {
             if (query) {
