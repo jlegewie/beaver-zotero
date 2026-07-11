@@ -689,8 +689,8 @@ export function resolveLibrariesFilterToSearchableIds(filters: Array<string | nu
             continue;
         }
 
-        const numericId = parseInt(filter, 10);
-        if (!isNaN(numericId)) {
+        if (/^\d+$/.test(filter)) {
+            const numericId = Number(filter);
             if (searchableLibraryIds.includes(numericId)) resolvedIds.add(numericId);
             continue;
         }
