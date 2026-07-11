@@ -930,6 +930,63 @@ describe('BackgroundExtractor', () => {
         expect(disposeSpy).toHaveBeenCalledTimes(1);
     });
 
+    it('unregisters and disposes only the executor that owns the lane', async () => {
+        const firstDispose = vi.fn();
+        const secondDispose = vi.fn();
+        const first = ocrExecutor(async () => ({ kind: 'complete', reason: 'first' }));
+        first.dispose = firstDispose;
+        const second = ocrExecutor(async () => ({ kind: 'complete', reason: 'second' }));
+        second.dispose = secondDispose;
+
+        const { BackgroundExtractor } = await loadProcessor();
+        const proc = new BackgroundExtractor();
+        proc.registerExecutor(first, { maxInFlight: 1 });
+        proc.registerExecutor(second, { maxInFlight: 1 });
+
+        proc.unregisterExecutor('document_ocr', first);
+        expect(proc.getLaneStatus().document_ocr).toEqual({ inFlight: 0, capacity: 1 });
+
+        proc.unregisterExecutor('document_ocr', second);
+        expect(proc.getLaneStatus().document_ocr).toBeUndefined();
+        expect(firstDispose).toHaveBeenCalledTimes(1);
+        expect(secondDispose).toHaveBeenCalledTimes(1);
+    });
+
+    it('aborts already-claimed work when its lane is unregistered', async () => {
+        await db.enqueueBackgroundJob({
+            jobType: 'document_ocr',
+            libraryId: 1,
+            zoteroKey: 'BBBBBBBB',
+            contentKind: 'pdf',
+            payloadKind: 'structured',
+            payload: payload(),
+            now: 0,
+        });
+
+        let executionSignal: AbortSignal | undefined;
+        const executor = ocrExecutor(async (_record, ctx) => {
+            executionSignal = ctx.externalAbortSignal;
+            await new Promise<void>((resolve) => {
+                if (ctx.externalAbortSignal.aborted) resolve();
+                else ctx.externalAbortSignal.addEventListener('abort', () => resolve(), { once: true });
+            });
+            return { kind: 'release', reason: 'aborted' };
+        });
+
+        const { BackgroundExtractor } = await loadProcessor();
+        const proc = new BackgroundExtractor();
+        proc.registerExecutor(executor, { maxInFlight: 1 });
+        await proc.processOnce();
+
+        expect(executionSignal?.aborted).toBe(false);
+        proc.unregisterExecutor('document_ocr', executor);
+        expect(executionSignal?.aborted).toBe(true);
+
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        const rows = await db.peekBackgroundJobs();
+        expect(rows.map((row) => row.zoteroKey)).toEqual(['BBBBBBBB']);
+    });
+
     it('does not let an extract backlog starve an OCR lane', async () => {
         await db.enqueueBackgroundJob({
             jobType: 'document_extract',

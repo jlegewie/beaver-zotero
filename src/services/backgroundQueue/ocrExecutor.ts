@@ -51,6 +51,11 @@ import { logger } from '../../utils/logger';
 import { UNRESOLVED_LIBRARY_ID } from '../../utils/libraryIdentity';
 import { safeIsInTrash } from '../../utils/zoteroItemUtils';
 import { ApiError } from '../../../react/types/apiErrors';
+import {
+    libraryScopeInitializedAtom,
+    searchableLibraryIdsAtom,
+} from '../../../react/atoms/profile';
+import { store } from '../../../react/store';
 import type {
     JobExecutionContext,
     JobExecutor,
@@ -154,6 +159,7 @@ export class OcrExecutor implements JobExecutor {
         const resolved = await this.resolveJob(record, ctx);
         if ('outcome' in resolved) return resolved.outcome;
         const job = resolved.job;
+        this.throwIfLibraryUnavailable(job.item.libraryID, ctx);
 
         // Loop guard: skip scans this OCR engine has already marked terminal.
         if (
@@ -166,6 +172,7 @@ export class OcrExecutor implements JobExecutor {
             logger(`OcrExecutor: ${job.sourceKey} skipped, terminal OCR failure already recorded`, 3);
             return { kind: 'complete', reason: 'ocr_perm_failed' };
         }
+        this.throwIfLibraryUnavailable(job.item.libraryID, ctx);
 
         const ready = await this.resolveReady(job, ctx, record.id);
         if ('outcome' in ready) return ready.outcome;
@@ -182,6 +189,7 @@ export class OcrExecutor implements JobExecutor {
         recordId: number,
     ): Promise<{ getUrl: string } | { outcome: JobOutcome }> {
         const hint = this.resumeHints.get(job.sourceKey);
+        this.throwIfLibraryUnavailable(job.item.libraryID, ctx);
         if (hint?.fileHash === job.fileHash) {
             logger(`OcrExecutor: ${job.sourceKey} resuming OCR backend job ${hint.jobId}`, 3);
             const resumed = await this.resumeByJobId(hint.jobId, job, ctx, recordId);
@@ -204,7 +212,7 @@ export class OcrExecutor implements JobExecutor {
 
         logger(`OcrExecutor: ${job.sourceKey} requesting OCR (pages=${job.pageCount})`, 3);
         const requestResult = await ocrApiClient.requestOcr(job.fileHash, job.pageCount);
-        this.throwIfAborted(ctx);
+        this.throwIfLibraryUnavailable(job.item.libraryID, ctx);
         return this.resolveToReadyGetUrl(requestResult, job, ctx, recordId);
     }
 
@@ -229,7 +237,7 @@ export class OcrExecutor implements JobExecutor {
             }
             throw error;
         }
-        this.throwIfAborted(ctx);
+        this.throwIfLibraryUnavailable(job.item.libraryID, ctx);
         logger(`OcrExecutor: ${job.sourceKey} resumed OCR backend job ${jobId}: ${status.status}`, 3);
 
         switch (status.status) {
@@ -255,11 +263,21 @@ export class OcrExecutor implements JobExecutor {
         ctx: JobExecutionContext,
     ): Promise<{ job: ResolvedJob } | { outcome: JobOutcome }> {
         let item: Zotero.Item | null = null;
-        if (record.libraryId === UNRESOLVED_LIBRARY_ID) {
+        if (!store.get(libraryScopeInitializedAtom)) {
+            // Normally the lane is unregistered while scope is unknown. Release
+            // defensively in case readiness changes after the row is claimed.
+            return { outcome: { kind: 'release', reason: 'library_scope_uninitialized' } };
+        } else if (record.libraryId === UNRESOLVED_LIBRARY_ID) {
             logger(
                 `OcrExecutor: library not available on this device for ${record.libraryId}-${record.zoteroKey}`,
                 1,
             );
+        } else if (!store.get(searchableLibraryIdsAtom).includes(record.libraryId)) {
+            logger(
+                `OcrExecutor: ${record.libraryId}-${record.zoteroKey} skipped (library_excluded)`,
+                2,
+            );
+            return { outcome: { kind: 'complete', reason: 'library_excluded' } };
         } else {
             try {
                 item = (await Zotero.Items.getByLibraryAndKeyAsync(
@@ -269,6 +287,7 @@ export class OcrExecutor implements JobExecutor {
             } catch (e) {
                 logger(`OcrExecutor: getByLibraryAndKeyAsync failed for ${record.libraryId}-${record.zoteroKey}: ${e}`, 1);
             }
+            this.throwIfLibraryUnavailable(record.libraryId, ctx);
         }
         if (!item || safeIsInTrash(item) === true) {
             return { outcome: { kind: 'complete', reason: !item ? 'item_missing' : 'in_trash' } };
@@ -284,6 +303,7 @@ export class OcrExecutor implements JobExecutor {
             maxFileSizeMB: 0,
             localSizeStrategy: 'zotero-total',
         });
+        this.throwIfLibraryUnavailable(record.libraryId, ctx);
         if (source.kind === 'error') {
             if (source.code === 'file_too_large') {
                 return { outcome: { kind: 'complete', reason: 'file_too_large' } };
@@ -320,6 +340,7 @@ export class OcrExecutor implements JobExecutor {
             } catch (e) {
                 logger(`OcrExecutor: attachmentHash failed for ${record.libraryId}-${record.zoteroKey}: ${e}`, 1);
             }
+            this.throwIfLibraryUnavailable(record.libraryId, ctx);
         }
         if (!fileHash) {
             return { outcome: { kind: 'complete', reason: 'no_file_hash' } };
@@ -330,6 +351,7 @@ export class OcrExecutor implements JobExecutor {
         // by the same synthetic path and stores the original byteLength, so no extra
         // download is needed here to learn the cache key.
         const meta = await this.resolveSourceMetadata(resolvedItem, filePath);
+        this.throwIfLibraryUnavailable(record.libraryId, ctx);
         const pageCount = meta?.pageCount ?? null;
         if (pageCount == null || pageCount < 1) {
             return { outcome: { kind: 'complete', reason: 'no_page_count' } };
@@ -381,8 +403,11 @@ export class OcrExecutor implements JobExecutor {
         source: AttachmentFileSource,
         ctx: JobExecutionContext,
     ): Promise<Uint8Array> {
+        this.throwIfLibraryUnavailable(item.libraryID, ctx);
         if (source.kind === 'local') {
-            return IOUtils.read(source.filePath);
+            const data = await IOUtils.read(source.filePath);
+            this.throwIfLibraryUnavailable(item.libraryID, ctx);
+            return data;
         }
         const result = await loadAttachmentData({
             item,
@@ -396,6 +421,7 @@ export class OcrExecutor implements JobExecutor {
         if (result.kind === 'error') {
             throw new OcrRemoteLoadError(result.code);
         }
+        this.throwIfLibraryUnavailable(item.libraryID, ctx);
         return result.data;
     }
 
@@ -433,7 +459,7 @@ export class OcrExecutor implements JobExecutor {
                 await this.upload(request.put_url, job, ctx);
                 logger(`OcrExecutor: ${job.sourceKey} marking OCR upload complete for backend job ${request.job_id}`, 3);
                 await ocrApiClient.markUploaded(request.job_id);
-                this.throwIfAborted(ctx);
+                this.throwIfLibraryUnavailable(job.item.libraryID, ctx);
                 return this.defer(request.job_id, job, recordId);
             }
             case 'queued':
@@ -455,12 +481,13 @@ export class OcrExecutor implements JobExecutor {
         // (`ready`) or rejoin (`queued`) never loads the file. `loadOriginalBytes`
         // memoizes so the bytes are loaded at most once per job.
         const bytes = await job.loadOriginalBytes();
-        this.throwIfAborted(ctx);
+        this.throwIfLibraryUnavailable(job.item.libraryID, ctx);
         logger(`OcrExecutor: ${job.sourceKey} uploading source PDF for OCR (${(bytes.length / 1024 / 1024).toFixed(2)}MB)`, 3);
         await putBytesToSignedUrl(putUrl, bytes, {
             contentType: 'application/pdf',
             signal: ctx.externalAbortSignal,
         });
+        this.throwIfLibraryUnavailable(job.item.libraryID, ctx);
         logger(`OcrExecutor: ${job.sourceKey} uploaded source PDF for OCR`, 3);
     }
 
@@ -552,9 +579,10 @@ export class OcrExecutor implements JobExecutor {
         job: ResolvedJob,
         ctx: JobExecutionContext,
     ): Promise<Uint8Array> {
+        this.throwIfLibraryUnavailable(job.item.libraryID, ctx);
         logger(`OcrExecutor: ${job.sourceKey} downloading OCR searchable PDF`, 3);
         const bytes = await getBytesFromSignedUrl(getUrl, { signal: ctx.externalAbortSignal });
-        this.throwIfAborted(ctx);
+        this.throwIfLibraryUnavailable(job.item.libraryID, ctx);
         logger(`OcrExecutor: ${job.sourceKey} downloaded OCR searchable PDF (${(bytes.length / 1024 / 1024).toFixed(2)}MB)`, 3);
         return bytes;
     }
@@ -564,6 +592,7 @@ export class OcrExecutor implements JobExecutor {
         ocrBytes: Uint8Array,
         ctx: JobExecutionContext,
     ): Promise<JobOutcome> {
+        this.throwIfLibraryUnavailable(job.item.libraryID, ctx);
         // Hand the MuPDF extraction to the serialized background lane.
         logger(`OcrExecutor: ${job.sourceKey} re-extracting OCR searchable PDF`, 3);
         const result = await ctx.runOnMuPDFWorker(() =>
@@ -578,6 +607,7 @@ export class OcrExecutor implements JobExecutor {
                 abortSignal: ctx.externalAbortSignal,
             }),
         );
+        this.throwIfLibraryUnavailable(job.item.libraryID, ctx);
 
         switch (result.kind) {
             case 'ok':
@@ -656,5 +686,15 @@ export class OcrExecutor implements JobExecutor {
 
     private throwIfAborted(ctx: JobExecutionContext): void {
         if (ctx.externalAbortSignal.aborted) throw new OcrAbort();
+    }
+
+    private throwIfLibraryUnavailable(libraryId: number, ctx: JobExecutionContext): void {
+        this.throwIfAborted(ctx);
+        if (
+            !store.get(libraryScopeInitializedAtom)
+            || !store.get(searchableLibraryIdsAtom).includes(libraryId)
+        ) {
+            throw new OcrAbort();
+        }
     }
 }

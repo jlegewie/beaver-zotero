@@ -10,7 +10,11 @@
 
 import { useEffect } from 'react';
 import { useAtomValue } from 'jotai';
-import { hasOcrAccessAtom } from '../atoms/profile';
+import {
+    hasOcrAccessAtom,
+    libraryScopeInitializedAtom,
+    searchableLibraryIdsAtom,
+} from '../atoms/profile';
 import { OcrExecutor } from '../../src/services/backgroundQueue/ocrExecutor';
 import { logger } from '../../src/utils/logger';
 
@@ -19,19 +23,29 @@ const OCR_LANE_MAX_IN_FLIGHT = 3;
 
 export function useOcrLane(): void {
     const hasOcrAccess = useAtomValue(hasOcrAccessAtom);
+    const libraryScopeInitialized = useAtomValue(libraryScopeInitializedAtom);
+    const searchableLibraryIds = useAtomValue(searchableLibraryIdsAtom);
+    // A stable value prevents equivalent profile refreshes from cycling the
+    // lane, while still reacting immediately when access scope really changes.
+    const libraryScopeKey = libraryScopeInitialized
+        ? [...searchableLibraryIds].sort((a, b) => a - b).join(',')
+        : null;
 
     // Register the OCR executor on the dispatcher. The background extractor is
     // created during esbuild startup, but the exact ordering vs the webpack
     // mount can vary (and it survives window reloads), so retry until present.
     useEffect(() => {
+        if (libraryScopeKey === null) return;
+
         let cancelled = false;
         let timer: ReturnType<typeof setInterval> | null = null;
+        const executor = new OcrExecutor();
 
         const tryRegister = (): boolean => {
             const extractor = Zotero.Beaver?.backgroundExtractor;
             if (!extractor) return false;
             try {
-                extractor.registerExecutor(new OcrExecutor(), {
+                extractor.registerExecutor(executor, {
                     maxInFlight: OCR_LANE_MAX_IN_FLIGHT,
                 });
                 logger('useOcrLane: registered document_ocr lane', 3);
@@ -54,8 +68,12 @@ export function useOcrLane(): void {
         return () => {
             cancelled = true;
             if (timer) clearInterval(timer);
+            Zotero.Beaver?.backgroundExtractor?.unregisterExecutor(
+                executor.jobType,
+                executor,
+            );
         };
-    }, []);
+    }, [libraryScopeKey]);
 
     // Mirror the entitlement into the esbuild-readable global used by the
     // enqueue gate.

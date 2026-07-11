@@ -16,6 +16,7 @@ import {
     isMigratingDataAtom,
     requiredDataVersionAtom,
     localZoteroLibrariesAtom,
+    localZoteroLibrariesInitializedAtom,
     minimumFrontendVersionAtom,
     syncDeniedForPlanAtom,
     prefWindowFocusRefreshAtom,
@@ -63,6 +64,7 @@ export const useProfileSync = () => {
     const setRequiredDataVersion = useSetAtom(requiredDataVersionAtom);
     const setMinimumFrontendVersion = useSetAtom(minimumFrontendVersionAtom);
     const setLocalZoteroLibraries = useSetAtom(localZoteroLibrariesAtom);
+    const setLocalZoteroLibrariesInitialized = useSetAtom(localZoteroLibrariesInitializedAtom);
     const setProfileSyncStatus = useSetAtom(profileSyncStatusAtom);
     const logout = useSetAtom(logoutAtom);
     const isAuthenticated = useAtomValue(isAuthenticatedAtom);
@@ -87,6 +89,13 @@ export const useProfileSync = () => {
             retryTimeoutRef.current = null;
         }
         isRefreshingRef.current = true;
+        // A cold load/account switch must not inherit the previous successful
+        // library enumeration while the new profile is still being resolved.
+        // Refresh failures after a completed load intentionally preserve the
+        // last known-good scope, matching the profile preservation behavior.
+        if (!store.get(isProfileLoadedAtom)) {
+            setLocalZoteroLibrariesInitialized(false);
+        }
         logger(`useProfileSync: Fetching profile and plan for ${userId}.`);
         try {
             const profileData = await accountService.getProfileWithPlan();
@@ -154,6 +163,7 @@ export const useProfileSync = () => {
                     .map(lib => serializeZoteroLibrary(lib))
                     .filter(lib => lib !== null);
                 setLocalZoteroLibraries(localLibraries);
+                setLocalZoteroLibrariesInitialized(true);
                 logger(`useProfileSync: Populated ${localLibraries.length} local libraries.`);
             } catch (libError) {
                 logger(`useProfileSync: Failed to populate local libraries: ${libError}`, 2);
@@ -209,7 +219,7 @@ export const useProfileSync = () => {
                 setTimeout(() => syncProfileData(userId), 0);
             }
         }
-    }, [user, setProfileWithPlan, setIsProfileLoaded, setIsProfileInvalid, setIsWaitingForProfile, setModels, setIsMigratingData, setRequiredDataVersion, setMinimumFrontendVersion, setLocalZoteroLibraries, setProfileSyncStatus, logout]);
+    }, [user, setProfileWithPlan, setIsProfileLoaded, setIsProfileInvalid, setIsWaitingForProfile, setModels, setIsMigratingData, setRequiredDataVersion, setMinimumFrontendVersion, setLocalZoteroLibraries, setLocalZoteroLibrariesInitialized, setProfileSyncStatus, logout]);
 
     const refreshProfile = useCallback(async (force = false) => {
         if (!user) return;

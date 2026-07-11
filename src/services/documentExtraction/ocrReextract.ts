@@ -90,6 +90,8 @@ export async function extractPdfBytesAndCacheAsOriginalAttachment(
     // original byte length, mirroring the regular remote extraction path.
     const sourceSizeBytes = args.isRemoteOnly ? (args.sourceSizeBytes ?? 0) : 0;
 
+    if (abortSignal?.aborted) return { kind: 'aborted' };
+
     const cache = Zotero.Beaver?.documentCache;
     if (!cache) {
         return { kind: 'unavailable', reason: 'document_cache_unavailable' };
@@ -103,6 +105,7 @@ export async function extractPdfBytesAndCacheAsOriginalAttachment(
     let sourceIdentity;
     try {
         sourceIdentity = await cache.getSourceIdentitySnapshot(filePath, sourceSizeBytes);
+        if (abortSignal?.aborted) return { kind: 'aborted' };
     } catch (error) {
         logger(`extractPdfBytesAndCacheAsOriginalAttachment: source identity snapshot failed: ${error}`, 1);
         return { kind: 'unavailable', reason: 'source_identity_unavailable' };
@@ -110,6 +113,7 @@ export async function extractPdfBytesAndCacheAsOriginalAttachment(
 
     // Use original page geometry when available; otherwise enforce page count.
     const originalMeta = await cache.getMetadata(docRef, filePath).catch(() => null);
+    if (abortSignal?.aborted) return { kind: 'aborted' };
     const originalPages = originalMeta?.pages ?? null;
 
     const client = getMuPDFWorkerClient(workerName);
@@ -141,6 +145,7 @@ export async function extractPdfBytesAndCacheAsOriginalAttachment(
             const message = error instanceof Error ? error.message : String(error);
             return { kind: 'error', message: `${mode}_extract_failed: ${message}` };
         }
+        if (abortSignal?.aborted) return { kind: 'aborted' };
 
         // Page count and per-page box/rotation must match the original so
         // coordinate-based citations and highlights stay aligned.
@@ -154,6 +159,7 @@ export async function extractPdfBytesAndCacheAsOriginalAttachment(
         }
 
         try {
+            if (abortSignal?.aborted) return { kind: 'aborted' };
             await cache.putResult({
                 item,
                 filePath,
@@ -164,6 +170,7 @@ export async function extractPdfBytesAndCacheAsOriginalAttachment(
                 metadata: buildExtractedDocumentCacheMetadata(extracted),
                 expectedSourceIdentity: sourceIdentity,
             });
+            if (abortSignal?.aborted) return { kind: 'aborted' };
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
             return { kind: 'error', message: `${mode}_cache_write_failed: ${message}` };

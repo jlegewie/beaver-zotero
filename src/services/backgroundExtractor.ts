@@ -132,6 +132,24 @@ export class BackgroundExtractor {
         this.notify();
     }
 
+    /** Deactivate a lane if it is still owned by the given executor. */
+    unregisterExecutor(jobType: BackgroundJobType, executor?: JobExecutor): void {
+        const current = this.executors.get(jobType);
+        if (!current || (executor && current.executor !== executor)) return;
+        this.executors.delete(jobType);
+        // Exclusions and other access-scope changes deactivate a lane through
+        // this method. Abort already-claimed work as well as preventing new
+        // claims, so an executor cannot continue across the boundary change.
+        for (const entry of this.laneInFlight.get(jobType)?.values() ?? []) {
+            try {
+                entry.abort.abort();
+            } catch {
+                // best-effort
+            }
+        }
+        this.disposeExecutor(current.executor);
+    }
+
     private disposeExecutor(executor: JobExecutor): void {
         try {
             executor.dispose?.();

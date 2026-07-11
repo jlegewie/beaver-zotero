@@ -43,6 +43,23 @@ vi.mock('../../../src/utils/zoteroItemUtils', () => ({
 
 vi.mock('../../../src/utils/logger', () => ({ logger: vi.fn() }));
 
+const libraryScope = vi.hoisted(() => ({ initialized: true, searchableIds: [1] }));
+const profileAtoms = vi.hoisted(() => ({
+    initialized: Symbol('libraryScopeInitializedAtom'),
+    searchableIds: Symbol('searchableLibraryIdsAtom'),
+}));
+vi.mock('../../../react/store', () => ({
+    store: {
+        get: vi.fn((target) => target === profileAtoms.initialized
+            ? libraryScope.initialized
+            : libraryScope.searchableIds),
+    },
+}));
+vi.mock('../../../react/atoms/profile', () => ({
+    libraryScopeInitializedAtom: profileAtoms.initialized,
+    searchableLibraryIdsAtom: profileAtoms.searchableIds,
+}));
+
 import { OcrExecutor } from '../../../src/services/backgroundQueue/ocrExecutor';
 import { ocrApiClient } from '../../../src/services/ocr/ocrApiClient';
 import {
@@ -105,6 +122,8 @@ function makeCtx(overrides: Partial<JobExecutionContext> = {}): JobExecutionCont
 
 beforeEach(() => {
     vi.clearAllMocks();
+    libraryScope.initialized = true;
+    libraryScope.searchableIds.splice(0, libraryScope.searchableIds.length, 1);
 
     fakePoller = { poll: vi.fn() };
 
@@ -365,6 +384,27 @@ describe('OcrExecutor', () => {
         expect(outcome).toEqual({ kind: 'complete', reason: 'item_missing' });
     });
 
+    it('discards a queued OCR job when its library is no longer searchable', async () => {
+        libraryScope.searchableIds.splice(0, libraryScope.searchableIds.length);
+
+        const outcome = await executor.execute(record, makeCtx());
+
+        expect(outcome).toEqual({ kind: 'complete', reason: 'library_excluded' });
+        expect(Zotero.Items.getByLibraryAndKeyAsync).not.toHaveBeenCalled();
+        expect(mockedResolveSource).not.toHaveBeenCalled();
+        expect(api.requestOcr).not.toHaveBeenCalled();
+    });
+
+    it('releases a queued OCR job while the library scope is uninitialized', async () => {
+        libraryScope.initialized = false;
+
+        const outcome = await executor.execute(record, makeCtx());
+
+        expect(outcome).toEqual({ kind: 'release', reason: 'library_scope_uninitialized' });
+        expect(Zotero.Items.getByLibraryAndKeyAsync).not.toHaveBeenCalled();
+        expect(api.requestOcr).not.toHaveBeenCalled();
+    });
+
     it('completes file_not_local when the scan is not retrievable', async () => {
         mockedResolveSource.mockResolvedValue({ kind: 'error', code: 'file_missing' } as any);
         const ctx = makeCtx();
@@ -488,6 +528,19 @@ describe('OcrExecutor', () => {
         const outcome = await executor.execute(record, ctx);
 
         expect(outcome).toEqual({ kind: 'release', reason: 'aborted' });
+    });
+
+    it('stops before the next data operation when its library becomes excluded', async () => {
+        api.requestOcr.mockImplementation(async () => {
+            libraryScope.searchableIds.splice(0, libraryScope.searchableIds.length);
+            return { status: 'ready', get_url: 'https://gcs/get' };
+        });
+
+        const outcome = await executor.execute(record, makeCtx());
+
+        expect(outcome).toEqual({ kind: 'release', reason: 'aborted' });
+        expect(mockedGet).not.toHaveBeenCalled();
+        expect(mockedReextract).not.toHaveBeenCalled();
     });
 
     it('defers; a track timeout leaves the row parked (no early wake)', async () => {

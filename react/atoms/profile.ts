@@ -60,6 +60,16 @@ export const isDeviceAuthorizedAtom = selectAtom(
 // This is used for Free users who don't store libraries in the backend per privacy policy
 export const localZoteroLibrariesAtom = atom<ZoteroLibrary[]>([]);
 
+// Distinguishes a successfully loaded (possibly empty) Zotero library list
+// from the atom's initial empty value. Both the local library list and the
+// profile exclusions must be known before background jobs can enforce the
+// searchable-library boundary.
+export const localZoteroLibrariesInitializedAtom = atom<boolean>(false);
+
+export const libraryScopeInitializedAtom = atom<boolean>((get) => {
+    return get(isProfileLoadedAtom) && get(localZoteroLibrariesInitializedAtom);
+});
+
 export const excludedLibrariesAtom = selectAtom(
     profileWithPlanAtom,
     (profile: SafeProfileWithPlan | null) => profile?.excluded_libraries ?? [],
