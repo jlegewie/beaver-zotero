@@ -17,6 +17,8 @@ export interface EditNoteProposedData {
     library_id: number;
     /** Zotero key of the note item */
     zotero_key: string;
+    /** Device-portable library identity ("u" | "g<groupID>"). See `src/utils/libraryIdentity.ts`. */
+    library_ref?: string;
     /**
      * Operation mode. Defaults to 'str_replace' if not set.
      * - str_replace: Replace one unique match of old_string with new_string
@@ -55,6 +57,8 @@ export interface EditNoteResultData {
     library_id: number;
     /** Zotero key of the edited note */
     zotero_key: string;
+    /** Device-portable library identity ("u" | "g<groupID>"). See `src/utils/libraryIdentity.ts`. */
+    library_ref?: string;
     /** Number of occurrences that were replaced */
     occurrences_replaced: number;
     /** Warnings (e.g., duplicate citation) */

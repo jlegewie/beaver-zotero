@@ -63,7 +63,8 @@ function makeRegularItem(overrides: Partial<ValidationItem> = {}): ValidationIte
 
 function attachmentInfo(overrides: Partial<AttachmentInfo> = {}): AttachmentInfo {
     return {
-        attachment_id: '1-2YWA8DTZ',
+        attachment_id: 'u-2YWA8DTZ',
+        library_ref: 'u',
         parent_item_id: null,
         title: 'Paper',
         filename: 'paper.pdf',
@@ -222,7 +223,7 @@ describe('ItemValidationManager unified attachment-info validation', () => {
     it('validates regular item attachments through processAttachmentInfoBatch', async () => {
         const item = makeRegularItem();
         const unreadable = attachmentInfo({
-            attachment_id: '1-UNREAD1',
+            attachment_id: 'u-UNREAD1',
             status: 'unreadable',
             status_code: 'epub_no_text',
             content_kind: 'epub',
@@ -253,6 +254,8 @@ describe('ItemValidationManager unified attachment-info validation', () => {
             severity: 'error',
             statusCode: 'epub_no_text',
         });
+        expect(result.attachmentResults.has('u-2YWA8DTZ')).toBe(false);
+        expect(result.attachmentResults.has('u-UNREAD1')).toBe(false);
     });
 
     it('keeps regular items valid when they have no attachments', async () => {

@@ -2,6 +2,7 @@ import { getPageLabelsForItem } from './itemData';
 import { getPageLocator } from '../../utils/citationGrammar';
 import { resolvePageLabelFromLabels, translatePageNumberToLabelFromLabels } from '../../utils/pageLabels';
 import { buildZoteroCitationLinkHTML, isLinkCitationItem } from '../../../src/utils/zoteroLinkCitation';
+import { resolveLibraryRef } from '../../../src/utils/libraryIdentity';
 import { logger } from '../../../src/utils/logger';
 import type {
     CitationExportRequest,
@@ -27,10 +28,18 @@ function escapeHtml(value: string): string {
  * Pre-formatted "link" citation items are returned as raw HTML.
  */
 function renderCitation(request: CitationExportRequest): CitationExportRender | null {
-    const { effectiveLibraryID, effectiveItemKey, requestedRef, pages, metadata, pageLabelsByAttachmentId } = request;
-    if (!effectiveLibraryID || !effectiveItemKey) return null;
+    const { effectiveLibraryID, effectiveItemKey, effectiveLibraryRef, requestedRef, pages, metadata, pageLabelsByAttachmentId } = request;
+    if (!effectiveItemKey) return null;
+    // `library_ref` is the portable identity and must win over a device-local
+    // libraryID when both are present. The numeric id may be 0 (unresolved) or
+    // may point at an unrelated library after the citation moves devices.
+    const libraryID = resolveLibraryRef({
+        library_ref: effectiveLibraryRef,
+        library_id: effectiveLibraryID,
+    });
+    if (!libraryID) return null;
     try {
-        const item = Zotero.Items.getByLibraryAndKey(effectiveLibraryID, effectiveItemKey);
+        const item = Zotero.Items.getByLibraryAndKey(libraryID, effectiveItemKey);
         if (!item) return null;
         if (isLinkCitationItem(item)) {
             return { kind: 'html', html: buildZoteroCitationLinkHTML(item) };
@@ -63,7 +72,7 @@ function renderCitation(request: CitationExportRequest): CitationExportRender | 
             citationData: encodeURIComponent(JSON.stringify(citationObj)),
         };
     } catch (e) {
-        logger(`zoteroDocumentExport: Item not loaded for ${effectiveLibraryID}/${effectiveItemKey}: ${e}`);
+        logger(`zoteroDocumentExport: Item not loaded for ${libraryID}/${effectiveItemKey}: ${e}`);
         return null;
     }
 }

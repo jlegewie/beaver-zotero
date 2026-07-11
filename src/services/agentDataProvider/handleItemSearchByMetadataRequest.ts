@@ -10,9 +10,6 @@
 import { logger } from '../../utils/logger';
 import { deduplicateItems } from '../../utils/zoteroUtils';
 import { agentItemFilter } from '../../utils/agentItemSupport';
-import { searchableLibraryIdsAtom } from '../../../react/atoms/profile';
-
-import { store } from '../../../react/store';
 import { serializeItem } from '../../utils/zoteroSerializers';
 import {
     WSItemSearchByMetadataRequest,
@@ -21,7 +18,13 @@ import {
     FrontendTimingMetadata,
 } from '../agentProtocol';
 import { searchItemsByMetadata, SearchItemsByMetadataOptions } from '../../../react/utils/searchTools';
-import { getCollectionByIdOrName, prepareAttachmentInfoBatchData, processAttachmentInfoBatch } from './utils';
+import {
+    getCollectionByIdOrName,
+    getSearchableLibraryIds,
+    prepareAttachmentInfoBatchData,
+    processAttachmentInfoBatch,
+    resolveLibrariesFilterToSearchableIds,
+} from './utils';
 import { TimingAccumulator } from '../../utils/timing';
 
 
@@ -70,42 +73,12 @@ export async function handleItemSearchByMetadataRequest(
         };
     }
 
-    // Get searchable library IDs (Pro: synced only, Free: all local)
-    const searchableLibraryIds = store.get(searchableLibraryIdsAtom);
-    
-    // Apply libraries_filter if provided, but always intersect with searchable libraries
-    const libraryIds: number[] = [];
-    if (request.libraries_filter && request.libraries_filter.length > 0) {
-        // Convert library names/IDs to library IDs
-        for (const libraryFilter of request.libraries_filter) {
-            if (typeof libraryFilter === 'number') {
-                // Only include if searchable
-                if (searchableLibraryIds.includes(libraryFilter)) {
-                    libraryIds.push(libraryFilter);
-                }
-            } else if (typeof libraryFilter === 'string') {
-                // Could be a library ID as string or a library name
-                const libraryIdNum = parseInt(libraryFilter, 10);
-                if (!isNaN(libraryIdNum)) {
-                    // It's a number as string - only include if searchable
-                    if (searchableLibraryIds.includes(libraryIdNum)) {
-                        libraryIds.push(libraryIdNum);
-                    }
-                } else {
-                    // It's a library name - find matching searchable libraries
-                    const allLibraries = Zotero.Libraries.getAll();
-                    for (const lib of allLibraries) {
-                        if (lib.name.toLowerCase().includes(libraryFilter.toLowerCase()) &&
-                            searchableLibraryIds.includes(lib.libraryID)) {
-                            libraryIds.push(lib.libraryID);
-                        }
-                    }
-                }
-            }
-        }
-    } else {
-        libraryIds.push(...searchableLibraryIds);
-    }
+    // Apply libraries_filter if provided, but always intersect with searchable libraries.
+    // Accepts portable library refs ("u"/"g<groupID>"), numeric IDs, numeric-ID
+    // strings, and library name substrings.
+    const libraryIds: number[] = request.libraries_filter && request.libraries_filter.length > 0
+        ? resolveLibrariesFilterToSearchableIds(request.libraries_filter)
+        : getSearchableLibraryIds();
 
     // Guard: if libraries_filter was provided but resolved to no searchable libraries,
     // return empty results instead of potentially widening scope

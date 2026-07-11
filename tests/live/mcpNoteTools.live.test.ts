@@ -51,8 +51,15 @@ function isMcpError(result: unknown): result is McpErrorResult {
 function splitNoteId(noteId: string): { libraryId: number; zoteroKey: string } {
     const dash = noteId.indexOf('-');
     if (dash <= 0) throw new Error(`Invalid note_id returned by MCP tool: ${noteId}`);
+    // note_id may be portable ("u-KEY") or legacy numeric; these tests only
+    // create notes in the personal library, so "u" maps to library 1.
+    const prefix = noteId.slice(0, dash);
+    const libraryId = prefix === 'u' ? 1 : Number(prefix);
+    if (!Number.isFinite(libraryId)) {
+        throw new Error(`Unsupported note_id prefix for cleanup: ${noteId}`);
+    }
     return {
-        libraryId: Number(noteId.slice(0, dash)),
+        libraryId,
         zoteroKey: noteId.slice(dash + 1),
     };
 }
@@ -116,25 +123,30 @@ describe('MCP note tools', () => {
 
     it('creates a standalone note with a real citation and reads it back', async () => {
         const itemId = `${PARENT_ITEM.library_id}-${PARENT_ITEM.zotero_key}`;
+        // Simplified note content emits portable citation ids ("u-KEY" for the
+        // personal library) even when the input citation used the numeric form.
+        const contentItemId = `${PARENT_ITEM.library_id === 1 ? 'u' : PARENT_ITEM.library_id}-${PARENT_ITEM.zotero_key}`;
         const created = await mcpCreateNote({
             title: 'MCP citation note',
             content: `A claim with a source. <citation id="${itemId}"/>`,
         });
 
-        expect(created.note_id).toMatch(/^\d+-[A-Z0-9]{8}$/);
+        expect(created.note_id).toMatch(/^(u|g\d+|\d+)-[A-Z0-9]{8}$/);
         expect(created.note_content).toContain('<citation');
-        expect(created.note_content).toContain(`id="${itemId}"`);
+        expect(created.note_content).toContain(`id="${contentItemId}"`);
         expect(created.citation_issues.invalid_keys).toEqual([]);
 
         const read = await mcpReadNote(created.note_id!);
         expect(read.note_id).toBe(created.note_id);
         expect(read.content).toContain('<citation');
-        expect(read.content).toContain(`id="${itemId}"`);
-        expect(read.cited_items.map((item) => item.item_id)).toContain(itemId);
+        expect(read.content).toContain(`id="${contentItemId}"`);
+        expect(read.cited_items.map((item) => item.item_id)).toContain(contentItemId);
     });
 
     it('creates a child note and drops collection assignment', async () => {
         const parentId = `${PARENT_ITEM.library_id}-${PARENT_ITEM.zotero_key}`;
+        // Responses emit portable ids even when the request used the numeric form.
+        const portableParentId = `${PARENT_ITEM.library_id === 1 ? 'u' : PARENT_ITEM.library_id}-${PARENT_ITEM.zotero_key}`;
         const created = await mcpCreateNote({
             title: 'MCP child note',
             content: 'Child note body.',
@@ -142,8 +154,8 @@ describe('MCP note tools', () => {
             collection: 'ignored-when-parent-is-set',
         });
 
-        expect(created.note_id).toMatch(/^\d+-[A-Z0-9]{8}$/);
-        expect(created.parent_item_id).toBe(parentId);
+        expect(created.note_id).toMatch(/^(u|g\d+|\d+)-[A-Z0-9]{8}$/);
+        expect(created.parent_item_id).toBe(portableParentId);
         expect(created.collection_key).toBeNull();
     });
 
@@ -153,7 +165,7 @@ describe('MCP note tools', () => {
             content: 'Bad citation. <citation id="not-a-real-id"/>',
         });
 
-        expect(created.note_id).toMatch(/^\d+-[A-Z0-9]{8}$/);
+        expect(created.note_id).toMatch(/^(u|g\d+|\d+)-[A-Z0-9]{8}$/);
         expect(created.citation_issues.invalid_keys).toContain('not-a-real-id');
     });
 

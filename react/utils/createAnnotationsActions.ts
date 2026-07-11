@@ -23,6 +23,8 @@ import {
 import { getReadableContentKind } from '../../src/services/documentExtraction/attachmentResolution';
 import { getAttachmentFileStatus } from '../../src/services/agentDataProvider/utils';
 import { logger } from '../../src/utils/logger';
+import { libraryRefForLibraryID, resolveItemReference } from '../../src/utils/libraryIdentity';
+import type { ZoteroItemReference } from '../types/zotero';
 
 type AnnotationContentKind = 'pdf' | 'epub';
 
@@ -39,10 +41,13 @@ function mapAnnotationErrorCode(error: unknown): string {
 }
 
 async function getAnnotationAttachment(
-    libraryId: number,
-    zoteroKey: string,
+    ref: ZoteroItemReference,
 ): Promise<{ attachment: Zotero.Item; contentKind: AnnotationContentKind }> {
-    const attachment = await Zotero.Items.getByLibraryAndKeyAsync(libraryId, zoteroKey);
+    const resolved = await resolveItemReference(ref);
+    if (resolved.status === 'library_unavailable') {
+        throw new Error('Attachment library is not available on this computer');
+    }
+    const attachment = resolved.status === 'found' ? resolved.item : null;
     const kind = attachment ? getReadableContentKind(attachment) : null;
     if (!attachment || (kind !== 'pdf' && kind !== 'epub')) {
         throw new Error('Resolved item is not a PDF or EPUB attachment');
@@ -63,10 +68,7 @@ export async function executeCreateHighlightAnnotationsAction(
 ): Promise<CreateHighlightAnnotationsResultData> {
     const data = action.proposed_data as CreateHighlightAnnotationsProposedData;
     const { requested_ref, resolved_ref, items, tags } = data;
-    const { attachment, contentKind } = await getAnnotationAttachment(
-        resolved_ref.library_id,
-        resolved_ref.zotero_key,
-    );
+    const { attachment, contentKind } = await getAnnotationAttachment(resolved_ref);
 
     await getAttachmentFileStatus(attachment, false);
 
@@ -92,6 +94,7 @@ export async function executeCreateHighlightAnnotationsAction(
                     loc_raw: item.loc_raw,
                     library_id: ref.library_id,
                     zotero_key: ref.zotero_key,
+                    library_ref: libraryRefForLibraryID(ref.library_id) ?? undefined,
                 });
             } catch (error: any) {
                 failed.push({
@@ -142,6 +145,7 @@ export async function executeCreateHighlightAnnotationsAction(
                     loc_raw: item.loc_raw,
                     library_id: ref.library_id,
                     zotero_key: ref.zotero_key,
+                    library_ref: libraryRefForLibraryID(ref.library_id) ?? undefined,
                 });
             } catch (error: any) {
                 failed.push({
@@ -173,10 +177,7 @@ export async function executeCreateNoteAnnotationsAction(
 ): Promise<CreateNoteAnnotationsResultData> {
     const data = action.proposed_data as CreateNoteAnnotationsProposedData;
     const { requested_ref, resolved_ref, items, tags } = data;
-    const { attachment, contentKind } = await getAnnotationAttachment(
-        resolved_ref.library_id,
-        resolved_ref.zotero_key,
-    );
+    const { attachment, contentKind } = await getAnnotationAttachment(resolved_ref);
 
     await getAttachmentFileStatus(attachment, false);
 
@@ -224,6 +225,7 @@ export async function executeCreateNoteAnnotationsAction(
                 loc_raw: item.loc_raw,
                 library_id: ref.library_id,
                 zotero_key: ref.zotero_key,
+                library_ref: libraryRefForLibraryID(ref.library_id) ?? undefined,
             });
         } catch (error: any) {
             failed.push({
@@ -257,9 +259,13 @@ export async function undoCreateAnnotationsAction(action: AgentAction): Promise<
     }
 
     for (const ref of created) {
-        const item = await Zotero.Items.getByLibraryAndKeyAsync(ref.library_id, ref.zotero_key);
-        if (item) {
-            await item.eraseTx();
+        const resolved = await resolveItemReference(ref);
+        if (resolved.status === 'library_unavailable') {
+            logger(`undoCreateAnnotationsAction: Library unavailable for ${ref.library_ref || ref.library_id}-${ref.zotero_key}`, 1);
+            continue;
+        }
+        if (resolved.status === 'found') {
+            await resolved.item.eraseTx();
         }
     }
 }

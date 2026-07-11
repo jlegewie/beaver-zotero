@@ -2,6 +2,7 @@ import { extractAndCacheDocument } from '../documentExtractionCore';
 import { liveAttachmentContentKind } from '../documentExtraction/attachmentResolution';
 import type { BackgroundJobRecord } from '../database';
 import { logger } from '../../utils/logger';
+import { UNRESOLVED_LIBRARY_ID } from '../../utils/libraryIdentity';
 import { safeIsInTrash } from '../../utils/zoteroItemUtils';
 import type {
     JobExecutionContext,
@@ -31,17 +32,24 @@ export class DocumentExtractExecutor implements JobExecutor {
         ctx: JobExecutionContext,
     ): Promise<JobOutcome> {
         let item: Zotero.Item | null = null;
-        try {
-            const lookup = await Zotero.Items.getByLibraryAndKeyAsync(
-                record.libraryId,
-                record.zoteroKey,
-            );
-            item = lookup || null;
-        } catch (e) {
+        if (record.libraryId === UNRESOLVED_LIBRARY_ID) {
             logger(
-                `DocumentExtractExecutor: getByLibraryAndKeyAsync failed for ${record.libraryId}-${record.zoteroKey}: ${e}`,
+                `DocumentExtractExecutor: library not available on this device for ${record.libraryId}-${record.zoteroKey}`,
                 1,
             );
+        } else {
+            try {
+                const lookup = await Zotero.Items.getByLibraryAndKeyAsync(
+                    record.libraryId,
+                    record.zoteroKey,
+                );
+                item = lookup || null;
+            } catch (e) {
+                logger(
+                    `DocumentExtractExecutor: getByLibraryAndKeyAsync failed for ${record.libraryId}-${record.zoteroKey}: ${e}`,
+                    1,
+                );
+            }
         }
 
         if (!item || safeIsInTrash(item) === true) {
@@ -137,5 +145,10 @@ export class DocumentExtractExecutor implements JobExecutor {
 }
 
 function isTransientResponseError(code: string): boolean {
-    return code === 'download_failed' || code === 'extraction_failed';
+    return code === 'download_failed'
+        || code === 'extraction_failed'
+        // The local PDF engine failed to start / respawn — machine-local and
+        // transient, so a background job should retry rather than complete
+        // terminally (the worker host may recover before the next attempt).
+        || code === 'worker_unavailable';
 }

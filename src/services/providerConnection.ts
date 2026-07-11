@@ -19,7 +19,9 @@
 
 import API_BASE_URL from '../utils/getAPIBaseURL';
 import { logger } from '../utils/logger';
-import { getZoteroUserIdentifier } from '../utils/zoteroUtils';
+import { buildZoteroInstanceWire } from './zoteroInstanceWire';
+import { store } from '../../react/store';
+import { searchableLibraryIdsAtom } from '../../react/atoms/profile';
 import {
     AgentDataProviderMap,
     createZoteroDataProvider,
@@ -65,15 +67,8 @@ export interface ProviderConnectionStatus {
     reconnectAttempts: number;
 }
 
-/** Build the snake_case instance-identity wire object for the handshake. */
 function getZoteroInstanceWire(): ZoteroInstanceWire {
-    const zid = getZoteroUserIdentifier();
-    return {
-        local_user_key: zid.localUserKey,
-        ...(zid.userID ? { user_id: zid.userID } : {}),
-        ...(zid.accountName ? { account_name: zid.accountName } : {}),
-        ...(zid.deviceName ? { device_name: zid.deviceName } : {}),
-    };
+    return buildZoteroInstanceWire(store.get(searchableLibraryIdsAtom));
 }
 
 export class ProviderConnection {

@@ -12,6 +12,7 @@ import { ZoteroItemReference } from '../types/zotero';
 import { logger } from '../../src/utils/logger';
 import { ExternalReference } from '../types/externalReferences';
 import { formatExternalCitation } from '../atoms/externalReferences';
+import { UNRESOLVED_LIBRARY_ID } from '../../src/utils/libraryIdentity';
 import {
     baseCitationKey,
     externalCompatKey,
@@ -130,7 +131,13 @@ export function renderToMarkdown(
                 logger(`renderToMarkdown: No Zotero item found for external_id: ${externalId}`);
                 return '';
             }
-            ref = { kind: 'zotero', library_id: mappedZoteroItem.library_id, zotero_key: mappedZoteroItem.zotero_key, loc: ref.loc };
+            ref = {
+                kind: 'zotero',
+                library_id: mappedZoteroItem.library_id,
+                zotero_key: mappedZoteroItem.zotero_key,
+                library_ref: mappedZoteroItem.library_ref,
+                loc: ref.loc,
+            };
         }
 
         // 2b. External file (user-attached, non-Zotero) — no Zotero item or
@@ -155,6 +162,13 @@ export function renderToMarkdown(
         }
         
         const { library_id: libraryID, zotero_key: itemKey } = ref;
+
+        // A portable ref whose library isn't on this device can't be looked
+        // up (and would throw) — nothing to cite.
+        if (libraryID === UNRESOLVED_LIBRARY_ID) {
+            logger(`renderToMarkdown: Library unavailable for libraryID: ${libraryID}, itemKey: ${itemKey}`);
+            return '';
+        }
 
         // Get the Zotero item
         try {

@@ -3,6 +3,7 @@ import { Icon, TickIcon, CSSItemTypeIcon, CSSIcon } from '../../../icons/icons';
 import { SearchMenuItem } from '../SearchMenu';
 import { getDisplayNameFromItem, isValidZoteroItem } from '../../../../utils/sourceUtils';
 import { ZoteroTag } from '../../../../types/zotero';
+import { ThreadItemFilter } from '../../../../atoms/ui';
 
 /**
  * Context for creating source menu items
@@ -11,6 +12,14 @@ export interface SourceMenuItemContext {
     currentMessageItems: Zotero.Item[];
     onAdd: (item: Zotero.Item) => void;
     onRemove: (item: Zotero.Item) => void;
+}
+
+/**
+ * Context for creating thread filter menu items
+ */
+export interface ThreadFilterMenuItemContext {
+    activeFilter: ThreadItemFilter | null;
+    onSelect: (item: Zotero.Item) => void;
 }
 
 /**
@@ -97,6 +106,57 @@ export async function createSourceMenuItem(
                     <span className={`truncate text-sm ${isValid ? 'font-color-tertiary' : 'font-color-red'} min-w-0`}>
                         {title}
                     </span>
+                </div>
+            </div>
+        ),
+    };
+}
+
+/**
+ * Create a menu item from a Zotero item for the thread filter menu
+ * (`ThreadFilterMenu`). Unlike `createSourceMenuItem`, selecting a row
+ * replaces the active thread filter rather than toggling an "attached"
+ * state, and the tick mark reflects whether this item is the current filter.
+ */
+export function createThreadFilterMenuItem(
+    item: Zotero.Item,
+    context: ThreadFilterMenuItemContext
+): SearchMenuItem {
+    const { activeFilter, onSelect } = context;
+
+    const title = item.getDisplayTitle();
+    const displayName = getDisplayNameFromItem(item);
+    const isActiveFilter = Boolean(
+        activeFilter &&
+        activeFilter.libraryId === item.libraryID &&
+        activeFilter.itemKey === item.key
+    );
+
+    const iconName = item.getItemTypeIconName();
+    const iconElement = iconName ? (
+        <span className="scale-80">
+            <CSSItemTypeIcon itemType={iconName} />
+        </span>
+    ) : null;
+
+    return {
+        label: displayName + " " + title,
+        onClick: () => onSelect(item),
+        customContent: (
+            <div className="display-flex flex-row gap-2 items-start min-w-0">
+                {iconElement}
+                <div className="display-flex flex-col gap-2 min-w-0 font-color-secondary">
+                    <div className="display-flex flex-row justify-between min-w-0">
+                        <span className="truncate font-color-secondary">
+                            {displayName}
+                        </span>
+                        {isActiveFilter && <Icon icon={TickIcon} className="scale-12 ml-2" />}
+                    </div>
+                    {title && title !== displayName && (
+                        <span className="truncate text-sm font-color-tertiary min-w-0">
+                            {title}
+                        </span>
+                    )}
                 </div>
             </div>
         ),

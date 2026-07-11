@@ -30,6 +30,9 @@ import { upgradeToolReturn } from "../compat/legacyToolResults";
 import { loadItemDataForAgentActions } from "../utils/agentActionUtils";
 import { BeaverTemporaryAnnotations } from "../utils/annotationUtils";
 import { enrichMessageAttachmentStub } from "../types/attachments/converters";
+import { zoteroReferenceKey } from "../types/attachments/apiTypes";
+import { resolveItemReference } from "../../src/utils/libraryIdentity";
+import type { ZoteroItemReference } from "../types/zotero";
 
 /**
  * Stores a run ID that ThreadView should scroll to after a thread finishes loading.
@@ -453,7 +456,7 @@ export const loadThreadAtom = atom(
                 // Load item data for user attachments. Citations no longer
                 // need item preloading: they render from backend metadata
                 // alone (citation v2).
-                const allItemReferences = new Set<string>();
+                const allItemReferences = new Map<string, ZoteroItemReference>();
 
                 // From user attachments in runs (external files have no Zotero
                 // reference to preload)
@@ -461,16 +464,20 @@ export const loadThreadAtom = atom(
                     const attachments = run.user_prompt.attachments || [];
                     attachments
                         .filter(att => att.type !== 'external_file')
-                        .filter(att => att.library_id && att.zotero_key)
-                        .forEach(att => allItemReferences.add(`${att.library_id}-${att.zotero_key}`));
+                        .filter(att => !!att.zotero_key)
+                        .forEach(att => allItemReferences.set(zoteroReferenceKey(att), {
+                            library_id: att.library_id,
+                            zotero_key: att.zotero_key,
+                            library_ref: att.library_ref,
+                        }));
                 }
 
                 const refToItem = new Map<string, Zotero.Item>();
-                const itemsPromises = Array.from(allItemReferences).map(async ref => {
-                    const [libraryId, key] = ref.split('-');
-                    const item = await Zotero.Items.getByLibraryAndKeyAsync(parseInt(libraryId), key);
-                    if (item) refToItem.set(ref, item);
-                    return item;
+                const itemsPromises = Array.from(allItemReferences.entries()).map(async ([refKey, ref]) => {
+                    const resolved = await resolveItemReference(ref);
+                    if (resolved.status !== 'found') return null;
+                    refToItem.set(refKey, resolved.item);
+                    return resolved.item;
                 });
                 await Promise.all(itemsPromises);
                 const itemsToLoad = Array.from(refToItem.values());
@@ -485,7 +492,7 @@ export const loadThreadAtom = atom(
                 for (const run of processedRuns) {
                     for (const att of run.user_prompt.attachments || []) {
                         if (att.type !== 'item' && att.type !== 'source') continue;
-                        const item = refToItem.get(`${att.library_id}-${att.zotero_key}`);
+                        const item = refToItem.get(zoteroReferenceKey(att));
                         if (item) enrichMessageAttachmentStub(att, item);
                     }
                 }

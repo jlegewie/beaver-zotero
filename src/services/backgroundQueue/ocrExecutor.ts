@@ -48,6 +48,7 @@ import {
     OCR_TERMINAL_NO_TEXT,
 } from '../ocr/constants';
 import { logger } from '../../utils/logger';
+import { UNRESOLVED_LIBRARY_ID } from '../../utils/libraryIdentity';
 import { safeIsInTrash } from '../../utils/zoteroItemUtils';
 import { ApiError } from '../../../react/types/apiErrors';
 import type {
@@ -254,13 +255,20 @@ export class OcrExecutor implements JobExecutor {
         ctx: JobExecutionContext,
     ): Promise<{ job: ResolvedJob } | { outcome: JobOutcome }> {
         let item: Zotero.Item | null = null;
-        try {
-            item = (await Zotero.Items.getByLibraryAndKeyAsync(
-                record.libraryId,
-                record.zoteroKey,
-            )) || null;
-        } catch (e) {
-            logger(`OcrExecutor: getByLibraryAndKeyAsync failed for ${record.libraryId}-${record.zoteroKey}: ${e}`, 1);
+        if (record.libraryId === UNRESOLVED_LIBRARY_ID) {
+            logger(
+                `OcrExecutor: library not available on this device for ${record.libraryId}-${record.zoteroKey}`,
+                1,
+            );
+        } else {
+            try {
+                item = (await Zotero.Items.getByLibraryAndKeyAsync(
+                    record.libraryId,
+                    record.zoteroKey,
+                )) || null;
+            } catch (e) {
+                logger(`OcrExecutor: getByLibraryAndKeyAsync failed for ${record.libraryId}-${record.zoteroKey}: ${e}`, 1);
+            }
         }
         if (!item || safeIsInTrash(item) === true) {
             return { outcome: { kind: 'complete', reason: !item ? 'item_missing' : 'in_trash' } };

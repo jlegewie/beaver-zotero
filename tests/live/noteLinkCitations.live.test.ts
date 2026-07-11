@@ -61,6 +61,9 @@ import { NORMAL_PDF, PARENT_ITEM } from '../helpers/fixtures';
 import { CoordOrigin } from '../../react/types/citations';
 
 const LIBRARY_ID = Number(process.env.ZOTERO_TEST_LIBRARY_ID ?? 1);
+// Simplified note output emits portable citation ids ("u-KEY" for the personal
+// library); assertions must use the same grammar.
+const LIBRARY_PREFIX = LIBRARY_ID === 1 ? 'u' : String(LIBRARY_ID);
 
 let zoteroAvailable = false;
 const createdNotes: Array<{ library_id: number; zotero_key: string }> = [];
@@ -206,7 +209,7 @@ describe('/beaver/note/read — note link citations', () => {
         expect(res.success, res.error).toBe(true);
         // The zotero:// href survived the real chrome-document normalize
         // round-trip (shield/restore) and the simplifier rewrote it.
-        expect(res.content).toContain(`<citation id="${LIBRARY_ID}-${target.zotero_key}"`);
+        expect(res.content).toContain(`<citation id="${LIBRARY_PREFIX}-${target.zotero_key}"`);
         expect(res.content).toContain(`ref="c_${target.zotero_key}_0"`);
         expect(res.content).not.toMatch(/<citation [^>]*\blabel="/);
         // The raw anchor must NOT leak into the agent-visible content.
@@ -245,7 +248,7 @@ describe('/beaver/note/read — annotation link citations', () => {
 
         const res = await readNote(`${source.library_id}-${source.zotero_key}`);
         expect(res.success, res.error).toBe(true);
-        expect(res.content).toContain(`<citation id="${LIBRARY_ID}-${annotation.key}"`);
+        expect(res.content).toContain(`<citation id="${LIBRARY_PREFIX}-${annotation.key}"`);
         expect(res.content).not.toContain('zotero://open-pdf');
     });
 
@@ -297,7 +300,7 @@ describe('/beaver/note/read — internal links and unresolved keys', () => {
         const res = await readNote(`${source.library_id}-${source.zotero_key}`);
         expect(res.success, res.error).toBe(true);
         // The simplifier does not check existence — the tag is still emitted.
-        expect(res.content).toContain('<citation id="1-ZZZZZZZZ"');
+        expect(res.content).toContain(`<citation id="${LIBRARY_PREFIX}-ZZZZZZZZ"`);
         // …but resolveCitedItems drops items that fail to load.
         expect(res.cited_items).toBeUndefined();
     });
@@ -355,7 +358,7 @@ describe('edit_note — note citation expands to a zotero:// anchor on save', ()
             zotero_key: source.zotero_key,
             operation: 'str_replace',
             old_string: 'Anchor sentence here.',
-            new_string: `Anchor sentence here <citation id="${LIBRARY_ID}-${target.zotero_key}" label="Note: Cited Target"/>.`,
+            new_string: `Anchor sentence here <citation id="${LIBRARY_PREFIX}-${target.zotero_key}" label="Note: Cited Target"/>.`,
         }, { timeout: 20000 });
         expect(exec.success, exec.error ?? undefined).toBe(true);
         expect(exec.result_data?.occurrences_replaced).toBe(1);

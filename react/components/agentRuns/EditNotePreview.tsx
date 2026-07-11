@@ -5,6 +5,7 @@ import { preloadNotePageLabels } from '../../../src/utils/noteCitationExpand';
 import { getLatestNoteHtml } from '../../../src/utils/noteEditorIO';
 import type { EditNoteOperation } from '../../types/agentActions/editNote';
 import { getPageLocator, normalizeCitationTag, parseRawCitationAttributes } from '../../utils/citationGrammar';
+import { modelObjectIdFromReference, resolveObjectId, UNRESOLVED_LIBRARY_ID } from '../../../src/utils/libraryIdentity';
 
 type ActionStatus = 'pending' | 'applied' | 'rejected' | 'undone' | 'error' | 'awaiting';
 
@@ -170,6 +171,9 @@ export const EditNotePreview: React.FC<EditNotePreviewProps> = ({
 
         (async () => {
             try {
+                // A portable library ref that couldn't be resolved on this device
+                // carries libraryId 0, which throws synchronously if looked up.
+                if (libraryId === UNRESOLVED_LIBRARY_ID) return;
                 const item = await Zotero.Items.getByLibraryAndKeyAsync(libraryId!, zoteroKey!);
                 if (!item || cancelled) return;
                 await item.loadDataType('note');
@@ -215,6 +219,9 @@ export const EditNotePreview: React.FC<EditNotePreviewProps> = ({
 
         (async () => {
             try {
+                // A portable library ref that couldn't be resolved on this device
+                // carries libraryId 0, which throws synchronously if looked up.
+                if (libraryId === UNRESOLVED_LIBRARY_ID) return;
                 const item = await Zotero.Items.getByLibraryAndKeyAsync(libraryId, zoteroKey);
                 if (!item || cancelled) return;
                 await item.loadDataType('note');
@@ -743,11 +750,12 @@ export function formatCitationText(citationItems: any[]): string | null {
  */
 export function lookupCitationItem(itemId: string): { itemData: any } | null {
     try {
-        const dashIdx = itemId.indexOf('-');
-        if (dashIdx === -1) return null;
-        const libraryID = parseInt(itemId.substring(0, dashIdx), 10);
-        const key = itemId.substring(dashIdx + 1);
-        const item = Zotero.Items.getByLibraryAndKey(libraryID, key);
+        const ref = resolveObjectId(itemId);
+        if (!ref) return null;
+        // A portable ref whose library isn't on this device resolves to
+        // UNRESOLVED_LIBRARY_ID, which throws synchronously if looked up.
+        if (ref.library_id === UNRESOLVED_LIBRARY_ID) return null;
+        const item = Zotero.Items.getByLibraryAndKey(ref.library_id, ref.zotero_key);
         if (!item) return null;
         return { itemData: Zotero.Utilities.Item.itemToCSLJSON(item) };
     } catch {
@@ -762,11 +770,12 @@ export function lookupCitationItem(itemId: string): { itemData: any } | null {
  */
 export function lookupCitationItemFromAttachment(attId: string): { itemData: any } | null {
     try {
-        const dashIdx = attId.indexOf('-');
-        if (dashIdx === -1) return null;
-        const libraryID = parseInt(attId.substring(0, dashIdx), 10);
-        const key = attId.substring(dashIdx + 1);
-        const attachment = Zotero.Items.getByLibraryAndKey(libraryID, key);
+        const ref = resolveObjectId(attId);
+        if (!ref) return null;
+        // A portable ref whose library isn't on this device resolves to
+        // UNRESOLVED_LIBRARY_ID, which throws synchronously if looked up.
+        if (ref.library_id === UNRESOLVED_LIBRARY_ID) return null;
+        const attachment = Zotero.Items.getByLibraryAndKey(ref.library_id, ref.zotero_key);
         if (!attachment) return null;
         if (typeof attachment.isAttachment !== 'function' || !attachment.isAttachment()) return null;
         // Resolve to parent item for citation formatting
@@ -789,7 +798,7 @@ export function recoverSimplifiedCitationLabel(tag: string): string | null {
     const rawAttrs = openTag ? parseRawCitationAttributes(openTag[1] || '') : {};
     const normalized = openTag ? normalizeCitationTag(rawAttrs) : null;
     if (normalized?.ok && normalized.ref.kind === 'zotero') {
-        const id = `${normalized.ref.library_id}-${normalized.ref.zotero_key}`;
+        const id = modelObjectIdFromReference(normalized.ref);
         const isAttachmentIdentity = rawAttrs.id != null || rawAttrs.att_id != null || rawAttrs.attachment_id != null;
         const ci = isAttachmentIdentity
             ? lookupCitationItemFromAttachment(id) || lookupCitationItem(id)

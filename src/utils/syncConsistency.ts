@@ -8,6 +8,7 @@ import { syncWithZoteroAtom } from '../../react/atoms/profile';
 import { serializeItem, serializeAttachment } from './zoteroSerializers';
 import { deleteItems, ItemSyncMetadata, CollectionSyncMetadata } from './sync';
 import { getAllItemsToSync, syncingItemFilter, syncItemsToBackend } from './sync';
+import { UNRESOLVED_LIBRARY_ID } from './libraryIdentity';
 
 /**
  * Discrepancy information for consistency checks
@@ -63,6 +64,10 @@ export async function performConsistencyCheck(
     sendUpdates: boolean = true
 ): Promise<ConsistencyCheckResult | null> {
     const consistencyId = uuidv4();
+    if (libraryID === UNRESOLVED_LIBRARY_ID) {
+        logger(`Beaver Consistency Check: Library ${libraryID} is not available on this device. Skipping consistency check.`, 2);
+        return null;
+    }
     const library = Zotero.Libraries.get(libraryID);
     const libraryName = library ? library.name : 'Unknown';
     

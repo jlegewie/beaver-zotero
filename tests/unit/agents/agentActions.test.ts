@@ -19,6 +19,7 @@ import type {
     CreateHighlightAnnotationsProposedData,
     CreateNoteAnnotationsProposedData,
 } from '../../../react/types/agentActions/createAnnotations';
+import type { CreateItemProposedData } from '../../../react/types/agentActions/items';
 
 describe('validateAppliedAgentAction', () => {
     const zotero = (globalThis as any).Zotero;
@@ -38,6 +39,10 @@ describe('validateAppliedAgentAction', () => {
         getByLibraryAndKeyAsync.mockReset();
         zotero.Items = { ...zotero.Items, getByLibraryAndKeyAsync };
         zotero.Libraries = { ...zotero.Libraries, userLibraryID: 1 };
+        zotero.Groups = {
+            ...zotero.Groups,
+            getLibraryIDFromGroupID: vi.fn((groupID: number) => groupID === 50 ? 5 : null),
+        };
     });
 
     it('returns valid when the applied item resolves', async () => {
@@ -56,16 +61,34 @@ describe('validateAppliedAgentAction', () => {
         expect(await validateAppliedAgentAction(appliedAction(1))).toBe('invalid');
     });
 
-    it('returns unverifiable when a group-library item does not resolve', async () => {
-        // Group libraryIDs are device-local: a failed lookup on this device
-        // must not be treated as a revert (it would persist a false undo).
+    it('returns invalid when a resolved group-library item is gone', async () => {
         getByLibraryAndKeyAsync.mockResolvedValue(null);
-        expect(await validateAppliedAgentAction(appliedAction(5))).toBe('unverifiable');
+        expect(await validateAppliedAgentAction(appliedAction(5, {
+            result_data: { library_id: 99, library_ref: 'g50', zotero_key: 'AAAAAAA1' },
+        }))).toBe('invalid');
+        expect(getByLibraryAndKeyAsync).toHaveBeenCalledWith(5, 'AAAAAAA1');
+    });
+
+    it('returns unverifiable when a group library is unavailable on this device', async () => {
+        getByLibraryAndKeyAsync.mockResolvedValue(null);
+        expect(await validateAppliedAgentAction(appliedAction(5, {
+            result_data: { library_id: 5, library_ref: 'g999', zotero_key: 'AAAAAAA1' },
+        }))).toBe('unverifiable');
+        expect(getByLibraryAndKeyAsync).not.toHaveBeenCalled();
     });
 
     it('returns valid when a group-library item resolves', async () => {
         getByLibraryAndKeyAsync.mockResolvedValue({ isAnnotation: () => false });
         expect(await validateAppliedAgentAction(appliedAction(5))).toBe('valid');
+    });
+
+    it('returns unverifiable when a legacy group-library item (no library_ref) is not found', async () => {
+        // A device-local group library_id is not a portable identity: a miss
+        // may just mean that id maps to a different group here, so it must not
+        // be treated as a revert. This covers all data written before library_ref.
+        getByLibraryAndKeyAsync.mockResolvedValue(null);
+        expect(await validateAppliedAgentAction(appliedAction(5))).toBe('unverifiable');
+        expect(getByLibraryAndKeyAsync).toHaveBeenCalledWith(5, 'AAAAAAA1');
     });
 
     it('returns invalid when an annotation action resolves to a non-annotation', async () => {
@@ -74,14 +97,14 @@ describe('validateAppliedAgentAction', () => {
         expect(await validateAppliedAgentAction(action)).toBe('invalid');
     });
 
-    it('returns unverifiable for bulk annotations in an unresolvable group library', async () => {
+    it('returns unverifiable for bulk annotations in an unavailable group library', async () => {
         getByLibraryAndKeyAsync.mockResolvedValue(null);
         const action = appliedAction(5, {
             action_type: 'create_highlight_annotations',
             result_data: {
                 created: [
-                    { library_id: 5, zotero_key: 'AAAAAAA1' },
-                    { library_id: 5, zotero_key: 'AAAAAAA2' },
+                    { library_id: 5, library_ref: 'g999', zotero_key: 'AAAAAAA1' },
+                    { library_id: 5, library_ref: 'g999', zotero_key: 'AAAAAAA2' },
                 ],
             },
         } as Partial<AgentAction>);
@@ -156,6 +179,36 @@ describe('getAppliedPdfAnnotationCount', () => {
         } as AgentAction;
 
         expect(getAppliedPdfAnnotationCount(action)).toBe(1);
+    });
+});
+
+describe('toAgentAction create_item normalization', () => {
+    it('parses a string library_id into a numeric library_id', () => {
+        const action = toAgentAction({
+            action_type: 'create_item',
+            proposed_data: {
+                library_id: '42',
+                item: { title: 'Imported item' },
+                file_available: false,
+            },
+        });
+
+        const data = action.proposed_data as CreateItemProposedData;
+        expect(data.library_id).toBe(42);
+    });
+
+    it('parses a camelCase string libraryId into a numeric library_id', () => {
+        const action = toAgentAction({
+            action_type: 'create_item',
+            proposed_data: {
+                libraryId: '43',
+                item: { title: 'Imported item' },
+                fileAvailable: true,
+            },
+        });
+
+        const data = action.proposed_data as CreateItemProposedData;
+        expect(data.library_id).toBe(43);
     });
 });
 

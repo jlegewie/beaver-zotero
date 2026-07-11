@@ -35,6 +35,10 @@ function queueDbRow(values: unknown[]) {
 
 (globalThis as any).Zotero = {
     ...((globalThis as any).Zotero ?? {}),
+    Libraries: {
+        ...((globalThis as any).Zotero?.Libraries ?? {}),
+        userLibraryID: 1,
+    },
     Tags: {
         getID: vi.fn(),
         getColor: vi.fn(() => null),
@@ -357,7 +361,7 @@ describe('executeManageTagsAction', () => {
         expect(resp.success).toBe(true);
         expect(Zot.Tags.rename).toHaveBeenCalledWith(1, 'old', 'new');
         expect(resp.result_data?.items_affected).toBe(2);
-        expect(resp.result_data?.affected_item_ids).toHaveLength(2);
+        expect(resp.result_data?.affected_item_ids).toEqual(['u-KEY10', 'u-KEY20']);
         expect(resp.result_data?.old_color).toEqual({ color: '#00ff00', position: 1 });
         expect(resp.result_data?.is_merge).toBe(false);
     });
@@ -389,7 +393,7 @@ describe('executeManageTagsAction', () => {
         expect(resp.success).toBe(true);
         expect(Zot.Tags.removeFromLibrary).toHaveBeenCalledWith(1, [11]);
         expect(resp.result_data?.items_affected).toBe(1);
-        expect(resp.result_data?.affected_item_ids).toHaveLength(1);
+        expect(resp.result_data?.affected_item_ids).toEqual(['u-KEY42']);
     });
 
     it('succeeds when tag already deleted (getID returns false)', async () => {

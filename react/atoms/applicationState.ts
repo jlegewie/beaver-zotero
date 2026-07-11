@@ -20,6 +20,7 @@ import {
 import { currentReaderAttachmentAtom, readerTextSelectionAtom } from './messageComposition';
 import { currentNoteItemAtom } from './zoteroContext';
 import { getCurrentPage, getCurrentReader, getEpubReaderPage } from '../utils/readerUtils';
+import { libraryRefForLibraryID } from '../../src/utils/libraryIdentity';
 import { searchableLibraryIdsAtom, processingModeAtom } from './profile';
 import { ProcessingMode } from '../types/profile';
 import { isLibraryTabAtom } from './ui';
@@ -69,6 +70,7 @@ export async function getReaderState(get: Getter, searchableLibraryIds: Set<numb
     return {
         library_id: readerAttachment.libraryID,
         zotero_key: readerAttachment.key,
+        library_ref: libraryRefForLibraryID(readerAttachment.libraryID) ?? undefined,
         current_page: currentPage,
         ...(contentKind && { content_kind: contentKind }),
         ...(currentTextSelection && { text_selection: currentTextSelection })
@@ -88,6 +90,7 @@ export function getNoteState(get: Getter, searchableLibraryIds: Set<number>): No
     return {
         library_id: noteItem.libraryID,
         zotero_key: noteItem.key,
+        library_ref: libraryRefForLibraryID(noteItem.libraryID) ?? undefined,
         ...(noteItem.parentKey && { parent_key: noteItem.parentKey }),
         ...(noteItem.getNoteTitle?.() && { title: noteItem.getNoteTitle() }),
     };
@@ -122,6 +125,7 @@ export async function buildZoteroApplicationState(get: Getter): Promise<Applicat
         if (library) {
             currentLibrary = {
                 library_id: library.libraryID,
+                library_ref: libraryRefForLibraryID(library.libraryID) ?? undefined,
                 name: library.name,
                 is_group: library.isGroup,
                 read_only: !library.editable,
@@ -134,6 +138,7 @@ export async function buildZoteroApplicationState(get: Getter): Promise<Applicat
         if (library) {
             currentLibrary = {
                 library_id: library.libraryID,
+                library_ref: libraryRefForLibraryID(library.libraryID) ?? undefined,
                 name: library.name,
                 is_group: library.isGroup,
                 read_only: !library.editable,
@@ -152,6 +157,7 @@ export async function buildZoteroApplicationState(get: Getter): Promise<Applicat
             if (library && searchableLibrarySet.has(library.libraryID)) {
                 currentLibrary = {
                     library_id: library.libraryID,
+                    library_ref: libraryRefForLibraryID(library.libraryID) ?? undefined,
                     name: library.name,
                     is_group: library.isGroup,
                     read_only: !library.editable,
@@ -165,6 +171,7 @@ export async function buildZoteroApplicationState(get: Getter): Promise<Applicat
                     collection_key: collection.key,
                     name: collection.name,
                     library_id: collection.libraryID,
+                    library_ref: libraryRefForLibraryID(collection.libraryID) ?? undefined,
                     parent_key: collection.parentKey || null,
                 };
             }
@@ -178,6 +185,7 @@ export async function buildZoteroApplicationState(get: Getter): Promise<Applicat
                     .map((item: Zotero.Item) => ({
                         library_id: item.libraryID,
                         zotero_key: item.key,
+                        library_ref: libraryRefForLibraryID(item.libraryID) ?? undefined,
                     }));
             }
         }

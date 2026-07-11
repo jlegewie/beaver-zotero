@@ -9,7 +9,7 @@ import { ModelMessage } from '../agents/types';
 import { ZoteroItemReference } from '../types/zotero';
 import { activeRunAtom } from '../agents/atoms';
 import { loadFullItemDataWithAllTypes, isLibraryEditable } from '../../src/utils/zoteroUtils';
-import { getLibraryByIdOrName, getCollectionByIdOrName } from '../../src/services/agentDataProvider/utils';
+import { getLibraryByIdOrName, getCollectionByIdOrName, isLibrarySearchable } from '../../src/services/agentDataProvider/utils';
 import { getPref } from '../../src/utils/prefs';
 import { store } from '../store';
 import { currentReaderAttachmentKeyAtom } from '../atoms/messageComposition';
@@ -19,6 +19,8 @@ import { toolAnnotationApplyBatcher, filterAnnotationAgentActions } from './tool
 import { saveStreamingNote } from './noteActions';
 import { currentThreadIdAtom } from '../atoms/threads';
 import { logger } from '../../src/utils/logger';
+import { parseZoteroId } from './citationGrammar';
+import { libraryRefForLibraryID, resolveItemReference, resolveWriteTargetLibrary } from '../../src/utils/libraryIdentity';
 
 /**
  * Extract all Zotero item references from agent actions that need to be loaded.
@@ -35,10 +37,15 @@ export function extractItemReferencesFromAgentActions(actions: AgentAction[]): Z
         if (isAnnotationAgentAction(action)) {
             const libraryId = action.proposed_data.library_id;
             const attachmentKey = action.proposed_data.attachment_key;
+            const libraryRef = action.proposed_data.library_ref;
             if (typeof libraryId === 'number' && typeof attachmentKey === 'string' && attachmentKey) {
                 const key = `${libraryId}-${attachmentKey}`;
                 if (!refs.has(key)) {
-                    refs.set(key, { library_id: libraryId, zotero_key: attachmentKey });
+                    refs.set(key, {
+                        library_id: libraryId,
+                        zotero_key: attachmentKey,
+                        ...(typeof libraryRef === 'string' && libraryRef ? { library_ref: libraryRef } : {}),
+                    });
                 }
             }
         }
@@ -47,10 +54,15 @@ export function extractItemReferencesFromAgentActions(actions: AgentAction[]): Z
         if (isZoteroNoteAgentAction(action)) {
             const libraryId = action.proposed_data.library_id;
             const zoteroKey = action.proposed_data.zotero_key;
+            const libraryRef = action.proposed_data.library_ref;
             if (typeof libraryId === 'number' && typeof zoteroKey === 'string' && zoteroKey) {
                 const key = `${libraryId}-${zoteroKey}`;
                 if (!refs.has(key)) {
-                    refs.set(key, { library_id: libraryId, zotero_key: zoteroKey });
+                    refs.set(key, {
+                        library_id: libraryId,
+                        zotero_key: zoteroKey,
+                        ...(typeof libraryRef === 'string' && libraryRef ? { library_ref: libraryRef } : {}),
+                    });
                 }
             }
         }
@@ -58,17 +70,14 @@ export function extractItemReferencesFromAgentActions(actions: AgentAction[]): Z
         // For create_note actions with parent item reference in proposed_data
         if (isCreateNoteAgentAction(action)) {
             const parentItemId = action.proposed_data.parent_item_id as string | undefined;
-            if (parentItemId) {
-                const dashIdx = parentItemId.indexOf('-');
-                if (dashIdx > 0) {
-                    const libraryId = parseInt(parentItemId.substring(0, dashIdx), 10);
-                    const zoteroKey = parentItemId.substring(dashIdx + 1);
-                    if (!isNaN(libraryId) && zoteroKey) {
-                        const key = `${libraryId}-${zoteroKey}`;
-                        if (!refs.has(key)) {
-                            refs.set(key, { library_id: libraryId, zotero_key: zoteroKey });
-                        }
-                    }
+            const parsedParent = parseZoteroId(parentItemId);
+            if (parsedParent) {
+                // Key on library_ref when available: an unresolved portable ref
+                // collapses library_id to UNRESOLVED_LIBRARY_ID, and two refs from
+                // different groups would otherwise collide on the same key.
+                const key = `${parsedParent.library_ref ?? parsedParent.library_id}-${parsedParent.zotero_key}`;
+                if (!refs.has(key)) {
+                    refs.set(key, parsedParent);
                 }
             }
         }
@@ -77,10 +86,15 @@ export function extractItemReferencesFromAgentActions(actions: AgentAction[]): Z
         if (hasAppliedZoteroItem(action)) {
             const libraryId = action.result_data!.library_id;
             const zoteroKey = action.result_data!.zotero_key;
+            const libraryRef = action.result_data!.library_ref;
             if (typeof libraryId === 'number' && typeof zoteroKey === 'string' && zoteroKey) {
                 const key = `${libraryId}-${zoteroKey}`;
                 if (!refs.has(key)) {
-                    refs.set(key, { library_id: libraryId, zotero_key: zoteroKey });
+                    refs.set(key, {
+                        library_id: libraryId,
+                        zotero_key: zoteroKey,
+                        ...(typeof libraryRef === 'string' && libraryRef ? { library_ref: libraryRef } : {}),
+                    });
                 }
             }
         }
@@ -102,10 +116,10 @@ export async function loadItemDataForAgentActions(actions: AgentAction[]): Promi
     const refs = extractItemReferencesFromAgentActions(actions);
     if (refs.length === 0) return [];
 
-    // Fetch items by library and key
-    const itemPromises = refs.map(ref =>
-        Zotero.Items.getByLibraryAndKeyAsync(ref.library_id, ref.zotero_key)
-    );
+    const itemPromises = refs.map(async ref => {
+        const resolved = await resolveItemReference(ref);
+        return resolved.status === 'found' ? resolved.item : null;
+    });
     const items = (await Promise.all(itemPromises)).filter((item): item is Zotero.Item => !!item);
 
     // Load full item data
@@ -357,34 +371,57 @@ export async function autoCreateNoteAgentActions(
         let parentReference: ZoteroItemReference | undefined;
         let targetLibraryId: number | undefined;
 
-        if (proposed.library_id != null && proposed.zotero_key) {
-            const item = await Zotero.Items.getByLibraryAndKeyAsync(
-                proposed.library_id, proposed.zotero_key
-            );
-            if (item) {
-                targetLibraryId = proposed.library_id;
+        if ((proposed.library_id != null || proposed.library_ref) && proposed.zotero_key) {
+            const resolved = await resolveItemReference({
+                library_id: proposed.library_id,
+                library_ref: proposed.library_ref,
+                zotero_key: proposed.zotero_key,
+            });
+            if (resolved.status === 'found') {
+                const item = resolved.item;
+                targetLibraryId = item.libraryID;
+                const libraryRef = proposed.library_ref ?? libraryRefForLibraryID(item.libraryID) ?? undefined;
                 if (item.isAttachment() && item.parentKey) {
-                    parentReference = { library_id: proposed.library_id, zotero_key: item.parentKey };
+                    parentReference = { library_id: item.libraryID, zotero_key: item.parentKey, library_ref: libraryRef };
                 } else {
-                    parentReference = { library_id: proposed.library_id, zotero_key: proposed.zotero_key };
+                    parentReference = { library_id: item.libraryID, zotero_key: proposed.zotero_key, library_ref: libraryRef };
                 }
             }
         }
 
-        // If no target library from item_id, try resolving from library attribute
-        if (!targetLibraryId && proposed.library) {
-            const libraryResult = getLibraryByIdOrName(proposed.library);
-            if (libraryResult.library) {
-                targetLibraryId = libraryResult.library.libraryID;
+        // Resolve a standalone-note target library, but only when no parent
+        // item was requested: a proposed zotero_key whose resolution failed
+        // must not silently become an unattached note — the action stays
+        // pending for the normal approval flow instead.
+        if (!targetLibraryId && !proposed.zotero_key) {
+            if (proposed.library_ref || proposed.library_id != null) {
+                // Structured fields: a portable library_ref is authoritative and
+                // never falls back to the name field when it doesn't resolve here.
+                const libraryResolution = resolveWriteTargetLibrary({
+                    library_ref: proposed.library_ref,
+                    library_id: proposed.library_id,
+                });
+                if (libraryResolution.ok) {
+                    targetLibraryId = libraryResolution.libraryID;
+                }
+            } else if (proposed.library) {
+                // `library` is a name-or-ID string; getLibraryByIdOrName also
+                // parses numeric-ID strings and portable refs.
+                const libraryResult = getLibraryByIdOrName(proposed.library);
+                if (libraryResult.library) {
+                    targetLibraryId = libraryResult.library.libraryID;
+                }
+            } else {
+                // No target info at all: default to the user's library,
+                // mirroring the resolution used at note-creation time.
+                targetLibraryId = Zotero.Libraries.userLibraryID;
             }
         }
 
-        // Fallback to user's default library if no library specified but collection is
-        if (!targetLibraryId && proposed.collection) {
-            targetLibraryId = Zotero.Libraries.userLibraryID;
-        }
-
         if (!targetLibraryId) continue;
+        // Libraries excluded from Beaver are an access-control boundary: never
+        // auto-create a note in one, regardless of how the target was resolved.
+        if (!isLibrarySearchable(targetLibraryId)) continue;
         if (!isLibraryEditable(targetLibraryId)) continue;
 
         // Resolve collection if specified
@@ -395,9 +432,14 @@ export async function autoCreateNoteAgentActions(
                 collectionKey = collectionResult.collection.key;
                 // If collection is in a different library than targetLibraryId
                 // (e.g. library was not specified but collection was found elsewhere),
-                // update targetLibraryId to match
-                if (!proposed.library_id && !proposed.zotero_key && !proposed.library) {
-                    targetLibraryId = collectionResult.libraryID;
+                // update targetLibraryId to match — but never into an excluded or
+                // read-only library; such a collection is unusable here.
+                if (!proposed.library_ref && !proposed.library_id && !proposed.zotero_key && !proposed.library) {
+                    if (isLibrarySearchable(collectionResult.libraryID) && isLibraryEditable(collectionResult.libraryID)) {
+                        targetLibraryId = collectionResult.libraryID;
+                    } else {
+                        collectionKey = undefined;
+                    }
                 }
             } else {
                 logger(`autoCreateNoteAgentActions: Collection "${proposed.collection}" not found, creating note without collection`, 1);
@@ -440,4 +482,3 @@ export async function autoCreateNoteAgentActions(
         }
     }
 }
-

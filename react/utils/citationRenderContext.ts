@@ -13,6 +13,7 @@ import {
 } from './citationGrammar';
 import { getCitationPreloadFilePath, preloadPageLabelsForContent } from './pageLabels';
 import type { CitationIndexEntry, StructuredExtractResult } from '../../src/beaver-extract/schema/schema';
+import { UNRESOLVED_LIBRARY_ID } from '../../src/utils/libraryIdentity';
 
 function citationLocationsFromEntries(entries: CitationIndexEntry[]): PartLocation[] {
     const byPage = new Map<number, PartLocation>();
@@ -80,6 +81,10 @@ export async function buildLocalCitationDataMapForContent(
         const citationKey = requestedCitationKey(normalized.ref);
         if (seen.has(citationKey)) continue;
         seen.add(citationKey);
+        // A portable ref whose library isn't available on this device can't be
+        // looked up (and would throw); local metadata is only an export
+        // enhancement, so skip it and fall back to normal citation rendering.
+        if (normalized.ref.library_id === UNRESOLVED_LIBRARY_ID) continue;
 
         try {
             const item = Zotero.Items.getByLibraryAndKey(

@@ -3,6 +3,7 @@
  */
 
 import { logger } from '../../utils/logger';
+import { modelObjectId, resolveItemReference, resolveObjectId, UNRESOLVED_LIBRARY_ID } from '../../utils/libraryIdentity';
 import {
     formatZoteroCreatorsString,
     getCreatorsFromItem,
@@ -41,28 +42,34 @@ export async function handleGetAnnotationsRequest(
     logger(`handleGetAnnotationsRequest: Getting annotations for ${request.attachment_id}`, 1);
 
     try {
-        const dashIndex = request.attachment_id.indexOf('-');
-        if (dashIndex === -1) {
-            return invalidResponse(request, 'Invalid attachment_id format', 'invalid_attachment_id');
-        }
-
-        const libraryId = parseInt(request.attachment_id.substring(0, dashIndex), 10);
-        const key = request.attachment_id.substring(dashIndex + 1);
-        if (isNaN(libraryId) || !key) {
+        const parsedRef = resolveObjectId(request.attachment_id);
+        if (!parsedRef) {
             return invalidResponse(request, 'Invalid attachment_id format', 'invalid_attachment_id');
         }
 
         // Reject attachments in libraries the user excluded from Beaver before any
         // lookup, so excluded annotations are never returned or confirmed to exist.
-        const excluded = checkLibraryExcluded(libraryId);
-        if (excluded) {
-            return invalidResponse(request, excluded.message, 'library_excluded');
+        // An unresolved portable ref has no local library to check yet — the
+        // resolution below reports it as library_unavailable.
+        if (parsedRef.library_id !== UNRESOLVED_LIBRARY_ID) {
+            const excluded = checkLibraryExcluded(parsedRef.library_id);
+            if (excluded) {
+                return invalidResponse(request, excluded.message, 'library_excluded');
+            }
         }
 
-        const attachment = await Zotero.Items.getByLibraryAndKeyAsync(libraryId, key);
-        if (!attachment) {
+        const resolved = await resolveItemReference(parsedRef);
+        if (resolved.status === 'library_unavailable') {
+            return invalidResponse(
+                request,
+                'Attachment is in a library that is not available on this computer.',
+                'library_unavailable',
+            );
+        }
+        if (resolved.status === 'not_found') {
             return invalidResponse(request, 'Attachment not found', 'not_found');
         }
+        const attachment = resolved.item;
 
         if (!attachment.isFileAttachment?.()) {
             return invalidResponse(request, 'Item is not a file attachment', 'not_attachment');
@@ -98,7 +105,7 @@ export async function handleGetAnnotationsRequest(
                     title = parent.getDisplayTitle?.() || '';
                 }
                 itemInfo = {
-                    item_id: `${parent.libraryID}-${parent.key}`,
+                    item_id: modelObjectId(parent.libraryID, parent.key),
                     item_type: parent.itemType ?? null,
                     title,
                     creators: formatZoteroCreatorsString(getCreatorsFromItem(parent)),

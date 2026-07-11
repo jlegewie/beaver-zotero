@@ -28,6 +28,7 @@ import Tooltip from '../../../components/ui/Tooltip';
 import { selectItemById } from '../../../../src/utils/selectItem';
 import { revealSource, getCurrentCollectionKeyForItem } from '../../../utils/sourceUtils';
 import { isLibraryEditable } from '../../../../src/utils/zoteroUtils';
+import { libraryRefForLibraryID, resolveItemReference } from '../../../../src/utils/libraryIdentity';
 import { saveStreamingNote } from '../../../utils/noteActions';
 import {
     extractNoteBlocksFromMessages,
@@ -39,6 +40,11 @@ import {
 import { citationMapAtom } from '../../../atoms/citations';
 import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '../../../atoms/externalReferences';
 import { isLibraryTabAtom } from '../../../atoms/ui';
+import {
+    annotationPanelStateAtom,
+    defaultAnnotationPanelState,
+    toggleAnnotationPanelVisibilityAtom,
+} from '../../../atoms/messageUIState';
 import { logger } from '../../../../src/utils/logger';
 import Button from '../../../components/ui/Button';
 import { textWithTrailingNoWrap } from '../../../utils/textWithTrailingNoWrap';
@@ -74,11 +80,12 @@ const NoteAgentActionRow: React.FC<NoteAgentActionRowProps> = ({ action, runId, 
     const handleReveal = useCallback(async () => {
         const libraryId = action.result_data?.library_id;
         const zoteroKey = action.result_data?.zotero_key;
+        const libraryRef = action.result_data?.library_ref;
         if (!libraryId || !zoteroKey) return;
         // Reveal within the current collection when the note belongs to it,
         // instead of switching to the library root.
         const collectionKey = await getCurrentCollectionKeyForItem(libraryId, zoteroKey);
-        revealSource({ library_id: libraryId, zotero_key: zoteroKey }, collectionKey);
+        revealSource({ library_id: libraryId, zotero_key: zoteroKey, library_ref: libraryRef }, collectionKey);
     }, [action.result_data]);
 
     // Undo: delete note from Zotero + revert action status
@@ -87,10 +94,15 @@ const NoteAgentActionRow: React.FC<NoteAgentActionRowProps> = ({ action, runId, 
         setIsBusy(true);
         try {
             if (action.result_data?.library_id && action.result_data?.zotero_key) {
-                const item = await Zotero.Items.getByLibraryAndKeyAsync(
-                    action.result_data.library_id, action.result_data.zotero_key
-                );
-                if (item) await item.eraseTx();
+                // Resolve through library_ref (with legacy library_id fallback)
+                // so the note is found even when this device numbers its group
+                // library differently than the device that created it.
+                const resolved = await resolveItemReference({
+                    library_id: action.result_data.library_id,
+                    library_ref: action.result_data.library_ref,
+                    zotero_key: action.result_data.zotero_key,
+                });
+                if (resolved.status === 'found') await resolved.item.eraseTx();
             }
             clearNoteAutoApplied(action.id);
             undoAgentAction(action.id);
@@ -121,16 +133,27 @@ const NoteAgentActionRow: React.FC<NoteAgentActionRowProps> = ({ action, runId, 
             let targetLibraryId: number | undefined;
 
             if (proposed.library_id != null && proposed.zotero_key) {
-                const item = await Zotero.Items.getByLibraryAndKeyAsync(
-                    proposed.library_id, proposed.zotero_key
-                );
-                if (item) {
-                    targetLibraryId = proposed.library_id;
-                    if (item.isAttachment() && item.parentKey) {
-                        parentReference = { library_id: proposed.library_id, zotero_key: item.parentKey };
-                    } else {
-                        parentReference = { library_id: proposed.library_id, zotero_key: proposed.zotero_key };
-                    }
+                // Resolve the intended parent through library_ref (with legacy
+                // library_id fallback). If it can't be resolved on this device,
+                // reject rather than silently misfiling the note into the
+                // personal library via the fallback below.
+                const resolved = await resolveItemReference({
+                    library_id: proposed.library_id,
+                    library_ref: proposed.library_ref,
+                    zotero_key: proposed.zotero_key,
+                });
+                if (resolved.status !== 'found') {
+                    logger(`NoteAgentActionRow: parent item unavailable (${resolved.status}), rejecting action`, 1);
+                    rejectAgentAction(action.id);
+                    return;
+                }
+                const item = resolved.item;
+                targetLibraryId = item.libraryID;
+                const libraryRef = proposed.library_ref ?? libraryRefForLibraryID(item.libraryID) ?? undefined;
+                if (item.isAttachment() && item.parentKey) {
+                    parentReference = { library_id: item.libraryID, zotero_key: item.parentKey, library_ref: libraryRef };
+                } else {
+                    parentReference = { library_id: item.libraryID, zotero_key: proposed.zotero_key, library_ref: libraryRef };
                 }
             }
 
@@ -314,7 +337,10 @@ interface NoteAgentActionGroupProps {
  * is shown.
  */
 const NoteAgentActionGroup: React.FC<NoteAgentActionGroupProps> = ({ runId, actions, noteBlocks }) => {
-    const [isExpanded, setIsExpanded] = useState(false);
+    const groupId = `${runId}:notes`;
+    const panelStates = useAtomValue(annotationPanelStateAtom);
+    const isExpanded = (panelStates[groupId] ?? defaultAnnotationPanelState).resultsVisible;
+    const togglePanelVisibility = useSetAtom(toggleAnnotationPanelVisibilityAtom);
     const [isHovered, setIsHovered] = useState(false);
     const [isProcessing, setIsProcessing] = useState(false);
     const [clickedButton, setClickedButton] = useState<'undo' | 'dismiss' | null>(null);
@@ -339,8 +365,8 @@ const NoteAgentActionGroup: React.FC<NoteAgentActionGroupProps> = ({ runId, acti
 
     const toggleExpanded = useCallback(() => {
         if (isProcessing) return;
-        setIsExpanded(prev => !prev);
-    }, [isProcessing]);
+        togglePanelVisibility(groupId);
+    }, [groupId, isProcessing, togglePanelVisibility]);
 
     const handleUndoAll = useCallback(async () => {
         if (isProcessing) return;
@@ -353,10 +379,14 @@ const NoteAgentActionGroup: React.FC<NoteAgentActionGroupProps> = ({ runId, acti
             for (const action of appliedActions) {
                 try {
                     if (action.result_data?.library_id && action.result_data?.zotero_key) {
-                        const item = await Zotero.Items.getByLibraryAndKeyAsync(
-                            action.result_data.library_id, action.result_data.zotero_key
-                        );
-                        if (item) await item.eraseTx();
+                        // library_ref (with legacy library_id fallback) resolves
+                        // the note across device-local group library numbering.
+                        const resolved = await resolveItemReference({
+                            library_id: action.result_data.library_id,
+                            library_ref: action.result_data.library_ref,
+                            zotero_key: action.result_data.zotero_key,
+                        });
+                        if (resolved.status === 'found') await resolved.item.eraseTx();
                     }
                     clearNoteAutoApplied(action.id);
                     undoAgentAction(action.id);

@@ -96,7 +96,9 @@ async function createHighlight(
 
     expect(response.ok, response.error).toBe(true);
     expect(response.reference).toBeTruthy();
-    const id = `${response.reference!.library_id}-${response.reference!.zotero_key}`;
+    // Compare in the portable grammar the find_annotations rows emit.
+    const ref = response.reference!;
+    const id = `${(ref as { library_ref?: string }).library_ref ?? ref.library_id}-${ref.zotero_key}`;
     createdItemIds.push(id);
     return id;
 }

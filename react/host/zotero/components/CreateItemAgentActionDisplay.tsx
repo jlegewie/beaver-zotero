@@ -15,6 +15,8 @@ import Tooltip from '../../../components/ui/Tooltip';
 import { applyCreateItemData } from '../../../utils/addItemActions';
 import { ensureItemSynced, ensureItemsSynced } from '../../../../src/utils/sync';
 import { logger } from '../../../../src/utils/logger';
+import { resolveItemReference } from '../../../../src/utils/libraryIdentity';
+import { notifyReferenceUnavailable } from '../sourceActions';
 import {
     CreateItemAgentAction,
     ackAgentActionsAtom,
@@ -223,6 +225,7 @@ const CreateItemAgentActionDisplay: React.FC<CreateItemAgentActionDisplayProps> 
         const resultData: CreateItemResultData = {
             library_id: itemRef.library_id,
             zotero_key: itemRef.zotero_key,
+            library_ref: itemRef.library_ref,
             attachment_status: 'none',
         };
 
@@ -255,7 +258,8 @@ const CreateItemAgentActionDisplay: React.FC<CreateItemAgentActionDisplayProps> 
             if (action.proposed_data.item.source_id) {
                 markExternalReferenceImported(action.proposed_data.item.source_id, {
                     library_id: result.library_id,
-                    zotero_key: result.zotero_key
+                    zotero_key: result.zotero_key,
+                    library_ref: result.library_ref,
                 });
             }
 
@@ -337,7 +341,8 @@ const CreateItemAgentActionDisplay: React.FC<CreateItemAgentActionDisplayProps> 
                             if (action.proposed_data.item.source_id) {
                                 markExternalReferenceImported(action.proposed_data.item.source_id, {
                                     library_id: result.library_id,
-                                    zotero_key: result.zotero_key
+                                    zotero_key: result.zotero_key,
+                                    library_ref: result.library_ref,
                                 });
                             }
 
@@ -417,14 +422,24 @@ const CreateItemAgentActionDisplay: React.FC<CreateItemAgentActionDisplayProps> 
                 // Item not created yet - just mark as rejected
                 rejectAgentAction(action.id);
             } else {
-                // Delete the item from Zotero
-                const item = await Zotero.Items.getByLibraryAndKeyAsync(
-                    action.result_data.library_id,
-                    action.result_data.zotero_key
-                );
-                if (item) {
+                // Delete the item from Zotero. Resolve through the device-portable
+                // library_ref so a group item created on another computer maps to the
+                // right local library instead of a stale device-local library_id.
+                const resolved = await resolveItemReference({
+                    library_ref: action.result_data.library_ref,
+                    library_id: action.result_data.library_id,
+                    zotero_key: action.result_data.zotero_key,
+                });
+                if (resolved.status === 'library_unavailable') {
+                    // The item is in a library this computer doesn't have (e.g. an
+                    // unjoined group). We can't delete it here, and marking it undone
+                    // would misrepresent the applied state on other devices.
+                    notifyReferenceUnavailable('item', 'library_unavailable');
+                    return;
+                }
+                if (resolved.status === 'found') {
                     await Zotero.DB.executeTransaction(async () => {
-                        await item.eraseTx();
+                        await resolved.item.eraseTx();
                     });
                 }
                 undoAgentAction(action.id);
@@ -564,4 +579,3 @@ const CreateItemAgentActionDisplay: React.FC<CreateItemAgentActionDisplayProps> 
 };
 
 export default CreateItemAgentActionDisplay;
-

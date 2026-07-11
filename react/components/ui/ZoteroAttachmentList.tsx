@@ -3,6 +3,7 @@ import { CSSItemTypeIcon } from '../icons/icons';
 import { FailedFileReference, FailedItemReference } from '../../types/zotero';
 import { errorMapping } from '../../atoms/errors';
 import { selectItemById } from '../../../src/utils/selectItem';
+import { UNRESOLVED_LIBRARY_ID } from '../../../src/utils/libraryIdentity';
 import IconButton from './IconButton';
 
 interface ItemWithSelectionId {
@@ -32,6 +33,9 @@ const ZoteroAttachmentList: React.FC<ZoteroAttachmentListProps> = ({
             if (attachments) {
                 const items: ItemWithSelectionId[] = [];
                 for (const attachment of attachments) {
+                    // A portable library ref that couldn't be resolved on this device
+                    // carries library_id 0, which throws synchronously if looked up.
+                    if (attachment.library_id === UNRESOLVED_LIBRARY_ID) continue;
                     const item = await Zotero.Items.getByLibraryAndKeyAsync(
                         attachment.library_id,
                         attachment.zotero_key

@@ -10,6 +10,7 @@ import { maybeEnqueueOcrJob } from '../ocr/enqueueOcr';
 import { isReadableContentKind, type AttachmentInfo, type ContentKind } from './shared/contentKinds';
 import { getPDFPageCountFromFulltext, getPDFPageCountFromWorker } from './shared/pageCount';
 import type { TimingAccumulator } from '../../utils/timing';
+import { libraryRefForLibraryID, modelObjectId } from '../../utils/libraryIdentity';
 
 export interface AttachmentInfoOptions {
     parentItemId?: string | null;
@@ -47,11 +48,11 @@ type AttachmentAvailabilityResult =
     | { available: true; filePath: string; contentType: string };
 
 function attachmentId(item: Zotero.Item): string {
-    return `${item.libraryID}-${item.key}`;
+    return modelObjectId(item.libraryID, item.key);
 }
 
 function defaultParentItemId(item: Zotero.Item): string | null {
-    return item.parentKey ? `${item.libraryID}-${item.parentKey}` : null;
+    return item.parentKey ? modelObjectId(item.libraryID, item.parentKey) : null;
 }
 
 function contentKindLabel(kind: ContentKind): string {
@@ -500,6 +501,7 @@ export async function getAttachmentInfo(
     const isPrimary = options.isPrimary ?? false;
     const base: AttachmentInfo = {
         attachment_id: attachmentId(item),
+        library_ref: libraryRefForLibraryID(item.libraryID) ?? undefined,
         parent_item_id: options.parentItemId ?? defaultParentItemId(item),
         title: item.getField?.('title') || item.getDisplayTitle?.() || null,
         filename: item.attachmentFilename || null,

@@ -11,11 +11,12 @@ import { toReadabilityInfo, summarizeRegularItemReadability } from '../utils/att
 import { InvalidItemsMessageContent } from '../components/ui/popup/InvalidItemsMessageContent';
 import { agentItemFilter } from "../../src/utils/agentItemSupport";
 import { getCurrentReader } from "../utils/readerUtils";
-import { TextSelection } from "../types/attachments/apiTypes";
+import { TextSelection, zoteroReferenceLookupKeys } from "../types/attachments/apiTypes";
 import { ZoteroTag, CollectionReference } from "../types/zotero";
 import type { ExternalFileRecord } from "../../src/services/database";
 import { currentNoteItemAtom } from "./zoteroContext";
 import type { SlashCommandDescriptor } from "../utils/slashCommands";
+import { libraryRefForLibraryID } from "../../src/utils/libraryIdentity";
 
 
 /**
@@ -370,7 +371,12 @@ async function validateItemsInBackground(
     // for as long as the tab is open, so their invalid popup should not auto-expire.
     isTabContext: boolean = false
 ) {
-    const getValidation = get(getItemValidationAtom);
+    // Read through the derived atom on every call. Capturing its returned
+    // function here would capture the validation-results Map from before the
+    // async work below and make the post-validation popup decision use stale
+    // attachment states.
+    const getValidation = (item: Zotero.Item): ItemValidationState | undefined =>
+        get(getItemValidationAtom)(item);
     logger(`validateItemsInBackground: Validating ${items.length} items`, 3);
     
     try {
@@ -540,7 +546,11 @@ export const updateMessageItemsFromZoteroSelectionAtom = atom(
 
         // Filter out items already in the thread
         const existingKeys = get(allUserAttachmentKeysAtom);
-        const newItems = itemsFiltered.filter((item) => !existingKeys.has(`${item.libraryID}-${item.key}`));
+        const newItems = itemsFiltered.filter((item) => !zoteroReferenceLookupKeys({
+            library_id: item.libraryID,
+            zotero_key: item.key,
+            library_ref: libraryRefForLibraryID(item.libraryID),
+        }).some(key => existingKeys.has(key)));
         
         if (!limit || newItems.length <= limit) {
             await set(addItemsToCurrentMessageItemsAtom, newItems.slice(0, limit));

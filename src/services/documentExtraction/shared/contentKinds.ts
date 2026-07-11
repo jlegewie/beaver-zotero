@@ -21,6 +21,8 @@ export type ContentInfoStatus = 'readable' | 'unreadable' | 'processing';
 /** Display subset of attachment metadata */
 export interface AttachmentStub {
     attachment_id: string;
+    /** Device-portable library identity ("u" | "g<groupID>") of the attachment referenced by `attachment_id`. */
+    library_ref?: string;
     parent_item_id?: string | null;
     title?: string | null;
     filename?: string | null;

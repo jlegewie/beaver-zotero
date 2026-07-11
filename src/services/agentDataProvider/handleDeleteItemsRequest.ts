@@ -1,4 +1,5 @@
 import { logger } from '../../utils/logger';
+import { resolveItemReference, resolveObjectId } from '../../utils/libraryIdentity';
 
 
 /**
@@ -6,7 +7,7 @@ import { logger } from '../../utils/logger';
  * Used for test cleanup.
  */
 interface DeleteItemsRequest {
-    item_ids: string[];  // Format: "libraryID-key"
+    item_ids: string[];  // Format: "<library_ref>-<key>" or "<libraryID>-<key>"
 }
 
 interface DeleteItemsResponse {
@@ -39,18 +40,22 @@ export async function handleDeleteItemsRequest(
 
     for (const itemId of item_ids) {
         try {
-            const parts = itemId.split('-');
-            const libraryId = parseInt(parts[0], 10);
-            const key = parts.slice(1).join('-');
-
-            const item = await Zotero.Items.getByLibraryAndKeyAsync(libraryId, key);
-            if (item) {
-                item.deleted = true;
-                await item.saveTx();
-                deleted++;
-            } else {
-                failed.push(`${itemId}: not found`);
+            const parsedRef = resolveObjectId(itemId);
+            if (!parsedRef) {
+                failed.push(`${itemId}: invalid format`);
+                continue;
             }
+
+            const resolved = await resolveItemReference(parsedRef);
+            if (resolved.status !== 'found') {
+                failed.push(`${itemId}: not found`);
+                continue;
+            }
+
+            const item = resolved.item;
+            item.deleted = true;
+            await item.saveTx();
+            deleted++;
         } catch (error) {
             failed.push(`${itemId}: ${error}`);
         }

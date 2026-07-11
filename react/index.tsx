@@ -34,13 +34,16 @@ import { useSearchIndexAccess } from './hooks/useSearchIndexAccess';
 import { useSyncSuppression } from './hooks/useSyncSuppression';
 import { BeaverTemporaryAnnotations } from './utils/annotationUtils';
 import { registerZoteroHost } from './host/zotero';
+import { notifyWorkerStartFailure } from './utils/workerUnavailableNotice';
 
 // Configure the PDF package (webpack bundle copy). The esbuild bundle
 // configures its own copy from `src/hooks.ts`. Both must run because each
 // bundle has its own module-scope config in `src/beaver-extract/config.ts`.
 // The cross-bundle `MuPDFWorkerClient` per-name singletons are shared via
 // `Zotero.__beaverMuPDFWorkerClient_hot` / `_background` regardless.
-configurePDFForBeaver();
+//
+// Only the webpack copy wires `onWorkerStartFailure` to an in-app popup (hot worker only)
+configurePDFForBeaver({ onWorkerStartFailure: notifyWorkerStartFailure });
 
 // Register the Zotero client host so rendered chat-history components can
 // resolve host-specific navigation and data lookups. Non-Zotero clients omit
@@ -61,8 +64,8 @@ const GlobalContextInitializer = () => {
     // Handle plugin upgrade tasks
     useUpgradeHandler();
 
-    // Handle Zotero sync
-    useZoteroSync();
+    // Handle Zotero sync (legacy cloud processing beta)
+    // useZoteroSync();
 
     // Suppress Zotero auto-sync while mutating agent runs are active.
     useSyncSuppression();

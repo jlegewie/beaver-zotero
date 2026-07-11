@@ -9,6 +9,7 @@ import { resolveEpubAnnotationTarget } from '../../../../src/services/annotation
 import { BeaverTemporaryAnnotations } from '../../../utils/annotationUtils';
 import { logger } from '../../../../src/utils/logger';
 import { BEAVER_ANNOTATION_COLORS } from '../../../../src/constants/annotations';
+import { resolveLibraryRef } from '../../../../src/utils/libraryIdentity';
 import { TagPill } from '../../../components/agentRuns/TagPill';
 import { AnnotationTooltip, getAnnotationTooltipIcon } from '../../../components/agentRuns/AnnotationTooltip';
 import type {
@@ -175,6 +176,17 @@ export const CreateAnnotationsPreview: React.FC<CreateAnnotationsPreviewProps> =
     }
 
     const resolvedRef = actionData.resolved_ref;
+    // A group attachment's device-local library_id is UNRESOLVED_LIBRARY_ID (0) —
+    // its identity is the portable library_ref. Resolve to this device's local
+    // library id (null when the library isn't on this device) so the content-kind
+    // and navigation lookups below work for available group attachments. No
+    // exclusion gate: rendering and user-initiated navigation from persisted
+    // actions are not gated on library exclusion (writes are gated in the
+    // action's validate/execute paths).
+    const resolvedLibraryId = resolveLibraryRef({
+        library_ref: resolvedRef?.library_ref,
+        library_id: resolvedRef?.library_id,
+    });
     const noun = kind === 'highlight' ? 'highlight' : 'note';
 
     // Resolve the attachment's content kind once
@@ -182,10 +194,12 @@ export const CreateAnnotationsPreview: React.FC<CreateAnnotationsPreviewProps> =
     useEffect(() => {
         let cancelled = false;
         (async () => {
-            if (!resolvedRef?.zotero_key || typeof resolvedRef.library_id !== 'number') return;
+            // resolvedLibraryId is null when the attachment's library isn't on
+            // this device; the lookup below would throw on an unresolved id.
+            if (!resolvedRef?.zotero_key || !resolvedLibraryId) return;
             try {
                 const attachment = await Zotero.Items.getByLibraryAndKeyAsync(
-                    resolvedRef.library_id,
+                    resolvedLibraryId,
                     resolvedRef.zotero_key,
                 );
                 const resolved = attachment ? getReadableContentKind(attachment as Zotero.Item) : null;
@@ -195,7 +209,7 @@ export const CreateAnnotationsPreview: React.FC<CreateAnnotationsPreviewProps> =
             }
         })();
         return () => { cancelled = true; };
-    }, [resolvedRef?.library_id, resolvedRef?.zotero_key]);
+    }, [resolvedLibraryId, resolvedRef?.zotero_key]);
     const isEpub = contentKind === 'epub';
 
     const handleItemClick = useCallback(async (
@@ -206,9 +220,18 @@ export const CreateAnnotationsPreview: React.FC<CreateAnnotationsPreviewProps> =
             await BeaverTemporaryAnnotations.cleanupAll();
 
             const firstCreated = createdEntries[0];
-            if (firstCreated) {
+            const createdLibraryId = firstCreated
+                ? resolveLibraryRef({
+                    library_ref: firstCreated.library_ref,
+                    library_id: firstCreated.library_id,
+                })
+                : null;
+            if (
+                firstCreated
+                && createdLibraryId
+            ) {
                 const annotationItem = await Zotero.Items.getByLibraryAndKeyAsync(
-                    firstCreated.library_id,
+                    createdLibraryId,
                     firstCreated.zotero_key,
                 );
                 if (annotationItem) {
@@ -217,12 +240,12 @@ export const CreateAnnotationsPreview: React.FC<CreateAnnotationsPreviewProps> =
                 }
             }
 
-            if (!resolvedRef?.zotero_key || typeof resolvedRef.library_id !== 'number') return;
+            if (!resolvedRef?.zotero_key || !resolvedLibraryId) return;
 
             // Determine the navigation path from the attachment's actual content
             // kind.
             const attachment = await Zotero.Items.getByLibraryAndKeyAsync(
-                resolvedRef.library_id,
+                resolvedLibraryId,
                 resolvedRef.zotero_key,
             );
             if (!attachment) return;

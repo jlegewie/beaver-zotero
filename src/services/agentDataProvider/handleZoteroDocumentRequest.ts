@@ -24,7 +24,6 @@ import {
     loadAttachmentData,
     resolveToReadableAttachment,
     resolveAttachmentFileSource,
-    validateZoteroItemReference,
 } from '../documentExtraction';
 import { readableToExtractKind, type ExtractContentKind, type ReadableContentKind } from '../documentExtraction/shared/contentKinds';
 import {
@@ -37,10 +36,17 @@ import {
 // Hot-path handler keeps the remote-download-failed popup behavior by
 // passing the popup notifier through `onRemoteDownloadFailure`. The
 // background extractor deliberately omits it.
-import { checkLibraryExcluded, notifyRemoteDownloadFailure, notifyRemoteFileNotSynced } from './utils';
+import {
+    notifyRemoteDownloadFailure,
+    notifyRemoteFileNotSynced,
+    preflightZoteroAttachmentRequest,
+    isLibrarySearchable,
+    validateZoteroItemReference,
+} from './utils';
 import { EXTERNAL_LIBRARY_ID, resolveExternalFile } from '../externalFiles';
 import type { ExternalFileRecord } from '../database';
 import { serializeAttachmentStub, serializeItemStub } from '../../utils/zoteroSerializers';
+import { libraryRefForLibraryID, modelObjectIdFromReference } from '../../utils/libraryIdentity';
 import {
     createPreparedJsonMessage,
     type PreparedJsonMessage,
@@ -260,22 +266,12 @@ export async function handleZoteroDocumentRequest(
             'invalid_format',
         );
     }
-    const requestKey = `${attachment.library_id}-${attachment.zotero_key}`;
-
-    const formatError = validateZoteroItemReference(attachment);
-    if (formatError) {
-        return errorResponse(
-            `Invalid attachment reference '${requestKey}': ${formatError}`,
-            'invalid_format',
-        );
+    const preflight = preflightZoteroAttachmentRequest(attachment, validateZoteroItemReference);
+    const { requestKey } = preflight;
+    if (!preflight.ok) {
+        return errorResponse(preflight.error, preflight.errorCode);
     }
-
-    // Reject libraries the user excluded from Beaver before any item lookup, so
-    // an excluded attachment is never resolved, read, or even confirmed to exist.
-    const excluded = checkLibraryExcluded(attachment.library_id);
-    if (excluded) {
-        return errorResponse(excluded.message, 'library_excluded');
-    }
+    const { resolvedLibraryId } = preflight;
 
     const timeout = createTimeoutController(
         timeout_seconds,
@@ -293,7 +289,7 @@ export async function handleZoteroDocumentRequest(
     try {
         const item = await withRequestDeadline(
             Zotero.Items.getByLibraryAndKeyAsync(
-                attachment.library_id,
+                resolvedLibraryId,
                 attachment.zotero_key,
             ),
             'zotero_item_lookup',
@@ -409,6 +405,7 @@ export async function handleZoteroDocumentRequest(
                 resolved_attachment: {
                     library_id: resolvedItem.libraryID,
                     zotero_key: resolvedItem.key,
+                    library_ref: libraryRefForLibraryID(resolvedItem.libraryID) ?? undefined,
                 },
                 content_type: contentType,
                 content_kind: 'text',
@@ -443,6 +440,7 @@ export async function handleZoteroDocumentRequest(
                     resolved_attachment: {
                         library_id: result.resolvedAttachment.libraryId,
                         zotero_key: result.resolvedAttachment.zoteroKey,
+                        library_ref: libraryRefForLibraryID(result.resolvedAttachment.libraryId) ?? undefined,
                     },
                     content_type: result.contentType,
                     content_kind: 'epub',
@@ -480,6 +478,7 @@ export async function handleZoteroDocumentRequest(
                     resolved_attachment: {
                         library_id: result.resolvedAttachment.libraryId,
                         zotero_key: result.resolvedAttachment.zoteroKey,
+                        library_ref: libraryRefForLibraryID(result.resolvedAttachment.libraryId) ?? undefined,
                     },
                     content_type: result.contentType,
                     content_kind: 'snapshot',
@@ -537,6 +536,7 @@ export async function handleZoteroDocumentRequest(
                     resolved_attachment: {
                         library_id: result.resolvedAttachment.libraryId,
                         zotero_key: result.resolvedAttachment.zoteroKey,
+                        library_ref: libraryRefForLibraryID(result.resolvedAttachment.libraryId) ?? undefined,
                     },
                     content_type: result.contentType,
                     content_kind: 'pdf',
@@ -550,6 +550,7 @@ export async function handleZoteroDocumentRequest(
                 resolved_attachment: {
                     library_id: result.resolvedAttachment.libraryId,
                     zotero_key: result.resolvedAttachment.zoteroKey,
+                    library_ref: libraryRefForLibraryID(result.resolvedAttachment.libraryId) ?? undefined,
                 },
                 content_type: result.contentType,
                 content_kind: 'pdf',
@@ -561,26 +562,29 @@ export async function handleZoteroDocumentRequest(
 
         if (result.kind === 'timeout' || (result.kind === 'external_abort' && timeout.signal.aborted)) {
             const target = result.resolvedAttachment ?? {
-                libraryId: attachment.library_id,
+                libraryId: resolvedLibraryId,
                 zoteroKey: attachment.zotero_key,
             };
             try {
-                await Zotero.Beaver?.db?.enqueueBackgroundJob({
-                    jobType: 'document_extract',
-                    libraryId: target.libraryId,
-                    zoteroKey: target.zoteroKey,
-                    contentKind: 'pdf',
-                    payloadKind: mode,
-                    priority: 50,
-                    payload: {
-                        content_kind: 'pdf',
-                        maxPages: max_pages ?? null,
-                        maxFileSizeMB: max_file_size_mb ?? 0,
-                        timeoutSeconds: MAX_PDF_TIMEOUT_SECONDS,
-                    },
-                    now: Date.now(),
-                });
-                Zotero.Beaver?.backgroundExtractor?.notify();
+                // Enqueue a background job to retry the extraction.
+                if (isLibrarySearchable(target.libraryId)) {
+                    await Zotero.Beaver?.db?.enqueueBackgroundJob({
+                        jobType: 'document_extract',
+                        libraryId: target.libraryId,
+                        zoteroKey: target.zoteroKey,
+                        contentKind: 'pdf',
+                        payloadKind: mode,
+                        priority: 50,
+                        payload: {
+                            content_kind: 'pdf',
+                            maxPages: max_pages ?? null,
+                            maxFileSizeMB: max_file_size_mb ?? 0,
+                            timeoutSeconds: MAX_PDF_TIMEOUT_SECONDS,
+                        },
+                        now: Date.now(),
+                    });
+                    Zotero.Beaver?.backgroundExtractor?.notify();
+                }
             } catch (e) {
                 logger(`handleZoteroDocumentRequest: background enqueue failed: ${e}`, 1);
             }

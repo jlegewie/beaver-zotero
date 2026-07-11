@@ -7,6 +7,7 @@ import ZoteroAttachmentList from '../ui/ZoteroAttachmentList';
 import Button from '../ui/Button';
 import Tooltip from '../ui/Tooltip';
 import { retryUploads } from "../../../src/services/FileUploader";
+import { UNRESOLVED_LIBRARY_ID } from '../../../src/utils/libraryIdentity';
 import { FailedFileReference } from '../../types/zotero';
 import { Icon, ArrowDownIcon, ArrowRightIcon, RepeatIcon } from '../icons/icons';
 import IconButton from '../ui/IconButton';
@@ -79,7 +80,11 @@ const PaginatedFailedUploadsList: React.FC<PaginatedFailedUploadsListProps> = ({
             logger(`PaginatedFailedUploadsList: ${result.items.length} items found for page ${page + 1}`, 3);
 
             const newItems = await Promise.all(result.items.map(async (item) => {
-                const attachment = await Zotero.Items.getByLibraryAndKeyAsync(item.library_id, item.zotero_key);
+                // A portable library ref that couldn't be resolved on this device
+                // carries library_id 0, which throws synchronously if looked up.
+                const attachment = item.library_id === UNRESOLVED_LIBRARY_ID
+                    ? false as const
+                    : await Zotero.Items.getByLibraryAndKeyAsync(item.library_id, item.zotero_key);
                 const errorCode = item.upload_error_code || await getErrorMessage(attachment);
 
                 return {

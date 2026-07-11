@@ -29,6 +29,7 @@ export interface CitationActivation {
     /** Effective library identity, accounting for mapped external references. */
     effectiveLibraryID: number;
     effectiveItemKey: string;
+    effectiveLibraryRef?: string;
     /** Stripped preview text (used as the temporary-annotation label). */
     previewText: string;
     /** Document the click originated from (targets the right reader window). */
@@ -56,6 +57,7 @@ export interface CitationActivation {
 export interface AttachmentMatchNavigation {
     library_id: number;
     zotero_key: string;
+    library_ref?: string;
     content_kind: 'pdf' | 'epub' | 'text' | 'snapshot';
     /** 1-based page number (EPUB: 1-based section ordinal). */
     page_number?: number | null;
@@ -180,6 +182,12 @@ export interface ItemDataHost {
 export interface CitationExportRequest {
     effectiveLibraryID: number;
     effectiveItemKey: string;
+    /**
+     * Portable library ref (`"u"` / `"g<groupID>"`). For group citations the
+     * device-local `effectiveLibraryID` is 0 (identity lives here), so the host
+     * must resolve this to a local libraryID before looking the item up.
+     */
+    effectiveLibraryRef?: string | null;
     /** Identity as cited by the model, for page-locator fallback. */
     requestedRef: CitationRef | null;
     /** 1-based cited page numbers. */

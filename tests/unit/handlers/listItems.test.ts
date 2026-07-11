@@ -313,4 +313,32 @@ describe('handleListItemsRequest', () => {
         }));
         expect(attachment.getAnnotations).not.toHaveBeenCalled();
     });
+
+    it('emits a portable "u-<key>" item_id when this device can map the library to the personal library', async () => {
+        (globalThis as any).Zotero.Libraries.userLibraryID = 1;
+        const item = makeItem({
+            id: 1,
+            key: 'PORTABLE1',
+            itemType: 'journalArticle',
+            getField: vi.fn((field: string) => (field === 'title' ? 'Portable Item' : '')),
+        });
+        itemsById.set(item.id, item);
+        searchResults.push([item.id]);
+
+        const response = await handleListItemsRequest({
+            event: 'list_items_request',
+            request_id: 'req-5',
+            item_category: 'all',
+            recursive: true,
+            sort_by: 'dateModified',
+            sort_order: 'desc',
+            limit: 20,
+            offset: 0,
+        });
+
+        expect(response.items[0]).toEqual(expect.objectContaining({
+            item_id: 'u-PORTABLE1',
+            result_type: 'regular',
+        }));
+    });
 });

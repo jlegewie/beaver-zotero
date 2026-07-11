@@ -1,5 +1,6 @@
 import type { LibrarySummary } from '../agentProtocol';
 import { logger } from '../../utils/logger';
+import { libraryRefForLibraryID } from '../../utils/libraryIdentity';
 
 async function countRegularItems(libraryId: number): Promise<number> {
     try {
@@ -108,6 +109,7 @@ async function getLibrarySummary(library: any): Promise<LibrarySummary | null> {
 
         return {
             library_id: library.libraryID,
+            library_ref: libraryRefForLibraryID(library.libraryID) ?? undefined,
             name: library.name,
             is_group: library.isGroup,
             read_only: !library.editable || !library.filesEditable,

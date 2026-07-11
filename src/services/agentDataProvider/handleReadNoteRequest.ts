@@ -15,6 +15,12 @@ import {
 } from '../agentProtocol';
 import { ItemStub, ItemSummary } from '../../../react/types/zotero';
 import { serializeItemStub, serializeItemSummary } from '../../utils/zoteroSerializers';
+import {
+    libraryRefForLibraryID,
+    modelObjectId,
+    resolveObjectId,
+    UNRESOLVED_LIBRARY_ID,
+} from '../../utils/libraryIdentity';
 import { checkLibraryExcluded, prepareAttachmentInfoBatchData, processAttachmentInfoBatch } from './utils';
 import { CITATION_TAG_PATTERN } from '../../../react/utils/citationPreprocessing';
 import {
@@ -41,6 +47,7 @@ function serializeNoteCitationSummary(item: Zotero.Item): ItemSummary {
     return {
         library_id: item.libraryID,
         zotero_key: item.key,
+        library_ref: libraryRefForLibraryID(item.libraryID) ?? undefined,
         item_type: 'note',
         title,
         preview: getNoteContentPreviewText(noteHtml, title, CITED_NOTE_PREVIEW_LENGTH),
@@ -53,6 +60,7 @@ function serializeAnnotationCitationSummary(item: Zotero.Item): ItemSummary {
     return {
         library_id: item.libraryID,
         zotero_key: item.key,
+        library_ref: libraryRefForLibraryID(item.libraryID) ?? undefined,
         item_type: 'annotation',
         title: snippet ? `Annotation: ${snippet}` : 'Annotation',
         annotation_text: annotation.annotationText || null,
@@ -80,7 +88,10 @@ function extractCitedItemRefs(simplifiedHtml: string): { libraryId: number; item
         const parsed = parseZoteroId(cleanId);
         if (!parsed) return;
 
-        const key = `${parsed.library_id}-${parsed.zotero_key}`;
+        // Key on library_ref when available: an unresolved portable ref
+        // collapses library_id to UNRESOLVED_LIBRARY_ID, and two refs from
+        // different groups would otherwise collide on the same key.
+        const key = `${parsed.library_ref ?? parsed.library_id}-${parsed.zotero_key}`;
         if (seen.has(key)) return;
         seen.add(key);
         refs.push({ libraryId: parsed.library_id, itemKey: parsed.zotero_key });
@@ -187,16 +198,14 @@ async function resolveCitedItems(
 }
 
 /**
- * Parse a note_id string ("{libraryID}-{itemKey}") into its components.
+ * Parse a note_id string (portable "u-KEY" / "g<groupID>-KEY" or legacy
+ * "{libraryID}-{itemKey}") into a device-local reference.
  * Returns null if the format is invalid.
  */
-function parseNoteId(noteId: string): { libraryId: number; itemKey: string } | null {
-    const dashIdx = noteId.indexOf('-');
-    if (dashIdx === -1) return null;
-    const libraryId = parseInt(noteId.substring(0, dashIdx), 10);
-    const itemKey = noteId.substring(dashIdx + 1);
-    if (isNaN(libraryId) || !itemKey) return null;
-    return { libraryId, itemKey };
+function parseNoteId(noteId: string): { libraryId: number; itemKey: string; libraryRef?: string } | null {
+    const resolved = resolveObjectId(noteId);
+    if (!resolved) return null;
+    return { libraryId: resolved.library_id, itemKey: resolved.zotero_key, libraryRef: resolved.library_ref };
 }
 
 
@@ -221,7 +230,12 @@ export async function handleReadNoteRequest(
     const parsed = parseNoteId(note_id);
     if (!parsed) {
         return errorResponse(
-            `Invalid note_id format: '${note_id}'. Expected '{libraryID}-{itemKey}'.`
+            `Invalid note_id format: '${note_id}'. Expected '{library}-{itemKey}'.`
+        );
+    }
+    if (parsed.libraryId === UNRESOLVED_LIBRARY_ID) {
+        return errorResponse(
+            `The library for note ${note_id} (${parsed.libraryRef}) is not available on this computer.`
         );
     }
 
@@ -271,11 +285,15 @@ export async function handleReadNoteRequest(
         }
 
         // 6. Simplify (also warms cache for subsequent edit_note calls).
+        // The cache is keyed by the device-local "{libraryID}-{itemKey}" form —
+        // the same key edit_note builds from its resolved reference — so a note
+        // addressed by a portable id and by a legacy numeric id shares one entry.
         // Pass raw HTML so the cache key matches edit_note's getOrSimplify
         // calls — simplifyNoteHtml normalizes internally, so the cached
         // simplified output is identical either way.
+        const cacheNoteId = `${item.libraryID}-${item.key}`;
         const pageLabelsByItemId = await preloadNotePageLabels(rawHtml, item.libraryID, { extractOnCacheMiss: true });
-        const { simplified } = getOrSimplify(note_id, rawHtml, item.libraryID, pageLabelsByItemId);
+        const { simplified } = getOrSimplify(cacheNoteId, rawHtml, item.libraryID, pageLabelsByItemId);
 
         // 7. Apply offset/limit pagination
         const lines = simplified.split('\n');
@@ -297,7 +315,7 @@ export async function handleReadNoteRequest(
         let parentSummary: ItemStub | undefined;
         if (item.parentItem) {
             await Zotero.Items.loadDataTypes([item.parentItem], ['primaryData', 'itemData', 'creators']);
-            parentItemId = `${item.parentItem.libraryID}-${item.parentItem.key}`;
+            parentItemId = modelObjectId(item.parentItem.libraryID, item.parentItem.key);
             parentTitle = item.parentItem.getField('title') as string;
             parentSummary = serializeItemStub(item.parentItem);
         }
@@ -312,6 +330,9 @@ export async function handleReadNoteRequest(
             request_id,
             success: true,
             note_id,
+            library_id: item.libraryID,
+            zotero_key: item.key,
+            library_ref: libraryRefForLibraryID(item.libraryID) ?? undefined,
             title: item.getNoteTitle() || '(untitled)',
             parent_item_id: parentItemId,
             parent_title: parentTitle,

@@ -266,4 +266,54 @@ describe('handleFindAnnotationsRequest', () => {
         expect(response.annotations).toEqual([]);
         expect(response.total_count).toBe(0);
     });
+
+    describe('attachment_id scoping', () => {
+        beforeEach(() => {
+            const Zotero = (globalThis as any).Zotero;
+            // The base installZoteroMocks() Libraries mock has no
+            // userLibraryID; add it so a portable "u-<key>" attachment_id
+            // resolves to library 1 (where `attachment` lives).
+            Zotero.Libraries.userLibraryID = 1;
+            Zotero.Items.getByLibraryAndKeyAsync = vi.fn(async (libraryID: number, key: string) => {
+                if (libraryID === attachment.libraryID && key === attachment.key) {
+                    return { ...attachment, isFileAttachment: () => true };
+                }
+                return null;
+            });
+        });
+
+        it('resolves a portable "u-<key>" attachment_id to the scoped library', async () => {
+            const response = await handleFindAnnotationsRequest({
+                ...baseRequest,
+                attachment_id: `u-${attachment.key}`,
+            });
+            expect(response.error).toBeUndefined();
+            expect(response.error_code).toBeUndefined();
+        });
+
+        it('resolves a legacy numeric attachment_id the same way as before', async () => {
+            const response = await handleFindAnnotationsRequest({
+                ...baseRequest,
+                attachment_id: `${attachment.libraryID}-${attachment.key}`,
+            });
+            expect(response.error).toBeUndefined();
+            expect(response.error_code).toBeUndefined();
+        });
+
+        it('reports library_unavailable (not not_found) for an unresolvable portable group attachment_id', async () => {
+            const response = await handleFindAnnotationsRequest({
+                ...baseRequest,
+                attachment_id: `g99999-${attachment.key}`,
+            });
+            expect(response.error_code).toBe('library_unavailable');
+        });
+
+        it('rejects a malformed attachment_id', async () => {
+            const response = await handleFindAnnotationsRequest({
+                ...baseRequest,
+                attachment_id: 'not-a-valid-###-id',
+            });
+            expect(response.error_code).toBe('invalid_attachment_id');
+        });
+    });
 });

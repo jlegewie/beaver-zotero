@@ -28,7 +28,11 @@ function refKey(ref: ZoteroItemReference): string {
 }
 
 function attachmentRef(att: ItemMetadataAttachment | SourceAttachment): ZoteroItemReference {
-    return { library_id: att.library_id, zotero_key: att.zotero_key };
+    return {
+        library_id: att.library_id,
+        zotero_key: att.zotero_key,
+        library_ref: att.library_ref,
+    };
 }
 
 function itemStubLabel(att: ItemMetadataAttachment): string | null {
@@ -96,12 +100,16 @@ export function RequestChips({ userPrompt }: { userPrompt: BeaverAgentPrompt }) 
                 />
             ))}
             {userPrompt.filters?.collections?.map((collection) => (
-                <CollectionChip
-                    key={`${collection.library_id}-${collection.zotero_key}`}
-                    name={collection.name}
-                    collectionRef={{ library_id: collection.library_id, zotero_key: collection.zotero_key }}
-                    isFilter={true}
-                />
+                    <CollectionChip
+                        key={`${collection.library_id}-${collection.zotero_key}`}
+                        name={collection.name}
+                        collectionRef={{
+                            library_id: collection.library_id,
+                            zotero_key: collection.zotero_key,
+                            library_ref: collection.library_ref,
+                        }}
+                        isFilter={true}
+                    />
             ))}
             {userPrompt.filters?.tags?.map((tag) => (
                 <TagChip key={`${tag.libraryId}-${tag.id}-${tag.tag}`} tag={tag.tag} color={tag.color} />
@@ -139,7 +147,11 @@ export function RequestChips({ userPrompt }: { userPrompt: BeaverAgentPrompt }) 
                         return (
                             <AnnotationChip
                                 key={`annotation-${annotation.library_id}-${annotation.zotero_key}`}
-                                annotationRef={{ library_id: annotation.library_id, zotero_key: annotation.zotero_key }}
+                                annotationRef={{
+                                    library_id: annotation.library_id,
+                                    zotero_key: annotation.zotero_key,
+                                    library_ref: annotation.library_ref,
+                                }}
                                 annotationType={annotation.annotation_type}
                                 color={annotation.color}
                                 title={annotationTitle(annotation)}
@@ -151,7 +163,11 @@ export function RequestChips({ userPrompt }: { userPrompt: BeaverAgentPrompt }) 
                         return (
                             <NoteChip
                                 key={`note-${note.library_id}-${note.zotero_key}`}
-                                noteRef={{ library_id: note.library_id, zotero_key: note.zotero_key }}
+                                noteRef={{
+                                    library_id: note.library_id,
+                                    zotero_key: note.zotero_key,
+                                    library_ref: note.library_ref,
+                                }}
                                 title={note.title}
                                 subtitle={noteSubtitle(note)}
                             />
@@ -163,7 +179,11 @@ export function RequestChips({ userPrompt }: { userPrompt: BeaverAgentPrompt }) 
                             <CollectionChip
                                 key={`collection-${collection.library_id}-${collection.zotero_key}`}
                                 name={collection.name}
-                                collectionRef={{ library_id: collection.library_id, zotero_key: collection.zotero_key }}
+                                collectionRef={{
+                                    library_id: collection.library_id,
+                                    zotero_key: collection.zotero_key,
+                                    library_ref: collection.library_ref,
+                                }}
                             />
                         );
                     }

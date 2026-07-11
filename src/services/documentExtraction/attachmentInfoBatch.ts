@@ -3,6 +3,7 @@ import { safeIsInTrash } from '../../utils/zoteroUtils';
 import type { TimingAccumulator } from '../../utils/timing';
 import { getAttachmentInfo, type AttachmentInfoOptions } from './attachmentInfo';
 import type { AttachmentInfo } from './shared/contentKinds';
+import { modelObjectId } from '../../utils/libraryIdentity';
 
 /**
  * Batch-fetch the "best attachment" for multiple parent items in a single SQL query.
@@ -111,7 +112,7 @@ export async function processAttachmentInfoBatch(
     await (ta ? ta.track('att_load_data_ms', loadFn) : loadFn());
 
     const bestAttachmentId = batchData.bestAttachmentMap.get(item.id);
-    const parentItemId = `${item.libraryID}-${item.key}`;
+    const parentItemId = modelObjectId(item.libraryID, item.key);
     const attachmentPromises = attachmentItems.map(async (attachment): Promise<AttachmentInfo | null> => {
         if (!attachment || attachment.deleted || safeIsInTrash(attachment)) {
             return null;

@@ -696,9 +696,11 @@ export type ZoteroDocumentErrorCode =
     | 'page_out_of_range'   // Requested pages are out of range
     | 'download_failed'     // Remote file download failed
     | 'timeout'             // Extraction timed out
+    | 'worker_unavailable'  // The local PDF engine could not start / died and could not be respawned (transient, retryable)
     | 'extraction_failed'  // General extraction failure
     | 'recursion_limit'     // Extraction overflowed the JS stack ("too much recursion" / "Maximum call stack")
     | 'library_excluded'    // Attachment is in a library the user excluded from Beaver
+    | 'library_unavailable' // Attachment is in a library unavailable on this computer
     | 'document_too_large'  // Serialized extraction result exceeds the WebSocket transfer budget
     | 'schema_version_mismatch'
     | 'mode_mismatch';
@@ -749,6 +751,7 @@ export type AttachmentPageImagesErrorCode =
     | 'invalid_page_value'  // Non-parseable string or unresolved label
     | 'timeout'             // Rendering timed out
     | 'library_excluded'    // Attachment is in a library the user excluded from Beaver
+    | 'library_unavailable' // Attachment is in a library unavailable on this computer
     | 'render_failed';      // General rendering failure
 
 /** Response to zotero attachment page images request */
@@ -780,6 +783,7 @@ export type AttachmentImageErrorCode =
     | 'decode_failed'              // Image could not be decoded (corrupt/truncated)
     | 'timeout'                    // Processing timed out
     | 'library_excluded'           // Attachment is in a library the user excluded from Beaver
+    | 'library_unavailable'        // Attachment is in a library unavailable on this computer
     | 'image_processing_failed';   // General resize/encode failure
 
 /** A processed attachment image. Field shapes align with WSPageImage. */
@@ -892,6 +896,7 @@ export type AttachmentSearchErrorCode =
     | 'download_failed'     // Remote file download failed
     | 'timeout'             // Search timed out
     | 'library_excluded'    // Attachment is in a library the user excluded from Beaver
+    | 'library_unavailable' // Attachment is in a library unavailable on this computer
     | 'search_failed';      // General search failure
 
 /** Request from backend to search text within an attachment */
@@ -983,6 +988,12 @@ export interface WSReadNoteResponse {
     error?: string;
     /** Note metadata */
     note_id?: string;
+    /** Device-local Zotero library ID of the note. */
+    library_id?: number;
+    /** Zotero key of the note. */
+    zotero_key?: string;
+    /** Device-portable library identity ("u" | "g<groupID>") of the note. */
+    library_ref?: string;
     title?: string;
     /** @deprecated Superseded by `parent_item`. Still emitted for clients/backends predating `parent_item`; remove once the backend reads `parent_item`. */
     parent_item_id?: string;
@@ -1044,6 +1055,8 @@ export interface WSZoteroSearchRequest extends WSBaseEvent {
 export interface RegularSearchResultItem {
     result_type: 'regular';
     item_id: string;
+    /** Device-portable library identity ("u" | "g<groupID>") of the item referenced by `item_id`. */
+    library_ref?: string;
     item_type: string;
     title?: string | null;
     creators?: string | null;
@@ -1055,6 +1068,8 @@ export interface RegularSearchResultItem {
 export interface NoteResultItem {
     result_type: 'note';
     item_id: string;
+    /** Device-portable library identity ("u" | "g<groupID>") of the note referenced by `item_id`. */
+    library_ref?: string;
     title?: string | null;
     /** @deprecated Superseded by `parent_item`. Still emitted for clients/backends predating `parent_item`; remove once the backend reads `parent_item`. */
     parent_item_id?: string | null;
@@ -1090,6 +1105,8 @@ export interface AnnotationResultItem {
     result_type: 'annotation';
     /** Annotation id, format "library_id-zotero_key". */
     annotation_id: string;
+    /** Device-portable library identity ("u" | "g<groupID>") of the annotation referenced by `annotation_id`. */
+    library_ref?: string;
     /** "highlight" | "underline" | "note" | "image" | "ink" | "text" */
     annotation_type?: string | null;
     /** Highlighted/selected text, when present. */
@@ -1131,6 +1148,8 @@ export type ListItemsResultItem = RegularListResultItem | NoteResultItem | Attac
 /** Brief library info for error responses */
 export interface AvailableLibraryInfo {
     library_id: number;
+    /** Device-portable library identity ("u" | "g<groupID>"). See `src/utils/libraryIdentity.ts`. */
+    library_ref?: string;
     name: string;
 }
 
@@ -1169,6 +1188,8 @@ export interface WSListItemsRequest extends WSBaseEvent {
 export interface RegularListResultItem {
     result_type: 'regular';
     item_id: string;
+    /** Device-portable library identity ("u" | "g<groupID>") of the item referenced by `item_id`. */
+    library_ref?: string;
     item_type: string;
     title?: string | null;
     creators?: string | null;
@@ -1279,6 +1300,9 @@ export interface WSListCollectionsRequest extends WSBaseEvent {
 
 /** Collection information */
 export interface CollectionInfo {
+    library_id?: number;
+    /** Device-portable library identity ("u" | "g<groupID>"). */
+    library_ref?: string;
     collection_key: string;
     name: string;
     parent_key?: string | null;
@@ -1294,6 +1318,8 @@ export interface WSListCollectionsResponse {
     collections: CollectionInfo[];
     total_count: number;
     library_id?: number | null;
+    /** Device-portable library identity ('u' / 'g<groupID>') of the listed library. */
+    library_ref?: string;
     library_name?: string | null;
     error?: string | null;
     error_code?: string | null;
@@ -1337,6 +1363,8 @@ export interface WSListTagsResponse {
     tags: TagInfo[];
     total_count: number;
     library_id?: number | null;
+    /** Device-portable library identity ('u' / 'g<groupID>') of the listed library. */
+    library_ref?: string;
     library_name?: string | null;
     error?: string | null;
     error_code?: string | null;
@@ -1357,6 +1385,8 @@ export interface WSListLibrariesRequest extends WSBaseEvent {
 /** Per-library count snapshot */
 export interface LibrarySummary {
     library_id: number;
+    /** Device-portable library identity ("u" | "g<groupID>"). See `src/utils/libraryIdentity.ts`. */
+    library_ref?: string;
     name: string;
     is_group: boolean;
     read_only: boolean;
@@ -1659,12 +1689,19 @@ export interface WSAuthMessage {
  * present and unique per install — the discriminator when one Beaver account has
  * several installs connected. The rest are best-effort context/labels (`user_id`/
  * `account_name` are absent when Zotero sync is off).
+ *
+ * `index_scope_refs` carries the install's searchable index scope — search-
+ * index scope refs for libraries not excluded in Beaver Preferences.
  */
 export interface ZoteroInstanceWire {
     local_user_key: string;
     user_id?: string;
     account_name?: string;
     device_name?: string;
+    /** Search-index scope refs in scope: `l<localUserKey>` (personal, always) and
+     * `g<groupID>` values for searchable libraries.
+     */
+    index_scope_refs?: string[];
 }
 
 /**
@@ -1697,6 +1734,7 @@ export const CLIENT_FEATURES = {
     EDIT_METADATA_CREATORS: 'edit_metadata_creators',
     EXTERNAL_FILES: 'external_files',
     ASK_USER_QUESTION: 'ask_user_question',
+    PORTABLE_IDS: 'portable_ids',
 } as const;
 
 /** Client type identifier for the Zotero plugin. */
@@ -1715,6 +1753,8 @@ export const ZOTERO_PLUGIN_FEATURES: string[] = Object.values(CLIENT_FEATURES);
 export interface CurrentLibrary {
     /** Library ID */
     library_id: number;
+    /** Device-portable library identity ("u" | "g<groupID>"). See `src/utils/libraryIdentity.ts`. */
+    library_ref?: string;
     /** Library name (e.g., "My Library" or group name) */
     name: string;
     /** Whether this is a group library */
@@ -1733,6 +1773,8 @@ export interface CurrentCollection {
     name: string;
     /** Library ID this collection belongs to */
     library_id: number;
+    /** Device-portable library identity ("u" | "g<groupID>"). See `src/utils/libraryIdentity.ts`. */
+    library_ref?: string;
     /** Parent collection key, if this is a subcollection */
     parent_key?: string | null;
 }

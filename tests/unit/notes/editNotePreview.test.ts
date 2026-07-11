@@ -78,4 +78,10 @@ describe('recoverSimplifiedCitationLabel', () => {
     it('resolves unified id attachment citation labels through the parent item', () => {
         expect(recoverSimplifiedCitationLabel('<citation id="1-ATTACH"/>')).toBe('(parent)');
     });
+
+    it('resolves a portable "u-<key>" citation the same way as its legacy numeric equivalent', () => {
+        (globalThis as any).Zotero.Libraries = { userLibraryID: 1 };
+        expect(recoverSimplifiedCitationLabel('<citation id="u-ATTACH"/>')).toBe('(parent)');
+        expect(recoverSimplifiedCitationLabel('<citation item_id="u-PARENT"/>')).toBe('(parent-direct)');
+    });
 });

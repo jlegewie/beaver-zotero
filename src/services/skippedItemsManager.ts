@@ -1,5 +1,6 @@
 import { SkippedItem, ZoteroItemReference } from '../../react/types/zotero';
 import { getPref, setPref } from '../utils/prefs';
+import { libraryRefForLibraryID } from '../utils/libraryIdentity';
 
 const SKIPPED_ITEMS_PREF = 'skippedItems';
 
@@ -72,6 +73,7 @@ export class SkippedItemsManager {
             const skippedItem: SkippedItem = {
                 zotero_key: key,
                 library_id: libraryID,
+                library_ref: libraryRefForLibraryID(libraryID) ?? undefined,
                 reason: reason,
             };
             skippedItemsMap.set(uniqueKey, skippedItem);

@@ -2,6 +2,7 @@ import { WSAgentActionValidateRequest, WSAgentActionValidateResponse, WSAgentAct
 import { store } from '../../../../react/store';
 import { searchableLibraryIdsAtom } from '../../../../react/atoms/profile';
 import { checkLibraryExcluded, excludedLibraryMessage, getDeferredToolPreference } from '../utils';
+import { resolveItemReference, resolveLibraryRef, parseItemReference, modelObjectId } from '../../../utils/libraryIdentity';
 import { TimeoutContext, checkAborted } from '../timeout';
 import { TimeoutError } from '../timeout';
 import { logger } from '../../../utils/logger';
@@ -83,11 +84,18 @@ export async function validateOrganizeItemsAction(
     // Validate all items exist and are in editable libraries
     // Also collect current state for undo
     const currentState: Record<string, { tags: string[]; collections: string[] }> = {};
+    // Portable ids ("<library_ref>-<zotero_key>") returned to the backend so the
+    // persisted/replayed action is device-independent. Kept in input order.
+    const normalizedItemIds: string[] = [];
+    // Resolved (device-local) libraryIDs collected for the same-library collection check.
+    const resolvedLibraryIds: number[] = [];
     const searchableLibraryIds = store.get(searchableLibraryIdsAtom);
 
     for (const itemId of item_ids) {
-        const parts = itemId.split('-');
-        if (parts.length < 2) {
+        // Accept both the portable "<library_ref>-<key>" grammar and the legacy
+        // "<library_id>-<key>" numeric grammar.
+        const parsed = parseItemReference(itemId);
+        if (!parsed) {
             return {
                 type: 'agent_action_validate_response',
                 request_id: request.request_id,
@@ -98,8 +106,19 @@ export async function validateOrganizeItemsAction(
             };
         }
 
-        const libraryId = parseInt(parts[0], 10);
-        const zoteroKey = parts.slice(1).join('-');
+        // Resolve to a device-local libraryID (library_ref wins; legacy numeric
+        // falls back). null => a portable group ref not present on this device.
+        const libraryId = resolveLibraryRef(parsed);
+        if (libraryId == null) {
+            return {
+                type: 'agent_action_validate_response',
+                request_id: request.request_id,
+                valid: false,
+                error: `Item not found: ${itemId}. This library isn't available on this computer.`,
+                error_code: 'library_unavailable',
+                preference: 'always_ask',
+            };
+        }
 
         // Validate library exists
         const library = Zotero.Libraries.get(libraryId);
@@ -139,8 +158,18 @@ export async function validateOrganizeItemsAction(
         }
 
         // Validate item exists
-        const item = await Zotero.Items.getByLibraryAndKeyAsync(libraryId, zoteroKey);
-        if (!item) {
+        const resolved = await resolveItemReference(parsed);
+        if (resolved.status === 'library_unavailable') {
+            return {
+                type: 'agent_action_validate_response',
+                request_id: request.request_id,
+                valid: false,
+                error: `Item not found: ${itemId}. This library isn't available on this computer.`,
+                error_code: 'library_unavailable',
+                preference: 'always_ask',
+            };
+        }
+        if (resolved.status === 'not_found') {
             return {
                 type: 'agent_action_validate_response',
                 request_id: request.request_id,
@@ -150,6 +179,12 @@ export async function validateOrganizeItemsAction(
                 preference: 'always_ask',
             };
         }
+        const item = resolved.item;
+
+        // Portable id derived from the resolved item (authoritative). Falls back
+        // to the numeric libraryID only for non-portable libraries (e.g. feeds),
+        // which can't reach here anyway (not searchable/editable).
+        const normalizedId = modelObjectId(item.libraryID, item.key);
 
         // Tags: allowed on regular items, attachments, notes, and annotations
         if (hasTagChanges && !item.isRegularItem() && !item.isAttachment() && !item.isNote() && !item.isAnnotation()) {
@@ -181,7 +216,8 @@ export async function validateOrganizeItemsAction(
         if (hasCollectionChanges && !item.isTopLevelItem()) {
             const itemType = Zotero.ItemTypes.getName(item.itemTypeID);
             const parentKey = item.parentKey;
-            const parentId = `${libraryId}-${parentKey}`;
+            // Echo the same prefix form the model sent so the id stays actionable.
+            const parentId = `${parsed.library_ref ?? parsed.library_id}-${parentKey}`;
             return {
                 type: 'agent_action_validate_response',
                 request_id: request.request_id,
@@ -201,20 +237,20 @@ export async function validateOrganizeItemsAction(
             }).filter(Boolean) as string[]
             : [];
 
-        currentState[itemId] = {
+        // Key current state (and the returned item ids) by the portable id so
+        // undo / current-state stay consistent with the persisted proposed_data.
+        currentState[normalizedId] = {
             tags: itemTags,
             collections: itemCollections,
         };
+        normalizedItemIds.push(normalizedId);
+        resolvedLibraryIds.push(item.libraryID);
     }
 
     // Validate collection operations: all items must be in the same library
     if (hasCollectionChanges) {
-        // Check that all items are in the same library
-        const libraryIds = new Set<number>();
-        for (const itemId of item_ids) {
-            const parts = itemId.split('-');
-            libraryIds.add(parseInt(parts[0], 10));
-        }
+        // Check that all items are in the same (resolved) library
+        const libraryIds = new Set<number>(resolvedLibraryIds);
 
         if (libraryIds.size > 1) {
             return {
@@ -235,6 +271,7 @@ export async function validateOrganizeItemsAction(
         // so the agent doesn't loop calling create_collection for a key we just returned.
         const findCollectionLibrary = async (collKey: string): Promise<number | null> => {
             for (const lib of Zotero.Libraries.getAll()) {
+                if (!searchableLibraryIds.includes(lib.libraryID)) continue;
                 const found = await Zotero.Collections.getByLibraryAndKeyAsync(lib.libraryID, collKey);
                 if (found) return lib.libraryID;
             }
@@ -273,7 +310,9 @@ export async function validateOrganizeItemsAction(
 
             // Detect the common model failure mode: collection keys that are
             // actually item zotero-keys copy-pasted from item_ids.
-            const itemZoteroKeys = new Set(item_ids.map(id => id.split('-').slice(1).join('-')));
+            const itemZoteroKeys = new Set(
+                item_ids.map(id => parseItemReference(id)?.zotero_key).filter(Boolean) as string[]
+            );
             const overlapWithItemKeys = invalidColls
                 .map(x => x.key)
                 .filter(key => itemZoteroKeys.has(key));
@@ -333,6 +372,9 @@ export async function validateOrganizeItemsAction(
         request_id: request.request_id,
         valid: true,
         current_value: currentState,
+        // Return the portable ids so the backend persists + replays them instead
+        // of the model-authored device-local ids (the validate-time enrichment seam).
+        normalized_action_data: { item_ids: normalizedItemIds },
         preference,
     };
 }
@@ -371,7 +413,10 @@ export async function executeOrganizeItemsAction(
     // TOCTOU guard: never mutate items in a library the user excluded from Beaver,
     // even if validation passed earlier or the execute request skipped it.
     for (const itemId of item_ids) {
-        const libraryId = parseInt(itemId.split('-')[0], 10);
+        const parsed = parseItemReference(itemId);
+        if (!parsed) continue; // malformed → skipped in the main loop
+        const libraryId = resolveLibraryRef(parsed);
+        if (libraryId == null) continue; // library not on this device → skipped in the main loop
         const excluded = checkLibraryExcluded(libraryId);
         if (excluded) {
             return {
@@ -410,19 +455,33 @@ export async function executeOrganizeItemsAction(
     const removeCollections = new Map<string, { id: number }>();
     const hasCollectionChanges = !!(collections && ((collections.add && collections.add.length > 0) || (collections.remove && collections.remove.length > 0)));
     if (hasCollectionChanges && item_ids.length > 0) {
-        const collectionLibraryId = parseInt(item_ids[0].split('-')[0], 10);
-        await ta.track('collection_resolve_ms', async () => {
-            for (const collKey of collections?.add ?? []) {
-                checkAborted(ctx, 'organize_items:collection_resolve');
-                const collection = await Zotero.Collections.getByLibraryAndKeyAsync(collectionLibraryId, collKey);
-                if (collection) addCollections.set(collKey, collection);
+        // Validation guarantees a collection batch shares one library. Resolve the
+        // first item reference that exists on this device and use its libraryID —
+        // more robust than trusting the raw prefix of item_ids[0].
+        let collectionLibraryId: number | null = null;
+        for (const itemId of item_ids) {
+            const parsed = parseItemReference(itemId);
+            if (!parsed) continue;
+            const resolved = await resolveItemReference(parsed);
+            if (resolved.status === 'found') {
+                collectionLibraryId = resolved.item.libraryID;
+                break;
             }
-            for (const collKey of collections?.remove ?? []) {
-                checkAborted(ctx, 'organize_items:collection_resolve');
-                const collection = await Zotero.Collections.getByLibraryAndKeyAsync(collectionLibraryId, collKey);
-                if (collection) removeCollections.set(collKey, collection);
-            }
-        });
+        }
+        if (collectionLibraryId != null) {
+            await ta.track('collection_resolve_ms', async () => {
+                for (const collKey of collections?.add ?? []) {
+                    checkAborted(ctx, 'organize_items:collection_resolve');
+                    const collection = await Zotero.Collections.getByLibraryAndKeyAsync(collectionLibraryId!, collKey);
+                    if (collection) addCollections.set(collKey, collection);
+                }
+                for (const collKey of collections?.remove ?? []) {
+                    checkAborted(ctx, 'organize_items:collection_resolve');
+                    const collection = await Zotero.Collections.getByLibraryAndKeyAsync(collectionLibraryId!, collKey);
+                    if (collection) removeCollections.set(collKey, collection);
+                }
+            });
+        }
     }
 
     try {
@@ -444,18 +503,22 @@ export async function executeOrganizeItemsAction(
             const txWorkStart = Date.now();
             try {
             for (const itemId of item_ids) {
-                const parts = itemId.split('-');
-                const libraryId = parseInt(parts[0], 10);
-                const zoteroKey = parts.slice(1).join('-');
-
-                const item = await ta.track('item_lookup_ms', () =>
-                    Zotero.Items.getByLibraryAndKeyAsync(libraryId, zoteroKey)
-                );
-                if (!item) {
-                    // Item not found - skip but don't fail the transaction
+                const parsed = parseItemReference(itemId);
+                if (!parsed) {
+                    // Malformed id - skip but don't fail the transaction
                     skippedItems.push(itemId);
                     continue;
                 }
+
+                const resolvedItem = await ta.track('item_lookup_ms', () =>
+                    resolveItemReference(parsed)
+                );
+                if (resolvedItem.status !== 'found') {
+                    // Item not found or its library unavailable on this device - skip but don't fail the transaction
+                    skippedItems.push(itemId);
+                    continue;
+                }
+                const item = resolvedItem.item;
 
                 // Annotations support tags but not collections. Tag changes below
                 // are item-type-agnostic; collection ops are guarded by isTopLevel,

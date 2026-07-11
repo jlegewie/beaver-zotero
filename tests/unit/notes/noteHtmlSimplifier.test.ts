@@ -29,6 +29,14 @@ vi.mock('../../../src/services/supabaseClient', () => ({
     },
 }));
 
+// noteCitationExpand gates citation targets on the library-exclusion check,
+// which reads the Jotai store; stub it so unit tests treat every library as
+// searchable.
+vi.mock('../../../src/services/agentDataProvider/utils', () => ({
+    getAttachmentFileStatus: vi.fn().mockResolvedValue(undefined),
+    checkLibraryExcluded: vi.fn(() => null),
+}));
+
 import {
     simplifyNoteHtml,
     normalizeNoteHtml,
@@ -265,7 +273,7 @@ describe('simplifyNoteHtml', () => {
         const html = wrap(`<p>${rawCitation('ABCD1234')}</p>`);
         const { simplified, metadata } = simplifyNoteHtml(html, 1);
         expect(simplified).toContain('ref="c_ABCD1234_0"');
-        expect(simplified).toContain('id="1-ABCD1234"');
+        expect(simplified).toContain('id="u-ABCD1234"');
         expect(simplified).not.toContain('label=');
         expect(simplified).toContain('/>');
         expect(metadata.elements.has('c_ABCD1234_0')).toBe(true);
@@ -276,7 +284,7 @@ describe('simplifyNoteHtml', () => {
         const html = wrap(`<p>${rawCompoundCitation(['KEY1', 'KEY2'])}</p>`);
         const { simplified, metadata } = simplifyNoteHtml(html, 1);
         expect(simplified).toContain('ref="c_KEY1+KEY2_0"');
-        expect(simplified).toContain('items="1-KEY1, 1-KEY2"');
+        expect(simplified).toContain('items="u-KEY1, u-KEY2"');
         expect(simplified).not.toContain('label=');
         const stored = metadata.elements.get('c_KEY1+KEY2_0');
         expect(stored!.type).toBe('compound-citation');
@@ -290,11 +298,14 @@ describe('simplifyNoteHtml', () => {
 
         const { simplified, metadata } = simplifyNoteHtml(html, 1);
 
-        expect(simplified).toContain('<citation id="1-NOTE1234" ref="c_NOTE1234_0"/>');
+        expect(simplified).toContain('<citation id="u-NOTE1234" ref="c_NOTE1234_0"/>');
+        // Group 42 has no reverse lookup mocked (getGroupIDFromLibraryID), so
+        // its portable ref can't be computed here and it falls back to the
+        // legacy numeric local library id (7).
         expect(simplified).toContain('<citation id="7-ANNOT123" ref="c_ANNOT123_0"/>');
         expect(metadata.elements.get('c_NOTE1234_0')).toMatchObject({
             type: 'citation',
-            originalAttrs: { item_id: '1-NOTE1234' },
+            originalAttrs: { item_id: 'u-NOTE1234' },
         });
         expect(metadata.elements.get('c_ANNOT123_0')).toMatchObject({
             type: 'citation',
@@ -329,8 +340,8 @@ describe('simplifyNoteHtml', () => {
         expect(savedHtml).toContain('href="zotero://select/library/items/NOTE1234"');
         expect(savedHtml).toContain('href="zotero://open-pdf/library/items/ATTACH12?annotation=ANNOT123"');
         expect(savedHtml).toContain('<p>Replacement sentence.</p>');
-        expect(simplified).toContain('<citation id="1-NOTE1234"');
-        expect(simplified).toContain('<citation id="1-ANNOT123"');
+        expect(simplified).toContain('<citation id="u-NOTE1234"');
+        expect(simplified).toContain('<citation id="u-ANNOT123"');
     });
 
     it('replaces annotation with <annotation> tag', () => {
@@ -425,12 +436,12 @@ describe('simplifyNoteHtml', () => {
     it('translates cached page labels to physical page numbers for page citations', () => {
         const html = wrap(`<p>${rawCitation('ROMANPG1', 1, 'xiv')}</p>`);
         const { simplified, metadata } = simplifyNoteHtml(html, 1, {
-            '1-ROMANPG1': { 13: 'xiv' },
+            'u-ROMANPG1': { 13: 'xiv' },
         });
 
         expect(simplified).toContain('loc="page14"');
         expect(metadata.elements.get('c_ROMANPG1_0')!.originalAttrs).toEqual({
-            item_id: '1-ROMANPG1',
+            item_id: 'u-ROMANPG1',
             page: '14',
             pageConvention: 'number',
         });
@@ -443,7 +454,7 @@ describe('simplifyNoteHtml', () => {
 
         const cold = getOrSimplify(noteId, html, 1);
         const seeded = getOrSimplify(noteId, html, 1, {
-            '1-LABELPG1': { 0: '341' },
+            'u-LABELPG1': { 0: '341' },
         });
 
         expect(cold.simplified).toContain('loc="page341"');
@@ -453,12 +464,12 @@ describe('simplifyNoteHtml', () => {
     it('does not translate non-page CSL locators', () => {
         const html = wrap(`<p>${rawCitationWithCSLLabel('CHAPTER1', 1, 'xiv', 'chapter')}</p>`);
         const { simplified, metadata } = simplifyNoteHtml(html, 1, {
-            '1-CHAPTER1': { 13: 'xiv' },
+            'u-CHAPTER1': { 13: 'xiv' },
         });
 
         expect(simplified).toContain('loc="pagexiv"');
         expect(metadata.elements.get('c_CHAPTER1_0')!.originalAttrs).toEqual({
-            item_id: '1-CHAPTER1',
+            item_id: 'u-CHAPTER1',
             page: 'xiv',
             pageConvention: 'label',
             cslLabel: 'chapter',
@@ -488,7 +499,7 @@ describe('simplifyNoteHtml', () => {
         const emptyCitation = `<span class="citation" data-citation="${encodeURIComponent(JSON.stringify(citationData))}">()</span>`;
         const html = wrap(`<p>${emptyCitation}</p>`);
         const { simplified } = simplifyNoteHtml(html, 1);
-        expect(simplified).toContain('id="1-ABCD1234"');
+        expect(simplified).toContain('id="u-ABCD1234"');
         expect(simplified).not.toContain('label="()"');
         expect(simplified).not.toContain('label=');
     });
@@ -515,7 +526,7 @@ describe('simplifyNoteHtml', () => {
         const label = 'Author "2024" & co.';
         const html = wrap(`<p>${rawCitation('ESC1', 1, '', label)}</p>`);
         const { simplified } = simplifyNoteHtml(html, 1);
-        expect(simplified).toContain('id="1-ESC1"');
+        expect(simplified).toContain('id="u-ESC1"');
         expect(simplified).not.toContain('label=');
     });
 });
@@ -534,8 +545,8 @@ describe('expandToRawHtml', () => {
 
         const metadata: SimplificationMetadata = {
             elements: new Map([
-                ['c_EX1_0', { rawHtml: rawCit, type: 'citation' as const, originalAttrs: { item_id: '1-EX1' } }],
-                ['c_EX1_1', { rawHtml: rawCitation('EX1', 1, '10'), type: 'citation' as const, originalAttrs: { item_id: '1-EX1', page: '10' } }],
+                ['c_EX1_0', { rawHtml: rawCit, type: 'citation' as const, originalAttrs: { item_id: 'u-EX1' } }],
+                ['c_EX1_1', { rawHtml: rawCitation('EX1', 1, '10'), type: 'citation' as const, originalAttrs: { item_id: 'u-EX1', page: '10' } }],
                 ['c_K1+K2_0', { rawHtml: rawCompoundCitation(['K1', 'K2']), type: 'compound-citation' as const, isCompound: true }],
                 ['a_EA1', { rawHtml: rawAnnot, type: 'annotation' as const, originalText: 'text here' }],
                 ['ai_EAI1', { rawHtml: rawAI, type: 'annotation-image' as const }],
@@ -615,7 +626,7 @@ describe('expandToRawHtml', () => {
         const { metadata } = makeMetadata();
         // Sentence locator s4 was pre-resolved to page "9".
         const input = '<citation id="1-EX1" loc="s4" label="(Author, 2024)" ref="c_EX1_new"/>';
-        const resolvedLocatorPages = { 'zotero:1-EX1:s4': '9' };
+        const resolvedLocatorPages = { 'zotero:u-EX1:s4': '9' };
         expandToRawHtml(input, metadata, 'new', undefined, undefined, resolvedLocatorPages);
         expect(createCitationHTML).toHaveBeenCalledWith(
             expect.objectContaining({ key: 'EX1' }),
@@ -640,7 +651,7 @@ describe('expandToRawHtml', () => {
         // page is already a final label and must be stored verbatim.
         const input = '<citation id="1-EX1" loc="s4" label="(Author, 2024)" ref="c_EX1_new"/>';
         const pageLabels = { '1-EX1': { 8: 'ix' } };
-        const resolvedLocatorPages = { 'zotero:1-EX1:s4': '9' };
+        const resolvedLocatorPages = { 'zotero:u-EX1:s4': '9' };
         expandToRawHtml(input, metadata, 'new', undefined, pageLabels as any, resolvedLocatorPages);
         expect(createCitationHTML).toHaveBeenCalledWith(
             expect.objectContaining({ key: 'EX1' }),
@@ -652,7 +663,7 @@ describe('expandToRawHtml', () => {
         const { metadata } = makeMetadata();
         // c_EX1_1 originally has page="10"; change its locator to sentence s4.
         const input = '<citation id="1-EX1" loc="s4" label="(Author, 2024, p. 10)" ref="c_EX1_1"/>';
-        const resolvedLocatorPages = { 'zotero:1-EX1:s4': '3' };
+        const resolvedLocatorPages = { 'zotero:u-EX1:s4': '3' };
         expandToRawHtml(input, metadata, 'new', undefined, undefined, resolvedLocatorPages);
         expect(createCitationHTML).toHaveBeenCalledWith(
             expect.objectContaining({ key: 'EX1' }),
@@ -663,7 +674,7 @@ describe('expandToRawHtml', () => {
     it('substitutes a resolved page for a legacy att_id structural locator', () => {
         const { metadata } = makeMetadata();
         const input = '<citation att_id="1-ATT1" loc="s4" label="(Author, 2024)"/>';
-        const resolvedLocatorPages = { 'zotero:1-ATT1:s4': '9' };
+        const resolvedLocatorPages = { 'zotero:u-ATT1:s4': '9' };
         expandToRawHtml(input, metadata, 'new', undefined, undefined, resolvedLocatorPages);
         expect(createCitationHTML).toHaveBeenCalledWith(
             expect.objectContaining({ key: 'ATT1' }),
@@ -675,7 +686,7 @@ describe('expandToRawHtml', () => {
         const { metadata } = makeMetadata();
         // The `sid` attribute is the legacy alias for a structural locator.
         const input = '<citation att_id="1-ATT1" sid="s4" label="(Author, 2024)"/>';
-        const resolvedLocatorPages = { 'zotero:1-ATT1:s4': '9' };
+        const resolvedLocatorPages = { 'zotero:u-ATT1:s4': '9' };
         expandToRawHtml(input, metadata, 'new', undefined, undefined, resolvedLocatorPages);
         expect(createCitationHTML).toHaveBeenCalledWith(
             expect.objectContaining({ key: 'ATT1' }),
@@ -879,6 +890,21 @@ describe('expandToRawHtml', () => {
         const metadata: SimplificationMetadata = { elements: new Map() };
         const input = '<citation att_id="1-MISSING" label="Missing"/>';
         expect(() => expandToRawHtml(input, metadata, 'new')).toThrow(/Attachment not found/);
+    });
+
+    it('throws for a new citation into an excluded library without a Zotero lookup', async () => {
+        const { checkLibraryExcluded } = await import('../../../src/services/agentDataProvider/utils');
+        vi.mocked(checkLibraryExcluded).mockReturnValueOnce({
+            message: 'The library "Private" is excluded from Beaver, so Beaver cannot read or modify its items.',
+        });
+        const lookup = vi.fn(() => null);
+        (globalThis as any).Zotero.Items.getByLibraryAndKey = lookup;
+        const metadata: SimplificationMetadata = { elements: new Map() };
+        const input = '<citation item_id="1-ABCD1234" label="Private item"/>';
+        // The gate must fire before the item lookup so no metadata of the
+        // excluded library's item is read or embedded.
+        expect(() => expandToRawHtml(input, metadata, 'new')).toThrow(/excluded from Beaver/);
+        expect(lookup).not.toHaveBeenCalled();
     });
 
     // ---- external_id citations ----
@@ -1251,6 +1277,28 @@ describe('citation round-trips', () => {
         expect(expanded).toBe(pmNormCitation('RT1'));
     });
 
+    it('portable-id citation: simplify emits the portable form and expand round-trips it unchanged', () => {
+        // The personal library (userLibraryID) always has a computable
+        // portable ref, so simplifyNoteHtml must emit "u-KEY" rather than
+        // the legacy device-local "1-KEY".
+        const raw = rawCitation('PORT0001', 1, '', 'Author, 2024');
+        const html = wrap(`<p>See ${raw} for details.</p>`);
+        const { simplified, metadata } = simplifyNoteHtml(html, 1);
+
+        const citationTag = simplified.match(/<citation [^/]*\/>/)?.[0];
+        expect(citationTag).toBe('<citation id="u-PORT0001" ref="c_PORT0001_0"/>');
+
+        // The model copies this tag verbatim into old_string; expansion must
+        // reproduce the exact stored raw HTML for the edit to apply cleanly.
+        const expanded = expandToRawHtml(citationTag!, metadata, 'old');
+        expect(expanded).toBe(pmNormCitation('PORT0001'));
+
+        // A legacy numeric id for the same item is also accepted (parsers
+        // support both forms indefinitely) and resolves to the same entry.
+        const legacyTag = '<citation id="1-PORT0001" ref="c_PORT0001_0"/>';
+        expect(expandToRawHtml(legacyTag, metadata, 'old')).toBe(expanded);
+    });
+
     it('single citation with page: round-trip preserves page locator', () => {
         const raw = rawCitation('RT2', 1, '42', 'Jones, 2021, p. 42');
         const html = wrap(`<p>${raw}</p>`);
@@ -1313,7 +1361,7 @@ describe('citation round-trips', () => {
 
         // Each ref is unique in simplified HTML, so expand-before gives the correct raw position
         for (let i = 0; i < 12; i++) {
-            const oldStr = `<citation id="1-DUP" ref="c_DUP_${i}"/>`;
+            const oldStr = `<citation id="u-DUP" ref="c_DUP_${i}"/>`;
             const pos = simplified.indexOf(oldStr);
             expect(pos).toBeGreaterThanOrEqual(0); // unique match
 
@@ -1373,7 +1421,7 @@ describe('citation round-trips', () => {
         const originalHtml = wrap(`<p>alpha</p><p>${raw}</p><p>${raw}</p><p>omega</p>`);
         const { simplified, metadata } = simplifyNoteHtml(originalHtml, 1);
         const strippedOriginal = stripDataCitationItems(normalizeNoteHtml(originalHtml));
-        const oldStr = '<citation id="1-DUP" ref="c_DUP_1"/>';
+        const oldStr = '<citation id="u-DUP" ref="c_DUP_1"/>';
         const expandedOriginal = expandToRawHtml(oldStr, metadata, 'old');
 
         const targetContext = captureValidatedEditTargetContext(
@@ -1451,7 +1499,7 @@ describe('citation round-trips', () => {
         expect(countOccurrences(contentHtml, expandedFooBar)).toBe(2);
 
         // old_string for c_CTX_2 with surrounding text — unique in simplified
-        const oldStr = 'foo <citation id="1-CTX" ref="c_CTX_2"/> bar';
+        const oldStr = 'foo <citation id="u-CTX" ref="c_CTX_2"/> bar';
         const pos = simplified.indexOf(oldStr);
         expect(pos).toBeGreaterThanOrEqual(0);
 
@@ -1552,7 +1600,7 @@ describe('getOrSimplify', () => {
 
     it('keeps labeled and unlabeled simplifications separate in cache', () => {
         const html = wrap(rawCitation('ABC12345', 1, 'xiv'));
-        const labels = { '1-ABC12345': { 13: 'xiv' } };
+        const labels = { 'u-ABC12345': { 13: 'xiv' } };
 
         const labeled = getOrSimplify('label-cache-note', html, 1, labels);
         const unlabeled = getOrSimplify('label-cache-note', html, 1);
@@ -1565,7 +1613,7 @@ describe('getOrSimplify', () => {
 
     it('keeps unlabeled and labeled simplifications separate in cache', () => {
         const html = wrap(rawCitation('DEF12345', 1, 'xiv'));
-        const labels = { '1-DEF12345': { 13: 'xiv' } };
+        const labels = { 'u-DEF12345': { 13: 'xiv' } };
 
         const unlabeled = getOrSimplify('label-cache-note-reverse', html, 1);
         const labeled = getOrSimplify('label-cache-note-reverse', html, 1, labels);
@@ -1855,7 +1903,7 @@ describe('checkDuplicateCitations', () => {
     it('returns null when no new citations', () => {
         const metadata: SimplificationMetadata = {
             elements: new Map([
-                ['c_EX_0', { rawHtml: '', type: 'citation', originalAttrs: { item_id: '1-EX' } }],
+                ['c_EX_0', { rawHtml: '', type: 'citation', originalAttrs: { item_id: 'u-EX' } }],
             ]),
         };
         expect(checkDuplicateCitations('<p>plain text</p>', metadata)).toBeNull();
@@ -1864,7 +1912,7 @@ describe('checkDuplicateCitations', () => {
     it('returns null when new citation references a different item', () => {
         const metadata: SimplificationMetadata = {
             elements: new Map([
-                ['c_EX_0', { rawHtml: '', type: 'citation', originalAttrs: { item_id: '1-EX' } }],
+                ['c_EX_0', { rawHtml: '', type: 'citation', originalAttrs: { item_id: 'u-EX' } }],
             ]),
         };
         const newStr = '<citation id="1-OTHER" label="Other"/>';
@@ -1874,7 +1922,7 @@ describe('checkDuplicateCitations', () => {
     it('returns warning when new citation duplicates existing', () => {
         const metadata: SimplificationMetadata = {
             elements: new Map([
-                ['c_DUP_0', { rawHtml: '', type: 'citation', originalAttrs: { item_id: '1-DUP' } }],
+                ['c_DUP_0', { rawHtml: '', type: 'citation', originalAttrs: { item_id: 'u-DUP' } }],
             ]),
         };
         const newStr = '<citation id="1-DUP" label="Dup"/>';
@@ -1912,30 +1960,30 @@ describe('enrichOldStringCitationRefs', () => {
     }
 
     it('returns null when old_string is empty', () => {
-        const metadata = makeCitationMetadata([['c_X_0', { item_id: '1-X' }]]);
+        const metadata = makeCitationMetadata([['c_X_0', { item_id: 'u-X' }]]);
         expect(enrichOldStringCitationRefs('', metadata)).toBeNull();
     });
 
     it('returns null when old_string has no citation tags', () => {
-        const metadata = makeCitationMetadata([['c_X_0', { item_id: '1-X' }]]);
+        const metadata = makeCitationMetadata([['c_X_0', { item_id: 'u-X' }]]);
         expect(enrichOldStringCitationRefs('<p>no citations here</p>', metadata)).toBeNull();
     });
 
     it('returns null when every citation already has a ref', () => {
-        const metadata = makeCitationMetadata([['c_X_0', { item_id: '1-X' }]]);
+        const metadata = makeCitationMetadata([['c_X_0', { item_id: 'u-X' }]]);
         const input = '<p>See <citation item_id="1-X" label="X" ref="c_X_0"/></p>';
         expect(enrichOldStringCitationRefs(input, metadata)).toBeNull();
     });
 
     it('enriches a single no-ref citation when exactly one metadata candidate exists', () => {
-        const metadata = makeCitationMetadata([['c_HPDPU3J5_0', { item_id: '1-HPDPU3J5' }]]);
+        const metadata = makeCitationMetadata([['c_HPDPU3J5_0', { item_id: 'u-HPDPU3J5' }]]);
         const input = '<p>See <citation item_id="1-HPDPU3J5"/></p>';
         const result = enrichOldStringCitationRefs(input, metadata);
         expect(result).toBe('<p>See <citation item_id="1-HPDPU3J5" ref="c_HPDPU3J5_0"/></p>');
     });
 
     it('preserves surrounding whitespace and attribute ordering', () => {
-        const metadata = makeCitationMetadata([['c_X_0', { item_id: '1-X' }]]);
+        const metadata = makeCitationMetadata([['c_X_0', { item_id: 'u-X' }]]);
         const input = '<li>\n<strong>Parabolic pattern</strong>: <citation item_id="1-X"/>\n</li>';
         const result = enrichOldStringCitationRefs(input, metadata);
         expect(result).toBe(
@@ -1945,9 +1993,9 @@ describe('enrichOldStringCitationRefs', () => {
 
     it('enriches multiple no-ref citations in a single old_string', () => {
         const metadata = makeCitationMetadata([
-            ['c_HPDPU3J5_0', { item_id: '1-HPDPU3J5' }],
-            ['c_78XAANZP_0', { item_id: '1-78XAANZP' }],
-            ['c_VIAT6WU4_0', { item_id: '1-VIAT6WU4' }],
+            ['c_HPDPU3J5_0', { item_id: 'u-HPDPU3J5' }],
+            ['c_78XAANZP_0', { item_id: 'u-78XAANZP' }],
+            ['c_VIAT6WU4_0', { item_id: 'u-VIAT6WU4' }],
         ]);
         const input =
             '<li>first <citation item_id="1-HPDPU3J5"/></li>' +
@@ -1961,8 +2009,8 @@ describe('enrichOldStringCitationRefs', () => {
 
     it('leaves ref-ful citations untouched while enriching sibling no-ref ones', () => {
         const metadata = makeCitationMetadata([
-            ['c_A_0', { item_id: '1-A' }],
-            ['c_B_0', { item_id: '1-B' }],
+            ['c_A_0', { item_id: 'u-A' }],
+            ['c_B_0', { item_id: 'u-B' }],
         ]);
         const input =
             '<p><citation item_id="1-A" label="A" ref="c_A_0"/> and <citation item_id="1-B"/></p>';
@@ -1976,22 +2024,22 @@ describe('enrichOldStringCitationRefs', () => {
     it('returns null when multiple metadata entries share the same item_id and page', () => {
         // Two entries with same originalAttrs → ambiguous, leave unchanged.
         const metadata = makeCitationMetadata([
-            ['c_X_0', { item_id: '1-X' }],
-            ['c_X_1', { item_id: '1-X' }],
+            ['c_X_0', { item_id: 'u-X' }],
+            ['c_X_1', { item_id: 'u-X' }],
         ]);
         const input = '<p><citation item_id="1-X"/></p>';
         expect(enrichOldStringCitationRefs(input, metadata)).toBeNull();
     });
 
     it('returns null when no metadata candidate exists for the item_id', () => {
-        const metadata = makeCitationMetadata([['c_Y_0', { item_id: '1-Y' }]]);
+        const metadata = makeCitationMetadata([['c_Y_0', { item_id: 'u-Y' }]]);
         const input = '<p><citation item_id="1-MISSING"/></p>';
         expect(enrichOldStringCitationRefs(input, metadata)).toBeNull();
     });
 
     it('only matches when page attribute agrees (both absent)', () => {
         const metadata = makeCitationMetadata([
-            ['c_X_paged', { item_id: '1-X', page: '5' }],
+            ['c_X_paged', { item_id: 'u-X', page: '5' }],
         ]);
         // old_string citation has no page, metadata has page=5 → no match.
         const input = '<p><citation item_id="1-X"/></p>';
@@ -2000,7 +2048,7 @@ describe('enrichOldStringCitationRefs', () => {
 
     it('only matches when page attribute agrees (both present and equal)', () => {
         const metadata = makeCitationMetadata([
-            ['c_X_paged', { item_id: '1-X', page: '5' }],
+            ['c_X_paged', { item_id: 'u-X', page: '5' }],
         ]);
         const input = '<p><citation item_id="1-X" page="5"/></p>';
         const result = enrichOldStringCitationRefs(input, metadata);
@@ -2009,8 +2057,8 @@ describe('enrichOldStringCitationRefs', () => {
 
     it('disambiguates by page when two entries share an item_id', () => {
         const metadata = makeCitationMetadata([
-            ['c_X_0', { item_id: '1-X' }],              // no page
-            ['c_X_1', { item_id: '1-X', page: '10' }], // page=10
+            ['c_X_0', { item_id: 'u-X' }],              // no page
+            ['c_X_1', { item_id: 'u-X', page: '10' }], // page=10
         ]);
         // Model's old_string has page=10 → matches c_X_1 uniquely.
         const pagedInput = '<p><citation item_id="1-X" page="10"/></p>';
@@ -2028,7 +2076,7 @@ describe('enrichOldStringCitationRefs', () => {
     it('skips att_id citations (reverse lookup not supported)', () => {
         // att_id maps to parent item_id during simplification, so enrichment
         // cannot uniquely resolve back. We leave them alone.
-        const metadata = makeCitationMetadata([['c_X_0', { item_id: '1-X' }]]);
+        const metadata = makeCitationMetadata([['c_X_0', { item_id: 'u-X' }]]);
         const input = '<p><citation att_id="1-ATT1"/></p>';
         expect(enrichOldStringCitationRefs(input, metadata)).toBeNull();
     });
@@ -2038,7 +2086,7 @@ describe('enrichOldStringCitationRefs', () => {
             elements: new Map([
                 // item_id here doesn't exist on annotations, but be robust anyway.
                 ['a_A1', { rawHtml: '', type: 'annotation', originalText: 'foo' }],
-                ['c_X_0', { rawHtml: '', type: 'citation', originalAttrs: { item_id: '1-X' } }],
+                ['c_X_0', { rawHtml: '', type: 'citation', originalAttrs: { item_id: 'u-X' } }],
             ]),
         };
         const input = '<p><citation item_id="1-X"/></p>';
@@ -2048,9 +2096,9 @@ describe('enrichOldStringCitationRefs', () => {
 
     it('partially enriches: unique citations get refs, ambiguous ones are left alone', () => {
         const metadata = makeCitationMetadata([
-            ['c_UNIQUE_0', { item_id: '1-UNIQUE' }],
-            ['c_DUP_0', { item_id: '1-DUP' }],
-            ['c_DUP_1', { item_id: '1-DUP' }],
+            ['c_UNIQUE_0', { item_id: 'u-UNIQUE' }],
+            ['c_DUP_0', { item_id: 'u-DUP' }],
+            ['c_DUP_1', { item_id: 'u-DUP' }],
         ]);
         const input =
             '<p><citation item_id="1-UNIQUE"/> and <citation item_id="1-DUP"/></p>';
@@ -2073,7 +2121,7 @@ describe('enrichOldStringCitationRefs', () => {
                     {
                         rawHtml: storedRaw,
                         type: 'citation',
-                        originalAttrs: { item_id: '1-EX1' },
+                        originalAttrs: { item_id: 'u-EX1' },
                     },
                 ],
             ]),

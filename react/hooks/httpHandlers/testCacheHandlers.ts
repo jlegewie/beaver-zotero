@@ -6,6 +6,8 @@
  * in `useHttpEndpoints.ts` → `registerEndpoints()`.
  */
 
+import { UNRESOLVED_LIBRARY_ID } from '../../../src/utils/libraryIdentity';
+
 export async function handleTestPingHttpRequest(_request: any) {
     const cache = Zotero.Beaver?.documentCache;
     const db = Zotero.Beaver?.db;
@@ -45,7 +47,7 @@ export async function handleTestCachePayloadHttpRequest(request: any) {
     const payloadKind = request.payload_kind ?? request.mode;
     const db = Zotero.Beaver?.db;
     if (!db) return { error: 'db not available' };
-    if (library_id == null || zotero_key == null) {
+    if (library_id == null || zotero_key == null || library_id === UNRESOLVED_LIBRARY_ID) {
         return { error: 'Provide library_id + zotero_key' };
     }
     const record = await db.getDocumentCachePayload(
@@ -90,7 +92,7 @@ export async function handleTestCacheSeedPageLabelsHttpRequest(request: any) {
     };
     const cache = Zotero.Beaver?.documentCache;
     if (!cache) return { error: 'cache not available' };
-    if (library_id == null || zotero_key == null || page_labels == null) {
+    if (library_id == null || zotero_key == null || page_labels == null || library_id === UNRESOLVED_LIBRARY_ID) {
         return { error: 'Provide library_id, zotero_key, and page_labels' };
     }
 
@@ -257,7 +259,7 @@ export async function handleTestFileStatusHttpRequest(request: any) {
         '../../../src/services/agentDataProvider/utils'
     );
     const { library_id, zotero_key, is_primary } = request || {};
-    if (library_id == null || zotero_key == null) {
+    if (library_id == null || zotero_key == null || library_id === UNRESOLVED_LIBRARY_ID) {
         return { ok: false, error: 'Provide library_id + zotero_key' };
     }
     const item = await Zotero.Items.getByLibraryAndKeyAsync(
@@ -272,7 +274,7 @@ export async function handleTestFileStatusHttpRequest(request: any) {
 
 export async function handleTestResolveItemHttpRequest(request: any) {
     const { library_id, zotero_key } = request;
-    if (library_id == null || zotero_key == null) {
+    if (library_id == null || zotero_key == null || library_id === UNRESOLVED_LIBRARY_ID) {
         return { error: 'Provide library_id + zotero_key' };
     }
     const item = await Zotero.Items.getByLibraryAndKeyAsync(library_id, zotero_key);
@@ -302,7 +304,7 @@ export async function handleTestResolveItemHttpRequest(request: any) {
 
 export async function handleTestResolveReadableHttpRequest(request: any) {
     const { library_id, zotero_key } = request;
-    if (library_id == null || zotero_key == null) {
+    if (library_id == null || zotero_key == null || library_id === UNRESOLVED_LIBRARY_ID) {
         return { error: 'Provide library_id + zotero_key' };
     }
     const item = await Zotero.Items.getByLibraryAndKeyAsync(library_id, zotero_key);
@@ -347,7 +349,7 @@ export async function handleTestResolveReadableHttpRequest(request: any) {
  */
 export async function handleTestBestEpubAttachmentHttpRequest(request: any) {
     const { library_id, zotero_key } = request || {};
-    if (library_id == null || zotero_key == null) {
+    if (library_id == null || zotero_key == null || library_id === UNRESOLVED_LIBRARY_ID) {
         return { error: 'Provide library_id + zotero_key' };
     }
     const item = await Zotero.Items.getByLibraryAndKeyAsync(library_id, zotero_key);
@@ -411,7 +413,7 @@ function validationOptionsFromRequest(request: any): {
  */
 export async function handleTestValidateItemHttpRequest(request: any) {
     const { library_id, zotero_key } = request || {};
-    if (library_id == null || zotero_key == null) {
+    if (library_id == null || zotero_key == null || library_id === UNRESOLVED_LIBRARY_ID) {
         return { ok: false, error: 'Provide library_id + zotero_key' };
     }
     const item = await Zotero.Items.getByLibraryAndKeyAsync(library_id, zotero_key);
@@ -443,7 +445,7 @@ export async function handleTestValidateItemHttpRequest(request: any) {
  */
 export async function handleTestValidateRegularItemHttpRequest(request: any) {
     const { library_id, zotero_key } = request || {};
-    if (library_id == null || zotero_key == null) {
+    if (library_id == null || zotero_key == null || library_id === UNRESOLVED_LIBRARY_ID) {
         return { ok: false, error: 'Provide library_id + zotero_key' };
     }
     const item = await Zotero.Items.getByLibraryAndKeyAsync(library_id, zotero_key);

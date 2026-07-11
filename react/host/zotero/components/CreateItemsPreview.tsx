@@ -128,7 +128,8 @@ const CreateItemPreviewRow: React.FC<{
                         onClick={() => revealSource(
                             {
                                 library_id: resultData.library_id,
-                                zotero_key: resultData.zotero_key
+                                zotero_key: resultData.zotero_key,
+                                library_ref: resultData.library_ref,
                             },
                             proposedData.collection_keys?.[0]
                         )}

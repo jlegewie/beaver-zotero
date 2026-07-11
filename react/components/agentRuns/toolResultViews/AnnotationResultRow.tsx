@@ -62,7 +62,11 @@ export const AnnotationResultRow: React.FC<AnnotationResultRowProps> = ({
     const tooltipBody = [row.text, row.comment].filter(Boolean).join('\n\n');
 
     const handleClick = () => {
-        getHost().navigation?.openAnnotation({ library_id: row.library_id, zotero_key: row.zotero_key });
+        getHost().navigation?.openAnnotation({
+            library_id: row.library_id,
+            zotero_key: row.zotero_key,
+            library_ref: row.library_ref,
+        });
     };
 
     const node = (

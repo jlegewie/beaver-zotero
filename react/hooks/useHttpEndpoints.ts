@@ -135,6 +135,18 @@ import {
     handleTestViewImagesHttpRequest,
     handleTestAttachmentImageHttpRequest,
 } from './httpHandlers/testExclusionHandlers';
+import {
+    handleTestLibraryIdentityHttpRequest,
+} from './httpHandlers/testLibraryIdentityHandlers';
+import {
+    handleTestNewThreadHttpRequest,
+    handleTestChatSendHttpRequest,
+    handleTestCurrentIdsHttpRequest,
+    handleTestLoadThreadHttpRequest,
+    handleTestListActionsHttpRequest,
+    handleTestApproveActionHttpRequest,
+    handleTestUndoActionHttpRequest,
+} from './httpHandlers/testChatHandlers';
 import type {
     WSZoteroDataRequest,
     WSExternalReferenceCheckRequest,
@@ -288,6 +300,16 @@ const ENDPOINT_PATHS = [
     '/beaver/test/get-annotations',
     '/beaver/test/view-images',
     '/beaver/test/attachment-image',
+    // Device-portable library-identity resolvers (dev-only)
+    '/beaver/test/library-identity',
+    // Headless chat/run lifecycle driving (dev-only)
+    '/beaver/test/new-thread',
+    '/beaver/test/chat-send',
+    '/beaver/test/current-ids',
+    '/beaver/test/load-thread',
+    '/beaver/test/list-actions',
+    '/beaver/test/approve-action',
+    '/beaver/test/undo-action',
 ] as const;
 
 /**
@@ -1058,6 +1080,31 @@ function registerEndpoints(): boolean {
 
         Zotero.Server.Endpoints['/beaver/test/attachment-image'] =
             createEndpoint(handleTestAttachmentImageHttpRequest);
+
+        // Device-portable library-identity resolvers (dev-only): thin wrappers
+        // over libraryRefForLibraryID / parseLibraryRef / resolveLibraryRef /
+        // resolveItemReference so live tests can assert them against real
+        // personal + group libraries.
+        Zotero.Server.Endpoints['/beaver/test/library-identity'] =
+            createEndpoint(handleTestLibraryIdentityHttpRequest);
+        // Headless chat/run lifecycle (dev-only): trigger the real send/approval/
+        // undo path over HTTP by writing the same Jotai action atoms the UI writes,
+        // so an automated agent can drive full agent runs without poking the
+        // Lexical editor (which can't be reliably driven by synthetic events).
+        Zotero.Server.Endpoints['/beaver/test/new-thread'] =
+            createEndpoint(handleTestNewThreadHttpRequest);
+        Zotero.Server.Endpoints['/beaver/test/chat-send'] =
+            createEndpoint(handleTestChatSendHttpRequest);
+        Zotero.Server.Endpoints['/beaver/test/current-ids'] =
+            createEndpoint(handleTestCurrentIdsHttpRequest);
+        Zotero.Server.Endpoints['/beaver/test/load-thread'] =
+            createEndpoint(handleTestLoadThreadHttpRequest);
+        Zotero.Server.Endpoints['/beaver/test/list-actions'] =
+            createEndpoint(handleTestListActionsHttpRequest);
+        Zotero.Server.Endpoints['/beaver/test/approve-action'] =
+            createEndpoint(handleTestApproveActionHttpRequest);
+        Zotero.Server.Endpoints['/beaver/test/undo-action'] =
+            createEndpoint(handleTestUndoActionHttpRequest);
     }
 
     logger(`useHttpEndpoints: Registered ${ENDPOINT_PATHS.length} HTTP endpoints`, 3);

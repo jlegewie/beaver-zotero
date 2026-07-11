@@ -25,6 +25,8 @@ import {
     parseRawCitationAttributes,
 } from '../../react/utils/citationGrammar';
 import type { PageLabelsByAttachmentId } from '../../react/atoms/citations';
+import { modelObjectId, modelObjectIdFromReference, resolveObjectId, UNRESOLVED_LIBRARY_ID } from './libraryIdentity';
+import { checkLibraryExcluded } from '../services/agentDataProvider/utils';
 
 // =============================================================================
 // New-string validation
@@ -103,10 +105,19 @@ export function checkNewCitationItemsExist(
         const normalized = normalizeCitationTag(parseRawCitationAttributes(attrStr));
         if (!normalized.ok || normalized.ref.kind !== 'zotero') continue; // will fail later in expansion with a proper error
 
-        const id = `${normalized.ref.library_id}-${normalized.ref.zotero_key}`;
+        const id = modelObjectIdFromReference(normalized.ref);
+        const label = extractAttr(attrStr, 'id') ? 'id' : extractAttr(attrStr, 'item_id') ? 'item_id' : 'att_id';
+        if (normalized.ref.library_id === UNRESOLVED_LIBRARY_ID) {
+            return `Citation ${label}="${id}" references an item in a library that is not available on this computer.`;
+        }
+        // Reject before the existence lookup: an excluded library's items must
+        // not be cited, and the response must not reveal whether the item exists.
+        const excluded = checkLibraryExcluded(normalized.ref.library_id);
+        if (excluded) {
+            return `Citation ${label}="${id}": ${excluded.message}`;
+        }
         const item = Zotero.Items.getByLibraryAndKey(normalized.ref.library_id, normalized.ref.zotero_key);
         if (!item) {
-            const label = extractAttr(attrStr, 'id') ? 'id' : extractAttr(attrStr, 'item_id') ? 'item_id' : 'att_id';
             return `Citation references a Zotero item that does not exist: ${label}="${id}". Verify the item ID is correct.`;
         }
     }
@@ -133,7 +144,7 @@ export function checkDuplicateCitations(
     while ((match = newCitationRegex.exec(newString)) !== null) {
         const normalized = normalizeCitationTag(parseRawCitationAttributes(match[1]));
         if (!normalized.ok || normalized.ref.kind !== 'zotero') continue;
-        const newItemId = `${normalized.ref.library_id}-${normalized.ref.zotero_key}`;
+        const newItemId = modelObjectIdFromReference(normalized.ref);
         // Check if any existing citation references the same item
         for (const [existingId, stored] of metadata.elements) {
             if (stored.type === 'citation' && stored.originalAttrs?.item_id === newItemId) {
@@ -189,18 +200,15 @@ function findUniqueCitationRef(
 function resolveAttIdToParent(
     attId: string,
 ): { parentItemId: string; attachmentItem: any } | null {
-    const dashIdx = attId.indexOf('-');
-    if (dashIdx <= 0) return null;
-    const libId = parseInt(attId.substring(0, dashIdx), 10);
-    const key = attId.substring(dashIdx + 1);
-    if (!libId || !key) return null;
-    const item = Zotero.Items.getByLibraryAndKey(libId, key);
+    const ref = resolveObjectId(attId);
+    if (!ref || ref.library_id === UNRESOLVED_LIBRARY_ID) return null;
+    const item = Zotero.Items.getByLibraryAndKey(ref.library_id, ref.zotero_key);
     if (!item || typeof item === 'boolean') return null;
     if (!item.isAttachment?.()) return null;
     const parentKey = (item as any).parentKey;
     if (!parentKey) return null;
     return {
-        parentItemId: `${item.libraryID}-${parentKey}`,
+        parentItemId: modelObjectId(item.libraryID, parentKey),
         attachmentItem: item,
     };
 }
@@ -231,12 +239,9 @@ function translateAttIdPageLocator(
 }
 
 function resolveUnifiedIdForOldString(id: string): { itemId?: string; attId?: string } {
-    const dashIdx = id.indexOf('-');
-    if (dashIdx <= 0) return { itemId: id };
-    const libId = parseInt(id.substring(0, dashIdx), 10);
-    const key = id.substring(dashIdx + 1);
-    if (!libId || !key) return { itemId: id };
-    const item = Zotero.Items.getByLibraryAndKey(libId, key);
+    const ref = resolveObjectId(id);
+    if (!ref || ref.library_id === UNRESOLVED_LIBRARY_ID) return { itemId: id };
+    const item = Zotero.Items.getByLibraryAndKey(ref.library_id, ref.zotero_key);
     if (item && typeof item !== 'boolean' && item.isAttachment?.()) {
         return { attId: id };
     }
@@ -320,7 +325,14 @@ export function enrichOldStringCitationRefs(
         const explicitItemId = extractAttr(attrStr, 'item_id');
         const unifiedId = extractAttr(attrStr, 'id');
         const resolvedUnifiedId = unifiedId ? resolveUnifiedIdForOldString(unifiedId) : {};
-        const itemId = explicitItemId || resolvedUnifiedId.itemId;
+        const rawItemId = explicitItemId || resolvedUnifiedId.itemId;
+        // Normalize to the portable id `simplifyNoteHtml` stores in
+        // `originalAttrs.item_id` so a legacy numeric id written by the model
+        // still matches — `normalized.ref` covers `item_id`/`id` identity
+        // attributes (see `firstZoteroIdentity`'s priority order).
+        const itemId = rawItemId && normalized.ok && normalized.ref.kind === 'zotero'
+            ? modelObjectIdFromReference(normalized.ref)
+            : rawItemId;
         const unifiedAttId = resolvedUnifiedId.attId;
         if (itemId) {
             const candidateRef = findUniqueCitationRef(metadata, itemId, page);

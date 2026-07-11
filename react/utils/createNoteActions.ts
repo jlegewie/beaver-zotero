@@ -13,11 +13,14 @@ import { prepareCitationRenderContext } from './citationRenderContext';
 import { wrapWithSchemaVersion, getBeaverNoteFooterHTML } from './noteActions';
 import { logger } from '../../src/utils/logger';
 import { resolveCreateNoteParent } from '../../src/services/agentDataProvider/actions/resolveCreateNoteParent';
+import { libraryRefForLibraryID, resolveItemReference, resolveWriteTargetLibrary } from '../../src/utils/libraryIdentity';
 
 
 export interface CreateNoteResultData {
     library_id: number;
     zotero_key: string;
+    /** Device-portable library identity ("u" | "g<groupID>"). See `src/utils/libraryIdentity.ts`. */
+    library_ref?: string;
     parent_key?: string;
     collection_key?: string;
     /** Simplified HTML content of the created note (same format as read_note) */
@@ -40,6 +43,7 @@ export async function executeCreateNoteAction(action: AgentAction, runId?: strin
         title: string;
         content: string;
         parent_item_id?: string;   // original: "<library_id>-<zotero_key>"
+        library_ref?: string;
         library_id?: number;       // resolved by validation (normalized_action_data)
         parent_key?: string;       // resolved by validation (normalized_action_data)
         collection_key?: string;   // resolved by validation (normalized_action_data)
@@ -58,13 +62,19 @@ export async function executeCreateNoteAction(action: AgentAction, runId?: strin
     // (relatedItemKey/warning); stored normalized fields like library_id or
     // parent_key don't carry that data, so skipping resolution when they're
     // present would lose the fallback link.
-    let targetLibraryId = proposed.library_id ?? Zotero.Libraries.userLibraryID;
+    const targetLibrary = resolveWriteTargetLibrary({
+        library_ref: proposed.library_ref,
+        library_id: proposed.library_id,
+        library_name: proposed.library,
+    });
+    if (!targetLibrary.ok) throw new Error(targetLibrary.message);
+    let targetLibraryId = targetLibrary.libraryID;
     let parentKey: string | null = proposed.parent_key || null;
     let relatedItemKey: string | null = null;
     let warning: string | null = null;
 
     if (proposed.parent_item_id) {
-        const resolution = await resolveCreateNoteParent(proposed.parent_item_id);
+        const resolution = await resolveCreateNoteParent(proposed.parent_item_id, proposed.library_ref);
         if (!resolution.ok) {
             throw new Error(resolution.error);
         }
@@ -180,6 +190,7 @@ export async function executeCreateNoteAction(action: AgentAction, runId?: strin
     return {
         library_id: zoteroNote.libraryID,
         zotero_key: zoteroNote.key,
+        library_ref: libraryRefForLibraryID(zoteroNote.libraryID) ?? undefined,
         ...(zoteroNote.parentKey ? { parent_key: zoteroNote.parentKey } : {}),
         ...(effectiveCollectionKey ? { collection_key: effectiveCollectionKey } : {}),
         ...(relatedItemKey ? { related_item_key: relatedItemKey } : {}),
@@ -197,14 +208,16 @@ export async function undoCreateNoteAction(action: AgentAction): Promise<void> {
         throw new Error('Cannot undo: no result data with note reference');
     }
 
-    const item = await Zotero.Items.getByLibraryAndKeyAsync(
-        resultData.library_id, resultData.zotero_key
-    );
-    if (!item) {
+    const resolved = await resolveItemReference(resultData);
+    if (resolved.status === 'library_unavailable') {
+        logger(`undoCreateNoteAction: Library unavailable for note ${resultData.library_ref || resultData.library_id}-${resultData.zotero_key}`, 1);
+        return;
+    }
+    if (resolved.status === 'not_found') {
         logger(`undoCreateNoteAction: Note ${resultData.library_id}-${resultData.zotero_key} not found, may have been manually deleted`, 1);
         return;
     }
 
-    await item.eraseTx();
+    await resolved.item.eraseTx();
     logger(`undoCreateNoteAction: Deleted note ${resultData.library_id}-${resultData.zotero_key}`, 1);
 }

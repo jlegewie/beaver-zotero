@@ -4,6 +4,8 @@ import type { ExternalReference } from "../externalReferences";
 export interface CreateItemProposedData {
     // Target library (undefined = user's main library)
     library_id?: number;
+    /** Device-portable library identity ("u" | "g<groupID>"). See `src/utils/libraryIdentity.ts`. */
+    library_ref?: string;
     library_name?: string;  // Resolve library by name if library_id not provided
 
     // Core item data
@@ -42,6 +44,8 @@ export interface CreateItemResultData {
     // From ZoteroItemReference
     library_id: number;
     zotero_key: string;  // The Zotero key assigned to the new item
+    /** Device-portable library identity ("u" | "g<groupID>"). See `src/utils/libraryIdentity.ts`. */
+    library_ref?: string;
 
     // Attachment lifecycle (see AttachmentStatus above)
     attachment_status: AttachmentStatus;

@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { ItemSearchResult } from '../../../../../src/services/searchService';
 import { getActiveZoteroLibraryId, getRecentAsync, loadFullItemData } from '../../../../../src/utils/zoteroUtils';
+import { UNRESOLVED_LIBRARY_ID } from '../../../../../src/utils/libraryIdentity';
 import { ArrowRightIcon, CSSIcon, FileLinkIcon, Icon } from '../../../icons/icons';
 import { SearchMenuItem } from '../SearchMenu';
 import { SourceMenuItemContext, createSourceMenuItem } from '../utils/menuItemFactories';
@@ -62,11 +63,20 @@ export const useSourcesMenu = ({
         let isCancelled = false;
 
         const buildMenuItems = async () => {
-            const recentItems = await getRecentItems();
-            const recentlyModifiedItems = await getRecentAsync(1, { limit: recentItemsLimit * 3 }) as Zotero.Item[];
+            // Never surface items from excluded libraries — stored recents can
+            // predate an exclusion.
+            const searchableOnly = (items: (Zotero.Item | null | undefined)[]) =>
+                items.filter((item): item is Zotero.Item =>
+                    Boolean(item) && searchableLibraryIds.includes(item!.libraryID));
 
-            const allItems = [...recentItems, ...recentlyModifiedItems]
-                .filter((item): item is Zotero.Item => Boolean(item));
+            const recentItems = searchableOnly(await getRecentItems());
+            // Don't read the personal library's recently-modified items when the
+            // user excluded it from Beaver.
+            const recentlyModifiedItems = searchableLibraryIds.includes(1)
+                ? searchableOnly(await getRecentAsync(1, { limit: recentItemsLimit * 3 }) as Zotero.Item[])
+                : [];
+
+            const allItems = [...recentItems, ...recentlyModifiedItems];
 
             await loadFullItemData(allItems);
 
@@ -295,6 +305,11 @@ export const useSourcesMenu = ({
             const items: SearchMenuItem[] = [];
 
             for (const result of searchResults) {
+                // A portable library ref that couldn't be resolved on this device
+                // carries library_id 0, which throws synchronously if looked up.
+                if (result.library_id === UNRESOLVED_LIBRARY_ID) {
+                    continue;
+                }
                 const item = await Zotero.Items.getByLibraryAndKeyAsync(result.library_id, result.zotero_key);
                 if (!item) {
                     continue;

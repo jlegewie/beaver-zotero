@@ -13,6 +13,7 @@ import {
     Spread,
 } from 'lexical';
 import { MentionPill } from './MentionPill';
+import { modelObjectId } from '../../../../src/utils/libraryIdentity';
 
 export type SerializedMentionNode = Spread<
     {
@@ -64,11 +65,12 @@ export class MentionNode extends DecoratorNode<React.ReactElement> {
         };
     }
 
-    // Plain text representation used by $getRoot().getTextContent().
-    // We use the Zotero-style "libraryID-itemKey" compact form so consumers
-    // downstream can still reason about the reference in plain text.
+    // Plain text representation used by $getRoot().getTextContent(), which
+    // flows into the outgoing message text the model reads. Uses the portable
+    // model-facing id format so the reference resolves the same way as every
+    // other object id the model sees.
     getTextContent(): string {
-        return `@${this.__libraryID}-${this.__itemKey}`;
+        return `@${modelObjectId(this.__libraryID, this.__itemKey)}`;
     }
 
     // --- DOM ---------------------------------------------------------------

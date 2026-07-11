@@ -10,7 +10,7 @@ import {
     isLinkedUrlAttachment,
     safeFileExists,
 } from '../../utils/attachmentFiles';
-import { getItemKey } from '../../utils/zoteroItemUtils';
+import { modelObjectId } from '../../utils/libraryIdentity';
 
 /**
  * Return the readable content kind represented by the current Zotero item.
@@ -192,12 +192,12 @@ export async function resolveToPdfAttachment(
 
         const bestAttachment = await item.getBestAttachment();
         const bestAttachmentKey = bestAttachment
-            ? `${bestAttachment.libraryID}-${bestAttachment.key}`
+            ? modelObjectId(bestAttachment.libraryID, bestAttachment.key)
             : null;
 
         if (pdfAttachments.length === 1) {
             const only = pdfAttachments[0];
-            const onlyKey = `${only.libraryID}-${only.key}`;
+            const onlyKey = modelObjectId(only.libraryID, only.key);
             const resolved = await Zotero.Items.getByLibraryAndKeyAsync(
                 only.libraryID,
                 only.key,
@@ -218,7 +218,7 @@ export async function resolveToPdfAttachment(
 
         const text = pdfAttachments
             .map((a) => {
-                const k = `${a.libraryID}-${a.key}`;
+                const k = modelObjectId(a.libraryID, a.key);
                 return k === bestAttachmentKey
                     ? `'${a.attachmentFilename}' (${k}, primary)`
                     : `'${a.attachmentFilename}' (${k})`;
@@ -297,7 +297,7 @@ export async function resolveToImageAttachment(
 
         if (imageAttachments.length === 1) {
             const only = imageAttachments[0];
-            const onlyKey = getItemKey(only);
+            const onlyKey = modelObjectId(only.libraryID, only.key);
             const resolved = await Zotero.Items.getByLibraryAndKeyAsync(
                 only.libraryID,
                 only.key,
@@ -314,7 +314,7 @@ export async function resolveToImageAttachment(
         }
 
         const text = imageAttachments
-            .map((a) => `'${a.attachmentFilename}' (${getItemKey(a)})`)
+            .map((a) => `'${a.attachmentFilename}' (${modelObjectId(a.libraryID, a.key)})`)
             .join(', ');
         const message = imageAttachments.length > 0
             ? `The id '${uniqueKey}' is a regular item, not an attachment. The item has ${imageAttachments.length} image attachments: ${text}`
@@ -355,7 +355,7 @@ function labelReadableAttachment(
     contentKind: ReadableContentKind,
     bestAttachmentKey: string | null,
 ): string {
-    const key = getItemKey(item);
+    const key = modelObjectId(item.libraryID, item.key);
     const primary = key === bestAttachmentKey ? ', primary' : '';
     return `'${item.attachmentFilename}' (${key}${primary}, ${contentKind})`;
 }
@@ -452,12 +452,12 @@ export async function resolveToReadableAttachment(
             await Zotero.Items.loadDataTypes([bestAttachment], ['itemData']);
         }
         const bestAttachmentKey = bestAttachment
-            ? getItemKey(bestAttachment)
+            ? modelObjectId(bestAttachment.libraryID, bestAttachment.key)
             : null;
 
         if (pdfReadable.length === 1) {
             const only = pdfReadable[0];
-            const onlyKey = getItemKey(only.attachment);
+            const onlyKey = modelObjectId(only.attachment.libraryID, only.attachment.key);
             const label = labelReadableAttachment(
                 only.attachment,
                 only.contentKind,
@@ -468,7 +468,7 @@ export async function resolveToReadableAttachment(
 
         if (readable.length === 1) {
             const only = readable[0];
-            const onlyKey = getItemKey(only.attachment);
+            const onlyKey = modelObjectId(only.attachment.libraryID, only.attachment.key);
             const label = labelReadableAttachment(
                 only.attachment,
                 only.contentKind,
@@ -482,7 +482,7 @@ export async function resolveToReadableAttachment(
             if (bestKind) {
                 return resolveReadableChildAttachment(
                     bestAttachment,
-                    getItemKey(bestAttachment),
+                    modelObjectId(bestAttachment.libraryID, bestAttachment.key),
                     uniqueKey,
                     labelReadableAttachment(bestAttachment, bestKind, bestAttachmentKey),
                 );

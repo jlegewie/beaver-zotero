@@ -10,6 +10,7 @@ import { addPopupMessageAtom } from '../../../utils/popupMessageUtils';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { getPref, setPref } from '../../../../src/utils/prefs';
 import { getRecentAsync, loadFullItemData, getActiveZoteroLibraryId } from '../../../../src/utils/zoteroUtils';
+import { libraryRefForLibraryID, UNRESOLVED_LIBRARY_ID } from '../../../../src/utils/libraryIdentity';
 import { searchTitleCreatorYear, scoreSearchResult } from '../../../utils/search';
 import { logger } from '../../../../src/utils/logger';
 import { searchableLibraryIdsAtom } from '../../../atoms/profile';
@@ -32,6 +33,7 @@ type MenuMode = 'sources' | 'libraries' | 'collections' | 'tags' | 'notes';
 interface RecentItem {
     zotero_key: string;
     library_id: number;
+    library_ref?: string;
 }
 
 const updateRecentItems = async (newRecentItems: RecentItem[]) => {
@@ -57,6 +59,10 @@ const updateRecentItems = async (newRecentItems: RecentItem[]) => {
         .filter((item, index, self) =>
             index === self.findIndex((t) => t.zotero_key === item.zotero_key && t.library_id === item.library_id)
         )
+        .map((item) => ({
+            ...item,
+            library_ref: item.library_ref ?? libraryRefForLibraryID(item.library_id) ?? undefined,
+        }))
         .slice(0, RECENT_ITEMS_LIMIT)
 
     // Update recent items
@@ -69,13 +75,21 @@ const getRecentItems = async (): Promise<Zotero.Item[]> => {
     if (recentItemsPref) {
         const recentItemsPrefParsed = JSON.parse(recentItemsPref as string);
         if (Array.isArray(recentItemsPrefParsed)) {
+            const searchableLibraryIds = store.get(searchableLibraryIdsAtom);
             recentItems = (await Promise.all(
                 recentItemsPrefParsed
-                    .filter((recentItem): recentItem is RecentItem => 
-                        typeof recentItem === 'object' && 
-                        recentItem !== null && 
-                        'zotero_key' in recentItem && 
-                        'library_id' in recentItem
+                    .filter((recentItem): recentItem is RecentItem =>
+                        typeof recentItem === 'object' &&
+                        recentItem !== null &&
+                        'zotero_key' in recentItem &&
+                        'library_id' in recentItem &&
+                        // A portable library ref that couldn't be resolved on this
+                        // device carries library_id 0, which throws synchronously
+                        // if looked up.
+                        recentItem.library_id !== UNRESOLVED_LIBRARY_ID &&
+                        // Never look up recents from libraries the user excluded
+                        // from Beaver — stored recents can predate an exclusion.
+                        searchableLibraryIds.includes(recentItem.library_id)
                     )
                     .map(async (recentItem) => await Zotero.Items.getByLibraryAndKeyAsync(recentItem.library_id, recentItem.zotero_key))
             )).filter((item): item is Zotero.Item => Boolean(item));
@@ -267,7 +281,11 @@ const AddSourcesMenu: React.FC<{
 
     // Handler functions for menu item callbacks
     const handleAddSourceItem = useCallback((item: Zotero.Item) => {
-        updateRecentItems([{ zotero_key: item.key, library_id: item.libraryID }]);
+        updateRecentItems([{
+            zotero_key: item.key,
+            library_id: item.libraryID,
+            library_ref: libraryRefForLibraryID(item.libraryID) ?? undefined,
+        }]);
         addItemToCurrentMessageItems(item);
         handleOnClose();
     }, [addItemToCurrentMessageItems, handleOnClose]);

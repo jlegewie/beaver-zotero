@@ -6,6 +6,7 @@
  */
 
 import { logger } from '../../utils/logger';
+import { libraryRefForLibraryID, modelObjectId, resolveItemReference, resolveLibraryRef } from '../../utils/libraryIdentity';
 import { ItemDataWithStatus, AttachmentDataWithStatus, ZoteroItemReference, ItemStub } from '../../../react/types/zotero';
 import { searchableLibraryIdsAtom, syncWithZoteroAtom } from '../../../react/atoms/profile';
 import { userIdAtom } from '../../../react/atoms/auth';
@@ -90,18 +91,27 @@ export async function lookupZoteroReferences(
 
     const loadResults = await Promise.all(
         references.map(async (reference) => {
-            // Never load items from libraries the user excluded from Beaver; the
-            // reference is reported as an error so its data is never serialized.
-            const excluded = checkLibraryExcluded(reference.library_id);
-            if (excluded) {
-                return { reference, error: excluded.message, error_code: 'library_excluded' as const };
-            }
             try {
-                const zoteroItem = await Zotero.Items.getByLibraryAndKeyAsync(reference.library_id, reference.zotero_key);
-                if (!zoteroItem) {
+                // Gate on library exclusion BEFORE any item lookup, so an item
+                // in an excluded library is never resolved or confirmed to
+                // exist. Resolve the library through library_ref (with legacy
+                // library_id fallback) so the check targets the same library
+                // the item would load from.
+                const resolvedLibraryId = resolveLibraryRef(reference);
+                if (resolvedLibraryId) {
+                    const excluded = checkLibraryExcluded(resolvedLibraryId);
+                    if (excluded) {
+                        return { reference, error: excluded.message, error_code: 'library_excluded' as const };
+                    }
+                }
+                const resolved = await resolveItemReference(reference);
+                if (resolved.status === 'library_unavailable') {
+                    return { reference, error: 'Library is not available on this computer', error_code: 'library_unavailable' as const };
+                }
+                if (resolved.status === 'not_found') {
                     return { reference, error: 'Item not found in local database', error_code: 'not_found' as const };
                 }
-                return { reference, item: zoteroItem };
+                return { reference, item: resolved.item };
             } catch (error: any) {
                 logger(`lookupZoteroReferences: Failed to load zotero item ${reference.library_id}-${reference.zotero_key}: ${error}`, 1);
                 const details = error instanceof Error ? `${error.message}\n${error.stack || ''}` : String(error);
@@ -115,6 +125,7 @@ export async function lookupZoteroReferences(
         if ('item' in result && result.item) {
             primaryItems.push(result.item);
             referenceToItem.set(makeKey(result.reference.library_id, result.reference.zotero_key), result.item);
+            referenceToItem.set(makeKey(result.item.libraryID, result.item.key), result.item);
         } else if ('error' in result) {
             errors.push({
                 reference: result.reference,
@@ -392,7 +403,11 @@ export async function lookupZoteroReferences(
             } catch (error: any) {
                 logger(`lookupZoteroReferences: Failed to serialize item ${item.libraryID}/${item.key}: ${error}`, 1);
                 errors.push({
-                    reference: { library_id: item.libraryID, zotero_key: item.key },
+                    reference: {
+                        library_id: item.libraryID,
+                        zotero_key: item.key,
+                        library_ref: libraryRefForLibraryID(item.libraryID) ?? undefined,
+                    },
                     error: 'Failed to serialize item',
                     error_code: 'load_failed',
                     details: error instanceof Error ? `${error.message}\n${error.stack || ''}` : String(error),
@@ -410,7 +425,11 @@ export async function lookupZoteroReferences(
                 });
                 if (!serialized) {
                     errors.push({
-                        reference: { library_id: attachment.libraryID, zotero_key: attachment.key },
+                        reference: {
+                            library_id: attachment.libraryID,
+                            zotero_key: attachment.key,
+                            library_ref: libraryRefForLibraryID(attachment.libraryID) ?? undefined,
+                        },
                         error: 'Attachment not available locally',
                         error_code: 'not_available',
                     });
@@ -442,7 +461,11 @@ export async function lookupZoteroReferences(
             } catch (error: any) {
                 logger(`lookupZoteroReferences: Failed to serialize attachment ${attachment.libraryID}/${attachment.key}: ${error}`, 1);
                 errors.push({
-                    reference: { library_id: attachment.libraryID, zotero_key: attachment.key },
+                    reference: {
+                        library_id: attachment.libraryID,
+                        zotero_key: attachment.key,
+                        library_ref: libraryRefForLibraryID(attachment.libraryID) ?? undefined,
+                    },
                     error: 'Failed to serialize attachment',
                     error_code: 'load_failed',
                     details: error instanceof Error ? `${error.message}\n${error.stack || ''}` : String(error),
@@ -480,7 +503,11 @@ export async function lookupZoteroReferences(
         } catch (error: any) {
             logger(`lookupZoteroReferences: Failed to serialize note ${note.libraryID}/${note.key}: ${error}`, 1);
             errors.push({
-                reference: { library_id: note.libraryID, zotero_key: note.key },
+                reference: {
+                    library_id: note.libraryID,
+                    zotero_key: note.key,
+                    library_ref: libraryRefForLibraryID(note.libraryID) ?? undefined,
+                },
                 error: 'Failed to serialize note',
                 error_code: 'load_failed',
                 details: error instanceof Error ? `${error.message}\n${error.stack || ''}` : String(error),
@@ -498,7 +525,7 @@ export async function lookupZoteroReferences(
         try {
             const parentAttachment = annotation.parentID ? attachmentItemsById.get(annotation.parentID) : null;
             const attachmentInfo = parentAttachment
-                ? { item_id: `${parentAttachment.libraryID}-${parentAttachment.key}` }
+                ? { item_id: modelObjectId(parentAttachment.libraryID, parentAttachment.key) }
                 : null;
 
             const regularItem = parentAttachment?.parentID
@@ -516,7 +543,7 @@ export async function lookupZoteroReferences(
                 try { itemTitle = (regularItem.getField('title', false, true) as string) || ''; }
                 catch { itemTitle = regularItem.getDisplayTitle?.() || ''; }
                 itemInfo = {
-                    item_id: `${regularItem.libraryID}-${regularItem.key}`,
+                    item_id: modelObjectId(regularItem.libraryID, regularItem.key),
                     item_type: regularItem.itemType ?? null,
                     title: itemTitle,
                     creators: formatZoteroCreatorsString(getCreatorsFromItem(regularItem)),
@@ -528,7 +555,11 @@ export async function lookupZoteroReferences(
         } catch (error: any) {
             logger(`lookupZoteroReferences: Failed to serialize annotation ${annotation.libraryID}/${annotation.key}: ${error}`, 1);
             errors.push({
-                reference: { library_id: annotation.libraryID, zotero_key: annotation.key },
+                reference: {
+                    library_id: annotation.libraryID,
+                    zotero_key: annotation.key,
+                    library_ref: libraryRefForLibraryID(annotation.libraryID) ?? undefined,
+                },
                 error: 'Failed to serialize annotation',
                 error_code: 'load_failed',
                 details: error instanceof Error ? `${error.message}\n${error.stack || ''}` : String(error),

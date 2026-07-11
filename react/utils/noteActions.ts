@@ -5,6 +5,7 @@ import { hasSchemaVersionWrapper } from "../../src/utils/noteWrapper";
 import { store } from "../store";
 import { currentThreadNameAtom } from "../atoms/threads";
 import { logger } from "../../src/utils/logger";
+import { libraryRefForLibraryID } from "../../src/utils/libraryIdentity";
 
 /**
  * Schema version used by the Zotero note editor for modern notes.
@@ -69,6 +70,7 @@ export interface ProvenanceNoteOptions {
 export interface ProvenanceNoteParent {
     library_id: number;
     zotero_key: string;
+    library_ref?: string;
 }
 
 /**
@@ -116,6 +118,8 @@ export interface SavedNoteReference {
     zotero_key: string;
     parent_key?: string;
     library_id: number;
+    /** Device-portable library identity ("u" | "g<groupID>"). See `src/utils/libraryIdentity.ts`. */
+    library_ref?: string;
 }
 
 export async function saveStreamingNote(options: SaveStreamingNoteOptions): Promise<SavedNoteReference> {
@@ -142,6 +146,7 @@ export async function saveStreamingNote(options: SaveStreamingNoteOptions): Prom
     return {
         library_id: zoteroNote.libraryID,
         zotero_key: zoteroNote.key,
+        library_ref: libraryRefForLibraryID(zoteroNote.libraryID) ?? undefined,
         ...(zoteroNote.parentKey ? { parent_key: zoteroNote.parentKey } : {})
     };
 }

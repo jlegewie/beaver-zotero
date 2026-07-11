@@ -97,6 +97,8 @@ interface PendingEntry {
     resolve: (value: any) => void;
     reject: (reason: any) => void;
     fatalCandidate?: FatalOperationCandidate;
+    /** Epoch-ms when the client accepted this operation. */
+    startedAt: number;
 }
 
 interface StartupEntry {
@@ -224,6 +226,12 @@ export class MuPDFWorkerClient {
     private startup: StartupEntry | null = null;
     private nextId = 1;
     private pending = new Map<number, PendingEntry>();
+    /** Cached for O(1) busy-context reads on every backend request. */
+    private oldestPendingStartedAt: number | null = null;
+    private nextStartupWaiterId = 1;
+    private startupWaiters = new Map<number, number>();
+    /** Cached so startup-wait age is also an O(1) property read. */
+    private oldestStartupWaitStartedAt: number | null = null;
     /**
      * Once true, the client refuses to spawn a new worker. Set by `dispose()`.
      * Distinguishes a stale-but-recoverable worker (transparent retry OK) from
@@ -239,6 +247,11 @@ export class MuPDFWorkerClient {
      */
     private spawnCount = 0;
     private retryCount = 0;
+    /**
+     * Consecutive worker start-phase failures (module load / configure
+     * handshake) since the last successful handshake.
+     */
+    private consecutiveStartFailures = 0;
     private dispatchCounts: Record<string, number> = {};
     private lastSpawnTime: number | null = null;
     private fatalOperationKeys = new Set<string>();
@@ -272,12 +285,93 @@ export class MuPDFWorkerClient {
     }
 
     /**
-     * Number of in-flight worker operations (PDF extraction work); 0 = idle.
+     * Number of accepted worker operations, including calls waiting for the
+     * configure handshake; 0 = idle.
      * Read cross-bundle via the `Zotero.__beaverMuPDFWorkerClient_*` globals to
      * feed `busy_extracting` in busy-context diagnostics.
      */
     get inFlight(): number {
-        return this.pending.size;
+        return this.pending.size + this.startupWaiters.size;
+    }
+
+    /** Epoch-ms for the oldest in-flight operation, or 0 while idle. */
+    get oldestInFlightStartedAt(): number {
+        if (this.oldestPendingStartedAt === null) {
+            return this.oldestStartupWaitStartedAt ?? 0;
+        }
+        if (this.oldestStartupWaitStartedAt === null) {
+            return this.oldestPendingStartedAt;
+        }
+        return Math.min(
+            this.oldestPendingStartedAt,
+            this.oldestStartupWaitStartedAt,
+        );
+    }
+
+    /** Track a call only while it waits for the worker configure handshake. */
+    private addStartupWaiter(): number {
+        const id = this.nextStartupWaiterId++;
+        const startedAt = Date.now();
+        this.startupWaiters.set(id, startedAt);
+        this.oldestStartupWaitStartedAt = this.oldestStartupWaitStartedAt === null
+            ? startedAt
+            : Math.min(this.oldestStartupWaitStartedAt, startedAt);
+        return id;
+    }
+
+    /** Remove a configure waiter and refresh its cached oldest timestamp. */
+    private deleteStartupWaiter(id: number): number | null {
+        const removedStartedAt = this.startupWaiters.get(id);
+        if (removedStartedAt === undefined || !this.startupWaiters.delete(id)) {
+            return null;
+        }
+        if (this.startupWaiters.size === 0) {
+            this.oldestStartupWaitStartedAt = null;
+        } else if (removedStartedAt === this.oldestStartupWaitStartedAt) {
+            let oldest = Infinity;
+            for (const startedAt of this.startupWaiters.values()) {
+                oldest = Math.min(oldest, startedAt);
+            }
+            this.oldestStartupWaitStartedAt = oldest;
+        }
+        return removedStartedAt;
+    }
+
+    /** Add an operation and update the cached oldest timestamp. */
+    private addPending(
+        id: number,
+        entry: Omit<PendingEntry, "startedAt">,
+        startedAt: number = Date.now(),
+    ): void {
+        this.pending.set(id, { ...entry, startedAt });
+        this.oldestPendingStartedAt = this.oldestPendingStartedAt === null
+            ? startedAt
+            : Math.min(this.oldestPendingStartedAt, startedAt);
+    }
+
+    /** Remove an operation and refresh age tracking outside the stats hot path. */
+    private deletePending(id: number): boolean {
+        const removed = this.pending.get(id);
+        if (!removed || !this.pending.delete(id)) return false;
+
+        if (this.pending.size === 0) {
+            this.oldestPendingStartedAt = null;
+        } else if (removed.startedAt === this.oldestPendingStartedAt) {
+            let oldest = Infinity;
+            for (const entry of this.pending.values()) {
+                oldest = Math.min(oldest, entry.startedAt);
+            }
+            this.oldestPendingStartedAt = oldest;
+        }
+        return true;
+    }
+
+    /** Clear all operations and reset the cached oldest timestamp. */
+    private clearPending(): PendingEntry[] {
+        const entries = Array.from(this.pending.values());
+        this.pending.clear();
+        this.oldestPendingStartedAt = null;
+        return entries;
     }
 
     /** Test-only: change the idle timeout on a live instance. */
@@ -311,6 +405,10 @@ export class MuPDFWorkerClient {
         const cfg = getConfig();
         const mainWindow = cfg.getWorkerHost();
         if (!mainWindow) {
+            // Pre-spawn failure: no StartupEntry exists, so this never reaches
+            // markStale. Count it here so repeated hot-slot spawn failures still
+            // raise the restart prompt (this surfaces as worker_unavailable).
+            this.recordStartFailure("spawn failed: no main window available");
             throw new WorkerSpawnError(
                 "MuPDFWorkerClient: no main window available to spawn worker",
             );
@@ -329,12 +427,25 @@ export class MuPDFWorkerClient {
 
         const WorkerCtor = (mainWindow as any).Worker as typeof Worker;
         if (!WorkerCtor) {
+            this.recordStartFailure("spawn failed: no Worker constructor");
             throw new WorkerSpawnError(
                 "MuPDFWorkerClient: main window has no Worker constructor",
             );
         }
 
-        const worker = new WorkerCtor(cfg.workerUrl, { type: "module" });
+        let worker: Worker;
+        try {
+            worker = new WorkerCtor(cfg.workerUrl, { type: "module" });
+        } catch (e) {
+            // A synchronous construction failure is also a pre-spawn failure
+            // (no StartupEntry yet). Count it and normalize to WorkerSpawnError
+            // so it classifies as worker_unavailable like the other paths.
+            const detail = e instanceof Error ? e.message : String(e);
+            this.recordStartFailure(`spawn failed: ${detail}`);
+            throw new WorkerSpawnError(
+                `MuPDFWorkerClient: worker construction failed: ${detail}`,
+            );
+        }
         this.spawnCount++;
         this.lastSpawnTime = Date.now();
         cfg.log(`[MuPDFWorkerClient ${this.slotName}] spawned new worker`, 3);
@@ -343,12 +454,12 @@ export class MuPDFWorkerClient {
         (worker as any).onerror = (event: any) => {
             const message = event?.message || "worker onerror";
             cfg.log(`[MuPDFWorkerClient ${this.slotName}] worker.onerror: ${message}`, 1);
-            this.markStale(`worker.onerror: ${message}`);
+            this.markStale(`worker.onerror: ${message}`, { startError: true });
         };
         (worker as any).onmessageerror = (event: any) => {
             const message = event?.message || "worker onmessageerror";
             cfg.log(`[MuPDFWorkerClient ${this.slotName}] worker.onmessageerror: ${message}`, 1);
-            this.markStale(`worker.onmessageerror: ${message}`);
+            this.markStale(`worker.onmessageerror: ${message}`, { startError: true });
         };
 
         this.worker = worker;
@@ -400,7 +511,7 @@ export class MuPDFWorkerClient {
         };
         entry.timeoutId = setTimeout(() => {
             if (this.startup !== entry || entry.configured) return;
-            this.markStale("configure handshake timed out");
+            this.markStale("configure handshake timed out", { startError: true });
         }, 15000);
         (entry.timeoutId as any)?.unref?.();
         return entry;
@@ -414,6 +525,7 @@ export class MuPDFWorkerClient {
         } catch (e) {
             this.markStale(
                 `configure postMessage threw during ${reason}: ${e instanceof Error ? e.message : String(e)}`,
+                { startError: true },
             );
         }
     }
@@ -438,6 +550,9 @@ export class MuPDFWorkerClient {
         if (lifecycle.kind === "configured") {
             if (this.startup?.worker === worker) {
                 this.startup.resolve();
+                // The worker completed its handshake — the slot is healthy
+                // again, so clear the consecutive start-failure streak.
+                this.consecutiveStartFailures = 0;
             }
             return;
         }
@@ -451,7 +566,7 @@ export class MuPDFWorkerClient {
             );
             return;
         }
-        this.pending.delete(reply.id);
+        this.deletePending(reply.id);
 
         if (reply.ok) {
             entry.resolve(reply.result);
@@ -489,16 +604,48 @@ export class MuPDFWorkerClient {
     }
 
     /**
+     * Record a worker start-phase failure: bump the consecutive-failure streak
+     * and notify the host hook so it can prompt the user after repeated
+     * failures. Covers both post-spawn failures (handshake timeout, `onerror`,
+     * routed here from `markStale`) and pre-spawn failures (the
+     * `WorkerSpawnError` paths in `ensureWorker`, which never create a
+     * `StartupEntry` and so never reach `markStale`). Guarded so a host callback
+     * error can never break the caller.
+     */
+    private recordStartFailure(reason: string): void {
+        if (this.disposed) return;
+        this.consecutiveStartFailures++;
+        if (!isConfigured()) return;
+        try {
+            getConfig().onWorkerStartFailure?.({
+                slotName: this.slotName,
+                consecutiveFailures: this.consecutiveStartFailures,
+                reason,
+            });
+        } catch (e) {
+            getConfig().log(
+                `[MuPDFWorkerClient ${this.slotName}] onWorkerStartFailure hook threw: ${e}`,
+                2,
+            );
+        }
+    }
+
+    /**
      * Mark the worker as stale: terminate it, reject all pending entries,
      * clear singleton state. Idempotent.
      */
-    private markStale(reason: string): void {
+    private markStale(reason: string, opts?: { startError?: boolean }): void {
         this.clearIdleTimer();
         const w = this.worker;
         this.worker = null;
         this.spawnedFromWindowInternal = null;
         const startup = this.startup;
         this.startup = null;
+
+        // A "start-phase" failure is a worker that died before it ever completed
+        // its configure handshake
+        const startPhaseFailure =
+            !!opts?.startError && !this.disposed && !!startup && !startup.configured;
 
         if (w) {
             try {
@@ -524,10 +671,16 @@ export class MuPDFWorkerClient {
         if (startup && startup.worker === w) {
             startup.reject(stale);
         }
-        const pending = Array.from(this.pending.values());
-        this.pending.clear();
+        const pending = this.clearPending();
         for (const entry of pending) {
             entry.reject(stale);
+        }
+
+        // Surface a repeated inability to start the worker to the host (e.g. to
+        // prompt the user to restart). Fired after state is cleared and pending
+        // is rejected.
+        if (startPhaseFailure) {
+            this.recordStartFailure(reason);
         }
     }
 
@@ -585,14 +738,23 @@ export class MuPDFWorkerClient {
         const worker = this.ensureWorker();
         const startup = this.pendingStartupFor(worker);
         if (startup) {
-            return this.waitForStartup(worker, startup, signal).then(() =>
-                this.dispatchConfigured<T>(
-                    worker,
-                    op,
-                    args,
-                    signal,
-                    fatalCandidate,
-                ),
+            const waiterId = this.addStartupWaiter();
+            return this.waitForStartup(worker, startup, signal).then(
+                () => {
+                    const startedAt = this.deleteStartupWaiter(waiterId);
+                    return this.dispatchConfigured<T>(
+                        worker,
+                        op,
+                        args,
+                        signal,
+                        fatalCandidate,
+                        startedAt ?? undefined,
+                    );
+                },
+                (error) => {
+                    this.deleteStartupWaiter(waiterId);
+                    throw error;
+                },
             );
         }
         return this.dispatchConfigured<T>(
@@ -662,6 +824,7 @@ export class MuPDFWorkerClient {
         args: Record<string, unknown>,
         signal: AbortSignal | undefined,
         fatalCandidate: FatalOperationCandidate | null,
+        startedAt?: number,
     ): Promise<T> {
         if (signal?.aborted) {
             return Promise.reject(new WorkerAbortError());
@@ -695,19 +858,23 @@ export class MuPDFWorkerClient {
             if (signal) {
                 onAbort = () => {
                     if (!this.pending.has(id)) return;
-                    this.pending.delete(id);
+                    this.deletePending(id);
                     rejectWithCleanup(new WorkerAbortError());
                     this.markStale("op aborted by caller");
                 };
                 signal.addEventListener("abort", onAbort, { once: true });
             }
-            this.pending.set(id, {
-                resolve: resolveWithCleanup,
-                reject: rejectWithCleanup,
-                fatalCandidate: fatalCandidate ?? undefined,
-            });
+            this.addPending(
+                id,
+                {
+                    resolve: resolveWithCleanup,
+                    reject: rejectWithCleanup,
+                    fatalCandidate: fatalCandidate ?? undefined,
+                },
+                startedAt,
+            );
             if (signal?.aborted) {
-                this.pending.delete(id);
+                this.deletePending(id);
                 rejectWithCleanup(new WorkerAbortError());
                 return;
             }
@@ -715,7 +882,7 @@ export class MuPDFWorkerClient {
                 this.clearIdleTimer();
                 worker.postMessage({ id, op, args });
             } catch (e) {
-                this.pending.delete(id);
+                this.deletePending(id);
                 this.markStale(
                     `postMessage threw: ${e instanceof Error ? e.message : String(e)}`,
                 );
@@ -1082,6 +1249,7 @@ export class MuPDFWorkerClient {
         disposed: boolean;
         spawnCount: number;
         retryCount: number;
+        consecutiveStartFailures: number;
         pendingCount: number;
         nextId: number;
         dispatchCounts: Record<string, number>;
@@ -1093,6 +1261,7 @@ export class MuPDFWorkerClient {
             disposed: this.disposed,
             spawnCount: this.spawnCount,
             retryCount: this.retryCount,
+            consecutiveStartFailures: this.consecutiveStartFailures,
             pendingCount: this.pending.size,
             nextId: this.nextId,
             dispatchCounts: { ...this.dispatchCounts },
@@ -1105,6 +1274,7 @@ export class MuPDFWorkerClient {
     resetStats(): void {
         this.spawnCount = 0;
         this.retryCount = 0;
+        this.consecutiveStartFailures = 0;
         this.dispatchCounts = {};
         this.lastSpawnTime = null;
     }
@@ -1223,12 +1393,12 @@ export class MuPDFWorkerClient {
         }
         const id = this.nextId++;
         return new Promise<T>((resolve, reject) => {
-            this.pending.set(id, { resolve, reject });
+            this.addPending(id, { resolve, reject });
             try {
                 this.clearIdleTimer();
                 worker.postMessage({ id, op, args });
             } catch (e) {
-                this.pending.delete(id);
+                this.deletePending(id);
                 this.armIdleTimer();
                 reject(
                     new Error(

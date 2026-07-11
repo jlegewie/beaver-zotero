@@ -20,7 +20,9 @@ import type { PageGeometry } from '../beaver-extract/types';
 import {
     ExtractionError,
     ExtractionErrorCode,
+    StaleWorkerError,
     WorkerAbortError,
+    WorkerSpawnError,
     getMuPDFWorkerClient,
     type PDFWorkerSlotName,
 } from '../beaver-extract';
@@ -102,6 +104,42 @@ async function resolveExternalFileSource(
         return { kind: 'error', code: 'file_too_large', sizeMB, maxMB };
     }
     return { kind: 'ok', filePath };
+}
+
+/**
+ * Match an `ExtractionError` even when it was constructed in the other bundle.
+ * The shared MuPDF worker client is a cross-bundle singleton and rehydrates
+ * errors using its own bundle's `ExtractionError` class, so a document request
+ * served from the other bundle would fail a plain `instanceof` check and
+ * misroute a document verdict (e.g. heap exhaustion) into a generic bucket.
+ * Falls back to the structural `name`/`code` shape the worker always sets.
+ */
+function asExtractionError(error: unknown): ExtractionError | null {
+    if (error instanceof ExtractionError) return error;
+    if (
+        error
+        && typeof error === 'object'
+        && (error as { name?: unknown }).name === 'ExtractionError'
+        && typeof (error as { code?: unknown }).code === 'string'
+    ) {
+        return error as ExtractionError;
+    }
+    return null;
+}
+
+/**
+ * True only for worker *lifecycle* failures (the engine could not start /
+ * respawn), bundle-agnostic via an `instanceof` + `name` fallback. Deliberately
+ * excludes heap exhaustion (an `ExtractionError`, a document verdict) so those
+ * keep their `pdf_too_complex` classification instead of being reported as a
+ * transient worker outage.
+ */
+function isWorkerLifecycleError(error: unknown): boolean {
+    if (error instanceof StaleWorkerError || error instanceof WorkerSpawnError) {
+        return true;
+    }
+    const name = (error as { name?: unknown } | null | undefined)?.name;
+    return name === 'StaleWorkerError' || name === 'WorkerSpawnError';
 }
 
 export interface ExtractAndCacheArgs {
@@ -1247,47 +1285,48 @@ export async function extractAndCacheResolvedPdfDocument(
             ? `${resolvedAttachment.libraryId}-${resolvedAttachment.zoteroKey}`
             : requestKey;
 
-        if (error instanceof ExtractionError) {
+        const extractionError = asExtractionError(error);
+        if (extractionError) {
             if (
                 resolvedCacheRef
                 && resolvedFilePath
-                && (error.code === ExtractionErrorCode.ENCRYPTED
-                    || error.code === ExtractionErrorCode.INVALID_PDF
-                    || error.code === ExtractionErrorCode.NO_TEXT_LAYER)
+                && (extractionError.code === ExtractionErrorCode.ENCRYPTED
+                    || extractionError.code === ExtractionErrorCode.INVALID_PDF
+                    || extractionError.code === ExtractionErrorCode.NO_TEXT_LAYER)
             ) {
-                const pageLabels = error.code === ExtractionErrorCode.NO_TEXT_LAYER
-                    ? error.pageLabels ?? null
+                const pageLabels = extractionError.code === ExtractionErrorCode.NO_TEXT_LAYER
+                    ? extractionError.pageLabels ?? null
                     : null;
                 await Zotero.Beaver?.documentCache?.putErrorMetadata({
                     item: resolvedCacheRef,
                     filePath: resolvedFilePath,
                     sourceSizeBytes: loadedPdfData?.byteLength ?? 0,
                     contentType: zoteroItem?.attachmentContentType || args.contentType || 'application/pdf',
-                    errorCode: error.code === ExtractionErrorCode.ENCRYPTED
+                    errorCode: extractionError.code === ExtractionErrorCode.ENCRYPTED
                         ? 'encrypted'
-                        : error.code === ExtractionErrorCode.INVALID_PDF
+                        : extractionError.code === ExtractionErrorCode.INVALID_PDF
                             ? 'invalid_pdf'
                             : 'no_text_layer',
-                    pageCount: error.pageCount ?? totalPages,
+                    pageCount: extractionError.pageCount ?? totalPages,
                     pageLabels,
                     pages: null,
                 });
 
                 // Queue OCR for Zotero attachments that lack a text layer.
                 // External files have no attachment hash, so they are skipped.
-                if (error.code === ExtractionErrorCode.NO_TEXT_LAYER && zoteroItem) {
+                if (extractionError.code === ExtractionErrorCode.NO_TEXT_LAYER && zoteroItem) {
                     maybeEnqueueOcrJob({
                         item: zoteroItem,
                         libraryId: zoteroItem.libraryID,
                         zoteroKey: zoteroItem.key,
                         itemId: zoteroItem.id,
-                        pageCount: error.pageCount ?? totalPages,
+                        pageCount: extractionError.pageCount ?? totalPages,
                     });
                 }
 
-                const cachedCode = error.code === ExtractionErrorCode.ENCRYPTED
+                const cachedCode = extractionError.code === ExtractionErrorCode.ENCRYPTED
                     ? 'encrypted'
-                    : error.code === ExtractionErrorCode.INVALID_PDF
+                    : extractionError.code === ExtractionErrorCode.INVALID_PDF
                         ? 'invalid_pdf'
                         : 'no_text_layer';
                 return {
@@ -1298,13 +1337,13 @@ export async function extractAndCacheResolvedPdfDocument(
                         : cachedCode === 'invalid_pdf'
                             ? `The PDF file for ${errorKey} is invalid or corrupted`
                             : `The PDF file for ${errorKey} requires OCR (no text layer)`,
-                    pageCount: error.pageCount ?? totalPages,
+                    pageCount: extractionError.pageCount ?? totalPages,
                     resolvedAttachment,
                 };
             }
 
-            const totalPagesForError = error.pageCount ?? totalPages;
-            switch (error.code) {
+            const totalPagesForError = extractionError.pageCount ?? totalPages;
+            switch (extractionError.code) {
                 case ExtractionErrorCode.ENCRYPTED:
                     return {
                         kind: 'response_error',
@@ -1341,7 +1380,7 @@ export async function extractAndCacheResolvedPdfDocument(
                     return {
                         kind: 'response_error',
                         code: 'page_out_of_range',
-                        message: error.message,
+                        message: extractionError.message,
                         pageCount: totalPagesForError,
                         resolvedAttachment,
                     };
@@ -1365,11 +1404,33 @@ export async function extractAndCacheResolvedPdfDocument(
                     return {
                         kind: 'response_error',
                         code: 'extraction_failed',
-                        message: `Failed to extract PDF content for ${errorKey}: ${error.message}`,
+                        message: `Failed to extract PDF content for ${errorKey}: ${extractionError.message}`,
                         pageCount: totalPagesForError,
                         resolvedAttachment,
                     };
             }
+        }
+
+        // Worker lifecycle failure: the local PDF engine could not start (module
+        // load / configure handshake) or died mid-op and could not be respawned.
+        // Narrowed to lifecycle errors so a cross-bundle heap-exhaustion
+        // ExtractionError (handled above) is never misreported here.
+        if (isWorkerLifecycleError(error)) {
+            logger(
+                `extractAndCacheDocument[${workerName}]: local PDF engine unavailable for ${errorKey}: ${error}`,
+                1,
+            );
+            return {
+                kind: 'response_error',
+                code: 'worker_unavailable',
+                message:
+                    `Beaver's local PDF engine is temporarily unavailable on this computer, ` +
+                    `so ${errorKey} could not be processed. This is not a problem with the document. ` +
+                    `Retrying may succeed. Only retry once and if it keeps failing, ` +
+                    `the user may need to restart Zotero.`,
+                pageCount: totalPages,
+                resolvedAttachment,
+            };
         }
 
         // Unexpected/native JS error (not an ExtractionError)

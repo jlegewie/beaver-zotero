@@ -54,7 +54,7 @@ import {
 } from './messageComposition';
 import { isWebSearchEnabledAtom, removePopupMessagesByTypeAtom, isWebSearchAllowedAtom } from './ui';
 import { currentNoteItemAtom } from './zoteroContext';
-import { isAnnotationAttachment, messageAttachmentKey } from '../types/attachments/apiTypes';
+import { isAnnotationAttachment, messageAttachmentKey, zoteroReferenceLookupKeys } from '../types/attachments/apiTypes';
 import type { ExternalFileAttachment } from '../types/attachments/apiTypes';
 import { getApplicationStateProvider } from './applicationState';
 import { uint8ArrayToBase64 } from '../utils/fileUtils';
@@ -132,7 +132,8 @@ import {
     clearAutoApprovedActionIdsAtom,
     makeNoteKey,
 } from './editNoteAutoApprove';
-import { loadFullItemDataWithAllTypes, getZoteroUserIdentifier } from '../../src/utils/zoteroUtils';
+import { loadFullItemDataWithAllTypes } from '../../src/utils/zoteroUtils';
+import { buildZoteroInstanceWire } from '../../src/services/zoteroInstanceWire';
 import { dismissDiffPreview } from '../utils/noteEditorDiffPreview';
 import { store } from '../store';
 import { profileSyncStatusAtom, searchableLibraryIdsAtom, syncWithZoteroAtom } from './profile';
@@ -140,6 +141,7 @@ import { triggerProfileRefresh } from '../hooks/useProfileSync';
 import { agentItemFilterAsync, isAgentSupportedItem } from '../../src/utils/agentItemSupport';
 import { safeIsInTrash } from '../../src/utils/zoteroUtils';
 import { wasItemAddedBeforeLastSync } from '../utils/sourceUtils';
+import { libraryRefForLibraryID, resolveItemReference, resolveLibraryRef } from '../../src/utils/libraryIdentity';
 import { ZoteroItemReference, createZoteroItemReference } from '../types/zotero';
 import { markExternalReferenceImportedAtom } from './externalReferences';
 import type { CreateItemProposedData, CreateItemResultData } from '../types/agentActions/items';
@@ -607,11 +609,10 @@ async function undoAppliedActionsInReverse(actions: AgentAction[]): Promise<void
             if (isCreateAnnotationsAgentAction(action)) {
                 await undoCreateAnnotationsAction(action);
             } else if (isAnnotationAgentAction(action) || isZoteroNoteAgentAction(action)) {
-                const item = await Zotero.Items.getByLibraryAndKeyAsync(
-                    action.result_data!.library_id,
-                    action.result_data!.zotero_key
-                );
-                if (item) await item.eraseTx();
+                const ref = action.result_data as ZoteroItemReference | undefined;
+                if (!ref) continue;
+                const resolved = await resolveItemReference(ref);
+                if (resolved.status === 'found') await resolved.item.eraseTx();
             } else if (isEditMetadataAgentAction(action)) {
                 // false = preserve fields the user manually modified after apply
                 await undoEditMetadataAction(action, false);
@@ -733,6 +734,7 @@ function confirmUndoAppliedActions(actions: ActionsToUndo): UndoConfirmResult {
 /** Reason why an item might be missing from the backend */
 type MissingItemReason = 
     | 'not_found'           // Item doesn't exist in Zotero
+    | 'library_unavailable' // Library is not available on this computer
     | 'in_trash'            // Item is in trash
     | 'library_not_synced'  // Library not configured to sync
     | 'filtered_from_sync'  // Doesn't pass sync filters (e.g., not a PDF)
@@ -749,14 +751,18 @@ async function determineMissingReason(ref: ZoteroItemReference, userId: string |
         // Get searchable libraries from store
         const searchableLibraryIds = store.get(searchableLibraryIdsAtom);
         const syncWithZotero = store.get(syncWithZoteroAtom);
+        const resolvedLibraryId = resolveLibraryRef(ref);
+        if (!resolvedLibraryId) {
+            return 'library_unavailable';
+        }
 
         // Check if library is searchable (synced for Pro, all local for Free)
-        if (!searchableLibraryIds.includes(ref.library_id)) {
+        if (!searchableLibraryIds.includes(resolvedLibraryId)) {
             return 'library_not_synced';
         }
 
         // Try to get the item from Zotero
-        const item = await Zotero.Items.getByLibraryAndKeyAsync(ref.library_id, ref.zotero_key);
+        const item = await Zotero.Items.getByLibraryAndKeyAsync(resolvedLibraryId, ref.zotero_key);
         if (!item) {
             return 'not_found';
         }
@@ -811,6 +817,7 @@ async function determineMissingReason(ref: ZoteroItemReference, userId: string |
 /** Human-readable messages for each missing reason */
 const MISSING_REASON_MESSAGES: Record<MissingItemReason, string> = {
     'not_found': 'Item not found in your Zotero library',
+    'library_unavailable': "Library is not available on this computer. It may be a group library you haven't joined on this device",
     'in_trash': 'Item is in trash',
     'library_not_synced': 'Library is not configured to sync with Beaver',
     'filtered_from_sync': 'Item type not supported',
@@ -982,7 +989,9 @@ async function prevalidateExtractionApproval(
             const ref = createZoteroItemReference(attachmentId);
             if (!ref) continue;
 
-            const item = await Zotero.Items.getByLibraryAndKeyAsync(ref.library_id, ref.zotero_key);
+            const resolved = await resolveItemReference(ref);
+            if (resolved.status !== 'found') continue;
+            const item = resolved.item;
             if (item && item.isAttachment()) {
                 existingCount++;
             } else if (item && item.isRegularItem()) {
@@ -1085,10 +1094,11 @@ function createWSCallbacks(set: Setter): WSCallbacks {
                 const itemReferences = extractZoteroReferencesFromToolCall(event.part);
                 if (itemReferences.length > 0) {
                     logger(`WS onPart: Loading ${itemReferences.length} item data for tool call`, 1);
-                    const itemPromises = itemReferences.map(ref => 
-                        Zotero.Items.getByLibraryAndKeyAsync(ref.library_id, ref.zotero_key)
-                    );
-                    const items = (await Promise.all(itemPromises)).filter(Boolean) as Zotero.Item[];
+                    const itemPromises = itemReferences.map(async ref => {
+                        const resolved = await resolveItemReference(ref);
+                        return resolved.status === 'found' ? resolved.item : null;
+                    });
+                    const items = (await Promise.all(itemPromises)).filter((item): item is Zotero.Item => !!item);
                     if (items.length > 0) {
                         await loadFullItemDataWithAllTypes(items).catch(err => 
                             logger(`WS onPart: Failed to load item data for tool call: ${err}`, 1)
@@ -1393,7 +1403,8 @@ function createWSCallbacks(set: Setter): WSCallbacks {
                     if (proposedData?.item?.source_id && resultData.library_id && resultData.zotero_key) {
                         set(markExternalReferenceImportedAtom, proposedData.item.source_id, {
                             library_id: resultData.library_id,
-                            zotero_key: resultData.zotero_key
+                            zotero_key: resultData.zotero_key,
+                            library_ref: resultData.library_ref,
                         });
                         logger(`WS onAgentActions: Marked external reference ${proposedData.item.source_id} as imported`, 1);
                     }
@@ -1569,12 +1580,9 @@ async function executeWSRequest(
     try {
         logger('WS Starting connection for run:', run.id);
         const frontendVersion = Zotero.Beaver.pluginVersion || '';
-        const zid = getZoteroUserIdentifier();
+        const zoteroInstance = buildZoteroInstanceWire(get(searchableLibraryIdsAtom));
         await agentService.connect(request, callbacks, frontendVersion, ZOTERO_PLUGIN_CLIENT_TYPE, ZOTERO_PLUGIN_FEATURES, {
-            local_user_key: zid.localUserKey,
-            ...(zid.userID ? { user_id: zid.userID } : {}),
-            ...(zid.accountName ? { account_name: zid.accountName } : {}),
-            ...(zid.deviceName ? { device_name: zid.deviceName } : {}),
+            ...zoteroInstance,
         });
         logger('WS Connection established and ready');
     } catch (error: any) {
@@ -1747,6 +1755,7 @@ export const sendWSMessageAtom = atom(
                 type: 'collection',
                 library_id: col.library_id,
                 zotero_key: col.zotero_key,
+                library_ref: col.library_ref,
                 name: col.name,
                 parent_key: col.parent_key,
             });
@@ -1793,9 +1802,13 @@ export const sendWSMessageAtom = atom(
                 ...allUserAttachmentKeys
             ]);
             logger(`sendWSMessageAtom: Handeling reader attachment - existingKeys: ${JSON.stringify(existingKeys)}`, 1);
-            const readerKey = `${readerAttachment.libraryID}-${readerAttachment.key}`;
-            if (!existingKeys.has(readerKey)) {
-                logger(`sendWSMessageAtom: Handeling reader attachment - Adding reader attachment: ${readerKey}`, 1);
+            const readerKeys = zoteroReferenceLookupKeys({
+                library_id: readerAttachment.libraryID,
+                zotero_key: readerAttachment.key,
+                library_ref: libraryRefForLibraryID(readerAttachment.libraryID),
+            });
+            if (!readerKeys.some(key => existingKeys.has(key))) {
+                logger(`sendWSMessageAtom: Handeling reader attachment - Adding reader attachment: ${readerKeys[0]}`, 1);
                 await Zotero.Items.loadDataTypes([readerAttachment], ['itemData']);
                 if (readerAttachment.parentItem) {
                     await Zotero.Items.loadDataTypes([readerAttachment.parentItem], ['itemData', 'creators']);
@@ -1803,13 +1816,14 @@ export const sendWSMessageAtom = atom(
                 attachments.push({
                     library_id: readerAttachment.libraryID,
                     zotero_key: readerAttachment.key,
+                    library_ref: libraryRefForLibraryID(readerAttachment.libraryID) ?? undefined,
                     type: 'source',
                     attachment: safeStub(() => serializeAttachmentStub(readerAttachment)),
                     parent_item: safeStub(() => readerAttachment.parentItem ? serializeItemStub(readerAttachment.parentItem) : undefined),
                     include: 'fulltext'
                 } as SourceAttachment);
             } else {
-                logger(`sendWSMessageAtom: Handeling reader attachment - Skipping reader attachment: ${readerKey}`, 1);
+                logger(`sendWSMessageAtom: Handeling reader attachment - Skipping reader attachment: ${readerKeys[0]}`, 1);
             }
         }
 
@@ -1822,8 +1836,12 @@ export const sendWSMessageAtom = atom(
                 ...attachments.map(messageAttachmentKey),
                 ...allUserAttachmentKeys
             ]);
-            const noteKey = `${currentNoteTabItem.libraryID}-${currentNoteTabItem.key}`;
-            if (!existingKeys.has(noteKey)) {
+            const noteKeys = zoteroReferenceLookupKeys({
+                library_id: currentNoteTabItem.libraryID,
+                zotero_key: currentNoteTabItem.key,
+                library_ref: libraryRefForLibraryID(currentNoteTabItem.libraryID),
+            });
+            if (!noteKeys.some(key => existingKeys.has(key))) {
                 const noteAttachment = toMessageAttachment(currentNoteTabItem);
                 if (noteAttachment) {
                     attachments.push(noteAttachment);

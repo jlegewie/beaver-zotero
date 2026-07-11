@@ -235,7 +235,7 @@ export interface CitationKeyParams {
  * - Base identification of the cited item
  *
  * Key format:
- * - Zotero citations: "zotero:{library_id}-{zotero_key}"
+ * - Zotero citations: "zotero:{library_ref|library_id}-{zotero_key}"
  * - Structured external citations: "external:{source}:{external_id}"
  * - Legacy external citations: "external:{external_source_id}"
  * - External files: "extfile:{ext_key}"
@@ -259,27 +259,6 @@ function getCitationIdentityRef(params: CitationKeyParams): CitationRef | null {
     }
     if (params.requested_ref) {
         return getRequestedRef(params);
-    }
-    return null;
-}
-
-/**
- * Parse a "libraryID-itemKey" reference string.
- * Handles optional 'user-content-' prefix added by rehype-sanitize.
- *
- * @param ref Reference string in format "libraryID-itemKey"
- * @returns Parsed reference or null if invalid
- */
-export function parseItemReference(ref: string | undefined): { libraryID: number; itemKey: string } | null {
-    if (!ref) return null;
-    const clean = ref.replace('user-content-', '');
-    const dashIndex = clean.indexOf('-');
-    if (dashIndex > 0) {
-        const libraryID = parseInt(clean.substring(0, dashIndex), 10);
-        const itemKey = clean.substring(dashIndex + 1);
-        if (libraryID > 0 && itemKey) {
-            return { libraryID, itemKey };
-        }
     }
     return null;
 }

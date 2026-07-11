@@ -6,6 +6,7 @@ import {
 } from './documentExtraction/attachmentInfoBatch';
 import type { AttachmentInfo, ContentKind } from './documentExtraction/shared/contentKinds';
 import { effectiveMaxPageCount } from './attachmentLimits';
+import { parseItemReference } from '../utils/libraryIdentity';
 
 export type ItemValidationResultState = 'readable' | 'unreadable' | 'blocked';
 export type ItemValidationSeverity = 'info' | 'error';
@@ -32,6 +33,7 @@ export type AttachmentValidationResult = ItemValidationResult;
  * Result of validating a regular item with all its attachments.
  */
 export interface RegularItemValidationResult extends ItemValidationResult {
+    /** Device-local keys (`<libraryID>-<zoteroKey>`) for UI/cache lookups. */
     attachmentResults: Map<string, AttachmentValidationResult>;
 }
 
@@ -377,7 +379,16 @@ class ItemValidationManager {
 
         const attachmentResults = new Map<string, AttachmentValidationResult>();
         for (const info of attachmentInfos) {
-            attachmentResults.set(info.attachment_id, resultFromAttachmentInfo(info, options));
+            // AttachmentInfo is model-facing and therefore carries portable ids
+            // (`u-KEY` / `g<groupID>-KEY`). Validation state is an internal,
+            // device-local map keyed by Zotero's numeric libraryID. All infos in
+            // this batch are children of `item`, so normalize the key at this
+            // boundary instead of leaking the model identity into the UI cache.
+            const parsed = parseItemReference(info.attachment_id);
+            const attachmentKey = parsed
+                ? `${item.libraryID}-${parsed.zotero_key}`
+                : info.attachment_id;
+            attachmentResults.set(attachmentKey, resultFromAttachmentInfo(info, options));
         }
 
         logger(

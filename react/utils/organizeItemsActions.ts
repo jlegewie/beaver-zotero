@@ -6,6 +6,7 @@
 import { AgentAction } from '../agents/agentActions';
 import type { OrganizeItemsResultData, TagChanges, CollectionChanges } from '../types/agentActions/base';
 import { logger } from '../../src/utils/logger';
+import { parseItemReference, resolveItemReference } from '../../src/utils/libraryIdentity';
 
 /**
  * Execute an organize_items agent action.
@@ -33,15 +34,18 @@ export async function executeOrganizeItemsAction(
     // Process each item
     for (const itemId of item_ids) {
         try {
-            const parts = itemId.split('-');
-            const libraryId = parseInt(parts[0], 10);
-            const zoteroKey = parts.slice(1).join('-');
-
-            const item = await Zotero.Items.getByLibraryAndKeyAsync(libraryId, zoteroKey);
-            if (!item) {
+            // Accept both portable "<library_ref>-<key>" and legacy numeric ids.
+            const parsed = parseItemReference(itemId);
+            if (!parsed) {
+                failedItems[itemId] = 'Invalid item id';
+                continue;
+            }
+            const resolved = await resolveItemReference(parsed);
+            if (resolved.status !== 'found') {
                 failedItems[itemId] = 'Item not found';
                 continue;
             }
+            const item = resolved.item;
 
             let modified = false;
 
@@ -83,7 +87,7 @@ export async function executeOrganizeItemsAction(
             if (isTopLevel && collections?.add && collections.add.length > 0) {
                 for (const collKey of collections.add) {
                     if (!existingCollections.has(collKey)) {
-                        const collection = await Zotero.Collections.getByLibraryAndKeyAsync(libraryId, collKey);
+                        const collection = await Zotero.Collections.getByLibraryAndKeyAsync(item.libraryID, collKey);
                         if (collection) {
                             item.addToCollection(collection.id);
                             actualCollectionsAdded.add(collKey);
@@ -97,7 +101,7 @@ export async function executeOrganizeItemsAction(
             if (isTopLevel && collections?.remove && collections.remove.length > 0) {
                 for (const collKey of collections.remove) {
                     if (existingCollections.has(collKey)) {
-                        const collection = await Zotero.Collections.getByLibraryAndKeyAsync(libraryId, collKey);
+                        const collection = await Zotero.Collections.getByLibraryAndKeyAsync(item.libraryID, collKey);
                         if (collection) {
                             item.removeFromCollection(collection.id);
                             actualCollectionsRemoved.add(collKey);
@@ -157,15 +161,18 @@ export async function undoOrganizeItemsAction(
 
     for (const itemId of item_ids) {
         try {
-            const parts = itemId.split('-');
-            const libraryId = parseInt(parts[0], 10);
-            const zoteroKey = parts.slice(1).join('-');
-
-            const item = await Zotero.Items.getByLibraryAndKeyAsync(libraryId, zoteroKey);
-            if (!item) {
+            // Accept both portable "<library_ref>-<key>" and legacy numeric ids.
+            const parsed = parseItemReference(itemId);
+            if (!parsed) {
+                logger(`undoOrganizeItemsAction: Invalid item id: ${itemId}`, 1);
+                continue;
+            }
+            const resolved = await resolveItemReference(parsed);
+            if (resolved.status !== 'found') {
                 logger(`undoOrganizeItemsAction: Item not found: ${itemId}`, 1);
                 continue;
             }
+            const item = resolved.item;
 
             let modified = false;
 
@@ -198,7 +205,7 @@ export async function undoOrganizeItemsAction(
                     for (const collKey of collections.add) {
                         // Only remove if it wasn't in the original state
                         if (!originalState.collections.includes(collKey)) {
-                            const collection = await Zotero.Collections.getByLibraryAndKeyAsync(libraryId, collKey);
+                            const collection = await Zotero.Collections.getByLibraryAndKeyAsync(item.libraryID, collKey);
                             if (collection) {
                                 item.removeFromCollection(collection.id);
                                 modified = true;
@@ -210,7 +217,7 @@ export async function undoOrganizeItemsAction(
                     for (const collKey of collections.remove) {
                         // Only add back if it was in the original state
                         if (originalState.collections.includes(collKey)) {
-                            const collection = await Zotero.Collections.getByLibraryAndKeyAsync(libraryId, collKey);
+                            const collection = await Zotero.Collections.getByLibraryAndKeyAsync(item.libraryID, collKey);
                             if (collection) {
                                 item.addToCollection(collection.id);
                                 modified = true;
@@ -235,7 +242,7 @@ export async function undoOrganizeItemsAction(
                 }
                 if (resultData.collections_added) {
                     for (const collKey of resultData.collections_added) {
-                        const collection = await Zotero.Collections.getByLibraryAndKeyAsync(libraryId, collKey);
+                        const collection = await Zotero.Collections.getByLibraryAndKeyAsync(item.libraryID, collKey);
                         if (collection) {
                             item.removeFromCollection(collection.id);
                             modified = true;
@@ -244,7 +251,7 @@ export async function undoOrganizeItemsAction(
                 }
                 if (resultData.collections_removed) {
                     for (const collKey of resultData.collections_removed) {
-                        const collection = await Zotero.Collections.getByLibraryAndKeyAsync(libraryId, collKey);
+                        const collection = await Zotero.Collections.getByLibraryAndKeyAsync(item.libraryID, collKey);
                         if (collection) {
                             item.addToCollection(collection.id);
                             modified = true;

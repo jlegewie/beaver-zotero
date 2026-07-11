@@ -17,7 +17,8 @@ import {
 } from '../agentProtocol';
 import { ItemStub } from '../../../react/types/zotero';
 import { serializeNote, serializeItemStub } from '../../utils/zoteroSerializers';
-import { getCollectionByIdOrName, validateLibraryAccess, isLibrarySearchable, getSearchableLibraries, extractYear, formatCreatorsString, getAttachmentInfoForItem } from './utils';
+import { libraryRefForLibraryID, modelObjectId } from '../../utils/libraryIdentity';
+import { getCollectionByIdOrName, validateLibraryAccess, isLibrarySearchable, getSearchableLibraries, excludedLibraryMessage, extractYear, formatCreatorsString, getAttachmentInfoForItem } from './utils';
 
 function isAnnotationItem(item: Zotero.Item): boolean {
     return String(item.itemType) === 'annotation' || (item as { isAnnotation?: () => boolean }).isAnnotation?.() === true;
@@ -74,7 +75,9 @@ export async function handleListItemsRequest(
                         request_id: request.request_id,
                         items: [],
                         total_count: 0,
-                        error: `Collection "${result.collection.name}" is in library "${(resolvedLib && resolvedLib.name) || result.libraryID}" which is not synced with Beaver.`,
+                        // Do not echo the collection's name: it is content from a
+                        // library the user excluded from Beaver.
+                        error: excludedLibraryMessage(result.libraryID),
                         error_code: 'library_not_searchable',
                         available_libraries: getSearchableLibraries(),
                     };
@@ -321,6 +324,8 @@ export async function handleListItemsRequest(
 
         // Build result items
         const items: ListItemsResultItem[] = [];
+        // Single-library request; the portable ref is constant across results.
+        const libraryRef = libraryRefForLibraryID(library.libraryID) ?? undefined;
         for (const { item } of paginatedItems) {
             if (item.isNote()) {
                 const parentInfo = item.parentItemID ? parentMap.get(item.parentItemID) : null;
@@ -351,7 +356,8 @@ export async function handleListItemsRequest(
 
                 const resultItem: RegularListResultItem = {
                     result_type: 'regular',
-                    item_id: `${library.libraryID}-${item.key}`,
+                    item_id: modelObjectId(library.libraryID, item.key),
+                    library_ref: libraryRef,
                     item_type: item.itemType,
                     title,
                     creators: formatCreatorsString(creators),

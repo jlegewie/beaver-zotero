@@ -5,7 +5,23 @@ import { getPref } from '../../src/utils/prefs';
 import { isUsingBeaverCreditsAtom } from './models';
 import type { ActionCategoryFilter } from '../types/actions';
 
-export const isSidebarVisibleAtom = atom(false);
+const isSidebarVisibleBaseAtom = atom(false);
+
+/**
+ * Whether the main-window sidebar is visible. Hiding it (toolbar toggle,
+ * keyboard shortcut, or item-pane collapse) also clears the thread list
+ * item filter.
+ */
+export const isSidebarVisibleAtom = atom(
+    (get) => get(isSidebarVisibleBaseAtom),
+    (get, set, update: boolean | ((prev: boolean) => boolean)) => {
+        const prev = get(isSidebarVisibleBaseAtom);
+        const next = typeof update === 'function' ? update(prev) : update;
+        set(isSidebarVisibleBaseAtom, next);
+        if (prev && !next) set(threadListFilterAtom, null);
+    }
+);
+
 export const isLibraryTabAtom = atom(false);
 export const selectedZoteroTabIdAtom = atom<string | null>(null);
 export const isWebSearchEnabledAtom = atom(false);
@@ -44,7 +60,40 @@ export const dataProviderEnabledAtom = atom(getPref('dataProviderEnabled'));
 export const requestPlusToolsAtom = atom(getPref('requestPlusTools'));
 export const isWebSearchAllowedAtom = atom((get) => Boolean(get(isUsingBeaverCreditsAtom) || get(requestPlusToolsAtom)));
 export const showFileStatusDetailsAtom = atom(false);
-export const isThreadListViewAtom = atom(false);
+
+/**
+ * Serializable descriptor of a Zotero item used to filter the thread list
+ * view (`ThreadListView`) to chats related to that item.
+ */
+export interface ThreadItemFilter {
+    libraryId: number;
+    libraryRef?: string;   // libraryRefForLibraryID(item.libraryID)
+    itemKey: string;       // identity for chip + active-row checkmark
+    keys: string[];        // expanded keys sent to /by-item
+    itemType: string;      // item.getItemTypeIconName() → CSSItemTypeIcon
+    label: string;         // getDisplayNameFromItem(item)
+}
+
+/**
+ * Active item filter for the thread list view, or null when unfiltered.
+ * Set by ThreadFilterMenu selections and RecentChats "View All"; cleared
+ * by the chip's remove control and whenever the thread list view closes.
+ */
+export const threadListFilterAtom = atom<ThreadItemFilter | null>(null);
+
+const isThreadListViewBaseAtom = atom(false);
+
+/**
+ * Whether the thread list view is open. Closing it also clears the item
+ * filter
+ */
+export const isThreadListViewAtom = atom(
+    (get) => get(isThreadListViewBaseAtom),
+    (get, set, value: boolean) => {
+        set(isThreadListViewBaseAtom, value);
+        if (!value) set(threadListFilterAtom, null);
+    }
+);
 
 /**
  * HomeLauncher — selected category for the current UI session (`null` = collapsed)

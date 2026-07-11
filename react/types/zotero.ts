@@ -1,9 +1,17 @@
+import { libraryRefForLibraryID, resolveObjectId } from "../../src/utils/libraryIdentity";
+
 /**
  * ZoteroLibrary is a reference to a Zotero library.
  */
 export interface ZoteroLibrary {
     library_id: number;
     group_id: number | null;
+    /**
+     * Device-portable library identity ("u" | "g<groupID>"). Absent for
+     * libraries `libraryRefForLibraryID` cannot compute a portable ref for
+     * (e.g. feed libraries). See `src/utils/libraryIdentity.ts`.
+     */
+    library_ref?: string;
     name: string;
     is_group: boolean;
     type: string;
@@ -17,6 +25,8 @@ export interface ZoteroLibrary {
 export interface ZoteroItemReference {
     zotero_key: string;
     library_id: number;
+    /** Device-portable library identity ("u" | "g<groupID>") */
+    library_ref?: string;
 }
 
 export interface FileHashReference {
@@ -43,15 +53,13 @@ export interface FailedFileReference extends FileHashReference {
     buttonIcon?: React.ComponentType<React.SVGProps<SVGSVGElement>>;
 }
 
+/**
+ * Parses a model-facing item id: either a portable `<library_ref>-<zotero_key>`
+ * (`u-KEY`, `g<groupID>-KEY`) or a legacy `<libraryID>-zoteroKey`. Returns
+ * `null` for `ext-<KEY>` external-file ids and other malformed input.
+ */
 export function createZoteroItemReference(id: string): ZoteroItemReference | null {
-    const [libraryId, zoteroKey] = id.split('-');
-    if (!libraryId || !zoteroKey) {
-        return null;
-    }
-    return {
-        zotero_key: zoteroKey,
-        library_id: parseInt(libraryId)
-    };
+    return resolveObjectId(id);
 }
 
 /**
@@ -71,6 +79,7 @@ export function collectionToReference(collection: Zotero.Collection): Collection
     return {
         library_id: collection.libraryID,
         zotero_key: collection.key,
+        library_ref: libraryRefForLibraryID(collection.libraryID) ?? undefined,
         name: collection.name,
         parent_key: collection.parentKey || null,
     };
@@ -105,6 +114,8 @@ export interface ZoteroCreator {
 export interface CollectionSummary {
     library_id: number;
     zotero_key: string;
+    /** Device-portable library identity ("u" | "g<groupID>"). See `src/utils/libraryIdentity.ts`. */
+    library_ref?: string;
     name: string;
 }
 
@@ -143,6 +154,8 @@ export interface DeleteData extends ZoteroItemReference {
 /** Minimal bibliographic anchor for a regular item */
 export interface ItemStub {
     item_id: string;
+    /** Device-portable library identity ("u" | "g<groupID>") of the item referenced by `item_id`. */
+    library_ref?: string;
     item_type?: string | null;
     title?: string | null;
     creators?: string | null;

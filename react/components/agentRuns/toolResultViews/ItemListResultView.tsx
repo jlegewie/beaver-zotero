@@ -35,7 +35,11 @@ function activateRow(row: ItemRowView): void {
         getHost().navigation?.launchExternalFile(row.zotero_key);
         return;
     }
-    getHost().navigation?.revealInLibrary({ library_id: row.library_id, zotero_key: row.zotero_key });
+    getHost().navigation?.revealInLibrary({
+        library_id: row.library_id,
+        zotero_key: row.zotero_key,
+        library_ref: row.library_ref,
+    });
 }
 
 /**

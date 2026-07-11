@@ -23,22 +23,24 @@ export async function searchTitleCreatorYear(
     }
 
     try {
-        const search = new Zotero.Search();
-        search.addCondition('joinMode', 'any');
-        
-        // Set the search scope to the currently selected library.
-        // Add library conditions as non-required (will be OR-ed together)
-        for (const libraryID of libraryIds ?? []) {
-            search.addCondition('libraryID', 'is', libraryID, false); // false = not required
-        }
-
-        // Use 'quicksearch-titleCreatorYear' condition.
-        // This internally creates an OR search across title-related fields,
-        // creator fields, and the year field.
-        search.addCondition('quicksearch-titleCreatorYear', 'contains', searchTerm, true);
-
-        // Execute the search
-        const itemIDs: number[] = await search.search();
+        // Run one search per library and merge the results. Zotero's search
+        // API cannot OR library conditions against an ANDed quicksearch
+        // condition (the `required` addCondition parameter is unsupported),
+        // so each search is scoped to a single library via the `libraryID`
+        // property instead. An empty/missing list searches all libraries.
+        const scopedLibraryIds: (number | null)[] =
+            libraryIds && libraryIds.length > 0 ? libraryIds : [null];
+        const idArrays = await Promise.all(scopedLibraryIds.map(async (libraryID) => {
+            const search = new Zotero.Search() as unknown as ZoteroSearchWritable;
+            if (libraryID !== null) {
+                search.libraryID = libraryID;
+            }
+            // 'quicksearch-titleCreatorYear' internally creates an OR search
+            // across title-related fields, creator fields, and the year field.
+            search.addCondition('quicksearch-titleCreatorYear', 'contains', searchTerm);
+            return (await search.search()) || [];
+        }));
+        const itemIDs: number[] = [...new Set(idArrays.flat())];
 
         if (!itemIDs || itemIDs.length === 0) {
             return [];

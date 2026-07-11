@@ -12,6 +12,7 @@
 
 import { logger } from "../../src/utils/logger";
 import { BEAVER_VISUALIZER_ANNOTATION_AUTHOR } from "../../src/constants/annotations";
+import { libraryRefForLibraryID } from "../../src/utils/libraryIdentity";
 import {
     BeaverExtractor,
     bboxToReaderFrame,
@@ -215,7 +216,11 @@ async function pushOverlayToReader(
             isTemporary: true,
         };
         tempAnnotations.push(tempAnnotation);
-        annotationReferences.push({ zotero_key: tempId, library_id: libraryId });
+        annotationReferences.push({
+            zotero_key: tempId,
+            library_id: libraryId,
+            library_ref: libraryRefForLibraryID(libraryId) ?? undefined,
+        });
     }
 
     (reader as any)._internalReader.setAnnotations(
