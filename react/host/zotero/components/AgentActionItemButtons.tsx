@@ -26,8 +26,7 @@ import {
 import { ButtonVariant } from '../../../components/ui/Button';
 import { CreateItemAgentAction } from '../../../agents/agentActions';
 import { ZoteroItemReference } from '../../../types/zotero';
-import { resolveSearchableLibraryId } from '../libraryAccess';
-import { searchableLibraryIdsAtom } from '../../../atoms/profile';
+import { resolveLocalLibraryId } from '../libraryAccess';
 
 const CITED_BY_URL = 'https://openalex.org/works?page=1&filter=cites:';
 
@@ -70,7 +69,6 @@ const AgentActionItemButtons: React.FC<AgentActionItemButtonsProps> = ({
     const checkReference = useSetAtom(checkExternalReferenceAtom);
     const getCachedReference = useAtomValue(getCachedReferenceForObjectAtom);
     const isChecking = useAtomValue(isCheckingReferenceObjectAtom);
-    const searchableLibraryIds = useAtomValue(searchableLibraryIdsAtom);
     
     // Local state for library item reference
     const [existingItemRef, setExistingItemRef] = useState<ZoteroItemReference | null>(null);
@@ -149,10 +147,7 @@ const AgentActionItemButtons: React.FC<AgentActionItemButtonsProps> = ({
                 setBestAttachment(null);
                 return;
             }
-            const libraryId = resolveSearchableLibraryId(
-                effectiveItemRef,
-                searchableLibraryIds,
-            );
+            const libraryId = resolveLocalLibraryId(effectiveItemRef);
             if (!libraryId) {
                 setBestAttachment(null);
                 return;
@@ -176,7 +171,7 @@ const AgentActionItemButtons: React.FC<AgentActionItemButtonsProps> = ({
             if (!cancelled) setBestAttachment(null);
         });
         return () => { cancelled = true; };
-    }, [effectiveItemRef, searchableLibraryIds]);
+    }, [effectiveItemRef]);
 
     const handleShowDetails = useCallback(() => {
         setSelectedReference(item);

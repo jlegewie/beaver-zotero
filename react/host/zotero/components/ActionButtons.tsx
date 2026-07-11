@@ -35,10 +35,9 @@ import {
 } from '../../../agents/agentActions';
 import { CreateItemResultData } from '../../../types/agentActions/items';
 import { currentThreadIdAtom } from '../../../atoms/threads';
-import { searchableLibraryIdsAtom } from '../../../atoms/profile';
 import type { ZoteroItemReference } from '../../../types/zotero';
 import type { ExternalReferenceActionMode, ExternalReferenceActionsProps } from '../../types';
-import { resolveSearchableLibraryId } from '../libraryAccess';
+import { resolveLocalLibraryId } from '../libraryAccess';
 
 const CITED_BY_URL = 'https://openalex.org/works?page=1&filter=cites:';
 
@@ -64,7 +63,6 @@ const ActionButtons: React.FC<ExternalReferenceActionsProps> = ({
     // Active thread ID — used to stamp the background PDF fetch so the
     // attachment_resolved ws event can route back to the live agent run.
     const threadId = useAtomValue(currentThreadIdAtom);
-    const searchableLibraryIds = useAtomValue(searchableLibraryIdsAtom);
 
     // Get cached reference directly from the cache for this item's source_id
     const sourceId = item.source_id;
@@ -218,7 +216,7 @@ const ActionButtons: React.FC<ExternalReferenceActionsProps> = ({
         setZoteroItemRef(cachedRef);
 
         const libraryId = cachedRef
-            ? resolveSearchableLibraryId(cachedRef, searchableLibraryIds)
+            ? resolveLocalLibraryId(cachedRef)
             : null;
         if (cachedRef && libraryId) {
             void (async () => {
@@ -244,7 +242,7 @@ const ActionButtons: React.FC<ExternalReferenceActionsProps> = ({
             setBestAttachment(null);
         }
         return () => { cancelled = true; };
-    }, [cachedRef, searchableLibraryIds]);
+    }, [cachedRef]);
 
     // Check cache and validate on mount
     useEffect(() => {
@@ -264,7 +262,7 @@ const ActionButtons: React.FC<ExternalReferenceActionsProps> = ({
                 setZoteroItemRef(result);
 
                 const libraryId = result
-                    ? resolveSearchableLibraryId(result, searchableLibraryIds)
+                    ? resolveLocalLibraryId(result)
                     : null;
                 if (result && libraryId) {
                     try {
@@ -291,7 +289,7 @@ const ActionButtons: React.FC<ExternalReferenceActionsProps> = ({
             setIsLoading(true);
         }
         return () => { cancelled = true; };
-    }, [item, sourceId, cachedRef, checkReference, isChecking, searchableLibraryIds]);
+    }, [item, sourceId, cachedRef, checkReference, isChecking]);
 
     // Update loading state when checking state changes
     useEffect(() => {

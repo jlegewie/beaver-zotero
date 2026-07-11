@@ -73,8 +73,9 @@ import {
 // deliberately left out of the searchable set below).
 const userLibrary = { libraryID: 1, name: 'My Library' };
 const groupAlpha = { libraryID: 100, name: 'Group Alpha' };
+const numericPrefix = { libraryID: 200, name: '2024 Projects' };
 const groupExcluded = { libraryID: 300, name: 'Excluded Group' };
-const allLibraries = [userLibrary, groupAlpha, groupExcluded];
+const allLibraries = [userLibrary, groupAlpha, numericPrefix, groupExcluded];
 
 function setSearchableLibraryIds(ids: number[]) {
     vi.mocked(store.get).mockReturnValue(ids);
@@ -108,7 +109,7 @@ describe('getLibraryByIdOrName / validateLibraryAccess', () => {
 
     beforeEach(() => {
         vi.clearAllMocks();
-        setSearchableLibraryIds([1, 100]);
+        setSearchableLibraryIds([1, 100, 200]);
         previousZotero = (globalThis as any).Zotero;
         installZoteroMock();
     });
@@ -171,7 +172,7 @@ describe('resolveLibrariesFilterToSearchableIds', () => {
 
     beforeEach(() => {
         vi.clearAllMocks();
-        setSearchableLibraryIds([1, 100]);
+        setSearchableLibraryIds([1, 100, 200]);
         previousZotero = (globalThis as any).Zotero;
         installZoteroMock();
     });
@@ -211,5 +212,9 @@ describe('resolveLibrariesFilterToSearchableIds', () => {
         // "Excluded Group" also matches the substring but its library isn't searchable.
         const result = resolveLibrariesFilterToSearchableIds(['group']);
         expect(result).toEqual([100]);
+    });
+
+    it('treats a digit-prefixed filter as a name unless the entire string is digits', () => {
+        expect(resolveLibrariesFilterToSearchableIds(['2024 Projects'])).toEqual([200]);
     });
 });
