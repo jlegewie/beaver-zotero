@@ -111,7 +111,7 @@ describe('handleZoteroDocumentRequest background queue', () => {
 
         expect(mocks.enqueueBackgroundJob).toHaveBeenCalledWith(
             expect.objectContaining({
-                jobType: 'document_timeout_retry',
+                jobType: 'document_extract',
                 libraryId: 1,
                 zoteroKey: 'ABCD1234',
             }),
