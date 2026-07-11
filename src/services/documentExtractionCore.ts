@@ -66,6 +66,13 @@ import {
     type SnapshotDocument,
 } from './documentExtraction/snapshot';
 
+/**
+ * Extra margin granted to a shared hot-slot extraction beyond the request's
+ * own deadline before the document cache aborts it (and the worker client
+ * terminates the worker), freeing the interactive slot for the next read.
+ */
+export const HOT_SHARED_EXTRACTION_GRACE_MS = 2000;
+
 export interface ResolvedAttachment {
     libraryId: number;
     zoteroKey: string;
@@ -850,6 +857,18 @@ export async function extractAndCacheResolvedPdfDocument(
 
     const client = getMuPDFWorkerClient(workerName);
 
+    // Budget for the shared (single-flight) extraction on the document cache.
+    // The hot slot serves interactive reads on the single interactive MuPDF
+    // worker: once every waiter has detached (request timed out), letting the
+    // shared extraction keep running up to MAX_PDF_TIMEOUT_SECONDS would
+    // head-of-line-block every subsequent interactive read. Cap it near this
+    // request's own deadline instead — the request's timeout path enqueues a
+    // background re-extraction, so the result is still produced and cached on
+    // the background slot. The background slot keeps the full ceiling.
+    const sharedTimeoutMs = workerName === 'hot'
+        ? Math.round(timeoutSeconds * 1000) + HOT_SHARED_EXTRACTION_GRACE_MS
+        : MAX_PDF_TIMEOUT_SECONDS * 1000;
+
     const zoteroItem = args.source.kind === 'zotero' ? args.source.item : null;
     const cacheItemRef: DocumentCacheItemRef = zoteroItem ?? (args.source as Extract<ExtractionSource, { kind: 'external' }>).itemRef;
     let resolvedCacheRef: DocumentCacheItemRef | null = null;
@@ -1193,7 +1212,8 @@ export async function extractAndCacheResolvedPdfDocument(
                     sourceSizeBytes: isRemoteOnly ? pdfBytes.byteLength : 0,
                     contentType: zoteroItem?.attachmentContentType || args.contentType || 'application/pdf',
                     maxSourceSizeBytes,
-                    sharedTimeoutMs: MAX_PDF_TIMEOUT_SECONDS * 1000,
+                    lockScope: workerName,
+                    sharedTimeoutMs,
                     abortSignal: signal,
                     expectedSourceIdentity: isRemoteOnly ? null : initialSourceIdentity,
                     create: createSharedResult as (extractSignal: AbortSignal) => ReturnType<typeof client.extractSerialized>,
@@ -1205,7 +1225,8 @@ export async function extractAndCacheResolvedPdfDocument(
                 sourceSizeBytes: isRemoteOnly ? pdfBytes.byteLength : 0,
                 contentType: zoteroItem?.attachmentContentType || args.contentType || 'application/pdf',
                 maxSourceSizeBytes,
-                sharedTimeoutMs: MAX_PDF_TIMEOUT_SECONDS * 1000,
+                lockScope: workerName,
+                sharedTimeoutMs,
                 abortSignal: signal,
                 expectedSourceIdentity: isRemoteOnly ? null : initialSourceIdentity,
                 create: createSharedResult as (extractSignal: AbortSignal) => Promise<BeaverExtractResult>,

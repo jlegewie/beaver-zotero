@@ -118,8 +118,10 @@ export interface SerializedDocumentCacheResult extends CacheablePayload {
 interface ExtractionLockEntry<T extends CacheablePayload = BeaverExtractResult> {
     promise: Promise<T | null>;
     controller: AbortController;
-    waiters: Set<symbol>;
+    /** Active callers and their absolute deadlines; `null` means uncapped. */
+    waiters: Map<symbol, number | null>;
     settled: boolean;
+    sharedTimer: ReturnType<typeof setTimeout> | null;
 }
 
 /** Full-document PDF extraction cache backed by SQLite metadata and gzip payload files. */
@@ -466,6 +468,8 @@ export class DocumentCache {
         sourceSizeBytes: number;
         contentType: string;
         maxSourceSizeBytes?: number;
+        /** Separates callers that use independent extraction resources. */
+        lockScope?: string;
         sharedTimeoutMs?: number;
         abortSignal?: AbortSignal;
         expectedSourceIdentity?: DocumentCacheSourceIdentity | null;
@@ -489,26 +493,29 @@ export class DocumentCache {
         const payloadKind = DocumentCache.payloadKindForMode(input.mode);
         const contentKind = input.contentKind ?? 'pdf';
         const suffix = contentKind === 'pdf' ? '' : `/${contentKind}`;
-        const lockKey = `${ref.libraryId}/${ref.zoteroKey}/${payloadKind}/${this.sourceIdentityKey(source)}${suffix}`;
+        const lockScope = input.lockScope ?? 'default';
+        const lockKey = `${ref.libraryId}/${ref.zoteroKey}/${payloadKind}/${this.sourceIdentityKey(source)}${suffix}/scope:${lockScope}`;
         const existing = this.extractionLocks.get(lockKey) as ExtractionLockEntry<T> | undefined;
-        if (existing) return this.waitForSharedExtraction(existing, input.abortSignal);
+        if (existing) {
+            return this.waitForSharedExtraction(existing, input.abortSignal, input.sharedTimeoutMs);
+        }
 
         const cached = await readCached(ref);
         if (cached) return cached;
 
         const refreshedExisting = this.extractionLocks.get(lockKey) as ExtractionLockEntry<T> | undefined;
-        if (refreshedExisting) return this.waitForSharedExtraction(refreshedExisting, input.abortSignal);
+        if (refreshedExisting) {
+            return this.waitForSharedExtraction(refreshedExisting, input.abortSignal, input.sharedTimeoutMs);
+        }
 
         const controller = createAbortController();
         const entry: ExtractionLockEntry<T> = {
             controller,
-            waiters: new Set(),
+            waiters: new Map(),
             settled: false,
             promise: Promise.resolve(null),
+            sharedTimer: null,
         };
-        const timer = input.sharedTimeoutMs != null && input.sharedTimeoutMs > 0
-            ? setTimeout(() => controller.abort(), input.sharedTimeoutMs)
-            : null;
         entry.promise = (async () => {
             const refreshed = await readCached(ref);
             if (refreshed) return refreshed;
@@ -517,7 +524,7 @@ export class DocumentCache {
             try {
                 result = await input.create(controller.signal);
             } finally {
-                if (timer) clearTimeout(timer);
+                this.clearSharedExtractionTimer(entry);
             }
             await this.putResult({
                 item: input.item,
@@ -537,13 +544,14 @@ export class DocumentCache {
             })
             .finally(() => {
                 entry.settled = true;
+                this.clearSharedExtractionTimer(entry);
                 if (this.extractionLocks.get(lockKey) === entry) {
                     this.extractionLocks.delete(lockKey);
                 }
             });
 
         this.extractionLocks.set(lockKey, entry);
-        return this.waitForSharedExtraction(entry, input.abortSignal);
+        return this.waitForSharedExtraction(entry, input.abortSignal, input.sharedTimeoutMs);
     }
 
     /** Return a cached serialized result or run one shared serialized extraction. */
@@ -554,6 +562,8 @@ export class DocumentCache {
         sourceSizeBytes: number;
         contentType: string;
         maxSourceSizeBytes?: number;
+        /** Separates callers that use independent extraction resources. */
+        lockScope?: string;
         sharedTimeoutMs?: number;
         abortSignal?: AbortSignal;
         expectedSourceIdentity?: DocumentCacheSourceIdentity | null;
@@ -575,26 +585,29 @@ export class DocumentCache {
             return null;
         }
         const payloadKind = DocumentCache.payloadKindForMode(input.mode);
-        const lockKey = `${ref.libraryId}/${ref.zoteroKey}/${payloadKind}/${this.sourceIdentityKey(source)}/serialized`;
+        const lockScope = input.lockScope ?? 'default';
+        const lockKey = `${ref.libraryId}/${ref.zoteroKey}/${payloadKind}/${this.sourceIdentityKey(source)}/serialized/scope:${lockScope}`;
         const existing = this.extractionLocks.get(lockKey) as ExtractionLockEntry<SerializedDocumentCacheResult> | undefined;
-        if (existing) return this.waitForSharedExtraction(existing, input.abortSignal);
+        if (existing) {
+            return this.waitForSharedExtraction(existing, input.abortSignal, input.sharedTimeoutMs);
+        }
 
         const cached = await readCached(ref);
         if (cached) return cached;
 
         const refreshedExisting = this.extractionLocks.get(lockKey) as ExtractionLockEntry<SerializedDocumentCacheResult> | undefined;
-        if (refreshedExisting) return this.waitForSharedExtraction(refreshedExisting, input.abortSignal);
+        if (refreshedExisting) {
+            return this.waitForSharedExtraction(refreshedExisting, input.abortSignal, input.sharedTimeoutMs);
+        }
 
         const controller = createAbortController();
         const entry: ExtractionLockEntry<SerializedDocumentCacheResult> = {
             controller,
-            waiters: new Set(),
+            waiters: new Map(),
             settled: false,
             promise: Promise.resolve(null),
+            sharedTimer: null,
         };
-        const timer = input.sharedTimeoutMs != null && input.sharedTimeoutMs > 0
-            ? setTimeout(() => controller.abort(), input.sharedTimeoutMs)
-            : null;
         entry.promise = (async () => {
             const refreshed = await readCached(ref);
             if (refreshed) return refreshed;
@@ -603,7 +616,7 @@ export class DocumentCache {
             try {
                 created = await input.create(controller.signal);
             } finally {
-                if (timer) clearTimeout(timer);
+                this.clearSharedExtractionTimer(entry);
             }
             const stored: SerializedDocumentCacheResult = {
                 schemaVersion: created.schemaVersion,
@@ -635,21 +648,51 @@ export class DocumentCache {
             })
             .finally(() => {
                 entry.settled = true;
+                this.clearSharedExtractionTimer(entry);
                 if (this.extractionLocks.get(lockKey) === entry) {
                     this.extractionLocks.delete(lockKey);
                 }
             });
 
         this.extractionLocks.set(lockKey, entry);
-        return this.waitForSharedExtraction(entry, input.abortSignal);
+        return this.waitForSharedExtraction(entry, input.abortSignal, input.sharedTimeoutMs);
+    }
+
+    private clearSharedExtractionTimer<T extends CacheablePayload>(entry: ExtractionLockEntry<T>): void {
+        if (entry.sharedTimer) {
+            clearTimeout(entry.sharedTimer);
+            entry.sharedTimer = null;
+        }
+    }
+
+    /** Recompute the shared deadline from all callers that are still waiting. */
+    private updateSharedExtractionTimer<T extends CacheablePayload>(entry: ExtractionLockEntry<T>): void {
+        this.clearSharedExtractionTimer(entry);
+        if (entry.settled || entry.controller.signal.aborted || entry.waiters.size === 0) return;
+
+        let deadline = 0;
+        for (const waiterDeadline of entry.waiters.values()) {
+            // An uncapped active caller keeps the shared extraction uncapped.
+            if (waiterDeadline === null) return;
+            deadline = Math.max(deadline, waiterDeadline);
+        }
+        entry.sharedTimer = setTimeout(
+            () => entry.controller.abort(),
+            Math.max(0, deadline - Date.now()),
+        );
     }
 
     private waitForSharedExtraction<T extends CacheablePayload>(
         entry: ExtractionLockEntry<T>,
         abortSignal?: AbortSignal,
+        sharedTimeoutMs?: number,
     ): Promise<T | null> {
         const waiter = Symbol('document-cache-waiter');
-        entry.waiters.add(waiter);
+        const deadline = sharedTimeoutMs != null && sharedTimeoutMs > 0
+            ? Date.now() + sharedTimeoutMs
+            : null;
+        entry.waiters.set(waiter, deadline);
+        this.updateSharedExtractionTimer(entry);
 
         let onAbort: (() => void) | null = null;
         const cleanupWaiter = () => {
@@ -658,7 +701,10 @@ export class DocumentCache {
             }
             entry.waiters.delete(waiter);
             if (!entry.settled && entry.waiters.size === 0) {
+                this.clearSharedExtractionTimer(entry);
                 entry.controller.abort();
+            } else {
+                this.updateSharedExtractionTimer(entry);
             }
         };
 

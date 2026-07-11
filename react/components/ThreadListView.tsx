@@ -125,6 +125,14 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
             // Exclusions can change (Beaver Preferences) while the view is
             // open, so re-check at fetch time instead of trusting the atom.
             if (!searchableLibraryIds.includes(filter.libraryId)) {
+                // Do not leave item-filtered rows visible after removing the
+                // filter chip. The atom update below triggers the unfiltered
+                // fetch on the next render.
+                setThreads([]);
+                setHasMore(false);
+                setNextCursor(null);
+                setFetchError(null);
+                setIsLoading(true);
                 setFilter(null);
                 return;
             }
