@@ -31,6 +31,10 @@ import { useOnboardingPopups } from './hooks/useOnboardingPopups';
 import { useBackgroundWorkerStatus } from './hooks/useBackgroundWorkerStatus';
 import { useOcrLane } from './hooks/useOcrLane';
 import { useSearchIndexAccess } from './hooks/useSearchIndexAccess';
+import { useFulltextUpsertLane } from './hooks/useFulltextUpsertLane';
+import { useBackgroundProcessingStatus } from './hooks/useBackgroundProcessingStatus';
+import { useBackgroundProcessingWelcome } from './hooks/useBackgroundProcessingWelcome';
+import { useBackgroundProcessingScopeCleanup } from './hooks/useBackgroundProcessingScopeCleanup';
 import { useSyncSuppression } from './hooks/useSyncSuppression';
 import { BeaverTemporaryAnnotations } from './utils/annotationUtils';
 import { registerZoteroHost } from './host/zotero';
@@ -123,6 +127,19 @@ const GlobalContextInitializer = () => {
 
     // Mirror the cloud search-index entitlement flag (background-processing plan)
     useSearchIndexAccess();
+
+    // Register the authenticated cloud-index lane and reconcile tag coverage.
+    useFulltextUpsertLane();
+
+    // Poll queue, ledger, and remote coverage for status UI.
+    useBackgroundProcessingStatus({
+        onlyWhenEnabled: true,
+        pollIntervalMs: 15_000,
+    });
+
+    useBackgroundProcessingWelcome();
+
+    useBackgroundProcessingScopeCleanup();
 
     return null; // This component does not render any UI
 };

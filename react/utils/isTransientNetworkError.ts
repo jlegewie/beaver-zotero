@@ -1,4 +1,4 @@
-import { ServerError, SessionRefreshError } from '../types/apiErrors';
+import { ApiError, ServerError, SessionRefreshError } from '../types/apiErrors';
 
 /**
  * True for errors that callers should retry rather than treat as terminal.
@@ -9,5 +9,7 @@ import { ServerError, SessionRefreshError } from '../types/apiErrors';
  * down, leading to infinite retry loops.
  */
 export function isTransientNetworkError(error: unknown): boolean {
-    return error instanceof SessionRefreshError || error instanceof ServerError;
+    return error instanceof SessionRefreshError
+        || error instanceof ServerError
+        || (error instanceof ApiError && (error.status === 429 || error.status >= 500));
 }

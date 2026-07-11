@@ -7,6 +7,8 @@ import { CitationService } from "./services/CitationService";
 import { BeaverDB } from "./services/database";
 import { DocumentCache } from "./services/documentCache";
 import { BackgroundExtractor } from "./services/backgroundExtractor";
+import { ReconcilerService } from "./services/backgroundProcessing/reconciler";
+import { NewItemWatcher } from "./services/backgroundProcessing/newItemWatcher";
 import { uiManager } from "../react/ui/UIManager";
 import { getPref, setPref } from "./utils/prefs";
 import { addPendingVersionNotification } from "./utils/versionNotificationPrefs";
@@ -233,6 +235,16 @@ async function onStartup() {
         backgroundExtractor.start();
         ztoolkit.log("BackgroundExtractor started");
 
+        // Whole-library producers are independently pref-gated. They only
+        // enumerate searchable libraries mirrored from the webpack profile.
+        const processingReconciler = new ReconcilerService();
+        addon.processingReconciler = processingReconciler;
+        processingReconciler.start();
+        const newItemWatcher = new NewItemWatcher();
+        addon.newItemWatcher = newItemWatcher;
+        newItemWatcher.start();
+        ztoolkit.log("Background processing producers started");
+
         try {
             const legacyContentCache = PathUtils.join(Zotero.Profile.dir, "beaver", "content-cache");
             if (await IOUtils.exists(legacyContentCache)) {
@@ -300,6 +312,10 @@ async function onStartup() {
         ztoolkit.log(`Startup failed, closing database: ${error}`);
         // Stop the background extractor
         try {
+            addon.newItemWatcher?.stop();
+            addon.newItemWatcher = undefined;
+            addon.processingReconciler?.stop();
+            addon.processingReconciler = undefined;
             if (addon.backgroundExtractor) {
                 await addon.backgroundExtractor.stop();
                 addon.backgroundExtractor = undefined;
@@ -496,6 +512,11 @@ async function onMainWindowUnload(win: Window): Promise<void> {
         // stale held-lock cannot block authentication on the next load.
         await cleanupSupabaseWindowState(win);
 
+        addon.newItemWatcher?.stop();
+        addon.newItemWatcher = undefined;
+        addon.processingReconciler?.stop();
+        addon.processingReconciler = undefined;
+
         // 2. Stop the background extraction processor. It owns the
         //    background MuPDFWorkerClient and an in-flight extraction may
         //    still be running; the stop() call aborts it cooperatively and
@@ -684,6 +705,11 @@ async function onShutdown(): Promise<void> {
         try {
             await cleanupSupabaseWindowState(Zotero.getMainWindow());
         } catch (_e) { /* may not be available during shutdown */ }
+
+        addon.newItemWatcher?.stop();
+        addon.newItemWatcher = undefined;
+        addon.processingReconciler?.stop();
+        addon.processingReconciler = undefined;
 
         if (addon.backgroundExtractor) {
             try {

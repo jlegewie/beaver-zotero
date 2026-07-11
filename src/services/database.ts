@@ -15,6 +15,7 @@ import type {
     DocumentCachePageLabels,
     ExtractContentKind,
 } from './documentExtraction/shared/contentKinds';
+import { BACKGROUND_UNTAG_PRIORITY } from './backgroundProcessing/constants';
 
 export type { DocumentCachePageLabels } from './documentExtraction/shared/contentKinds';
 
@@ -180,7 +181,8 @@ export function isExternalFileContentKind(value: string): value is ExternalFileC
 export type BackgroundJobType =
     | 'document_extract'
     | 'document_ocr'
-    | 'fulltext_upsert';
+    | 'fulltext_upsert'
+    | 'fulltext_untag';
 
 /**
  * Single row in `background_jobs`. Timestamps are epoch milliseconds so
@@ -258,10 +260,79 @@ export interface BackgroundQueueStats {
     byJobType: Record<string, number>;
 }
 
+export type AttachmentExtractStatus = 'done' | 'failed' | 'skipped' | null;
+export type AttachmentOcrStatus = 'na' | 'needed' | 'done' | 'failed' | null;
+export type AttachmentUpsertStatus = 'done' | 'failed' | null;
+
+/** Durable per-attachment progress ledger for whole-library processing. */
+export interface AttachmentProcessingStateRecord {
+    libraryId: number;
+    zoteroKey: string;
+    itemId: number | null;
+    contentKind: Extract<ExtractContentKind, 'pdf' | 'epub' | 'snapshot'>;
+    fileMtimeMs: number | null;
+    fileSizeBytes: number | null;
+    fileHash: string | null;
+    structuredDocumentHash: string | null;
+    extractStatus: AttachmentExtractStatus;
+    extractSchemaVersion: string | null;
+    ocrStatus: AttachmentOcrStatus;
+    ocrEngineVersion: string | null;
+    upsertStatus: AttachmentUpsertStatus;
+    upsertIndexVersion: string | null;
+    lastError: string | null;
+    createdAt: string;
+    updatedAt: string;
+}
+
+export interface AttachmentProcessingStateInput {
+    libraryId: number;
+    zoteroKey: string;
+    itemId?: number | null;
+    contentKind: AttachmentProcessingStateRecord['contentKind'];
+}
+
+export interface AttachmentProcessingAggregates {
+    total: number;
+    extracted: number;
+    ocrNeeded: number;
+    ocrDone: number;
+    upserted: number;
+    failed: number;
+    skipped: number;
+    oldestPendingAt: string | null;
+}
+
+export interface BackgroundProcessingFailureSummary {
+    source: 'ledger' | 'dead_letter' | 'content_failure';
+    stage: string;
+    libraryId: number | null;
+    zoteroKey: string | null;
+    error: string | null;
+    attempts: number | null;
+    timestamp: string | number | null;
+}
+
+/** Cheap per-library cursor used to avoid unnecessary attachment scans. */
+export interface ProcessingIndexStateRecord {
+    libraryId: number;
+    maxClientDateModified: string | null;
+    attachmentCount: number;
+    ledgerRowCount: number;
+    lastScanTimestamp: number;
+}
+
 const BACKGROUND_JOB_COLUMNS = `
     id, job_type, library_id, item_id, zotero_key,
     content_kind, payload_kind, priority, payload_json,
     enqueued_at, available_at, attempt_count, last_error
+`;
+
+const ATTACHMENT_PROCESSING_COLUMNS = `
+    library_id, zotero_key, item_id, content_kind,
+    file_mtime_ms, file_size_bytes, file_hash, structured_document_hash,
+    extract_status, extract_schema_version, ocr_status, ocr_engine_version,
+    upsert_status, upsert_index_version, last_error, created_at, updated_at
 `;
 
 /**
@@ -290,7 +361,9 @@ export const DOC_PROCESSING_RETRY_BASE_DELAY_MS = 60 * 60 * 1000; // 1 hour
 // `schema_versions` table and survives the table drops, so existing installs
 // reset exactly once when the version changes.
 export const DOCUMENT_CACHE_SCHEMA_VERSION = 1;
-export const BACKGROUND_JOBS_SCHEMA_VERSION = 1;
+export const BACKGROUND_JOBS_SCHEMA_VERSION = 2;
+export const ATTACHMENT_PROCESSING_STATE_SCHEMA_VERSION = 1;
+export const PROCESSING_INDEX_STATE_SCHEMA_VERSION = 1;
 
 
 /* 
@@ -477,6 +550,88 @@ export class BeaverDB {
                 last_attempt     TEXT NOT NULL DEFAULT (datetime('now')),
                 next_retry_after TEXT NOT NULL,
                 UNIQUE(file_hash, task, engine_version)
+            );
+        `);
+
+        // Attachment progress is derived and recoverable during the pre-GA
+        // schema-churn period. Version both new tables through the same
+        // drop/recreate framework as the document cache and queue.
+        if (await this.disposableSchemaNeedsReset(
+            'attachment_processing_state',
+            ATTACHMENT_PROCESSING_STATE_SCHEMA_VERSION,
+            ['attachment_processing_state'],
+            () => this.attachmentProcessingStateSchemaIsCurrent(),
+        )) {
+            await this.conn.queryAsync(`DROP TABLE IF EXISTS attachment_processing_state`);
+            await this.setSchemaVersion(
+                'attachment_processing_state',
+                ATTACHMENT_PROCESSING_STATE_SCHEMA_VERSION,
+            );
+        }
+
+        await this.conn.queryAsync(`
+            CREATE TABLE IF NOT EXISTS attachment_processing_state (
+                library_id                 INTEGER NOT NULL,
+                zotero_key                 TEXT NOT NULL,
+                item_id                    INTEGER,
+                content_kind               TEXT NOT NULL,
+                file_mtime_ms              INTEGER,
+                file_size_bytes            INTEGER,
+                file_hash                  TEXT,
+                structured_document_hash   TEXT,
+                extract_status             TEXT,
+                extract_schema_version     TEXT,
+                ocr_status                 TEXT,
+                ocr_engine_version         TEXT,
+                upsert_status              TEXT,
+                upsert_index_version       TEXT,
+                last_error                 TEXT,
+                created_at                 TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at                 TEXT NOT NULL DEFAULT (datetime('now')),
+                UNIQUE(library_id, zotero_key)
+            );
+        `);
+        await this.conn.queryAsync(`
+            CREATE INDEX IF NOT EXISTS idx_attachment_processing_extract
+            ON attachment_processing_state(library_id, extract_status);
+        `);
+        await this.conn.queryAsync(`
+            CREATE INDEX IF NOT EXISTS idx_attachment_processing_ocr
+            ON attachment_processing_state(library_id, ocr_status);
+        `);
+        await this.conn.queryAsync(`
+            CREATE INDEX IF NOT EXISTS idx_attachment_processing_upsert
+            ON attachment_processing_state(library_id, upsert_status);
+        `);
+        await this.conn.queryAsync(`
+            CREATE INDEX IF NOT EXISTS idx_attachment_processing_file_hash
+            ON attachment_processing_state(file_hash);
+        `);
+        await this.conn.queryAsync(`
+            CREATE INDEX IF NOT EXISTS idx_attachment_processing_document_hash
+            ON attachment_processing_state(structured_document_hash);
+        `);
+
+        if (await this.disposableSchemaNeedsReset(
+            'processing_index_state',
+            PROCESSING_INDEX_STATE_SCHEMA_VERSION,
+            ['processing_index_state'],
+            () => this.processingIndexStateSchemaIsCurrent(),
+        )) {
+            await this.conn.queryAsync(`DROP TABLE IF EXISTS processing_index_state`);
+            await this.setSchemaVersion(
+                'processing_index_state',
+                PROCESSING_INDEX_STATE_SCHEMA_VERSION,
+            );
+        }
+
+        await this.conn.queryAsync(`
+            CREATE TABLE IF NOT EXISTS processing_index_state (
+                library_id                 INTEGER PRIMARY KEY,
+                max_client_date_modified   TEXT,
+                attachment_count           INTEGER NOT NULL,
+                ledger_row_count           INTEGER NOT NULL,
+                last_scan_timestamp        INTEGER NOT NULL
             );
         `);
 
@@ -693,9 +848,8 @@ export class BeaverDB {
             await this.setSchemaVersion('background_jobs', BACKGROUND_JOBS_SCHEMA_VERSION);
         }
 
-        // Background job queue: one row per logical document extraction request.
-        // Uses epoch-ms timestamps throughout so visibility-bump UPSERTs can
-        // compare via MIN(available_at, ?) without string-vs-number drift.
+        // Background job queue: one row per logical request. `dedupe_key`
+        // separates multiple content-addressed untag intents for one item.
         await this.conn.queryAsync(`
             CREATE TABLE IF NOT EXISTS background_jobs (
                 id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -705,19 +859,20 @@ export class BeaverDB {
                 zotero_key      TEXT NOT NULL,
                 content_kind    TEXT NOT NULL,
                 payload_kind    TEXT NOT NULL,
+                dedupe_key      TEXT NOT NULL DEFAULT '',
                 priority        INTEGER NOT NULL DEFAULT 100,
                 payload_json    TEXT,
                 enqueued_at     INTEGER NOT NULL,
                 available_at    INTEGER NOT NULL,
                 attempt_count   INTEGER NOT NULL DEFAULT 0,
                 last_error      TEXT,
-                UNIQUE(job_type, library_id, zotero_key, payload_kind)
+                UNIQUE(job_type, library_id, zotero_key, payload_kind, dedupe_key)
             );
         `);
 
         await this.conn.queryAsync(`
             DELETE FROM background_jobs
-            WHERE job_type NOT IN ('document_extract','document_ocr','fulltext_upsert')
+            WHERE job_type NOT IN ('document_extract','document_ocr','fulltext_upsert','fulltext_untag')
         `);
 
         await this.conn.queryAsync(`
@@ -1975,6 +2130,595 @@ export class BeaverDB {
         );
     }
 
+    // =====================================================================
+    // Attachment background-processing ledger and scan cursors
+    // =====================================================================
+
+    /**
+     * Create the identity row without touching executor-owned progress.
+     * Existing rows only refresh the convenient item id and current kind.
+     */
+    public async ensureAttachmentProcessingState(
+        input: AttachmentProcessingStateInput,
+    ): Promise<AttachmentProcessingStateRecord> {
+        await this.conn.queryAsync(
+            `INSERT OR IGNORE INTO attachment_processing_state (
+                library_id, zotero_key, item_id, content_kind
+             ) VALUES (?, ?, ?, ?)`,
+            [input.libraryId, input.zoteroKey, input.itemId ?? null, input.contentKind],
+        );
+        await this.conn.queryAsync(
+            `UPDATE attachment_processing_state
+             SET item_id = ?, content_kind = ?, updated_at = datetime('now')
+             WHERE library_id = ? AND zotero_key = ?
+               AND (item_id IS NOT ? OR content_kind != ?)`,
+            [
+                input.itemId ?? null,
+                input.contentKind,
+                input.libraryId,
+                input.zoteroKey,
+                input.itemId ?? null,
+                input.contentKind,
+            ],
+        );
+        const row = await this.getAttachmentProcessingState(input.libraryId, input.zoteroKey);
+        if (!row) throw new Error('Failed to create attachment processing state');
+        return row;
+    }
+
+    public async getAttachmentProcessingState(
+        libraryId: number,
+        zoteroKey: string,
+    ): Promise<AttachmentProcessingStateRecord | null> {
+        const rows = await this.selectAttachmentProcessingStates(
+            `SELECT ${ATTACHMENT_PROCESSING_COLUMNS}
+             FROM attachment_processing_state
+             WHERE library_id = ? AND zotero_key = ? LIMIT 1`,
+            [libraryId, zoteroKey],
+        );
+        return rows[0] ?? null;
+    }
+
+    public async getAttachmentProcessingStatesByLibrary(
+        libraryId: number,
+    ): Promise<AttachmentProcessingStateRecord[]> {
+        return this.selectAttachmentProcessingStates(
+            `SELECT ${ATTACHMENT_PROCESSING_COLUMNS}
+             FROM attachment_processing_state
+             WHERE library_id = ? ORDER BY zotero_key`,
+            [libraryId],
+        );
+    }
+
+    public async deleteAttachmentProcessingState(
+        libraryId: number,
+        zoteroKey: string,
+    ): Promise<AttachmentProcessingStateRecord | null> {
+        const existing = await this.getAttachmentProcessingState(libraryId, zoteroKey);
+        if (!existing) return null;
+        await this.conn.queryAsync(
+            `DELETE FROM attachment_processing_state
+             WHERE library_id = ? AND zotero_key = ?`,
+            [libraryId, zoteroKey],
+        );
+        return existing;
+    }
+
+    public async deleteAttachmentProcessingStatesByLibrary(libraryId: number): Promise<void> {
+        await this.conn.queryAsync(
+            `DELETE FROM attachment_processing_state WHERE library_id = ?`,
+            [libraryId],
+        );
+    }
+
+    /** Drop content-reading work when a library leaves Beaver's scope. */
+    public async deleteBackgroundJobsByLibrary(libraryId: number): Promise<void> {
+        await this.conn.queryAsync(
+            `DELETE FROM background_jobs
+             WHERE library_id = ? AND job_type != 'fulltext_untag'`,
+            [libraryId],
+        );
+    }
+
+    /**
+     * Redrive durable remote-cleanup intents after their ordinary retry budget
+     * was exhausted. Untags are idempotent and their dead rows retain the full
+     * content-addressed reference, so replay is safe and needs no library read.
+     */
+    public async redriveDeadUntagJobs(now: number, limit = 100): Promise<number> {
+        const candidates: Array<{
+            id: number;
+            libraryId: number;
+            zoteroKey: string;
+            contentKind: ExtractContentKind;
+            payloadKind: DocumentCachePayloadKind;
+            payload: BackgroundJobPayload;
+        }> = [];
+        await this.conn.queryAsync(
+            `SELECT id, library_id, zotero_key, content_kind,
+                    payload_kind, payload_json
+             FROM background_jobs_dead
+             WHERE job_type = 'fulltext_untag'
+             ORDER BY died_at ASC LIMIT ?`,
+            [Math.max(1, Math.min(1_000, Math.floor(limit)))],
+            {
+                onRow: (row: any) => {
+                    const contentKind = row.getResultByIndex(3) as ExtractContentKind;
+                    const payload = parseBackgroundJobPayload(
+                        contentKind,
+                        row.getResultByIndex(5),
+                    );
+                    if (!payload?.doc_hash) return;
+                    candidates.push({
+                        id: row.getResultByIndex(0),
+                        libraryId: row.getResultByIndex(1),
+                        zoteroKey: row.getResultByIndex(2),
+                        contentKind,
+                        payloadKind: row.getResultByIndex(4) as DocumentCachePayloadKind,
+                        payload,
+                    });
+                },
+            },
+        );
+        if (candidates.length === 0) return 0;
+
+        await this.conn.executeTransaction(async () => {
+            for (const candidate of candidates) {
+                await this.enqueueBackgroundJobInTransaction({
+                    jobType: 'fulltext_untag',
+                    libraryId: candidate.libraryId,
+                    itemId: null,
+                    zoteroKey: candidate.zoteroKey,
+                    contentKind: candidate.contentKind,
+                    payloadKind: candidate.payloadKind,
+                    priority: BACKGROUND_UNTAG_PRIORITY,
+                    payload: candidate.payload,
+                    now,
+                });
+                await this.conn.queryAsync(
+                    `DELETE FROM background_jobs_dead WHERE id = ?`,
+                    [candidate.id],
+                );
+            }
+        });
+        return candidates.length;
+    }
+
+    /** Reconciler-owned reset for a source signature or extraction-version change. */
+    public async resetAttachmentExtraction(
+        libraryId: number,
+        zoteroKey: string,
+        reason: string | null = null,
+    ): Promise<void> {
+        await this.conn.queryAsync(
+            `UPDATE attachment_processing_state SET
+                extract_status = NULL,
+                last_error = ?,
+                updated_at = datetime('now')
+             WHERE library_id = ? AND zotero_key = ?`,
+            [reason, libraryId, zoteroKey],
+        );
+    }
+
+    public async resetAttachmentOcr(
+        libraryId: number,
+        zoteroKey: string,
+        reason: string | null = null,
+    ): Promise<void> {
+        await this.conn.queryAsync(
+            `UPDATE attachment_processing_state SET
+                ocr_status = NULL,
+                last_error = ?,
+                updated_at = datetime('now')
+             WHERE library_id = ? AND zotero_key = ?`,
+            [reason, libraryId, zoteroKey],
+        );
+    }
+
+    public async resetAttachmentUpsert(
+        libraryId: number,
+        zoteroKey: string,
+        reason: string | null = null,
+    ): Promise<void> {
+        await this.conn.queryAsync(
+            `UPDATE attachment_processing_state SET
+                upsert_status = NULL,
+                last_error = ?,
+                updated_at = datetime('now')
+             WHERE library_id = ? AND zotero_key = ?`,
+            [reason, libraryId, zoteroKey],
+        );
+    }
+
+    /**
+     * Executor-owned extract completion. The prior signature/hash predicates
+     * prevent a stale in-flight job from overwriting a newer completion.
+     */
+    public async markAttachmentExtracted(input: {
+        libraryId: number;
+        zoteroKey: string;
+        expectedFileMtimeMs: number | null;
+        expectedFileSizeBytes: number | null;
+        previousDocumentHash: string | null;
+        expectedExtractStatus: AttachmentExtractStatus;
+        fileMtimeMs: number;
+        fileSizeBytes: number;
+        fileHash: string | null;
+        structuredDocumentHash: string | null;
+        extractSchemaVersion: string;
+        ocrStatus: Extract<AttachmentOcrStatus, 'na' | 'needed'>;
+    }): Promise<boolean> {
+        const hashChanged = input.previousDocumentHash !== input.structuredDocumentHash;
+        const refreshDownstream = hashChanged || input.ocrStatus === 'needed';
+        await this.conn.queryAsync(
+            `UPDATE attachment_processing_state SET
+                file_mtime_ms = ?, file_size_bytes = ?, file_hash = ?,
+                structured_document_hash = ?, extract_status = 'done',
+                extract_schema_version = ?,
+                ocr_status = CASE WHEN ? THEN ? ELSE ocr_status END,
+                ocr_engine_version = CASE WHEN ? THEN NULL ELSE ocr_engine_version END,
+                upsert_status = CASE WHEN ? THEN NULL ELSE upsert_status END,
+                upsert_index_version = CASE WHEN ? THEN NULL ELSE upsert_index_version END,
+                last_error = NULL, updated_at = datetime('now')
+             WHERE library_id = ? AND zotero_key = ?
+               AND file_mtime_ms IS ? AND file_size_bytes IS ?
+               AND structured_document_hash IS ? AND extract_status IS ?`,
+            [
+                input.fileMtimeMs,
+                input.fileSizeBytes,
+                input.fileHash,
+                input.structuredDocumentHash,
+                input.extractSchemaVersion,
+                refreshDownstream ? 1 : 0,
+                input.ocrStatus,
+                refreshDownstream ? 1 : 0,
+                refreshDownstream ? 1 : 0,
+                refreshDownstream ? 1 : 0,
+                input.libraryId,
+                input.zoteroKey,
+                input.expectedFileMtimeMs,
+                input.expectedFileSizeBytes,
+                input.previousDocumentHash,
+                input.expectedExtractStatus,
+            ],
+        );
+        return await this.lastStatementChangedRow();
+    }
+
+    public async markAttachmentExtractFailure(input: {
+        libraryId: number;
+        zoteroKey: string;
+        status: Extract<AttachmentExtractStatus, 'failed' | 'skipped'>;
+        error: string;
+    }): Promise<void> {
+        await this.conn.queryAsync(
+            `UPDATE attachment_processing_state SET
+                extract_status = ?, last_error = ?, updated_at = datetime('now')
+             WHERE library_id = ? AND zotero_key = ? AND extract_status IS NULL`,
+            [input.status, input.error, input.libraryId, input.zoteroKey],
+        );
+    }
+
+    /** OCR completion is guarded by the exact bytes hash the executor consumed. */
+    public async markAttachmentOcrDone(input: {
+        libraryId: number;
+        zoteroKey: string;
+        fileHash: string;
+        ocrEngineVersion: string;
+        structuredDocumentHash: string;
+        expectedOcrStatus: AttachmentOcrStatus;
+        expectedOcrEngineVersion: string | null;
+        expectedExtractStatus: AttachmentExtractStatus;
+    }): Promise<boolean> {
+        await this.conn.queryAsync(
+            `UPDATE attachment_processing_state SET
+                ocr_status = 'done', ocr_engine_version = ?,
+                structured_document_hash = ?,
+                upsert_status = CASE WHEN structured_document_hash IS NOT ? THEN NULL ELSE upsert_status END,
+                upsert_index_version = CASE WHEN structured_document_hash IS NOT ? THEN NULL ELSE upsert_index_version END,
+                last_error = NULL, updated_at = datetime('now')
+             WHERE library_id = ? AND zotero_key = ? AND file_hash = ?
+               AND ocr_status IS ? AND ocr_engine_version IS ?
+               AND extract_status IS ?`,
+            [
+                input.ocrEngineVersion,
+                input.structuredDocumentHash,
+                input.structuredDocumentHash,
+                input.structuredDocumentHash,
+                input.libraryId,
+                input.zoteroKey,
+                input.fileHash,
+                input.expectedOcrStatus,
+                input.expectedOcrEngineVersion,
+                input.expectedExtractStatus,
+            ],
+        );
+        return await this.lastStatementChangedRow();
+    }
+
+    /** OCR may originate from the on-demand detector before a backlog row exists. */
+    public async ensureAttachmentFileHash(
+        libraryId: number,
+        zoteroKey: string,
+        fileHash: string,
+    ): Promise<void> {
+        await this.conn.queryAsync(
+            `UPDATE attachment_processing_state SET
+                file_hash = COALESCE(file_hash, ?), updated_at = datetime('now')
+             WHERE library_id = ? AND zotero_key = ?`,
+            [fileHash, libraryId, zoteroKey],
+        );
+    }
+
+    public async markAttachmentOcrFailed(
+        libraryId: number,
+        zoteroKey: string,
+        fileHash: string,
+        error: string,
+    ): Promise<void> {
+        await this.conn.queryAsync(
+            `UPDATE attachment_processing_state SET
+                ocr_status = 'failed', last_error = ?, updated_at = datetime('now')
+             WHERE library_id = ? AND zotero_key = ? AND file_hash = ?`,
+            [error, libraryId, zoteroKey, fileHash],
+        );
+    }
+
+    public async markAttachmentUpsertDone(input: {
+        libraryId: number;
+        zoteroKey: string;
+        structuredDocumentHash: string;
+        upsertIndexVersion: string;
+        expectedUpsertStatus?: AttachmentUpsertStatus;
+        expectedUpsertIndexVersion?: string | null;
+        expectedExtractStatus?: AttachmentExtractStatus;
+    }): Promise<boolean> {
+        const guardStatus = input.expectedUpsertStatus !== undefined;
+        const guardVersion = input.expectedUpsertIndexVersion !== undefined;
+        const guardExtract = input.expectedExtractStatus !== undefined;
+        await this.conn.queryAsync(
+            `UPDATE attachment_processing_state SET
+                upsert_status = 'done', upsert_index_version = ?,
+                last_error = NULL, updated_at = datetime('now')
+             WHERE library_id = ? AND zotero_key = ?
+               AND structured_document_hash = ?
+               AND (? = 0 OR upsert_status IS ?)
+               AND (? = 0 OR upsert_index_version IS ?)
+               AND (? = 0 OR extract_status IS ?)`,
+            [
+                input.upsertIndexVersion,
+                input.libraryId,
+                input.zoteroKey,
+                input.structuredDocumentHash,
+                guardStatus ? 1 : 0,
+                input.expectedUpsertStatus ?? null,
+                guardVersion ? 1 : 0,
+                input.expectedUpsertIndexVersion ?? null,
+                guardExtract ? 1 : 0,
+                input.expectedExtractStatus ?? null,
+            ],
+        );
+        return await this.lastStatementChangedRow();
+    }
+
+    public async markAttachmentUpsertFailed(
+        libraryId: number,
+        zoteroKey: string,
+        structuredDocumentHash: string,
+        error: string,
+    ): Promise<void> {
+        await this.conn.queryAsync(
+            `UPDATE attachment_processing_state SET
+                upsert_status = 'failed', last_error = ?, updated_at = datetime('now')
+             WHERE library_id = ? AND zotero_key = ?
+               AND structured_document_hash = ?`,
+            [error, libraryId, zoteroKey, structuredDocumentHash],
+        );
+    }
+
+    public async getAttachmentProcessingAggregates(
+        libraryId?: number,
+        targets: { ocr?: boolean; upsert?: boolean } = {},
+    ): Promise<AttachmentProcessingAggregates> {
+        const rows: AttachmentProcessingAggregates[] = [];
+        const where = libraryId == null ? '' : ' WHERE library_id = ?';
+        const params = libraryId == null ? [] : [libraryId];
+        const pendingConditions = ['extract_status IS NULL'];
+        if (targets.ocr) pendingConditions.push(`ocr_status = 'needed'`);
+        if (targets.upsert) {
+            pendingConditions.push(`(
+                upsert_status IS NULL
+                AND structured_document_hash IS NOT NULL
+                AND (ocr_status IS NULL OR ocr_status IN ('na', 'done'))
+            )`);
+        }
+        await this.conn.queryAsync(
+            `SELECT
+                COUNT(*),
+                SUM(CASE WHEN extract_status = 'done' THEN 1 ELSE 0 END),
+                SUM(CASE WHEN ocr_status = 'needed' THEN 1 ELSE 0 END),
+                SUM(CASE WHEN ocr_status = 'done' THEN 1 ELSE 0 END),
+                SUM(CASE WHEN upsert_status = 'done' THEN 1 ELSE 0 END),
+                SUM(CASE WHEN extract_status = 'failed' OR ocr_status = 'failed' OR upsert_status = 'failed' THEN 1 ELSE 0 END),
+                SUM(CASE WHEN extract_status = 'skipped' THEN 1 ELSE 0 END),
+                MIN(CASE WHEN ${pendingConditions.join(' OR ')} THEN created_at END)
+             FROM attachment_processing_state${where}`,
+            params,
+            {
+                onRow: (row: any) => rows.push({
+                    total: Number(row.getResultByIndex(0)) || 0,
+                    extracted: Number(row.getResultByIndex(1)) || 0,
+                    ocrNeeded: Number(row.getResultByIndex(2)) || 0,
+                    ocrDone: Number(row.getResultByIndex(3)) || 0,
+                    upserted: Number(row.getResultByIndex(4)) || 0,
+                    failed: Number(row.getResultByIndex(5)) || 0,
+                    skipped: Number(row.getResultByIndex(6)) || 0,
+                    oldestPendingAt: row.getResultByIndex(7) ?? null,
+                }),
+            },
+        );
+        return rows[0] ?? {
+            total: 0,
+            extracted: 0,
+            ocrNeeded: 0,
+            ocrDone: 0,
+            upserted: 0,
+            failed: 0,
+            skipped: 0,
+            oldestPendingAt: null,
+        };
+    }
+
+    public async getBackgroundProcessingFailures(
+        limit = 50,
+    ): Promise<BackgroundProcessingFailureSummary[]> {
+        const rows: BackgroundProcessingFailureSummary[] = [];
+        await this.conn.queryAsync(
+            `SELECT library_id, zotero_key,
+                    CASE
+                        WHEN upsert_status = 'failed' THEN 'fulltext_upsert'
+                        WHEN ocr_status = 'failed' THEN 'document_ocr'
+                        ELSE 'document_extract'
+                    END,
+                    last_error, updated_at
+             FROM attachment_processing_state
+             WHERE extract_status = 'failed' OR ocr_status = 'failed' OR upsert_status = 'failed'
+             ORDER BY updated_at DESC LIMIT ?`,
+            [limit],
+            { onRow: (row: any) => rows.push({
+                source: 'ledger',
+                libraryId: row.getResultByIndex(0),
+                zoteroKey: row.getResultByIndex(1),
+                stage: row.getResultByIndex(2),
+                error: row.getResultByIndex(3) ?? null,
+                attempts: null,
+                timestamp: row.getResultByIndex(4) ?? null,
+            }) },
+        );
+        await this.conn.queryAsync(
+            `SELECT job_type, library_id, zotero_key, last_error,
+                    attempt_count, died_at
+             FROM background_jobs_dead ORDER BY died_at DESC LIMIT ?`,
+            [limit],
+            { onRow: (row: any) => rows.push({
+                source: 'dead_letter',
+                stage: row.getResultByIndex(0),
+                libraryId: row.getResultByIndex(1),
+                zoteroKey: row.getResultByIndex(2),
+                error: row.getResultByIndex(3) ?? null,
+                attempts: row.getResultByIndex(4) ?? null,
+                timestamp: row.getResultByIndex(5) ?? null,
+            }) },
+        );
+        await this.conn.queryAsync(
+            `SELECT task, source_key, last_error, failure_count, last_attempt
+             FROM document_processing_failures
+             ORDER BY last_attempt DESC LIMIT ?`,
+            [limit],
+            { onRow: (row: any) => {
+                const sourceKey = row.getResultByIndex(1) as string | null;
+                const match = sourceKey?.match(/^(\d+)-([A-Z0-9]{8})$/);
+                rows.push({
+                    source: 'content_failure',
+                    stage: row.getResultByIndex(0),
+                    libraryId: match ? Number(match[1]) : null,
+                    zoteroKey: match?.[2] ?? null,
+                    error: row.getResultByIndex(2) ?? null,
+                    attempts: row.getResultByIndex(3) ?? null,
+                    timestamp: row.getResultByIndex(4) ?? null,
+                });
+            } },
+        );
+        return rows.slice(0, limit);
+    }
+
+    public async getProcessingIndexState(
+        libraryId: number,
+    ): Promise<ProcessingIndexStateRecord | null> {
+        const rows: ProcessingIndexStateRecord[] = [];
+        await this.conn.queryAsync(
+            `SELECT library_id, max_client_date_modified, attachment_count,
+                    ledger_row_count, last_scan_timestamp
+             FROM processing_index_state WHERE library_id = ? LIMIT 1`,
+            [libraryId],
+            {
+                onRow: (row: any) => rows.push({
+                    libraryId: row.getResultByIndex(0),
+                    maxClientDateModified: row.getResultByIndex(1) ?? null,
+                    attachmentCount: row.getResultByIndex(2),
+                    ledgerRowCount: row.getResultByIndex(3),
+                    lastScanTimestamp: row.getResultByIndex(4),
+                }),
+            },
+        );
+        return rows[0] ?? null;
+    }
+
+    public async upsertProcessingIndexState(state: ProcessingIndexStateRecord): Promise<void> {
+        await this.conn.queryAsync(
+            `INSERT INTO processing_index_state (
+                library_id, max_client_date_modified, attachment_count,
+                ledger_row_count, last_scan_timestamp
+             ) VALUES (?, ?, ?, ?, ?)
+             ON CONFLICT(library_id) DO UPDATE SET
+                max_client_date_modified = excluded.max_client_date_modified,
+                attachment_count = excluded.attachment_count,
+                ledger_row_count = excluded.ledger_row_count,
+                last_scan_timestamp = excluded.last_scan_timestamp`,
+            [
+                state.libraryId,
+                state.maxClientDateModified,
+                state.attachmentCount,
+                state.ledgerRowCount,
+                state.lastScanTimestamp,
+            ],
+        );
+    }
+
+    public async deleteProcessingIndexState(libraryId: number): Promise<void> {
+        await this.conn.queryAsync(
+            `DELETE FROM processing_index_state WHERE library_id = ?`,
+            [libraryId],
+        );
+    }
+
+    private async lastStatementChangedRow(): Promise<boolean> {
+        const changes: number[] = [];
+        await this.conn.queryAsync(`SELECT changes()`, [], {
+            onRow: (row: any) => changes.push(row.getResultByIndex(0)),
+        });
+        return (changes[0] ?? 0) === 1;
+    }
+
+    private async selectAttachmentProcessingStates(
+        sql: string,
+        params: any[] = [],
+    ): Promise<AttachmentProcessingStateRecord[]> {
+        const rows: AttachmentProcessingStateRecord[] = [];
+        await this.conn.queryAsync(sql, params, {
+            onRow: (row: any) => rows.push({
+                libraryId: row.getResultByIndex(0),
+                zoteroKey: row.getResultByIndex(1),
+                itemId: row.getResultByIndex(2) ?? null,
+                contentKind: row.getResultByIndex(3),
+                fileMtimeMs: row.getResultByIndex(4) ?? null,
+                fileSizeBytes: row.getResultByIndex(5) ?? null,
+                fileHash: row.getResultByIndex(6) ?? null,
+                structuredDocumentHash: row.getResultByIndex(7) ?? null,
+                extractStatus: row.getResultByIndex(8) ?? null,
+                extractSchemaVersion: row.getResultByIndex(9) ?? null,
+                ocrStatus: row.getResultByIndex(10) ?? null,
+                ocrEngineVersion: row.getResultByIndex(11) ?? null,
+                upsertStatus: row.getResultByIndex(12) ?? null,
+                upsertIndexVersion: row.getResultByIndex(13) ?? null,
+                lastError: row.getResultByIndex(14) ?? null,
+                createdAt: row.getResultByIndex(15),
+                updatedAt: row.getResultByIndex(16),
+            }),
+        });
+        return rows;
+    }
+
     // =============================================
     // Document Cache Methods
     // =============================================
@@ -2208,6 +2952,7 @@ export class BeaverDB {
             'zotero_key',
             'content_kind',
             'payload_kind',
+            'dedupe_key',
             'priority',
             'payload_json',
             'enqueued_at',
@@ -2239,6 +2984,42 @@ export class BeaverDB {
         return requiredDeadColumns.every((col) => deadColumns.has(col)) && !deadColumns.has('mode');
     }
 
+    private async attachmentProcessingStateSchemaIsCurrent(): Promise<boolean> {
+        if (!(await this.tableExists('attachment_processing_state'))) return false;
+        const columns = await this.getTableColumns('attachment_processing_state');
+        return [
+            'library_id',
+            'zotero_key',
+            'item_id',
+            'content_kind',
+            'file_mtime_ms',
+            'file_size_bytes',
+            'file_hash',
+            'structured_document_hash',
+            'extract_status',
+            'extract_schema_version',
+            'ocr_status',
+            'ocr_engine_version',
+            'upsert_status',
+            'upsert_index_version',
+            'last_error',
+            'created_at',
+            'updated_at',
+        ].every((column) => columns.has(column));
+    }
+
+    private async processingIndexStateSchemaIsCurrent(): Promise<boolean> {
+        if (!(await this.tableExists('processing_index_state'))) return false;
+        const columns = await this.getTableColumns('processing_index_state');
+        return [
+            'library_id',
+            'max_client_date_modified',
+            'attachment_count',
+            'ledger_row_count',
+            'last_scan_timestamp',
+        ].every((column) => columns.has(column));
+    }
+
     /** Read SQLite table column names. */
     private async getTableColumns(tableName: string): Promise<Set<string>> {
         const columns = new Set<string>();
@@ -2266,7 +3047,9 @@ export class BeaverDB {
             },
         );
 
-        const expected = ['job_type', 'library_id', 'zotero_key', 'payload_kind'];
+        const expected = [
+            'job_type', 'library_id', 'zotero_key', 'payload_kind', 'dedupe_key',
+        ];
         for (const indexName of uniqueIndexNames) {
             const escapedName = indexName.replace(/'/g, `''`);
             const columns: string[] = [];
@@ -2967,6 +3750,9 @@ export class BeaverDB {
     ): Promise<BackgroundJobEnqueueResult> {
         const priority = input.priority ?? 100;
         const payloadJson = input.payload ? JSON.stringify(input.payload) : null;
+        const dedupeKey = input.jobType === 'fulltext_untag'
+            ? input.payload?.doc_hash ?? ''
+            : '';
         const itemId = input.itemId ?? null;
 
         let enqueued = false;
@@ -2975,10 +3761,10 @@ export class BeaverDB {
         await this.conn.queryAsync(
             `INSERT OR IGNORE INTO background_jobs (
                 job_type, library_id, item_id, zotero_key, content_kind,
-                payload_kind,
+                payload_kind, dedupe_key,
                 priority, payload_json, enqueued_at, available_at,
                 attempt_count, last_error
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL)`,
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL)`,
             [
                 input.jobType,
                 input.libraryId,
@@ -2986,6 +3772,7 @@ export class BeaverDB {
                 input.zoteroKey,
                 input.contentKind,
                 input.payloadKind,
+                dedupeKey,
                 priority,
                 payloadJson,
                 input.now,
@@ -3005,20 +3792,25 @@ export class BeaverDB {
             await this.conn.queryAsync(
                 `UPDATE background_jobs SET
                     priority      = MIN(priority, ?),
-                    available_at  = MIN(available_at, ?),
+                    available_at  = CASE WHEN content_kind != ? OR ? < priority
+                                         THEN MIN(available_at, ?) ELSE available_at END,
                     content_kind  = ?,
-                    payload_json  = CASE WHEN content_kind != ? OR ? < priority
+                    payload_json  = CASE WHEN content_kind != ? OR ? < priority OR ? = 'fulltext_upsert'
                                          THEN ? ELSE payload_json END,
                     attempt_count = CASE WHEN content_kind != ? OR ? < priority
                                          THEN 0 ELSE attempt_count END,
                     last_error    = CASE WHEN content_kind != ? OR ? < priority
                                          THEN NULL ELSE last_error END
-                 WHERE job_type = ? AND library_id = ? AND zotero_key = ? AND payload_kind = ?`,
+                 WHERE job_type = ? AND library_id = ? AND zotero_key = ?
+                   AND payload_kind = ? AND dedupe_key = ?`,
                 [
+                    priority,
+                    input.contentKind,
                     priority,
                     input.now,
                     input.contentKind,
                     input.contentKind, priority,
+                    input.jobType,
                     payloadJson,
                     input.contentKind, priority,
                     input.contentKind, priority,
@@ -3026,6 +3818,7 @@ export class BeaverDB {
                     input.libraryId,
                     input.zoteroKey,
                     input.payloadKind,
+                    dedupeKey,
                 ],
             );
         }
@@ -3033,8 +3826,9 @@ export class BeaverDB {
         const idRows: number[] = [];
         await this.conn.queryAsync(
             `SELECT id FROM background_jobs
-             WHERE job_type = ? AND library_id = ? AND zotero_key = ? AND payload_kind = ?`,
-            [input.jobType, input.libraryId, input.zoteroKey, input.payloadKind],
+             WHERE job_type = ? AND library_id = ? AND zotero_key = ?
+               AND payload_kind = ? AND dedupe_key = ?`,
+            [input.jobType, input.libraryId, input.zoteroKey, input.payloadKind, dedupeKey],
             {
                 onRow: (row: any) => {
                     idRows.push(row.getResultByIndex(0));
@@ -3048,7 +3842,8 @@ export class BeaverDB {
 
     /**
      * Resolve a duplicate enqueue against the queue dedup key
-     * (`job_type, library_id, zotero_key, payload_kind`) without re-inserting.
+     * (`job_type, library_id, zotero_key, payload_kind, dedupe_key`) without
+     * re-inserting. Promotion targets ordinary jobs (`dedupe_key=''`).
      *
      * Lets a caller skip expensive pre-enqueue work (e.g. content hashing) when
      * a ticket is already queued, while still promoting an on-demand request
@@ -3073,6 +3868,7 @@ export class BeaverDB {
         await this.conn.queryAsync(
             `SELECT priority FROM background_jobs
              WHERE job_type = ? AND library_id = ? AND zotero_key = ? AND payload_kind = ?
+               AND dedupe_key = ''
              LIMIT 1`,
             [jobType, libraryId, zoteroKey, payloadKind],
             { onRow: (row: any) => current.push(row.getResultByIndex(0)) },
@@ -3085,6 +3881,7 @@ export class BeaverDB {
         await this.conn.queryAsync(
             `UPDATE background_jobs SET priority = ?
              WHERE job_type = ? AND library_id = ? AND zotero_key = ? AND payload_kind = ?
+               AND dedupe_key = ''
                AND priority > ?`,
             [priority, jobType, libraryId, zoteroKey, payloadKind, priority],
         );

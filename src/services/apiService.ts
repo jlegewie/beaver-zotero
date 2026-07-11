@@ -2,6 +2,7 @@ import { AuthApiError, AuthError, AuthSessionMissingError, isAuthRetryableFetchE
 import { ApiError, ServerError, SessionExpiredError, SessionRefreshError } from '../../react/types/apiErrors';
 import { logger } from '../utils/logger';
 import { supabase } from './supabaseClient';
+import { gzipJsonValueChunked } from '../utils/gzip';
 
 type HttpMethod = 'GET' | 'POST' | 'PATCH' | 'DELETE';
 
@@ -108,8 +109,14 @@ export class ApiService {
         }
     }
 
-    private async request(endpoint: string, method: HttpMethod, body?: unknown): Promise<Response> {
+    private async request(
+        endpoint: string,
+        method: HttpMethod,
+        body?: unknown,
+        options?: { rawBody?: Uint8Array; headers?: Record<string, string> },
+    ): Promise<Response> {
         const bodyText = body === undefined ? undefined : JSON.stringify(body);
+        const requestBody = options?.rawBody ?? bodyText;
         const logMessage = method === 'PATCH' && bodyText
             ? `${method}: ${endpoint} ${bodyText}`
             : `${method}: ${endpoint}`;
@@ -118,8 +125,8 @@ export class ApiService {
             try {
                 return await fetch(`${this.baseUrl}${endpoint}`, {
                     method,
-                    headers,
-                    body: bodyText
+                    headers: { ...headers, ...options?.headers },
+                    body: requestBody as BodyInit | undefined,
                 });
             } catch (e) {
                 // fetch throws TypeError on network failure (offline, DNS, TLS, aborted).
@@ -225,35 +232,33 @@ export class ApiService {
     * Handles API response errors and throws appropriate custom errors
     */
     private async handleApiError(response: Response): Promise<never> {
-        if (response.status >= 500) {
-            throw new ServerError(`Server error: ${response.status} - ${response.statusText}`);
-        } else {
-            let errorBody = '';
-            try {
-                errorBody = await response.text();
-                logger(`API error ${response.status} ${response.statusText}: ${errorBody}`, 2);
-                const errorJson = JSON.parse(errorBody);
-                // Handle FastAPI HTTPException detail format (can be string or object)
-                const detail = errorJson.detail;
-                if (typeof detail === 'object' && detail !== null && !Array.isArray(detail)) {
-                    throw new ApiError(
-                        response.status,
-                        response.statusText,
-                        detail.message || response.statusText,
-                        detail.code
-                    );
-                } else {
-                    throw new ApiError(
-                        response.status,
-                        response.statusText,
-                        detail || errorJson.message || response.statusText
-                    );
-                }
-            } catch (e) {
-                if (e instanceof ApiError) throw e;
-                logger(`API error ${response.status} ${response.statusText} (non-JSON body: ${errorBody})`, 2);
-                throw new ApiError(response.status, response.statusText);
+        let errorBody = '';
+        try {
+            errorBody = await response.text();
+            logger(`API error ${response.status} ${response.statusText}: ${errorBody}`, 2);
+            const errorJson = JSON.parse(errorBody);
+            const detail = errorJson.detail;
+            if (typeof detail === 'object' && detail !== null && !Array.isArray(detail)) {
+                throw new ApiError(
+                    response.status,
+                    response.statusText,
+                    detail.message || response.statusText,
+                    detail.code,
+                    detail,
+                );
             }
+            throw new ApiError(
+                response.status,
+                response.statusText,
+                detail || errorJson.message || response.statusText,
+            );
+        } catch (e) {
+            if (e instanceof ApiError) throw e;
+            logger(`API error ${response.status} ${response.statusText} (non-JSON body: ${errorBody})`, 2);
+            if (response.status >= 500) {
+                throw new ServerError(`Server error: ${response.status} - ${response.statusText}`);
+            }
+            throw new ApiError(response.status, response.statusText);
         }
     }
     
@@ -270,6 +275,19 @@ export class ApiService {
     */
     async post<T>(endpoint: string, body: any): Promise<T> {
         const response = await this.request(endpoint, 'POST', body);
+        return await this.parseJsonResponse<T>(response, 'POST');
+    }
+
+    /** POST a gzip-compressed JSON body through the normal auth/retry path. */
+    async postGzip<T>(endpoint: string, body: unknown): Promise<T> {
+        const compressed = await gzipJsonValueChunked(body);
+        const response = await this.request(endpoint, 'POST', undefined, {
+            rawBody: compressed,
+            headers: {
+                'Content-Type': 'application/json',
+                'Content-Encoding': 'gzip',
+            },
+        });
         return await this.parseJsonResponse<T>(response, 'POST');
     }
     

@@ -126,7 +126,10 @@ function setupZoteroGlobal() {
     if ((globalThis as any).Zotero.Sync?.Runner) {
         (globalThis as any).Zotero.Sync.Runner.syncInProgress = false;
     }
-    (globalThis as any).Zotero.Prefs.get = vi.fn().mockReturnValue(undefined);
+    (globalThis as any).Zotero.Prefs.get = vi.fn((pref: string) =>
+        pref === 'extensions.zotero.beaver.backgroundProcessingEnabled'
+            ? true
+            : undefined);
     mockState.mainWindow = win;
     return { win, item };
 }
@@ -387,6 +390,47 @@ describe('BackgroundExtractor', () => {
         expect(mockState.extractCalls[0].timeoutSeconds).toBe(120);
         const rows = await db.peekBackgroundJobs();
         expect(rows).toHaveLength(0);
+    });
+
+    it('does not stamp the structured ledger for a markdown extraction job', async () => {
+        await db.enqueueBackgroundJob({
+            jobType: 'document_extract',
+            libraryId: 1,
+            zoteroKey: 'AAAAAAAA',
+            contentKind: 'pdf',
+            payloadKind: 'markdown',
+            payload: payload(),
+            now: 0,
+        });
+        mockState.nextResult = okResult();
+
+        const { BackgroundExtractor } = await loadProcessor();
+        const proc = new BackgroundExtractor();
+        expect((await proc.processOnce()).processed).toBe(true);
+        expect(await db.getAttachmentProcessingState(1, 'AAAAAAAA')).toBeNull();
+    });
+
+    it('rejects an excluded library before looking up the queued item', async () => {
+        (Zotero as any).Beaver = {
+            db,
+            libraryScopeInitialized: true,
+            searchableLibraryIds: [],
+        };
+        await db.enqueueBackgroundJob({
+            jobType: 'document_extract',
+            libraryId: 1,
+            zoteroKey: 'AAAAAAAA',
+            contentKind: 'pdf',
+            payloadKind: 'structured',
+            payload: payload(),
+            now: 0,
+        });
+
+        const { BackgroundExtractor } = await loadProcessor();
+        const proc = new BackgroundExtractor();
+        expect((await proc.processOnce()).processed).toBe(true);
+        expect(Zotero.Items.getByLibraryAndKeyAsync).not.toHaveBeenCalled();
+        expect(mockState.extractCalls).toHaveLength(0);
     });
 
     it.each([
@@ -1220,6 +1264,44 @@ describe('BackgroundExtractor', () => {
         });
     });
 
+    it('marks extraction failed when its final retry dead-letters', async () => {
+        await db.ensureAttachmentProcessingState({
+            libraryId: 1,
+            zoteroKey: 'AAAAAAAA',
+            contentKind: 'pdf',
+        });
+        const enqueued = await db.enqueueBackgroundJob({
+            jobType: 'document_extract',
+            libraryId: 1,
+            zoteroKey: 'AAAAAAAA',
+            contentKind: 'pdf',
+            payloadKind: 'structured',
+            payload: payload(),
+            now: 0,
+        });
+        for (let attempt = 0; attempt < 2; attempt += 1) {
+            await db.failBackgroundJob(enqueued.id, 'temporary extraction error', {
+                maxAttempts: 3,
+                backoffMs: () => 0,
+                now: attempt,
+            });
+        }
+        const [record] = await db.peekBackgroundJobs();
+        const { BackgroundExtractor } = await loadProcessor();
+        const proc = new BackgroundExtractor();
+        const executor = (proc as any).executors.get('document_extract').executor;
+        await (proc as any).recordRetryFailure(
+            record,
+            executor,
+            { kind: 'retry', error: 'final extraction error' },
+            db,
+        );
+
+        expect((await db.getAttachmentProcessingState(1, 'AAAAAAAA'))?.extractStatus)
+            .toBe('failed');
+        expect((await db.getBackgroundQueueStats(Date.now())).dead).toBe(1);
+    });
+
     it('latches db-write disable when stop() is called during shutdown', async () => {
         await db.enqueueBackgroundJob({
             jobType: 'document_extract',
@@ -1560,7 +1642,10 @@ describe('BackgroundExtractor', () => {
         });
 
         it('pref observer flipping back to true triggers a wake and re-arms claiming', async () => {
-            (Zotero as any).Prefs.get = vi.fn(() => false);
+            (Zotero as any).Prefs.get = vi.fn((pref: string) =>
+                pref === 'extensions.zotero.beaver.backgroundProcessingEnabled'
+                    ? true
+                    : false);
             const registerObserver = vi.fn(
                 (_pref: string, _handler: (v: unknown) => void, _global?: boolean) => Symbol('pref-obs'),
             );
@@ -1684,6 +1769,39 @@ describe('BackgroundExtractor', () => {
                 );
                 claimSpy.mockRestore();
             }
+        });
+
+        it('master processing toggle pauses backlog jobs without blocking hot jobs', async () => {
+            (Zotero.Prefs.get as any).mockImplementation((pref: string) =>
+                pref === 'extensions.zotero.beaver.backgroundProcessingEnabled'
+                    ? false
+                    : undefined);
+            await db.enqueueBackgroundJob({
+                jobType: 'document_extract',
+                libraryId: 1,
+                zoteroKey: 'BACKLOG1',
+                contentKind: 'pdf',
+                payloadKind: 'structured',
+                priority: 110,
+                payload: payload(),
+                now: 0,
+            });
+            await db.enqueueBackgroundJob({
+                jobType: 'document_extract',
+                libraryId: 1,
+                zoteroKey: 'HOTPATH1',
+                contentKind: 'pdf',
+                payloadKind: 'structured',
+                priority: 50,
+                payload: payload(),
+                now: 0,
+            });
+
+            const { BackgroundExtractor } = await loadProcessor();
+            const proc = new BackgroundExtractor();
+            expect((await proc.processOnce()).processed).toBe(true);
+            expect((await db.peekBackgroundJobs()).map((job) => job.zoteroKey))
+                .toEqual(['BACKLOG1']);
         });
 
         it('not idle + priority=50 job in queue still claims and runs', async () => {

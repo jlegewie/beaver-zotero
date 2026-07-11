@@ -30,6 +30,7 @@ import AdvancedSection from "./AdvancedSection";
 import PermissionsSection from "./PermissionsSection";
 import EmbeddingIndexProgress from "../pages/onboarding/EmbeddingIndexProgress";
 import ExcludedLibrariesList from "./ExcludedLibrariesList";
+import BackgroundProcessingSection from "./BackgroundProcessingSection";
 
 
 const PreferencePage: React.FC = () => {
@@ -424,7 +425,7 @@ const PreferencePage: React.FC = () => {
     type VisiblePreferencePageTab = Exclude<PreferencePageTab, 'account'>;
     const tabs = useMemo<{ id: VisiblePreferencePageTab; label: string; icon: React.ComponentType<React.SVGProps<SVGSVGElement>> | React.ReactElement }[]>(() => [
         { id: 'general', label: 'General', icon: SettingsIcon },
-        { id: 'sync', label: isDatabaseSyncSupported ? 'Sync' : 'Search', icon: isDatabaseSyncSupported ? SyncIcon : SearchIcon },
+        { id: 'sync', label: 'Search & Processing', icon: SearchIcon },
         { id: 'permissions', label: 'Permissions', icon: LockIcon },
         { id: 'billing', label: 'Plan & Usage', icon: DollarCircleIcon },
         { id: 'models', label: 'API Keys', icon: KeyIcon },
@@ -771,6 +772,7 @@ const PreferencePage: React.FC = () => {
             {/* ===== SYNC TAB ===== */}
             {effectiveActiveTab === 'sync' && (
                 <>
+                    <BackgroundProcessingSection />
                     {/* <div className="text-base font-color-secondary mt-1 mb-4" style={{ paddingLeft: '2px' }}>
                         {isDatabaseSyncSupported ? (
                             <>
@@ -867,10 +869,10 @@ const PreferencePage: React.FC = () => {
                             <SectionLabel>Libraries</SectionLabel>
                             <ExcludedLibrariesList />
 
-                            <SectionLabel>Search Index</SectionLabel>
+                            <SectionLabel>Item Search Index</SectionLabel>
                             <SettingsGroup>
                                 <SettingsRow
-                                    title="Search Index"
+                                    title="Local item search index"
                                     description={
                                         <>
                                             Check that the local search index matches your Zotero libraries.

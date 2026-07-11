@@ -146,7 +146,7 @@ describe('BeaverDB background queue', () => {
         const version = raw
             .prepare(`SELECT version FROM schema_versions WHERE component = 'background_jobs'`)
             .get() as { version: number };
-        expect(version.version).toBe(1);
+        expect(version.version).toBe(2);
     });
 
     it('rebuilds the background queue with the current unique key on upgrade from an unversioned install', async () => {
@@ -202,6 +202,7 @@ describe('BeaverDB background queue', () => {
             'library_id',
             'zotero_key',
             'payload_kind',
+            'dedupe_key',
         ]);
     });
 

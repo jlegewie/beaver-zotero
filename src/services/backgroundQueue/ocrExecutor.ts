@@ -14,7 +14,11 @@
  * `JobExecutor` interface.
  */
 
-import type { BackgroundJobRecord, DocumentProcessingFailureInput } from '../database';
+import type {
+    AttachmentProcessingStateRecord,
+    BackgroundJobRecord,
+    DocumentProcessingFailureInput,
+} from '../database';
 import {
     loadAttachmentData,
     resolveAttachmentFileSource,
@@ -22,6 +26,12 @@ import {
 } from '../documentExtraction/attachmentSource';
 import { ExternalAbortError } from '../agentDataProvider/timeout';
 import { extractPdfBytesAndCacheAsOriginalAttachment } from '../documentExtraction/ocrReextract';
+import { computeStructuredDocumentHash } from '../documentExtraction/structuredDocumentHash';
+import {
+    backgroundProcessingEnabled,
+    buildIndexJobPayload,
+} from '../backgroundProcessing/utils';
+import { BACKGROUND_UPSERT_PRIORITY } from '../backgroundProcessing/constants';
 import {
     ocrApiClient,
     type OcrError,
@@ -160,6 +170,22 @@ export class OcrExecutor implements JobExecutor {
         if ('outcome' in resolved) return resolved.outcome;
         const job = resolved.job;
         this.throwIfLibraryUnavailable(job.item.libraryID, ctx);
+        if (typeof (ctx.db as any).ensureAttachmentProcessingState === 'function') {
+            await ctx.db.ensureAttachmentProcessingState({
+                libraryId: job.item.libraryID,
+                zoteroKey: job.item.key,
+                itemId: job.item.id,
+                contentKind: 'pdf',
+            });
+            await ctx.db.ensureAttachmentFileHash(
+                job.item.libraryID,
+                job.item.key,
+                job.fileHash,
+            );
+        }
+        const ledgerGuard = typeof (ctx.db as any).getAttachmentProcessingState === 'function'
+            ? await ctx.db.getAttachmentProcessingState(job.item.libraryID, job.item.key)
+            : null;
 
         // Loop guard: skip scans this OCR engine has already marked terminal.
         if (
@@ -175,11 +201,16 @@ export class OcrExecutor implements JobExecutor {
         this.throwIfLibraryUnavailable(job.item.libraryID, ctx);
 
         const ready = await this.resolveReady(job, ctx, record.id);
-        if ('outcome' in ready) return ready.outcome;
+        if ('outcome' in ready) {
+            await this.persistFailedOutcome(job, ready.outcome, ctx);
+            return ready.outcome;
+        }
 
         const ocrBytes = await this.download(ready.getUrl, job, ctx);
 
-        return this.reextractAndCache(job, ocrBytes, ctx);
+        const outcome = await this.reextractAndCache(job, ocrBytes, ctx, ledgerGuard);
+        await this.persistFailedOutcome(job, outcome, ctx);
+        return outcome;
     }
 
     /** Resolve a ready GET URL, reusing a valid resume hint when available. */
@@ -591,6 +622,7 @@ export class OcrExecutor implements JobExecutor {
         job: ResolvedJob,
         ocrBytes: Uint8Array,
         ctx: JobExecutionContext,
+        ledgerGuard: AttachmentProcessingStateRecord | null,
     ): Promise<JobOutcome> {
         this.throwIfLibraryUnavailable(job.item.libraryID, ctx);
         // Hand the MuPDF extraction to the serialized background lane.
@@ -615,6 +647,57 @@ export class OcrExecutor implements JobExecutor {
                 await ctx.db
                     .clearDocumentProcessingFailure(job.fileHash, 'ocr', OCR_ENGINE_VERSION)
                     .catch(() => undefined);
+                if (typeof (ctx.db as any).markAttachmentOcrDone === 'function') {
+                    const cache = Zotero.Beaver?.documentCache;
+                    const document = await cache?.getResult(
+                        { libraryId: job.item.libraryID, zoteroKey: job.item.key },
+                        'structured',
+                        job.filePath,
+                    );
+                    if (!document) {
+                        return { kind: 'retry', error: 'ocr_cache_missing_after_reextract' };
+                    }
+                    const previous = await ctx.db.getAttachmentProcessingState(
+                        job.item.libraryID,
+                        job.item.key,
+                    );
+                    const structuredDocumentHash = await computeStructuredDocumentHash(
+                        'pdf',
+                        document as any,
+                    );
+                    const applied = await ctx.db.markAttachmentOcrDone({
+                        libraryId: job.item.libraryID,
+                        zoteroKey: job.item.key,
+                        fileHash: job.fileHash,
+                        ocrEngineVersion: OCR_ENGINE_VERSION,
+                        structuredDocumentHash,
+                        expectedOcrStatus: ledgerGuard?.ocrStatus ?? null,
+                        expectedOcrEngineVersion: ledgerGuard?.ocrEngineVersion ?? null,
+                        expectedExtractStatus: ledgerGuard?.extractStatus ?? null,
+                    });
+                    if (
+                        applied
+                        && previous?.structuredDocumentHash !== structuredDocumentHash
+                        && Zotero.Beaver?.hasSearchIndexAccess === true
+                        && backgroundProcessingEnabled()
+                    ) {
+                        await ctx.enqueue({
+                            jobType: 'fulltext_upsert',
+                            libraryId: job.item.libraryID,
+                            itemId: job.item.id,
+                            zoteroKey: job.item.key,
+                            contentKind: 'pdf',
+                            payloadKind: 'structured',
+                            priority: BACKGROUND_UPSERT_PRIORITY,
+                            payload: buildIndexJobPayload('pdf', {
+                                docHash: structuredDocumentHash,
+                                previousDocumentHash:
+                                    previous?.structuredDocumentHash ?? undefined,
+                            }),
+                            now: Date.now(),
+                        });
+                    }
+                }
                 logger(`OcrExecutor: ${job.sourceKey} OCR'd + cached (pages=${result.pageCount})`, 3);
                 return { kind: 'complete', reason: 'ocr_ok' };
             case 'no_text':
@@ -667,6 +750,21 @@ export class OcrExecutor implements JobExecutor {
             },
             reason: `terminal:${terminalCode}`,
         };
+    }
+
+    private async persistFailedOutcome(
+        job: ResolvedJob,
+        outcome: JobOutcome,
+        ctx: JobExecutionContext,
+    ): Promise<void> {
+        if (outcome.kind !== 'failPermanent') return;
+        if (typeof (ctx.db as any).markAttachmentOcrFailed !== 'function') return;
+        await ctx.db.markAttachmentOcrFailed(
+            job.item.libraryID,
+            job.item.key,
+            job.fileHash,
+            outcome.failure.error,
+        );
     }
 
     /** Fire-and-forget telemetry for a client-detected terminal outcome. */

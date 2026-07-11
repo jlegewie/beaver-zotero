@@ -1,21 +1,29 @@
 import { type ExtractContentKind, isExtractContentKind } from "./contentKinds";
 
-export interface PdfBackgroundJobPayload {
+export interface IndexBackgroundJobMetadata {
+  index_action?: "upsert" | "untag";
+  /** Hash to untag for a delete/replacement operation. */
+  doc_hash?: string;
+  /** Prior attachment hash removed after a replacement upsert succeeds. */
+  previous_doc_hash?: string;
+}
+
+export interface PdfBackgroundJobPayload extends IndexBackgroundJobMetadata {
   content_kind: "pdf";
   maxPages: number | null;
   maxFileSizeMB: number;
   timeoutSeconds: number;
 }
 
-export interface EpubBackgroundJobPayload {
+export interface EpubBackgroundJobPayload extends IndexBackgroundJobMetadata {
   content_kind: "epub";
 }
 
-export interface TextBackgroundJobPayload {
+export interface TextBackgroundJobPayload extends IndexBackgroundJobMetadata {
   content_kind: "text";
 }
 
-export interface SnapshotBackgroundJobPayload {
+export interface SnapshotBackgroundJobPayload extends IndexBackgroundJobMetadata {
   content_kind: "snapshot";
 }
 

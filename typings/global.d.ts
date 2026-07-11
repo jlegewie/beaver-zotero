@@ -396,11 +396,84 @@ declare namespace Zotero {
                 task: import("../src/services/database").DocumentProcessingTask,
                 engineVersion?: string,
             ): Promise<void>;
+
+            ensureAttachmentProcessingState(
+                input: import("../src/services/database").AttachmentProcessingStateInput,
+            ): Promise<import("../src/services/database").AttachmentProcessingStateRecord>;
+            getAttachmentProcessingState(
+                libraryId: number,
+                zoteroKey: string,
+            ): Promise<import("../src/services/database").AttachmentProcessingStateRecord | null>;
+            getAttachmentProcessingStatesByLibrary(
+                libraryId: number,
+            ): Promise<import("../src/services/database").AttachmentProcessingStateRecord[]>;
+            deleteAttachmentProcessingState(
+                libraryId: number,
+                zoteroKey: string,
+            ): Promise<import("../src/services/database").AttachmentProcessingStateRecord | null>;
+            deleteAttachmentProcessingStatesByLibrary(libraryId: number): Promise<void>;
+            deleteBackgroundJobsByLibrary(libraryId: number): Promise<void>;
+            redriveDeadUntagJobs(now: number, limit?: number): Promise<number>;
+            resetAttachmentExtraction(libraryId: number, zoteroKey: string, reason?: string | null): Promise<void>;
+            resetAttachmentOcr(libraryId: number, zoteroKey: string, reason?: string | null): Promise<void>;
+            resetAttachmentUpsert(libraryId: number, zoteroKey: string, reason?: string | null): Promise<void>;
+            markAttachmentExtracted(input: {
+                libraryId: number; zoteroKey: string;
+                expectedFileMtimeMs: number | null; expectedFileSizeBytes: number | null;
+                previousDocumentHash: string | null;
+                expectedExtractStatus: import("../src/services/database").AttachmentExtractStatus;
+                fileMtimeMs: number; fileSizeBytes: number;
+                fileHash: string | null; structuredDocumentHash: string | null;
+                extractSchemaVersion: string; ocrStatus: 'na' | 'needed';
+            }): Promise<boolean>;
+            markAttachmentExtractFailure(input: {
+                libraryId: number; zoteroKey: string; status: 'failed' | 'skipped'; error: string;
+            }): Promise<void>;
+            ensureAttachmentFileHash(libraryId: number, zoteroKey: string, fileHash: string): Promise<void>;
+            markAttachmentOcrDone(input: {
+                libraryId: number; zoteroKey: string; fileHash: string;
+                ocrEngineVersion: string; structuredDocumentHash: string;
+                expectedOcrStatus: import("../src/services/database").AttachmentOcrStatus;
+                expectedOcrEngineVersion: string | null;
+                expectedExtractStatus: import("../src/services/database").AttachmentExtractStatus;
+            }): Promise<boolean>;
+            markAttachmentOcrFailed(libraryId: number, zoteroKey: string, fileHash: string, error: string): Promise<void>;
+            markAttachmentUpsertDone(input: {
+                libraryId: number; zoteroKey: string; structuredDocumentHash: string;
+                upsertIndexVersion: string;
+                expectedUpsertStatus?: import("../src/services/database").AttachmentUpsertStatus;
+                expectedUpsertIndexVersion?: string | null;
+                expectedExtractStatus?: import("../src/services/database").AttachmentExtractStatus;
+            }): Promise<boolean>;
+            markAttachmentUpsertFailed(libraryId: number, zoteroKey: string, structuredDocumentHash: string, error: string): Promise<void>;
+            getAttachmentProcessingAggregates(
+                libraryId?: number,
+                targets?: { ocr?: boolean; upsert?: boolean },
+            ): Promise<import("../src/services/database").AttachmentProcessingAggregates>;
+            getBackgroundProcessingFailures(
+                limit?: number,
+            ): Promise<import("../src/services/database").BackgroundProcessingFailureSummary[]>;
+            getProcessingIndexState(
+                libraryId: number,
+            ): Promise<import("../src/services/database").ProcessingIndexStateRecord | null>;
+            upsertProcessingIndexState(
+                state: import("../src/services/database").ProcessingIndexStateRecord,
+            ): Promise<void>;
+            deleteProcessingIndexState(libraryId: number): Promise<void>;
         }
 
         const backgroundExtractor:
             | import("../src/services/backgroundExtractor").BackgroundExtractor
             | undefined;
+
+        const processingReconciler:
+            | import("../src/services/backgroundProcessing/reconciler").ReconcilerService
+            | undefined;
+        const newItemWatcher:
+            | import("../src/services/backgroundProcessing/newItemWatcher").NewItemWatcher
+            | undefined;
+        const searchableLibraryIds: number[] | undefined;
+        const libraryScopeInitialized: boolean | undefined;
 
         /**
          * OCR entitlement mirror, synced from the webpack profile hook so the

@@ -30,8 +30,8 @@ export interface MaybeEnqueueOcrArgs {
     /**
      * Queue priority. Defaults to on-demand (a scan the user just opened), which
      * runs promptly and preempts a draining backfill. The whole-library backfill
-     * reconciler passes `OCR_PRIORITY_BACKFILL`, which stays just under the idle
-     * gate so it makes progress while the user is active but yields to on-demand.
+     * reconciler passes `OCR_PRIORITY_BACKFILL`, which stays behind the idle
+     * and master-toggle gate and yields to on-demand work.
      */
     priority?: number;
 }

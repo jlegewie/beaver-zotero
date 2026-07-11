@@ -31,6 +31,20 @@ export function useOcrLane(): void {
         ? [...searchableLibraryIds].sort((a, b) => a - b).join(',')
         : null;
 
+    // Mirror the access-control boundary for esbuild-side producers. They
+    // cannot import the webpack Jotai store, so this is their only source of
+    // searchable library scope.
+    useEffect(() => {
+        if (!Zotero.Beaver) return;
+        (Zotero.Beaver as {
+            searchableLibraryIds?: number[];
+            libraryScopeInitialized?: boolean;
+        }).searchableLibraryIds = [...searchableLibraryIds];
+        (Zotero.Beaver as { libraryScopeInitialized?: boolean })
+            .libraryScopeInitialized = libraryScopeInitialized;
+        Zotero.Beaver.processingReconciler?.notify();
+    }, [libraryScopeInitialized, libraryScopeKey]);
+
     // Register the OCR executor on the dispatcher. The background extractor is
     // created during esbuild startup, but the exact ordering vs the webpack
     // mount can vary (and it survives window reloads), so retry until present.
@@ -81,5 +95,6 @@ export function useOcrLane(): void {
         if (Zotero.Beaver) {
             (Zotero.Beaver as { hasOcrAccess?: boolean }).hasOcrAccess = hasOcrAccess;
         }
+        Zotero.Beaver?.processingReconciler?.notify();
     }, [hasOcrAccess]);
 }

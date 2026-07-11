@@ -66,6 +66,11 @@ declare namespace _ZoteroTypes {
       "mcpServerEnabled": boolean;
       "mcpCreateNoteToolEnabled": boolean;
       "backgroundExtractorEnabled": boolean;
+      "backgroundProcessingEnabled": boolean;
+      "backgroundProcessingContinuous": boolean;
+      "backgroundProcessingLibrariesToSkip": string;
+      "backgroundProcessingWelcomeAck": boolean;
+      "backgroundProcessingWelcomeDeferred": boolean;
       "runConsistencyCheck": boolean;
       "runCollectionSync": boolean;
       "runWebDAVSync": boolean;

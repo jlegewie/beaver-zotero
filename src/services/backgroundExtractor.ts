@@ -42,6 +42,8 @@ const IDLE_THRESHOLD_MS = 30_000;
 const IDLE_THRESHOLD_SEC = 30;
 const LOW_PRIORITY_CEILING = 100;
 const PREF_ENABLED = 'backgroundExtractorEnabled';
+const PREF_PROCESSING_ENABLED = 'backgroundProcessingEnabled';
+const PREF_CONTINUOUS = 'backgroundProcessingContinuous';
 const COOPERATIVE_THROTTLE = true;
 
 export type ProcessOnceReason =
@@ -369,8 +371,11 @@ export class BackgroundExtractor {
         if (!db || this.executors.size === 0) return inactive('empty');
 
         const idleMs = getSystemIdleTimeMs();
-        const maxPriority =
-            idleMs >= IDLE_THRESHOLD_MS ? undefined : LOW_PRIORITY_CEILING;
+        const processBacklog = getPref(PREF_PROCESSING_ENABLED) === true;
+        const continuous = processBacklog && getPref(PREF_CONTINUOUS) === true;
+        const maxPriority = processBacklog && (continuous || idleMs >= IDLE_THRESHOLD_MS)
+            ? undefined
+            : LOW_PRIORITY_CEILING;
 
         const launched = await this.dispatchPass({
             db,
@@ -566,10 +571,38 @@ export class BackgroundExtractor {
     ): Promise<void> {
         const result = await db.failBackgroundJob(record.id, outcome.error, {
             maxAttempts: MAX_ATTEMPTS,
-            backoffMs: BACKOFF_MS,
+            backoffMs: (attempt) => outcome.retryAfterMs ?? BACKOFF_MS(attempt),
             now: Date.now(),
         });
         if (result.dead) {
+            if (record.jobType === 'document_extract') {
+                await db.markAttachmentExtractFailure({
+                    libraryId: record.libraryId,
+                    zoteroKey: record.zoteroKey,
+                    status: 'failed',
+                    error: outcome.error,
+                });
+            } else if (record.jobType === 'fulltext_upsert' && record.payload?.doc_hash) {
+                await db.markAttachmentUpsertFailed(
+                    record.libraryId,
+                    record.zoteroKey,
+                    record.payload.doc_hash,
+                    outcome.error,
+                );
+            } else if (record.jobType === 'document_ocr') {
+                const ledger = await db.getAttachmentProcessingState(
+                    record.libraryId,
+                    record.zoteroKey,
+                );
+                if (ledger?.fileHash) {
+                    await db.markAttachmentOcrFailed(
+                        record.libraryId,
+                        record.zoteroKey,
+                        ledger.fileHash,
+                        outcome.error,
+                    );
+                }
+            }
             const failure = executor.describeFailure?.(record, outcome.error) ?? null;
             if (failure) {
                 await db.recordDocumentProcessingFailure(failure);

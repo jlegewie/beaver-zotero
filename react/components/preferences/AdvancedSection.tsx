@@ -11,6 +11,7 @@ import { logger } from "../../../src/utils/logger";
 import { setPref } from "../../../src/utils/prefs";
 import { TickIcon, CopyIcon } from "../icons/icons";
 import CustomInstructionsSection from "./CustomInstructionsSection";
+import BackgroundProcessingSection from "./BackgroundProcessingSection";
 import {
     deleteAllExternalFiles,
     getExternalFilesStats,
@@ -180,6 +181,8 @@ const AdvancedSection: React.FC = () => {
         <>
             {/* ===== CUSTOM INSTRUCTIONS ===== */}
             <CustomInstructionsSection />
+
+            <BackgroundProcessingSection placement="advanced" />
 
             {/* ===== STORAGE ===== */}
             <div className="display-flex flex-row items-center gap-2" style={{ marginTop: '20px', marginBottom: '6px', paddingLeft: '2px' }}>

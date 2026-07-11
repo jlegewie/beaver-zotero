@@ -14,7 +14,11 @@ describe('firstRunFollowups', () => {
     describe('getFollowupsForWhereToStart', () => {
         it('returns launcher follow-ups keyed by built-in action id', () => {
             expect(ids(getFollowupsForWhereToStart('builtin-start-project')))
-                .toEqual(['discover_more_external', 'project_overview_note']);
+                .toEqual([
+                    'project_overview_note',
+                    'organize_into_sub_collections',
+                    'discover_more_external',
+                ]);
             expect(ids(getFollowupsForWhereToStart('builtin-color-code')))
                 .toEqual(['summarize_in_note', 'related_in_library', 'find_recent_external']);
             expect(ids(getFollowupsForWhereToStart('builtin-tidy-up')))
@@ -67,7 +71,8 @@ describe('firstRunFollowups', () => {
 
     describe('renderFollowup with launcher topics', () => {
         it('uses the topic-anchored variant when a topic is present', () => {
-            const [discoverMore] = WHERE_TO_START_FOLLOWUPS['builtin-start-project'];
+            const discoverMore = WHERE_TO_START_FOLLOWUPS['builtin-start-project']
+                .find((followup) => followup.id === 'discover_more_external')!;
             const { title, prompt } = renderFollowup(discoverMore, 'social capital');
             expect(title).toBe('Find more recent research on social capital');
             expect(prompt).toContain('social capital');
@@ -75,7 +80,8 @@ describe('firstRunFollowups', () => {
         });
 
         it('falls back to the base copy when no topic is present', () => {
-            const [discoverMore] = WHERE_TO_START_FOLLOWUPS['builtin-start-project'];
+            const discoverMore = WHERE_TO_START_FOLLOWUPS['builtin-start-project']
+                .find((followup) => followup.id === 'discover_more_external')!;
             const { title } = renderFollowup(discoverMore, null);
             expect(title).toBe('Find more recent research on this topic');
         });

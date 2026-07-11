@@ -5,13 +5,25 @@ export class ApiError extends Error {
     public readonly status: number;
     public readonly statusText: string;
     public readonly code?: string;
+    public readonly detail?: Record<string, unknown>;
+    public readonly retryAfterSeconds?: number;
 
-    constructor(status: number, statusText: string, message?: string, code?: string) {
+    constructor(
+        status: number,
+        statusText: string,
+        message?: string,
+        code?: string,
+        detail?: Record<string, unknown>,
+    ) {
         super(message || `API error: ${status} - ${statusText}`);
         this.name = 'ApiError';
         this.status = status;
         this.statusText = statusText;
         this.code = code;
+        this.detail = detail;
+        this.retryAfterSeconds = typeof detail?.retry_after_seconds === 'number'
+            ? detail.retry_after_seconds
+            : undefined;
     }
 
     /**

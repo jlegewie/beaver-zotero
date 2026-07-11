@@ -7,6 +7,8 @@ import { AIProvider } from "./services/OpenAIProvider";
 import { CitationService } from "./services/CitationService";
 import { DocumentCache } from "./services/documentCache";
 import { BackgroundExtractor } from "./services/backgroundExtractor";
+import type { ReconcilerService } from "./services/backgroundProcessing/reconciler";
+import type { NewItemWatcher } from "./services/backgroundProcessing/newItemWatcher";
 
 class Addon {
     public data: {
@@ -30,11 +32,15 @@ class Addon {
     public db?: BeaverDB;
     public documentCache?: DocumentCache;
     public backgroundExtractor?: BackgroundExtractor;
+    public processingReconciler?: ReconcilerService;
+    public newItemWatcher?: NewItemWatcher;
     public pluginVersion?: typeof version;
     /** OCR entitlement mirror kept in sync from the webpack profile hook */
     public hasOcrAccess: boolean = false;
     /** Cloud search-index entitlement mirror kept in sync from the webpack profile hook */
     public hasSearchIndexAccess: boolean = false;
+    public searchableLibraryIds: number[] = [];
+    public libraryScopeInitialized: boolean = false;
     // Lifecycle hooks
     public hooks: typeof hooks;
     // APIs

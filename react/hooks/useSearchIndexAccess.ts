@@ -19,5 +19,6 @@ export function useSearchIndexAccess(): void {
             (Zotero.Beaver as { hasSearchIndexAccess?: boolean }).hasSearchIndexAccess =
                 hasSearchIndexAccess;
         }
+        Zotero.Beaver?.processingReconciler?.notify();
     }, [hasSearchIndexAccess]);
 }

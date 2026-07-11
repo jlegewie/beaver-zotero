@@ -18,7 +18,7 @@ export interface JobExecutionContext {
 export type JobOutcome =
     | { kind: 'complete'; reason: string }
     | { kind: 'release'; reason: string }
-    | { kind: 'retry'; error: string; reason?: string }
+    | { kind: 'retry'; error: string; reason?: string; retryAfterMs?: number }
     | {
         kind: 'failPermanent';
         failure: DocumentProcessingFailureInput;

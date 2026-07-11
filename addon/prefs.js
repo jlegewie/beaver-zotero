@@ -105,6 +105,13 @@ pref("mcpCreateNoteToolEnabled", false);
 
 // Background extractor kill-switch (drains the background_jobs queue)
 pref("backgroundExtractorEnabled", true);
+// Whole-library producers are an explicit opt-in. The dispatcher above remains
+// enabled so user-initiated extraction jobs still work when this is off.
+pref("backgroundProcessingEnabled", false);
+pref("backgroundProcessingContinuous", false);
+pref("backgroundProcessingLibrariesToSkip", "[]");
+pref("backgroundProcessingWelcomeAck", false);
+pref("backgroundProcessingWelcomeDeferred", false);
 
 // Flags to show notifications, run consistency check and collection sync on upgrade
 pref("runConsistencyCheck", false);
