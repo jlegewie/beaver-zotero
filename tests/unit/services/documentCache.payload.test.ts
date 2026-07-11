@@ -468,7 +468,9 @@ describe('DocumentCache payloads', () => {
             metadata,
         });
 
-        while (createSignal === null) {
+        // Prefer mock.calls over `while (createSignal === null)` — that loop
+        // narrows the closure-assigned let to `never` under TypeScript CFA.
+        while (create.mock.calls.length === 0) {
             await Promise.resolve();
         }
 
@@ -490,6 +492,7 @@ describe('DocumentCache payloads', () => {
         // Well past the creator's 25 ms budget the extraction must still be
         // alive, because the joiner's budget has not expired.
         await new Promise((resolve) => setTimeout(resolve, 100));
+        expect(createSignal).not.toBeNull();
         expect(createSignal!.aborted).toBe(false);
 
         releaseCreate();
@@ -531,7 +534,7 @@ describe('DocumentCache payloads', () => {
             metadata,
         });
 
-        while (createSignal === null) {
+        while (create.mock.calls.length === 0) {
             await Promise.resolve();
         }
 
@@ -548,6 +551,7 @@ describe('DocumentCache payloads', () => {
         });
 
         await new Promise((resolve) => setTimeout(resolve, 100));
+        expect(createSignal).not.toBeNull();
         expect(createSignal!.aborted).toBe(false);
 
         releaseCreate();
@@ -596,7 +600,7 @@ describe('DocumentCache payloads', () => {
             sharedTimeoutMs: 25,
             create: hotCreate,
         });
-        while (hotSignal === null) await Promise.resolve();
+        while (hotCreate.mock.calls.length === 0) await Promise.resolve();
 
         const background = cache.getOrCreateResult({
             ...common,
@@ -606,6 +610,7 @@ describe('DocumentCache payloads', () => {
         });
 
         await expect(hot).rejects.toThrow('hot worker terminated');
+        expect(hotSignal).not.toBeNull();
         expect(hotSignal!.aborted).toBe(true);
         expect(hotCreate).toHaveBeenCalledTimes(1);
         expect(backgroundCreate).toHaveBeenCalledTimes(1);
@@ -641,7 +646,7 @@ describe('DocumentCache payloads', () => {
         };
 
         const short = cache.getOrCreateResult({ ...common, sharedTimeoutMs: 50 });
-        while (createSignal === null) await Promise.resolve();
+        while (hungCreate.mock.calls.length === 0) await Promise.resolve();
         const long = cache.getOrCreateResult({
             ...common,
             sharedTimeoutMs: 5000,
@@ -652,6 +657,7 @@ describe('DocumentCache payloads', () => {
         longWaiterController.abort();
         await expect(longOutcome).resolves.toMatchObject({ message: 'Operation aborted' });
         await expect(short).rejects.toThrow('worker terminated');
+        expect(createSignal).not.toBeNull();
         expect(createSignal!.aborted).toBe(true);
     });
 
@@ -757,7 +763,7 @@ describe('DocumentCache payloads', () => {
     it('passes the caller abort signal to cold result creation', async () => {
         const item = createCacheAttachment();
         const controller = new AbortController();
-        const create = vi.fn(async (signal: AbortSignal) => {
+        const create = vi.fn(async (signal: AbortSignal): Promise<BeaverExtractResult> => {
             expect(signal.aborted).toBe(true);
             throw new Error('aborted');
         });
