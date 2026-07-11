@@ -10,7 +10,7 @@ import { convertUTCToLocal } from '../utils/dateUtils';
 import { deduplicateByThread } from '../utils/threadMatches';
 import { getReaderOrNoteContextItem } from '../utils/zoteroTabContext';
 import { buildThreadItemFilter } from '../utils/threadItemFilter';
-import { buildRecentChatsItemLookup } from '../utils/recentChatsLookup';
+import { buildRecentChatsCacheKey, buildRecentChatsItemLookup } from '../utils/recentChatsLookup';
 import Spinner from './icons/Spinner';
 import { logger } from '../../src/utils/logger';
 import Button from './ui/Button';
@@ -125,14 +125,18 @@ const RecentChats: React.FC = () => {
         }
 
         // Cache key: differentiate library vs reader-per-attachment vs note
-        let cacheKey: string;
+        let contextCacheKey: string;
         if (!isLibraryTab && attachmentKey) {
-            cacheKey = `${user.id}:reader:${attachmentKey}`;
+            contextCacheKey = `${user.id}:reader:${attachmentKey}`;
         } else if (!isLibraryTab && noteKey) {
-            cacheKey = `${user.id}:note:${noteKey}`;
+            contextCacheKey = `${user.id}:note:${noteKey}`;
         } else {
-            cacheKey = `${user.id}:library`;
+            contextCacheKey = `${user.id}:library`;
         }
+        const cacheKey = buildRecentChatsCacheKey(
+            contextCacheKey,
+            searchableLibraryIds,
+        );
 
         // On first mount, clear cache for fresh data; subsequent renders use TTL
         if (!hasMountedRef.current) {
