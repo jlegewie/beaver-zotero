@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { listRefs } = vi.hoisted(() => ({ listRefs: vi.fn() }));
+const { listAllRefs } = vi.hoisted(() => ({ listAllRefs: vi.fn() }));
 
 vi.mock('../../../src/services/searchIndex/searchIndexApiClient', () => ({
-    searchIndexApiClient: { listRefs },
+    searchIndexApiClient: { listAllRefs },
 }));
 vi.mock('../../../src/utils/zoteroUtils', () => ({
     getIndexScopeRef: vi.fn(() => 'lLOCAL123'),
@@ -11,15 +11,14 @@ vi.mock('../../../src/utils/zoteroUtils', () => ({
 }));
 vi.mock('../../../src/utils/logger', () => ({ logger: vi.fn() }));
 
-import { purgeExcludedLibraries } from '../../../react/hooks/useBackgroundProcessingScopeCleanup';
+import { purgeExcludedLibraries } from '../../../src/services/backgroundProcessing/exclusionCleanup';
 
 describe('background processing scope cleanup', () => {
     beforeEach(() => {
         vi.clearAllMocks();
-        listRefs.mockResolvedValue({
-            refs: [{ zotero_key: 'REMOTE01', doc_hash: 'b'.repeat(64) }],
-            next_cursor: null,
-        });
+        listAllRefs.mockResolvedValue([
+            { zotero_key: 'REMOTE01', doc_hash: 'b'.repeat(64) },
+        ]);
     });
 
     it('purges local derived state and durably untags only an explicitly excluded library', async () => {
@@ -66,7 +65,7 @@ describe('background processing scope cleanup', () => {
     });
 
     it('reports completion once both local ledger and remote refs are empty', async () => {
-        listRefs.mockResolvedValueOnce({ refs: [], next_cursor: null });
+        listAllRefs.mockResolvedValueOnce([]);
         const db = {
             getAttachmentProcessingStatesByLibrary: vi.fn(async () => []),
             deleteBackgroundJobsByLibrary: vi.fn(async () => undefined),

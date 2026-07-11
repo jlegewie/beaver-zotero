@@ -1,17 +1,14 @@
-import type { AttachmentProcessingStateRecord } from '../database';
+import type { BackgroundJobInput } from '../database';
 import type { QueueDB } from '../backgroundQueue/jobExecutor';
 import { getReadableContentKind } from '../documentExtraction/attachmentResolution';
 import { resolveAttachmentFileSource } from '../documentExtraction/attachmentSource';
 import { safeIsInTrash } from '../../utils/zoteroItemUtils';
 import { logger } from '../../utils/logger';
-import {
-    BACKGROUND_EXTRACT_PRIORITY,
-    BACKGROUND_UNTAG_PRIORITY,
-} from './constants';
+import { BACKGROUND_EXTRACT_PRIORITY } from './constants';
 import {
     backgroundProcessingEnabled,
     buildBackgroundExtractPayload,
-    buildIndexJobPayload,
+    buildUntagJobInput,
     isBackgroundProcessingLibraryEnabled,
 } from './utils';
 
@@ -89,22 +86,32 @@ export class NewItemWatcher {
         }
         const db = Zotero.Beaver?.db;
         if (!db) return;
+        const jobs: BackgroundJobInput[] = [];
         for (const event of events) {
             try {
                 if (event.event === 'delete') {
                     await this.handleDelete(db, event.extra);
                 } else {
-                    await this.handleUpsert(db, event);
+                    const job = await this.handleUpsert(db, event);
+                    if (job) jobs.push(job);
                 }
             } catch (error) {
                 logger(`NewItemWatcher: ${event.event} ${event.id} failed: ${error}`, 2);
             }
         }
+        try {
+            await db.enqueueBackgroundJobs(jobs);
+        } catch (error) {
+            logger(`NewItemWatcher: enqueue of ${jobs.length} jobs failed: ${error}`, 2);
+        }
         Zotero.Beaver?.processingReconciler?.notify();
         Zotero.Beaver?.backgroundExtractor?.notify();
     }
 
-    private async handleUpsert(db: QueueDB, event: PendingEvent): Promise<void> {
+    private async handleUpsert(
+        db: QueueDB,
+        event: PendingEvent,
+    ): Promise<BackgroundJobInput | null> {
         // Resolve the cheap primary identity first, then enforce the exclusion
         // boundary before loading attachment data.
         const identity: Array<{ libraryId: number; key: string }> = [];
@@ -119,17 +126,17 @@ export class NewItemWatcher {
             },
         );
         const ref = identity[0];
-        if (!ref || !isBackgroundProcessingLibraryEnabled(ref.libraryId)) return;
+        if (!ref || !isBackgroundProcessingLibraryEnabled(ref.libraryId)) return null;
         const item = await Zotero.Items.getAsync(event.id);
-        if (!item) return;
+        if (!item) return null;
         if (safeIsInTrash(item) === true) {
             await this.removeLocalState(db, ref.libraryId, ref.key);
-            return;
+            return null;
         }
         const kind = getReadableContentKind(item);
         if (kind !== 'pdf' && kind !== 'epub' && kind !== 'snapshot') {
             await this.removeLocalState(db, ref.libraryId, ref.key);
-            return;
+            return null;
         }
         const existing = await db.getAttachmentProcessingState(ref.libraryId, ref.key);
         await db.ensureAttachmentProcessingState({
@@ -154,9 +161,9 @@ export class NewItemWatcher {
                 status: 'skipped',
                 error: source.code,
             });
-            return;
+            return null;
         }
-        await db.enqueueBackgroundJob({
+        return {
             jobType: 'document_extract',
             libraryId: ref.libraryId,
             itemId: item.id,
@@ -166,7 +173,7 @@ export class NewItemWatcher {
             priority: BACKGROUND_EXTRACT_PRIORITY,
             payload: buildBackgroundExtractPayload(kind),
             now: Date.now(),
-        });
+        };
     }
 
     private async handleDelete(
@@ -186,29 +193,10 @@ export class NewItemWatcher {
     ): Promise<void> {
         const row = await db.getAttachmentProcessingState(libraryId, zoteroKey);
         if (row?.upsertStatus === 'done' && row.structuredDocumentHash) {
-            await this.enqueueUntag(db, row);
+            // The untag intent must be durable before the ledger row drops.
+            await db.enqueueBackgroundJob(buildUntagJobInput(row, Date.now()));
         }
         await db.deleteAttachmentProcessingState(libraryId, zoteroKey);
         await Zotero.Beaver?.documentCache?.invalidate(libraryId, zoteroKey);
-    }
-
-    private async enqueueUntag(
-        db: QueueDB,
-        row: AttachmentProcessingStateRecord,
-    ): Promise<void> {
-        await db.enqueueBackgroundJob({
-            jobType: 'fulltext_untag',
-            libraryId: row.libraryId,
-            itemId: row.itemId,
-            zoteroKey: row.zoteroKey,
-            contentKind: row.contentKind,
-            payloadKind: 'structured',
-            priority: BACKGROUND_UNTAG_PRIORITY,
-            payload: buildIndexJobPayload(row.contentKind, {
-                indexAction: 'untag',
-                docHash: row.structuredDocumentHash!,
-            }),
-            now: Date.now(),
-        });
     }
 }

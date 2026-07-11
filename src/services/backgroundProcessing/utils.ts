@@ -1,6 +1,10 @@
-import type { BackgroundJobPayload } from '../database';
-import type { AttachmentProcessingStateRecord } from '../database';
+import type {
+    AttachmentProcessingStateRecord,
+    BackgroundJobInput,
+    BackgroundJobPayload,
+} from '../database';
 import { getPref } from '../../utils/prefs';
+import { BACKGROUND_UNTAG_PRIORITY } from './constants';
 
 type ProcessableKind = AttachmentProcessingStateRecord['contentKind'];
 
@@ -31,6 +35,15 @@ export function backgroundProcessingLibraryToken(libraryId: number): string | nu
         return groupId ? `G${groupId}` : null;
     }
     return library.libraryType === 'user' ? `L${libraryId}` : null;
+}
+
+/**
+ * Library-exclusion boundary for background work. True only once the scope is
+ * known, so unresolved startup states never read as excluded.
+ */
+export function isLibraryExcludedFromScope(libraryId: number): boolean {
+    return Zotero.Beaver?.libraryScopeInitialized === true
+        && !(Zotero.Beaver.searchableLibraryIds ?? []).includes(libraryId);
 }
 
 export function isBackgroundProcessingLibraryEnabled(libraryId: number): boolean {
@@ -69,5 +82,26 @@ export function buildIndexJobPayload(
             ? { previous_doc_hash: options.previousDocumentHash }
             : {}),
     } as BackgroundJobPayload;
+}
+
+/** Untag job for a ledger row whose indexed content is being dropped. */
+export function buildUntagJobInput(
+    row: AttachmentProcessingStateRecord,
+    now: number,
+): BackgroundJobInput {
+    return {
+        jobType: 'fulltext_untag',
+        libraryId: row.libraryId,
+        itemId: row.itemId,
+        zoteroKey: row.zoteroKey,
+        contentKind: row.contentKind,
+        payloadKind: 'structured',
+        priority: BACKGROUND_UNTAG_PRIORITY,
+        payload: buildIndexJobPayload(row.contentKind, {
+            indexAction: 'untag',
+            docHash: row.structuredDocumentHash!,
+        }),
+        now,
+    };
 }
 

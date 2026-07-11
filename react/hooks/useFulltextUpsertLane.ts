@@ -7,17 +7,8 @@ import {
 } from '../atoms/profile';
 import { FulltextUpsertExecutor } from '../../src/services/backgroundQueue/fulltextUpsertExecutor';
 import { searchIndexApiClient } from '../../src/services/searchIndex/searchIndexApiClient';
-import {
-    BACKGROUND_UPSERT_PRIORITY,
-    EXPECTED_SEARCH_INDEX_VERSION,
-    INDEX_RECONCILE_INTERVAL_MS,
-} from '../../src/services/backgroundProcessing/constants';
-import {
-    buildIndexJobPayload,
-    backgroundProcessingEnabled,
-    isBackgroundProcessingLibraryEnabled,
-} from '../../src/services/backgroundProcessing/utils';
-import { getIndexScopeRef, getZoteroUserIdentifier } from '../../src/utils/zoteroUtils';
+import { INDEX_RECONCILE_INTERVAL_MS } from '../../src/services/backgroundProcessing/constants';
+import { reconcileRemoteRefs } from '../../src/services/backgroundProcessing/remoteRefsReconcile';
 import { logger } from '../../src/utils/logger';
 
 const INDEX_LANE_MAX_IN_FLIGHT = 2;
@@ -90,86 +81,4 @@ export function useFulltextUpsertLane(): void {
             );
         };
     }, [hasAccess, scopeKey]);
-}
-
-export async function reconcileRemoteRefs(
-    libraryIds: number[],
-    isCancelled: () => boolean,
-): Promise<void> {
-    const db = Zotero.Beaver?.db;
-    if (
-        !db
-        || Zotero.Beaver?.hasSearchIndexAccess !== true
-        || !backgroundProcessingEnabled()
-    ) return;
-    const { localUserKey } = getZoteroUserIdentifier();
-    for (const libraryId of libraryIds) {
-        if (isCancelled()) return;
-        if (!isBackgroundProcessingLibraryEnabled(libraryId)) continue;
-        const scopeRef = getIndexScopeRef(libraryId);
-        if (!scopeRef) continue;
-
-        const remote: Array<{ doc_hash: string; zotero_key: string }> = [];
-        let cursor: string | null = null;
-        do {
-            const page = await searchIndexApiClient.listRefs({
-                scopeRef,
-                zoteroLocalId: localUserKey,
-                cursor,
-            });
-            remote.push(...page.refs);
-            cursor = page.next_cursor;
-        } while (cursor && !isCancelled());
-        if (isCancelled()) return;
-
-        const local = await db.getAttachmentProcessingStatesByLibrary(libraryId);
-        const localPairs = new Map(
-            local
-                .filter((row) => !!row.structuredDocumentHash)
-                .map((row) => [
-                    `${row.zoteroKey}:${row.structuredDocumentHash}`,
-                    row,
-                ]),
-        );
-        const remotePairs = new Set(
-            remote.map((ref) => `${ref.zotero_key}:${ref.doc_hash}`),
-        );
-
-        for (const [pair, row] of localPairs) {
-            if (remotePairs.has(pair)) {
-                const knownVersion = row.upsertIndexVersion == null
-                    ? null
-                    : Number(row.upsertIndexVersion);
-                if (knownVersion != null && knownVersion >= EXPECTED_SEARCH_INDEX_VERSION) {
-                    await db.markAttachmentUpsertDone({
-                        libraryId,
-                        zoteroKey: row.zoteroKey,
-                        structuredDocumentHash: row.structuredDocumentHash!,
-                        upsertIndexVersion: row.upsertIndexVersion!,
-                    });
-                    continue;
-                }
-            }
-            if (row.extractStatus !== 'done') continue;
-            await db.enqueueBackgroundJob({
-                jobType: 'fulltext_upsert',
-                libraryId,
-                itemId: row.itemId,
-                zoteroKey: row.zoteroKey,
-                contentKind: row.contentKind,
-                payloadKind: 'structured',
-                priority: BACKGROUND_UPSERT_PRIORITY,
-                payload: buildIndexJobPayload(row.contentKind, {
-                    docHash: row.structuredDocumentHash!,
-                }),
-                now: Date.now(),
-            });
-        }
-
-        // Remote-only pairs are not safe deletion evidence. Scope refs are
-        // shared across devices, while a local ledger may be empty after a
-        // schema reset or incomplete before Zotero sync finishes. Explicit
-        // item deletion/replacement and library exclusion own untagging.
-        Zotero.Beaver?.backgroundExtractor?.notify();
-    }
 }

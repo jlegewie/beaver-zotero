@@ -9,19 +9,12 @@ import { backgroundProcessingStatusAtom } from '../../atoms/backgroundProcessing
 import { useBackgroundProcessingStatus } from '../../hooks/useBackgroundProcessingStatus';
 import { getPref, setPref } from '../../../src/utils/prefs';
 import { getIndexScopeRef } from '../../../src/utils/zoteroUtils';
+import {
+    backgroundProcessingLibraryToken,
+    getBackgroundProcessingSkipTokens,
+} from '../../../src/services/backgroundProcessing/utils';
 import Button from '../ui/Button';
 import { SettingsGroup, SettingsRow, SectionLabel } from './components/SettingsElements';
-
-function readSkipTokens(): string[] {
-    try {
-        const parsed = JSON.parse(getPref('backgroundProcessingLibrariesToSkip') || '[]');
-        return Array.isArray(parsed)
-            ? parsed.filter((entry): entry is string => typeof entry === 'string')
-            : [];
-    } catch {
-        return [];
-    }
-}
 
 export default function BackgroundProcessingSection(props: {
     placement?: 'search' | 'advanced';
@@ -41,7 +34,9 @@ export default function BackgroundProcessingSection(props: {
     const [continuous, setContinuous] = useState(
         () => getPref('backgroundProcessingContinuous') === true,
     );
-    const [skipTokens, setSkipTokens] = useState<string[]>(readSkipTokens);
+    const [skipTokens, setSkipTokens] = useState<string[]>(
+        () => [...getBackgroundProcessingSkipTokens()],
+    );
     const [showFailures, setShowFailures] = useState(false);
     const entitled = hasOcrAccess || hasSearchAccess;
     const placement = props.placement ?? 'search';
@@ -68,11 +63,6 @@ export default function BackgroundProcessingSection(props: {
         };
     }, []);
 
-    const libraryToken = (library: typeof libraries[number]) =>
-        library.is_group && library.group_id != null
-            ? `G${library.group_id}`
-            : `L${library.library_id}`;
-
     const toggleLibrary = (token: string, shouldProcess: boolean) => {
         const next = shouldProcess
             ? skipTokens.filter((entry) => entry !== token)
@@ -80,6 +70,19 @@ export default function BackgroundProcessingSection(props: {
         setSkipTokens(next);
         setPref('backgroundProcessingLibrariesToSkip', JSON.stringify(next));
         Zotero.Beaver?.processingReconciler?.notify();
+    };
+
+    const updateEnabled = (next: boolean) => {
+        setEnabled(next);
+        setPref('backgroundProcessingEnabled', next);
+        Zotero.Beaver?.processingReconciler?.notify();
+        Zotero.Beaver?.backgroundExtractor?.notify();
+    };
+
+    const updateContinuous = (next: boolean) => {
+        setContinuous(next);
+        setPref('backgroundProcessingContinuous', next);
+        Zotero.Beaver?.backgroundExtractor?.notify();
     };
 
     const coverageByScope = useMemo(() => new Map(
@@ -107,23 +110,12 @@ export default function BackgroundProcessingSection(props: {
                     description={entitled
                         ? 'Extracts readable attachments and keeps entitled OCR and cloud search coverage current.'
                         : 'Advanced: warms Beaver’s local extraction cache. OCR and cloud indexing require an eligible plan.'}
-                    onClick={() => {
-                        const next = !enabled;
-                        setEnabled(next);
-                        setPref('backgroundProcessingEnabled', next);
-                        Zotero.Beaver?.processingReconciler?.notify();
-                        Zotero.Beaver?.backgroundExtractor?.notify();
-                    }}
+                    onClick={() => updateEnabled(!enabled)}
                     control={<input
                         type="checkbox"
                         aria-label="Process library files in the background"
                         checked={enabled}
-                        onChange={(event) => {
-                            setEnabled(event.target.checked);
-                            setPref('backgroundProcessingEnabled', event.target.checked);
-                            Zotero.Beaver?.processingReconciler?.notify();
-                            Zotero.Beaver?.backgroundExtractor?.notify();
-                        }}
+                        onChange={(event) => updateEnabled(event.target.checked)}
                         onClick={(event) => event.stopPropagation()}
                     />}
                 />
@@ -134,21 +126,14 @@ export default function BackgroundProcessingSection(props: {
                     hasBorder
                     onClick={() => {
                         if (!enabled) return;
-                        const next = !continuous;
-                        setContinuous(next);
-                        setPref('backgroundProcessingContinuous', next);
-                        Zotero.Beaver?.backgroundExtractor?.notify();
+                        updateContinuous(!continuous);
                     }}
                     control={<input
                         type="checkbox"
                         aria-label="Process continuously"
                         checked={continuous}
                         disabled={!enabled}
-                        onChange={(event) => {
-                            setContinuous(event.target.checked);
-                            setPref('backgroundProcessingContinuous', event.target.checked);
-                            Zotero.Beaver?.backgroundExtractor?.notify();
-                        }}
+                        onChange={(event) => updateContinuous(event.target.checked)}
                         onClick={(event) => event.stopPropagation()}
                     />}
                 />
@@ -206,7 +191,8 @@ export default function BackgroundProcessingSection(props: {
             <SectionLabel>Libraries to Process</SectionLabel>
             <SettingsGroup>
                 {libraries.map((library, index) => {
-                    const token = libraryToken(library);
+                    const token = backgroundProcessingLibraryToken(library.library_id);
+                    if (!token) return null;
                     const checked = !skipTokens.includes(token);
                     return (
                         <SettingsRow
@@ -234,7 +220,8 @@ export default function BackgroundProcessingSection(props: {
                         {libraries.map((library, index) => {
                             const scopeRef = getIndexScopeRef(library.library_id);
                             const coverage = scopeRef ? coverageByScope.get(scopeRef) : undefined;
-                            const skipped = skipTokens.includes(libraryToken(library));
+                            const token = backgroundProcessingLibraryToken(library.library_id);
+                            const skipped = token != null && skipTokens.includes(token);
                             return (
                                 <SettingsRow
                                     key={library.library_id}

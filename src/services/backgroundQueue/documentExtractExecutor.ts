@@ -28,6 +28,7 @@ import {
     backgroundProcessingEnabled,
     buildIndexJobPayload,
     isBackgroundProcessingLibraryEnabled,
+    isLibraryExcludedFromScope,
 } from '../backgroundProcessing/utils';
 import type {
     JobExecutionContext,
@@ -53,8 +54,7 @@ export class DocumentExtractExecutor implements JobExecutor {
     ): Promise<JobOutcome> {
         if (
             record.libraryId !== UNRESOLVED_LIBRARY_ID
-            && Zotero.Beaver?.libraryScopeInitialized === true
-            && !(Zotero.Beaver.searchableLibraryIds ?? []).includes(record.libraryId)
+            && isLibraryExcludedFromScope(record.libraryId)
         ) {
             return { kind: 'complete', reason: 'library_excluded' };
         }
@@ -62,12 +62,6 @@ export class DocumentExtractExecutor implements JobExecutor {
         // Markdown requests are hot-path cache work and must never stamp a
         // structured schema version/hash into that ledger.
         if (record.payloadKind !== 'structured') {
-            return ctx.runOnMuPDFWorker(() => this.executeLegacy(record, ctx));
-        }
-        // Older/test queue DB adapters predate the ledger surface. Preserve the
-        // established hot-path behavior while production BeaverDB takes the
-        // durable path below.
-        if (typeof (ctx.db as any).ensureAttachmentProcessingState !== 'function') {
             return ctx.runOnMuPDFWorker(() => this.executeLegacy(record, ctx));
         }
         // Lightweight adapters used by existing integrations expose primary
@@ -92,10 +86,7 @@ export class DocumentExtractExecutor implements JobExecutor {
         if ('outcome' in resolved) return resolved.outcome;
         const { item, kind } = resolved;
 
-        if (
-            Zotero.Beaver?.libraryScopeInitialized === true
-            && !(Zotero.Beaver.searchableLibraryIds ?? []).includes(item.libraryID)
-        ) {
+        if (isLibraryExcludedFromScope(item.libraryID)) {
             return { kind: 'complete', reason: 'library_excluded' };
         }
         // Background producers must re-check exclusions after claim. Priority

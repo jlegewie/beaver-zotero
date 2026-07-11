@@ -1,5 +1,6 @@
 import type {
     AttachmentProcessingStateRecord,
+    BackgroundJobInput,
     ProcessingIndexStateRecord,
 } from '../database';
 import type { QueueDB } from '../backgroundQueue/jobExecutor';
@@ -15,7 +16,6 @@ import { logger } from '../../utils/logger';
 import {
     ATTACHMENT_SCAN_BATCH_SIZE,
     BACKGROUND_EXTRACT_PRIORITY,
-    BACKGROUND_UNTAG_PRIORITY,
     BACKGROUND_UPSERT_PRIORITY,
     EXPECTED_SEARCH_INDEX_VERSION,
     FULL_DIFF_SAFETY_INTERVAL_MS,
@@ -25,6 +25,7 @@ import {
     backgroundProcessingEnabled,
     buildBackgroundExtractPayload,
     buildIndexJobPayload,
+    buildUntagJobInput,
     isBackgroundProcessingLibraryEnabled,
 } from './utils';
 
@@ -204,6 +205,7 @@ export class ReconcilerService {
         const liveKeys = new Set<string>();
         for (let start = 0; start < items.length; start += ATTACHMENT_SCAN_BATCH_SIZE) {
             const batch = items.slice(start, start + ATTACHMENT_SCAN_BATCH_SIZE);
+            const jobs: BackgroundJobInput[] = [];
             for (const item of batch) {
                 if (this.cancelled(generation)) return;
                 const kind = getReadableContentKind(item);
@@ -214,19 +216,21 @@ export class ReconcilerService {
                     item,
                     kind,
                     statFiles,
+                    jobs,
                     ledgerByKey.get(item.key),
                 );
             }
+            await db.enqueueBackgroundJobs(jobs);
             await new Promise<void>((resolve) => setTimeout(resolve, 0));
         }
 
         // Heal missed delete notifications while a full enumeration is already
-        // happening. Untag work is persisted before the local ledger row drops.
-        for (const row of ledgerRows) {
-            if (liveKeys.has(row.zoteroKey)) continue;
-            if (row.upsertStatus === 'done' && row.structuredDocumentHash) {
-                await this.enqueueUntag(db, row);
-            }
+        // happening. Untag work is persisted before the local ledger rows drop.
+        const staleRows = ledgerRows.filter((row) => !liveKeys.has(row.zoteroKey));
+        await db.enqueueBackgroundJobs(staleRows
+            .filter((row) => row.upsertStatus === 'done' && row.structuredDocumentHash)
+            .map((row) => buildUntagJobInput(row, Date.now())));
+        for (const row of staleRows) {
             await db.deleteAttachmentProcessingState(libraryId, row.zoteroKey);
         }
 
@@ -249,6 +253,7 @@ export class ReconcilerService {
         item: Zotero.Item,
         kind: ProcessableKind,
         statFile: boolean,
+        jobs: BackgroundJobInput[],
         existing?: AttachmentProcessingStateRecord,
     ): Promise<void> {
         if (!isBackgroundProcessingLibraryEnabled(item.libraryID)) return;
@@ -262,21 +267,23 @@ export class ReconcilerService {
             });
         }
 
+        // The reconciler owns these resets, so the row is patched in memory
+        // instead of being refetched after each UPDATE.
         const expectedSchema = expectedExtractionSchemaVersion(kind);
         if (expectedSchema && row.extractStatus === 'done'
             && row.extractSchemaVersion !== expectedSchema) {
             await db.resetAttachmentExtraction(item.libraryID, item.key, 'extract_schema_changed');
-            row = (await db.getAttachmentProcessingState(item.libraryID, item.key))!;
+            row = { ...row, extractStatus: null, lastError: 'extract_schema_changed' };
         }
         if (kind === 'pdf' && row.ocrStatus === 'done'
             && row.ocrEngineVersion !== OCR_ENGINE_VERSION) {
             await db.resetAttachmentOcr(item.libraryID, item.key, 'ocr_engine_changed');
-            row = (await db.getAttachmentProcessingState(item.libraryID, item.key))!;
+            row = { ...row, ocrStatus: null, lastError: 'ocr_engine_changed' };
         }
         const storedIndexVersion = Number(row.upsertIndexVersion ?? 0);
         if (row.upsertStatus === 'done' && storedIndexVersion < EXPECTED_SEARCH_INDEX_VERSION) {
             await db.resetAttachmentUpsert(item.libraryID, item.key, 'index_version_changed');
-            row = (await db.getAttachmentProcessingState(item.libraryID, item.key))!;
+            row = { ...row, upsertStatus: null, lastError: 'index_version_changed' };
         }
 
         if (statFile && row.fileMtimeMs != null && row.fileSizeBytes != null) {
@@ -288,7 +295,7 @@ export class ReconcilerService {
                     || signature.size_bytes !== row.fileSizeBytes
                 )) {
                     await db.resetAttachmentExtraction(item.libraryID, item.key, 'file_signature_changed');
-                    row = (await db.getAttachmentProcessingState(item.libraryID, item.key))!;
+                    row = { ...row, extractStatus: null, lastError: 'file_signature_changed' };
                 }
             }
         }
@@ -308,7 +315,7 @@ export class ReconcilerService {
                 });
                 return;
             }
-            await db.enqueueBackgroundJob({
+            jobs.push({
                 jobType: 'document_extract',
                 libraryId: item.libraryID,
                 itemId: item.id,
@@ -348,7 +355,7 @@ export class ReconcilerService {
             && row.structuredDocumentHash
             && row.upsertStatus === null
         ) {
-            await db.enqueueBackgroundJob({
+            jobs.push({
                 jobType: 'fulltext_upsert',
                 libraryId: item.libraryID,
                 itemId: item.id,
@@ -362,26 +369,6 @@ export class ReconcilerService {
                 now: Date.now(),
             });
         }
-    }
-
-    private async enqueueUntag(
-        db: QueueDB,
-        row: AttachmentProcessingStateRecord,
-    ): Promise<void> {
-        await db.enqueueBackgroundJob({
-            jobType: 'fulltext_untag',
-            libraryId: row.libraryId,
-            itemId: row.itemId,
-            zoteroKey: row.zoteroKey,
-            contentKind: row.contentKind,
-            payloadKind: 'structured',
-            priority: BACKGROUND_UNTAG_PRIORITY,
-            payload: buildIndexJobPayload(row.contentKind, {
-                indexAction: 'untag',
-                docHash: row.structuredDocumentHash!,
-            }),
-            now: Date.now(),
-        });
     }
 
     private async readLibraryCursor(libraryId: number): Promise<LibraryCursor> {

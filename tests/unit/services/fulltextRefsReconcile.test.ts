@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { listRefs } = vi.hoisted(() => ({ listRefs: vi.fn() }));
+const { listAllRefs } = vi.hoisted(() => ({ listAllRefs: vi.fn() }));
 
 vi.mock('../../../src/services/searchIndex/searchIndexApiClient', () => ({
-    searchIndexApiClient: { listRefs },
+    searchIndexApiClient: { listAllRefs },
 }));
 vi.mock('../../../src/services/backgroundProcessing/utils', () => ({
     backgroundProcessingEnabled: vi.fn(() => true),
@@ -16,31 +16,32 @@ vi.mock('../../../src/utils/zoteroUtils', () => ({
 }));
 vi.mock('../../../src/utils/logger', () => ({ logger: vi.fn() }));
 
-import { reconcileRemoteRefs } from '../../../react/hooks/useFulltextUpsertLane';
+import { reconcileRemoteRefs } from '../../../src/services/backgroundProcessing/remoteRefsReconcile';
 
 describe('fulltext refs reconciliation', () => {
     beforeEach(() => {
         vi.clearAllMocks();
-        listRefs.mockResolvedValue({
-            refs: [{ zotero_key: 'REMOTE01', doc_hash: 'a'.repeat(64) }],
-            next_cursor: null,
-        });
+        listAllRefs.mockResolvedValue([
+            { zotero_key: 'REMOTE01', doc_hash: 'a'.repeat(64) },
+        ]);
     });
 
     it('never treats an empty or warming local ledger as permission to untag remote refs', async () => {
-        const enqueueBackgroundJob = vi.fn(async () => undefined);
+        const enqueueBackgroundJobs = vi.fn(async () => []);
         (globalThis as any).Zotero.Beaver = {
             hasSearchIndexAccess: true,
             db: {
                 getAttachmentProcessingStatesByLibrary: vi.fn(async () => []),
-                enqueueBackgroundJob,
+                enqueueBackgroundJobs,
             },
             backgroundExtractor: { notify: vi.fn() },
         };
 
         await reconcileRemoteRefs([1], () => false);
 
-        expect(listRefs).toHaveBeenCalled();
-        expect(enqueueBackgroundJob).not.toHaveBeenCalled();
+        expect(listAllRefs).toHaveBeenCalled();
+        for (const [jobs] of enqueueBackgroundJobs.mock.calls) {
+            expect(jobs).toEqual([]);
+        }
     });
 });

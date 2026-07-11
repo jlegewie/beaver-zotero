@@ -2284,20 +2284,29 @@ export class BeaverDB {
         return candidates.length;
     }
 
-    /** Reconciler-owned reset for a source signature or extraction-version change. */
-    public async resetAttachmentExtraction(
+    /** Reconciler-owned reset of one processing stage back to "not started". */
+    private async resetAttachmentStatusColumn(
+        column: 'extract_status' | 'ocr_status' | 'upsert_status',
         libraryId: number,
         zoteroKey: string,
-        reason: string | null = null,
+        reason: string | null,
     ): Promise<void> {
         await this.conn.queryAsync(
             `UPDATE attachment_processing_state SET
-                extract_status = NULL,
+                ${column} = NULL,
                 last_error = ?,
                 updated_at = datetime('now')
              WHERE library_id = ? AND zotero_key = ?`,
             [reason, libraryId, zoteroKey],
         );
+    }
+
+    public async resetAttachmentExtraction(
+        libraryId: number,
+        zoteroKey: string,
+        reason: string | null = null,
+    ): Promise<void> {
+        await this.resetAttachmentStatusColumn('extract_status', libraryId, zoteroKey, reason);
     }
 
     public async resetAttachmentOcr(
@@ -2305,14 +2314,7 @@ export class BeaverDB {
         zoteroKey: string,
         reason: string | null = null,
     ): Promise<void> {
-        await this.conn.queryAsync(
-            `UPDATE attachment_processing_state SET
-                ocr_status = NULL,
-                last_error = ?,
-                updated_at = datetime('now')
-             WHERE library_id = ? AND zotero_key = ?`,
-            [reason, libraryId, zoteroKey],
-        );
+        await this.resetAttachmentStatusColumn('ocr_status', libraryId, zoteroKey, reason);
     }
 
     public async resetAttachmentUpsert(
@@ -2320,14 +2322,7 @@ export class BeaverDB {
         zoteroKey: string,
         reason: string | null = null,
     ): Promise<void> {
-        await this.conn.queryAsync(
-            `UPDATE attachment_processing_state SET
-                upsert_status = NULL,
-                last_error = ?,
-                updated_at = datetime('now')
-             WHERE library_id = ? AND zotero_key = ?`,
-            [reason, libraryId, zoteroKey],
-        );
+        await this.resetAttachmentStatusColumn('upsert_status', libraryId, zoteroKey, reason);
     }
 
     /**

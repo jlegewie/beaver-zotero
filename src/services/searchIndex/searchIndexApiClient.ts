@@ -97,6 +97,29 @@ export class SearchIndexApiClient extends ApiService {
         return this.get<IndexRefsResponse>(`${SEARCH_INDEX_API_PREFIX}/refs?${query}`);
     }
 
+    /**
+     * Follow the refs cursor to the end of a scope. An `isCancelled` callback
+     * stops between pages and returns the refs fetched so far.
+     */
+    async listAllRefs(args: {
+        scopeRef: string;
+        zoteroLocalId: string;
+        isCancelled?: () => boolean;
+    }): Promise<IndexRefsResponse['refs']> {
+        const refs: IndexRefsResponse['refs'] = [];
+        let cursor: string | null = null;
+        do {
+            const page = await this.listRefs({
+                scopeRef: args.scopeRef,
+                zoteroLocalId: args.zoteroLocalId,
+                cursor,
+            });
+            refs.push(...page.refs);
+            cursor = page.next_cursor;
+        } while (cursor && !args.isCancelled?.());
+        return refs;
+    }
+
     status(zoteroLocalId: string): Promise<IndexStatusResponse> {
         return this.get<IndexStatusResponse>(
             `${SEARCH_INDEX_API_PREFIX}/status?zotero_local_id=${encodeURIComponent(zoteroLocalId)}`,

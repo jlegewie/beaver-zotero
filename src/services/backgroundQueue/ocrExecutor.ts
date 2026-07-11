@@ -170,22 +170,21 @@ export class OcrExecutor implements JobExecutor {
         if ('outcome' in resolved) return resolved.outcome;
         const job = resolved.job;
         this.throwIfLibraryUnavailable(job.item.libraryID, ctx);
-        if (typeof (ctx.db as any).ensureAttachmentProcessingState === 'function') {
-            await ctx.db.ensureAttachmentProcessingState({
-                libraryId: job.item.libraryID,
-                zoteroKey: job.item.key,
-                itemId: job.item.id,
-                contentKind: 'pdf',
-            });
-            await ctx.db.ensureAttachmentFileHash(
-                job.item.libraryID,
-                job.item.key,
-                job.fileHash,
-            );
-        }
-        const ledgerGuard = typeof (ctx.db as any).getAttachmentProcessingState === 'function'
-            ? await ctx.db.getAttachmentProcessingState(job.item.libraryID, job.item.key)
-            : null;
+        await ctx.db.ensureAttachmentProcessingState({
+            libraryId: job.item.libraryID,
+            zoteroKey: job.item.key,
+            itemId: job.item.id,
+            contentKind: 'pdf',
+        });
+        await ctx.db.ensureAttachmentFileHash(
+            job.item.libraryID,
+            job.item.key,
+            job.fileHash,
+        );
+        const ledgerGuard = await ctx.db.getAttachmentProcessingState(
+            job.item.libraryID,
+            job.item.key,
+        );
 
         // Loop guard: skip scans this OCR engine has already marked terminal.
         if (
@@ -647,7 +646,7 @@ export class OcrExecutor implements JobExecutor {
                 await ctx.db
                     .clearDocumentProcessingFailure(job.fileHash, 'ocr', OCR_ENGINE_VERSION)
                     .catch(() => undefined);
-                if (typeof (ctx.db as any).markAttachmentOcrDone === 'function') {
+                {
                     const cache = Zotero.Beaver?.documentCache;
                     const document = await cache?.getResult(
                         { libraryId: job.item.libraryID, zoteroKey: job.item.key },
@@ -758,7 +757,6 @@ export class OcrExecutor implements JobExecutor {
         ctx: JobExecutionContext,
     ): Promise<void> {
         if (outcome.kind !== 'failPermanent') return;
-        if (typeof (ctx.db as any).markAttachmentOcrFailed !== 'function') return;
         await ctx.db.markAttachmentOcrFailed(
             job.item.libraryID,
             job.item.key,

@@ -132,6 +132,12 @@ beforeEach(() => {
         clearDocumentProcessingFailure: vi.fn(async () => undefined),
         // Used by the slot-free track to wake a parked row for the finish phase.
         releaseBackgroundJob: vi.fn(async () => undefined),
+        // Attachment-ledger surface consulted around re-extraction.
+        ensureAttachmentProcessingState: vi.fn(async () => ({})),
+        ensureAttachmentFileHash: vi.fn(async () => undefined),
+        getAttachmentProcessingState: vi.fn(async () => null),
+        markAttachmentOcrDone: vi.fn(async () => true),
+        markAttachmentOcrFailed: vi.fn(async () => undefined),
     };
 
     (globalThis as any).Zotero.Items = {
@@ -149,6 +155,7 @@ beforeEach(() => {
     (globalThis as any).Zotero.Beaver = {
         documentCache: {
             getMetadata: vi.fn(async () => ({ pageCount: 5 })),
+            getResult: vi.fn(async () => ({ pageCount: 5, pages: [] })),
         },
         db: dbStub,
         backgroundExtractor: { notify: vi.fn() },
