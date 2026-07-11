@@ -1,5 +1,26 @@
 import { describe, expect, it } from 'vitest';
-import { buildRecentChatsItemLookup } from '../../../react/utils/recentChatsLookup';
+import {
+    buildRecentChatsCacheKey,
+    buildRecentChatsItemLookup,
+} from '../../../react/utils/recentChatsLookup';
+
+describe('buildRecentChatsCacheKey', () => {
+    it('changes when searchable library access changes', () => {
+        const baseKey = 'user-1:reader:ATTACH01';
+
+        expect(buildRecentChatsCacheKey(baseKey, [1, 42])).not.toBe(
+            buildRecentChatsCacheKey(baseKey, [1]),
+        );
+    });
+
+    it('is stable when searchable library IDs are reordered', () => {
+        const baseKey = 'user-1:reader:ATTACH01';
+
+        expect(buildRecentChatsCacheKey(baseKey, [42, 1])).toBe(
+            buildRecentChatsCacheKey(baseKey, [1, 42]),
+        );
+    });
+});
 
 describe('buildRecentChatsItemLookup', () => {
     it('returns no backend lookup payload for an excluded library', () => {

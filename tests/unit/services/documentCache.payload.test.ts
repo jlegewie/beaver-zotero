@@ -437,10 +437,333 @@ describe('DocumentCache payloads', () => {
         expect(await db.getDocumentCachePayloadCount()).toBe(1);
     });
 
+    it('extends the shared abort deadline when a longer-budget caller joins', async () => {
+        const item = createCacheAttachment();
+        const expectedSourceIdentity = await cache.getSourceIdentitySnapshot(sourcePath);
+        let createSignal: AbortSignal | null = null;
+        let releaseCreate!: () => void;
+        const createBarrier = new Promise<void>((resolve) => {
+            releaseCreate = resolve;
+        });
+        const create = vi.fn(async (signal: AbortSignal) => {
+            createSignal = signal;
+            await createBarrier;
+            return structuredResult;
+        });
+        const metadata = (result: BeaverExtractResult) => ({
+            pageCount: result.document.pageCount,
+            pageLabels: result.document.pageLabels ?? null,
+            pages: onePageGeometry,
+        });
+
+        const first = cache.getOrCreateResult({
+            item,
+            filePath: sourcePath,
+            mode: 'structured',
+            sourceSizeBytes: 3,
+            contentType: 'application/pdf',
+            sharedTimeoutMs: 25,
+            expectedSourceIdentity,
+            create,
+            metadata,
+        });
+
+        // Prefer mock.calls over `while (createSignal === null)` — that loop
+        // narrows the closure-assigned let to `never` under TypeScript CFA.
+        while (create.mock.calls.length === 0) {
+            await Promise.resolve();
+        }
+
+        // A caller with a longer budget joins the in-flight extraction: the
+        // shared deadline must extend to its budget, not stay pinned at the
+        // creator's.
+        const second = cache.getOrCreateResult({
+            item,
+            filePath: sourcePath,
+            mode: 'structured',
+            sourceSizeBytes: 3,
+            contentType: 'application/pdf',
+            sharedTimeoutMs: 5000,
+            expectedSourceIdentity,
+            create,
+            metadata,
+        });
+
+        // Well past the creator's 25 ms budget the extraction must still be
+        // alive, because the joiner's budget has not expired.
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        expect(createSignal).not.toBeNull();
+        expect(createSignal!.aborted).toBe(false);
+
+        releaseCreate();
+        await expect(Promise.all([first, second])).resolves.toEqual([
+            structuredResult,
+            structuredResult,
+        ]);
+        expect(create).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not shorten the shared abort deadline when a shorter-budget caller joins', async () => {
+        const item = createCacheAttachment();
+        const expectedSourceIdentity = await cache.getSourceIdentitySnapshot(sourcePath);
+        let createSignal: AbortSignal | null = null;
+        let releaseCreate!: () => void;
+        const createBarrier = new Promise<void>((resolve) => {
+            releaseCreate = resolve;
+        });
+        const create = vi.fn(async (signal: AbortSignal) => {
+            createSignal = signal;
+            await createBarrier;
+            return structuredResult;
+        });
+        const metadata = (result: BeaverExtractResult) => ({
+            pageCount: result.document.pageCount,
+            pageLabels: result.document.pageLabels ?? null,
+            pages: onePageGeometry,
+        });
+
+        const first = cache.getOrCreateResult({
+            item,
+            filePath: sourcePath,
+            mode: 'structured',
+            sourceSizeBytes: 3,
+            contentType: 'application/pdf',
+            sharedTimeoutMs: 5000,
+            expectedSourceIdentity,
+            create,
+            metadata,
+        });
+
+        while (create.mock.calls.length === 0) {
+            await Promise.resolve();
+        }
+
+        const second = cache.getOrCreateResult({
+            item,
+            filePath: sourcePath,
+            mode: 'structured',
+            sourceSizeBytes: 3,
+            contentType: 'application/pdf',
+            sharedTimeoutMs: 25,
+            expectedSourceIdentity,
+            create,
+            metadata,
+        });
+
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        expect(createSignal).not.toBeNull();
+        expect(createSignal!.aborted).toBe(false);
+
+        releaseCreate();
+        await expect(Promise.all([first, second])).resolves.toEqual([
+            structuredResult,
+            structuredResult,
+        ]);
+        expect(create).toHaveBeenCalledTimes(1);
+    });
+
+    it('keeps hot and background extractions in separate single-flight scopes', async () => {
+        const item = createCacheAttachment();
+        const expectedSourceIdentity = await cache.getSourceIdentitySnapshot(sourcePath);
+        let hotSignal: AbortSignal | null = null;
+        let releaseBackground!: () => void;
+        const backgroundBarrier = new Promise<void>((resolve) => {
+            releaseBackground = resolve;
+        });
+        const hotCreate = vi.fn(
+            (signal: AbortSignal) => new Promise<BeaverExtractResult>((_, reject) => {
+                hotSignal = signal;
+                signal.addEventListener('abort', () => reject(new Error('hot worker terminated')), { once: true });
+            }),
+        );
+        const backgroundCreate = vi.fn(async () => {
+            await backgroundBarrier;
+            return structuredResult;
+        });
+        const common = {
+            item,
+            filePath: sourcePath,
+            mode: 'structured' as const,
+            sourceSizeBytes: 3,
+            contentType: 'application/pdf',
+            expectedSourceIdentity,
+            metadata: (result: BeaverExtractResult) => ({
+                pageCount: result.document.pageCount,
+                pageLabels: result.document.pageLabels ?? null,
+                pages: onePageGeometry,
+            }),
+        };
+
+        const hot = cache.getOrCreateResult({
+            ...common,
+            lockScope: 'hot',
+            sharedTimeoutMs: 25,
+            create: hotCreate,
+        });
+        while (hotCreate.mock.calls.length === 0) await Promise.resolve();
+
+        const background = cache.getOrCreateResult({
+            ...common,
+            lockScope: 'background',
+            sharedTimeoutMs: 5000,
+            create: backgroundCreate,
+        });
+
+        await expect(hot).rejects.toThrow('hot worker terminated');
+        expect(hotSignal).not.toBeNull();
+        expect(hotSignal!.aborted).toBe(true);
+        expect(hotCreate).toHaveBeenCalledTimes(1);
+        expect(backgroundCreate).toHaveBeenCalledTimes(1);
+
+        releaseBackground();
+        await expect(background).resolves.toEqual(structuredResult);
+    });
+
+    it('recomputes the shared deadline when a longer-budget waiter cancels', async () => {
+        const item = createCacheAttachment();
+        const expectedSourceIdentity = await cache.getSourceIdentitySnapshot(sourcePath);
+        const longWaiterController = new AbortController();
+        let createSignal: AbortSignal | null = null;
+        const hungCreate = vi.fn(
+            (signal: AbortSignal) => new Promise<BeaverExtractResult>((_, reject) => {
+                createSignal = signal;
+                signal.addEventListener('abort', () => reject(new Error('worker terminated')), { once: true });
+            }),
+        );
+        const common = {
+            item,
+            filePath: sourcePath,
+            mode: 'structured' as const,
+            sourceSizeBytes: 3,
+            contentType: 'application/pdf',
+            expectedSourceIdentity,
+            create: hungCreate,
+            metadata: (result: BeaverExtractResult) => ({
+                pageCount: result.document.pageCount,
+                pageLabels: result.document.pageLabels ?? null,
+                pages: onePageGeometry,
+            }),
+        };
+
+        const short = cache.getOrCreateResult({ ...common, sharedTimeoutMs: 50 });
+        while (hungCreate.mock.calls.length === 0) await Promise.resolve();
+        const long = cache.getOrCreateResult({
+            ...common,
+            sharedTimeoutMs: 5000,
+            abortSignal: longWaiterController.signal,
+        });
+        const longOutcome = long.catch((error) => error);
+
+        longWaiterController.abort();
+        await expect(longOutcome).resolves.toMatchObject({ message: 'Operation aborted' });
+        await expect(short).rejects.toThrow('worker terminated');
+        expect(createSignal).not.toBeNull();
+        expect(createSignal!.aborted).toBe(true);
+    });
+
+    it('clears a timer armed by a joiner while the result is being stored', async () => {
+        const item = createCacheAttachment();
+        const expectedSourceIdentity = await cache.getSourceIdentitySnapshot(sourcePath);
+        let createSignal: AbortSignal | null = null;
+        let releasePut!: () => void;
+        const putBarrier = new Promise<void>((resolve) => {
+            releasePut = resolve;
+        });
+        const putSpy = vi.spyOn(cache, 'putResult').mockImplementation(async () => putBarrier);
+        const create = vi.fn(async (signal: AbortSignal) => {
+            createSignal = signal;
+            return structuredResult;
+        });
+        const common = {
+            item,
+            filePath: sourcePath,
+            mode: 'structured' as const,
+            sourceSizeBytes: 3,
+            contentType: 'application/pdf',
+            sharedTimeoutMs: 30,
+            expectedSourceIdentity,
+            create,
+            metadata: (result: BeaverExtractResult) => ({
+                pageCount: result.document.pageCount,
+                pageLabels: result.document.pageLabels ?? null,
+                pages: onePageGeometry,
+            }),
+        };
+
+        try {
+            const first = cache.getOrCreateResult(common);
+            while (putSpy.mock.calls.length === 0) await Promise.resolve();
+            const second = cache.getOrCreateResult(common);
+            releasePut();
+
+            await expect(Promise.all([first, second])).resolves.toEqual([
+                structuredResult,
+                structuredResult,
+            ]);
+            await new Promise((resolve) => setTimeout(resolve, 60));
+            expect(createSignal!.aborted).toBe(false);
+        } finally {
+            putSpy.mockRestore();
+        }
+    });
+
+    it('aborts a detached shared extraction at sharedTimeoutMs and clears the in-flight lock', async () => {
+        const item = createCacheAttachment();
+        const expectedSourceIdentity = await cache.getSourceIdentitySnapshot(sourcePath);
+        // Fake worker call that never resolves on its own; like the real
+        // worker client, it settles only when the shared-extraction budget
+        // aborts its signal (terminate-on-abort).
+        const hungCreate = vi.fn(
+            (signal: AbortSignal) => new Promise<BeaverExtractResult>((_, reject) => {
+                signal.addEventListener('abort', () => reject(new Error('worker terminated')), { once: true });
+            }),
+        );
+
+        const pending = cache.getOrCreateResult({
+            item,
+            filePath: sourcePath,
+            mode: 'structured',
+            sourceSizeBytes: 3,
+            contentType: 'application/pdf',
+            sharedTimeoutMs: 20,
+            expectedSourceIdentity,
+            create: hungCreate,
+            metadata: (result) => ({
+                pageCount: result.document.pageCount,
+                pageLabels: result.document.pageLabels ?? null,
+                pages: onePageGeometry,
+            }),
+        });
+
+        await expect(pending).rejects.toThrow('worker terminated');
+        expect(hungCreate).toHaveBeenCalledTimes(1);
+        expect(await db.getDocumentCachePayloadCount()).toBe(0);
+
+        // The in-flight lock is released, so the next caller starts a fresh
+        // extraction instead of joining the dead one.
+        const freshCreate = vi.fn(async (_signal: AbortSignal) => structuredResult);
+        await expect(cache.getOrCreateResult({
+            item,
+            filePath: sourcePath,
+            mode: 'structured',
+            sourceSizeBytes: 3,
+            contentType: 'application/pdf',
+            sharedTimeoutMs: 20,
+            expectedSourceIdentity,
+            create: freshCreate,
+            metadata: (result) => ({
+                pageCount: result.document.pageCount,
+                pageLabels: result.document.pageLabels ?? null,
+                pages: onePageGeometry,
+            }),
+        })).resolves.toEqual(structuredResult);
+        expect(freshCreate).toHaveBeenCalledTimes(1);
+    });
+
     it('passes the caller abort signal to cold result creation', async () => {
         const item = createCacheAttachment();
         const controller = new AbortController();
-        const create = vi.fn(async (signal: AbortSignal) => {
+        const create = vi.fn(async (signal: AbortSignal): Promise<BeaverExtractResult> => {
             expect(signal.aborted).toBe(true);
             throw new Error('aborted');
         });
