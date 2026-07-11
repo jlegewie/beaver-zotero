@@ -118,4 +118,24 @@ describe('handleZoteroDocumentRequest background queue', () => {
         );
         expect(mocks.notify).toHaveBeenCalledOnce();
     });
+
+    it('does not enqueue for hard-cap too_many_pages rejections', async () => {
+        vi.mocked(extractAndCacheResolvedPdfDocument).mockResolvedValue({
+            kind: 'response_error',
+            code: 'too_many_pages',
+            message: 'exceeds the 1500-page limit',
+            pageCount: 2000,
+            resolvedAttachment: { libraryId: 1, zoteroKey: 'ABCD1234' },
+        });
+
+        const response = await handleZoteroDocumentRequest({
+            event: 'zotero_document_request',
+            request_id: 'req-hard-cap',
+            attachment: { library_id: 1, zotero_key: 'ABCD1234' },
+            mode: 'structured',
+        });
+
+        expect(response).toMatchObject({ error_code: 'too_many_pages' });
+        expect(mocks.enqueueBackgroundJob).not.toHaveBeenCalled();
+    });
 });
