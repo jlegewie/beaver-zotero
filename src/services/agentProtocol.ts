@@ -1117,6 +1117,7 @@ export interface WSListItemsRequest extends WSBaseEvent {
     collection_key?: string | null;
     tag?: string | null;
     item_category: ZoteroItemCategory;
+    include_children?: boolean;
     recursive: boolean;
     sort_by: string;
     sort_order: string;
@@ -1676,6 +1677,7 @@ export const CLIENT_FEATURES = {
     EXTERNAL_FILES: 'external_files',
     ASK_USER_QUESTION: 'ask_user_question',
     PORTABLE_IDS: 'portable_ids',
+    // LIST_ITEMS_INCLUDE_CHILDREN: 'list_items_include_children',
 } as const;
 
 /** Client type identifier for the Zotero plugin. */
