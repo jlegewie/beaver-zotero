@@ -119,9 +119,12 @@ async function validateCreateNoteAction(
     } = request.action_data as CreateNoteActionData;
 
     // Tags to apply to the new note (create_note_tags_collections feature).
-    const tagsInput: string[] = (rawTags ?? [])
-        .map(t => (typeof t === 'string' ? t.trim() : ''))
-        .filter(Boolean);
+    // Deduplicated so the normalized data and current_value report each tag once.
+    const tagsInput: string[] = [...new Set(
+        (rawTags ?? [])
+            .map(t => (typeof t === 'string' ? t.trim() : ''))
+            .filter(Boolean)
+    )];
 
     // Validate required fields
     if (!title || !title.trim()) {
@@ -679,11 +682,12 @@ async function executeCreateNoteAction(
         }
 
         // Stage tags (create_note_tags_collections). Tags are valid on child
-        // notes too; addTag creates missing tags implicitly.
+        // notes too; addTag creates missing tags implicitly. Skip duplicates so
+        // result_data reports each applied tag once.
         const appliedTags: string[] = [];
         for (const tag of tags ?? []) {
             const trimmed = typeof tag === 'string' ? tag.trim() : '';
-            if (!trimmed) continue;
+            if (!trimmed || appliedTags.includes(trimmed)) continue;
             try {
                 zoteroNote.addTag(trimmed);
                 appliedTags.push(trimmed);

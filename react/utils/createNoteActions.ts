@@ -206,10 +206,11 @@ export async function executeCreateNoteAction(action: AgentAction, runId?: strin
     }
 
     // Stage tags (create_note_tags_collections). Valid on child notes too.
+    // Skip duplicates so result_data reports each applied tag once.
     const appliedTags: string[] = [];
     for (const tag of proposed.tags ?? []) {
         const trimmed = typeof tag === 'string' ? tag.trim() : '';
-        if (!trimmed) continue;
+        if (!trimmed || appliedTags.includes(trimmed)) continue;
         try {
             zoteroNote.addTag(trimmed);
             appliedTags.push(trimmed);
