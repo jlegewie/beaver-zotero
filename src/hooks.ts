@@ -7,7 +7,7 @@ import { CitationService } from "./services/CitationService";
 import { BeaverDB } from "./services/database";
 import { DocumentCache } from "./services/documentCache";
 import { BackgroundExtractor } from "./services/backgroundExtractor";
-import { uiManager } from "../react/ui/UIManager";
+import { uiManager, restoreReaderSidebarWidthHandler } from "../react/ui/UIManager";
 import { getPref, setPref } from "./utils/prefs";
 import { addPendingVersionNotification } from "./utils/versionNotificationPrefs";
 import { compareVersions } from "./utils/compareVersions";
@@ -476,7 +476,14 @@ async function onMainWindowUnload(win: Window): Promise<void> {
             ztoolkit.log("onMainWindowUnload: Other windows remain, skipping global cleanup");
             return;
         }
-        
+
+        // Restore Zotero.Reader.onChangeSidebarWidth even when the app keeps
+        // running (macOS last-window close): the wrapper was installed by this
+        // window's React bundle and would otherwise outlive the window on the
+        // app-lifetime Zotero.Reader singleton, pinning the closed window's
+        // compartment. It is re-installed on the next sidebar open.
+        restoreReaderSidebarWidthHandler();
+
         if (!shouldRunGlobalCleanup) {
             ztoolkit.log("onMainWindowUnload: Last window closed but app still running, skipping global cleanup");
             return;

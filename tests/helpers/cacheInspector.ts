@@ -1159,3 +1159,36 @@ export async function resolveItemReferenceViaHttp(
 ): Promise<ResolveItemReferenceResponse> {
     return post('/beaver/test/library-identity', { op: 'resolve_item', ...ref });
 }
+
+// ---------------------------------------------------------------------------
+// Reader sidebar-width wrapper lifecycle (dev-only)
+//
+// Talks to `/beaver/test/sidebar-width-handler` (see
+// `react/hooks/httpHandlers/testUiHandlers.ts`), which drives the real
+// UIManager install/unwrap/restore path against the live `Zotero.Reader`.
+// Every mutating scenario restores the slot before returning.
+// ---------------------------------------------------------------------------
+
+export type SidebarWidthScenario =
+    | 'inspect'
+    | 'install-over-plain-original'
+    | 'replace-stale-tagged'
+    | 'replace-legacy'
+    | 'restore-unwinds-own'
+    | 'restore-clears-bare-legacy'
+    | 'restore-leaves-foreign'
+    | 'own-wrapper-skip'
+    | 'reinstall-after-displacement'
+    | 'unwrap-direct';
+
+export interface SidebarWidthScenarioResponse {
+    ok?: boolean;
+    error?: string;
+    [key: string]: unknown;
+}
+
+export async function sidebarWidthScenario(
+    scenario: SidebarWidthScenario,
+): Promise<SidebarWidthScenarioResponse> {
+    return post('/beaver/test/sidebar-width-handler', { scenario });
+}
