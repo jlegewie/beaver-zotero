@@ -45,7 +45,14 @@ interface CreateNoteActionData {
     library_id?: number | null;
     library_ref?: string | null;
     library?: string | null;
+    /** Legacy single collection (key or name). Backends only send this shape to
+     * clients that do not declare create_note_tags_collections. */
     collection?: string | null;
+    /** Collection keys or names (create_note_tags_collections feature). Preferred
+     * over `collection` when present. */
+    collections?: string[] | null;
+    /** Tags to apply to the new note (create_note_tags_collections feature). */
+    tags?: string[] | null;
 }
 
 
@@ -72,6 +79,10 @@ interface CreateNoteResultData {
     library_ref?: string;
     parent_key?: string;
     collection_key?: string;
+    /** All collection keys the note was added to (create_note_tags_collections). */
+    collection_keys?: string[];
+    /** Tags applied to the created note (create_note_tags_collections). */
+    tags?: string[];
     note_content?: string;
     cited_items_data?: CitedItemsData;
     warning?: string;
@@ -103,7 +114,14 @@ async function validateCreateNoteAction(
         library_ref: libraryRef,
         library: libraryNameOrId,
         collection: collectionNameOrKey,
+        collections: rawCollections,
+        tags: rawTags,
     } = request.action_data as CreateNoteActionData;
+
+    // Tags to apply to the new note (create_note_tags_collections feature).
+    const tagsInput: string[] = (rawTags ?? [])
+        .map(t => (typeof t === 'string' ? t.trim() : ''))
+        .filter(Boolean);
 
     // Validate required fields
     if (!title || !title.trim()) {
@@ -137,7 +155,11 @@ async function validateCreateNoteAction(
 
     // Detect collection key passed as parent_id.
     let parentItemIdInput: string | null | undefined = rawParentItemId;
-    let collectionInput: string | null | undefined = collectionNameOrKey;
+    // Prefer the plural shape (create_note_tags_collections feature); fall back
+    // to the legacy singular field for older backends and stored actions.
+    let collectionsInput: string[] = (rawCollections && rawCollections.length > 0)
+        ? rawCollections.filter(c => typeof c === 'string' && c.trim())
+        : (collectionNameOrKey ? [collectionNameOrKey] : []);
     let parentToCollectionWarning: string | null = null;
     let collectionDerivedLibraryId: number | null = null;
 
@@ -175,17 +197,17 @@ async function validateCreateNoteAction(
                 );
                 if (!collectionMatch) return;
 
-                // If the caller already supplied an explicit collection, defer
-                // to it
-                if (collectionInput) {
+                // If the caller already supplied explicit collections, defer
+                // to them
+                if (collectionsInput.length > 0) {
                     logger(
-                        `validateCreateNoteAction: parent_id "${parentItemIdInput}" looks like collection "${collectionMatch.collection.name}", but an explicit collection was supplied; clearing parent_id and keeping the explicit collection`,
+                        `validateCreateNoteAction: parent_id "${parentItemIdInput}" looks like collection "${collectionMatch.collection.name}", but explicit collections were supplied; clearing parent_id and keeping the explicit collections`,
                         1,
                     );
                     parentToCollectionWarning =
                         `parent_id "${parentItemIdInput}" was a collection key, not an item ID, and was ignored. ` +
-                        `The explicit 'collection' parameter was used instead. ` +
-                        `Use the 'collection' parameter for collections.`;
+                        `The explicit 'collections' parameter was used instead. ` +
+                        `Use the 'collections' parameter for collections.`;
                     parentItemIdInput = null;
                     return;
                 }
@@ -197,9 +219,9 @@ async function validateCreateNoteAction(
                 parentToCollectionWarning =
                     `parent_id "${parentItemIdInput}" was a collection key, not an item ID. ` +
                     `The note was added to collection "${collectionMatch.collection.name}" as a standalone note instead of as a child item. ` +
-                    `Use the 'collection' parameter for collections.`;
+                    `Use the 'collections' parameter for collections.`;
                 parentItemIdInput = null;
-                collectionInput = collectionMatch.collection.key;
+                collectionsInput = [collectionMatch.collection.key];
                 collectionDerivedLibraryId = collectionMatch.libraryID;
             });
         }
@@ -391,29 +413,34 @@ async function validateCreateNoteAction(
     }
     ta.record('library_resolution_ms', Date.now() - tLib);
 
-    // Resolve collection if specified.
+    // Resolve collections if specified.
     // Child notes cannot belong to collections directly (Zotero's
     // fki_collectionItems_itemID_parentItemID trigger aborts the insert),
-    // so silently drop the collection when a parent is set — the note
+    // so silently drop the collections when a parent is set — the note
     // inherits collection membership from the parent.
-    let resolvedCollectionKey: string | null = null;
-    if (collectionInput && !parentKey) {
+    const resolvedCollectionKeys: string[] = [];
+    if (collectionsInput.length > 0 && !parentKey) {
         const tColl = Date.now();
-        const collectionResult = getCollectionByIdOrName(collectionInput, resolvedLibraryId);
-        ta.record('collection_resolution_ms', Date.now() - tColl);
-        if (collectionResult) {
-            resolvedCollectionKey = collectionResult.collection.key;
-        } else {
-            logger(`validateCreateNoteAction: Collection "${collectionInput}" not found, will skip collection assignment`, 1);
+        for (const entry of collectionsInput) {
+            const collectionResult = getCollectionByIdOrName(entry, resolvedLibraryId);
+            if (collectionResult) {
+                if (!resolvedCollectionKeys.includes(collectionResult.collection.key)) {
+                    resolvedCollectionKeys.push(collectionResult.collection.key);
+                }
+            } else {
+                logger(`validateCreateNoteAction: Collection "${entry}" not found, will skip collection assignment`, 1);
+            }
         }
-    } else if (collectionInput && parentKey) {
-        logger(`validateCreateNoteAction: Ignoring collection "${collectionInput}" because note has parent_key ${parentKey}`, 1);
+        ta.record('collection_resolution_ms', Date.now() - tColl);
+    } else if (collectionsInput.length > 0 && parentKey) {
+        logger(`validateCreateNoteAction: Ignoring collections "${collectionsInput.join(', ')}" because note has parent_key ${parentKey}`, 1);
     }
+    let resolvedCollectionKey: string | null = resolvedCollectionKeys[0] ?? null;
 
     // Standalone fallback: if parent resolution dropped to a standalone related
     // item and no collection was explicitly provided, inherit the related item's
     // first collection so the note stays near it in the library tree.
-    if (relatedItemKey && !resolvedCollectionKey && !collectionInput) {
+    if (relatedItemKey && resolvedCollectionKeys.length === 0 && collectionsInput.length === 0) {
         await ta.track('collection_inherit_ms', async () => {
             const sourceItem = await Zotero.Items.getByLibraryAndKeyAsync(resolvedLibraryId!, relatedItemKey);
             if (sourceItem) {
@@ -426,6 +453,7 @@ async function validateCreateNoteAction(
                         const firstCollection = Zotero.Collections.get(collectionIds[0]);
                         if (firstCollection) {
                             resolvedCollectionKey = firstCollection.key;
+                            resolvedCollectionKeys.push(firstCollection.key);
                         }
                     }
                 } catch (collErr: any) {
@@ -452,9 +480,12 @@ async function validateCreateNoteAction(
         library_id: resolvedLibraryId,
         library_ref: libraryRefForLibraryID(resolvedLibraryId) ?? undefined,
         parent_item_id: parentItemIdInput ?? null,
-        collection: collectionInput ?? null,
+        collection: collectionsInput[0] ?? null,
+        collections: collectionsInput,
+        tags: tagsInput,
         parent_key: parentKey,
         collection_key: resolvedCollectionKey,
+        collection_keys: resolvedCollectionKeys,
         related_item_key: relatedItemKey,
         warning: combinedWarning,
     };
@@ -469,6 +500,8 @@ async function validateCreateNoteAction(
             library_name: library.name,
             parent_key: parentKey,
             collection_key: resolvedCollectionKey,
+            collection_keys: resolvedCollectionKeys,
+            tags: tagsInput,
         },
         normalized_action_data: normalizedActionData,
         preference,
@@ -500,6 +533,8 @@ async function executeCreateNoteAction(
         library_ref?: string | null;  // resolved by validation
         parent_key?: string | null;  // resolved by validation
         collection_key?: string | null;  // resolved by validation
+        collection_keys?: string[] | null;  // resolved by validation (create_note_tags_collections)
+        tags?: string[] | null;  // create_note_tags_collections
         related_item_key?: string | null;  // set by validation when falling back to standalone
         warning?: string | null;  // surfaced to the agent after creation
     };
@@ -511,6 +546,8 @@ async function executeCreateNoteAction(
         library_ref: libraryRef,
         parent_key: parentKey,
         collection_key: collectionKey,
+        collection_keys: collectionKeys,
+        tags,
         related_item_key: relatedItemKey,
         warning,
     } = actionData;
@@ -617,19 +654,42 @@ async function executeCreateNoteAction(
             }
         }
 
-        // Stage the collection assignment on the in-memory item so saveTx persists it too.
+        // Stage the collection assignments on the in-memory item so saveTx persists them too.
+        // Prefer the plural resolved keys (create_note_tags_collections); fall back to the
+        // legacy singular key for actions validated by older code.
         // Child notes (with parentKey) cannot be in collections — Zotero's
         // fki_collectionItems_itemID_parentItemID trigger aborts saveTx if we try.
-        // Validation should already have dropped collectionKey in that case; guard anyway.
-        if (collectionKey && !parentKey) {
-            try {
-                zoteroNote.addToCollection(collectionKey);
-            } catch (collectionError: any) {
-                logger(`executeCreateNoteAction: Failed to stage collection assignment: ${collectionError.message}`, 1);
-                // Don't fail the whole operation for a collection assignment failure
+        // Validation should already have dropped the keys in that case; guard anyway.
+        const collectionKeysToApply = (collectionKeys && collectionKeys.length > 0)
+            ? collectionKeys
+            : (collectionKey ? [collectionKey] : []);
+        const appliedCollectionKeys: string[] = [];
+        if (collectionKeysToApply.length > 0 && !parentKey) {
+            for (const key of collectionKeysToApply) {
+                try {
+                    zoteroNote.addToCollection(key);
+                    appliedCollectionKeys.push(key);
+                } catch (collectionError: any) {
+                    logger(`executeCreateNoteAction: Failed to stage collection assignment for ${key}: ${collectionError.message}`, 1);
+                    // Don't fail the whole operation for a collection assignment failure
+                }
             }
-        } else if (collectionKey && parentKey) {
-            logger(`executeCreateNoteAction: Skipping addToCollection(${collectionKey}) because note has parent_key ${parentKey} (child notes cannot be in collections directly)`, 1);
+        } else if (collectionKeysToApply.length > 0 && parentKey) {
+            logger(`executeCreateNoteAction: Skipping addToCollection(${collectionKeysToApply.join(', ')}) because note has parent_key ${parentKey} (child notes cannot be in collections directly)`, 1);
+        }
+
+        // Stage tags (create_note_tags_collections). Tags are valid on child
+        // notes too; addTag creates missing tags implicitly.
+        const appliedTags: string[] = [];
+        for (const tag of tags ?? []) {
+            const trimmed = typeof tag === 'string' ? tag.trim() : '';
+            if (!trimmed) continue;
+            try {
+                zoteroNote.addTag(trimmed);
+                appliedTags.push(trimmed);
+            } catch (tagError: any) {
+                logger(`executeCreateNoteAction: Failed to stage tag "${trimmed}": ${tagError.message}`, 1);
+            }
         }
 
         await ta.track('save_tx_ms', () => zoteroNote.saveTx());
@@ -699,7 +759,9 @@ async function executeCreateNoteAction(
             zotero_key: zoteroNote.key,
             library_ref: libraryRefForLibraryID(zoteroNote.libraryID) ?? undefined,
             ...(zoteroNote.parentKey ? { parent_key: zoteroNote.parentKey } : {}),
-            ...(collectionKey ? { collection_key: collectionKey } : {}),
+            ...(appliedCollectionKeys.length > 0 ? { collection_key: appliedCollectionKeys[0] } : {}),
+            ...(appliedCollectionKeys.length > 0 ? { collection_keys: appliedCollectionKeys } : {}),
+            ...(appliedTags.length > 0 ? { tags: appliedTags } : {}),
             ...(noteContent ? { note_content: noteContent } : {}),
             ...(warning ? { warning } : {}),
             ...(relatedItemKey ? { related_item_key: relatedItemKey } : {}),

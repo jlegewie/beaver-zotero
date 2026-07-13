@@ -1677,7 +1677,8 @@ export const CLIENT_FEATURES = {
     EXTERNAL_FILES: 'external_files',
     ASK_USER_QUESTION: 'ask_user_question',
     PORTABLE_IDS: 'portable_ids',
-    // LIST_ITEMS_INCLUDE_CHILDREN: 'list_items_include_children',
+    LIST_ITEMS_INCLUDE_CHILDREN: 'list_items_include_children',
+    CREATE_NOTE_TAGS_COLLECTIONS: 'create_note_tags_collections',
 } as const;
 
 /** Client type identifier for the Zotero plugin. */
