@@ -34,7 +34,7 @@ const LegacyVersionContent: React.FC<{
     return (
         <div className="display-flex flex-col gap-5 w-full">
             {text && (
-                <div className="font-color-secondary text-base" style={{ whiteSpace: 'pre-line' }}>
+                <div className="font-color-primary text-base" style={{ whiteSpace: 'pre-line' }}>
                     {parseTextWithLinksAndNewlines(text)}
                 </div>
             )}
@@ -47,11 +47,11 @@ const LegacyVersionContent: React.FC<{
                                 <Icon icon={TickIcon} className="scale-12 mt-020 font-color-secondary" />
                             </div>
                             <div className="display-flex flex-col gap-1">
-                                <span className="font-color-secondary text-base">
+                                <span className="font-color-primary text-base">
                                     {feature.title}
                                 </span>
                                 {feature.description && (
-                                    <span className="font-color-tertiary text-md">
+                                    <span className="font-color-secondary text-md">
                                         {parseTextWithLinksAndNewlines(feature.description)}
                                     </span>
                                 )}
