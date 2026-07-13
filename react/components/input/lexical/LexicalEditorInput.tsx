@@ -41,6 +41,12 @@ import {
 } from '../../../utils/slashCommands';
 import { getHost } from '../../../host';
 import { SlashCommandHoverCardPlugin } from './SlashCommandHoverCardPlugin';
+import type { ComposerSelection } from '../../../utils/composerSelection';
+import {
+    $getFlatSelectionOffsets,
+    $selectFlatRange,
+    $selectFlatSelection,
+} from './selectionOffsets';
 
 export type { SlashCommandDescriptor };
 
@@ -185,70 +191,6 @@ function scrollFocusIntoView(root: HTMLElement, sel: Selection): void {
     }
 }
 
-/** Flattened plain-text offsets of the current selection's anchor and focus
- *  points (offsets are relative to the concatenated text-node content), or
- *  null when there is no range selection or a point sits outside the text
- *  nodes. Must be called inside an editor read/update context. */
-function $getFlatSelectionOffsets(): { anchor: number; focus: number } | null {
-    const selection = $getSelection();
-    if (!$isRangeSelection(selection)) return null;
-    const anchorKey = selection.anchor.getNode().getKey();
-    const focusKey = selection.focus.getNode().getKey();
-    let anchor: number | null = null;
-    let focus: number | null = null;
-    let runningOffset = 0;
-    for (const textNode of $getRoot().getAllTextNodes()) {
-        const key = textNode.getKey();
-        if (key === anchorKey) anchor = runningOffset + selection.anchor.offset;
-        if (key === focusKey) focus = runningOffset + selection.focus.offset;
-        runningOffset += textNode.getTextContentSize();
-    }
-    if (anchor === null || focus === null) return null;
-    return { anchor, focus };
-}
-
-/** Map a flattened plain-text [start, end] range (start <= end) back onto the
- *  editor's text nodes and select it. Must be called inside an update context. */
-function $selectFlatRange(start: number, end: number): void {
-    const root = $getRoot();
-    const textLength = root.getTextContent().length;
-    const safeStart = Math.max(0, Math.min(start, textLength));
-    const safeEnd = Math.max(0, Math.min(end, textLength));
-    const textNodes = root.getAllTextNodes();
-    if (textNodes.length === 0) {
-        root.selectEnd();
-        return;
-    }
-
-    let startNode = textNodes[0];
-    let endNode = textNodes[textNodes.length - 1];
-    let startOffset = 0;
-    let endOffset = endNode.getTextContentSize();
-    let runningOffset = 0;
-
-    for (const textNode of textNodes) {
-        const nodeLength = textNode.getTextContentSize();
-        const nodeStart = runningOffset;
-        const nodeEnd = nodeStart + nodeLength;
-        if (safeStart >= nodeStart && safeStart <= nodeEnd) {
-            startNode = textNode;
-            startOffset = safeStart - nodeStart;
-        }
-        if (safeEnd >= nodeStart && safeEnd <= nodeEnd) {
-            endNode = textNode;
-            endOffset = safeEnd - nodeStart;
-            break;
-        }
-        runningOffset = nodeEnd;
-    }
-
-    startNode.select(startOffset, startOffset);
-    const selection = $getSelection();
-    if ($isRangeSelection(selection)) {
-        selection.focus.set(endNode.getKey(), endOffset, 'text');
-    }
-}
-
 export type LexicalEditorInputHandle = {
     focus: () => void;
     clear: () => void;
@@ -258,7 +200,9 @@ export type LexicalEditorInputHandle = {
      *  the attachment menu without flattening colored command nodes. */
     deleteTrailingCharacter: () => void;
     selectRange: (start: number, end: number, options?: { skipFocus?: boolean }) => void;
+    setSelection: (selection: ComposerSelection, options?: { skipFocus?: boolean }) => void;
     getSelectionOffset: () => number | null;
+    getSelection: () => ComposerSelection | null;
     /** Insert a styled command pill followed by a space, caret left at the
      *  end. With a numeric `queryLength`, the trailing `/query` (length
      *  `queryLength`, excluding the `/`) the user typed is replaced by the
@@ -389,12 +333,30 @@ const EditorApi = forwardRef<LexicalEditorInputHandle, {
                         options?.skipFocus ? { tag: SKIP_SELECTION_FOCUS_TAG } : undefined,
                     );
                 },
+                setSelection: (selection, options) => {
+                    pinnedEndCaretRef.current = false;
+                    blurSelectionRef.current = null;
+                    editor.update(
+                        () => $selectFlatSelection(selection),
+                        options?.skipFocus ? { tag: SKIP_SELECTION_FOCUS_TAG } : undefined,
+                    );
+                },
                 getSelectionOffset: () => {
                     let offset: number | null = null;
                     editor.getEditorState().read(() => {
                         offset = $getFlatSelectionOffsets()?.anchor ?? null;
                     });
                     return offset;
+                },
+                getSelection: () => {
+                    let selection: ComposerSelection | null = null;
+                    editor.getEditorState().read(() => {
+                        selection = $getFlatSelectionOffsets();
+                        if (!selection && $getRoot().getTextContentSize() === 0) {
+                            selection = { anchor: 0, focus: 0 };
+                        }
+                    });
+                    return selection;
                 },
                 insertSlashCommand: (descriptor, queryLength) => {
                     blurSelectionRef.current = null;
@@ -1347,6 +1309,7 @@ export const LexicalEditorInput = forwardRef<LexicalEditorInputHandle, LexicalEd
                                 <ContentEditable
                                     ref={handleContentEditableRef}
                                     className="chat-input beaver-lexical-content"
+                                    data-beaver-composer="true"
                                     aria-label={ariaLabel ?? 'Message'}
                                     aria-multiline="true"
                                     role="textbox"

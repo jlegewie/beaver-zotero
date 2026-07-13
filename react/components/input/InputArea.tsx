@@ -29,6 +29,11 @@ import { getPref, setPref } from '../../../src/utils/prefs';
 import { LexicalEditorInput, LexicalEditorInputHandle, SlashCommandDescriptor } from './lexical/LexicalEditorInput';
 import { useSlashMenu } from '../../hooks/useSlashMenu';
 import { sendComposedMessageAtom } from '../../atoms/actions';
+import { pendingComposerFocusTransferAtom } from '../../atoms/composerFocus';
+import {
+    getComposerWindowToken,
+    registerComposerSelectionProvider,
+} from '../../utils/composerSelection';
 
 const HIGH_INPUT_TOKEN_WARNING_THRESHOLD = 100_000;
 
@@ -70,6 +75,7 @@ const InputArea: React.FC<InputAreaProps> = ({
     const isWebSearchAllowed = useAtomValue(isWebSearchAllowedAtom);
     const currentNoteItem = useAtomValue(currentNoteItemAtom);
     const pendingPillInsert = useAtomValue(pendingPillInsertAtom);
+    const pendingFocusTransfer = useAtomValue(pendingComposerFocusTransferAtom);
     const store = useStore();
     const webSearchDescriptionId = useId();
 
@@ -77,6 +83,7 @@ const InputArea: React.FC<InputAreaProps> = ({
     const editorHandleRef = useRef<LexicalEditorInputHandle | null>(null);
     const pendingSelectionRestoreRef = useRef<{ offset: number; skipFocus: boolean } | null>(null);
     const sourceMenuSelectionRestoreRef = useRef<{ offset: number } | null>(null);
+    const unregisterSelectionProviderRef = useRef<(() => void) | null>(null);
     const focusEditor = useCallback(() => {
         editorHandleRef.current?.focus();
     }, []);
@@ -85,6 +92,17 @@ const InputArea: React.FC<InputAreaProps> = ({
     const insertSlashCommand = useCallback((descriptor: SlashCommandDescriptor, queryLength: number) => {
         editorHandleRef.current?.insertSlashCommand(descriptor, queryLength);
     }, []);
+    const handleContentEditableRef = useCallback((el: HTMLElement | null) => {
+        unregisterSelectionProviderRef.current?.();
+        unregisterSelectionProviderRef.current = null;
+        (inputRef as React.MutableRefObject<HTMLElement | null>).current = el;
+        if (el) {
+            unregisterSelectionProviderRef.current = registerComposerSelectionProvider(
+                el,
+                () => editorHandleRef.current?.getSelection() ?? null,
+            );
+        }
+    }, [inputRef]);
 
     // WebSocket state
     const sendWSMessage = useSetAtom(sendWSMessageAtom);
@@ -188,9 +206,67 @@ const InputArea: React.FC<InputAreaProps> = ({
         if (isPending && getPref('focusResponseForScreenReaders')) {
             return;
         }
+        const inputEl = inputRef.current;
+        const ownWindow = inputEl?.ownerDocument.defaultView;
+        const ownSurface = inputEl?.closest('#beaver-react-root-library')
+            ? 'library'
+            : inputEl?.closest('#beaver-react-root-reader')
+                ? 'reader'
+                : null;
+        if (
+            pendingFocusTransfer
+            && ownWindow
+            && getComposerWindowToken(ownWindow) === pendingFocusTransfer.targetWindowToken
+            && ownSurface === pendingFocusTransfer.targetSurface
+        ) {
+            // The transfer effect below owns focus timing. In particular, a
+            // loading reader must finish before either mount autofocus or the
+            // transfer can focus the composer.
+            return;
+        }
         // Focus on mount via the Lexical handle.
         focusEditor();
     }, []);
+
+    // Zotero replaces the library composer with a separately mounted reader
+    // composer, and also schedules its own content refocus after announcing a
+    // tab change. Consume the host's one-shot handoff after that refocus so
+    // the composer deterministically keeps both focus and its Lexical
+    // selection. Other mounted composers (notably the separate Beaver window)
+    // ignore transfers that do not target their window and surface.
+    useEffect(() => {
+        if (!pendingFocusTransfer) return;
+        const inputEl = inputRef.current;
+        const ownWindow = inputEl?.ownerDocument.defaultView ?? null;
+        const ownSurface = inputEl?.closest('#beaver-react-root-library')
+            ? 'library'
+            : inputEl?.closest('#beaver-react-root-reader')
+                ? 'reader'
+                : null;
+        if (
+            !ownWindow
+            || getComposerWindowToken(ownWindow) !== pendingFocusTransfer.targetWindowToken
+            || ownSurface !== pendingFocusTransfer.targetSurface
+        ) {
+            return;
+        }
+        if (pendingFocusTransfer.deferred) return;
+
+        const timer = ownWindow.setTimeout(() => {
+            if (store.get(pendingComposerFocusTransferAtom) !== pendingFocusTransfer) {
+                return;
+            }
+            store.set(pendingComposerFocusTransferAtom, null);
+            if (isAwaitingApproval) return;
+            if (isPending && getPref('focusResponseForScreenReaders')) return;
+            editorHandleRef.current?.setSelection(
+                pendingFocusTransfer.selection,
+                { skipFocus: true },
+            );
+            focusEditor();
+        }, pendingFocusTransfer.restoreDelayMs);
+        return () => ownWindow.clearTimeout(timer);
+    }, [focusEditor, inputRef, isAwaitingApproval, isPending, pendingFocusTransfer, store]);
 
     // Consume a staged /command pill (home launcher, context menu, reader
     // toolbar). This component owns the editor handle, so the pill is inserted
@@ -547,11 +623,7 @@ const InputArea: React.FC<InputAreaProps> = ({
                         disabled={isAwaitingApproval}
                         onKeyDown={handleEditorKeyDown}
                         suspendKeyboardNavigation={isSlashMenuOpen || isAddAttachmentMenuOpen}
-                        onContentEditableRef={(el) => {
-                            // Forward the Lexical content-editable element to the
-                            // parent's inputRef so legacy `.focus()` callers work.
-                            (inputRef as React.MutableRefObject<HTMLElement | null>).current = el;
-                        }}
+                        onContentEditableRef={handleContentEditableRef}
                     />
                 </div>
 
