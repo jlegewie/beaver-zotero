@@ -41,6 +41,7 @@ import {
     ENTITY_FORMS,
 } from '../../src/utils/noteHtmlEntities';
 import { getBeaverFooterAppendPoint } from '../../src/utils/noteEditFooter';
+import { containsPreviewMarkers } from '../../src/utils/notePreviewGuard';
 import { store } from '../store';
 import {
     externalReferenceMappingAtom,
@@ -136,6 +137,12 @@ interface DiffPreviewState {
 }
 
 let activePreview: DiffPreviewState | null = null;
+
+/**
+ * Marker for a showDiffPreview call whose async setup is still running (the
+ * preview is not yet active). Lets callers abort an in-flight show.
+ */
+let pendingShow: { key: string } | null = null;
 
 /**
  * Generation counter: incremented on every show/dismiss to abort stale async calls.
@@ -257,6 +264,7 @@ export async function showDiffPreview(
     options?: DiffPreviewOptions,
 ): Promise<boolean> {
     const noteKey = `${libraryId}-${zoteroKey}`;
+    let myPendingShow: { key: string } | null = null;
     try {
         if (edits.length === 0) {
             logger(`showDiffPreview: aborting for ${noteKey}, edits array is empty`, 1);
@@ -282,8 +290,19 @@ export async function showDiffPreview(
             return true;
         }
 
-        // Dismiss existing and claim this generation
-        await dismissDiffPreview();
+        // Mark this show as in flight so callers can abort it (see
+        // pendingShow). Cleared in the finally block below.
+        myPendingShow = { key: noteKey };
+        pendingShow = myPendingShow;
+
+        // Dismiss any existing preview
+        const dismissal = dismissDiffPreview();
+        const genAfterOwnDismiss = generation;
+        await dismissal;
+        if (generation !== genAfterOwnDismiss) {
+            logger(`showDiffPreview: aborting for ${noteKey}, dismissed while awaiting prior teardown`, 1);
+            return false;
+        }
         const myGeneration = ++generation;
 
         if (!areEditorApisAvailable()) {
@@ -464,7 +483,17 @@ export async function showDiffPreview(
     } catch (e: any) {
         logger(`showDiffPreview: error for ${noteKey}: ${e.message}\n${e.stack ?? ''}`, 1);
         return false;
+    } finally {
+        if (pendingShow === myPendingShow) pendingShow = null;
     }
+}
+
+/**
+ * True while a showDiffPreview call for this note is still in its async
+ * setup phase (not yet active).
+ */
+export function isDiffPreviewPendingFor(libraryId: number, zoteroKey: string): boolean {
+    return pendingShow?.key === `${libraryId}-${zoteroKey}`;
 }
 
 /**
@@ -536,15 +565,43 @@ export function dismissDiffPreview(): Promise<void> {
         // for that message guarantees ProseMirror holds the clean HTML
         // before saving resumes — unlike a fixed timeout.
         return new Promise<void>((resolve) => {
-            let savingRestored = false;
+            let settled = false;
             let quietTimer: ReturnType<typeof setTimeout> | null = null;
+            let fallbackTimer: ReturnType<typeof setTimeout> | null = null;
             const QUIET_DURATION_MS = 50;
-            const restoreSaving = () => {
-                if (savingRestored) return;
-                savingRestored = true;
+            const cleanup = () => {
                 if (quietTimer) clearTimeout(quietTimer);
+                if (fallbackTimer) clearTimeout(fallbackTimer);
                 try { inst._iframeWindow?.removeEventListener('message', onIframeMsg); } catch { /* ignore */ }
-                try { inst._disableSaving = wasSavingDisabled; } catch { /* ignore */ }
+            };
+            const restoreSaving = () => {
+                if (settled) return;
+                settled = true;
+                cleanup();
+                restoreSavingGuarded(inst, wasSavingDisabled);
+                resolve();
+            };
+            // The iframe could not apply the restore, so its document still
+            // holds the diff HTML
+            const deferToEditorReinit = () => {
+                if (settled) return;
+                settled = true;
+                cleanup();
+                logger('dismissDiffPreview: incremental restore failed; deferring to the editor reinit', 1);
+                const tabID = inst.tabID;
+                setTimeout(() => {
+                    try {
+                        // Zotero's reinit drops the tab association; restore
+                        // it so tab-based preview gating keeps working.
+                        if (tabID && !inst._tabID) inst._tabID = tabID;
+                        if (inst._disableSaving && isEditorInstanceUsable(inst)) {
+                            const html = readLiveEditorHtml(inst);
+                            if (html !== null && !containsPreviewMarkers(html)) {
+                                inst._disableSaving = wasSavingDisabled;
+                            }
+                        }
+                    } catch { /* ignore */ }
+                }, 3000);
                 resolve();
             };
             const scheduleQuietRestore = () => {
@@ -555,20 +612,87 @@ export function dismissDiffPreview(): Promise<void> {
                 try {
                     if (e.data?.instanceID !== inst.instanceID) return;
                     const action = e.data?.message?.action;
-                    if ((action === 'update' && e.data?.message?.system) || action === 'incrementalUpdateFailed') {
+                    if (action === 'update' && e.data?.message?.system) {
                         scheduleQuietRestore();
+                    } else if (action === 'incrementalUpdateFailed') {
+                        deferToEditorReinit();
                     }
                 } catch { /* ignore */ }
             };
             try { inst._iframeWindow.addEventListener('message', onIframeMsg); } catch { /* ignore */ }
-            // Fallback: restore after 1.5s even if no 'update' arrives
-            // (e.g., iframe destroyed or update silently dropped).
-            setTimeout(restoreSaving, 1500);
+            // Fallback: run the guarded restore after 1.5s even if no
+            // 'update' arrives (e.g., iframe destroyed or update silently
+            // dropped).
+            fallbackTimer = setTimeout(restoreSaving, 1500);
         });
     } catch (e: any) {
         logger(`dismissDiffPreview: error: ${e.message}`, 1);
-        try { inst._disableSaving = wasSavingDisabled; } catch { /* ignore */ }
+        restoreSavingGuarded(inst, wasSavingDisabled);
         return Promise.resolve();
+    }
+}
+
+/**
+ * Read the current ProseMirror document HTML from an editor instance's
+ * iframe, or null if it cannot be read.
+ *
+ * Must pass onlyChanged=false: getDataSync(true) returns null whenever the
+ * editor's docChanged flag is unset, and applyExternalChanges clears that
+ * flag — so after a preview apply or restore the true-variant reports
+ * nothing and a marker check against it would silently pass.
+ */
+function readLiveEditorHtml(inst: any): string | null {
+    try {
+        const noteData = inst._iframeWindow?.wrappedJSObject?.getDataSync(false);
+        return typeof noteData?.html === 'string' ? noteData.html : null;
+    } catch { return null; }
+}
+
+/**
+ * Re-enable an editor instance's save path after a preview teardown, but
+ * only if its document no longer shows the diff markup. If the diff is
+ * still present (the restore never landed), re-enabling saves would let the
+ * editor's next autosave persist the presentation-only markup into the note
+ * — permanent corruption, since the preview guard then refuses every
+ * subsequent save. Instead, reinitialize the editor from the item's saved
+ * note: reinit() resets _disableSaving itself, and saveSync() inside
+ * uninit() is a no-op while saving is still disabled.
+ */
+function restoreSavingGuarded(inst: any, wasSavingDisabled: boolean): void {
+    const liveHtml = readLiveEditorHtml(inst);
+    if (liveHtml !== null && containsPreviewMarkers(liveHtml)) {
+        logger('dismissDiffPreview: editor still shows diff markup; reinitializing editor from saved note', 1);
+        reinitEditorInstance(inst);
+        return;
+    }
+    try { inst._disableSaving = wasSavingDisabled; } catch { /* ignore */ }
+}
+
+/**
+ * Reinitialize an editor instance, preserving its tab association.
+ * Zotero's reinit() rebuilds init options without tabID, so a plain reinit
+ * permanently breaks tab-based gating (isNoteInSelectedTab and therefore
+ * the automatic preview) for that editor until the tab is reopened.
+ */
+function reinitEditorInstance(inst: any): void {
+    const tabID = inst.tabID;
+    const restoreTabId = () => {
+        try { if (tabID && !inst._tabID) inst._tabID = tabID; } catch { /* ignore */ }
+    };
+    try {
+        const p = inst.reinit();
+        if (p?.then) {
+            p.then(restoreTabId, (e: any) => {
+                restoreTabId();
+                logger(`dismissDiffPreview: reinit failed: ${e?.message}`, 1);
+            });
+        } else {
+            restoreTabId();
+        }
+    } catch (e: any) {
+        // Leave saving disabled — a stuck editor (recovered by reopening
+        // the note) is preferable to persisting the diff markup.
+        logger(`dismissDiffPreview: reinit threw: ${e?.message}`, 1);
     }
 }
 
