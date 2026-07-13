@@ -66,6 +66,7 @@ describe("pdf barrel exports", () => {
             "DEFAULT_EXTRACTION_SETTINGS",
             "DEFAULT_MARGINS",
             "DEFAULT_MARGIN_ZONE",
+            "DEFAULT_MAX_RENDER_PIXELS",
             "DEFAULT_OCR_DETECTION_OPTIONS",
             "DEFAULT_PAGE_IMAGE_OPTIONS",
             "DEFAULT_PDF_SEARCH_OPTIONS",
