@@ -55,7 +55,7 @@ import { clearNoteEditorSelection } from './sourceUtils';
 import { store } from '../store';
 import { currentThreadIdAtom } from '../atoms/threads';
 import { addOrUpdateEditFooter, getBeaverFooterAppendPoint } from '../../src/utils/noteEditFooter';
-import { assertNoPreviewMarkers } from '../../src/utils/notePreviewGuard';
+import { assertNoPreviewMarkers, containsPreviewMarkers, stripPreviewMarkers } from '../../src/utils/notePreviewGuard';
 import {
     externalReferenceMappingAtom,
     externalReferenceItemMappingAtom,
@@ -201,6 +201,23 @@ export async function executeEditNoteAction(
     // 2b. Promote any unsaved editor content into the DB so this apply sees
     //     the same HTML validation saw. See flushLiveEditorToDB for rationale.
     await flushLiveEditorToDB(item);
+
+    // 2c. Repair notes that contain persisted diff-preview markup, mirroring
+    //     the agent execute path.
+    {
+        const persistedHtml: string = item.getNote();
+        if (containsPreviewMarkers(persistedHtml)) {
+            const repaired = stripPreviewMarkers(persistedHtml);
+            if (!containsPreviewMarkers(repaired)) {
+                logger(`executeEditNoteAction: repairing persisted diff-preview markup in ${library_id}-${zotero_key}`, 1);
+                item.setNote(repaired);
+                await item.saveTx();
+                await waitForNoteSaveStabilization(item, repaired);
+            } else {
+                logger(`executeEditNoteAction: diff-preview markup in ${library_id}-${zotero_key} could not be fully stripped; save will be refused by the preview guard`, 1);
+            }
+        }
+    }
 
     // 3. Get current note HTML
     const oldHtml: string = item.getNote();
