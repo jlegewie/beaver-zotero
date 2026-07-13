@@ -13,6 +13,7 @@ import {
     LibraryTreeRowType,
 } from '../atoms/zoteroContext';
 import { updateNoteItemAtom } from '../atoms/messageComposition';
+import { isLibraryAccessReadyAtom, searchableLibraryIdsAtom } from '../atoms/profile';
 
 const MAX_SELECTED_ITEMS = 10;
 
@@ -143,8 +144,39 @@ export function useZoteroContext() {
     // Routes through updateNoteItemAtom (not the raw atom) so the note tab item
     // is validated — a note in an excluded/unreadable library is flagged invalid.
     const setNoteItem = useSetAtom(updateNoteItemAtom);
+    const isLibraryAccessReady = useAtomValue(isLibraryAccessReadyAtom);
+    const searchableLibraryIds = useAtomValue(searchableLibraryIdsAtom);
+    const searchableLibraryIdsKey = searchableLibraryIds.join(',');
     const setRecentlyAddedTodayCount = useSetAtom(recentlyAddedTodayCountAtom);
     const setLibraryItemCount = useSetAtom(libraryItemCountAtom);
+
+    // A note tab may be discovered before profile exclusions and the local
+    // library list finish loading. updateNoteItemAtom safely defers that first
+    // validation; retry the still-active note once access becomes ready, and
+    // whenever the searchable set changes in Preferences.
+    useEffect(() => {
+        if (!isLibraryAccessReady) return;
+        const mainWindow = Zotero.getMainWindow();
+        const selectedTab = mainWindow?.Zotero_Tabs?._tabs?.find(
+            (tab: any) => tab.id === mainWindow.Zotero_Tabs.selectedID,
+        );
+        if (!selectedTab || !isNoteTabType(selectedTab.type) || !selectedTab.data?.itemID) {
+            return;
+        }
+
+        let cancelled = false;
+        Zotero.Items.getAsync(selectedTab.data.itemID).then(async (item: Zotero.Item) => {
+            if (!item || cancelled) return;
+            await item.loadDataType('itemData');
+            if (!cancelled) setNoteItem(item);
+        }).catch((error: unknown) => {
+            logger(`useZoteroContext: failed to revalidate active note tab: ${error}`, 2);
+        });
+
+        return () => {
+            cancelled = true;
+        };
+    }, [isLibraryAccessReady, searchableLibraryIdsKey, setNoteItem]);
 
     useEffect(() => {
         const mainWindow = Zotero.getMainWindow();

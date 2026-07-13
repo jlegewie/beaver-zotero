@@ -6,7 +6,7 @@ import {
     type ItemValidationSeverity,
 } from '../../src/services/itemValidationManager';
 import { logger } from '../../src/utils/logger';
-import { searchableLibraryIdsAtom } from './profile';
+import { isLibraryAccessReadyAtom, searchableLibraryIdsAtom } from './profile';
 import { selectedModelAtom } from './models';
 import { getPref } from '../../src/utils/prefs';
 import { getContentKind } from '../../src/services/documentExtraction/attachmentResolution';
@@ -98,6 +98,16 @@ export const validateItemAtom = atom(
     async (get, set, params: { item: Zotero.Item }) => {
         const { item } = params;
         const itemKey = getItemKey(item);
+
+        // The searchable-library list is deliberately empty until both the
+        // profile exclusions and local Zotero libraries have loaded. Defer
+        // validation instead of misclassifying that fail-closed loading state
+        // as an explicit library exclusion. Active tab contexts retry when
+        // library access becomes ready.
+        if (!get(isLibraryAccessReadyAtom)) {
+            logger(`Deferring validation for item ${itemKey}: library access is not ready`, 4);
+            return undefined;
+        }
         
         // Set validating state (optimistic, assume valid until checked)
         const results = get(itemValidationResultsAtom);
@@ -192,6 +202,11 @@ export const validateRegularItemAtom = atom(
         }
 
         const itemKey = getItemKey(item);
+
+        if (!get(isLibraryAccessReadyAtom)) {
+            logger(`Deferring validation for regular item ${itemKey}: library access is not ready`, 4);
+            return undefined;
+        }
         
         // Set validating state for the item
         const results = get(itemValidationResultsAtom);

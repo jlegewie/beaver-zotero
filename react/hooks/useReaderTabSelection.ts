@@ -6,7 +6,12 @@ import { logger } from '../../src/utils/logger';
 import { addSelectionChangeListener, getCurrentReader, getSelectedTextAsTextSelection } from '../utils/readerUtils';
 import { isValidAnnotationType, TextSelection } from '../types/attachments/apiTypes';
 import { isAuthenticatedAtom } from "../atoms/auth";
-import { hasAuthorizedAccessAtom, isDeviceAuthorizedAtom } from '../atoms/profile';
+import {
+    hasAuthorizedAccessAtom,
+    isDeviceAuthorizedAtom,
+    isLibraryAccessReadyAtom,
+    searchableLibraryIdsAtom,
+} from '../atoms/profile';
 import { BeaverTemporaryAnnotations, ZoteroReader } from '../utils/annotationUtils';
 import { store } from '../store';
 import { threadAgentActionsAtom, getZoteroItemReferenceFromAgentAction, hasAppliedBulkAnnotations, AgentAction } from '../agents/agentActions';
@@ -30,6 +35,9 @@ export function useReaderTabSelection() {
     const isAuthenticated = useAtomValue(isAuthenticatedAtom);
     const hasAuthorized = useAtomValue(hasAuthorizedAccessAtom);
     const isDeviceAuthorized = useAtomValue(isDeviceAuthorizedAtom);
+    const isLibraryAccessReady = useAtomValue(isLibraryAccessReadyAtom);
+    const searchableLibraryIds = useAtomValue(searchableLibraryIdsAtom);
+    const searchableLibraryIdsKey = searchableLibraryIds.join(',');
     const updateReaderAttachment = useSetAtom(updateReaderAttachmentAtom);
     const setReaderTextSelection = useSetAtom(readerTextSelectionAtom);
     const setReaderAttachment = useSetAtom(currentReaderAttachmentAtom);
@@ -163,7 +171,7 @@ export function useReaderTabSelection() {
 
 
     useEffect(() => {
-        if (!isAuthenticated || !hasAuthorized || !isDeviceAuthorized) return;
+        if (!isAuthenticated || !hasAuthorized || !isDeviceAuthorized || !isLibraryAccessReady) return;
         logger("useReaderTabSelection: Hook mounted");
 
         let isMounted = true;
@@ -326,6 +334,6 @@ export function useReaderTabSelection() {
                 logger(`useReaderTabSelection: Error cleaning up temporary annotations on unmount: ${error}`);
             });
         };
-    }, [setupReader, setReaderTextSelection, updateReaderAttachment, setReaderAttachment, mainWindow, waitForInternalReader, isAuthenticated, isDeviceAuthorized, hasAuthorized]);
+    }, [setupReader, setReaderTextSelection, updateReaderAttachment, setReaderAttachment, mainWindow, waitForInternalReader, isAuthenticated, isDeviceAuthorized, hasAuthorized, isLibraryAccessReady, searchableLibraryIdsKey]);
 
 }
