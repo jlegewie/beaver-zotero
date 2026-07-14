@@ -499,7 +499,7 @@ const versionUpdateMessageList: VersionUpdateMessageConfig[] = [
             },
         ],
         inPanel: true,
-        // footer: `<a href="https://github.com/jlegewie/beaver-zotero/releases/tag/v0.21.0" target='_blank'>Full changelog</a>`,
+        footer: `<a href="https://github.com/jlegewie/beaver-zotero/releases/tag/v0.22.0" target='_blank'>Full changelog</a>`,
     },
 ];
 
