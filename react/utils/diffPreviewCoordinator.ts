@@ -18,6 +18,7 @@ import {
     showDiffPreview,
     dismissDiffPreview,
     isDiffPreviewActive,
+    isDiffPreviewPendingFor,
     isDiffPreviewSupported,
     isNoteInSelectedTab,
     getPreviewNoteKey,
@@ -102,7 +103,10 @@ export function updateDiffPreviewForNote(libraryId: number, zoteroKey: string): 
     }
 
     if (edits.length === 0) {
-        if (isDiffPreviewActive(libraryId, zoteroKey)) {
+        // Also dismiss when a show for this note is still in its async setup
+        // phase (e.g. the approval was answered before the preview applied):
+        // dismissDiffPreview()'s generation bump aborts the pending show.
+        if (isDiffPreviewActive(libraryId, zoteroKey) || isDiffPreviewPendingFor(libraryId, zoteroKey)) {
             dismissDiffPreview();
             store.set(diffPreviewNoteKeyAtom, null);
         }

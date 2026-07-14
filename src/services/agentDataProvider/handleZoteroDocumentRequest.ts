@@ -40,6 +40,7 @@ import {
     notifyRemoteDownloadFailure,
     notifyRemoteFileNotSynced,
     preflightZoteroAttachmentRequest,
+    isLibrarySearchable,
     validateZoteroItemReference,
 } from './utils';
 import { EXTERNAL_LIBRARY_ID, resolveExternalFile } from '../externalFiles';
@@ -561,26 +562,31 @@ export async function handleZoteroDocumentRequest(
 
         if (result.kind === 'timeout' || (result.kind === 'external_abort' && timeout.signal.aborted)) {
             const target = result.resolvedAttachment ?? {
-                libraryId: attachment.library_id,
+                libraryId: resolvedLibraryId,
                 zoteroKey: attachment.zotero_key,
             };
             try {
-                await Zotero.Beaver?.db?.enqueueBackgroundJob({
-                    jobType: 'document_timeout_retry',
-                    libraryId: target.libraryId,
-                    zoteroKey: target.zoteroKey,
-                    contentKind: 'pdf',
-                    payloadKind: mode,
-                    priority: 50,
-                    payload: {
-                        content_kind: 'pdf',
-                        maxPages: max_pages ?? null,
-                        maxFileSizeMB: max_file_size_mb ?? 0,
-                        timeoutSeconds: MAX_PDF_TIMEOUT_SECONDS,
-                    },
-                    now: Date.now(),
-                });
-                Zotero.Beaver?.backgroundExtractor?.notify();
+                // Exclusions can change while the foreground extraction is in
+                // flight. Recheck the live boundary before staging follow-up
+                // work so an excluded library never reaches the queue.
+                if (isLibrarySearchable(target.libraryId)) {
+                    await Zotero.Beaver?.db?.enqueueBackgroundJob({
+                        jobType: 'document_timeout_retry',
+                        libraryId: target.libraryId,
+                        zoteroKey: target.zoteroKey,
+                        contentKind: 'pdf',
+                        payloadKind: mode,
+                        priority: 50,
+                        payload: {
+                            content_kind: 'pdf',
+                            maxPages: max_pages ?? null,
+                            maxFileSizeMB: max_file_size_mb ?? 0,
+                            timeoutSeconds: MAX_PDF_TIMEOUT_SECONDS,
+                        },
+                        now: Date.now(),
+                    });
+                    Zotero.Beaver?.backgroundExtractor?.notify();
+                }
             } catch (e) {
                 logger(`handleZoteroDocumentRequest: background enqueue failed: ${e}`, 1);
             }

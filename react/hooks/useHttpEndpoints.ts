@@ -88,6 +88,9 @@ import {
     handleTestSyncPauseHttpRequest,
 } from './httpHandlers/testSyncHandlers';
 import {
+    handleTestSidebarWidthHandlerHttpRequest,
+} from './httpHandlers/testUiHandlers';
+import {
     handleTestPdfPageCountHttpRequest,
     handleTestPdfPageLabelsHttpRequest,
     handleTestPdfRenderPagesHttpRequest,
@@ -291,6 +294,8 @@ const ENDPOINT_PATHS = [
     '/beaver/test/set-pref',
     // Sync-suppression control/inspection (dev-only)
     '/beaver/test/sync-pause',
+    // Reader sidebar-width wrapper lifecycle (install/unwrap/restore)
+    '/beaver/test/sidebar-width-handler',
     // Provider-mode connection control (dev-only)
     '/beaver/test/provider-connect',
     '/beaver/test/provider-status',
@@ -1055,6 +1060,11 @@ function registerEndpoints(): boolean {
         // syncPause module + raw Sync.Runner contract for live tests.
         Zotero.Server.Endpoints['/beaver/test/sync-pause'] =
             createEndpoint(handleTestSyncPauseHttpRequest);
+
+        // Reader sidebar-width wrapper lifecycle (dev-only): drives the real
+        // UIManager install/unwrap/restore path against Zotero.Reader.
+        Zotero.Server.Endpoints['/beaver/test/sidebar-width-handler'] =
+            createEndpoint(handleTestSidebarWidthHandlerHttpRequest);
 
         // Provider-mode connection control (dev-only manual trigger/inspection)
         Zotero.Server.Endpoints['/beaver/test/provider-connect'] =

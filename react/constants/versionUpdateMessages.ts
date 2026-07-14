@@ -482,9 +482,9 @@ const versionUpdateMessageList: VersionUpdateMessageConfig[] = [
         inPanel: true,
     },
     {
-        version: "0.22.0-beta.1",
-        title: "Redesigned Actions, Home Screen Launcher and more",
-        steps: [
+        version: "0.22.0",
+        title: "Version 0.22: Redesigned Actions, Home Screen Launcher and more",
+        featureList: [
             {
                 title: "Redesigned Actions",
                 description: "Actions are rebuilt to handle more complex, multi-step workflows. Import and export actions to share with others.",
@@ -498,7 +498,8 @@ const versionUpdateMessageList: VersionUpdateMessageConfig[] = [
                 description: "When a request is ambiguous, Beaver now pauses to ask instead of guessing keeping longer tasks on track.",
             },
         ],
-        // footer: `<a href="https://github.com/jlegewie/beaver-zotero/releases/tag/v0.21.0" target='_blank'>Full changelog</a>`,
+        inPanel: true,
+        footer: `<a href="https://github.com/jlegewie/beaver-zotero/releases/tag/v0.22.0" target='_blank'>Full changelog</a>`,
     },
 ];
 

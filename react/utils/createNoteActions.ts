@@ -13,6 +13,7 @@ import { prepareCitationRenderContext } from './citationRenderContext';
 import { wrapWithSchemaVersion, getBeaverNoteFooterHTML } from './noteActions';
 import { logger } from '../../src/utils/logger';
 import { resolveCreateNoteParent } from '../../src/services/agentDataProvider/actions/resolveCreateNoteParent';
+import { getCollectionByIdOrName } from '../../src/services/agentDataProvider/utils';
 import { libraryRefForLibraryID, resolveItemReference, resolveWriteTargetLibrary } from '../../src/utils/libraryIdentity';
 
 
@@ -23,6 +24,10 @@ export interface CreateNoteResultData {
     library_ref?: string;
     parent_key?: string;
     collection_key?: string;
+    /** All collection keys the note was added to (create_note_tags_collections). */
+    collection_keys?: string[];
+    /** Tags applied to the created note (create_note_tags_collections). */
+    tags?: string[];
     /** Simplified HTML content of the created note (same format as read_note) */
     note_content?: string;
     /** Formatted revision instructions from automated review (set by backend) */
@@ -47,8 +52,11 @@ export async function executeCreateNoteAction(action: AgentAction, runId?: strin
         library_id?: number;       // resolved by validation (normalized_action_data)
         parent_key?: string;       // resolved by validation (normalized_action_data)
         collection_key?: string;   // resolved by validation (normalized_action_data)
+        collection_keys?: string[]; // resolved by validation (create_note_tags_collections)
         library?: string;
         collection?: string;
+        collections?: string[];    // raw keys or names (create_note_tags_collections)
+        tags?: string[];           // create_note_tags_collections
     };
 
     const { title, content } = proposed;
@@ -86,7 +94,28 @@ export async function executeCreateNoteAction(action: AgentAction, runId?: strin
         warning = resolution.warning;
     }
 
-    const collectionKey = proposed.collection_key || null;
+    // Collections: prefer keys already resolved by validation; otherwise
+    // resolve raw keys-or-names from the proposed data (covers pending actions
+    // persisted before validation normalized them).
+    let collectionKeysToApply: string[] = [];
+    if (proposed.collection_keys && proposed.collection_keys.length > 0) {
+        collectionKeysToApply = [...proposed.collection_keys];
+    } else {
+        const rawCollections = (proposed.collections && proposed.collections.length > 0)
+            ? proposed.collections
+            : (proposed.collection ? [proposed.collection] : []);
+        for (const entry of rawCollections) {
+            const match = getCollectionByIdOrName(entry, targetLibraryId);
+            if (match && !collectionKeysToApply.includes(match.collection.key)) {
+                collectionKeysToApply.push(match.collection.key);
+            } else if (!match) {
+                logger(`executeCreateNoteAction: Collection "${entry}" not found, skipping`, 1);
+            }
+        }
+        if (collectionKeysToApply.length === 0 && proposed.collection_key) {
+            collectionKeysToApply = [proposed.collection_key];
+        }
+    }
 
     // Get citation context for rendering
     const citationDataMap = store.get(citationMapAtom);
@@ -130,15 +159,14 @@ export async function executeCreateNoteAction(action: AgentAction, runId?: strin
     }
 
     // Inherit collection from the standalone parent when none was specified.
-    let effectiveCollectionKey = collectionKey;
-    if (relatedItem && !effectiveCollectionKey) {
+    if (relatedItem && collectionKeysToApply.length === 0) {
         try {
             await Zotero.Items.loadDataTypes([relatedItem], ['collections']);
             const collectionIds = relatedItem.getCollections();
             if (collectionIds && collectionIds.length > 0) {
                 const firstCollection = Zotero.Collections.get(collectionIds[0]);
                 if (firstCollection) {
-                    effectiveCollectionKey = firstCollection.key;
+                    collectionKeysToApply.push(firstCollection.key);
                 }
             }
         } catch (error: any) {
@@ -163,11 +191,31 @@ export async function executeCreateNoteAction(action: AgentAction, runId?: strin
         }
     }
 
-    if (effectiveCollectionKey) {
+    // Child notes (with parentKey) cannot be in collections — Zotero's
+    // fki_collectionItems_itemID_parentItemID trigger aborts saveTx if we try.
+    const appliedCollectionKeys: string[] = [];
+    if (!parentKey) {
+        for (const key of collectionKeysToApply) {
+            try {
+                zoteroNote.addToCollection(key);
+                appliedCollectionKeys.push(key);
+            } catch (error: any) {
+                logger(`executeCreateNoteAction: Failed to stage collection assignment for ${key}: ${error.message}`, 1);
+            }
+        }
+    }
+
+    // Stage tags (create_note_tags_collections). Valid on child notes too.
+    // Skip duplicates so result_data reports each applied tag once.
+    const appliedTags: string[] = [];
+    for (const tag of proposed.tags ?? []) {
+        const trimmed = typeof tag === 'string' ? tag.trim() : '';
+        if (!trimmed || appliedTags.includes(trimmed)) continue;
         try {
-            zoteroNote.addToCollection(effectiveCollectionKey);
+            zoteroNote.addTag(trimmed);
+            appliedTags.push(trimmed);
         } catch (error: any) {
-            logger(`executeCreateNoteAction: Failed to stage collection assignment: ${error.message}`, 1);
+            logger(`executeCreateNoteAction: Failed to stage tag "${trimmed}": ${error.message}`, 1);
         }
     }
 
@@ -192,7 +240,9 @@ export async function executeCreateNoteAction(action: AgentAction, runId?: strin
         zotero_key: zoteroNote.key,
         library_ref: libraryRefForLibraryID(zoteroNote.libraryID) ?? undefined,
         ...(zoteroNote.parentKey ? { parent_key: zoteroNote.parentKey } : {}),
-        ...(effectiveCollectionKey ? { collection_key: effectiveCollectionKey } : {}),
+        ...(appliedCollectionKeys.length > 0 ? { collection_key: appliedCollectionKeys[0] } : {}),
+        ...(appliedCollectionKeys.length > 0 ? { collection_keys: appliedCollectionKeys } : {}),
+        ...(appliedTags.length > 0 ? { tags: appliedTags } : {}),
         ...(relatedItemKey ? { related_item_key: relatedItemKey } : {}),
         ...(warning ? { warning } : {}),
     };

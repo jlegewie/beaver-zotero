@@ -167,11 +167,6 @@ export const useProfileSync = () => {
             lastRefreshRef.current = new Date();
             logger(`useProfileSync: Successfully fetched profile and plan for ${userId}.`, profileData.profile);
 
-            if (profileData.profile.plan.upload_files && profileData.profile.has_authorized_access) {
-                await fileUploader.start();
-            } else {
-                await fileUploader.stop();
-            }
         } catch (error: any) {
             if (error instanceof ZoteroInstanceMismatchError) {
                 logger(`useProfileSync: Zotero instance mismatch for ${userId}. Signing out user.`, 2);

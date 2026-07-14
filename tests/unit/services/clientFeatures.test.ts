@@ -40,7 +40,18 @@ const VERSION_GATES: { feature: string; minVersion: string; op: Op }[] = [
 // portable_ids is declaration-only because it gates emission of the
 // device-portable model-facing id format, which every declaring client both
 // emits and resolves — there is no version threshold to derive it from.
-const DECLARATION_ONLY_FEATURES = ['external_files', 'ask_user_question', 'portable_ids'];
+// list_items_include_children and create_note_tags_collections are
+// declaration-only because they gate request/action_data fields a client only
+// honors if its handlers implement them: builds that predate them drop the
+// unknown fields, so the backend degrades gracefully instead of assuming
+// support from a version.
+const DECLARATION_ONLY_FEATURES = [
+    'external_files',
+    'ask_user_question',
+    'portable_ids',
+    'list_items_include_children',
+    'create_note_tags_collections',
+];
 
 // The full backend feature vocabulary (ALL_FEATURES in version_gates.py): every
 // version-gated feature plus the declaration-only ones.

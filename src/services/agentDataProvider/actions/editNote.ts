@@ -62,7 +62,8 @@ import {
 import { renderToHTML, type RenderContextData } from '../../../../react/utils/citationRenderers';
 import { prepareCitationRenderContext } from '../../../../react/utils/citationRenderContext';
 import { addOrUpdateEditFooter, getBeaverFooterAppendPoint } from '../../../utils/noteEditFooter';
-import { assertNoPreviewMarkers } from '../../../utils/notePreviewGuard';
+import { assertNoPreviewMarkers, containsPreviewMarkers, stripPreviewMarkers } from '../../../utils/notePreviewGuard';
+import { dismissDiffPreview, isDiffPreviewActive, isDiffPreviewPendingFor } from '../../../../react/utils/noteEditorDiffPreview';
 import {
     WSAgentActionValidateRequest,
     WSAgentActionValidateResponse,
@@ -516,7 +517,15 @@ async function validateEditNoteAction(
 
     // 6. Load note data
     await item.loadDataType('note');
-    const rawHtml = getLatestNoteHtml(item);
+    let rawHtml = getLatestNoteHtml(item);
+    // Recovery path: if diff-preview markup was ever accidentally persisted
+    // into this note, validate against the stripped content. Execution
+    // repairs the stored note the same way before applying, so old_string
+    // matching stays consistent across validate and execute.
+    if (containsPreviewMarkers(rawHtml)) {
+        logger(`validateEditNoteAction: note ${resolvedLibraryId}-${zotero_key} contains persisted diff-preview markup; validating against stripped content`, 1);
+        rawHtml = stripPreviewMarkers(rawHtml);
+    }
 
     // 7. Note not empty
     if (!rawHtml || rawHtml.trim() === '') {
@@ -876,12 +885,45 @@ async function executeEditNoteAction(
     // 2. Load note
     await item.loadDataType('note');
 
+    // 2a. If the in-editor diff preview is still showing for this note (or a
+    //     show is in flight), dismiss it and wait for the editor restore to
+    //     finish before reading or writing. Approval paths dismiss the
+    //     preview fire-and-forget, so an execute arriving over WS can
+    //     otherwise race the restore.
+    if (isDiffPreviewActive(resolvedLibraryId, zotero_key) || isDiffPreviewPendingFor(resolvedLibraryId, zotero_key)) {
+        await dismissDiffPreview();
+    }
+
     // 2b. Promote any unsaved content from the open editor into the DB so that
     //     this execute reads the same HTML validation saw. Without this, a
     //     rewrite could clobber the user's in-flight typing, and a str_replace
     //     could fail with no_match against matches that only exist in the
     //     editor's unsaved state.
     await flushLiveEditorToDB(item);
+
+    // 2c. Repair notes that contain persisted diff-preview markup. The
+    //     preview is presentation-only; if a teardown failure ever let an
+    //     editor autosave persist it, assertNoPreviewMarkers below would
+    //     refuse every subsequent save of this note with no recovery path.
+    //     Strip the markup (drop proposed-addition spans, unwrap deletion
+    //     spans back to the original text) and save the repaired note before
+    //     applying the edit. This writes even when the edit itself later
+    //     fails to match — intentional, so a failed attempt still un-bricks
+    //     the note for subsequent edits.
+    {
+        const persistedHtml: string = item.getNote();
+        if (containsPreviewMarkers(persistedHtml)) {
+            const repaired = stripPreviewMarkers(persistedHtml);
+            if (!containsPreviewMarkers(repaired)) {
+                logger(`executeEditNoteAction: repairing persisted diff-preview markup in ${resolvedLibraryId}-${zotero_key}`, 1);
+                item.setNote(repaired);
+                await item.saveTx();
+                await waitForNoteSaveStabilization(item, repaired);
+            } else {
+                logger(`executeEditNoteAction: diff-preview markup in ${resolvedLibraryId}-${zotero_key} could not be fully stripped; save will be refused by the preview guard`, 1);
+            }
+        }
+    }
 
     // 3. Pre-load page labels so new citations resolve page indices to labels.
     //    Done before reading the note to avoid async gaps between read and write.

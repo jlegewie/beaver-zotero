@@ -104,8 +104,22 @@ export const searchableLibraryIdsAtom = atom<number[]>((get) => {
         .map(lib => lib.library_id);
 });
 
+/**
+ * Whether the library-access snapshot is ready to make allow/deny decisions.
+ *
+ * `searchableLibraryIdsAtom` intentionally remains fail-closed while the
+ * profile is loading, so its initial value is `[]`. Consumers that need to
+ * explain an access decision must distinguish that loading state from the
+ * genuine "all libraries excluded" state.
+ */
+export const isLibraryAccessReadyAtom = atom<boolean>((get) => {
+    return get(isProfileLoadedAtom)
+        && get(profileWithPlanAtom) !== null
+        && get(localZoteroLibrariesAtom).length > 0;
+});
+
 export const allLibrariesExcludedAtom = atom<boolean>((get) => {
-    return get(localZoteroLibrariesAtom).length > 0 && get(searchableLibraryIdsAtom).length === 0;
+    return get(isLibraryAccessReadyAtom) && get(searchableLibraryIdsAtom).length === 0;
 });
 
 // Plan data

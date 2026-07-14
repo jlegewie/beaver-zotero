@@ -31,6 +31,8 @@ vi.mock('../../../react/utils/popupMessageUtils', async () => {
 
 import {
     allLibrariesExcludedAtom,
+    isLibraryAccessReadyAtom,
+    isProfileLoadedAtom,
     localZoteroLibrariesAtom,
     profileWithPlanAtom,
     searchableLibraryIdsAtom,
@@ -108,6 +110,23 @@ function profile(overrides: Partial<SafeProfileWithPlan> = {}): SafeProfileWithP
 }
 
 describe('searchableLibraryIdsAtom', () => {
+    it('keeps access decisions pending until profile and local libraries are loaded', () => {
+        const store = createStore();
+
+        expect(store.get(searchableLibraryIdsAtom)).toEqual([]);
+        expect(store.get(isLibraryAccessReadyAtom)).toBe(false);
+
+        store.set(profileWithPlanAtom, profile());
+        store.set(localZoteroLibrariesAtom, [library({ library_id: 1 })]);
+
+        expect(store.get(searchableLibraryIdsAtom)).toEqual([1]);
+        expect(store.get(isLibraryAccessReadyAtom)).toBe(false);
+
+        store.set(isProfileLoadedAtom, true);
+
+        expect(store.get(isLibraryAccessReadyAtom)).toBe(true);
+    });
+
     it('returns all local library IDs when nothing is excluded', () => {
         const store = createStore();
         store.set(profileWithPlanAtom, profile());
@@ -148,6 +167,10 @@ describe('searchableLibraryIdsAtom', () => {
         expect(store.get(allLibrariesExcludedAtom)).toBe(false);
 
         store.set(localZoteroLibrariesAtom, [library({ library_id: 1 })]);
+
+        expect(store.get(allLibrariesExcludedAtom)).toBe(false);
+
+        store.set(isProfileLoadedAtom, true);
 
         expect(store.get(allLibrariesExcludedAtom)).toBe(true);
     });

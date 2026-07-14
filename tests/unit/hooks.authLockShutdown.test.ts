@@ -45,6 +45,7 @@ vi.mock('../../react/ui/UIManager', () => ({
     uiManager: {
         cleanup: mockUiManagerCleanup,
     },
+    restoreReaderSidebarWidthHandler: vi.fn(),
 }));
 
 vi.mock('../../src/services/protocolHandler', () => ({

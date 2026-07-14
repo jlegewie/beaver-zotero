@@ -371,7 +371,12 @@ async function validateItemsInBackground(
     // for as long as the tab is open, so their invalid popup should not auto-expire.
     isTabContext: boolean = false
 ) {
-    const getValidation = get(getItemValidationAtom);
+    // Read through the derived atom on every call. Capturing its returned
+    // function here would capture the validation-results Map from before the
+    // async work below and make the post-validation popup decision use stale
+    // attachment states.
+    const getValidation = (item: Zotero.Item): ItemValidationState | undefined =>
+        get(getItemValidationAtom)(item);
     logger(`validateItemsInBackground: Validating ${items.length} items`, 3);
     
     try {

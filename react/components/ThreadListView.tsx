@@ -1,16 +1,22 @@
-import React, { useEffect, useState, useRef, useCallback } from 'react';
+import React, { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { SearchIcon, EditIcon, DeleteIcon, TickIcon, CancelIcon } from './icons/icons';
 import Spinner from './icons/Spinner';
 import IconButton from './ui/IconButton';
-import { isThreadListViewAtom } from '../atoms/ui';
+import { isThreadListViewAtom, threadListFilterAtom } from '../atoms/ui';
 import { ThreadData, loadThreadAtom, newThreadAtom } from '../atoms/threads';
 import { currentThreadIdAtom } from '../agents/atoms';
 import { userAtom } from '../atoms/auth';
+import { searchableLibraryIdsAtom } from '../atoms/profile';
 import { threadService } from '../../src/services/threadService';
 import { getDateGroup } from '../utils/dateUtils';
 import { formatTimeAgo } from '../utils/formatTimeAgo';
+import { buildThreadItemFilter } from '../utils/threadItemFilter';
+import { deduplicateByThread } from '../utils/threadMatches';
 import Button from './ui/Button';
+import { ChipButton } from './agentRuns/requestChips/ChipButton';
+import { CSSIcon, CSSItemTypeIcon } from './icons/zotero';
+import ThreadFilterMenu from './ui/menus/ThreadFilterMenu';
 import { clearRecentChatsCache } from './RecentChats';
 import { isTransientNetworkError } from '../utils/isTransientNetworkError';
 
@@ -70,6 +76,9 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
     const newThread = useSetAtom(newThreadAtom);
     const currentThreadId = useAtomValue(currentThreadIdAtom);
     const user = useAtomValue(userAtom);
+    const filter = useAtomValue(threadListFilterAtom);
+    const setFilter = useSetAtom(threadListFilterAtom);
+    const searchableLibraryIds = useAtomValue(searchableLibraryIdsAtom);
 
     const [threads, setThreads] = useState<ThreadData[]>([]);
     const [isLoading, setIsLoading] = useState(false);
@@ -79,16 +88,81 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
 
     const [searchQuery, setSearchQuery] = useState('');
     const [activeQuery, setActiveQuery] = useState('');
+    const activeQueryRef = useRef('');
     const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    // Guards against a stale in-flight fetch (e.g. from a filter that was
+    // just replaced or cleared) overwriting state set by a newer one.
+    const fetchSeqRef = useRef(0);
 
     const [editingThreadId, setEditingThreadId] = useState<string | null>(null);
     const [editingName, setEditingName] = useState('');
     const [isSavingRename, setIsSavingRename] = useState(false);
     const [hoveredThreadId, setHoveredThreadId] = useState<string | null>(null);
 
+    const containerRef = useRef<HTMLDivElement | null>(null);
+    const menuPortalContainer = containerRef.current?.closest('[id^="beaver-react-root-"], #beaver-pane-window') as HTMLElement | null;
+    const searchInputRef = useRef<HTMLInputElement | null>(null);
+
+    // The filter menu's own search input holds focus while the menu is open
+    // and nothing restores it on close, so refocus after the close settles.
+    const focusSearchInput = () => {
+        setTimeout(() => searchInputRef.current?.focus(), 5);
+    };
+
+    useEffect(() => {
+        activeQueryRef.current = activeQuery;
+    }, [activeQuery]);
+
     // Fetch threads (initial load or after search)
     const fetchThreads = useCallback(async (query: string) => {
         if (!user) return;
+
+        // Invalidate any earlier request before taking a synchronous path
+        // (such as a cache hit) so stale results cannot overwrite it later.
+        const seq = ++fetchSeqRef.current;
+
+        if (filter) {
+            // Exclusions can change (Beaver Preferences) while the view is
+            // open, so re-check at fetch time instead of trusting the atom.
+            if (!searchableLibraryIds.includes(filter.libraryId)) {
+                // Do not leave item-filtered rows visible after removing the
+                // filter chip. The atom update below triggers the unfiltered
+                // fetch on the next render.
+                setThreads([]);
+                setHasMore(false);
+                setNextCursor(null);
+                setFetchError(null);
+                setIsLoading(true);
+                setFilter(null);
+                return;
+            }
+
+            setThreads([]);
+            setIsLoading(true);
+            try {
+                const matches = await threadService.findThreadsByItem(filter.libraryId, filter.keys, 'both');
+                const deduped = deduplicateByThread(matches);
+                if (seq === fetchSeqRef.current) {
+                    setThreads(deduped);
+                    setHasMore(false);
+                    setNextCursor(null);
+                    setFetchError(null);
+                }
+            } catch (error) {
+                console.error('Error fetching threads by item:', error);
+                if (seq === fetchSeqRef.current) {
+                    if (isTransientNetworkError(error)) {
+                        const offline = typeof navigator !== 'undefined' && navigator.onLine === false;
+                        setFetchError({ offline });
+                    } else {
+                        setFetchError(null);
+                    }
+                }
+            } finally {
+                if (seq === fetchSeqRef.current) setIsLoading(false);
+            }
+            return;
+        }
 
         const cacheKey = `${user.id}:${query}`;
 
@@ -99,6 +173,7 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
             setHasMore(cached.hasMore);
             setNextCursor(cached.nextCursor);
             setFetchError(null);
+            setIsLoading(false);
             return;
         }
 
@@ -112,9 +187,11 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
                     createdAt: t.created_at,
                     updatedAt: t.updated_at,
                 } as ThreadData));
-                setThreads(mapped);
-                setNextCursor(response.next_cursor);
-                setHasMore(response.has_more);
+                if (seq === fetchSeqRef.current) {
+                    setThreads(mapped);
+                    setNextCursor(response.next_cursor);
+                    setHasMore(response.has_more);
+                }
                 searchCache.set(cacheKey, {
                     threads: mapped,
                     hasMore: response.has_more,
@@ -129,9 +206,11 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
                     createdAt: t.created_at,
                     updatedAt: t.updated_at,
                 } as ThreadData));
-                setThreads(mapped);
-                setNextCursor(response.next_cursor);
-                setHasMore(response.has_more);
+                if (seq === fetchSeqRef.current) {
+                    setThreads(mapped);
+                    setNextCursor(response.next_cursor);
+                    setHasMore(response.has_more);
+                }
                 searchCache.set(cacheKey, {
                     threads: mapped,
                     hasMore: response.has_more,
@@ -139,23 +218,26 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
                     timestamp: Date.now(),
                 });
             }
-            setFetchError(null);
+            if (seq === fetchSeqRef.current) setFetchError(null);
         } catch (error) {
             console.error('Error fetching threads:', error);
-            if (isTransientNetworkError(error)) {
-                const offline = typeof navigator !== 'undefined' && navigator.onLine === false;
-                setFetchError({ offline });
-            } else {
-                setFetchError(null);
+            if (seq === fetchSeqRef.current) {
+                if (isTransientNetworkError(error)) {
+                    const offline = typeof navigator !== 'undefined' && navigator.onLine === false;
+                    setFetchError({ offline });
+                } else {
+                    setFetchError(null);
+                }
             }
         } finally {
-            setIsLoading(false);
+            if (seq === fetchSeqRef.current) setIsLoading(false);
         }
-    }, [user]);
+    }, [user, filter, searchableLibraryIds]);
 
-    // Initial fetch
+    // Initial fetch, and refetch (with the in-progress query) whenever the
+    // filter is set/cleared/switched.
     useEffect(() => {
-        fetchThreads('');
+        fetchThreads(activeQueryRef.current);
     }, [fetchThreads]);
 
     // Debounced search
@@ -167,7 +249,9 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
 
         debounceRef.current = setTimeout(() => {
             setActiveQuery(searchQuery);
-            fetchThreads(searchQuery);
+            // Filtered mode searches the already-fetched set client-side —
+            // no network call or cache invalidation needed.
+            if (!filter) fetchThreads(searchQuery);
         }, 400);
 
         return () => {
@@ -175,7 +259,7 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
                 clearTimeout(debounceRef.current);
             }
         };
-    }, [searchQuery, activeQuery, fetchThreads]);
+    }, [searchQuery, activeQuery, filter, fetchThreads]);
 
     const handleSearchKeyDown = (e: React.KeyboardEvent) => {
         if (e.key === 'Escape') {
@@ -188,16 +272,24 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
                 clearTimeout(debounceRef.current);
             }
             setActiveQuery(searchQuery);
+            if (filter) return;
             // Invalidate cache for this query to get fresh results on Enter
             if (user) searchCache.delete(`${user.id}:${searchQuery}`);
             fetchThreads(searchQuery);
         }
     };
 
+    const handleSelectFilterItem = async (item: Zotero.Item) => {
+        const f = await buildThreadItemFilter(item, searchableLibraryIds);
+        if (f) setFilter(f);
+        focusSearchInput();
+    };
+
     // Load more
     const loadMoreThreads = async () => {
-        if (!user || isLoading) return;
+        if (!user || isLoading || filter) return;
 
+        const seq = ++fetchSeqRef.current;
         setIsLoading(true);
         try {
             const cacheKey = `${user.id}:${activeQuery}`;
@@ -214,24 +306,26 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
                 updatedAt: t.updated_at,
             } as ThreadData));
             const combined = [...threads, ...mapped];
-            setThreads(combined);
-            setNextCursor(response.next_cursor);
-            setHasMore(response.has_more);
+            if (seq === fetchSeqRef.current) {
+                setThreads(combined);
+                setNextCursor(response.next_cursor);
+                setHasMore(response.has_more);
+            }
             searchCache.set(cacheKey, {
                 threads: combined,
                 hasMore: response.has_more,
                 nextCursor: response.next_cursor,
                 timestamp: Date.now(),
             });
-            setFetchError(null);
+            if (seq === fetchSeqRef.current) setFetchError(null);
         } catch (error) {
             console.error('Error loading more threads:', error);
-            if (isTransientNetworkError(error)) {
+            if (seq === fetchSeqRef.current && isTransientNetworkError(error)) {
                 const offline = typeof navigator !== 'undefined' && navigator.onLine === false;
                 setFetchError({ offline });
             }
         } finally {
-            setIsLoading(false);
+            if (seq === fetchSeqRef.current) setIsLoading(false);
         }
     };
 
@@ -317,10 +411,15 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
         }
     };
 
-    const groupedThreads = groupThreadsByDate(threads);
+    const displayedThreads = useMemo(() =>
+        (!filter || !activeQuery) ? threads
+            : threads.filter(t => (t.name || 'Unnamed conversation').toLowerCase().includes(activeQuery.toLowerCase())),
+        [filter, activeQuery, threads]);
+
+    const groupedThreads = groupThreadsByDate(displayedThreads);
 
     return (
-        <div className="display-flex flex-col flex-1 min-h-0">
+        <div className="display-flex flex-col flex-1 min-h-0" ref={containerRef}>
             {/* Title */}
             <div className="thread-overlay-title mb-1">Chats</div>
 
@@ -341,6 +440,7 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
                         onChange={e => setSearchQuery(e.target.value)}
                         onKeyDown={handleSearchKeyDown}
                         autoFocus
+                        ref={searchInputRef}
                     />
                     {isLoading && (
                         <div className="thread-search-spinner">
@@ -349,6 +449,42 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
                     )}
                 </div>
             </div>
+
+            {/* Filter row */}
+            <div className="thread-filter-row">
+                <ThreadFilterMenu
+                    disabled={isLoading}
+                    activeFilter={filter}
+                    onSelect={handleSelectFilterItem}
+                    menuPortalContainer={menuPortalContainer}
+                />
+                {filter && (
+                    <>
+                        <div className="thread-filter-divider" />
+                        <ChipButton
+                            className="thread-filter-chip"
+                            onClick={() => {}}
+                            aria-label={`Filtered by ${filter.label}`}
+                        >
+                            <CSSItemTypeIcon itemType={filter.itemType} className="scale-80" />
+                            <span className="truncate">{filter.label}</span>
+                            <span
+                                role="button"
+                                aria-label="Remove filter"
+                                className="thread-filter-chip-remove"
+                                onClick={(e) => { e.stopPropagation(); setFilter(null); focusSearchInput(); }}
+                            >
+                                <CSSIcon name="x-8" className="icon-16 scale-80" />
+                            </span>
+                        </ChipButton>
+                    </>
+                )}
+            </div>
+            {filter && !isLoading && (
+                <div className="thread-filter-count">
+                    Showing {displayedThreads.length} chat{displayedThreads.length === 1 ? '' : 's'} related to {filter.label}
+                </div>
+            )}
 
             {/* Thread list */}
             <div className="flex-1 overflow-y-auto px-1">
@@ -466,7 +602,7 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
                 })}
 
                 {/* Network error state — replaces empty state when fetch failed transiently */}
-                {!isLoading && threads.length === 0 && fetchError && (
+                {!isLoading && displayedThreads.length === 0 && fetchError && (
                     <div className="display-flex flex-col items-center justify-center gap-2 py-6 text-center px-3 mt-2">
                         <span className="font-color-primary font-semibold text-sm">
                             {fetchError.offline ? "You're offline" : "Couldn't load chats"}
@@ -489,23 +625,23 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
                 )}
 
                 {/* Empty state */}
-                {!isLoading && threads.length === 0 && !fetchError && (
+                {!isLoading && displayedThreads.length === 0 && !fetchError && (
                     <div className="display-flex items-center justify-center py-6">
                         <span className="font-color-tertiary text-sm">
-                            {activeQuery ? 'No matching chats' : 'No chats yet'}
+                            {activeQuery ? 'No matching chats' : filter ? `No chats about ${filter.label}` : 'No chats yet'}
                         </span>
                     </div>
                 )}
 
                 {/* Loading spinner */}
-                {isLoading && threads.length === 0 && (
+                {isLoading && displayedThreads.length === 0 && (
                     <div className="display-flex items-center justify-center py-6">
                         <Spinner size={18} />
                     </div>
                 )}
 
                 {/* Inline network error — when we already have some threads but a refresh / load-more failed */}
-                {threads.length > 0 && fetchError && !isLoading && (
+                {displayedThreads.length > 0 && fetchError && !isLoading && (
                     <div className="display-flex items-center gap-2 px-3 py-2">
                         <span className="font-color-tertiary text-sm flex-1">
                             {fetchError.offline ? "You're offline." : "Couldn't reach the server."}

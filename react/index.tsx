@@ -62,8 +62,8 @@ const GlobalContextInitializer = () => {
     // Handle plugin upgrade tasks
     useUpgradeHandler();
 
-    // Handle Zotero sync
-    useZoteroSync();
+    // Handle Zotero sync (legacy cloud processing beta)
+    // useZoteroSync();
 
     // Suppress Zotero auto-sync while mutating agent runs are active.
     useSyncSuppression();

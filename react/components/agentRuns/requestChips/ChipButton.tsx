@@ -23,13 +23,14 @@ export interface ChipButtonProps extends React.ButtonHTMLAttributes<HTMLButtonEl
 }
 
 export const ChipButton = forwardRef<HTMLButtonElement, ChipButtonProps>(
-    function ChipButton({ children, className = '', onClick, ...rest }, ref) {
+    function ChipButton({ children, className = '', onClick, disabled, ...rest }, ref) {
         return (
             <button
                 ref={ref}
                 type="button"
                 style={{ height: '22px' }}
                 className={`variant-outline source-button ${className}`}
+                disabled={disabled}
                 onClick={(e) => {
                     stopLeftClick(e);
                     if (e.button === 0) onClick?.(e);
