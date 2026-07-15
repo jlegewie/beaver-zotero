@@ -7,7 +7,7 @@
  */
 
 import { wrapWithSchemaVersion } from '../../utils/noteActions';
-import { undoEditNoteAction } from '../../utils/editNoteActions';
+import { undoEditNoteAction, undoEditNoteBatchAction } from '../../utils/editNoteActions';
 import { getLatestNoteHtml } from '../../../src/utils/noteEditorIO';
 import type { AgentAction } from '../../agents/agentActions';
 import { UNRESOLVED_LIBRARY_ID } from '../../../src/utils/libraryIdentity';
@@ -179,7 +179,11 @@ export async function handleTestNoteUndoHttpRequest(request: any) {
         return { error: 'action with proposed_data is required' };
     }
     try {
-        await undoEditNoteAction(action);
+        if (action.action_type === 'edit_note_batch') {
+            await undoEditNoteBatchAction(action);
+        } else {
+            await undoEditNoteAction(action);
+        }
         return { ok: true };
     } catch (e: any) {
         return { ok: false, error: e?.message || String(e) };

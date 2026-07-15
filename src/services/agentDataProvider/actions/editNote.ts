@@ -131,7 +131,7 @@ function renderMarkdownFragment(
  * create_note, then simplify the rendered HTML into the matcher's input format.
  * The helper is only called after the normal synchronous matcher misses.
  */
-async function buildMarkdownRenderFields(
+export async function buildMarkdownRenderFields(
     oldString: string,
     newString: string,
     operation: EditNoteOperation,
@@ -196,7 +196,7 @@ async function findMarkdownRenderFallbackMatch(
  * Returns 'always_apply' if the note has been auto-approved for this run,
  * otherwise falls back to the user's stored deferred-tool preference.
  */
-function getEditNotePreference(library_id: number, zotero_key: string): DeferredToolPreference {
+export function getEditNotePreference(library_id: number, zotero_key: string): DeferredToolPreference {
     const noteKey = makeNoteKey(library_id, zotero_key);
     const autoApproveKeys = store.get(autoApproveNoteKeysAtom);
     if (autoApproveKeys.has(noteKey)) {
@@ -211,7 +211,7 @@ function getEditNotePreference(library_id: number, zotero_key: string): Deferred
  * to either an in-library Zotero item or an inline `<a>` link, instead of
  * throwing on attributes the simplifier doesn't natively know about.
  */
-function getExternalRefContext(): ExternalRefContext {
+export function getExternalRefContext(): ExternalRefContext {
     return {
         externalRefs: store.get(externalReferenceMappingAtom),
         externalItemMapping: store.get(externalReferenceItemMappingAtom),

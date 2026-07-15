@@ -162,6 +162,17 @@ export const isEditNoteAgentAction = (action: AgentAction): boolean => {
 };
 
 /**
+ * Type guard for batch edit note actions
+ */
+export const isEditNoteBatchAgentAction = (action: AgentAction): boolean => {
+    return action.action_type === 'edit_note_batch';
+};
+
+/** edit_note OR edit_note_batch — any note-edit action against a single note. */
+export const isAnyEditNoteAgentAction = (action: AgentAction): boolean =>
+    isEditNoteAgentAction(action) || isEditNoteBatchAgentAction(action);
+
+/**
  * Type guard for confirm extraction actions
  */
 export const isConfirmExtractionAgentAction = (action: AgentAction): boolean => {
@@ -1021,8 +1032,8 @@ export const addPendingApprovalAtom = atom(
             return next;
         });
 
-        // Trigger in-editor diff preview for edit_note approvals
-        if (event.action_type === 'edit_note') {
+        // Trigger in-editor diff preview for edit_note / edit_note_batch approvals
+        if (event.action_type === 'edit_note' || event.action_type === 'edit_note_batch') {
             const { library_id, zotero_key } = event.action_data || {};
             if (library_id != null && zotero_key) {
                 updateDiffPreviewForNote(library_id, zotero_key);
@@ -1051,8 +1062,8 @@ export const removePendingApprovalAtom = atom(
             return next;
         });
 
-        // If the removed approval was edit_note, update/dismiss the preview
-        if (removed?.actionType === 'edit_note') {
+        // If the removed approval was edit_note / edit_note_batch, update/dismiss the preview
+        if (removed?.actionType === 'edit_note' || removed?.actionType === 'edit_note_batch') {
             const libId = removed.actionData?.library_id;
             const zKey = removed.actionData?.zotero_key;
             if (libId != null && zKey) {
@@ -1168,7 +1179,7 @@ export async function buildPendingApprovalFromAction(action: AgentAction): Promi
     } else if (actionType === 'confirm_external_search') {
         // No Zotero data fetching needed — cost info is entirely in proposed_data
         currentValue = undefined;
-    } else if (actionType === 'edit_note') {
+    } else if (actionType === 'edit_note' || actionType === 'edit_note_batch') {
         // No extra Zotero data fetching needed — old_string/new_string are in proposed_data
         currentValue = undefined;
     }

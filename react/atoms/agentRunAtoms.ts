@@ -91,6 +91,8 @@ import {
     isManageTagsAgentAction,
     isManageCollectionsAgentAction,
     isEditNoteAgentAction,
+    isEditNoteBatchAgentAction,
+    isAnyEditNoteAgentAction,
     isCreateNoteAgentAction,
     hasAppliedZoteroItem,
     hasAppliedBulkAnnotations,
@@ -114,7 +116,7 @@ import { undoCreateCollectionAction } from '../utils/createCollectionActions';
 import { undoOrganizeItemsAction } from '../utils/organizeItemsActions';
 import { undoManageTagsAction } from '../utils/manageTagsActions';
 import { undoManageCollectionsAction } from '../utils/manageCollectionsActions';
-import { undoEditNoteAction } from '../utils/editNoteActions';
+import { undoEditNoteAction, undoEditNoteBatchAction } from '../utils/editNoteActions';
 import { undoCreateNoteAction } from '../utils/createNoteActions';
 import { undoCreateAnnotationsAction } from '../utils/createAnnotationsActions';
 import { processToolReturnResults } from '../agents/toolResultProcessing';
@@ -618,6 +620,8 @@ async function undoAppliedActionsInReverse(actions: AgentAction[]): Promise<void
                 await undoEditMetadataAction(action, false);
             } else if (isEditNoteAgentAction(action)) {
                 await undoEditNoteAction(action);
+            } else if (isEditNoteBatchAgentAction(action)) {
+                await undoEditNoteBatchAction(action);
             } else if (isCreateItemAgentAction(action)) {
                 await undoCreateItemAction(action);
             } else if (isCreateCollectionAgentAction(action)) {
@@ -1476,14 +1480,14 @@ function createWSCallbacks(set: Setter): WSCallbacks {
                 }
             }
 
-            // edit_note: auto-approve if user opted in for this note in this run
-            if (event.action_type === 'edit_note') {
+            // edit_note / edit_note_batch: auto-approve if user opted in for this note in this run
+            if (event.action_type === 'edit_note' || event.action_type === 'edit_note_batch') {
                 const { library_id, zotero_key } = event.action_data || {};
                 if (library_id != null && zotero_key) {
                     const noteKey = makeNoteKey(library_id, zotero_key);
                     const autoApproveKeys = store.get(autoApproveNoteKeysAtom);
                     if (autoApproveKeys.has(noteKey)) {
-                        logger(`Auto-approving edit_note for ${noteKey}`, 1);
+                        logger(`Auto-approving ${event.action_type} for ${noteKey}`, 1);
                         agentService.sendApprovalResponse(event.action_id, true);
                         set(addAutoApprovedActionIdAtom, event.action_id);
                         return;
@@ -2082,7 +2086,7 @@ export const regenerateFromRunAtom = atom(
                 .filter(isManageCollectionsAgentAction)
                 .filter(a => a.status === 'applied');
             const noteEditsToUndo = actionsInRemovedRuns
-                .filter(isEditNoteAgentAction)
+                .filter(isAnyEditNoteAgentAction)
                 .filter(a => a.status === 'applied');
             const createNotesToUndo = actionsInRemovedRuns
                 .filter(isCreateNoteAgentAction)
@@ -2269,7 +2273,7 @@ export const regenerateWithEditedPromptAtom = atom(
                 .filter(isManageCollectionsAgentAction)
                 .filter(a => a.status === 'applied');
             const noteEditsToUndo = actionsInRemovedRuns
-                .filter(isEditNoteAgentAction)
+                .filter(isAnyEditNoteAgentAction)
                 .filter(a => a.status === 'applied');
             const createNotesToUndo = actionsInRemovedRuns
                 .filter(isCreateNoteAgentAction)

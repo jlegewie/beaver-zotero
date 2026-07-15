@@ -42,6 +42,7 @@ import {
 } from '../../src/utils/noteHtmlEntities';
 import { getBeaverFooterAppendPoint } from '../../src/utils/noteEditFooter';
 import { containsPreviewMarkers } from '../../src/utils/notePreviewGuard';
+import { findTargetRawMatchPosition } from '../../src/utils/editNoteRawPosition';
 import { store } from '../store';
 import {
     externalReferenceMappingAtom,
@@ -114,6 +115,9 @@ export interface EditOperation {
     oldString: string;
     newString: string;
     operation?: EditNoteOperation;
+    /** Validation-captured raw context anchoring a repeated oldString target. */
+    targetBeforeContext?: string;
+    targetAfterContext?: string;
 }
 
 export interface DiffPreviewOptions {
@@ -364,13 +368,19 @@ export async function showDiffPreview(
         }
 
         // Expand all edits
-        const expandedEdits: Array<{ expandedOld: string; expandedNew: string; operation: EditNoteOperation }> = [];
+        const expandedEdits: PreviewExpandedEdit[] = [];
         for (const edit of edits) {
             const op = edit.operation ?? 'str_replace';
             try {
                 if (op === 'rewrite' || op === 'append') {
                     const expandedNew = edit.newString ? expandToRawHtml(edit.newString, metadata, 'new', externalRefContext, pageLabels) : '';
-                    expandedEdits.push({ expandedOld: '', expandedNew, operation: op });
+                    expandedEdits.push({
+                        expandedOld: '',
+                        expandedNew,
+                        operation: op,
+                        targetBeforeContext: edit.targetBeforeContext,
+                        targetAfterContext: edit.targetAfterContext,
+                    });
                 } else {
                     const expandedOld = edit.oldString ? expandToRawHtml(edit.oldString, metadata, 'old') : '';
                     // For insert_after / insert_before, new_string is already
@@ -382,7 +392,13 @@ export async function showDiffPreview(
                     // context and the insertion as addition.
                     const expandedNew = edit.newString ? expandToRawHtml(edit.newString, metadata, 'new', externalRefContext, pageLabels) : '';
                     if (expandedOld) {
-                        expandedEdits.push({ expandedOld, expandedNew, operation: op });
+                        expandedEdits.push({
+                            expandedOld,
+                            expandedNew,
+                            operation: op,
+                            targetBeforeContext: edit.targetBeforeContext,
+                            targetAfterContext: edit.targetAfterContext,
+                        });
                     } else {
                         logger(
                             `showDiffPreview: dropping edit for ${noteKey} — expandedOld is empty `
@@ -736,7 +752,8 @@ function findEditorInstance(itemId: number): any | null {
 
 function computeEditsHash(edits: EditOperation[]): string {
     return edits.map(e =>
-        `${e.oldString.length}:${e.newString.length}:${e.operation ?? 'str_replace'}:${e.oldString}`,
+        `${e.oldString.length}:${e.newString.length}:${e.operation ?? 'str_replace'}:${e.oldString}`
+        + `:${e.targetBeforeContext ?? ''}:${e.targetAfterContext ?? ''}`,
     ).join('|');
 }
 
@@ -868,6 +885,14 @@ function findScrollContainer(element: Element): Element | null {
 // Diff Construction
 // =============================================================================
 
+interface PreviewExpandedEdit {
+    expandedOld: string;
+    expandedNew: string;
+    operation: EditNoteOperation;
+    targetBeforeContext?: string;
+    targetAfterContext?: string;
+}
+
 /**
  * Try to locate edit.expandedOld in `stripped`, falling back through entity
  * decode/encode variants the way the validation/execution paths do (see
@@ -884,8 +909,8 @@ function findScrollContainer(element: Element): Element | null {
  */
 function resolveExpandedOldForMatch(
     stripped: string,
-    edit: { expandedOld: string; expandedNew: string; operation: EditNoteOperation },
-): { expandedOld: string; expandedNew: string; operation: EditNoteOperation } | null {
+    edit: PreviewExpandedEdit,
+): PreviewExpandedEdit | null {
     if (stripped.indexOf(edit.expandedOld) !== -1) return edit;
 
     const decodedOld = decodeHtmlEntities(edit.expandedOld);
@@ -894,6 +919,12 @@ function resolveExpandedOldForMatch(
             expandedOld: decodedOld,
             expandedNew: decodeHtmlEntities(edit.expandedNew),
             operation: edit.operation,
+            targetBeforeContext: edit.targetBeforeContext !== undefined
+                ? decodeHtmlEntities(edit.targetBeforeContext)
+                : undefined,
+            targetAfterContext: edit.targetAfterContext !== undefined
+                ? decodeHtmlEntities(edit.targetAfterContext)
+                : undefined,
         };
     }
 
@@ -904,6 +935,12 @@ function resolveExpandedOldForMatch(
                 expandedOld: encodedOld,
                 expandedNew: encodeTextEntities(edit.expandedNew, form),
                 operation: edit.operation,
+                targetBeforeContext: edit.targetBeforeContext !== undefined
+                    ? encodeTextEntities(edit.targetBeforeContext, form)
+                    : undefined,
+                targetAfterContext: edit.targetAfterContext !== undefined
+                    ? encodeTextEntities(edit.targetAfterContext, form)
+                    : undefined,
             };
         }
     }
@@ -998,7 +1035,7 @@ function logExpandedOldMismatch(
 
 export function constructMultiDiffHtml(
     fullHtml: string,
-    edits: Array<{ expandedOld: string; expandedNew: string; operation: EditNoteOperation }>,
+    edits: PreviewExpandedEdit[],
 ): string | null {
     const existingCitationCache = extractDataCitationItems(fullHtml);
     const stripped = stripDataCitationItems(fullHtml);
@@ -1043,6 +1080,41 @@ export function constructMultiDiffHtml(
         const edit = resolveExpandedOldForMatch(stripped, origEdit);
         if (!edit) {
             logExpandedOldMismatch(stripped, origEdit);
+            continue;
+        }
+
+        const hasTargetAnchors = edit.targetBeforeContext !== undefined
+            || edit.targetAfterContext !== undefined;
+        if (edit.operation !== 'str_replace_all' && hasTargetAnchors) {
+            const targetPosition = findTargetRawMatchPosition(
+                stripped,
+                edit.expandedOld,
+                edit.targetBeforeContext,
+                edit.targetAfterContext,
+            );
+            // Never fall back to the first raw occurrence when validation has
+            // selected another occurrence. If the saved anchors no longer
+            // resolve, omit this edit so the caller falls back safely rather
+            // than presenting a misleading approval preview.
+            if (targetPosition === null) {
+                logger(
+                    'constructMultiDiffHtml: target anchors did not resolve uniquely; '
+                    + 'skipping the edit instead of previewing the first occurrence',
+                    1,
+                );
+                continue;
+            }
+            const { prefix, oldMiddle, newMiddle, suffix } = computeHtmlDiff(
+                edit.expandedOld,
+                edit.expandedNew,
+            );
+            const styledOld = oldMiddle ? wrapTextNodesWithStyle(oldMiddle, DEL_STYLE) : '';
+            const styledNew = newMiddle ? wrapTextNodesWithStyle(newMiddle, ADD_STYLE) : '';
+            ops.push({
+                pos: targetPosition,
+                oldLen: edit.expandedOld.length,
+                replacement: prefix + styledOld + styledNew + suffix,
+            });
             continue;
         }
 

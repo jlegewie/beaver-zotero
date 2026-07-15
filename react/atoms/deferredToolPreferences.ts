@@ -34,6 +34,7 @@ const DEFAULT_TOOL_GROUPS: Record<string, string> = {
     'edit_metadata': 'metadata_edits',
     'edit_item': 'metadata_edits',
     'edit_note': 'note_edits',
+    'edit_note_batch': 'note_edits',
     'create_note': 'note_creation',
     'create_collection': 'library_modifications',
     'organize_items': 'library_modifications',

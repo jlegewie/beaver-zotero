@@ -19,7 +19,12 @@ import {
     sendApprovalResponseAtom,
 } from '../../../atoms/agentRunAtoms';
 import { getToolCallStatus, toolResultsMapAtom } from '../../../agents/atoms';
-import { executeEditNoteAction, undoEditNoteAction } from '../../../utils/editNoteActions';
+import {
+    executeEditNoteAction,
+    executeEditNoteBatchAction,
+    undoEditNoteAction,
+    undoEditNoteBatchAction,
+} from '../../../utils/editNoteActions';
 import { openNoteAndSearchEdit, openNoteByKey } from '../../../utils/sourceUtils';
 import {
     dismissDiffPreview,
@@ -43,22 +48,6 @@ import {
     parseEditNoteToolCallArgs,
     resolveEditNoteTargetFromData,
 } from '../../../components/agentRuns/editNoteShared';
-
-export function buildPreviewableEditOperations(
-    entries: Array<Record<string, any> | null | undefined>,
-): EditOperation[] {
-    const edits: EditOperation[] = [];
-    for (const entry of entries) {
-        if (!entry) continue;
-        const oldString = (entry.old_string as string | undefined) ?? '';
-        const newString = (entry.new_string as string | undefined) ?? '';
-        const operation = (entry.operation ?? 'str_replace') as EditOperation['operation'];
-        if (operation === 'rewrite' || operation === 'append' || oldString) {
-            edits.push({ oldString, newString, operation });
-        }
-    }
-    return edits;
-}
 
 export async function dismissActiveEditNotePreview(): Promise<void> {
     if (!isDiffPreviewActive()) return;
@@ -163,6 +152,9 @@ export function useEditNoteActions({
     const isRunPending = useAtomValue(isWSChatPendingAtom);
 
     const actions = getAgentActionsByToolcall(toolcallId, (a) => a.run_id === runId);
+    // A single tool call always produces exactly one AgentAction, even for an
+    // edit_note_batch call (the whole batch is one action with an edits[]
+    // array in proposed_data) — actions[0] is never ambiguous here.
     const action = actions.length > 0 ? actions[0] : null;
     const pendingApprovalFromMap = useMemo(
         () => findPendingApprovalForToolcall(toolcallId, allPendingApprovals.values()),
@@ -254,10 +246,23 @@ export function useEditNoteActions({
     });
     const config = STATUS_CONFIGS[effectiveStatus];
 
-    const basePreviewData = buildPreviewData('edit_note', pendingApproval, action);
+    // buildPreviewData derives actionType from pendingApproval/action when either
+    // is present, so the toolName argument only matters as the pre-action/pre-approval
+    // fallback below it — pass the real type when known for clarity.
+    const basePreviewData = buildPreviewData(
+        pendingApproval?.actionType ?? action?.action_type ?? 'edit_note',
+        pendingApproval,
+        action,
+    );
+    // Before any action/pendingApproval exists (pure streaming), detect a
+    // batch call from its args shape (`edits[]`) so the preview dispatches to
+    // the batch branch instead of defaulting to the v1 type.
+    const streamingActionType = parsedArgs && Array.isArray((parsedArgs as any).edits)
+        ? 'edit_note_batch'
+        : 'edit_note';
     const previewData = basePreviewData
         ?? (parsedArgs && Object.keys(parsedArgs).length > 0
-            ? { actionType: 'edit_note', actionData: parsedArgs }
+            ? { actionType: streamingActionType, actionData: parsedArgs }
             : null);
     const previewStatus: EditNoteDisplayStatus = previewData
         ? effectiveStatus
@@ -276,12 +281,14 @@ export function useEditNoteActions({
         setClickedButton(button);
         try {
             await dismissActiveEditNotePreview();
-            const result = await executeEditNoteAction(action);
+            const result = action.action_type === 'edit_note_batch'
+                ? await executeEditNoteBatchAction(action)
+                : await executeEditNoteAction(action);
             await ackAgentActions(runId, [{
                 action_id: action.id,
                 result_data: result,
             }]);
-            logger(`useEditNoteActions: Applied edit_note action ${action.id}`, 1);
+            logger(`useEditNoteActions: Applied ${action.action_type} action ${action.id}`, 1);
         } catch (error: any) {
             const errorMessage = error?.message || 'Failed to apply edit_note';
             const stackTrace = error?.stack || '';
@@ -337,9 +344,13 @@ export function useEditNoteActions({
         setClickedButton('undo');
         try {
             await dismissActiveEditNotePreview();
-            await undoEditNoteAction(action);
+            if (action.action_type === 'edit_note_batch') {
+                await undoEditNoteBatchAction(action);
+            } else {
+                await undoEditNoteAction(action);
+            }
             undoAgentAction(action.id);
-            logger(`useEditNoteActions: Undone edit_note action ${action.id}`, 1);
+            logger(`useEditNoteActions: Undone ${action.action_type} action ${action.id}`, 1);
         } catch (error: any) {
             const errorMessage = error?.message || 'Failed to undo edit_note';
             const stackTrace = error?.stack || '';

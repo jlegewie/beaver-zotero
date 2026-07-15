@@ -15,6 +15,8 @@ import IconButton from '../../../components/ui/IconButton';
 import Tooltip from '../../../components/ui/Tooltip';
 import { ActionPreview } from './ActionPreview';
 import { useEditNoteActions } from './useEditNoteActions';
+import type { EditNoteRowDescriptor } from '../../../components/agentRuns/editNoteShared';
+import { buildBatchRowPreviewData } from './editNoteBatchPreviewData';
 
 interface EditNoteRowViewProps {
     part: ToolCallPart;
@@ -23,6 +25,13 @@ interface EditNoteRowViewProps {
     disabled?: boolean;
     externalUndoError?: string | null;
     onUndoErrorChange?: (toolcallId: string, error: string | null) => void;
+    /**
+     * Present when this row renders a single edit within an edit_note_batch
+     * action's edits[] rather than a v1 (single-edit) part. Drives the
+     * preview from the edit's own fields and suppresses per-row action
+     * buttons, since a batch applies/undoes atomically at the group level.
+     */
+    rowDescriptor?: EditNoteRowDescriptor;
 }
 
 export const EditNoteRowView: React.FC<EditNoteRowViewProps> = ({
@@ -32,10 +41,11 @@ export const EditNoteRowView: React.FC<EditNoteRowViewProps> = ({
     disabled = false,
     externalUndoError = null,
     onUndoErrorChange,
+    rowDescriptor,
 }) => {
     const {
         actions,
-        previewData,
+        previewData: hookPreviewData,
         previewStatus,
         previewIsStreaming,
         isProcessing,
@@ -43,19 +53,16 @@ export const EditNoteRowView: React.FC<EditNoteRowViewProps> = ({
         config,
         clickedButton,
         displayedUndoError,
-        showApply,
-        showReject,
-        showUndo,
-        showRetry,
-        showOpenNoteAction,
-        openNoteTooltip,
+        showApply: hookShowApply,
+        showReject: hookShowReject,
+        showUndo: hookShowUndo,
+        showRetry: hookShowRetry,
         handleApprove,
         handleReject,
         handleApplyPending,
         handleRejectPending,
         handleUndo,
         handleRetry,
-        handleOpenNote,
     } = useEditNoteActions({
         part,
         runId,
@@ -63,6 +70,19 @@ export const EditNoteRowView: React.FC<EditNoteRowViewProps> = ({
         externalUndoError,
         onUndoErrorChange,
     });
+
+    const isBatchRow = rowDescriptor !== undefined;
+    const previewData = isBatchRow
+        ? buildBatchRowPreviewData(hookPreviewData, rowDescriptor)
+        : hookPreviewData;
+
+    // A batch (edit_note_batch) is applied/undone atomically for the whole
+    // action — only the group-level Apply All / Undo All / Retry All buttons
+    // may act, so per-row controls are suppressed for a batch row.
+    const showApply = !isBatchRow && hookShowApply;
+    const showReject = !isBatchRow && hookShowReject;
+    const showUndo = !isBatchRow && hookShowUndo;
+    const showRetry = !isBatchRow && hookShowRetry;
 
     const actionButtonsDisabled = disabled || isProcessing;
     const onApply = previewStatus === 'awaiting' ? handleApprove : handleApplyPending;
@@ -92,7 +112,7 @@ export const EditNoteRowView: React.FC<EditNoteRowViewProps> = ({
                 <div className="flex-1 min-w-0">
                     {previewData ? (
                         <ActionPreview
-                            toolName="edit_note"
+                            toolName={isBatchRow ? 'edit_note_batch' : 'edit_note'}
                             previewData={previewData}
                             status={previewStatus}
                             actions={actions}
@@ -104,7 +124,10 @@ export const EditNoteRowView: React.FC<EditNoteRowViewProps> = ({
                 </div>
 
                 <div className="display-flex flex-col gap-25 py-2 mr-2">
-                    {isProcessing ? (
+                    {/* A batch row never shows action buttons or its own processing
+                        spinner — the whole edit_note_batch action applies/undoes
+                        atomically via the group's Apply All / Undo All / Retry All. */}
+                    {!isBatchRow && (isProcessing ? (
                         <>
                             {clickedButton === 'approve' && (
                                 <Tooltip content="Apply" showArrow singleLine>
@@ -205,7 +228,7 @@ export const EditNoteRowView: React.FC<EditNoteRowViewProps> = ({
                                 </Tooltip>
                             )}
                         </>
-                    )}
+                    ))}
                 </div>
             </div>
 
