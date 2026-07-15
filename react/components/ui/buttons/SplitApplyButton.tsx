@@ -11,13 +11,13 @@ interface SplitApplyButtonProps {
     disabled?: boolean;
     /** Label for the primary (left) button. Defaults to "Apply". */
     primaryLabel?: string;
-    /** Label for the dropdown menu item. Defaults to "Apply all for this note". */
+    /** Label for the dropdown menu item. */
     applyAllLabel?: string;
 }
 
 /**
  * Split button: left half is a normal "Apply" button, right half is a small
- * chevron that opens a single-item dropdown ("Apply all for this note").
+ * chevron that opens one broader approval option.
  */
 const SplitApplyButton: React.FC<SplitApplyButtonProps> = ({
     onApply,
@@ -25,7 +25,7 @@ const SplitApplyButton: React.FC<SplitApplyButtonProps> = ({
     loading = false,
     disabled = false,
     primaryLabel = 'Apply',
-    applyAllLabel = 'Apply all for this note',
+    applyAllLabel = 'Allow this action group for this run',
 }) => {
     const menuItems: MenuItem[] = [
         {

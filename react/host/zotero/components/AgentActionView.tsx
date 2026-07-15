@@ -14,6 +14,7 @@ import {
     isCreateAnnotationsAgentAction,
 } from '../../../agents/agentActions';
 import {
+    approveToolGroupForRunAtom,
     approvalResponseIntentsAtom,
     isWSChatPendingAtom,
     removeApprovalResponseIntentAtom,
@@ -68,6 +69,7 @@ import { revealSource, openNoteByKey, getCurrentCollectionKeyForItem } from '../
 import Button from '../../../components/ui/Button';
 import IconButton from '../../../components/ui/IconButton';
 import Tooltip from '../../../components/ui/Tooltip';
+import SplitApplyButton from '../../../components/ui/buttons/SplitApplyButton';
 import DeferredToolPreferenceButton from '../../../components/ui/buttons/DeferredToolPreferenceButton';
 import ExtractionApprovalButton from '../../../components/ui/buttons/ExtractionApprovalButton';
 import ExternalSearchApprovalButton from '../../../components/ui/buttons/ExternalSearchApprovalButton';
@@ -85,6 +87,7 @@ import {
 } from './agentActionViewHelpers';
 import { ActionPreview } from './ActionPreview';
 import { currentThreadIdAtom } from '../../../atoms/threads';
+import { getToolGroupRunApprovalLabel } from '../../../atoms/runToolGroupApprovals';
 
 export { STATUS_CONFIGS, getOverallStatus } from './agentActionViewHelpers';
 export type { ActionStatus } from './agentActionViewHelpers';
@@ -187,6 +190,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     const isMultiAction = (toolName === 'create_items' || toolName === 'create_item') && actions.length > 1;
 
     const sendApprovalResponse = useSetAtom(sendApprovalResponseAtom);
+    const approveToolGroupForRun = useSetAtom(approveToolGroupForRunAtom);
     const removeApprovalResponseIntent = useSetAtom(removeApprovalResponseIntentAtom);
     const removePendingApproval = useSetAtom(removePendingApprovalAtom);
     const ackAgentActions = useSetAtom(ackAgentActionsAtom);
@@ -308,6 +312,13 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
         sendApprovalResponse({ actionId: pendingApproval.actionId, approved: false });
         removePendingApproval(pendingApproval.actionId);
     }, [pendingApproval, sendApprovalResponse, removePendingApproval]);
+
+    const handleApproveForRun = useCallback(() => {
+        if (!pendingApproval) return;
+        setIsProcessingApproval(true);
+        setClickedButton('approve');
+        approveToolGroupForRun({ runId, toolName });
+    }, [pendingApproval, approveToolGroupForRun, runId, toolName]);
 
     const handleApplyPending = useCallback(async () => {
         if (actions.length === 0 || isProcessing) return;
@@ -563,6 +574,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
 
     const toggleExpanded = () => setExpanded({ key: expansionKey, expanded: !isExpanded });
     const previewData = buildPreviewData(toolName, pendingApproval, action);
+    const runApprovalLabel = getToolGroupRunApprovalLabel(toolName);
 
     const getHeaderIcon = () => {
         const getToolIcon = () => {
@@ -863,14 +875,24 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                         )}
 
                         {config.showApply && (!isProcessing || clickedButton === 'approve') && (
-                            <Button
-                                variant="solid"
-                                onClick={isAwaitingApproval ? handleApprove : handleApplyPending}
-                                loading={isProcessing && clickedButton === 'approve'}
-                                disabled={isProcessing}
-                            >
-                                <span>{isConfirmAction ? 'Confirm' : 'Apply'}</span>
-                            </Button>
+                            isAwaitingApproval && runApprovalLabel ? (
+                                <SplitApplyButton
+                                    onApply={handleApprove}
+                                    onApplyAll={handleApproveForRun}
+                                    loading={isProcessing && clickedButton === 'approve'}
+                                    disabled={isProcessing}
+                                    applyAllLabel={runApprovalLabel}
+                                />
+                            ) : (
+                                <Button
+                                    variant="solid"
+                                    onClick={isAwaitingApproval ? handleApprove : handleApplyPending}
+                                    loading={isProcessing && clickedButton === 'approve'}
+                                    disabled={isProcessing}
+                                >
+                                    <span>{isConfirmAction ? 'Confirm' : 'Apply'}</span>
+                                </Button>
+                            )
                         )}
                     </div>
                 </div>

@@ -12,14 +12,18 @@ import {
     setAgentActionsToErrorAtom,
     undoAgentActionAtom,
 } from '../../../agents/agentActions';
-import { isWSChatPendingAtom, sendApprovalResponseAtom } from '../../../atoms/agentRunAtoms';
+import {
+    approveToolGroupForRunAtom,
+    isWSChatPendingAtom,
+    sendApprovalResponseAtom,
+} from '../../../atoms/agentRunAtoms';
 import {
     agentActionItemTitlesAtom,
     setAgentActionItemTitleAtom,
     toolExpandedAtom,
     setToolExpandedAtom,
 } from '../../../atoms/messageUIState';
-import { addAutoApproveNoteKeyAtom, makeNoteKey } from '../../../atoms/editNoteAutoApprove';
+import { getToolGroupRunApprovalLabel } from '../../../atoms/runToolGroupApprovals';
 import { STATUS_CONFIGS, type ActionStatus } from './agentActionViewHelpers';
 import {
     ArrowDownIcon,
@@ -93,7 +97,7 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
     const rejectAgentAction = useSetAtom(rejectAgentActionAtom);
     const setAgentActionsToError = useSetAtom(setAgentActionsToErrorAtom);
     const undoAgentAction = useSetAtom(undoAgentActionAtom);
-    const addAutoApproveNoteKey = useSetAtom(addAutoApproveNoteKeyAtom);
+    const approveToolGroupForRun = useSetAtom(approveToolGroupForRunAtom);
 
     const partStates = useMemo(() => {
         return parts.map((part) => {
@@ -353,41 +357,36 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
         setAgentActionsToError,
     ]);
 
-    const handleApproveAllForNote = useCallback(() => {
-        if (!resolvedTarget) return;
-        const noteKey = makeNoteKey(resolvedTarget.libraryId, resolvedTarget.zoteroKey);
-        addAutoApproveNoteKey(noteKey);
-
-        // Batch-remove non-group approvals for this note in one update;
-        // handleApplyAll will dismiss the preview and batch-remove the
-        // group's own approvals.
-        const idsToRemove: string[] = [];
-        for (const [, pending] of allPendingApprovals) {
-            if (pending.actionType !== 'edit_note') continue;
-            const pendingTarget = resolveEditNoteTargetFromData(pending.actionData);
-            if (!pendingTarget) continue;
-            if (makeNoteKey(pendingTarget.libraryId, pendingTarget.zoteroKey) !== noteKey) continue;
-            if (pendingApprovalsForGroup.some((groupPending) => groupPending.actionId === pending.actionId)) continue;
-            sendApprovalResponse({ actionId: pending.actionId, approved: true });
-            idsToRemove.push(pending.actionId);
-        }
-        if (idsToRemove.length > 0) {
-            setPendingApprovals((prev) => {
-                const next = new Map(prev);
-                for (const id of idsToRemove) next.delete(id);
-                return next;
+    const handleApproveNoteEditsForRun = useCallback(async () => {
+        if (isProcessing) return;
+        setIsLocallyProcessing(true);
+        setClickedButton('approve');
+        const shouldWaitForExternalProcessing = hasPendingApprovals && isRunPending;
+        try {
+            await dismissActiveEditNotePreview();
+            const approvedCount = approveToolGroupForRun({
+                runId,
+                toolName: 'edit_note',
             });
+            if (shouldWaitForExternalProcessing) {
+                setIsExternallyProcessing(true);
+            }
+            logger(
+                `EditNoteGroupView: Allowed note edits for run ${runId} and approved ${approvedCount} pending action(s)`,
+                1,
+            );
+        } finally {
+            setIsLocallyProcessing(false);
+            if (!shouldWaitForExternalProcessing) {
+                setClickedButton(null);
+            }
         }
-
-        handleApplyAll();
     }, [
-        resolvedTarget,
-        addAutoApproveNoteKey,
-        allPendingApprovals,
-        pendingApprovalsForGroup,
-        sendApprovalResponse,
-        setPendingApprovals,
-        handleApplyAll,
+        isProcessing,
+        hasPendingApprovals,
+        isRunPending,
+        approveToolGroupForRun,
+        runId,
     ]);
 
     const handleRejectAll = useCallback(() => {
@@ -823,11 +822,11 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
                                 hasPendingApprovals ? (
                                     <SplitApplyButton
                                         onApply={handleApplyAll}
-                                        onApplyAll={handleApproveAllForNote}
+                                        onApplyAll={handleApproveNoteEditsForRun}
                                         loading={isProcessing && clickedButton === 'approve'}
                                         disabled={isProcessing}
                                         primaryLabel="Apply All"
-                                        applyAllLabel="Always apply for this note"
+                                        applyAllLabel={getToolGroupRunApprovalLabel('edit_note') ?? undefined}
                                     />
                                 ) : (
                                     <Button

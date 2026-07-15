@@ -26,7 +26,6 @@ import {
     setOnDismiss,
     type EditOperation,
 } from './noteEditorDiffPreview';
-import { makeNoteKey } from '../atoms/editNoteAutoApprove';
 import { logger } from '../../src/utils/logger';
 import { getPref } from '../../src/utils/prefs';
 import { store } from '../store';
@@ -68,6 +67,10 @@ function getStore(): any {
  * editor" indicator.
  */
 export const diffPreviewNoteKeyAtom = atom<string | null>(null);
+
+function makeNoteKey(libraryId: number, zoteroKey: string): string {
+    return `${libraryId}-${zoteroKey}`;
+}
 
 // =============================================================================
 // Coordinator
