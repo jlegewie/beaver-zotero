@@ -98,6 +98,7 @@ import {
     AgentAction,
     addPendingApprovalAtom,
     removePendingApprovalAtom,
+    removePendingApprovalsAtom,
     pendingApprovalsAtom,
     buildPendingApprovalFromAction,
     clearAllPendingApprovalsAtom,
@@ -126,12 +127,13 @@ import { currentThreadNameAtom } from './threads';
 import { loadItemDataForAgentActions, autoApplyAnnotationAgentActions, autoCreateNoteAgentActions } from '../utils/agentActionUtils';
 import { extractZoteroReferencesFromToolCall } from '../agents/toolLabels';
 import {
-    autoApproveNoteKeysAtom,
-    clearAutoApproveNoteKeysAtom,
-    addAutoApprovedActionIdAtom,
-    clearAutoApprovedActionIdsAtom,
-    makeNoteKey,
-} from './editNoteAutoApprove';
+    clearRunToolGroupApprovalsAtom,
+    getPendingApprovalIdsForToolGroup,
+    getToolGroup,
+    grantToolGroupForRunAtom,
+    isToolGroupApprovedForCurrentRun,
+    runToolGroupApprovalsAtom,
+} from './runToolGroupApprovals';
 import { loadFullItemDataWithAllTypes } from '../../src/utils/zoteroUtils';
 import { buildZoteroInstanceWire } from '../../src/services/zoteroInstanceWire';
 import { dismissDiffPreview } from '../utils/noteEditorDiffPreview';
@@ -967,7 +969,7 @@ export const prepareForNewRunAtom = atom(null, (_get, set) => {
     set(clearAllPendingApprovalsAtom);
     set(clearAllPendingQuestionsAtom);
     set(clearApprovalResponseIntentsAtom);
-    set(clearAutoApproveNoteKeysAtom);
+    set(clearRunToolGroupApprovalsAtom);
 });
 
 /**
@@ -1282,8 +1284,7 @@ function createWSCallbacks(set: Setter): WSCallbacks {
             // Clear pending approvals and dismiss diff preview
             set(clearAllPendingApprovalsAtom);
             set(clearAllPendingQuestionsAtom);
-            // Clear per-run auto-approve state (keys only; IDs kept for UI labeling)
-            set(clearAutoApproveNoteKeysAtom);
+            set(clearRunToolGroupApprovalsAtom);
         },
 
         onError: (event: WSErrorEvent) => {
@@ -1310,8 +1311,7 @@ function createWSCallbacks(set: Setter): WSCallbacks {
             // Clear pending approvals and dismiss diff preview (run failed)
             set(clearAllPendingApprovalsAtom);
             set(clearAllPendingQuestionsAtom);
-            // Clear per-run auto-approve state
-            set(clearAutoApproveNoteKeysAtom);
+            set(clearRunToolGroupApprovalsAtom);
 
             if (
                 event.try_auto_resume &&
@@ -1476,19 +1476,14 @@ function createWSCallbacks(set: Setter): WSCallbacks {
                 }
             }
 
-            // edit_note: auto-approve if user opted in for this note in this run
-            if (event.action_type === 'edit_note') {
-                const { library_id, zotero_key } = event.action_data || {};
-                if (library_id != null && zotero_key) {
-                    const noteKey = makeNoteKey(library_id, zotero_key);
-                    const autoApproveKeys = store.get(autoApproveNoteKeysAtom);
-                    if (autoApproveKeys.has(noteKey)) {
-                        logger(`Auto-approving edit_note for ${noteKey}`, 1);
-                        agentService.sendApprovalResponse(event.action_id, true);
-                        set(addAutoApprovedActionIdAtom, event.action_id);
-                        return;
-                    }
-                }
+            // A grant can be selected while other validation requests are
+            // already in flight. Catch those requests here even though future
+            // validations will return always_apply directly.
+            const runApprovals = store.get(runToolGroupApprovalsAtom);
+            if (isToolGroupApprovedForCurrentRun(runApprovals, event.action_type)) {
+                logger(`Auto-approving ${event.action_type} for the current run`, 1);
+                agentService.sendApprovalResponse(event.action_id, true);
+                return;
             }
 
             // Default: add to pending approvals map for UI rendering
@@ -1525,8 +1520,7 @@ function createWSCallbacks(set: Setter): WSCallbacks {
             // Clear pending approvals and dismiss diff preview (connection lost)
             set(clearAllPendingApprovalsAtom);
             set(clearAllPendingQuestionsAtom);
-            // Clear per-run auto-approve state if the socket drops before done/error.
-            set(clearAutoApproveNoteKeysAtom);
+            set(clearRunToolGroupApprovalsAtom);
 
             // If the socket dropped uncleanly while a run was still in flight, the
             // server never delivered an error event
@@ -2441,8 +2435,7 @@ export const closeWSConnectionAtom = atom(null, async (get, set) => {
     set(clearAllPendingApprovalsAtom);
     set(clearAllPendingQuestionsAtom);
     set(clearApprovalResponseIntentsAtom);
-    // Clear per-run auto-approve state
-    set(clearAutoApproveNoteKeysAtom);
+    set(clearRunToolGroupApprovalsAtom);
 
     // Mark active run as canceled if it exists
     const activeRun = get(activeRunAtom);
@@ -2482,9 +2475,7 @@ export const clearThreadAtom = atom(null, (_get, set) => {
     // Clear pending questions so a reset never leaves the composer disabled
     // behind an unanswerable card (pending approvals are left as-is here).
     set(clearAllPendingQuestionsAtom);
-    // Clear per-run auto-approve state (both keys and action IDs)
-    set(clearAutoApproveNoteKeysAtom);
-    set(clearAutoApprovedActionIdsAtom);
+    set(clearRunToolGroupApprovalsAtom);
 });
 
 /**
@@ -2527,6 +2518,40 @@ export const sendApprovalResponseAtom = atom(
         logger(`sendApprovalResponseAtom: Sending approval response for ${actionId}: ${approved}${userInstructions ? ' (with instructions)' : ''}`, 1);
         agentService.sendApprovalResponse(actionId, approved, userInstructions);
     }
+);
+
+/**
+ * Grant a tool group for the rest of a run and approve every request from that
+ * group that is already pending. Future validations and late-arriving approval
+ * requests read the same transient policy.
+ */
+export const approveToolGroupForRunAtom = atom(
+    null,
+    (
+        get,
+        set,
+        { runId, toolName }: { runId: string; toolName: string },
+    ): number => {
+        const group = getToolGroup(toolName);
+        if (!group) return 0;
+
+        set(grantToolGroupForRunAtom, { runId, toolName });
+
+        const matchingActionIds = getPendingApprovalIdsForToolGroup(
+            get(pendingApprovalsAtom).values(),
+            toolName,
+        );
+        for (const actionId of matchingActionIds) {
+            set(sendApprovalResponseAtom, { actionId, approved: true });
+        }
+        set(removePendingApprovalsAtom, matchingActionIds);
+
+        logger(
+            `approveToolGroupForRunAtom: Granted ${group} for run ${runId} and approved ${matchingActionIds.length} pending action(s)`,
+            1,
+        );
+        return matchingActionIds.length;
+    },
 );
 
 /**

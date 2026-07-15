@@ -30,7 +30,6 @@ import { TimeoutContext, checkAborted } from '../timeout';
 import { extractCitationReferences } from './extractCitationReferences';
 import { lookupZoteroReferences, LookupZoteroReferencesResult } from '../lookupZoteroReferences';
 import { WSDataError, NoteResultItem } from '../../agentProtocol';
-import { addAutoApproveNoteKeyAtom, makeNoteKey } from '../../../../react/atoms/editNoteAutoApprove';
 import { resolveCreateNoteParent } from './resolveCreateNoteParent';
 import { TimingAccumulator } from '../../../utils/timing';
 
@@ -699,11 +698,6 @@ async function executeCreateNoteAction(
         await ta.track('save_tx_ms', () => zoteroNote.saveTx());
 
         logger(`executeCreateNoteAction: Created note "${title}" with key ${zoteroNote.key} in library ${targetLibraryId}`, 1);
-
-        // Auto-approve future edit_note actions targeting this newly created note
-        const noteKey = makeNoteKey(zoteroNote.libraryID, zoteroNote.key);
-        store.set(addAutoApproveNoteKeyAtom, noteKey);
-        logger(`executeCreateNoteAction: Auto-approve enabled for created note ${noteKey}`, 1);
 
         // Mirror the relation on the related item so the "Related" pane shows
         // the link from either side. Requires the note's key, so runs post-save.

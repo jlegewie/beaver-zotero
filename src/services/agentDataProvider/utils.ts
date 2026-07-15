@@ -21,6 +21,10 @@ import { addPopupMessageAtom } from '../../../react/utils/popupMessageUtils';
 import { wasItemAddedBeforeLastSync } from '../../../react/utils/sourceUtils';
 import { DeferredToolPreference } from '../agentProtocol';
 import { deferredToolPreferencesAtom } from '../../../react/atoms/deferredToolPreferences';
+import {
+    isToolGroupApprovedForCurrentRun,
+    runToolGroupApprovalsAtom,
+} from '../../../react/atoms/runToolGroupApprovals';
 import { isAgentSupportedItem } from '../../utils/agentItemSupport';
 import { store } from '../../../react/store';
 import { searchableLibraryIdsAtom } from '../../../react/atoms/profile';
@@ -924,6 +928,11 @@ export function validateLibraryAccess(libraryIdOrName: number | string | null | 
  */
 export function getDeferredToolPreference(toolName: string): DeferredToolPreference {
     try {
+        const runApprovals = store.get(runToolGroupApprovalsAtom);
+        if (isToolGroupApprovedForCurrentRun(runApprovals, toolName)) {
+            return 'always_apply';
+        }
+
         const data = store.get(deferredToolPreferencesAtom);
         const group = data.toolToGroup[toolName] ?? toolName;
         const preference = data.groupPreferences[group];

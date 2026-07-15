@@ -15,6 +15,7 @@
 import { atom } from 'jotai';
 import { getPref, setPref } from '../../src/utils/prefs';
 import { logger } from '../../src/utils/logger';
+import { DEFAULT_TOOL_GROUPS } from './runToolGroupApprovals';
 
 // =============================================================================
 // Types
@@ -28,22 +29,6 @@ export interface DeferredToolPreferencesData {
     /** Maps group names to preference values */
     groupPreferences: Record<string, DeferredToolPreference>;
 }
-
-// Default group mappings for known tools
-const DEFAULT_TOOL_GROUPS: Record<string, string> = {
-    'edit_metadata': 'metadata_edits',
-    'edit_item': 'metadata_edits',
-    'edit_note': 'note_edits',
-    'create_note': 'note_creation',
-    'create_collection': 'library_modifications',
-    'organize_items': 'library_modifications',
-    'manage_tags': 'library_structure',
-    'manage_collections': 'library_structure',
-    'create_highlight_annotations': 'annotations',
-    'create_note_annotations': 'annotations',
-    'create_item': 'create_items',
-    'create_items': 'create_items',
-};
 
 // Default preferences for groups
 const DEFAULT_GROUP_PREFERENCES: Record<string, DeferredToolPreference> = {
