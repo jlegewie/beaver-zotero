@@ -87,7 +87,10 @@ import {
 } from './agentActionViewHelpers';
 import { ActionPreview } from './ActionPreview';
 import { currentThreadIdAtom } from '../../../atoms/threads';
-import { getToolGroupRunApprovalLabel } from '../../../atoms/runApprovalPolicy';
+import {
+    getToolGroupRunApprovalLabel,
+    getToolGroupRunApprovalScope,
+} from '../../../atoms/runApprovalPolicy';
 
 export { STATUS_CONFIGS, getOverallStatus } from './agentActionViewHelpers';
 export type { ActionStatus } from './agentActionViewHelpers';
@@ -575,6 +578,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     const toggleExpanded = () => setExpanded({ key: expansionKey, expanded: !isExpanded });
     const previewData = buildPreviewData(toolName, pendingApproval, action);
     const runApprovalLabel = getToolGroupRunApprovalLabel(toolName);
+    const runApprovalScope = getToolGroupRunApprovalScope(toolName);
 
     const getHeaderIcon = () => {
         const getToolIcon = () => {
@@ -882,6 +886,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                                     loading={isProcessing && clickedButton === 'approve'}
                                     disabled={isProcessing}
                                     applyAllLabel={runApprovalLabel}
+                                    applyAllScope={runApprovalScope ?? undefined}
                                 />
                             ) : (
                                 <Button

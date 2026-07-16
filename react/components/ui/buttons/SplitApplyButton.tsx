@@ -11,8 +11,14 @@ interface SplitApplyButtonProps {
     disabled?: boolean;
     /** Label for the primary (left) button. Defaults to "Apply". */
     primaryLabel?: string;
-    /** Label for the dropdown menu item. */
+    /** Full accessible label for the dropdown menu item. */
     applyAllLabel?: string;
+    /** Short description of the action group shown below the menu title. */
+    applyAllScope?: string;
+}
+
+function sentenceCase(value: string): string {
+    return value ? value.charAt(0).toUpperCase() + value.slice(1) : value;
 }
 
 /**
@@ -26,11 +32,25 @@ const SplitApplyButton: React.FC<SplitApplyButtonProps> = ({
     disabled = false,
     primaryLabel = 'Apply',
     applyAllLabel = 'Allow this action group for this run',
+    applyAllScope = 'Similar actions',
 }) => {
     const menuItems: MenuItem[] = [
         {
             label: applyAllLabel,
             onClick: onApplyAll,
+            customContent: (
+                <div className="display-flex flex-col min-w-0" style={{ lineHeight: 1.25 }}>
+                    <div className="text-base font-medium font-color-primary">
+                        Allow for this run
+                    </div>
+                    <div
+                        className="text-base font-color-secondary"
+                        style={{ whiteSpace: 'normal', overflowWrap: 'break-word' }}
+                    >
+                        {sentenceCase(applyAllScope)}
+                    </div>
+                </div>
+            ),
         },
     ];
 
@@ -60,6 +80,8 @@ const SplitApplyButton: React.FC<SplitApplyButtonProps> = ({
                 disabled={disabled || loading}
                 ariaLabel="More apply options"
                 showArrow={false}
+                maxWidth="200px"
+                // maxWidth="calc(100vw - 24px)"
                 style={{
                     borderTopLeftRadius: 0,
                     borderBottomLeftRadius: 0,
