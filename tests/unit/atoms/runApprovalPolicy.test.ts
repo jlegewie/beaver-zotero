@@ -6,6 +6,7 @@ import {
     getPendingApprovalIdsForToolGroup,
     getToolGroup,
     getToolGroupRunApprovalLabel,
+    getToolGroupRunApprovalScope,
     grantCreatedNoteEditsForRunAtom,
     grantToolGroupForRunAtom,
     isActionApprovedForCurrentRun,
@@ -158,6 +159,9 @@ describe('runApprovalPolicy', () => {
         );
         expect(getToolGroupRunApprovalLabel('manage_collections')).toBe(
             'Allow all library-wide tag and collection changes for this run',
+        );
+        expect(getToolGroupRunApprovalScope('create_collection')).toBe(
+            'item organization and collection creation',
         );
     });
 });

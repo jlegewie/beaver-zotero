@@ -23,7 +23,10 @@ import {
     toolExpandedAtom,
     setToolExpandedAtom,
 } from '../../../atoms/messageUIState';
-import { getToolGroupRunApprovalLabel } from '../../../atoms/runApprovalPolicy';
+import {
+    getToolGroupRunApprovalLabel,
+    getToolGroupRunApprovalScope,
+} from '../../../atoms/runApprovalPolicy';
 import { STATUS_CONFIGS, type ActionStatus } from './agentActionViewHelpers';
 import {
     ArrowDownIcon,
@@ -827,6 +830,7 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
                                         disabled={isProcessing}
                                         primaryLabel="Apply All"
                                         applyAllLabel={getToolGroupRunApprovalLabel('edit_note') ?? undefined}
+                                        applyAllScope={getToolGroupRunApprovalScope('edit_note') ?? undefined}
                                     />
                                 ) : (
                                     <Button

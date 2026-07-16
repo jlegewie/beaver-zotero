@@ -57,10 +57,15 @@ export function getToolGroup(toolName: string): string | null {
 }
 
 export function getToolGroupRunApprovalLabel(toolName: string): string | null {
+    const scope = getToolGroupRunApprovalScope(toolName);
+    return scope ? `Allow all ${scope} for this run` : null;
+}
+
+/** Short scope shown beneath the shared "Allow for this run" menu title. */
+export function getToolGroupRunApprovalScope(toolName: string): string | null {
     const group = getToolGroup(toolName);
     if (!group) return null;
-    const label = TOOL_GROUP_RUN_LABELS[group];
-    return label ? `Allow all ${label} for this run` : null;
+    return TOOL_GROUP_RUN_LABELS[group] ?? null;
 }
 
 export function getPendingApprovalIdsForToolGroup(
