@@ -4,7 +4,7 @@ import { searchableLibraryIdsAtom } from '../../../../react/atoms/profile';
 import { citationMapAtom } from '../../../../react/atoms/citations';
 import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '../../../../react/atoms/externalReferences';
 import { currentThreadIdAtom } from '../../../../react/atoms/threads';
-import { activeRunAtom } from '../../../../react/agents/atoms';
+import { grantCreatedNoteEditsForRunAtom } from '../../../../react/atoms/runApprovalPolicy';
 import { renderToHTML } from '../../../../react/utils/citationRenderers';
 import { prepareCitationRenderContext } from '../../../../react/utils/citationRenderContext';
 import { wrapWithSchemaVersion, getBeaverNoteFooterHTML } from '../../../../react/utils/noteActions';
@@ -625,7 +625,9 @@ async function executeCreateNoteAction(
 
         // Add Beaver footer with thread/run link
         const threadId = store.get(currentThreadIdAtom);
-        const runId = store.get(activeRunAtom)?.id;
+        // Only the execute request can authoritatively associate this mutation
+        // with a run. MCP/HTTP executions intentionally omit run_id.
+        const runId = request.run_id;
         if (threadId) {
             htmlContent += getBeaverNoteFooterHTML(threadId, runId);
         }
@@ -698,6 +700,16 @@ async function executeCreateNoteAction(
         await ta.track('save_tx_ms', () => zoteroNote.saveTx());
 
         logger(`executeCreateNoteAction: Created note "${title}" with key ${zoteroNote.key} in library ${targetLibraryId}`, 1);
+
+        // A note created by the agent is a safe, narrow continuation target:
+        // allow only edits to this exact note for the remainder of this run.
+        if (runId) {
+            store.set(grantCreatedNoteEditsForRunAtom, {
+                runId,
+                libraryId: zoteroNote.libraryID,
+                zoteroKey: zoteroNote.key,
+            });
+        }
 
         // Mirror the relation on the related item so the "Related" pane shows
         // the link from either side. Requires the note's key, so runs post-save.

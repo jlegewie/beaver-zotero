@@ -15,7 +15,7 @@
 import { atom } from 'jotai';
 import { getPref, setPref } from '../../src/utils/prefs';
 import { logger } from '../../src/utils/logger';
-import { DEFAULT_TOOL_GROUPS } from './runToolGroupApprovals';
+import { DEFAULT_TOOL_GROUPS } from './runApprovalPolicy';
 
 // =============================================================================
 // Types

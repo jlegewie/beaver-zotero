@@ -87,7 +87,7 @@ import {
 } from './agentActionViewHelpers';
 import { ActionPreview } from './ActionPreview';
 import { currentThreadIdAtom } from '../../../atoms/threads';
-import { getToolGroupRunApprovalLabel } from '../../../atoms/runToolGroupApprovals';
+import { getToolGroupRunApprovalLabel } from '../../../atoms/runApprovalPolicy';
 
 export { STATUS_CONFIGS, getOverallStatus } from './agentActionViewHelpers';
 export type { ActionStatus } from './agentActionViewHelpers';

@@ -23,7 +23,7 @@ import {
     toolExpandedAtom,
     setToolExpandedAtom,
 } from '../../../atoms/messageUIState';
-import { getToolGroupRunApprovalLabel } from '../../../atoms/runToolGroupApprovals';
+import { getToolGroupRunApprovalLabel } from '../../../atoms/runApprovalPolicy';
 import { STATUS_CONFIGS, type ActionStatus } from './agentActionViewHelpers';
 import {
     ArrowDownIcon,
