@@ -15,7 +15,10 @@
 import { atom } from 'jotai';
 import { getPref, setPref } from '../../src/utils/prefs';
 import { logger } from '../../src/utils/logger';
-import { DEFAULT_TOOL_GROUPS } from './runApprovalPolicy';
+import {
+    DEFAULT_DEFERRED_TOOL_GROUPS,
+    RUN_APPROVAL_ACTION_TYPE_ALIASES,
+} from './runApprovalPolicy';
 
 // =============================================================================
 // Types
@@ -69,8 +72,15 @@ function loadPreferences(): DeferredToolPreferencesData {
         const prefString = getPref('deferredToolPreferences');
         if (prefString && typeof prefString === 'string') {
             const parsed = JSON.parse(prefString);
+            const storedToolToGroup = { ...(parsed.toolToGroup ?? {}) };
+            // Older versions persisted the full run-authorization alias map.
+            // Strip those action-record names so they cannot acquire a
+            // preference merely by being authorization aliases.
+            for (const actionType of Object.keys(RUN_APPROVAL_ACTION_TYPE_ALIASES)) {
+                delete storedToolToGroup[actionType];
+            }
             return {
-                toolToGroup: { ...DEFAULT_TOOL_GROUPS, ...parsed.toolToGroup },
+                toolToGroup: { ...DEFAULT_DEFERRED_TOOL_GROUPS, ...storedToolToGroup },
                 groupPreferences: { ...DEFAULT_GROUP_PREFERENCES, ...parsed.groupPreferences },
             };
         }
@@ -78,7 +88,7 @@ function loadPreferences(): DeferredToolPreferencesData {
         logger(`deferredToolPreferences: Failed to load preferences: ${error}`, 1);
     }
     return {
-        toolToGroup: { ...DEFAULT_TOOL_GROUPS },
+        toolToGroup: { ...DEFAULT_DEFERRED_TOOL_GROUPS },
         groupPreferences: { ...DEFAULT_GROUP_PREFERENCES },
     };
 }

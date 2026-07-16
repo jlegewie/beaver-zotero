@@ -2,6 +2,7 @@ import { createStore } from 'jotai';
 import { describe, expect, it } from 'vitest';
 import {
     clearRunApprovalPolicyAtom,
+    DEFAULT_DEFERRED_TOOL_GROUPS,
     getPendingApprovalIdsForToolGroup,
     getToolGroup,
     getToolGroupRunApprovalLabel,
@@ -10,6 +11,7 @@ import {
     isActionApprovedForCurrentRun,
     isActionApprovedForRun,
     isToolGroupApprovedForRun,
+    RUN_APPROVAL_ACTION_TYPE_ALIASES,
     runApprovalPolicyAtom,
 } from '../../../react/atoms/runApprovalPolicy';
 
@@ -117,6 +119,21 @@ describe('runApprovalPolicy', () => {
         expect(getToolGroup('confirm_extraction')).toBeNull();
         expect(getToolGroup('confirm_external_search')).toBeNull();
         expect(getToolGroupRunApprovalLabel('confirm_extraction')).toBeNull();
+    });
+
+    it('keeps action-type aliases out of persistent preference defaults', () => {
+        expect(DEFAULT_DEFERRED_TOOL_GROUPS).not.toHaveProperty('zotero_note');
+        expect(DEFAULT_DEFERRED_TOOL_GROUPS).not.toHaveProperty('highlight_annotation');
+        expect(DEFAULT_DEFERRED_TOOL_GROUPS).not.toHaveProperty('note_annotation');
+        expect(RUN_APPROVAL_ACTION_TYPE_ALIASES).toEqual({
+            zotero_note: 'note_creation',
+            highlight_annotation: 'annotations',
+            note_annotation: 'annotations',
+        });
+
+        expect(getToolGroup('zotero_note')).toBe('note_creation');
+        expect(getToolGroup('highlight_annotation')).toBe('annotations');
+        expect(getToolGroup('note_annotation')).toBe('annotations');
     });
 
     it('selects all currently pending approvals in the group and no others', () => {

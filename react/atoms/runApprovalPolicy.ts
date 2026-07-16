@@ -2,31 +2,43 @@ import { atom } from 'jotai';
 import type { AgentActionType } from '../../src/services/agentProtocol';
 
 /**
- * Stable approval groups shared by persistent defaults and transient run grants.
- * Tool aliases deliberately map to the same group so an approval follows the
- * user-facing capability rather than a backend implementation name.
+ * Stable groups for actual deferred tool names. These seed persistent
+ * preferences and are also recognized by transient run grants.
  *
  * Authorization invariant: run grants use this canonical map, not a persisted
  * toolToGroup remap. Runtime remapping is not currently supported; adding it
  * must update this policy boundary explicitly so stored preferences, pending
  * approval matching, labels, and run grants cannot silently diverge.
  */
-export const DEFAULT_TOOL_GROUPS: Record<string, string> = {
+export const DEFAULT_DEFERRED_TOOL_GROUPS: Record<string, string> = {
     edit_metadata: 'metadata_edits',
     edit_item: 'metadata_edits',
     edit_note: 'note_edits',
     create_note: 'note_creation',
-    zotero_note: 'note_creation',
     create_collection: 'library_modifications',
     organize_items: 'library_modifications',
     manage_tags: 'library_structure',
     manage_collections: 'library_structure',
-    highlight_annotation: 'annotations',
-    note_annotation: 'annotations',
     create_highlight_annotations: 'annotations',
     create_note_annotations: 'annotations',
     create_item: 'create_items',
     create_items: 'create_items',
+};
+
+/**
+ * AgentAction aliases used only when authorizing or matching run approvals.
+ * Keeping these out of DEFAULT_DEFERRED_TOOL_GROUPS prevents action-record
+ * names from silently acquiring persistent preference defaults.
+ */
+export const RUN_APPROVAL_ACTION_TYPE_ALIASES: Record<string, string> = {
+    zotero_note: 'note_creation',
+    highlight_annotation: 'annotations',
+    note_annotation: 'annotations',
+};
+
+const RUN_APPROVAL_TOOL_GROUPS: Record<string, string> = {
+    ...DEFAULT_DEFERRED_TOOL_GROUPS,
+    ...RUN_APPROVAL_ACTION_TYPE_ALIASES,
 };
 
 /** Labels complete the phrase "Allow all … for this run". */
@@ -41,7 +53,7 @@ export const TOOL_GROUP_RUN_LABELS: Record<string, string> = {
 };
 
 export function getToolGroup(toolName: string): string | null {
-    return DEFAULT_TOOL_GROUPS[toolName] ?? null;
+    return RUN_APPROVAL_TOOL_GROUPS[toolName] ?? null;
 }
 
 export function getToolGroupRunApprovalLabel(toolName: string): string | null {
