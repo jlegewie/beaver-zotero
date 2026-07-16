@@ -1,5 +1,5 @@
 import React, { useCallback, useState } from "react";
-import {SettingsGroup, SettingsRow, SectionLabel, DocLink} from "./components/SettingsElements";
+import {SettingsGroup, SettingsRow, SectionLabel, DocLink, SectionHeader, SectionDescription} from "./components/SettingsElements";
 import DeferredToolPreferenceSetting from "./DeferredToolPreferenceSetting";
 import { getPref, setPref } from "../../../src/utils/prefs";
 
@@ -74,19 +74,13 @@ const PermissionsSection: React.FC = () => {
 
     return (
         <>
-            <SectionLabel>Library Modifications</SectionLabel>
-            <SettingsGroup>
-                <div className="display-flex flex-col gap-05 flex-1 min-w-0" style={{ padding: '8px 12px' }}>
-                    {/* <div className="font-color-primary text-base font-medium">Permissions</div> */}
-                    <div className="font-color-secondary text-base">
-                        When Beaver modifies your library, all changes require your approval by default.
-                        You can change this behavior here. Be careful, Beaver might make changes you didn't expect.
-                    
-                        For more details, see documentation on <DocLink path="editing-metadata">editing metadata</DocLink> and <DocLink path="library-management">organizing your library items</DocLink>.
+            <SectionHeader>Library Modifications</SectionHeader>
+            <SectionDescription>
+                When Beaver modifies your library, all changes require your approval by default (the only exception is when Beaver creates a new note).
+                You can change this behavior here. Be careful, Beaver might make changes you didn't expect.
 
-                    </div>
-                </div>
-            </SettingsGroup>
+                For more details, see documentation on <DocLink path="editing-metadata">editing metadata</DocLink> and <DocLink path="library-management">organizing your library items</DocLink>.
+            </SectionDescription>
             <SettingsGroup>
                 <div style={{ padding: '8px 12px' }}>
                     <DeferredToolPreferenceSetting

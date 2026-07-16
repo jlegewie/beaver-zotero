@@ -1,6 +1,6 @@
 import React, { useState, useCallback } from "react";
 import Button from "../ui/Button";
-import {SettingsGroup, SettingsRow, SectionLabel, DocLink, SectionHeader} from "./components/SettingsElements";
+import {SettingsGroup, SettingsRow, SectionLabel, DocLink, SectionHeader, SectionDescription} from "./components/SettingsElements";
 import ApiKeyInput from "./ApiKeyInput";
 import CustomProviderCard from "./CustomProviderCard";
 import PlusSignIcon from "../icons/PlusSignIcon";
@@ -125,13 +125,11 @@ const ApiKeysSection: React.FC = () => {
     return (
         <>
             <SectionHeader>API Keys and Model Providers</SectionHeader>
-            <div className="display-flex flex-col gap-05 flex-1 min-w-0 py-1 mb-2">
-                <div className="font-color-secondary text-base">
-                    Connect your own API keys (see our <DocLink path="api-key">guide</DocLink>),
-                    or add a <DocLink path="custom-models">custom endpoint</DocLink>. Free and new paid keys (Tier 1) keys often hit rate limits. A key with higher rate limits works best (Tier 2+).
-                    <DocLink path="api-key#why-beaver-needs-more-from-your-api-key"> Why?</DocLink>
-                </div>
-            </div>
+            <SectionDescription>
+                Connect your own API keys (see our <DocLink path="api-key">guide</DocLink>),
+                or add a <DocLink path="custom-models">custom endpoint</DocLink>. Free and new paid keys (Tier 1) keys often hit rate limits. A key with higher rate limits works best (Tier 2+).
+                <DocLink path="api-key#why-beaver-needs-more-from-your-api-key"> Why?</DocLink>
+            </SectionDescription>
 
             {/* API Keys */}
             <SettingsGroup className="bg-senary">

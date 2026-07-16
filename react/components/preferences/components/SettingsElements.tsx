@@ -9,8 +9,16 @@ export const SectionLabel: React.FC<{ children: React.ReactNode }> = ({ children
 );
 
 export const SectionHeader: React.FC<{ children: React.ReactNode }> = ({ children }) => (
-    <div role="heading" aria-level={2} className="text-xl font-color-primary font-bold" style={{ marginTop: '8px', marginBottom: '6px', paddingLeft: '2px' }}>
+    <div role="heading" aria-level={2} className="text-xl font-color-primary font-bold" style={{ marginTop: '8px', marginBottom: '6px', paddingLeft: '4px' }}>
         {children}
+    </div>
+);
+
+export const SectionDescription: React.FC<{ children: React.ReactNode }> = ({ children }) => (
+    <div className="display-flex flex-col gap-05 flex-1 min-w-0 py-1 mb-2" style={{ paddingLeft: '4px' }}>
+        <div className="font-color-secondary text-base">
+            {children}
+        </div>
     </div>
 );
 
