@@ -80,7 +80,7 @@ const SplitApplyButton: React.FC<SplitApplyButtonProps> = ({
                 disabled={disabled || loading}
                 ariaLabel="More apply options"
                 showArrow={false}
-                maxWidth="200px"
+                maxWidth="180px"
                 // maxWidth="calc(100vw - 24px)"
                 style={{
                     borderTopLeftRadius: 0,
