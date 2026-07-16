@@ -21,6 +21,7 @@ import {
 } from '../../helpers/mockWorker';
 
 import {
+    MuPDFWorkerClient,
     getMuPDFWorkerClient,
     getExistingMuPDFWorkerClient,
     disposeMuPDFWorker,
@@ -394,6 +395,306 @@ describe('MuPDFWorkerClient', () => {
             await disposeMuPDFWorker();
             vi.useRealTimers();
         }
+    });
+
+    describe('proactive recycling', () => {
+        afterEach(() => {
+            vi.useRealTimers();
+        });
+
+        it('recycles an idle hot worker after its observed heap reaches the limit', async () => {
+            vi.useFakeTimers();
+            const client = new MuPDFWorkerClient({
+                recycleHeapBytes: 512,
+                recycleAfterDataOperations: 32,
+            });
+            try {
+                const firstOp = client.getPageCount(new Uint8Array([1]));
+                const first = MockWorker.instances[0];
+                first.replyToLast({
+                    ok: true,
+                    result: { count: 1 },
+                    heapBytes: 512,
+                });
+                await expect(firstOp).resolves.toBe(1);
+
+                expect(client.getStats()).toMatchObject({
+                    hasWorker: true,
+                    workerHeapBytes: 512,
+                    peakWorkerHeapBytes: 512,
+                    completedDataOperationsSinceSpawn: 1,
+                    proactiveRecyclePending: true,
+                    proactiveRecycleCount: 0,
+                });
+
+                await vi.advanceTimersByTimeAsync(0);
+
+                expect(first.terminate).toHaveBeenCalledOnce();
+                expect(client.getStats()).toMatchObject({
+                    hasWorker: false,
+                    workerHeapBytes: null,
+                    completedDataOperationsSinceSpawn: 0,
+                    proactiveRecyclePending: false,
+                    proactiveRecycleCount: 1,
+                    lastProactiveRecycleReason: 'heap_limit',
+                    lastProactiveRecycleHeapBytes: 512,
+                    lastProactiveRecycleDataOperations: 1,
+                });
+
+                const secondOp = client.getPageCount(new Uint8Array([2]));
+                const second = MockWorker.instances[1];
+                expect(second).toBeDefined();
+                second.replyToLast({
+                    ok: true,
+                    result: { count: 2 },
+                    heapBytes: 64,
+                });
+                await expect(secondOp).resolves.toBe(2);
+                expect(client.getStats()).toMatchObject({
+                    hasWorker: true,
+                    spawnCount: 2,
+                    workerHeapBytes: 64,
+                    completedDataOperationsSinceSpawn: 1,
+                });
+            } finally {
+                client.dispose();
+            }
+        });
+
+        it('applies the heap guard to the background slot without an operation-count limit', async () => {
+            vi.useFakeTimers();
+            const client = new MuPDFWorkerClient({ slotName: 'background' });
+            try {
+                expect(client.getStats()).toMatchObject({
+                    recycleHeapThresholdBytes: 512 * 1024 * 1024,
+                    recycleDataOperationThreshold: null,
+                });
+
+                const op = client.getPageCount(new Uint8Array([1]));
+                const worker = MockWorker.instances[0];
+                worker.replyToLast({
+                    ok: true,
+                    result: { count: 1 },
+                    heapBytes: 512 * 1024 * 1024,
+                });
+                await expect(op).resolves.toBe(1);
+                await vi.advanceTimersByTimeAsync(0);
+
+                expect(worker.terminate).toHaveBeenCalledOnce();
+                expect(client.getStats()).toMatchObject({
+                    hasWorker: false,
+                    proactiveRecycleCount: 1,
+                    lastProactiveRecycleReason: 'heap_limit',
+                });
+            } finally {
+                client.dispose();
+            }
+        });
+
+        it('waits for every accepted operation before count-based recycling', async () => {
+            vi.useFakeTimers();
+            const client = new MuPDFWorkerClient({
+                recycleHeapBytes: null,
+                recycleAfterDataOperations: 2,
+            });
+            try {
+                const firstOp = client.getPageCount(new Uint8Array([1]));
+                const secondOp = client.getPageCount(new Uint8Array([2]));
+                const worker = MockWorker.instances[0];
+                const firstId = worker.posted[0].message.id;
+                const secondId = worker.posted[1].message.id;
+
+                worker.onmessage?.({
+                    data: {
+                        id: firstId,
+                        ok: true,
+                        result: { count: 1 },
+                        heapBytes: 64,
+                    },
+                });
+                await expect(firstOp).resolves.toBe(1);
+                expect(client.getStats()).toMatchObject({
+                    pendingCount: 1,
+                    completedDataOperationsSinceSpawn: 1,
+                    proactiveRecyclePending: false,
+                });
+                await vi.advanceTimersByTimeAsync(0);
+                expect(worker.terminate).not.toHaveBeenCalled();
+
+                worker.onmessage?.({
+                    data: {
+                        id: secondId,
+                        ok: true,
+                        result: { count: 2 },
+                        heapBytes: 64,
+                    },
+                });
+                await expect(secondOp).resolves.toBe(2);
+                expect(client.getStats()).toMatchObject({
+                    pendingCount: 0,
+                    completedDataOperationsSinceSpawn: 2,
+                    proactiveRecyclePending: true,
+                });
+
+                await vi.advanceTimersByTimeAsync(0);
+                expect(worker.terminate).toHaveBeenCalledOnce();
+                expect(client.getStats()).toMatchObject({
+                    hasWorker: false,
+                    proactiveRecycleCount: 1,
+                    lastProactiveRecycleReason: 'data_operation_limit',
+                    lastProactiveRecycleDataOperations: 2,
+                });
+            } finally {
+                client.dispose();
+            }
+        });
+
+        it('allows one chained follow-up, then routes the next sequential operation to a fresh worker', async () => {
+            vi.useFakeTimers();
+            const client = new MuPDFWorkerClient({
+                recycleHeapBytes: null,
+                recycleAfterDataOperations: 1,
+            });
+            try {
+                const firstOp = client.getPageCount(new Uint8Array([1]));
+                const worker = MockWorker.instances[0];
+                worker.replyToLast({
+                    ok: true,
+                    result: { count: 1 },
+                    heapBytes: 64,
+                });
+
+                // Awaiting the first call resumes in a microtask, before the
+                // zero-delay recycle check. A related follow-up dispatch can
+                // therefore stay on the warm worker.
+                await expect(firstOp).resolves.toBe(1);
+                const secondOp = client.getPageCount(new Uint8Array([2]));
+                expect(worker.posted).toHaveLength(2);
+                expect(MockWorker.instances).toHaveLength(1);
+
+                await vi.advanceTimersByTimeAsync(0);
+                expect(worker.terminate).not.toHaveBeenCalled();
+
+                worker.replyToLast({
+                    ok: true,
+                    result: { count: 2 },
+                    heapBytes: 64,
+                });
+                await expect(secondOp).resolves.toBe(2);
+
+                // A sequential loop resumes before the retirement timer too,
+                // but the one-operation grace is now exhausted. This dispatch
+                // synchronously retires the idle worker and uses a fresh one.
+                const thirdOp = client.getPageCount(new Uint8Array([3]));
+                expect(worker.terminate).toHaveBeenCalledOnce();
+                expect(worker.posted).toHaveLength(2);
+                expect(MockWorker.instances).toHaveLength(2);
+
+                const replacement = MockWorker.instances[1];
+                replacement.replyToLast({
+                    ok: true,
+                    result: { count: 3 },
+                    heapBytes: 64,
+                });
+                await expect(thirdOp).resolves.toBe(3);
+                expect(client.getStats()).toMatchObject({
+                    proactiveRecycleCount: 1,
+                    lastProactiveRecycleReason: 'data_operation_limit',
+                });
+            } finally {
+                client.dispose();
+            }
+        });
+
+        it('holds operations beyond the grace behind the drain barrier', async () => {
+            vi.useFakeTimers();
+            const client = new MuPDFWorkerClient({
+                recycleHeapBytes: null,
+                recycleAfterDataOperations: 1,
+            });
+            try {
+                const firstOp = client.getPageCount(new Uint8Array([1]));
+                const worker = MockWorker.instances[0];
+                worker.replyToLast({
+                    ok: true,
+                    result: { count: 1 },
+                    heapBytes: 64,
+                });
+                await expect(firstOp).resolves.toBe(1);
+
+                const followupOp = client.getPageCount(new Uint8Array([2]));
+                const blockedOp = client.getPageCount(new Uint8Array([3]));
+                expect(worker.posted).toHaveLength(2);
+                expect(client.getStats().pendingCount).toBe(1);
+
+                worker.replyToLast({
+                    ok: true,
+                    result: { count: 2 },
+                    heapBytes: 64,
+                });
+                await expect(followupOp).resolves.toBe(2);
+                await vi.advanceTimersByTimeAsync(0);
+
+                expect(worker.terminate).toHaveBeenCalledOnce();
+                expect(worker.posted).toHaveLength(2);
+                expect(MockWorker.instances).toHaveLength(2);
+
+                const replacement = MockWorker.instances[1];
+                replacement.replyToLast({
+                    ok: true,
+                    result: { count: 3 },
+                    heapBytes: 64,
+                });
+                await expect(blockedOp).resolves.toBe(3);
+            } finally {
+                client.dispose();
+            }
+        });
+
+        it('keeps fatal-operation suppression after a proactive recycle', async () => {
+            vi.useFakeTimers();
+            const client = new MuPDFWorkerClient({
+                recycleHeapBytes: null,
+                recycleAfterDataOperations: 1,
+            });
+            try {
+                const badBytes = new Uint8Array([2]);
+                const bad = client.getPageCount(badBytes);
+                const first = MockWorker.instances[0];
+                first.replyToLast({
+                    ok: false,
+                    error: {
+                        name: 'ExtractionError',
+                        code: ExtractionErrorCode.WASM_ERROR,
+                        message: 'fatal parser failure',
+                    },
+                    heapBytes: 128,
+                });
+                await expect(bad).rejects.toMatchObject({
+                    code: ExtractionErrorCode.WASM_ERROR,
+                });
+
+                const good = client.getPageCount(new Uint8Array([3]));
+                const second = MockWorker.instances[1];
+                second.replyToLast({
+                    ok: true,
+                    result: { count: 3 },
+                    heapBytes: 128,
+                });
+                await expect(good).resolves.toBe(3);
+                await vi.advanceTimersByTimeAsync(0);
+                expect(second.terminate).toHaveBeenCalledOnce();
+
+                await expect(
+                    client.getPageCount(new Uint8Array([2])),
+                ).rejects.toMatchObject({
+                    code: ExtractionErrorCode.WASM_ERROR,
+                });
+                expect(MockWorker.instances).toHaveLength(2);
+            } finally {
+                client.dispose();
+            }
+        });
     });
 
     it('rehydrates an ExtractionError from a structured failure reply', async () => {
@@ -1048,6 +1349,9 @@ describe('MuPDFWorkerClient', () => {
             const after = client.getStats();
             // __cacheStats must NOT pollute dispatchCounts.
             expect(after.dispatchCounts).toEqual(before.dispatchCounts);
+            expect(after.completedDataOperationsSinceSpawn).toBe(
+                before.completedDataOperationsSinceSpawn,
+            );
             // Verify the wire op is __cacheStats, not 'getCacheStats' or similar.
             const lastPosted = MockWorker.instances[0].posted[
                 MockWorker.instances[0].posted.length - 1
@@ -1244,6 +1548,14 @@ describe('MuPDFWorkerClient', () => {
             expect(hot).not.toBe(bg);
             expect((hot as any).name).toBe('hot');
             expect((bg as any).name).toBe('background');
+            expect(hot.getStats()).toMatchObject({
+                recycleHeapThresholdBytes: 512 * 1024 * 1024,
+                recycleDataOperationThreshold: 32,
+            });
+            expect(bg.getStats()).toMatchObject({
+                recycleHeapThresholdBytes: 512 * 1024 * 1024,
+                recycleDataOperationThreshold: null,
+            });
         });
 
         it('parks each instance in its own slot', () => {
