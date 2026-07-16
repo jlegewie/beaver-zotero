@@ -279,7 +279,7 @@ function buildValidateSuccess(
 ): WSAgentActionValidateResponse {
     const noteTitle = item.getNoteTitle() || '(untitled)';
     const totalLines = simplified.split('\n').length;
-    const preference = getDeferredToolPreference('edit_note');
+    const preference = getDeferredToolPreference('edit_note', { library_id, zotero_key });
     return {
         type: 'agent_action_validate_response',
         request_id: requestId,
@@ -539,7 +539,10 @@ async function validateEditNoteAction(
 
         const noteTitle = item.getNoteTitle() || '(untitled)';
         const totalLines = simplified.split('\n').length;
-        const preference = getDeferredToolPreference('edit_note');
+        const preference = getDeferredToolPreference('edit_note', {
+            library_id: resolvedLibraryId,
+            zotero_key,
+        });
 
         return {
             type: 'agent_action_validate_response',
@@ -573,7 +576,10 @@ async function validateEditNoteAction(
 
         const noteTitle = item.getNoteTitle() || '(untitled)';
         const totalLines = simplified.split('\n').length;
-        const preference = getDeferredToolPreference('edit_note');
+        const preference = getDeferredToolPreference('edit_note', {
+            library_id: resolvedLibraryId,
+            zotero_key,
+        });
 
         return {
             type: 'agent_action_validate_response',

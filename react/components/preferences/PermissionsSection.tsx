@@ -126,15 +126,15 @@ const PermissionsSection: React.FC = () => {
                 <div className="border-top-quinary" style={{ padding: '8px 12px' }}>
                     <DeferredToolPreferenceSetting
                         toolName="create_collection"
-                        label="Library Organization"
-                        description="Creating collections and organizing items into collections and by tags"
+                        label="Item Organization"
+                        description="Creating collections and adding or removing tags and collections on selected items"
                     />
                 </div>
                 <div className="border-top-quinary" style={{ padding: '8px 12px' }}>
                     <DeferredToolPreferenceSetting
                         toolName="manage_tags"
-                        label="Library Structure"
-                        description="Library-wide tag and collection operations (rename, merge, move, delete)"
+                        label="Tag & Collection Management"
+                        description="Library-wide tag and collection rename, move, merge, and delete operations"
                     />
                 </div>
             </SettingsGroup>

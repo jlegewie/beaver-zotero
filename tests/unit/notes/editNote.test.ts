@@ -441,6 +441,10 @@ describe('validateEditNoteAction — success', () => {
         const response = await handleAgentActionValidateRequest(makeValidateRequest());
         expect(response.valid).toBe(true);
         expect(response.preference).toBe('always_apply');
+        expect(getDeferredToolPreference).toHaveBeenCalledWith('edit_note', {
+            library_id: 1,
+            zotero_key: 'NOTE0001',
+        });
     });
 
     it('validates append with match_count 1 and no old content', async () => {

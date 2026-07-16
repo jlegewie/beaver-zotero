@@ -127,13 +127,13 @@ import { currentThreadNameAtom } from './threads';
 import { loadItemDataForAgentActions, autoApplyAnnotationAgentActions, autoCreateNoteAgentActions } from '../utils/agentActionUtils';
 import { extractZoteroReferencesFromToolCall } from '../agents/toolLabels';
 import {
-    clearRunToolGroupApprovalsAtom,
+    clearRunApprovalPolicyAtom,
     getPendingApprovalIdsForToolGroup,
     getToolGroup,
     grantToolGroupForRunAtom,
-    isToolGroupApprovedForCurrentRun,
-    runToolGroupApprovalsAtom,
-} from './runToolGroupApprovals';
+    isActionApprovedForCurrentRun,
+    runApprovalPolicyAtom,
+} from './runApprovalPolicy';
 import { loadFullItemDataWithAllTypes } from '../../src/utils/zoteroUtils';
 import { buildZoteroInstanceWire } from '../../src/services/zoteroInstanceWire';
 import { dismissDiffPreview } from '../utils/noteEditorDiffPreview';
@@ -969,7 +969,7 @@ export const prepareForNewRunAtom = atom(null, (_get, set) => {
     set(clearAllPendingApprovalsAtom);
     set(clearAllPendingQuestionsAtom);
     set(clearApprovalResponseIntentsAtom);
-    set(clearRunToolGroupApprovalsAtom);
+    set(clearRunApprovalPolicyAtom);
 });
 
 /**
@@ -1284,7 +1284,7 @@ function createWSCallbacks(set: Setter): WSCallbacks {
             // Clear pending approvals and dismiss diff preview
             set(clearAllPendingApprovalsAtom);
             set(clearAllPendingQuestionsAtom);
-            set(clearRunToolGroupApprovalsAtom);
+            set(clearRunApprovalPolicyAtom);
         },
 
         onError: (event: WSErrorEvent) => {
@@ -1311,7 +1311,7 @@ function createWSCallbacks(set: Setter): WSCallbacks {
             // Clear pending approvals and dismiss diff preview (run failed)
             set(clearAllPendingApprovalsAtom);
             set(clearAllPendingQuestionsAtom);
-            set(clearRunToolGroupApprovalsAtom);
+            set(clearRunApprovalPolicyAtom);
 
             if (
                 event.try_auto_resume &&
@@ -1479,8 +1479,8 @@ function createWSCallbacks(set: Setter): WSCallbacks {
             // A grant can be selected while other validation requests are
             // already in flight. Catch those requests here even though future
             // validations will return always_apply directly.
-            const runApprovals = store.get(runToolGroupApprovalsAtom);
-            if (isToolGroupApprovedForCurrentRun(runApprovals, event.action_type)) {
+            const runPolicy = store.get(runApprovalPolicyAtom);
+            if (isActionApprovedForCurrentRun(runPolicy, event.action_type, event.action_data)) {
                 logger(`Auto-approving ${event.action_type} for the current run`, 1);
                 agentService.sendApprovalResponse(event.action_id, true);
                 return;
@@ -1520,7 +1520,7 @@ function createWSCallbacks(set: Setter): WSCallbacks {
             // Clear pending approvals and dismiss diff preview (connection lost)
             set(clearAllPendingApprovalsAtom);
             set(clearAllPendingQuestionsAtom);
-            set(clearRunToolGroupApprovalsAtom);
+            set(clearRunApprovalPolicyAtom);
 
             // If the socket dropped uncleanly while a run was still in flight, the
             // server never delivered an error event
@@ -2435,7 +2435,7 @@ export const closeWSConnectionAtom = atom(null, async (get, set) => {
     set(clearAllPendingApprovalsAtom);
     set(clearAllPendingQuestionsAtom);
     set(clearApprovalResponseIntentsAtom);
-    set(clearRunToolGroupApprovalsAtom);
+    set(clearRunApprovalPolicyAtom);
 
     // Mark active run as canceled if it exists
     const activeRun = get(activeRunAtom);
@@ -2475,7 +2475,7 @@ export const clearThreadAtom = atom(null, (_get, set) => {
     // Clear pending questions so a reset never leaves the composer disabled
     // behind an unanswerable card (pending approvals are left as-is here).
     set(clearAllPendingQuestionsAtom);
-    set(clearRunToolGroupApprovalsAtom);
+    set(clearRunApprovalPolicyAtom);
 });
 
 /**
