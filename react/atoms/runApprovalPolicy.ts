@@ -5,6 +5,11 @@ import type { AgentActionType } from '../../src/services/agentProtocol';
  * Stable approval groups shared by persistent defaults and transient run grants.
  * Tool aliases deliberately map to the same group so an approval follows the
  * user-facing capability rather than a backend implementation name.
+ *
+ * Authorization invariant: run grants use this canonical map, not a persisted
+ * toolToGroup remap. Runtime remapping is not currently supported; adding it
+ * must update this policy boundary explicitly so stored preferences, pending
+ * approval matching, labels, and run grants cannot silently diverge.
  */
 export const DEFAULT_TOOL_GROUPS: Record<string, string> = {
     edit_metadata: 'metadata_edits',
