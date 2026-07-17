@@ -41,6 +41,7 @@ import {
     DEFAULT_PAGES_TIMEOUT_SECONDS,
     DEFAULT_SEARCH_TIMEOUT_SECONDS,
     DEFAULT_TIMEOUT_SECONDS,
+    MAX_INTERACTIVE_PDF_TIMEOUT_SECONDS,
     MAX_PDF_TIMEOUT_SECONDS,
 } from '../../../src/services/agentDataProvider/timeout';
 import {
@@ -1123,6 +1124,12 @@ describe('MuPDFWorkerClient', () => {
 
             expect(DEFAULT_BUSY_LEASE_MS_HOT).toBeGreaterThan(
                 Math.max(...hotPathDefaultsMs),
+            );
+        });
+
+        it('keeps the hot lease above the interactive request ceiling', () => {
+            expect(DEFAULT_BUSY_LEASE_MS_HOT).toBeGreaterThan(
+                MAX_INTERACTIVE_PDF_TIMEOUT_SECONDS * 1_000,
             );
         });
 

@@ -52,8 +52,11 @@ const DEFAULT_IDLE_TIMEOUT_MS_BACKGROUND = 60 * 1000;
 // themselves (per-request timeouts — including backend-provided
 // timeout_seconds — plus any shared-extraction grace), so the lease only
 // fires when those reclaim paths failed. A lease at or below such a deadline
-// would reap in-budget work instead. Raise the lease alongside any increase
-// to those budgets (hot: the largest interactive request timeout;
+// would reap in-budget work instead. Interactive hot-slot request timeouts
+// are clamped to MAX_INTERACTIVE_PDF_TIMEOUT_SECONDS (agentDataProvider
+// timeout module) to keep the hot invariant enforced; raise the lease
+// alongside any increase to those budgets (hot:
+// MAX_INTERACTIVE_PDF_TIMEOUT_SECONDS plus the shared-extraction grace;
 // background: MAX_PDF_TIMEOUT_SECONDS).
 export const DEFAULT_BUSY_LEASE_MS_HOT = 65_000;
 export const DEFAULT_BUSY_LEASE_MS_BACKGROUND = 240_000;

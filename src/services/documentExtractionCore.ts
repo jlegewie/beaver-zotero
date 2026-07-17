@@ -30,6 +30,7 @@ import {
 import {
     DEFAULT_PAGES_TIMEOUT_SECONDS,
     ExternalAbortError,
+    MAX_INTERACTIVE_PDF_TIMEOUT_SECONDS,
     MAX_PDF_TIMEOUT_SECONDS,
     TimeoutError,
     type TimeoutControllerContext,
@@ -72,7 +73,8 @@ import {
  * terminates the worker), freeing the interactive slot for the next read.
  * The request timeout plus this grace must stay below
  * DEFAULT_BUSY_LEASE_MS_HOT so the cache abort reclaims the slot before the
- * worker client's busy lease reaps the operation.
+ * worker client's busy lease reaps the operation. Hot-slot request timeouts
+ * are clamped to MAX_INTERACTIVE_PDF_TIMEOUT_SECONDS to enforce this.
  */
 export const HOT_SHARED_EXTRACTION_GRACE_MS = 2000;
 
@@ -392,6 +394,9 @@ export async function extractAndCacheDocument(
         args.timeoutSeconds,
         DEFAULT_PAGES_TIMEOUT_SECONDS,
         args.externalAbortSignal,
+        (args.workerName ?? 'hot') === 'hot'
+            ? MAX_INTERACTIVE_PDF_TIMEOUT_SECONDS
+            : undefined,
     );
     const { signal, timeoutSeconds, throwIfTimedOut, dispose } = timeout;
 
@@ -867,6 +872,7 @@ export async function extractAndCacheResolvedPdfDocument(
         args.timeoutSeconds,
         DEFAULT_PAGES_TIMEOUT_SECONDS,
         externalAbortSignal,
+        workerName === 'hot' ? MAX_INTERACTIVE_PDF_TIMEOUT_SECONDS : undefined,
     );
     const { signal, timeoutSeconds, throwIfTimedOut, dispose } = timeout;
 

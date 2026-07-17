@@ -46,6 +46,7 @@ import { effectiveMaxFileSizeMB, effectiveMaxPageCount } from '../attachmentLimi
 import { withWorkerDiagnostics } from './workerDiagnostics';
 import {
     DEFAULT_IMAGES_TIMEOUT_SECONDS,
+    MAX_INTERACTIVE_PDF_TIMEOUT_SECONDS,
     TimeoutError,
     createTimeoutController,
 } from './timeout';
@@ -513,7 +514,12 @@ async function handleExternalFileViewRequest(
         );
     }
 
-    const timeout = createTimeoutController(timeout_seconds, DEFAULT_IMAGES_TIMEOUT_SECONDS);
+    const timeout = createTimeoutController(
+        timeout_seconds,
+        DEFAULT_IMAGES_TIMEOUT_SECONDS,
+        undefined,
+        MAX_INTERACTIVE_PDF_TIMEOUT_SECONDS,
+    );
     const { signal, timeoutSeconds, throwIfTimedOut, dispose } = timeout;
 
     // True once the request has posted work to the PDF worker; gates the
