@@ -1089,26 +1089,15 @@ const SelectionPersistencePlugin: React.FC = () => {
     const [editor] = useLexicalComposerContext();
     useEffect(() => {
         let saved: LexicalSelectionOffsets | null = null;
-        let reactivatedEmptySelection: LexicalSelectionOffsets | null = null;
-        let repairAfterNextTextUpdate = false;
-        let repairTimer: number | null = null;
         let rootEl: HTMLElement | null = null;
         const isEditorActive = () =>
             !!rootEl && rootEl.ownerDocument.activeElement === rootEl;
-        const clearRepairTimer = () => {
-            if (repairTimer === null) return;
-            rootEl?.ownerDocument.defaultView?.clearTimeout(repairTimer);
-            repairTimer = null;
-        };
 
         const onWindowBlur = (e: FocusEvent) => {
             // Only window deactivation - element-level blurs don't bubble to
             // the window, but be defensive about synthesized events.
             if (e.target !== e.currentTarget) return;
             if (!isEditorActive()) return;
-            clearRepairTimer();
-            reactivatedEmptySelection = null;
-            repairAfterNextTextUpdate = false;
             editor.getEditorState().read(() => {
                 saved = $getFlatSelectionOffsets();
             });
@@ -1122,10 +1111,8 @@ const SelectionPersistencePlugin: React.FC = () => {
             editor.getEditorState().read(() => {
                 isEmpty = $getRoot().getTextContentSize() === 0;
                 // Some Gecko focus transitions change activeElement before the
-                // window blur listener runs, so its guarded snapshot can be
-                // absent. An active empty editor is unambiguous: normalize its
-                // current structural point (or synthesize offset zero) and
-                // still enable the first-insertion repair.
+                // blur listener runs. The active editor's current model point
+                // is still a useful fallback, especially when it is empty.
                 restore ??= $getFlatSelectionOffsets();
             });
             if (!restore && isEmpty) {
@@ -1138,89 +1125,13 @@ const SelectionPersistencePlugin: React.FC = () => {
             }
             if (!restore) return;
             const restoreSelection = restore;
-            reactivatedEmptySelection = isEmpty ? restoreSelection : null;
-            // A discrete update repairs the structural selection before the
-            // first input event can expose Gecko's root-start collapse.
             editor.update(
                 () => $selectFlatSelection(restoreSelection),
                 { discrete: true },
             );
         };
 
-        // For the first ordinary character typed into an empty editor after
-        // reactivation, avoid Gecko's native contenteditable mutation path.
-        // Lexical performs the insertion against the restored paragraph point,
-        // giving us a reliable post-insert selection to re-assert below.
-        const unregisterBeforeInput = editor.registerCommand<InputEvent>(
-            BEFORE_INPUT_COMMAND,
-            (event) => {
-                const restore = reactivatedEmptySelection;
-                if (!restore) return false;
-                if (
-                    event.inputType !== 'insertText'
-                    || event.data == null
-                    || event.data === '\n'
-                    || event.data === '\n\n'
-                    || editor.isComposing()
-                ) {
-                    return false;
-                }
-                if ($getRoot().getTextContentSize() !== 0) {
-                    reactivatedEmptySelection = null;
-                    return false;
-                }
-                reactivatedEmptySelection = null;
-                repairAfterNextTextUpdate = true;
-                event.preventDefault();
-                $selectFlatSelection(restore);
-                editor.dispatchCommand(CONTROLLED_TEXT_INSERTION_COMMAND, event.data);
-                return true;
-            },
-            COMMAND_PRIORITY_HIGH,
-        );
-
-        // React removes Lexical's placeholder after the text update. In a
-        // Zotero chrome document that external child-list mutation can queue a
-        // late selection reset even though the insertion itself ended at the
-        // right position. Re-assert the post-insert selection in the next task,
-        // after React and the queued selectionchange work have settled.
-        const unregisterUpdate = editor.registerUpdateListener(({ editorState, prevEditorState }) => {
-            if (!repairAfterNextTextUpdate) return;
-            let previousText = '';
-            let nextText = '';
-            let expectedSelection: LexicalSelectionOffsets | null = null;
-            prevEditorState.read(() => {
-                previousText = $getRoot().getTextContent();
-            });
-            editorState.read(() => {
-                nextText = $getRoot().getTextContent();
-                expectedSelection = $getFlatSelectionOffsets();
-            });
-            if (previousText === nextText) return;
-            repairAfterNextTextUpdate = false;
-            if (!expectedSelection || !rootEl) return;
-            const expected = expectedSelection;
-            const expectedText = nextText;
-            const win = rootEl.ownerDocument.defaultView;
-            if (!win) return;
-            clearRepairTimer();
-            repairTimer = win.setTimeout(() => {
-                repairTimer = null;
-                if (!isEditorActive()) return;
-                let currentText = '';
-                editor.getEditorState().read(() => {
-                    currentText = $getRoot().getTextContent();
-                });
-                // A subsequent edit supersedes this one-shot repair.
-                if (currentText !== expectedText) return;
-                editor.update(
-                    () => $selectFlatSelection(expected),
-                    { discrete: true },
-                );
-            }, 0);
-        });
-
-        const unregisterRoot = editor.registerRootListener((rootElement, prevRootElement) => {
+        return editor.registerRootListener((rootElement, prevRootElement) => {
             const prevWin = prevRootElement?.ownerDocument.defaultView;
             if (prevWin) {
                 prevWin.removeEventListener('blur', onWindowBlur);
@@ -1233,9 +1144,138 @@ const SelectionPersistencePlugin: React.FC = () => {
                 win.addEventListener('focus', onWindowFocus);
             }
         });
+    }, [editor]);
+    return null;
+};
+
+/**
+ * Normalizes every first ordinary insertion into an empty editor through
+ * Lexical's controlled insertion path. An empty contenteditable can carry a
+ * Gecko root-level DOM point even though Lexical expects the caret in its empty
+ * paragraph; native insertion at that mismatched point is the common trigger
+ * for a first-character jump after stop, send, focus changes, and similar UI
+ * transitions.
+ */
+const EmptyEditorInsertionPlugin: React.FC = () => {
+    const [editor] = useLexicalComposerContext();
+    useEffect(() => editor.registerCommand<InputEvent>(
+        BEFORE_INPUT_COMMAND,
+        (event) => {
+            if (
+                event.inputType !== 'insertText'
+                || event.data == null
+                || event.data === '\n'
+                || event.data === '\n\n'
+                || editor.isComposing()
+                || $getRoot().getTextContentSize() !== 0
+            ) {
+                return false;
+            }
+            const selection = $getFlatSelectionOffsets() ?? {
+                anchor: 0,
+                focus: 0,
+                anchorType: 'element' as const,
+                focusType: 'element' as const,
+            };
+            event.preventDefault();
+            $selectFlatSelection(selection);
+            editor.dispatchCommand(CONTROLLED_TEXT_INSERTION_COMMAND, event.data);
+            return true;
+        },
+        COMMAND_PRIORITY_HIGH,
+    ), [editor]);
+    return null;
+};
+
+/**
+ * Holds on to Lexical's selection after each committed text update until
+ * surrounding React/XUL mutations have settled. Zotero's chrome document can
+ * reset selection offsets when unrelated child nodes mount/unmount; repairing
+ * in the next task covers mutations that land after MutationObserver-based
+ * SelectionGuardPlugin has already run. The first insertion is always
+ * re-asserted because its placeholder removal can clobber the DOM selection
+ * before this listener gets a reliable snapshot. Later updates only write when
+ * the live selection actually drifted. A newer edit or user action cancels it.
+ */
+const DeferredSelectionRepairPlugin: React.FC = () => {
+    const [editor] = useLexicalComposerContext();
+    useEffect(() => {
+        let rootEl: HTMLElement | null = null;
+        let repairTimer: number | null = null;
+
+        const clearRepair = () => {
+            if (repairTimer === null) return;
+            rootEl?.ownerDocument.defaultView?.clearTimeout(repairTimer);
+            repairTimer = null;
+        };
+
+        const unregisterUpdate = editor.registerUpdateListener(({ editorState, prevEditorState }) => {
+            if (!rootEl || rootEl.ownerDocument.activeElement !== rootEl || editor.isComposing()) return;
+            let previousText = '';
+            let nextText = '';
+            let expectedSelection: LexicalSelectionOffsets | null = null;
+            prevEditorState.read(() => {
+                previousText = $getRoot().getTextContent();
+            });
+            editorState.read(() => {
+                nextText = $getRoot().getTextContent();
+                expectedSelection = $getFlatSelectionOffsets();
+            });
+            if (previousText === nextText || !expectedSelection) return;
+
+            const root = rootEl;
+            const win = root.ownerDocument.defaultView;
+            const domSelection = win?.getSelection();
+            const expectedDom = domSelection ? captureDomSelection(domSelection, root) : null;
+            if (!win) return;
+            const expectedText = nextText;
+            const expectedModel = expectedSelection;
+            const isFirstInsertion = previousText.length === 0 && nextText.length > 0;
+            clearRepair();
+            repairTimer = win.setTimeout(() => {
+                repairTimer = null;
+                if (root.ownerDocument.activeElement !== root || editor.isComposing()) return;
+                let currentText = '';
+                editor.getEditorState().read(() => {
+                    currentText = $getRoot().getTextContent();
+                });
+                if (currentText !== expectedText) return;
+                const live = win.getSelection();
+                if (!live) return;
+                if (!isFirstInsertion && expectedDom) {
+                    const unchanged =
+                        root.contains(expectedDom.anchorNode)
+                        && root.contains(expectedDom.focusNode)
+                        && live.anchorNode === expectedDom.anchorNode
+                        && live.anchorOffset === expectedDom.anchorOffset
+                        && live.focusNode === expectedDom.focusNode
+                        && live.focusOffset === expectedDom.focusOffset;
+                    if (unchanged) return;
+                }
+                editor.update(
+                    () => $selectFlatSelection(expectedModel),
+                    { discrete: true },
+                );
+            }, 0);
+        });
+
+        const unregisterRoot = editor.registerRootListener((rootElement, prevRootElement) => {
+            if (prevRootElement) {
+                prevRootElement.removeEventListener('keydown', clearRepair, true);
+                prevRootElement.ownerDocument.removeEventListener('pointerdown', clearRepair, true);
+                prevRootElement.ownerDocument.defaultView?.removeEventListener('blur', clearRepair);
+            }
+            clearRepair();
+            rootEl = rootElement;
+            if (rootElement) {
+                rootElement.addEventListener('keydown', clearRepair, true);
+                rootElement.ownerDocument.addEventListener('pointerdown', clearRepair, true);
+                rootElement.ownerDocument.defaultView?.addEventListener('blur', clearRepair);
+            }
+        });
+
         return () => {
-            clearRepairTimer();
-            unregisterBeforeInput();
+            clearRepair();
             unregisterUpdate();
             unregisterRoot();
         };
@@ -1500,6 +1540,8 @@ export const LexicalEditorInput = forwardRef<LexicalEditorInputHandle, LexicalEd
                     <CaretNavigationPlugin suspendedRef={suspendNavRef} pendingDomSelectionRef={pendingDomSelectionRef} />
                     <SelectionGuardPlugin pendingDomSelectionRef={pendingDomSelectionRef} />
                     <SelectionPersistencePlugin />
+                    <EmptyEditorInsertionPlugin />
+                    <DeferredSelectionRepairPlugin />
                     <BlurSelectionSnapshotPlugin blurSelectionRef={blurSelectionRef} />
                     <PinnedEndCaretPlugin pinnedRef={pinnedEndCaretRef} />
                     <SlashCommandClickPlugin />
