@@ -1523,7 +1523,9 @@ function createWSCallbacks(set: Setter): WSCallbacks {
             set(clearRunApprovalPolicyAtom);
 
             // If the socket dropped uncleanly while a run was still in flight, the
-            // server never delivered an error event
+            // server never delivered an error event. Reuse the close-code
+            // classifier so mid-run drops surface the same actionable details
+            // as connect-phase failures.
             if (!wasClean) {
                 const activeRun = store.get(activeRunAtom);
                 if (
@@ -1533,10 +1535,12 @@ function createWSCallbacks(set: Setter): WSCallbacks {
                 ) {
                     const message =
                         'The connection to the server was lost before the run finished. Please try again.';
+                    const details = formatCloseCodeDetails(code);
                     set(wsErrorAtom, {
                         event: 'error',
                         type: 'connection_error',
                         message,
+                        details,
                         is_retryable: true,
                     });
                     set(activeRunAtom, (prev) =>
@@ -1547,6 +1551,7 @@ function createWSCallbacks(set: Setter): WSCallbacks {
                                   error: {
                                       type: 'connection_error',
                                       message,
+                                      details,
                                       is_retryable: true,
                                   },
                               }
@@ -1620,55 +1625,100 @@ async function executeWSRequest(
     }
 }
 
+// Placeholder for the public docs page — replace when the page is live.
+const CONNECTION_TROUBLESHOOTING_URL = 'https://www.beaverapp.ai/docs/connection-troubleshooting';
+
 /**
- * Human-readable label for standard WebSocket close codes (RFC 6455) plus
- * a short hint at likely causes. Backend-specific 4xxx codes fall through
- * and are only shown numerically.
+ * User-facing explanation for a WebSocket close code (RFC 6455 plus the
+ * 4xxx server-defined range). Grouped by remediation, not by RFC code —
+ * two codes that need the same fix share the same wording.
+ * `linkDocs` says whether the troubleshooting guide is relevant.
  */
-function labelForCloseCode(code: number): string {
+function getCloseCodeExplanation(code: number): { hint: string; linkDocs: boolean } {
     switch (code) {
-        case 1000: return 'Normal closure';
-        case 1001: return 'Going away';
-        case 1002: return 'Protocol error';
-        case 1003: return 'Unsupported data';
-        case 1005: return 'No status received';
-        case 1006: return 'Abnormal closure — often a proxy, firewall, or TLS inspector blocking WebSocket traffic';
-        case 1007: return 'Invalid frame payload';
-        case 1008: return 'Policy violation';
-        case 1009: return 'Message too big';
-        case 1010: return 'Missing extension';
-        case 1011: return 'Server error';
-        case 1012: return 'Service restart';
-        case 1013: return 'Try again later';
-        case 1014: return 'Bad gateway';
-        case 1015: return 'TLS handshake failure';
+        // Corporate/school proxies and firewalls dropping WebSocket traffic.
+        case 1005:
+        case 1006:
+            return {
+                hint: "Your network appears to be blocking Beaver's connection. This is common on work, school, or public Wi‑Fi.",
+                linkDocs: true,
+            };
+
+        // TLS-inspection appliances, corporate VPNs, or aggressive antivirus.
+        case 1015:
+            return {
+                hint: "Your network's security software (antivirus, VPN, or corporate proxy) is interfering with Beaver's secure connection.",
+                linkDocs: true,
+            };
+
+        // Server-side problems Beaver operators need to fix — user just retries.
+        case 1011:
+        case 1014:
+            return {
+                hint: "Beaver's server ran into a problem. Please try again in a moment.",
+                linkDocs: false,
+            };
+        case 1012:
+        case 1013:
+            return {
+                hint: "Beaver's server is temporarily unavailable. Please try again in a moment.",
+                linkDocs: false,
+            };
+
+        // Protocol-level issues almost always mean the client is out of date.
+        case 1002:
+        case 1003:
+        case 1007:
+        case 1008:
+        case 1009:
+        case 1010:
+            return {
+                hint: 'Beaver ran into an unexpected connection issue. Please try again, or update Beaver to the latest version if the problem continues.',
+                linkDocs: false,
+            };
+
         default:
-            if (code >= 4000 && code <= 4999) return 'Application-specific (server-defined)';
-            return 'Unknown close code';
+            if (code >= 4000 && code <= 4999) {
+                return {
+                    hint: 'The server rejected the connection. Please try again.',
+                    linkDocs: false,
+                };
+            }
+            return {
+                hint: 'Beaver ran into an unexpected connection issue. Please try again.',
+                linkDocs: false,
+            };
     }
 }
 
-/** Build a `details` string for connection_error suitable for copy-paste into support tickets. */
-function buildConnectionErrorDetails(error: any): string | undefined {
-    if (error instanceof WSConnectionError) {
-        const parts: string[] = [];
-        if (error.close_code !== undefined) {
-            parts.push(`close code ${error.close_code} (${labelForCloseCode(error.close_code)})`);
-        }
-        if (error.close_reason) {
-            parts.push(`reason: ${error.close_reason}`);
-        }
-        if (error.was_clean !== undefined) {
-            parts.push(`clean=${error.was_clean}`);
-        }
-        if (error.phase === 'setup' && parts.length === 0) {
-            return error.message || undefined;
-        }
-        return parts.length > 0 ? parts.join(', ') : undefined;
+/**
+ * Build the user-facing `details` string for a connection_error from a
+ * WebSocket close code. Used by both connect-phase failures and mid-run
+ * drops so identical underlying causes always produce identical wording.
+ * The rendered format is:
+ *   "<user-oriented sentence>[ See <link>.] (error code NNNN)"
+ * The `<a>` tag is picked up by parseTextWithLinksAndNewlines in the UI.
+ */
+function formatCloseCodeDetails(code: number): string {
+    const { hint, linkDocs } = getCloseCodeExplanation(code);
+    const link = linkDocs
+        ? ` See our <a href="${CONNECTION_TROUBLESHOOTING_URL}">connection troubleshooting guide</a> for help.`
+        : '';
+    return `${hint}${link} (error code ${code})`;
+}
+
+/**
+ * `details` string for a connection_error caught during the WebSocket
+ * connect phase. Prefers the close-code explanation; falls back to the
+ * underlying error message for pre-connect failures (e.g. auth token
+ * fetch).
+ */
+function buildConnectionErrorDetails(error: unknown): string | undefined {
+    if (error instanceof WSConnectionError && error.close_code !== undefined) {
+        return formatCloseCodeDetails(error.close_code);
     }
-    // Non-WS errors (e.g., auth token fetch failures) — include the message if any.
-    if (error && typeof error.message === 'string' && error.message) {
-        return error.message;
+    if (error && typeof (error as { message?: unknown }).message === 'string') {
+        return (error as { message: string }).message || undefined;
     }
     return undefined;
 }
