@@ -65,7 +65,10 @@ If you need more information, please contact us at [support@beaverapp.ai](mailto
 
 ## Reading the error code
 
-Beaver shows a numeric error code below the "Connection Failed" message. If you're filing a support ticket, including this code helps us diagnose the problem quickly.
+Beaver shows a numeric error code below the "Connection Failed" message. If you're filing a support ticket, including this code helps us diagnose the problem quickly. You may also see one of two suffixes:
+
+- **`https ok`** — Beaver reached its servers over plain HTTPS, so only the real‑time (WebSocket) traffic is blocked. This almost always points at a proxy or filter on your network that allows regular web traffic but not WebSocket.
+- **`https blocked`** — Neither WebSocket nor regular HTTPS worked, so Beaver is unreachable from your network as a whole. Check your internet connection, then any VPN or security software that might be blocking `api.beaverapp.ai`.
 
 | Code | Meaning | Common cause |
 |------|---------|--------------|

@@ -9,6 +9,7 @@ import { atom, Getter, Setter } from 'jotai';
 import { v4 as uuidv4 } from 'uuid';
 import { agentService, WSConnectionError } from '../../src/services/agentService';
 import { notifyRunComplete, notifyUserQuestion } from '../../src/services/systemNotifications';
+import { reportConnectionFailure, ConnectionFailureReport } from '../../src/services/diagnosticsService';
 import {
     WSCallbacks,
     AgentRunRequest,
@@ -1557,6 +1558,21 @@ function createWSCallbacks(set: Setter): WSCallbacks {
                               }
                             : prev,
                     );
+                    // Fire the diagnostics probe. When it returns, refine
+                    // the details string in place (e.g. add "https ok"
+                    // when we've proven the network only blocks WSS).
+                    dispatchConnectionFailureReport(
+                        {
+                            phase: 'mid_run',
+                            close_code: code,
+                            close_reason: reason,
+                            was_clean: wasClean,
+                            run_id: activeRun.id,
+                        },
+                        code,
+                        activeRun.id,
+                        set,
+                    );
                 }
             }
         }
@@ -1622,6 +1638,25 @@ async function executeWSRequest(
             }
         } : prev);
         set(isWSChatPendingAtom, false);
+
+        // Fire the diagnostics probe. When it returns, refine the details
+        // string in place — an HTTPS success proves the network only blocks
+        // WSS, an HTTPS failure means Beaver is unreachable altogether.
+        const closeCode = error instanceof WSConnectionError && error.close_code !== undefined
+            ? error.close_code
+            : null;
+        dispatchConnectionFailureReport(
+            {
+                phase: 'connect',
+                close_code: closeCode,
+                close_reason: error instanceof WSConnectionError ? (error.close_reason ?? '') : '',
+                was_clean: error instanceof WSConnectionError ? (error.was_clean ?? null) : null,
+                run_id: run.id,
+            },
+            closeCode,
+            run.id,
+            set,
+        );
     }
 }
 
@@ -1629,16 +1664,43 @@ async function executeWSRequest(
 const CONNECTION_TROUBLESHOOTING_URL = 'https://www.beaverapp.ai/docs/connection-troubleshooting';
 
 /**
+ * Result of the client-side probe that fires alongside every connection
+ * failure. `undefined` = probe hasn't returned yet (or wasn't run),
+ * `'https_ok'` = HTTPS reached the backend (so only WSS is blocked),
+ * `'https_blocked'` = plain HTTPS is blocked too (broader connectivity
+ * problem).
+ */
+type ProbeResult = 'https_ok' | 'https_blocked' | undefined;
+
+/**
  * User-facing explanation for a WebSocket close code (RFC 6455 plus the
  * 4xxx server-defined range). Grouped by remediation, not by RFC code —
- * two codes that need the same fix share the same wording.
+ * two codes that need the same fix share the same wording. The wording
+ * is further refined by the HTTPS probe result when available:
+ *   - httpsReachable === true  → we know only WSS is blocked
+ *   - httpsReachable === false → we know network is blocking Beaver entirely
  * `linkDocs` says whether the troubleshooting guide is relevant.
  */
-function getCloseCodeExplanation(code: number): { hint: string; linkDocs: boolean } {
+function getCloseCodeExplanation(
+    code: number,
+    probe: ProbeResult,
+): { hint: string; linkDocs: boolean } {
     switch (code) {
         // Corporate/school proxies and firewalls dropping WebSocket traffic.
         case 1005:
         case 1006:
+            if (probe === 'https_ok') {
+                return {
+                    hint: "Beaver's servers are reachable, but the streaming connection was blocked. Your network is likely blocking WebSocket traffic specifically.",
+                    linkDocs: true,
+                };
+            }
+            if (probe === 'https_blocked') {
+                return {
+                    hint: "Beaver's servers are not reachable from your network. Please check your internet connection and any active VPN, then try again.",
+                    linkDocs: true,
+                };
+            }
             return {
                 hint: "Your network appears to be blocking Beaver's connection. This is common on work, school, or public Wi‑Fi.",
                 linkDocs: true,
@@ -1646,6 +1708,18 @@ function getCloseCodeExplanation(code: number): { hint: string; linkDocs: boolea
 
         // TLS-inspection appliances, corporate VPNs, or aggressive antivirus.
         case 1015:
+            if (probe === 'https_ok') {
+                return {
+                    hint: "Beaver's HTTPS connection works, but the secure streaming (WebSocket) handshake was blocked by security software.",
+                    linkDocs: true,
+                };
+            }
+            if (probe === 'https_blocked') {
+                return {
+                    hint: "Beaver's connection is being blocked by security software (VPN, antivirus, or corporate proxy).",
+                    linkDocs: true,
+                };
+            }
             return {
                 hint: "Your network's security software (antivirus, VPN, or corporate proxy) is interfering with Beaver's secure connection.",
                 linkDocs: true,
@@ -1654,6 +1728,12 @@ function getCloseCodeExplanation(code: number): { hint: string; linkDocs: boolea
         // Server-side problems Beaver operators need to fix — user just retries.
         case 1011:
         case 1014:
+            if (probe === 'https_blocked') {
+                return {
+                    hint: "Beaver's servers are not reachable right now. Please try again in a moment.",
+                    linkDocs: false,
+                };
+            }
             return {
                 hint: "Beaver's server ran into a problem. Please try again in a moment.",
                 linkDocs: false,
@@ -1679,6 +1759,12 @@ function getCloseCodeExplanation(code: number): { hint: string; linkDocs: boolea
 
         default:
             if (code >= 4000 && code <= 4999) {
+                if (probe === 'https_blocked') {
+                    return {
+                        hint: "Beaver's servers are not reachable right now. Please try again in a moment.",
+                        linkDocs: false,
+                    };
+                }
                 return {
                     hint: 'The server rejected the connection. Please try again.',
                     linkDocs: false,
@@ -1696,15 +1782,20 @@ function getCloseCodeExplanation(code: number): { hint: string; linkDocs: boolea
  * WebSocket close code. Used by both connect-phase failures and mid-run
  * drops so identical underlying causes always produce identical wording.
  * The rendered format is:
- *   "<user-oriented sentence>[ See <link>.] (error code NNNN)"
+ *   "<user-oriented sentence>[ See <link>.] (error code NNNN[, https ok|blocked])"
  * The `<a>` tag is picked up by parseTextWithLinksAndNewlines in the UI.
+ * `probe` refines the wording once the diagnostics POST has settled.
  */
-function formatCloseCodeDetails(code: number): string {
-    const { hint, linkDocs } = getCloseCodeExplanation(code);
+function formatCloseCodeDetails(code: number, probe: ProbeResult = undefined): string {
+    const { hint, linkDocs } = getCloseCodeExplanation(code, probe);
     const link = linkDocs
         ? ` See our <a href="${CONNECTION_TROUBLESHOOTING_URL}">connection troubleshooting guide</a> for help.`
         : '';
-    return `${hint}${link} (error code ${code})`;
+    const probeSuffix =
+        probe === 'https_ok' ? ', https ok'
+        : probe === 'https_blocked' ? ', https blocked'
+        : '';
+    return `${hint}${link} (error code ${code}${probeSuffix})`;
 }
 
 /**
@@ -1713,14 +1804,65 @@ function formatCloseCodeDetails(code: number): string {
  * underlying error message for pre-connect failures (e.g. auth token
  * fetch).
  */
-function buildConnectionErrorDetails(error: unknown): string | undefined {
+function buildConnectionErrorDetails(error: unknown, probe: ProbeResult = undefined): string | undefined {
     if (error instanceof WSConnectionError && error.close_code !== undefined) {
-        return formatCloseCodeDetails(error.close_code);
+        return formatCloseCodeDetails(error.close_code, probe);
     }
     if (error && typeof (error as { message?: unknown }).message === 'string') {
         return (error as { message: string }).message || undefined;
     }
     return undefined;
+}
+
+/**
+ * Fire the connection-failure report to the backend and, when it
+ * returns, refine the `details` string on the matching run/error atom
+ * so the user sees a message tailored to what the probe learned.
+ *
+ * The initial (pre-probe) message is set by the caller synchronously,
+ * so the user never has to wait for the probe to see an error. The
+ * refinement is a silent in-place update that lands within a few
+ * seconds. If the run has already moved on (retry/regenerate), the
+ * update is skipped.
+ */
+function dispatchConnectionFailureReport(
+    report: ConnectionFailureReport,
+    code: number | null,
+    activeRunId: string,
+    set: Setter,
+): void {
+    // Fire-and-forget: the caller has already surfaced the initial
+    // error, and we don't want to block anything on this probe.
+    void reportConnectionFailure(report).then((result) => {
+        // No close code → nothing to refine (setup-phase auth errors,
+        // etc. — the details string is already the underlying message).
+        if (code === null) return;
+
+        const probe: ProbeResult = result.httpsReachable ? 'https_ok' : 'https_blocked';
+        const refinedDetails = formatCloseCodeDetails(code, probe);
+
+        // Only refine if the same errored run is still on screen. If
+        // the user hit Retry (or started a new run) before the probe
+        // returned, the stale probe result must not overwrite the new
+        // state. activeRunAtom is the source of truth; wsErrorAtom is
+        // updated in lockstep with it.
+        let matched = false;
+        set(activeRunAtom, (prev) => {
+            if (!prev || prev.id !== activeRunId) return prev;
+            if (prev.error?.type !== 'connection_error') return prev;
+            matched = true;
+            return {
+                ...prev,
+                error: { ...prev.error, details: refinedDetails },
+            };
+        });
+        if (matched) {
+            set(wsErrorAtom, (prev) => {
+                if (!prev || prev.type !== 'connection_error') return prev;
+                return { ...prev, details: refinedDetails };
+            });
+        }
+    });
 }
 
 /**
