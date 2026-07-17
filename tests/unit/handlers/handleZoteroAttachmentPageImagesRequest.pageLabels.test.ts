@@ -1,8 +1,9 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 // Test-controlled mock state — reset in beforeEach.
 const mockState = {
     renderImpl: null as ((args: any) => Promise<any>) | null,
+    metadataImpl: null as ((signal?: AbortSignal) => Promise<any>) | null,
     renderCalls: [] as any[],
     cannedPageCount: 3,
     cannedPageLabels: { 0: 'i', 1: '1', 2: '2' } as Record<number, string>,
@@ -14,7 +15,13 @@ vi.mock('../../../src/beaver-extract', () => {
             return mockState.cannedPageCount;
         }
 
-        async getMetadata(): Promise<{ pageCount: number; pageLabels: Record<number, string> }> {
+        async getMetadata(
+            _pdfData: Uint8Array | ArrayBuffer,
+            signal?: AbortSignal,
+        ): Promise<{ pageCount: number; pageLabels: Record<number, string> }> {
+            if (mockState.metadataImpl) {
+                return mockState.metadataImpl(signal);
+            }
             return {
                 pageCount: mockState.cannedPageCount,
                 pageLabels: mockState.cannedPageLabels,
@@ -64,6 +71,20 @@ vi.mock('../../../src/beaver-extract', () => {
         BeaverExtractor: MockPDFExtractor,
         ExtractionError: MockExtractionError,
         WorkerAbortError: MockWorkerAbortError,
+        isWorkerDeadlineError: () => false,
+        getExistingMuPDFWorkerClient: () => ({
+            getStats: () => ({
+                hasWorker: true,
+                spawnCount: 1,
+                retryCount: 0,
+                consecutiveStartFailures: 0,
+                leaseReapCount: 0,
+                lastLeaseReapOp: null,
+                lastLeaseReapAgeMs: null,
+            }),
+            inFlight: 1,
+            oldestInFlightStartedAt: Date.now(),
+        }),
         ExtractionErrorCode: {
             ENCRYPTED: 'encrypted',
             INVALID_PDF: 'invalid_pdf',
@@ -112,9 +133,14 @@ describe('handleZoteroAttachmentPageImagesRequest page labels', () => {
     beforeEach(() => {
         vi.clearAllMocks();
         mockState.renderImpl = null;
+        mockState.metadataImpl = null;
         mockState.renderCalls = [];
         mockState.cannedPageCount = 3;
         mockState.cannedPageLabels = { 0: 'i', 1: '1', 2: '2' };
+    });
+
+    afterEach(() => {
+        vi.useRealTimers();
     });
 
     function setupRequestScenario(opts: {
@@ -207,6 +233,36 @@ describe('handleZoteroAttachmentPageImagesRequest page labels', () => {
         ]);
         // Exactly one render call (no separate getPageCount or label hydration).
         expect(mockState.renderCalls).toHaveLength(1);
+    });
+
+    it('attaches worker diagnostics when uncached page-label metadata times out', async () => {
+        vi.useFakeTimers();
+        setupRequestScenario({ cachedPageCount: null, cachedPageLabels: null });
+        mockState.metadataImpl = (signal) => new Promise((_resolve, reject) => {
+            signal?.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
+        });
+
+        const pending = handleZoteroAttachmentPageImagesRequest({
+            event: 'zotero_attachment_page_images_request',
+            request_id: 'req-label-timeout',
+            attachment: { library_id: 1, zotero_key: 'ABCD1234' },
+            pages: [1],
+            skip_local_limits: true,
+            prefer_page_labels: true,
+            timeout_seconds: 0.01,
+        });
+
+        await vi.advanceTimersByTimeAsync(10);
+
+        await expect(pending).resolves.toMatchObject({
+            error_code: 'timeout',
+            worker_diagnostics: {
+                slot: 'hot',
+                lease_reaped: false,
+                has_worker: true,
+                in_flight: 1,
+            },
+        });
     });
 
     it('does NOT write metadata after a successful render even when a prior writer confirmed text-layer status', async () => {

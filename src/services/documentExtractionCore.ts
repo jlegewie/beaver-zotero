@@ -327,12 +327,24 @@ export type ExtractAndCacheResult =
           timeoutSeconds: number;
           pageCount: number | null;
           resolvedAttachment: ResolvedAttachment | null;
+          /** True when the worker busy-lease watchdog reaped the operation. */
+          leaseReaped?: boolean;
+          /**
+           * True when this request's own extraction dispatched to the PDF
+           * worker before timing out. Stays false for timeouts during cache
+           * pre-work (reads, decompression) and for requests joined to another
+           * request's in-flight shared extraction, so the worker snapshot on
+           * the response never describes unrelated activity.
+           */
+          workerDispatched?: boolean;
       }
     | {
           kind: 'external_abort';
           phase: string;
           pageCount: number | null;
           resolvedAttachment: ResolvedAttachment | null;
+          /** True when this request dispatched to the PDF worker before the external abort. */
+          workerDispatched?: boolean;
       };
 
 export type ExtractAndCacheEpubResult =
@@ -879,6 +891,7 @@ export async function extractAndCacheResolvedPdfDocument(
     let resolvedFilePath: string | null = null;
     let totalPages: number | null = null;
     let loadedPdfData: Uint8Array | null = null;
+    let workerDispatched = false;
 
     const aborted = (): ExtractAndCacheResult | null => {
         if (externalAbortSignal?.aborted) {
@@ -887,6 +900,7 @@ export async function extractAndCacheResolvedPdfDocument(
                 phase: 'external_pre_abort',
                 pageCount: totalPages,
                 resolvedAttachment,
+                workerDispatched,
             };
         }
         return null;
@@ -1107,6 +1121,7 @@ export async function extractAndCacheResolvedPdfDocument(
             pdfData = loaded.data;
             throwIfTimedOut('pdf_data_load_for_page_count');
             loadedPdfData = pdfData;
+            workerDispatched = true;
             totalPages = await client.getPageCount(pdfData, signal);
             throwIfTimedOut('page_count_extraction');
         }
@@ -1183,12 +1198,20 @@ export async function extractAndCacheResolvedPdfDocument(
             throw new Error('PDF data was not loaded before extraction');
         }
         const extractSettings = { checkTextLayer: true as const };
-        const createSharedResult = async (extractSignal: AbortSignal) =>
-            args.serializedResult
+        const createSharedResult = async (extractSignal: AbortSignal) => {
+            // Set only when this request's own extraction actually dispatches to the worker.
+            // A timeout during cache pre-work (metadata/payload reads, decompression) or while
+            // joined to another request's in-flight shared extraction must not attribute worker
+            // state to this request; if a shared extraction wedges, the leader request's timeout
+            // response carries the worker snapshot for that episode.
+            workerDispatched = true;
+            return args.serializedResult
                 ? client.extractSerialized(pdfBytes, { mode, settings: extractSettings }, extractSignal)
                 : client.extract(pdfBytes, { mode, settings: extractSettings }, extractSignal);
+        };
 
         const createUnsharedResult = async () => {
+            workerDispatched = true;
             const extracted = args.serializedResult
                 ? serializedWorkerResultToCacheResult(
                     await client.extractSerialized(
@@ -1278,6 +1301,7 @@ export async function extractAndCacheResolvedPdfDocument(
                 phase: error.phase,
                 pageCount: totalPages,
                 resolvedAttachment,
+                workerDispatched,
             };
         }
 
@@ -1290,6 +1314,7 @@ export async function extractAndCacheResolvedPdfDocument(
                 phase: 'external_abort',
                 pageCount: totalPages,
                 resolvedAttachment,
+                workerDispatched,
             };
         }
 
@@ -1306,6 +1331,8 @@ export async function extractAndCacheResolvedPdfDocument(
                 timeoutSeconds,
                 pageCount: totalPages,
                 resolvedAttachment,
+                leaseReaped: isWorkerDeadlineError(error),
+                workerDispatched,
             };
         }
 

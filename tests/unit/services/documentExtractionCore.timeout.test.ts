@@ -52,6 +52,10 @@ describe('extractAndCacheDocument timeout handling', () => {
         vi.useRealTimers();
         vi.clearAllMocks();
         vi.restoreAllMocks();
+        // Mirrors the absence of Zotero.Beaver in the default test setup so
+        // tests that rely on the unshared (no document cache) path are not
+        // affected by a documentCache stub left behind by another test.
+        delete (globalThis as any).Zotero.Beaver;
     });
 
     it('times out while resolving the Zotero item', async () => {
@@ -142,10 +146,163 @@ describe('extractAndCacheDocument timeout handling', () => {
             phase: 'unknown',
             timeoutSeconds: 40,
             pageCount: null,
+            leaseReaped: true,
+            workerDispatched: true,
             resolvedAttachment: {
                 libraryId: -1,
                 zoteroKey: 'EXTTEST1',
             },
         });
+    });
+
+    it('preserves worker dispatch metadata when an external deadline aborts a worker call', async () => {
+        vi.useFakeTimers();
+        const external = new AbortController();
+        (globalThis as any).IOUtils.stat = vi.fn().mockResolvedValue({ size: 4 });
+        (globalThis as any).IOUtils.read = vi.fn().mockResolvedValue(
+            new Uint8Array([0x25, 0x50, 0x44, 0x46]),
+        );
+        workerClientMocks.getPageCount.mockImplementation(
+            (_data: Uint8Array, signal: AbortSignal) => new Promise((_resolve, reject) => {
+                signal.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
+            }),
+        );
+
+        const pending = extractAndCacheResolvedPdfDocument({
+            source: {
+                kind: 'external',
+                filePath: '/tmp/external-deadline-test.pdf',
+                itemRef: { id: 0, libraryID: -1, key: 'EXTTEST4' },
+            },
+            resolvedKey: 'external-EXTTEST4',
+            contentType: 'application/pdf',
+            mode: 'structured',
+            maxPages: null,
+            maxFileSizeMB: 10,
+            timeoutSeconds: 40,
+            workerName: 'hot',
+            externalAbortSignal: external.signal,
+        });
+
+        await vi.advanceTimersByTimeAsync(0);
+        external.abort();
+
+        await expect(pending).resolves.toMatchObject({
+            kind: 'external_abort',
+            workerDispatched: true,
+            resolvedAttachment: {
+                libraryId: -1,
+                zoteroKey: 'EXTTEST4',
+            },
+        });
+        expect(workerClientMocks.getPageCount).toHaveBeenCalled();
+    });
+
+    it('does not mark worker dispatch when the cache stalls before extraction', async () => {
+        vi.useFakeTimers();
+        (globalThis as any).IOUtils.stat = vi.fn().mockResolvedValue({ size: 4 });
+        (globalThis as any).IOUtils.read = vi.fn().mockResolvedValue(
+            new Uint8Array([0x25, 0x50, 0x44, 0x46]),
+        );
+
+        // Stalls in the cache's own pre-work (metadata/payload reads) without
+        // ever invoking the supplied create callback, so the extraction never
+        // reaches the worker.
+        const getOrCreateResult = vi.fn(() => new Promise(() => {}));
+        (globalThis as any).Zotero.Beaver = {
+            data: { env: 'production' },
+            documentCache: {
+                getSourceIdentitySnapshot: vi.fn().mockResolvedValue(null),
+                getMetadata: vi.fn().mockResolvedValue({ pageCount: 3 }),
+                getResult: vi.fn().mockResolvedValue(null),
+                getSerializedResult: vi.fn().mockResolvedValue(null),
+                getOrCreateResult,
+                getOrCreateSerializedResult: vi.fn(),
+            },
+        };
+
+        const pending = extractAndCacheResolvedPdfDocument({
+            source: {
+                kind: 'external',
+                filePath: '/tmp/stalled-cache-test.pdf',
+                itemRef: { id: 0, libraryID: -1, key: 'EXTTEST2' },
+            },
+            resolvedKey: 'external-EXTTEST2',
+            contentType: 'application/pdf',
+            mode: 'structured',
+            maxPages: null,
+            maxFileSizeMB: 10,
+            timeoutSeconds: 1,
+            workerName: 'hot',
+        });
+
+        await vi.advanceTimersByTimeAsync(1000);
+        const result = await pending;
+
+        expect(result).toMatchObject({
+            kind: 'timeout',
+            timeoutSeconds: 1,
+            leaseReaped: false,
+            resolvedAttachment: {
+                libraryId: -1,
+                zoteroKey: 'EXTTEST2',
+            },
+        });
+        expect((result as { workerDispatched?: boolean }).workerDispatched).toBeFalsy();
+        expect(getOrCreateResult).toHaveBeenCalled();
+        expect(workerClientMocks.extract).not.toHaveBeenCalled();
+        expect(workerClientMocks.getPageCount).not.toHaveBeenCalled();
+    });
+
+    it('marks worker dispatch when the shared extraction reached the worker', async () => {
+        vi.useFakeTimers();
+        (globalThis as any).IOUtils.stat = vi.fn().mockResolvedValue({ size: 4 });
+        (globalThis as any).IOUtils.read = vi.fn().mockResolvedValue(
+            new Uint8Array([0x25, 0x50, 0x44, 0x46]),
+        );
+        workerClientMocks.extract.mockImplementation(() => new Promise(() => {})); // worker call never resolves
+
+        const getOrCreateResult = vi.fn((opts: any) => opts.create(new AbortController().signal));
+        (globalThis as any).Zotero.Beaver = {
+            data: { env: 'production' },
+            documentCache: {
+                getSourceIdentitySnapshot: vi.fn().mockResolvedValue(null),
+                getMetadata: vi.fn().mockResolvedValue({ pageCount: 3 }),
+                getResult: vi.fn().mockResolvedValue(null),
+                getSerializedResult: vi.fn().mockResolvedValue(null),
+                getOrCreateResult,
+                getOrCreateSerializedResult: vi.fn(),
+            },
+        };
+
+        const pending = extractAndCacheResolvedPdfDocument({
+            source: {
+                kind: 'external',
+                filePath: '/tmp/dispatched-worker-test.pdf',
+                itemRef: { id: 0, libraryID: -1, key: 'EXTTEST3' },
+            },
+            resolvedKey: 'external-EXTTEST3',
+            contentType: 'application/pdf',
+            mode: 'structured',
+            maxPages: null,
+            maxFileSizeMB: 10,
+            timeoutSeconds: 1,
+            workerName: 'hot',
+        });
+
+        await vi.advanceTimersByTimeAsync(1000);
+
+        await expect(pending).resolves.toMatchObject({
+            kind: 'timeout',
+            timeoutSeconds: 1,
+            leaseReaped: false,
+            workerDispatched: true,
+            resolvedAttachment: {
+                libraryId: -1,
+                zoteroKey: 'EXTTEST3',
+            },
+        });
+        expect(getOrCreateResult).toHaveBeenCalled();
+        expect(workerClientMocks.extract).toHaveBeenCalled();
     });
 });

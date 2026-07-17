@@ -169,6 +169,7 @@ export async function ensurePageLabelsForResolution(
     cachedMeta: DocumentCacheMetadata | null,
     extractor: BeaverExtractor,
     signal?: AbortSignal,
+    onWorkerDispatch?: () => void,
 ): Promise<PageLabelLoadResult> {
     // 1. Cache hit — pageLabels === null means "not yet checked";
     //    {} means "checked, no custom labels".
@@ -186,6 +187,7 @@ export async function ensurePageLabelsForResolution(
     // 2. Eager metadata-only load
     try {
         const pdfData = await IOUtils.read(filePath);
+        onWorkerDispatch?.();
         const { pageCount, pageLabels } = await extractor.getMetadata(pdfData, signal);
         const normalised = Object.keys(pageLabels).length > 0 ? pageLabels : null;
         return { labels: normalised, pageCount, pdfData };

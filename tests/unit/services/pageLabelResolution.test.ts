@@ -305,6 +305,35 @@ describe('ensurePageLabelsForResolution', () => {
         expect(extractor.getMetadata).toHaveBeenCalledWith(pdfBytes, undefined);
     });
 
+    it('reports dispatch only when the eager metadata worker call is reached', async () => {
+        const onWorkerDispatch = vi.fn();
+        const pdfBytes = new Uint8Array([1, 2, 3]);
+        mockIOUtils.read.mockResolvedValueOnce(pdfBytes);
+        const extractor = makeMockExtractor({ pageCount: 3, pageLabels: { 0: '1' } });
+
+        await ensurePageLabelsForResolution(
+            '/data/test.pdf',
+            null,
+            extractor,
+            undefined,
+            onWorkerDispatch,
+        );
+
+        expect(onWorkerDispatch).toHaveBeenCalledOnce();
+        expect(onWorkerDispatch).toHaveBeenCalledBefore(vi.mocked(extractor.getMetadata));
+
+        onWorkerDispatch.mockClear();
+        mockIOUtils.read.mockRejectedValueOnce(new Error('disk error'));
+        await ensurePageLabelsForResolution(
+            '/data/test.pdf',
+            null,
+            extractor,
+            undefined,
+            onWorkerDispatch,
+        );
+        expect(onWorkerDispatch).not.toHaveBeenCalled();
+    });
+
     it('does an eager load when cachedMeta has null page_labels (never checked)', async () => {
         const cachedMeta = makeCachedMeta({ pageLabels: null, pageCount: null });
         const pdfBytes = new Uint8Array([1, 2, 3]);

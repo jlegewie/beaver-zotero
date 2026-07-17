@@ -23,6 +23,7 @@ import {
     isWorkerDeadlineError,
 } from '../../beaver-extract';
 import { makeRemoteFilePath } from '../documentFileIdentity';
+import { withWorkerDiagnostics } from './workerDiagnostics';
 import {
     preflightZoteroAttachmentRequest,
     resolveToPdfAttachment,
@@ -88,6 +89,11 @@ export async function handleZoteroAttachmentPageImagesRequest(
 
     const timeout = createTimeoutController(timeout_seconds, DEFAULT_IMAGES_TIMEOUT_SECONDS);
     const { signal, timeoutSeconds, throwIfTimedOut, dispose } = timeout;
+
+    // True once the request has posted work to the PDF worker; gates the
+    // worker snapshot on timeout responses so pre-dispatch failures (item
+    // lookup, file download) are not labeled with unrelated worker activity.
+    let workerDispatched = false;
 
     try {
         const zoteroItem = await Zotero.Items.getByLibraryAndKeyAsync(
@@ -198,7 +204,13 @@ export async function handleZoteroAttachmentPageImagesRequest(
 
         // 5a. Load page labels for label-aware resolution. Short-circuits on cache.
         if (prefer_page_labels && filePath) {
-            const labelResult = await ensurePageLabelsForResolution(filePath, cachedMeta, extractor, signal);
+            const labelResult = await ensurePageLabelsForResolution(
+                filePath,
+                cachedMeta,
+                extractor,
+                signal,
+                () => { workerDispatched = true; },
+            );
             throwIfTimedOut('page_label_resolution');
             pageLabels = labelResult.labels;
             if (labelResult.pageCount != null) {
@@ -245,6 +257,7 @@ export async function handleZoteroAttachmentPageImagesRequest(
                     }
                 }
             }
+            workerDispatched = true;
             totalPages = await extractor.getPageCount(pdfData, signal);
             throwIfTimedOut('page_count_extraction');
         }
@@ -351,6 +364,7 @@ export async function handleZoteroAttachmentPageImagesRequest(
             + `pageIndices=${JSON.stringify(pageIndicesArg ?? null)} (allPages=${requestingAllPages})`,
             3,
         );
+        workerDispatched = true;
         const renderResult = await extractor.renderPages(pdfData, {
             pageIndices: pageIndicesArg,
             options: renderOptions,
@@ -398,10 +412,13 @@ export async function handleZoteroAttachmentPageImagesRequest(
             || isWorkerDeadlineError(error)
         ) {
             logger(`handleZoteroAttachmentPageImagesRequest: Timed out after ${timeoutSeconds}s`, 1);
-            return errorResponse(
-                `PDF page rendering timed out after ${timeoutSeconds} seconds`,
-                'timeout',
-                resolvedCachedPageCount,
+            return withWorkerDiagnostics(
+                errorResponse(
+                    `PDF page rendering timed out after ${timeoutSeconds} seconds`,
+                    'timeout',
+                    resolvedCachedPageCount,
+                ),
+                { workerDispatched, leaseReaped: isWorkerDeadlineError(error) },
             );
         }
 
