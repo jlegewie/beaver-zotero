@@ -15,7 +15,13 @@ import {
     AttachmentPageImagesErrorCode,
     WSPageImage,
 } from '../agentProtocol';
-import { BeaverExtractor, ExtractionError, ExtractionErrorCode, WorkerAbortError } from '../../beaver-extract';
+import {
+    BeaverExtractor,
+    ExtractionError,
+    ExtractionErrorCode,
+    WorkerAbortError,
+    isWorkerDeadlineError,
+} from '../../beaver-extract';
 import { makeRemoteFilePath } from '../documentFileIdentity';
 import {
     preflightZoteroAttachmentRequest,
@@ -385,7 +391,12 @@ export async function handleZoteroAttachmentPageImagesRequest(
         };
 
     } catch (error) {
-        if (signal.aborted || error instanceof WorkerAbortError || error instanceof TimeoutError) {
+        if (
+            signal.aborted
+            || error instanceof WorkerAbortError
+            || error instanceof TimeoutError
+            || isWorkerDeadlineError(error)
+        ) {
             logger(`handleZoteroAttachmentPageImagesRequest: Timed out after ${timeoutSeconds}s`, 1);
             return errorResponse(
                 `PDF page rendering timed out after ${timeoutSeconds} seconds`,

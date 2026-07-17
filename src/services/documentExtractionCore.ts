@@ -24,6 +24,7 @@ import {
     WorkerAbortError,
     WorkerSpawnError,
     getMuPDFWorkerClient,
+    isWorkerDeadlineError,
     type PDFWorkerSlotName,
 } from '../beaver-extract';
 import {
@@ -69,6 +70,9 @@ import {
  * Extra margin granted to a shared hot-slot extraction beyond the request's
  * own deadline before the document cache aborts it (and the worker client
  * terminates the worker), freeing the interactive slot for the next read.
+ * The request timeout plus this grace must stay below
+ * DEFAULT_BUSY_LEASE_MS_HOT so the cache abort reclaims the slot before the
+ * worker client's busy lease reaps the operation.
  */
 export const HOT_SHARED_EXTRACTION_GRACE_MS = 2000;
 
@@ -1289,7 +1293,12 @@ export async function extractAndCacheResolvedPdfDocument(
             };
         }
 
-        if (signal.aborted || error instanceof WorkerAbortError || error instanceof TimeoutError) {
+        if (
+            signal.aborted
+            || error instanceof WorkerAbortError
+            || error instanceof TimeoutError
+            || isWorkerDeadlineError(error)
+        ) {
             logger(`extractAndCacheDocument[${workerName}]: Timed out after ${timeoutSeconds}s`, 1);
             return {
                 kind: 'timeout',

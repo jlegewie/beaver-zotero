@@ -35,7 +35,13 @@ import {
     getResolvedAttachmentParentStub,
     buildServedAttachmentStub,
 } from './handleZoteroDocumentRequest';
-import { BeaverExtractor, ExtractionError, ExtractionErrorCode, WorkerAbortError } from '../../beaver-extract';
+import {
+    BeaverExtractor,
+    ExtractionError,
+    ExtractionErrorCode,
+    WorkerAbortError,
+    isWorkerDeadlineError,
+} from '../../beaver-extract';
 import { effectiveMaxFileSizeMB, effectiveMaxPageCount } from '../attachmentLimits';
 import {
     DEFAULT_IMAGES_TIMEOUT_SECONDS,
@@ -630,7 +636,12 @@ async function handleExternalFileViewRequest(
             served_attachment: servedExternal,
         };
     } catch (error) {
-        if (signal.aborted || error instanceof WorkerAbortError || error instanceof TimeoutError) {
+        if (
+            signal.aborted
+            || error instanceof WorkerAbortError
+            || error instanceof TimeoutError
+            || isWorkerDeadlineError(error)
+        ) {
             return errorResponse(`Rendering timed out after ${timeoutSeconds} seconds`, 'timeout');
         }
         if (error instanceof ExtractionError) {

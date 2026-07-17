@@ -1,10 +1,23 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+const workerClientMocks = vi.hoisted(() => ({
+    getPageCount: vi.fn(),
+    extract: vi.fn(),
+}));
+
 vi.mock('../../../src/beaver-extract', () => ({
     ExtractionError: class MockExtractionError extends Error {},
     StaleWorkerError: class MockStaleWorkerError extends Error {},
     WorkerAbortError: class MockWorkerAbortError extends Error {},
+    WorkerDeadlineError: class MockWorkerDeadlineError extends Error {
+        constructor(message = 'worker busy-age lease exceeded') {
+            super(message);
+            this.name = 'WorkerDeadlineError';
+        }
+    },
     WorkerSpawnError: class MockWorkerSpawnError extends Error {},
+    isWorkerDeadlineError: (error: unknown) =>
+        (error as { name?: unknown } | null | undefined)?.name === 'WorkerDeadlineError',
     ExtractionErrorCode: {
         ENCRYPTED: 'encrypted',
         NO_TEXT_LAYER: 'no_text_layer',
@@ -14,10 +27,7 @@ vi.mock('../../../src/beaver-extract', () => ({
         WASM_ERROR: 'wasm_error',
         HEAP_EXHAUSTION: 'heap_exhaustion',
     },
-    getMuPDFWorkerClient: vi.fn(() => ({
-        getPageCount: vi.fn(),
-        extract: vi.fn(),
-    })),
+    getMuPDFWorkerClient: vi.fn(() => workerClientMocks),
 }));
 
 vi.mock('../../../src/services/documentExtraction', async () => {
@@ -31,11 +41,16 @@ vi.mock('../../../src/services/documentExtraction', async () => {
     };
 });
 
-import { extractAndCacheDocument } from '../../../src/services/documentExtractionCore';
+import { WorkerDeadlineError } from '../../../src/beaver-extract';
+import {
+    extractAndCacheDocument,
+    extractAndCacheResolvedPdfDocument,
+} from '../../../src/services/documentExtractionCore';
 
 describe('extractAndCacheDocument timeout handling', () => {
     afterEach(() => {
         vi.useRealTimers();
+        vi.clearAllMocks();
         vi.restoreAllMocks();
     });
 
@@ -95,6 +110,42 @@ describe('extractAndCacheDocument timeout handling', () => {
             phase: 'zotero_item_load',
             pageCount: null,
             resolvedAttachment: null,
+        });
+    });
+
+    it('maps a worker busy-age deadline to a timeout result', async () => {
+        (globalThis as any).IOUtils.stat = vi.fn().mockResolvedValue({ size: 4 });
+        (globalThis as any).IOUtils.read = vi.fn().mockResolvedValue(
+            new Uint8Array([0x25, 0x50, 0x44, 0x46]),
+        );
+        workerClientMocks.getPageCount.mockRejectedValueOnce(
+            new WorkerDeadlineError(),
+        );
+
+        const result = await extractAndCacheResolvedPdfDocument({
+            source: {
+                kind: 'external',
+                filePath: '/tmp/deadline-test.pdf',
+                itemRef: { id: 0, libraryID: -1, key: 'EXTTEST1' },
+            },
+            resolvedKey: 'external-EXTTEST1',
+            contentType: 'application/pdf',
+            mode: 'structured',
+            maxPages: null,
+            maxFileSizeMB: 10,
+            timeoutSeconds: 40,
+            workerName: 'hot',
+        });
+
+        expect(result).toMatchObject({
+            kind: 'timeout',
+            phase: 'unknown',
+            timeoutSeconds: 40,
+            pageCount: null,
+            resolvedAttachment: {
+                libraryId: -1,
+                zoteroKey: 'EXTTEST1',
+            },
         });
     });
 });
