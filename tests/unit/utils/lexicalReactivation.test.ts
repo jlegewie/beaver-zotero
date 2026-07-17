@@ -2,15 +2,59 @@
 
 import React, { act, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { LexicalEditorInputHandle } from '../../../react/components/input/lexical/LexicalEditorInput';
 
 vi.mock('../../../react/components/input/lexical/SlashCommandHoverCardPlugin', () => ({
     SlashCommandHoverCardPlugin: () => null,
 }));
 
+type SavedDescriptor = {
+    target: object;
+    key: PropertyKey;
+    descriptor: PropertyDescriptor | undefined;
+};
+
 describe('Lexical selection stability', () => {
     let container: HTMLDivElement | null = null;
     let reactRoot: ReturnType<typeof createRoot> | null = null;
+    let documentFocused = true;
+    let savedDescriptors: SavedDescriptor[] = [];
+
+    const patchProperty = (target: object, key: PropertyKey, value: unknown) => {
+        savedDescriptors.push({
+            target,
+            key,
+            descriptor: Object.getOwnPropertyDescriptor(target, key),
+        });
+        Object.defineProperty(target, key, {
+            configurable: true,
+            value,
+        });
+    };
+
+    const restorePatchedProperties = () => {
+        for (const { target, key, descriptor } of savedDescriptors.reverse()) {
+            if (descriptor) Object.defineProperty(target, key, descriptor);
+            else Reflect.deleteProperty(target, key);
+        }
+        savedDescriptors = [];
+    };
+
+    beforeEach(() => {
+        documentFocused = true;
+        patchProperty(
+            globalThis,
+            'IS_REACT_ACT_ENVIRONMENT',
+            true,
+        );
+        // Lexical enables BEFORE_INPUT_COMMAND only when getTargetRanges is
+        // available. Gecko provides it; jsdom needs this capability shim.
+        patchProperty(InputEvent.prototype, 'getTargetRanges', () => []);
+        patchProperty(Node.prototype, 'getBoundingClientRect', () => new DOMRect());
+        patchProperty(Range.prototype, 'getBoundingClientRect', () => new DOMRect());
+        patchProperty(Document.prototype, 'hasFocus', () => documentFocused);
+    });
 
     afterEach(async () => {
         if (reactRoot) {
@@ -19,33 +63,15 @@ describe('Lexical selection stability', () => {
         container?.remove();
         container = null;
         reactRoot = null;
+        restorePatchedProperties();
     });
 
-    it('repairs a late caret collapse after the first character', async () => {
-        const testWindow = globalThis.window;
+    const mountEmptyEditor = async () => {
         const testDocument = globalThis.document;
-        (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean })
-            .IS_REACT_ACT_ENVIRONMENT = true;
-        // Lexical enables BEFORE_INPUT_COMMAND only when getTargetRanges is
-        // available. Gecko provides it; jsdom needs the capability shim before
-        // Lexical is imported.
-        if (!('getTargetRanges' in InputEvent.prototype)) {
-            Object.defineProperty(InputEvent.prototype, 'getTargetRanges', {
-                configurable: true,
-                value: () => [],
-            });
-        }
-        Object.defineProperty(Node.prototype, 'getBoundingClientRect', {
-            configurable: true,
-            value: () => new DOMRect(),
-        });
-        Object.defineProperty(Range.prototype, 'getBoundingClientRect', {
-            configurable: true,
-            value: () => new DOMRect(),
-        });
         const { LexicalEditorInput } = await import(
             '../../../react/components/input/lexical/LexicalEditorInput'
         );
+        const editorHandle = React.createRef<LexicalEditorInputHandle>();
 
         container = testDocument.createElement('div');
         testDocument.body.append(container);
@@ -54,6 +80,7 @@ describe('Lexical selection stability', () => {
         function Harness() {
             const [value, setValue] = useState('');
             return React.createElement(LexicalEditorInput, {
+                ref: editorHandle,
                 value,
                 onChange: setValue,
                 onSubmit: () => {},
@@ -65,119 +92,103 @@ describe('Lexical selection stability', () => {
         const editable = container.querySelector<HTMLElement>('.beaver-lexical-content');
         expect(editable).not.toBeNull();
         editable!.focus();
-
-        testWindow.dispatchEvent(new FocusEvent('blur'));
-        const nativeSelection = testWindow.getSelection();
+        const nativeSelection = globalThis.window.getSelection();
         expect(nativeSelection).not.toBeNull();
-        nativeSelection!.setBaseAndExtent(editable!, 0, editable!, 0);
-        testDocument.dispatchEvent(new Event('selectionchange'));
-        testWindow.dispatchEvent(new FocusEvent('focus'));
+        return { editable: editable!, editorHandle, nativeSelection: nativeSelection! };
+    };
+
+    const insertFirstCharacter = async (editable: HTMLElement) => {
+        const beforeInput = new InputEvent('beforeinput', {
+            bubbles: true,
+            cancelable: true,
+            data: 'a',
+            inputType: 'insertText',
+        });
+        editable.dispatchEvent(beforeInput);
+        expect(beforeInput.defaultPrevented).toBe(true);
+        // Lexical commits the controlled insertion in a microtask; do not
+        // advance timers yet because the repair intentionally runs later.
+        await Promise.resolve();
+        await Promise.resolve();
+        expect(editable.textContent, editable.innerHTML).toBe('a');
+    };
+
+    const collapseCaretToStart = (
+        editable: HTMLElement,
+        nativeSelection: Selection,
+    ) => {
+        const text = globalThis.document.createTreeWalker(
+            editable,
+            NodeFilter.SHOW_TEXT,
+        ).nextNode();
+        expect(text?.nodeType).toBe(Node.TEXT_NODE);
+        nativeSelection.setBaseAndExtent(text!, 0, text!, 0);
+        globalThis.document.dispatchEvent(new Event('selectionchange'));
+    };
+
+    const waitForDeferredRepair = () =>
+        new Promise(resolve => globalThis.window.setTimeout(resolve, 0));
+
+    const expectCaretOffset = (nativeSelection: Selection, offset: number) => {
+        expect(nativeSelection.anchorNode?.nodeValue).toBe('a');
+        expect(nativeSelection.anchorOffset).toBe(offset);
+        expect(nativeSelection.focusOffset).toBe(offset);
+    };
+
+    it('repairs a late caret collapse after the first character', async () => {
+        const { editable, nativeSelection } = await mountEmptyEditor();
+
+        globalThis.window.dispatchEvent(new FocusEvent('blur'));
+        nativeSelection.setBaseAndExtent(editable, 0, editable, 0);
+        globalThis.document.dispatchEvent(new Event('selectionchange'));
+        globalThis.window.dispatchEvent(new FocusEvent('focus'));
 
         await act(async () => {
-            const beforeInput = new InputEvent('beforeinput', {
-                bubbles: true,
-                cancelable: true,
-                data: 'a',
-                inputType: 'insertText',
-            });
-            editable!.dispatchEvent(beforeInput);
-            expect(beforeInput.defaultPrevented).toBe(true);
-            // Lexical commits the controlled insertion in a microtask; do not
-            // advance timers yet because the repair intentionally runs later.
-            await Promise.resolve();
-            await Promise.resolve();
-            expect(editable!.textContent, editable!.innerHTML).toBe('a');
-
-            // Reproduce the late chrome-document collapse that arrives after
-            // the first insertion/placeholder update.
-            const text = testDocument.createTreeWalker(
-                editable!,
-                NodeFilter.SHOW_TEXT,
-            ).nextNode();
-            expect(text?.nodeType).toBe(Node.TEXT_NODE);
-            nativeSelection!.setBaseAndExtent(text!, 0, text!, 0);
-            testDocument.dispatchEvent(new Event('selectionchange'));
-            await new Promise(resolve => testWindow.setTimeout(resolve, 0));
+            await insertFirstCharacter(editable);
+            collapseCaretToStart(editable, nativeSelection);
+            await waitForDeferredRepair();
         });
 
-        expect(editable!.textContent).toBe('a');
-        expect(nativeSelection!.anchorNode?.nodeValue).toBe('a');
-        expect(nativeSelection!.anchorOffset).toBe(1);
-        expect(nativeSelection!.focusOffset).toBe(1);
+        expectCaretOffset(nativeSelection, 1);
     });
 
     it('repairs the same first-character collapse without window reactivation', async () => {
-        const testWindow = globalThis.window;
-        const testDocument = globalThis.document;
-        (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean })
-            .IS_REACT_ACT_ENVIRONMENT = true;
-        if (!('getTargetRanges' in InputEvent.prototype)) {
-            Object.defineProperty(InputEvent.prototype, 'getTargetRanges', {
-                configurable: true,
-                value: () => [],
-            });
-        }
-        Object.defineProperty(Node.prototype, 'getBoundingClientRect', {
-            configurable: true,
-            value: () => new DOMRect(),
-        });
-        Object.defineProperty(Range.prototype, 'getBoundingClientRect', {
-            configurable: true,
-            value: () => new DOMRect(),
-        });
-        const { LexicalEditorInput } = await import(
-            '../../../react/components/input/lexical/LexicalEditorInput'
-        );
-
-        container = testDocument.createElement('div');
-        testDocument.body.append(container);
-        reactRoot = createRoot(container);
-
-        function Harness() {
-            const [value, setValue] = useState('');
-            return React.createElement(LexicalEditorInput, {
-                value,
-                onChange: setValue,
-                onSubmit: () => {},
-                placeholder: 'Message Beaver',
-            });
-        }
-
-        await act(async () => reactRoot?.render(React.createElement(Harness)));
-        const editable = container.querySelector<HTMLElement>('.beaver-lexical-content');
-        expect(editable).not.toBeNull();
-        editable!.focus();
-        const nativeSelection = testWindow.getSelection();
-        expect(nativeSelection).not.toBeNull();
+        const { editable, nativeSelection } = await mountEmptyEditor();
 
         await act(async () => {
-            const beforeInput = new InputEvent('beforeinput', {
-                bubbles: true,
-                cancelable: true,
-                data: 'a',
-                inputType: 'insertText',
-            });
-            editable!.dispatchEvent(beforeInput);
-            expect(beforeInput.defaultPrevented).toBe(true);
-            await Promise.resolve();
-            await Promise.resolve();
-            expect(editable!.textContent, editable!.innerHTML).toBe('a');
-
-            // This models the selection reset caused by Stop/surrounding UI
-            // churn, without arming any window-focus-specific behavior.
-            const text = testDocument.createTreeWalker(
-                editable!,
-                NodeFilter.SHOW_TEXT,
-            ).nextNode();
-            expect(text?.nodeType).toBe(Node.TEXT_NODE);
-            nativeSelection!.setBaseAndExtent(text!, 0, text!, 0);
-            testDocument.dispatchEvent(new Event('selectionchange'));
-            await new Promise(resolve => testWindow.setTimeout(resolve, 0));
+            await insertFirstCharacter(editable);
+            collapseCaretToStart(editable, nativeSelection);
+            await waitForDeferredRepair();
         });
 
-        expect(editable!.textContent).toBe('a');
-        expect(nativeSelection!.anchorNode?.nodeValue).toBe('a');
-        expect(nativeSelection!.anchorOffset).toBe(1);
-        expect(nativeSelection!.focusOffset).toBe(1);
+        expectCaretOffset(nativeSelection, 1);
+    });
+
+    it('does not repair text updates in a background document', async () => {
+        const { editable, nativeSelection } = await mountEmptyEditor();
+        // activeElement remains the editor even though its window is no longer
+        // focused, matching the separate-window/sidebar sync case.
+        documentFocused = false;
+
+        await act(async () => {
+            await insertFirstCharacter(editable);
+            collapseCaretToStart(editable, nativeSelection);
+            await waitForDeferredRepair();
+        });
+
+        expectCaretOffset(nativeSelection, 0);
+    });
+
+    it('does not override an explicit programmatic caret placement', async () => {
+        const { editable, editorHandle, nativeSelection } = await mountEmptyEditor();
+
+        await act(async () => {
+            await insertFirstCharacter(editable);
+            editorHandle.current?.selectRange(0, 0);
+            await Promise.resolve();
+            await waitForDeferredRepair();
+        });
+
+        expectCaretOffset(nativeSelection, 0);
     });
 });

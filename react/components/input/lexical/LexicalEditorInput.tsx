@@ -308,10 +308,12 @@ export interface LexicalEditorInputProps {
 const EditorApi = forwardRef<LexicalEditorInputHandle, {
     pinnedEndCaretRef: React.MutableRefObject<boolean>;
     blurSelectionRef: React.MutableRefObject<LexicalSelectionOffsets | null>;
+    selectionRepairGenerationRef: React.MutableRefObject<number>;
 }>(
-    function EditorApi({ pinnedEndCaretRef, blurSelectionRef }, ref) {
+    function EditorApi({ pinnedEndCaretRef, blurSelectionRef, selectionRepairGenerationRef }, ref) {
         const [editor] = useLexicalComposerContext();
         const setPlainText = useCallback((text: string, selectionStart = text.length, selectionEnd = selectionStart) => {
+            selectionRepairGenerationRef.current++;
             pinnedEndCaretRef.current = false;
             blurSelectionRef.current = null;
             editor.update(() => {
@@ -331,12 +333,13 @@ const EditorApi = forwardRef<LexicalEditorInputHandle, {
                     p.select();
                 }
             });
-        }, [editor, pinnedEndCaretRef, blurSelectionRef]);
+        }, [editor, pinnedEndCaretRef, blurSelectionRef, selectionRepairGenerationRef]);
 
         useImperativeHandle(
             ref,
             () => ({
                 focus: () => {
+                    selectionRepairGenerationRef.current++;
                     const root = editor.getRootElement();
                     const doc = root?.ownerDocument;
                     const snap = blurSelectionRef.current;
@@ -370,6 +373,7 @@ const EditorApi = forwardRef<LexicalEditorInputHandle, {
                     setPlainText(text, caretOffset);
                 },
                 deleteTrailingCharacter: () => {
+                    selectionRepairGenerationRef.current++;
                     pinnedEndCaretRef.current = false;
                     blurSelectionRef.current = null;
                     editor.update(() => {
@@ -387,6 +391,7 @@ const EditorApi = forwardRef<LexicalEditorInputHandle, {
                     });
                 },
                 selectRange: (start, end, options) => {
+                    selectionRepairGenerationRef.current++;
                     pinnedEndCaretRef.current = false;
                     blurSelectionRef.current = null;
                     editor.update(
@@ -402,6 +407,7 @@ const EditorApi = forwardRef<LexicalEditorInputHandle, {
                     return offset;
                 },
                 insertSlashCommand: (descriptor, queryLength) => {
+                    selectionRepairGenerationRef.current++;
                     blurSelectionRef.current = null;
                     editor.update(() => {
                         const root = $getRoot();
@@ -495,7 +501,7 @@ const EditorApi = forwardRef<LexicalEditorInputHandle, {
                     return result;
                 },
             }),
-            [editor, setPlainText, pinnedEndCaretRef, blurSelectionRef],
+            [editor, setPlainText, pinnedEndCaretRef, blurSelectionRef, selectionRepairGenerationRef],
         );
         return null;
     },
@@ -1197,11 +1203,17 @@ const EmptyEditorInsertionPlugin: React.FC = () => {
  * before this listener gets a reliable snapshot. Later updates only write when
  * the live selection actually drifted. A newer edit or user action cancels it.
  */
-const DeferredSelectionRepairPlugin: React.FC = () => {
+const DeferredSelectionRepairPlugin: React.FC<{
+    selectionRepairGenerationRef: React.MutableRefObject<number>;
+}> = ({ selectionRepairGenerationRef }) => {
     const [editor] = useLexicalComposerContext();
     useEffect(() => {
         let rootEl: HTMLElement | null = null;
         let repairTimer: number | null = null;
+
+        const isEditorActiveInFocusedWindow = (root: HTMLElement) =>
+            root.ownerDocument.hasFocus()
+            && root.ownerDocument.activeElement === root;
 
         const clearRepair = () => {
             if (repairTimer === null) return;
@@ -1210,7 +1222,7 @@ const DeferredSelectionRepairPlugin: React.FC = () => {
         };
 
         const unregisterUpdate = editor.registerUpdateListener(({ editorState, prevEditorState }) => {
-            if (!rootEl || rootEl.ownerDocument.activeElement !== rootEl || editor.isComposing()) return;
+            if (!rootEl || !isEditorActiveInFocusedWindow(rootEl) || editor.isComposing()) return;
             let previousText = '';
             let nextText = '';
             let expectedSelection: LexicalSelectionOffsets | null = null;
@@ -1225,16 +1237,21 @@ const DeferredSelectionRepairPlugin: React.FC = () => {
 
             const root = rootEl;
             const win = root.ownerDocument.defaultView;
-            const domSelection = win?.getSelection();
-            const expectedDom = domSelection ? captureDomSelection(domSelection, root) : null;
             if (!win) return;
+            const domSelection = win.getSelection();
+            const expectedDom = domSelection ? captureDomSelection(domSelection, root) : null;
             const expectedText = nextText;
             const expectedModel = expectedSelection;
             const isFirstInsertion = previousText.length === 0 && nextText.length > 0;
+            const repairGeneration = selectionRepairGenerationRef.current;
             clearRepair();
             repairTimer = win.setTimeout(() => {
                 repairTimer = null;
-                if (root.ownerDocument.activeElement !== root || editor.isComposing()) return;
+                if (
+                    selectionRepairGenerationRef.current !== repairGeneration
+                    || !isEditorActiveInFocusedWindow(root)
+                    || editor.isComposing()
+                ) return;
                 let currentText = '';
                 editor.getEditorState().read(() => {
                     currentText = $getRoot().getTextContent();
@@ -1279,7 +1296,7 @@ const DeferredSelectionRepairPlugin: React.FC = () => {
             unregisterUpdate();
             unregisterRoot();
         };
-    }, [editor]);
+    }, [editor, selectionRepairGenerationRef]);
     return null;
 };
 
@@ -1478,6 +1495,10 @@ export const LexicalEditorInput = forwardRef<LexicalEditorInputHandle, LexicalEd
         // external rebuild path.
         const blurSelectionRef = useRef<LexicalSelectionOffsets | null>(null);
 
+        // Incremented by imperative caret APIs so a deferred repair scheduled
+        // by an earlier text update cannot overwrite an intentional selection.
+        const selectionRepairGenerationRef = useRef(0);
+
         // The ContentEditable ref callback MUST keep a stable identity across
         // renders. Lexical memoizes its root-element ref on this callback, so a
         // changing identity makes it re-run editor.setRootElement() on every
@@ -1541,13 +1562,18 @@ export const LexicalEditorInput = forwardRef<LexicalEditorInputHandle, LexicalEd
                     <SelectionGuardPlugin pendingDomSelectionRef={pendingDomSelectionRef} />
                     <SelectionPersistencePlugin />
                     <EmptyEditorInsertionPlugin />
-                    <DeferredSelectionRepairPlugin />
+                    <DeferredSelectionRepairPlugin selectionRepairGenerationRef={selectionRepairGenerationRef} />
                     <BlurSelectionSnapshotPlugin blurSelectionRef={blurSelectionRef} />
                     <PinnedEndCaretPlugin pinnedRef={pinnedEndCaretRef} />
                     <SlashCommandClickPlugin />
                     <SlashCommandHoverCardPlugin />
                     <SubmitOnEnterPlugin onSubmit={onSubmit} />
-                    <EditorApi ref={ref} pinnedEndCaretRef={pinnedEndCaretRef} blurSelectionRef={blurSelectionRef} />
+                    <EditorApi
+                        ref={ref}
+                        pinnedEndCaretRef={pinnedEndCaretRef}
+                        blurSelectionRef={blurSelectionRef}
+                        selectionRepairGenerationRef={selectionRepairGenerationRef}
+                    />
                 </div>
             </LexicalComposer>
         );
