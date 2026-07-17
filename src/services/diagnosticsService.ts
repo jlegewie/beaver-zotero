@@ -1,15 +1,11 @@
 /**
  * Diagnostics service
  *
- * Reports client-side connection failures to the backend via a plain
- * HTTPS POST. Dual purpose:
- *  1. Backend learns about connection-failure patterns in the wild
- *     (close codes, phase, platform) without needing WebSocket to
- *     succeed first.
- *  2. The success/failure of *this* HTTPS call itself is a diagnostic
- *     signal — it tells us whether the network is blocking Beaver
- *     entirely, or only blocking WebSocket traffic specifically. The
- *     result is used to refine the error message shown to the user.
+ * Reports client-side WebSocket connection failures to the backend via
+ * a plain HTTPS POST. Fire-and-forget — nothing on the client depends
+ * on the result. Users who reach this code path are already
+ * authenticated (they've been using the app), so plain HTTPS is known
+ * to work and the failure is inherently WebSocket-specific.
  *
  * ---------------------------------------------------------------------------
  * Backend endpoint contract
@@ -18,14 +14,8 @@
  * Path:   /api/v1/diagnostics/connection-failure
  * Auth:   OPTIONAL Bearer token. If provided and valid, associate the
  *         report with the user. If missing/invalid, accept anonymously —
- *         connection failures may prevent Supabase from issuing a fresh
- *         token, so requiring auth would drop the reports we most want.
- * Rate:   Recommend server-side rate-limiting by (IP + close_code) to
- *         cap volume from a single misconfigured network. Do not gate
- *         the response on the rate limit — clients should still see a
- *         2xx so the client can conclude "HTTPS works". Silent drops
- *         on the server side are fine; the client only needs to know
- *         that the HTTP request round-tripped.
+ *         we still want the reports even if the session cache is stale.
+ * Rate:   Rate-limit server-side by (IP + close_code) at your discretion.
  *
  * Request body (JSON):
  *   {
@@ -42,12 +32,7 @@
  *     "client_time":      string                   // ISO-8601 UTC
  *   }
  *
- * Response body (JSON):
- *   { "received": true }
- *
- * Any 2xx response counts as "HTTPS succeeded" for the client's
- * subsequent message refinement. Any network error, timeout, or
- * non-2xx status counts as "HTTPS failed".
+ * Response body: anything 2xx. The client does not read it.
  *
  * Privacy: intentionally omits everything user-identifying beyond what
  * the optional bearer token conveys. No chat content, no library data,
@@ -77,17 +62,6 @@ export interface ConnectionFailureReport {
     run_id?: string | null;
 }
 
-export interface ConnectionFailureReportResult {
-    /**
-     * Whether the HTTPS POST itself succeeded. Signals that the network
-     * is not blocking Beaver globally; only WebSocket traffic is
-     * blocked. Used to refine the user-facing error message.
-     */
-    httpsReachable: boolean;
-    /** HTTP status if we got a response, undefined on network error. */
-    status?: number;
-}
-
 /**
  * Attempt to grab an auth token synchronously from the Supabase
  * session cache. Never triggers a refresh — a network issue that
@@ -104,15 +78,11 @@ async function getBestEffortAuthToken(): Promise<string | undefined> {
 
 /**
  * Fire the connection-failure report to the backend. Never throws.
- * Always resolves within REPORT_TIMEOUT_MS with a result the caller
- * can use to refine the message shown to the user.
+ * Fire-and-forget: callers should not await for correctness — the UI
+ * has already surfaced the error by the time this runs.
  */
-export async function reportConnectionFailure(
-    report: ConnectionFailureReport,
-): Promise<ConnectionFailureReportResult> {
-    if (!API_BASE_URL) {
-        return { httpsReachable: false };
-    }
+export async function reportConnectionFailure(report: ConnectionFailureReport): Promise<void> {
+    if (!API_BASE_URL) return;
 
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), REPORT_TIMEOUT_MS);
@@ -148,17 +118,14 @@ export async function reportConnectionFailure(
         if (zoteroVersion) headers['X-Zotero-Version'] = zoteroVersion;
         if (token) headers['Authorization'] = `Bearer ${token}`;
 
-        const response = await fetch(`${API_BASE_URL}${DIAGNOSTICS_ENDPOINT}`, {
+        await fetch(`${API_BASE_URL}${DIAGNOSTICS_ENDPOINT}`, {
             method: 'POST',
             headers,
             body: JSON.stringify(body),
             signal: controller.signal,
         });
-
-        return { httpsReachable: response.ok, status: response.status };
     } catch (error) {
         logger(`DiagnosticsService: connection-failure report failed: ${error}`, 1);
-        return { httpsReachable: false };
     } finally {
         clearTimeout(timeoutId);
     }
