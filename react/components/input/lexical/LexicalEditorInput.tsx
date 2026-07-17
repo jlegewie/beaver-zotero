@@ -41,6 +41,12 @@ import {
 } from '../../../utils/slashCommands';
 import { getHost } from '../../../host';
 import { SlashCommandHoverCardPlugin } from './SlashCommandHoverCardPlugin';
+import {
+    $getFlatSelectionOffsets,
+    $selectFlatRange,
+    $selectFlatSelection,
+    type LexicalSelectionOffsets,
+} from './selectionOffsets';
 
 export type { SlashCommandDescriptor };
 
@@ -185,11 +191,10 @@ function scrollFocusIntoView(root: HTMLElement, sel: Selection): void {
     }
 }
 
-/** Flattened plain-text offsets of the current selection's anchor and focus
- *  points (offsets are relative to the concatenated text-node content), or
- *  null when there is no range selection or a point sits outside the text
- *  nodes. Must be called inside an editor read/update context. */
-function $getFlatSelectionOffsets(): { anchor: number; focus: number } | null {
+/** Text-node-only offsets matching getDomFlatSelectionOffsets. This coordinate
+ *  system intentionally excludes block separators and is only used by the DOM
+ *  mutation guard when comparing two text-node selections. */
+function $getDomComparableSelectionOffsets(): { anchor: number; focus: number } | null {
     const selection = $getSelection();
     if (!$isRangeSelection(selection)) return null;
     const anchorKey = selection.anchor.getNode().getKey();
@@ -207,9 +212,8 @@ function $getFlatSelectionOffsets(): { anchor: number; focus: number } | null {
     return { anchor, focus };
 }
 
-/** Map a flattened plain-text [start, end] range (start <= end) back onto the
- *  editor's text nodes and select it. Must be called inside an update context. */
-function $selectFlatRange(start: number, end: number): void {
+/** Restore offsets produced by $getDomComparableSelectionOffsets. */
+function $selectDomComparableRange(start: number, end: number): void {
     const root = $getRoot();
     const textLength = root.getTextContent().length;
     const safeStart = Math.max(0, Math.min(start, textLength));
@@ -303,11 +307,13 @@ export interface LexicalEditorInputProps {
 // surrounding InputArea can keep its existing imperative usage.
 const EditorApi = forwardRef<LexicalEditorInputHandle, {
     pinnedEndCaretRef: React.MutableRefObject<boolean>;
-    blurSelectionRef: React.MutableRefObject<{ anchor: number; focus: number } | null>;
+    blurSelectionRef: React.MutableRefObject<LexicalSelectionOffsets | null>;
+    selectionRepairGenerationRef: React.MutableRefObject<number>;
 }>(
-    function EditorApi({ pinnedEndCaretRef, blurSelectionRef }, ref) {
+    function EditorApi({ pinnedEndCaretRef, blurSelectionRef, selectionRepairGenerationRef }, ref) {
         const [editor] = useLexicalComposerContext();
         const setPlainText = useCallback((text: string, selectionStart = text.length, selectionEnd = selectionStart) => {
+            selectionRepairGenerationRef.current++;
             pinnedEndCaretRef.current = false;
             blurSelectionRef.current = null;
             editor.update(() => {
@@ -327,12 +333,13 @@ const EditorApi = forwardRef<LexicalEditorInputHandle, {
                     p.select();
                 }
             });
-        }, [editor, pinnedEndCaretRef, blurSelectionRef]);
+        }, [editor, pinnedEndCaretRef, blurSelectionRef, selectionRepairGenerationRef]);
 
         useImperativeHandle(
             ref,
             () => ({
                 focus: () => {
+                    selectionRepairGenerationRef.current++;
                     const root = editor.getRootElement();
                     const doc = root?.ownerDocument;
                     const snap = blurSelectionRef.current;
@@ -343,9 +350,10 @@ const EditorApi = forwardRef<LexicalEditorInputHandle, {
                         // Restore the snapshot taken at blur instead.
                         blurSelectionRef.current = null;
                         pinnedEndCaretRef.current = false;
-                        const start = Math.min(snap.anchor, snap.focus);
-                        const end = Math.max(snap.anchor, snap.focus);
-                        editor.update(() => $selectFlatRange(start, end));
+                        editor.update(
+                            () => $selectFlatSelection(snap),
+                            { discrete: true },
+                        );
                     }
                     // Runs in both branches: on the restore path Lexical flushes the
                     // queued update first, so focus() re-asserts the restored
@@ -365,6 +373,7 @@ const EditorApi = forwardRef<LexicalEditorInputHandle, {
                     setPlainText(text, caretOffset);
                 },
                 deleteTrailingCharacter: () => {
+                    selectionRepairGenerationRef.current++;
                     pinnedEndCaretRef.current = false;
                     blurSelectionRef.current = null;
                     editor.update(() => {
@@ -382,6 +391,7 @@ const EditorApi = forwardRef<LexicalEditorInputHandle, {
                     });
                 },
                 selectRange: (start, end, options) => {
+                    selectionRepairGenerationRef.current++;
                     pinnedEndCaretRef.current = false;
                     blurSelectionRef.current = null;
                     editor.update(
@@ -397,6 +407,7 @@ const EditorApi = forwardRef<LexicalEditorInputHandle, {
                     return offset;
                 },
                 insertSlashCommand: (descriptor, queryLength) => {
+                    selectionRepairGenerationRef.current++;
                     blurSelectionRef.current = null;
                     editor.update(() => {
                         const root = $getRoot();
@@ -490,7 +501,7 @@ const EditorApi = forwardRef<LexicalEditorInputHandle, {
                     return result;
                 },
             }),
-            [editor, setPlainText, pinnedEndCaretRef, blurSelectionRef],
+            [editor, setPlainText, pinnedEndCaretRef, blurSelectionRef, selectionRepairGenerationRef],
         );
         return null;
     },
@@ -512,7 +523,7 @@ const PlainTextSync: React.FC<{
     onChange: (text: string) => void;
     pills?: SlashCommandDescriptor[];
     onPillsChange?: (pills: SlashCommandDescriptor[]) => void;
-    blurSelectionRef: React.MutableRefObject<{ anchor: number; focus: number } | null>;
+    blurSelectionRef: React.MutableRefObject<LexicalSelectionOffsets | null>;
 }> = ({ value, onChange, pills, onPillsChange, blurSelectionRef }) => {
     const [editor] = useLexicalComposerContext();
     // Tracks the last values we emitted upward to avoid echoes.
@@ -956,6 +967,14 @@ const SelectionGuardPlugin: React.FC<{
             const onPointerCancel = () => {
                 pointerDown = false;
             };
+            // A pointer sequence can be cut off when the OS deactivates the
+            // window, leaving no pointerup/pointercancel in this document. A
+            // stuck flag would disable caret repair on the first mutation
+            // after reactivation (notably the placeholder disappearing).
+            const onWindowBlur = () => {
+                pointerDown = false;
+                pendingDomSelectionRef.current = null;
+            };
             // Runs after Lexical's own selectionchange listener (registered at
             // editor creation, so earlier), i.e. once Lexical has adopted the
             // current DOM selection and the snapshot is no longer needed.
@@ -1002,7 +1021,7 @@ const SelectionGuardPlugin: React.FC<{
                 if (!live) return;
                 let state: { anchor: number; focus: number } | null = null;
                 editor.getEditorState().read(() => {
-                    state = $getFlatSelectionOffsets();
+                    state = $getDomComparableSelectionOffsets();
                 });
                 if (!state) return;
                 const stateOffsets = state as { anchor: number; focus: number };
@@ -1021,7 +1040,7 @@ const SelectionGuardPlugin: React.FC<{
                 // (Range direction is not preserved; a collapsed caret — the
                 // common case — is unaffected.)
                 editor.update(() => {
-                    $selectFlatRange(
+                    $selectDomComparableRange(
                         Math.min(stateOffsets.anchor, stateOffsets.focus),
                         Math.max(stateOffsets.anchor, stateOffsets.focus),
                     );
@@ -1034,12 +1053,14 @@ const SelectionGuardPlugin: React.FC<{
             doc.addEventListener('pointerup', onPointerUp, true);
             doc.addEventListener('pointercancel', onPointerCancel, true);
             doc.addEventListener('selectionchange', onSelectionChange);
+            win.addEventListener('blur', onWindowBlur);
             return () => {
                 observer.disconnect();
                 doc.removeEventListener('pointerdown', onPointerDown, true);
                 doc.removeEventListener('pointerup', onPointerUp, true);
                 doc.removeEventListener('pointercancel', onPointerCancel, true);
                 doc.removeEventListener('selectionchange', onSelectionChange);
+                win.removeEventListener('blur', onWindowBlur);
             };
         };
 
@@ -1073,7 +1094,7 @@ const SelectionGuardPlugin: React.FC<{
 const SelectionPersistencePlugin: React.FC = () => {
     const [editor] = useLexicalComposerContext();
     useEffect(() => {
-        let saved: { anchor: number; focus: number } | null = null;
+        let saved: LexicalSelectionOffsets | null = null;
         let rootEl: HTMLElement | null = null;
         const isEditorActive = () =>
             !!rootEl && rootEl.ownerDocument.activeElement === rootEl;
@@ -1089,14 +1110,31 @@ const SelectionPersistencePlugin: React.FC = () => {
         };
         const onWindowFocus = (e: FocusEvent) => {
             if (e.target !== e.currentTarget) return;
-            const restore = saved;
+            let restore = saved;
             saved = null;
-            if (!restore || !isEditorActive()) return;
-            // Selection direction is not preserved; restore the range
-            // forward-ordered (collapsed carets are unaffected).
-            const start = Math.min(restore.anchor, restore.focus);
-            const end = Math.max(restore.anchor, restore.focus);
-            editor.update(() => $selectFlatRange(start, end));
+            if (!isEditorActive()) return;
+            let isEmpty = false;
+            editor.getEditorState().read(() => {
+                isEmpty = $getRoot().getTextContentSize() === 0;
+                // Some Gecko focus transitions change activeElement before the
+                // blur listener runs. The active editor's current model point
+                // is still a useful fallback, especially when it is empty.
+                restore ??= $getFlatSelectionOffsets();
+            });
+            if (!restore && isEmpty) {
+                restore = {
+                    anchor: 0,
+                    focus: 0,
+                    anchorType: 'element',
+                    focusType: 'element',
+                };
+            }
+            if (!restore) return;
+            const restoreSelection = restore;
+            editor.update(
+                () => $selectFlatSelection(restoreSelection),
+                { discrete: true },
+            );
         };
 
         return editor.registerRootListener((rootElement, prevRootElement) => {
@@ -1117,11 +1155,157 @@ const SelectionPersistencePlugin: React.FC = () => {
 };
 
 /**
+ * Normalizes every first ordinary insertion into an empty editor through
+ * Lexical's controlled insertion path. An empty contenteditable can carry a
+ * Gecko root-level DOM point even though Lexical expects the caret in its empty
+ * paragraph; native insertion at that mismatched point is the common trigger
+ * for a first-character jump after stop, send, focus changes, and similar UI
+ * transitions.
+ */
+const EmptyEditorInsertionPlugin: React.FC = () => {
+    const [editor] = useLexicalComposerContext();
+    useEffect(() => editor.registerCommand<InputEvent>(
+        BEFORE_INPUT_COMMAND,
+        (event) => {
+            if (
+                event.inputType !== 'insertText'
+                || event.data == null
+                || event.data === '\n'
+                || event.data === '\n\n'
+                || editor.isComposing()
+                || $getRoot().getTextContentSize() !== 0
+            ) {
+                return false;
+            }
+            const selection = $getFlatSelectionOffsets() ?? {
+                anchor: 0,
+                focus: 0,
+                anchorType: 'element' as const,
+                focusType: 'element' as const,
+            };
+            event.preventDefault();
+            $selectFlatSelection(selection);
+            editor.dispatchCommand(CONTROLLED_TEXT_INSERTION_COMMAND, event.data);
+            return true;
+        },
+        COMMAND_PRIORITY_HIGH,
+    ), [editor]);
+    return null;
+};
+
+/**
+ * Holds on to Lexical's selection after each committed text update until
+ * surrounding React/XUL mutations have settled. Zotero's chrome document can
+ * reset selection offsets when unrelated child nodes mount/unmount; repairing
+ * in the next task covers mutations that land after MutationObserver-based
+ * SelectionGuardPlugin has already run. The first insertion is always
+ * re-asserted because its placeholder removal can clobber the DOM selection
+ * before this listener gets a reliable snapshot. Later updates only write when
+ * the live selection actually drifted. A newer edit or user action cancels it.
+ */
+const DeferredSelectionRepairPlugin: React.FC<{
+    selectionRepairGenerationRef: React.MutableRefObject<number>;
+}> = ({ selectionRepairGenerationRef }) => {
+    const [editor] = useLexicalComposerContext();
+    useEffect(() => {
+        let rootEl: HTMLElement | null = null;
+        let repairTimer: number | null = null;
+
+        const isEditorActiveInFocusedWindow = (root: HTMLElement) =>
+            root.ownerDocument.hasFocus()
+            && root.ownerDocument.activeElement === root;
+
+        const clearRepair = () => {
+            if (repairTimer === null) return;
+            rootEl?.ownerDocument.defaultView?.clearTimeout(repairTimer);
+            repairTimer = null;
+        };
+
+        const unregisterUpdate = editor.registerUpdateListener(({ editorState, prevEditorState }) => {
+            if (!rootEl || !isEditorActiveInFocusedWindow(rootEl) || editor.isComposing()) return;
+            let previousText = '';
+            let nextText = '';
+            let expectedSelection: LexicalSelectionOffsets | null = null;
+            prevEditorState.read(() => {
+                previousText = $getRoot().getTextContent();
+            });
+            editorState.read(() => {
+                nextText = $getRoot().getTextContent();
+                expectedSelection = $getFlatSelectionOffsets();
+            });
+            if (previousText === nextText || !expectedSelection) return;
+
+            const root = rootEl;
+            const win = root.ownerDocument.defaultView;
+            if (!win) return;
+            const domSelection = win.getSelection();
+            const expectedDom = domSelection ? captureDomSelection(domSelection, root) : null;
+            const expectedText = nextText;
+            const expectedModel = expectedSelection;
+            const isFirstInsertion = previousText.length === 0 && nextText.length > 0;
+            const repairGeneration = selectionRepairGenerationRef.current;
+            clearRepair();
+            repairTimer = win.setTimeout(() => {
+                repairTimer = null;
+                if (
+                    selectionRepairGenerationRef.current !== repairGeneration
+                    || !isEditorActiveInFocusedWindow(root)
+                    || editor.isComposing()
+                ) return;
+                let currentText = '';
+                editor.getEditorState().read(() => {
+                    currentText = $getRoot().getTextContent();
+                });
+                if (currentText !== expectedText) return;
+                const live = win.getSelection();
+                if (!live) return;
+                if (!isFirstInsertion && expectedDom) {
+                    const unchanged =
+                        root.contains(expectedDom.anchorNode)
+                        && root.contains(expectedDom.focusNode)
+                        && live.anchorNode === expectedDom.anchorNode
+                        && live.anchorOffset === expectedDom.anchorOffset
+                        && live.focusNode === expectedDom.focusNode
+                        && live.focusOffset === expectedDom.focusOffset;
+                    if (unchanged) return;
+                }
+                editor.update(
+                    () => $selectFlatSelection(expectedModel),
+                    { discrete: true },
+                );
+            }, 0);
+        });
+
+        const unregisterRoot = editor.registerRootListener((rootElement, prevRootElement) => {
+            if (prevRootElement) {
+                prevRootElement.removeEventListener('keydown', clearRepair, true);
+                prevRootElement.ownerDocument.removeEventListener('pointerdown', clearRepair, true);
+                prevRootElement.ownerDocument.defaultView?.removeEventListener('blur', clearRepair);
+            }
+            clearRepair();
+            rootEl = rootElement;
+            if (rootElement) {
+                rootElement.addEventListener('keydown', clearRepair, true);
+                rootElement.ownerDocument.addEventListener('pointerdown', clearRepair, true);
+                rootElement.ownerDocument.defaultView?.addEventListener('blur', clearRepair);
+            }
+        });
+
+        return () => {
+            clearRepair();
+            unregisterUpdate();
+            unregisterRoot();
+        };
+    }, [editor, selectionRepairGenerationRef]);
+    return null;
+};
+
+/**
  * Snapshots the editor's selection offsets on element blur (focusout), for
  * the imperative focus() handle to restore.
  */
 const BlurSelectionSnapshotPlugin: React.FC<{
-    blurSelectionRef: React.MutableRefObject<{ anchor: number; focus: number } | null>;
+    blurSelectionRef: React.MutableRefObject<LexicalSelectionOffsets | null>;
 }> = ({ blurSelectionRef }) => {
     const [editor] = useLexicalComposerContext();
     useEffect(() => {
@@ -1309,7 +1493,11 @@ export const LexicalEditorInput = forwardRef<LexicalEditorInputHandle, LexicalEd
         // blurred. Written by BlurSelectionSnapshotPlugin, consumed and
         // invalidated by EditorApi; also invalidated by PlainTextSync's
         // external rebuild path.
-        const blurSelectionRef = useRef<{ anchor: number; focus: number } | null>(null);
+        const blurSelectionRef = useRef<LexicalSelectionOffsets | null>(null);
+
+        // Incremented by imperative caret APIs so a deferred repair scheduled
+        // by an earlier text update cannot overwrite an intentional selection.
+        const selectionRepairGenerationRef = useRef(0);
 
         // The ContentEditable ref callback MUST keep a stable identity across
         // renders. Lexical memoizes its root-element ref on this callback, so a
@@ -1373,12 +1561,19 @@ export const LexicalEditorInput = forwardRef<LexicalEditorInputHandle, LexicalEd
                     <CaretNavigationPlugin suspendedRef={suspendNavRef} pendingDomSelectionRef={pendingDomSelectionRef} />
                     <SelectionGuardPlugin pendingDomSelectionRef={pendingDomSelectionRef} />
                     <SelectionPersistencePlugin />
+                    <EmptyEditorInsertionPlugin />
+                    <DeferredSelectionRepairPlugin selectionRepairGenerationRef={selectionRepairGenerationRef} />
                     <BlurSelectionSnapshotPlugin blurSelectionRef={blurSelectionRef} />
                     <PinnedEndCaretPlugin pinnedRef={pinnedEndCaretRef} />
                     <SlashCommandClickPlugin />
                     <SlashCommandHoverCardPlugin />
                     <SubmitOnEnterPlugin onSubmit={onSubmit} />
-                    <EditorApi ref={ref} pinnedEndCaretRef={pinnedEndCaretRef} blurSelectionRef={blurSelectionRef} />
+                    <EditorApi
+                        ref={ref}
+                        pinnedEndCaretRef={pinnedEndCaretRef}
+                        blurSelectionRef={blurSelectionRef}
+                        selectionRepairGenerationRef={selectionRepairGenerationRef}
+                    />
                 </div>
             </LexicalComposer>
         );
