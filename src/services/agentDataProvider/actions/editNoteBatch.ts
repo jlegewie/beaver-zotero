@@ -342,9 +342,24 @@ function normalizedEditDiffers(
  * appends and group apply operations into undo records, so duplicate,
  * out-of-order, fractional, or missing indices are not safe to accept.
  */
+
+/**
+ * Local backstop on batch size for callers that do not go through the backend.
+ * Matches the upper bound of the backend's configurable per-call edit limit,
+ * so a batch the backend allows is never rejected here.
+ */
+export const MAX_BATCH_EDITS = 200;
+
 export function checkBatchShape(edits: EditNoteBatchEditItem[] | undefined): { error: string; errorCode: string } | null {
     if (!Array.isArray(edits) || edits.length === 0) {
         return { error: 'edit_note_batch requires at least one edit.', errorCode: 'no_edits' };
+    }
+    if (edits.length > MAX_BATCH_EDITS) {
+        return {
+            error: `edit_note_batch supports at most ${MAX_BATCH_EDITS} edits per call; received ${edits.length}. `
+                + 'Split the changes into multiple calls, or use a single rewrite edit for dense whole-note changes.',
+            errorCode: 'invalid_batch',
+        };
     }
     const invalidIndexPosition = edits.findIndex(
         (edit, position) => !edit || !Number.isInteger(edit.index) || edit.index !== position,
@@ -570,6 +585,14 @@ async function executeEditNoteBatchAction(
 
     const excludedLibrary = checkLibraryExcluded(resolvedLibraryId);
     if (excludedLibrary) return executeError(request.request_id, excludedLibrary.message, 'library_not_searchable');
+
+    // Library editability can change between validation and execution
+    // (TOCTOU, same as the exclusion re-check above): fail cleanly instead of
+    // surfacing a raw save error from Zotero.
+    const executeLibrary = Zotero.Libraries.get(resolvedLibraryId);
+    if (executeLibrary && !executeLibrary.editable) {
+        return executeError(request.request_id, `Library '${executeLibrary.name}' is read-only and cannot be edited`, 'library_not_editable');
+    }
 
     // Load note + settle any in-flight diff preview / unsaved editor content.
     await item.loadDataType('note');

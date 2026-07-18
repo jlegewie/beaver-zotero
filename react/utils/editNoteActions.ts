@@ -1117,6 +1117,13 @@ export async function executeEditNoteBatchAction(
         throw new Error(`Item ${library_id}-${zotero_key} is not a note`);
     }
 
+    // Library editability can change after validation (TOCTOU): fail with a
+    // clear message instead of a raw Zotero save error.
+    const targetLibrary = Zotero.Libraries.get(library_id);
+    if (targetLibrary && !targetLibrary.editable) {
+        throw new Error(`Library '${targetLibrary.name}' is read-only and cannot be edited`);
+    }
+
     // 2. Load note data
     await item.loadDataType('note');
 

@@ -48,6 +48,7 @@ import {
     applyResolvedEdits,
     captureUndoContexts,
     findAllOccurrences,
+    buildAmbiguousMatchError,
     type BatchEditSpec,
     type ResolveBatchContext,
     type ResolvedBatchEdit,
@@ -486,6 +487,34 @@ describe('resolveBatchEdits failures', () => {
             spec(0, 'str_replace', 'dup', 'x'),
         ]);
         expect(failures[0]).toMatchObject({ index: 0, errorCode: 'ambiguous_match' });
+    });
+});
+
+describe('buildAmbiguousMatchError', () => {
+    it('suggests str_replace_all for replacement edits', () => {
+        const msg = buildAmbiguousMatchError(3, 'str_replace');
+        expect(msg).toContain('found 3 times');
+        expect(msg).toContain('str_replace_all');
+    });
+
+    it.each(['insert_after', 'insert_before'] as EditNoteOperation[])(
+        'asks for a unique anchor instead of str_replace_all for %s',
+        (op) => {
+            const msg = buildAmbiguousMatchError(2, op);
+            expect(msg).toContain('insertion anchor');
+            expect(msg).toContain('found 2 times');
+            expect(msg).not.toContain('str_replace_all');
+        },
+    );
+
+    it('flows the insert-aware hint through resolveBatchEdits failures', () => {
+        const ctx = makeCtx('dup here and dup there');
+        const { failures } = resolveBatchEdits(ctx, [
+            spec(0, 'insert_after', 'dup', 'dup X'),
+        ]);
+        expect(failures[0]).toMatchObject({ index: 0, errorCode: 'ambiguous_match' });
+        expect(failures[0].error).toContain('insertion anchor');
+        expect(failures[0].error).not.toContain('str_replace_all');
     });
 });
 

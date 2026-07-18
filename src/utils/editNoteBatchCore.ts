@@ -214,7 +214,13 @@ export function mergeInsertNewString(
     return newString;
 }
 
-export function buildAmbiguousMatchError(matchCount: number): string {
+export function buildAmbiguousMatchError(matchCount: number, operation?: EditNoteOperation): string {
+    // str_replace_all is only a valid alternative for replacement edits; for
+    // inserts the anchor itself must be made unique.
+    if (operation === 'insert_after' || operation === 'insert_before') {
+        return `The insertion anchor was found ${matchCount} times in the note. `
+            + 'Include more surrounding context in old_string so the anchor matches exactly once.';
+    }
     return `The string to replace was found ${matchCount} times in the note. `
         + 'Use operation str_replace_all to replace all occurrences, or include more context to make the match unique.';
 }
@@ -561,7 +567,7 @@ function resolveOne(
     // Single-target ops.
     const location = resolveSingleTarget(ctx, spec, match);
     if (location === null) {
-        return failure(index, buildAmbiguousMatchError(matchCount), 'ambiguous_match');
+        return failure(index, buildAmbiguousMatchError(matchCount, operation), 'ambiguous_match');
     }
     const pos = location.pos;
     if (pos === -1) {

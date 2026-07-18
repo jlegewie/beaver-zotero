@@ -347,7 +347,13 @@ function buildInsertDedupWarning(
     return null;
 }
 
-function buildAmbiguousMatchError(matchCount: number): string {
+function buildAmbiguousMatchError(matchCount: number, operation?: EditNoteOperation): string {
+    // str_replace_all is only a valid alternative for replacement edits; for
+    // inserts the anchor itself must be made unique.
+    if (operation === 'insert_after' || operation === 'insert_before') {
+        return `The insertion anchor was found ${matchCount} times in the note. `
+            + 'Include more surrounding context in old_string so the anchor matches exactly once.';
+    }
     return `The string to replace was found ${matchCount} times in the note. `
         + 'Use operation str_replace_all to replace all occurrences, or include more context to make the match unique.';
 }
@@ -355,12 +361,13 @@ function buildAmbiguousMatchError(matchCount: number): string {
 function buildAmbiguousMatchResponse(
     requestId: string,
     matchCount: number,
+    operation?: EditNoteOperation,
 ): WSAgentActionValidateResponse {
     return {
         type: 'agent_action_validate_response',
         request_id: requestId,
         valid: false,
-        error: buildAmbiguousMatchError(matchCount),
+        error: buildAmbiguousMatchError(matchCount, operation),
         error_code: 'ambiguous_match',
         preference: 'always_ask',
     };
@@ -767,7 +774,7 @@ async function validateEditNoteAction(
                 overrides.target_before_context = location.beforeContext;
                 overrides.target_after_context = location.afterContext;
             } else if (location.kind === 'ambiguous') {
-                return buildAmbiguousMatchResponse(request.request_id, match.matchCount);
+                return buildAmbiguousMatchResponse(request.request_id, match.matchCount, operation);
             }
             // 'position' — silent success; executor will re-locate via
             // findUniqueRawMatchPosition with no anchors needed.
@@ -1310,7 +1317,7 @@ async function executeEditNoteAction(
                     type: 'agent_action_execute_response',
                     request_id: request.request_id,
                     success: false,
-                    error: buildAmbiguousMatchError(matchCount),
+                    error: buildAmbiguousMatchError(matchCount, operation),
                     error_code: 'ambiguous_match',
                 };
             }

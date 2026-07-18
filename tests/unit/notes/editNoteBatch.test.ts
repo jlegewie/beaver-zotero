@@ -261,6 +261,7 @@ import type {
     WSAgentActionExecuteRequest,
 } from '../../../src/services/agentProtocol';
 import type { EditNoteBatchEditItem } from '../../../react/types/agentActions/editNoteBatch';
+import { MAX_BATCH_EDITS } from '../../../src/services/agentDataProvider/actions/editNoteBatch';
 
 
 // =============================================================================
@@ -689,6 +690,34 @@ describe('validateEditNoteBatchAction — per-edit failures', () => {
 // Validate — Backstop guards + exclusion gate
 // =============================================================================
 
+describe('validateEditNoteBatchAction — ambiguous-match hints', () => {
+    it('gives an insert-specific hint (no str_replace_all) for an ambiguous insert anchor', async () => {
+        useNote('<div data-schema-version="9"><p>dup one</p><p>dup two</p></div>');
+        const response = await handleAgentActionValidateRequest(makeValidateRequest([
+            { index: 0, operation: 'insert_after', old_string: 'dup', new_string: 'dup X' },
+        ]));
+
+        expect(response.valid).toBe(false);
+        const editErrors = (response as any).edit_errors;
+        expect(editErrors).toHaveLength(1);
+        expect(editErrors[0].error_code).toBe('ambiguous_match');
+        expect(editErrors[0].error).toContain('insertion anchor');
+        expect(editErrors[0].error).not.toContain('str_replace_all');
+    });
+
+    it('keeps the str_replace_all suggestion for an ambiguous str_replace target', async () => {
+        useNote('<div data-schema-version="9"><p>dup one</p><p>dup two</p></div>');
+        const response = await handleAgentActionValidateRequest(makeValidateRequest([
+            { index: 0, operation: 'str_replace', old_string: 'dup', new_string: 'DUP' },
+        ]));
+
+        expect(response.valid).toBe(false);
+        const editErrors = (response as any).edit_errors;
+        expect(editErrors[0].error_code).toBe('ambiguous_match');
+        expect(editErrors[0].error).toContain('str_replace_all');
+    });
+});
+
 describe('validateEditNoteBatchAction — backstop guards', () => {
     it('rejects an empty edits array', async () => {
         const response = await handleAgentActionValidateRequest(makeValidateRequest([]));
@@ -728,6 +757,22 @@ describe('validateEditNoteBatchAction — backstop guards', () => {
         expect(response.valid).toBe(false);
         expect(response.error_code).toBe('invalid_batch');
         expect(response.error).toContain('index must match its zero-based position');
+        expect((globalThis as any).Zotero.Items.getByLibraryAndKeyAsync).not.toHaveBeenCalled();
+    });
+
+    it('rejects a batch larger than MAX_BATCH_EDITS before resolving the note', async () => {
+        const edits = Array.from({ length: MAX_BATCH_EDITS + 1 }, (_, i) => ({
+            index: i,
+            operation: 'append' as const,
+            new_string: `<p>Edit ${i}</p>`,
+        }));
+        const response = await handleAgentActionValidateRequest(
+            makeValidateRequest(edits as EditNoteBatchEditItem[]),
+        );
+
+        expect(response.valid).toBe(false);
+        expect(response.error_code).toBe('invalid_batch');
+        expect(response.error).toContain(`at most ${MAX_BATCH_EDITS}`);
         expect((globalThis as any).Zotero.Items.getByLibraryAndKeyAsync).not.toHaveBeenCalled();
     });
 
@@ -886,6 +931,22 @@ describe('executeEditNoteBatchAction — success', () => {
 // =============================================================================
 
 describe('executeEditNoteBatchAction — atomicity and failures', () => {
+    it('fails cleanly with library_not_editable when the library became read-only after validation', async () => {
+        const item = useNote(NOTE_HTML);
+        (globalThis as any).Zotero.Libraries.get = vi.fn(() => ({
+            name: 'Read-only group',
+            editable: false,
+        }));
+        const response = await handleAgentActionExecuteRequest(makeExecuteRequest([
+            { index: 0, operation: 'str_replace', old_string: 'Alpha sentence one.', new_string: 'X.' },
+        ]));
+
+        expect(response.success).toBe(false);
+        expect(response.error_code).toBe('library_not_editable');
+        expect(item.setNote).not.toHaveBeenCalled();
+        expect(item.saveTx).not.toHaveBeenCalled();
+    });
+
     it('fails the WHOLE batch with no setNote/saveTx when one edit no longer resolves (stale edit)', async () => {
         const item = useNote(NOTE_HTML);
         const response = await handleAgentActionExecuteRequest(makeExecuteRequest([

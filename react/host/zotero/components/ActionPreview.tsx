@@ -267,9 +267,14 @@ export const ActionPreview: React.FC<{
 
                     return (
                         <div key={`edit-${editIndex}`} className="flex flex-col gap-1">
-                            <div className="text-sm font-color-secondary px-3 py-1">
-                                {`Edit ${position + 1} · ${op.replace(/_/g, ' ')}`}
-                            </div>
+                            {/* Row labels only separate STACKED diffs (full edits[]
+                                render). Group rows slice to one edit each and are
+                                already delimited by row borders — no label there. */}
+                            {edits.length > 1 && (
+                                <div className="text-sm font-color-secondary px-3 py-1">
+                                    {isRewrite ? 'Full rewrite' : `Edit ${position + 1}`}
+                                </div>
+                            )}
                             <EditNotePreview
                                 oldString={oldString}
                                 newString={newString}

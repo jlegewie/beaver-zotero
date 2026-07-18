@@ -328,12 +328,10 @@ describe('edit_note_batch stale edit', () => {
         expect(after.saved_html).not.toContain('X.');
 
         // CONTRACT: the validate response carries per-edit diagnostics naming
-        // ONLY the failing index. The validator produces edit_errors (pinned
-        // by unit tests through the same dispatch), but the dev HTTP wrapper
-        // `handleAgentActionValidateHttpRequest` (useHttpEndpoints.ts) omits
-        // the field from its whitelist — this assertion fails until the
-        // wrapper forwards `edit_errors`. Do not water down: the production
-        // WS path sends the full response, and live tests should see it too.
+        // ONLY the failing index. The dev HTTP wrapper
+        // `handleAgentActionValidateHttpRequest` (useHttpEndpoints.ts)
+        // forwards `edit_errors`; this assertion pins that forwarding in
+        // addition to the validator behavior itself. Do not water down.
         expect(validation.edit_errors).toHaveLength(1);
         expect(validation.edit_errors![0].index).toBe(1);
         expect(validation.edit_errors![0].error_code).toBe('old_string_not_found');
@@ -373,9 +371,9 @@ describe('edit_note_batch overlapping edits', () => {
         const after = await readNote(ref.library_id, ref.zotero_key);
         expect(after.saved_html).toBe(before.saved_html);
 
-        // CONTRACT: per-edit conflict diagnostics naming both indices. Fails
-        // until the dev HTTP wrapper forwards `edit_errors` (see the stale-
-        // edit test above for details) — do not water down.
+        // CONTRACT: per-edit conflict diagnostics naming both indices,
+        // forwarded through the dev HTTP wrapper's `edit_errors` field (see
+        // the stale-edit test above) — do not water down.
         expect(validation.edit_errors).toHaveLength(1);
         expect(validation.edit_errors![0].error_code).toBe('overlapping_edits');
         expect(validation.edit_errors![0].error).toMatch(/Edit 1 overlaps edit\D*0/);

@@ -57,12 +57,14 @@ export const EditNoteRowView: React.FC<EditNoteRowViewProps> = ({
         showReject: hookShowReject,
         showUndo: hookShowUndo,
         showRetry: hookShowRetry,
+        showOpenNoteAction,
         handleApprove,
         handleReject,
         handleApplyPending,
         handleRejectPending,
         handleUndo,
         handleRetry,
+        handleOpenNoteForRow,
     } = useEditNoteActions({
         part,
         runId,
@@ -91,23 +93,28 @@ export const EditNoteRowView: React.FC<EditNoteRowViewProps> = ({
     return (
         <div className="agent-action-view rounded-md flex flex-col min-w-0">
             <div className="display-flex flex-row min-w-0">
-                <div className="display-flex flex-col items-center gap-25 px-2 py-2 flex-shrink-0" style={{ marginLeft: '0.225rem' }}>
-                    {isStreamingPlaceholder ? (
-                        <div className="display-flex items-center mt-010">
-                            <Spinner size={13} className="font-color-secondary scale-10" style={{ marginLeft: '0.185rem' }} />
-                        </div>
-                    ) : (
-                        config.icon && config.icon !== Spinner ? (
+                {/* Batch rows skip the status-icon gutter: the group header
+                    already carries the batch's status, so the column would
+                    only render an invisible placeholder and waste width. */}
+                {!isBatchRow && (
+                    <div className="display-flex flex-col items-center gap-25 px-2 py-2 flex-shrink-0" style={{ marginLeft: '0.225rem' }}>
+                        {isStreamingPlaceholder ? (
                             <div className="display-flex items-center mt-010">
-                                <Icon icon={config.icon} className={`${config.iconClassName}`} style={{ transform: 'scale(1)' }} />
+                                <Spinner size={13} className="font-color-secondary scale-10" style={{ marginLeft: '0.185rem' }} />
                             </div>
                         ) : (
-                            <div className="display-flex items-center mt-010 scale-10">
-                                <Icon icon={EditIcon} className="font-color-secondary opacity-0" />
-                            </div>
-                        )
-                    )}
-                </div>
+                            config.icon && config.icon !== Spinner ? (
+                                <div className="display-flex items-center mt-010">
+                                    <Icon icon={config.icon} className={`${config.iconClassName}`} style={{ transform: 'scale(1)' }} />
+                                </div>
+                            ) : (
+                                <div className="display-flex items-center mt-010 scale-10">
+                                    <Icon icon={EditIcon} className="font-color-secondary opacity-0" />
+                                </div>
+                            )
+                        )}
+                    </div>
+                )}
 
                 <div className="flex-1 min-w-0">
                     {previewData ? (
@@ -123,11 +130,29 @@ export const EditNoteRowView: React.FC<EditNoteRowViewProps> = ({
                     )}
                 </div>
 
+                {/* Batch rows get a single navigation affordance on the right:
+                    open the note and jump to THIS edit's position. */}
+                {isBatchRow && !isStreamingPlaceholder && previewData && showOpenNoteAction && (
+                    <div className="display-flex flex-col py-2 mr-2 flex-shrink-0">
+                        <Tooltip content="Open note and jump to edit" showArrow singleLine>
+                            <IconButton
+                                icon={ArrowUpRightIcon}
+                                variant="ghost-secondary"
+                                iconClassName="font-color-secondary scale-10"
+                                onClick={() => { void handleOpenNoteForRow(rowDescriptor); }}
+                            />
+                        </Tooltip>
+                    </div>
+                )}
+
+                {/* A batch row never shows action buttons or its own processing
+                    spinner — the whole edit_note_batch action applies/undoes
+                    atomically via the group's Apply All / Undo All / Retry All —
+                    so the button column is omitted entirely to give the diff
+                    its full width. */}
+                {!isBatchRow && (
                 <div className="display-flex flex-col gap-25 py-2 mr-2">
-                    {/* A batch row never shows action buttons or its own processing
-                        spinner — the whole edit_note_batch action applies/undoes
-                        atomically via the group's Apply All / Undo All / Retry All. */}
-                    {!isBatchRow && (isProcessing ? (
+                    {(isProcessing ? (
                         <>
                             {clickedButton === 'approve' && (
                                 <Tooltip content="Apply" showArrow singleLine>
@@ -230,6 +255,7 @@ export const EditNoteRowView: React.FC<EditNoteRowViewProps> = ({
                         </>
                     ))}
                 </div>
+                )}
             </div>
 
             {displayedUndoError && (

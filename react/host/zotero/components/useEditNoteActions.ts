@@ -47,7 +47,9 @@ import {
     isEditNoteStreamingPlaceholder,
     parseEditNoteToolCallArgs,
     resolveEditNoteTargetFromData,
+    type EditNoteRowDescriptor,
 } from '../../../components/agentRuns/editNoteShared';
+import type { EditNoteOperation } from '../../../types/agentActions/editNote';
 
 export async function dismissActiveEditNotePreview(): Promise<void> {
     if (!isDiffPreviewActive()) return;
@@ -127,6 +129,7 @@ export interface EditNoteRowState {
     handleUndo: () => Promise<void>;
     handleRetry: () => Promise<void>;
     handleOpenNote: () => Promise<void>;
+    handleOpenNoteForRow: (row: EditNoteRowDescriptor) => Promise<void>;
 }
 
 export function useEditNoteActions({
@@ -393,6 +396,39 @@ export function useEditNoteActions({
         await openNoteByKey(resolvedTarget.libraryId, resolvedTarget.zoteroKey);
     }, [resolvedTarget, action, pendingApproval]);
 
+    /**
+     * Open the note and jump to ONE edit of an edit_note_batch action. The
+     * row descriptor carries the edit's own strings; disambiguation anchors
+     * and undo contexts are joined from the action payload by edit index.
+     */
+    const handleOpenNoteForRow = useCallback(async (row: EditNoteRowDescriptor) => {
+        if (!resolvedTarget) return;
+        const batchData = action?.proposed_data ?? pendingApproval?.actionData;
+        const edits: any[] = Array.isArray(batchData?.edits) ? batchData.edits : [];
+        const fullEdit = row.editIndex !== null
+            ? edits.find((e: any) => e?.index === row.editIndex)
+            : undefined;
+        const undoRecords: any[] = Array.isArray(action?.result_data?.undo)
+            ? action.result_data.undo
+            : [];
+        const undoRecord = row.editIndex !== null
+            ? undoRecords.find((u: any) => u?.index === row.editIndex)
+            : undefined;
+
+        await openNoteAndSearchEdit(
+            resolvedTarget.libraryId,
+            resolvedTarget.zoteroKey,
+            row.oldString || '',
+            row.newString || '',
+            action?.status === 'applied',
+            undoRecord?.undo_before_context,
+            undoRecord?.undo_after_context,
+            fullEdit?.target_before_context,
+            fullEdit?.target_after_context,
+            row.operation as EditNoteOperation,
+        );
+    }, [resolvedTarget, action, pendingApproval]);
+
     return {
         actions,
         previewData,
@@ -416,5 +452,6 @@ export function useEditNoteActions({
         handleUndo,
         handleRetry,
         handleOpenNote,
+        handleOpenNoteForRow,
     };
 }
