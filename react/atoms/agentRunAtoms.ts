@@ -1510,8 +1510,8 @@ function createWSCallbacks(set: Setter): WSCallbacks {
             set(isWSConnectedAtom, true);
         },
 
-        onClose: (code: number, reason: string, wasClean: boolean) => {
-            logger(`WS onClose: code=${code}, reason=${reason}, clean=${wasClean}`, 1);
+        onClose: (code: number, reason: string, wasClean: boolean, hadReachedReady: boolean) => {
+            logger(`WS onClose: code=${code}, reason=${reason}, clean=${wasClean}, hadReachedReady=${hadReachedReady}`, 1);
             // set(activeRunAtom, null);
             set(isWSConnectedAtom, false);
             set(isWSReadyAtom, false);
@@ -1523,11 +1523,16 @@ function createWSCallbacks(set: Setter): WSCallbacks {
             set(clearAllPendingQuestionsAtom);
             set(clearRunApprovalPolicyAtom);
 
-            // If the socket dropped uncleanly while a run was still in flight, the
-            // server never delivered an error event. Reuse the close-code
-            // classifier so mid-run drops surface the same actionable details
-            // as connect-phase failures.
-            if (!wasClean) {
+            // If the socket dropped uncleanly after the connection had reached
+            // the ready state, the server never delivered an error event for
+            // the in-flight run. Reuse the close-code classifier so mid-run
+            // drops surface the same actionable details as connect-phase
+            // failures. Gated on `hadReachedReady` (not just the active run's
+            // status) so a connect-phase failure — which also sees an
+            // `in_progress` active run, since the run is created before the
+            // socket connects — is handled once by executeWSRequest's catch
+            // instead of being reported here a second time.
+            if (!wasClean && hadReachedReady) {
                 const activeRun = store.get(activeRunAtom);
                 if (
                     activeRun &&
@@ -1536,7 +1541,7 @@ function createWSCallbacks(set: Setter): WSCallbacks {
                 ) {
                     const message =
                         'The connection to the server was lost before the run finished. Please try again.';
-                    const details = formatCloseCodeDetails(code);
+                    const details = formatCloseCodeDetails(code, reason);
                     set(wsErrorAtom, {
                         event: 'error',
                         type: 'connection_error',
@@ -1610,8 +1615,9 @@ async function executeWSRequest(
         // No error was set yet, so set a generic connection error.
         // If the failure came from the WebSocket connect phase, surface the
         // close code and a human-readable label as details — useful for
-        // triaging corporate proxy/firewall blocks (1006), TLS failures
-        // (1015), and server-side rejections (4xxx codes).
+        // triaging corporate proxy/firewall blocks (1006), authentication
+        // rejections (1008, the common real-world server-side code), and
+        // TLS failures (1015, rare in practice).
         const errorMessage = 'Could not connect to the server. Please check your internet connection and try again.';
         const details = buildConnectionErrorDetails(error);
         set(wsErrorAtom, {
@@ -1658,18 +1664,21 @@ const CONNECTION_TROUBLESHOOTING_URL = 'https://www.beaverapp.ai/docs/connection
  */
 function getCloseCodeExplanation(code: number): { hint: string; linkDocs: boolean } {
     switch (code) {
-        // Corporate/school proxies and firewalls dropping WebSocket traffic.
-        // (If plain HTTPS were blocked the user could not have signed in or
-        // loaded their profile, so we can attribute this to a WebSocket-
-        // specific block with high confidence.)
+        // Corporate/school proxies and firewalls dropping WebSocket traffic —
+        // by far the most common cause. Antivirus or TLS-inspecting security
+        // software that intercepts the connection can also surface as this
+        // code. (If plain HTTPS were blocked the user could not have signed
+        // in or loaded their profile, so a WebSocket-specific block is the
+        // most likely explanation.)
         case 1005:
         case 1006:
             return {
-                hint: "Your network appears to be blocking Beaver's live connection. This is common on work, school, or public Wi‑Fi that doesn't allow WebSocket traffic.",
+                hint: "Your network appears to be blocking Beaver's live connection. This is common on work, school, or public Wi‑Fi that doesn't allow WebSocket traffic, and can also happen when antivirus or TLS-inspecting security software intercepts the connection.",
                 linkDocs: true,
             };
 
         // TLS-inspection appliances, corporate VPNs, or aggressive antivirus.
+        // Rare in practice — most TLS interference surfaces as 1005/1006 above.
         case 1015:
             return {
                 hint: "Your network's security software (antivirus, VPN, or corporate proxy) is interfering with Beaver's secure connection.",
@@ -1690,11 +1699,20 @@ function getCloseCodeExplanation(code: number): { hint: string; linkDocs: boolea
                 linkDocs: false,
             };
 
+        // Authentication or policy rejection (e.g. an expired/invalid session,
+        // or the connection origin isn't allowed). Distinct from the generic
+        // protocol-error codes below since re-authenticating fixes it, not
+        // updating Beaver.
+        case 1008:
+            return {
+                hint: 'Beaver could not verify your account for this connection. Please try again; if it keeps happening, sign out and sign back in.',
+                linkDocs: false,
+            };
+
         // Protocol-level issues almost always mean the client is out of date.
         case 1002:
         case 1003:
         case 1007:
-        case 1008:
         case 1009:
         case 1010:
             return {
@@ -1717,19 +1735,36 @@ function getCloseCodeExplanation(code: number): { hint: string; linkDocs: boolea
 }
 
 /**
+ * Strip characters that would let a string be interpreted as an HTML tag by
+ * parseTextWithLinksAndNewlines, which turns any `<a href="...">...</a>`
+ * substring into a clickable element that opens the URL via
+ * Zotero.launchURL. The WebSocket close `reason` is untrusted network
+ * input — a middlebox or captive portal that completes the handshake
+ * controls it — so it must always render as inert text, never as a link.
+ */
+function sanitizeUntrustedText(text: string): string {
+    return text.replace(/[<>]/g, '');
+}
+
+/**
  * Build the user-facing `details` string for a connection_error from a
  * WebSocket close code. Used by both connect-phase failures and mid-run
  * drops so identical underlying causes always produce identical wording.
  * The rendered format is:
- *   "<user-oriented sentence>[ See <link>.] (error code NNNN)"
+ *   "<user-oriented sentence>[ See <link>.][ Server message: "<reason>".] (error code NNNN)"
  * The `<a>` tag is picked up by parseTextWithLinksAndNewlines in the UI.
+ * `reason` is the server-supplied close reason, included when non-empty
+ * since it's often the most specific explanation available (e.g. the exact
+ * authentication failure). It is sanitized before interpolation since it's
+ * untrusted network input (see sanitizeUntrustedText).
  */
-function formatCloseCodeDetails(code: number): string {
+function formatCloseCodeDetails(code: number, reason?: string): string {
     const { hint, linkDocs } = getCloseCodeExplanation(code);
     const link = linkDocs
         ? ` See our <a href="${CONNECTION_TROUBLESHOOTING_URL}">connection troubleshooting guide</a> for help.`
         : '';
-    return `${hint}${link} (error code ${code})`;
+    const reasonText = reason ? ` Server message: "${sanitizeUntrustedText(reason)}"` : '';
+    return `${hint}${link}${reasonText} (error code ${code})`;
 }
 
 /**
@@ -1740,7 +1775,7 @@ function formatCloseCodeDetails(code: number): string {
  */
 function buildConnectionErrorDetails(error: unknown): string | undefined {
     if (error instanceof WSConnectionError && error.close_code !== undefined) {
-        return formatCloseCodeDetails(error.close_code);
+        return formatCloseCodeDetails(error.close_code, error.close_reason);
     }
     if (error && typeof (error as { message?: unknown }).message === 'string') {
         return (error as { message: string }).message || undefined;

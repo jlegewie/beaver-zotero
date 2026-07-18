@@ -125,13 +125,14 @@ If you see **"Connection Failed — Could not connect to the server"** on a work
 **Quick self-diagnosis:**
 
 1. In Zotero, go to **Help → Debug Output Logging → Enable**, reproduce the error, then **Help → Debug Output Logging → View Output**.
-2. Search the log for lines starting with `[Beaver]`. The error display in Beaver also shows a WebSocket close code (e.g. `close code 1006`). Common codes:
-   - **1006** (Abnormal Closure) — almost always a proxy, firewall, or TLS inspector dropping the WebSocket.
-   - **1015** — TLS handshake failure (likely a cert-inspection issue).
-   - **4xxx** — server-side rejection (authentication, version, or policy).
+2. Search the log for lines starting with `[Beaver]`. The error display in Beaver also shows a WebSocket error code (e.g. `error code 1006`). Common codes:
+   - **1006** (Abnormal Closure) — almost always a proxy, firewall, or filter dropping the WebSocket; can also occur when antivirus or TLS-inspecting security software intercepts the connection.
+   - **1008** — authentication or policy rejection. Try again; if it persists, sign out and sign back in.
+   - **1015** — TLS handshake failure. Rare in practice — TLS inspection issues on Zotero usually surface as 1006 above.
+   - **4xxx** — reserved for server-defined rejections.
 3. If `https://` works in your browser on the same network but Beaver fails, WebSocket is being blocked specifically.
 
-If you run Zotero through a corporate HTTP proxy, Zotero (based on Firefox) honors proxy settings from **Edit → Preferences → Advanced → Config Editor**, keys under `network.proxy.*`.
+If you run Zotero through a corporate HTTP proxy, Zotero (based on Firefox) honors proxy settings from **Edit → Settings (Zotero → Settings on macOS) → Advanced → Config Editor**, keys under `network.proxy.*`.
 
 ## Building from source
 

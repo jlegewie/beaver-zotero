@@ -49,6 +49,9 @@ const DIAGNOSTICS_ENDPOINT = '/api/v1/diagnostics/connection-failure';
 /** How long to wait for the diagnostics POST before giving up. */
 const REPORT_TIMEOUT_MS = 8_000;
 
+/** How long to wait for the auth token lookup before falling back to an anonymous report. */
+const AUTH_TOKEN_TIMEOUT_MS = 2_000;
+
 export interface ConnectionFailureReport {
     /** Where in the run lifecycle the failure occurred. */
     phase: 'connect' | 'mid_run';
@@ -63,16 +66,29 @@ export interface ConnectionFailureReport {
 }
 
 /**
- * Attempt to grab an auth token synchronously from the Supabase
- * session cache. Never triggers a refresh — a network issue that
- * caused the WebSocket to fail could hang a refresh call.
+ * Attempt to grab an auth token to associate with the report.
+ * `supabase.auth.getSession()` performs a network refresh when the cached
+ * token is expired, and this function runs precisely when the network may
+ * be broken (a WebSocket connection just failed) — so the lookup is raced
+ * against a short timeout and falls back to an anonymous report rather than
+ * stalling the whole diagnostics call.
  */
 async function getBestEffortAuthToken(): Promise<string | undefined> {
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
     try {
-        const { data } = await supabase.auth.getSession();
-        return data.session?.access_token || undefined;
+        const session = await Promise.race([
+            supabase.auth.getSession(),
+            new Promise<null>((resolve) => {
+                timeoutId = setTimeout(() => resolve(null), AUTH_TOKEN_TIMEOUT_MS);
+            }),
+        ]);
+        return session?.data.session?.access_token || undefined;
     } catch {
         return undefined;
+    } finally {
+        // Clear the timer so a fast getSession() doesn't leave the losing
+        // setTimeout of the race outstanding.
+        clearTimeout(timeoutId);
     }
 }
 

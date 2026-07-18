@@ -44,7 +44,7 @@ vi.mock('../../../react/agents/agentActions', () => ({
     toAgentAction: vi.fn((action) => action),
 }));
 
-import { AgentService } from '../../../src/services/agentService';
+import { AgentService, WSConnectionError } from '../../../src/services/agentService';
 import type { AgentRunRequest, WSCallbacks } from '../../../src/services/agentProtocol';
 
 class MockWebSocket {
@@ -232,7 +232,7 @@ describe('AgentService reconnect handling', () => {
         });
 
         expect(callbacks.onClose).toHaveBeenCalledTimes(1);
-        expect(callbacks.onClose).toHaveBeenCalledWith(1000, 'User cancelled', true);
+        expect(callbacks.onClose).toHaveBeenCalledWith(1000, 'User cancelled', true, true);
     });
 
     it('notifies onClose for an unexpected transport close on the active socket', async () => {
@@ -249,6 +249,46 @@ describe('AgentService reconnect handling', () => {
         });
 
         expect(callbacks.onClose).toHaveBeenCalledTimes(1);
-        expect(callbacks.onClose).toHaveBeenCalledWith(1011, 'transport lost', false);
+        expect(callbacks.onClose).toHaveBeenCalledWith(1011, 'transport lost', false, true);
+    });
+
+    it('reports hadReachedReady=false and rejects connect() when the socket closes before ready', async () => {
+        const service = new AgentService('https://api.example.com');
+        const callbacks = createCallbacks();
+        const request = { type: 'pre-ready-close-test' } as AgentRunRequest;
+
+        const initialCount = MockWebSocket.instances.length;
+        const connectPromise = service.connect(request, callbacks);
+        // Attach a handler immediately so the eventual rejection (triggered
+        // further down, once the mock socket exists) is never left unhandled.
+        const connectOutcome = connectPromise.then(
+            () => ({ ok: true as const }),
+            (error: unknown) => ({ ok: false as const, error }),
+        );
+
+        for (let i = 0; i < 20 && MockWebSocket.instances.length === initialCount; i++) {
+            await Promise.resolve();
+        }
+        const socket = MockWebSocket.instances[initialCount];
+        if (!socket) {
+            throw new Error('Expected AgentService.connect() to create a WebSocket');
+        }
+
+        // The transport opens (so auth is sent) but the server rejects the
+        // connection before the "ready" event — e.g. an invalid/expired
+        // token — so hasReachedReady must still be false.
+        socket.emitOpen();
+        await vi.advanceTimersByTimeAsync(50);
+        socket.emitClose({ code: 1008, reason: 'invalid token', wasClean: false });
+
+        const outcome = await connectOutcome;
+        expect(outcome.ok).toBe(false);
+        if (!outcome.ok) {
+            expect(outcome.error).toBeInstanceOf(WSConnectionError);
+            expect((outcome.error as WSConnectionError).close_code).toBe(1008);
+        }
+
+        expect(callbacks.onClose).toHaveBeenCalledTimes(1);
+        expect(callbacks.onClose).toHaveBeenCalledWith(1008, 'invalid token', false, false);
     });
 });

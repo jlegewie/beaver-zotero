@@ -84,19 +84,20 @@ export async function getWSAuthToken(): Promise<string> {
 /**
  * Error thrown when the WebSocket connect phase fails.
  * Carries the underlying close code/reason so callers can distinguish
- * proxy/firewall blocks (commonly 1006) from TLS failures (1015) or
- * server-side rejections (4xxx close codes used by the backend).
+ * proxy/firewall blocks (commonly 1006) from TLS failures (rare, 1015)
+ * or server-side rejections (e.g. 1008 for authentication/policy
+ * failures, with `close_reason` describing the specific rejection).
  */
 export class WSConnectionError extends Error {
     close_code?: number;
     close_reason?: string;
     was_clean?: boolean;
-    /** 'error' if the failure came from ws.onerror without a close frame, 'close' if it came from ws.onclose, 'setup' for pre-connect errors (auth etc.) */
-    phase: 'error' | 'close' | 'setup';
+    /** Always 'close' — this error is only constructed from a WebSocket close event. */
+    phase: 'close';
 
     constructor(
         message: string,
-        phase: 'error' | 'close' | 'setup',
+        phase: 'close',
         opts?: { close_code?: number; close_reason?: string; was_clean?: boolean }
     ) {
         super(message);
@@ -124,6 +125,14 @@ export class AgentService {
     /** Whether the connected backend understands `request_received` acks (from the ready event) */
     private serverSupportsRequestAcks: boolean = false;
     /**
+     * Whether the current connection attempt has received the `ready` event.
+     * Tracked per-connection (reset on every connect/close) so `onclose` can
+     * tell callers whether a drop happened during the connect handshake or
+     * after the connection was fully established, without depending on
+     * caller-side state that could go stale across reconnects.
+     */
+    private hasReachedReady: boolean = false;
+    /**
      * Map of backend data-request event -> handler. Injectable so a non-Zotero
      * host can serve the same requests its own way. Defaults to the Zotero
      * plugin's handlers.
@@ -147,6 +156,7 @@ export class AgentService {
         this.messageQueue = Promise.resolve();
         this.actionExecutionQueue = Promise.resolve();
         this.serverSupportsRequestAcks = false;
+        this.hasReachedReady = false;
     }
 
     /**
@@ -232,6 +242,7 @@ export class AgentService {
                     ...callbacks,
                     onReady: (data: WSReadyData) => {
                         logger('AgentService: Server ready, sending agent run request', 1);
+                        this.hasReachedReady = true;
                         // Call the original onReady callback first
                         callbacks.onReady(data);
                         // Send the chat request now that server is ready
@@ -316,7 +327,10 @@ export class AgentService {
                         return;
                     }
                     logger(`AgentService: Connection closed - code=${event.code}, reason=${event.reason}, clean=${event.wasClean}`, 1);
-                    callbacks.onClose?.(event.code, event.reason, event.wasClean);
+                    // Capture before resetConnectionState() clears it, so callers can
+                    // distinguish a connect-phase drop from a post-ready (mid-run) drop.
+                    const hadReachedReady = this.hasReachedReady;
+                    callbacks.onClose?.(event.code, event.reason, event.wasClean, hadReachedReady);
                     this.resetConnectionState();
                     // If we haven't resolved yet, the connection closed before ready
                     if (!hasResolved) {
@@ -684,6 +698,8 @@ export class AgentService {
         const { notifyClose = true } = options;
         const wsToClose = this.ws;
         const callbacks = this.callbacks;
+        // Capture before resetConnectionState() clears it below.
+        const hadReachedReady = this.hasReachedReady;
 
         if (wsToClose) {
             // Only attempt to close if not already closing/closed
@@ -702,7 +718,7 @@ export class AgentService {
         }
         this.resetConnectionState();
         if (notifyClose) {
-            callbacks?.onClose?.(code, reason, true);
+            callbacks?.onClose?.(code, reason, true, hadReachedReady);
         }
     }
 

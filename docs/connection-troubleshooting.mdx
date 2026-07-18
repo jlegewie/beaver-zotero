@@ -26,13 +26,13 @@ Work, school, and hotel Wi‑Fi networks often run a **proxy**, **firewall**, or
 
 1. If you can switch networks, do so.
 2. If you have to stay on the restricted network, ask your IT team to allow Beaver's traffic — see [For IT administrators](#for-it-administrators) below.
-3. If your organisation requires a specific HTTP proxy, Zotero (which is based on Firefox) honours proxy settings under **Edit → Preferences → Advanced → Config Editor**, in the `network.proxy.*` keys.
+3. If your organization requires a specific HTTP proxy, Zotero (which is based on Firefox) honors proxy settings under **Edit → Settings (Zotero → Settings on macOS) → Advanced → Config Editor**, in the `network.proxy.*` keys.
 
 ## Security software interference
 
 Antivirus, VPN, or corporate security suites sometimes intercept every secure connection your computer makes, decrypt it, and re‑sign it with their own certificate. That process — often called **TLS inspection** or **SSL inspection** — breaks Beaver's connection, because Zotero doesn't trust the re‑signed certificate.
 
-If Beaver's error shows **error code 1015**, TLS inspection is the likely cause.
+If Beaver's error shows **error code 1006** (by far the most common) or the rarer **error code 1015**, TLS inspection is a likely cause.
 
 **What to do:**
 
@@ -42,13 +42,15 @@ If Beaver's error shows **error code 1015**, TLS inspection is the likely cause.
 
 ## Temporary server issues
 
-If Beaver's error shows a code in the **1011–1014** range or a **4xxx** code, the server is telling Beaver something went wrong on its side. This is almost always temporary — wait a moment and click **Retry**.
+If Beaver's error shows a code in the **1011–1014** range, the server is telling Beaver something went wrong on its side. This is almost always temporary — wait a moment and click **Retry**.
+
+If Beaver's error shows a **4xxx** code, the server rejected the connection for another reason — for example, an outdated or unsupported client. Retrying may help, but if it doesn't, check that Beaver is up to date.
 
 If it keeps failing for more than a few minutes and switching networks doesn't help, please [file a report](#if-nothing-works).
 
 ## For IT administrators
 
-If a colleague at your organisation is having trouble using Beaver, please allow the following outbound traffic on TCP **port 443**:
+If a colleague at your organization is having trouble using Beaver, please allow the following outbound traffic on TCP **port 443**:
 
 | Host | Protocols |
 |------|-----------|
@@ -59,7 +61,7 @@ If a colleague at your organisation is having trouble using Beaver, please allow
 
 - **WebSocket traffic must be permitted.** Beaver streams responses over `wss://`, not plain HTTPS. Proxies that strip or block the `Upgrade: websocket` and `Connection: Upgrade` request headers will cause "Connection Failed".
 - **Exempt `api.beaverapp.ai` from TLS/SSL inspection.** Many web filters and next‑gen firewalls (Zscaler, Netskope, Blue Coat, Palo Alto, Fortinet, etc.) inspect encrypted traffic by re‑signing it with an internal certificate. Zotero will not trust that certificate and the connection will fail.
-- **No custom API endpoint or proxy setting is required inside Beaver.** Beaver uses whatever proxy is configured for Zotero (Edit → Preferences → Advanced → Config Editor, `network.proxy.*`).
+- **No custom API endpoint or proxy setting is required inside Beaver.** Beaver uses whatever proxy is configured for Zotero (Edit → Settings (Zotero → Settings on macOS) → Advanced → Config Editor, `network.proxy.*`).
 
 If you need more information, please contact us at [support@beaverapp.ai](mailto:support@beaverapp.ai).
 
@@ -70,14 +72,15 @@ Beaver shows a numeric error code below the "Connection Failed" message. If you'
 | Code | Meaning | Common cause |
 |------|---------|--------------|
 | **1005** | No status received | Proxy or firewall dropping the connection |
-| **1006** | Connection blocked before Beaver's server responded | Corporate/school proxy, firewall, or filter blocking WebSocket traffic |
+| **1006** | Connection blocked before Beaver's server responded | Corporate/school proxy, firewall, or filter blocking WebSocket traffic; also the code that TLS/SSL inspection (antivirus, VPN, or corporate proxy) usually produces in Zotero |
+| **1008** | Authentication or policy rejection | Beaver couldn't verify your account for this connection — try again, or sign out and back in if it persists |
 | **1011** | Server error | Temporary problem on Beaver's servers — retry in a moment |
 | **1012** | Service restart | Beaver's servers are restarting — retry in a moment |
 | **1013** | Try again later | Beaver's servers are temporarily overloaded — retry in a moment |
 | **1014** | Bad gateway | Temporary problem upstream of Beaver's servers — retry in a moment |
-| **1015** | TLS handshake failure | TLS/SSL inspection by antivirus, VPN, or corporate proxy |
-| **1002 / 1003 / 1007 / 1008 / 1009 / 1010** | Protocol error | Usually resolved by updating Beaver to the latest version |
-| **4000–4999** | Server‑defined rejection | Almost always temporary — retry, or check that Beaver is up to date |
+| **1015** | TLS handshake failure | TLS/SSL inspection by antivirus, VPN, or corporate proxy. Rare in practice — this usually surfaces as 1006 instead |
+| **1002 / 1003 / 1007 / 1009 / 1010** | Protocol error | Usually resolved by updating Beaver to the latest version |
+| **4000–4999** | Server‑defined rejection | Reserved for the server to signal other rejections — retry, or check that Beaver is up to date |
 
 ## If nothing works
 
