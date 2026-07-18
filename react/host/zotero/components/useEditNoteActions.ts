@@ -29,6 +29,7 @@ import { openNoteAndSearchEdit, openNoteByKey } from '../../../utils/sourceUtils
 import {
     dismissDiffPreview,
     isDiffPreviewActive,
+    isDiffPreviewPending,
     isNoteOpenInEditor,
     showDiffPreview,
     type EditOperation,
@@ -52,7 +53,11 @@ import {
 import type { EditNoteOperation } from '../../../types/agentActions/editNote';
 
 export async function dismissActiveEditNotePreview(): Promise<void> {
-    if (!isDiffPreviewActive()) return;
+    // A deferred re-render (the revision guard's bounce) is pending-but-not-
+    // active; it must be cancelled here too, or resolving the action from
+    // the sidebar during that window would let the bounce resurrect a stale
+    // preview afterwards. dismissDiffPreview()'s generation bump cancels it.
+    if (!isDiffPreviewActive() && !isDiffPreviewPending()) return;
     await dismissDiffPreview();
     store.set(diffPreviewNoteKeyAtom, null);
 }
@@ -330,6 +335,12 @@ export function useEditNoteActions({
     const handleRejectPending = useCallback(() => {
         if (!action || isProcessing) return;
         setClickedButton('reject');
+        // Dismiss (or cancel a pending re-render of) the preview before
+        // resolving — rejection via local action state has no approval for
+        // the coordinator to react to, so without this a deferred preview
+        // bounce could resurrect a stale preview whose Apply callback
+        // targets the now-rejected action.
+        void dismissActiveEditNotePreview();
         rejectAgentAction(action.id);
         setTimeout(() => setClickedButton(null), 100);
     }, [action, isProcessing, rejectAgentAction]);

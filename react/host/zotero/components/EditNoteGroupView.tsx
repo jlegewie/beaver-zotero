@@ -441,6 +441,11 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
             }
             logger(`EditNoteGroupView: Rejected ${idsToRemove.length} edit_note actions for ${noteKeyLabel}`, 1);
         } else {
+            // Dismiss (or cancel a pending re-render of) the preview before
+            // resolving, mirroring the pending-approvals branch — otherwise a
+            // deferred preview bounce could resurrect a stale preview whose
+            // Apply callback targets the now-rejected action.
+            void dismissActiveEditNotePreview();
             for (const action of reapplicableActions) {
                 rejectAgentAction(action.id);
             }
