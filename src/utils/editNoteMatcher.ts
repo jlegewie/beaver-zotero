@@ -40,6 +40,7 @@
  *                                 module.
  */
 
+import { diffChars } from 'diff';
 import {
     countOccurrences,
     type SimplificationMetadata,
@@ -47,6 +48,8 @@ import {
 import { stripNoteWrapperDiv } from './noteWrapper';
 import {
     expandToRawHtml,
+    getUnescapedDollarPositions,
+    type ExpandToRawHtmlOptions,
     type ExternalRefContext,
     type ResolvedLocatorPages,
 } from './noteCitationExpand';
@@ -133,6 +136,8 @@ export interface MatchInput {
 export interface BaseExpansion {
     expandedOld: string;
     expandedNew: string;
+    /** Options used to expand the target anchor. */
+    options?: ExpandToRawHtmlOptions;
 }
 
 export interface MatchResult {
@@ -174,6 +179,238 @@ interface Strategy {
 
 const identity = (s: string): string => s;
 
+interface AlignedDollar {
+    oldOrdinal: number;
+    oldIndex: number;
+    newIndex: number;
+    retainedContext: boolean;
+}
+
+/**
+ * Map dollars aligned by the character diff. A one-character unchanged
+ * segment is not sufficient evidence that the dollar was copied: diffChars
+ * can align an unrelated old dollar with a new math delimiter during a
+ * wholesale replacement. `retainedContext` requires at least one adjacent
+ * character in the same unchanged segment.
+ */
+function alignedCopiedDollars(
+    oldString: string,
+    newString: string,
+): AlignedDollar[] {
+    const aligned: AlignedDollar[] = [];
+    let oldOffset = 0;
+    let newOffset = 0;
+    const oldOrdinalByIndex = new Map(
+        getUnescapedDollarPositions(oldString).map((position, ordinal) => [position, ordinal]),
+    );
+    const newDollarPositions = new Set(getUnescapedDollarPositions(newString));
+
+    for (const change of diffChars(oldString, newString)) {
+        if (change.added) {
+            newOffset += change.value.length;
+            continue;
+        }
+        if (change.removed) {
+            oldOffset += change.value.length;
+            continue;
+        }
+
+        for (let i = 0; i < change.value.length; i++) {
+            const oldIndex = oldOffset + i;
+            const newIndex = newOffset + i;
+            const oldOrdinal = oldOrdinalByIndex.get(oldIndex);
+            if (oldOrdinal !== undefined && newDollarPositions.has(newIndex)) {
+                aligned.push({
+                    oldOrdinal,
+                    oldIndex,
+                    newIndex,
+                    retainedContext: change.value.length > 1,
+                });
+            }
+        }
+        oldOffset += change.value.length;
+        newOffset += change.value.length;
+    }
+
+    return aligned;
+}
+
+/**
+ * Dollar positions that delimit a complete math expression in the
+ * replacement. A closing inline delimiter followed immediately by a digit is
+ * excluded because two rewritten currency amounts such as `EUR$6;GBP$8`
+ * otherwise look like one broad `$6;GBP$` span to the permissive math regex.
+ */
+function completeMathDollarPositions(str: string): Set<number> {
+    const positions = new Set<number>();
+
+    const displayPattern = /\$\$([\s\S]+?)\$\$/g;
+    let match: RegExpExecArray | null;
+    while ((match = displayPattern.exec(str)) !== null) {
+        const start = match.index;
+        const end = start + match[0].length;
+        positions.add(start);
+        positions.add(start + 1);
+        positions.add(end - 2);
+        positions.add(end - 1);
+    }
+
+    const inlinePattern = /(?<!\$)\$(?!\$)(?=\S)((?:[^$\\]|\\.)+?)(?<=\S)\$(?!\$)/g;
+    while ((match = inlinePattern.exec(str)) !== null) {
+        const start = match.index;
+        const end = start + match[0].length;
+        const closing = end - 1;
+        if (/\d/.test(str.charAt(end))) continue;
+        positions.add(start);
+        positions.add(closing);
+    }
+
+    return positions;
+}
+
+function strongCurrencyDollarPositions(str: string): Set<number> {
+    const positions = new Set<number>();
+    for (const position of getUnescapedDollarPositions(str)) {
+        const prefix = str.substring(0, position);
+        if (
+            /(?:^|[^A-Za-z])[A-Z]{2,3}$/.test(prefix)
+            && /\d/.test(str.charAt(position + 1))
+        ) positions.add(position);
+    }
+    return positions;
+}
+
+function isCompactLiteralPair(str: string, start: number, end: number): boolean {
+    if (end <= start + 1) return false;
+    const before = str.charAt(start - 1);
+    const after = str.charAt(end + 1);
+    if (/\w/.test(before) || /\w/.test(after)) return false;
+    return !/[\s"'<>$]/.test(str.substring(start + 1, end));
+}
+
+function copiedLiteralDollarRanges(
+    operation: EditNoteOperation,
+    oldString: string,
+    newString: string,
+    literalOldOrdinals: readonly number[],
+): Array<{ start: number; end: number }> {
+    if (literalOldOrdinals.length === 0) return [];
+    const literalOrdinals = new Set(literalOldOrdinals);
+    const oldDollarPositions = getUnescapedDollarPositions(oldString);
+
+    const rangesForEmbeddedAnchor = (anchorStart: number) => {
+        const ranges: Array<{ start: number; end: number }> = [];
+        for (let ordinal = 0; ordinal < oldDollarPositions.length; ordinal++) {
+            if (literalOrdinals.has(ordinal)) {
+                const start = anchorStart + oldDollarPositions[ordinal];
+                ranges.push({ start, end: start + 1 });
+            }
+        }
+        return ranges;
+    };
+
+    if (operation === 'insert_after') {
+        return newString.startsWith(oldString)
+            ? rangesForEmbeddedAnchor(0)
+            : [];
+    }
+    if (operation === 'insert_before') {
+        return newString.endsWith(oldString)
+            ? rangesForEmbeddedAnchor(newString.length - oldString.length)
+            : [];
+    }
+
+    const aligned = alignedCopiedDollars(oldString, newString);
+    const ranges = aligned
+        .filter(({ oldOrdinal, retainedContext }) => (
+            literalOrdinals.has(oldOrdinal) && retainedContext
+        ))
+        .map(({ newIndex }) => ({ start: newIndex, end: newIndex + 1 }));
+
+    // Preserve a compact literal pair as a unit when both delimiters survive
+    // and only its body changes (`$a$` → `$b$`). Each delimiter is a one-char
+    // diff segment, but their paired structure is retained. This does not
+    // apply to separate JSON-key dollars because the text between them
+    // contains quotes/whitespace rather than one compact token body.
+    const alignedByOldOrdinal = new Map(aligned.map((entry) => [entry.oldOrdinal, entry]));
+    for (let ordinal = 0; ordinal < oldDollarPositions.length - 1; ordinal++) {
+        if (!literalOrdinals.has(ordinal) || !literalOrdinals.has(ordinal + 1)) continue;
+        const first = alignedByOldOrdinal.get(ordinal);
+        const second = alignedByOldOrdinal.get(ordinal + 1);
+        if (!first || !second) continue;
+        if (!isCompactLiteralPair(oldString, first.oldIndex, second.oldIndex)) continue;
+        if (!isCompactLiteralPair(newString, first.newIndex, second.newIndex)) continue;
+        for (const start of [first.newIndex, second.newIndex]) {
+            if (!ranges.some((range) => range.start === start)) {
+                ranges.push({ start, end: start + 1 });
+            }
+        }
+        ordinal++;
+    }
+
+    // A substantial rewrite can leave no retained diff context even though
+    // the replacement dollars are unambiguously still currency delimiters:
+    // `US$5/CA$7` → `EUR$6;GBP$8`. Preserve dollar signs that immediately
+    // introduce numeric amounts whenever the matched target established a
+    // literal-dollar convention. This deliberately does not classify `$x$`
+    // as literal, so an independent formula replacement still expands.
+    // Resolve strong currency syntax first, then remove those dollars before
+    // finding math pairs. Otherwise `EUR$6;formula:$x$` is misread as one
+    // broad `$6;formula:$` expression and the actual `$x$` pair is corrupted.
+    const currencyDollarPositions = strongCurrencyDollarPositions(newString);
+    const mathScanString = newString.split('').map((char, index) => (
+        currencyDollarPositions.has(index) ? '\uE000' : char
+    )).join('');
+    const mathDollarPositions = completeMathDollarPositions(mathScanString);
+    for (let i = 0; i < newString.length - 1; i++) {
+        if (newString.charAt(i) !== '$' || !/\d/.test(newString.charAt(i + 1))) continue;
+        if (!currencyDollarPositions.has(i) && mathDollarPositions.has(i)) continue;
+        if (!ranges.some(({ start }) => start === i)) {
+            ranges.push({ start: i, end: i + 1 });
+        }
+    }
+
+    return ranges.sort((a, b) => a.start - b.start);
+}
+
+/**
+ * Expand a replacement using the target's normal mode, except on the
+ * literal-dollar retry: only dollar characters copied from the old anchor are
+ * preserved. Independent replacement/insertion text still receives normal
+ * math semantics.
+ */
+function expandReplacement(
+    input: MatchInput,
+    oldString: string,
+    newString: string,
+    targetOptions?: ExpandToRawHtmlOptions,
+): string {
+    let replacementOptions = targetOptions;
+    const literalOldOrdinals = targetOptions?.expandMath === false
+        ? getUnescapedDollarPositions(oldString).map((_position, index) => index)
+        : targetOptions?.literalDollarOrdinals ?? [];
+    if (literalOldOrdinals.length > 0) {
+        const literalDollarRanges = copiedLiteralDollarRanges(
+            input.operation,
+            oldString,
+            newString,
+            literalOldOrdinals,
+        );
+        replacementOptions = literalDollarRanges.length > 0
+            ? { literalDollarRanges }
+            : undefined;
+    }
+    return expandToRawHtml(
+        newString,
+        input.metadata,
+        'new',
+        input.externalRefContext,
+        input.pageLabels,
+        input.resolvedLocatorPages,
+        replacementOptions,
+    );
+}
+
 function rewriteInsertReplacementForTrim(
     operation: EditNoteOperation,
     oldString: string,
@@ -195,15 +432,11 @@ function rewriteInsertReplacementForTrim(
  * `executeEditNoteAction`) catch and translate into an `expansion_failed`
  * response envelope.
  */
-export function expandBase(input: MatchInput): BaseExpansion {
+export function expandBase(input: MatchInput, options?: ExpandToRawHtmlOptions): BaseExpansion {
     return {
-        expandedOld: expandToRawHtml(input.oldString, input.metadata, 'old'),
-        expandedNew: expandToRawHtml(
-            input.newString,
-            input.metadata,
-            'new',
-            input.externalRefContext, input.pageLabels, input.resolvedLocatorPages,
-        ),
+        expandedOld: expandToRawHtml(input.oldString, input.metadata, 'old', undefined, undefined, undefined, options),
+        expandedNew: expandReplacement(input, input.oldString, input.newString, options),
+        options,
     };
 }
 
@@ -430,14 +663,16 @@ const quoteNormalizedStrategy: Strategy = {
 
 const trimTrailingNewlinesStrategy: Strategy = {
     name: 'trim_trailing_newlines',
-    tryMatch(input) {
+    tryMatch(input, base) {
         if (!input.oldString) return null;
         const trimmedOld = input.oldString.replace(/\n+$/, '');
         if (trimmedOld === input.oldString) return null;
 
         let expandedOld: string;
         try {
-            expandedOld = expandToRawHtml(trimmedOld, input.metadata, 'old');
+            expandedOld = expandToRawHtml(
+                trimmedOld, input.metadata, 'old', undefined, undefined, undefined, base.options,
+            );
         } catch {
             return null;
         }
@@ -460,9 +695,7 @@ const trimTrailingNewlinesStrategy: Strategy = {
 
         let expandedNew: string;
         try {
-            expandedNew = expandToRawHtml(
-                trimmedNew, input.metadata, 'new', input.externalRefContext, input.pageLabels, input.resolvedLocatorPages,
-            );
+            expandedNew = expandReplacement(input, trimmedOld, trimmedNew, base.options);
         } catch {
             return null;
         }
@@ -492,7 +725,7 @@ const unescapeJsonEscapes = (s: string): string =>
 
 const jsonUnescapeStrategy: Strategy = {
     name: 'json_unescape',
-    tryMatch(input) {
+    tryMatch(input, base) {
         if (!input.oldString) return null;
         if (!/\\["\\/nrt]/.test(input.oldString)) return null;
         const unescapedOld = unescapeJsonEscapes(input.oldString);
@@ -500,7 +733,9 @@ const jsonUnescapeStrategy: Strategy = {
 
         let expandedOld: string;
         try {
-            expandedOld = expandToRawHtml(unescapedOld, input.metadata, 'old');
+            expandedOld = expandToRawHtml(
+                unescapedOld, input.metadata, 'old', undefined, undefined, undefined, base.options,
+            );
         } catch {
             return null;
         }
@@ -510,9 +745,7 @@ const jsonUnescapeStrategy: Strategy = {
         const unescapedNew = unescapeJsonEscapes(input.newString);
         let expandedNew: string;
         try {
-            expandedNew = expandToRawHtml(
-                unescapedNew, input.metadata, 'new', input.externalRefContext, input.pageLabels, input.resolvedLocatorPages,
-            );
+            expandedNew = expandReplacement(input, unescapedOld, unescapedNew, base.options);
         } catch {
             return null;
         }
@@ -531,7 +764,7 @@ const jsonUnescapeStrategy: Strategy = {
 
 const partialElementStripStrategy: Strategy = {
     name: 'partial_element_strip',
-    tryMatch(input) {
+    tryMatch(input, base) {
         if (!input.oldString) return null;
         const simplifiedPos = input.simplified.indexOf(input.oldString);
         if (simplifiedPos === -1) return null;
@@ -547,9 +780,11 @@ const partialElementStripStrategy: Strategy = {
         let expandedOld: string;
         let expandedNew: string;
         try {
-            expandedOld = expandToRawHtml(stripped.strippedOld, input.metadata, 'old');
-            expandedNew = expandToRawHtml(
-                stripped.strippedNew, input.metadata, 'new', input.externalRefContext, input.pageLabels, input.resolvedLocatorPages,
+            expandedOld = expandToRawHtml(
+                stripped.strippedOld, input.metadata, 'old', undefined, undefined, undefined, base.options,
+            );
+            expandedNew = expandReplacement(
+                input, stripped.strippedOld, stripped.strippedNew, base.options,
             );
         } catch {
             return null;
@@ -569,6 +804,9 @@ const partialElementStripStrategy: Strategy = {
                     input.simplified.substring(0, strippedStart),
                     input.metadata,
                     'old',
+                    undefined,
+                    undefined,
+                    undefined,
                 );
                 const unwrapped = stripNoteWrapperDiv(input.strippedHtml);
                 const wrapperPrefixLen = unwrapped !== input.strippedHtml
@@ -599,7 +837,7 @@ const partialElementStripStrategy: Strategy = {
 
 const spuriousWrapStripStrategy: Strategy = {
     name: 'spurious_wrap_strip',
-    tryMatch(input) {
+    tryMatch(input, base) {
         if (!input.oldString) return null;
         const candidates = stripSpuriousWrappingTags(input.oldString, input.newString);
         // Candidates are ordered least-to-most aggressive (leading-only,
@@ -609,9 +847,11 @@ const spuriousWrapStripStrategy: Strategy = {
             let expandedOld: string;
             let expandedNew: string;
             try {
-                expandedOld = expandToRawHtml(candidate.strippedOld, input.metadata, 'old');
-                expandedNew = expandToRawHtml(
-                    candidate.strippedNew, input.metadata, 'new', input.externalRefContext, input.pageLabels, input.resolvedLocatorPages,
+                expandedOld = expandToRawHtml(
+                    candidate.strippedOld, input.metadata, 'old', undefined, undefined, undefined, base.options,
+                );
+                expandedNew = expandReplacement(
+                    input, candidate.strippedOld, candidate.strippedNew, base.options,
                 );
             } catch {
                 continue;
@@ -656,14 +896,16 @@ function stripBlockTagAttributes(s: string): string {
 
 const tagAttributeStripStrategy: Strategy = {
     name: 'tag_attribute_strip',
-    tryMatch(input) {
+    tryMatch(input, base) {
         if (!input.oldString) return null;
         const strippedOld = stripBlockTagAttributes(input.oldString);
         if (strippedOld === input.oldString) return null;
 
         let expandedOld: string;
         try {
-            expandedOld = expandToRawHtml(strippedOld, input.metadata, 'old');
+            expandedOld = expandToRawHtml(
+                strippedOld, input.metadata, 'old', undefined, undefined, undefined, base.options,
+            );
         } catch {
             return null;
         }
@@ -706,9 +948,7 @@ const tagAttributeStripStrategy: Strategy = {
                 );
                 expandedNew = expandedInjected + expandedOld;
             } else {
-                expandedNew = expandToRawHtml(
-                    strippedNew, input.metadata, 'new', input.externalRefContext, input.pageLabels, input.resolvedLocatorPages,
-                );
+                expandedNew = expandReplacement(input, strippedOld, strippedNew, base.options);
             }
         } catch {
             return null;
@@ -734,14 +974,16 @@ const tagAttributeStripStrategy: Strategy = {
 
 const markdownToHtmlStrategy: Strategy = {
     name: 'markdown_to_html',
-    tryMatch(input) {
+    tryMatch(input, base) {
         if (!input.oldString) return null;
         const convertedOld = convertMarkdownToHtml(input.oldString);
         if (convertedOld === input.oldString) return null;
 
         let expandedOld: string;
         try {
-            expandedOld = expandToRawHtml(convertedOld, input.metadata, 'old');
+            expandedOld = expandToRawHtml(
+                convertedOld, input.metadata, 'old', undefined, undefined, undefined, base.options,
+            );
         } catch {
             return null;
         }
@@ -766,9 +1008,7 @@ const markdownToHtmlStrategy: Strategy = {
 
         let expandedNew: string;
         try {
-            expandedNew = expandToRawHtml(
-                convertedNew, input.metadata, 'new', input.externalRefContext, input.pageLabels, input.resolvedLocatorPages,
-            );
+            expandedNew = expandReplacement(input, convertedOld, convertedNew, base.options);
         } catch {
             return null;
         }
@@ -1020,13 +1260,15 @@ const whitespaceRelaxedStrategy: Strategy = {
 
 const markdownRenderStrategy: Strategy = {
     name: 'markdown_render',
-    tryMatch(input) {
+    tryMatch(input, base) {
         const renderedOld = input.renderedOldSimplified;
         if (!renderedOld) return null;
 
         let expandedOld: string;
         try {
-            expandedOld = expandToRawHtml(renderedOld, input.metadata, 'old');
+            expandedOld = expandToRawHtml(
+                renderedOld, input.metadata, 'old', undefined, undefined, undefined, base.options,
+            );
         } catch {
             return null;
         }
@@ -1037,14 +1279,7 @@ const markdownRenderStrategy: Strategy = {
         const renderedNew = input.renderedNewSimplified ?? renderedOld;
         let expandedNew: string;
         try {
-            expandedNew = expandToRawHtml(
-                renderedNew,
-                input.metadata,
-                'new',
-                input.externalRefContext,
-                input.pageLabels,
-                input.resolvedLocatorPages,
-            );
+            expandedNew = expandReplacement(input, renderedOld, renderedNew, base.options);
         } catch {
             return null;
         }
@@ -1084,6 +1319,70 @@ const STRATEGIES: Strategy[] = [
     markdownRenderStrategy,
 ];
 
+const MAX_DOLLAR_RETRY_VARIANTS = 512;
+
+/**
+ * Generate per-dollar literal interpretations, most-literal first. Trying
+ * supersets first matters because shielding one delimiter can leave its mate
+ * unmatched and accidentally produce the same raw text as shielding both;
+ * the superset records the complete literal identity for replacement
+ * expansion.
+ *
+ * A genuine math span consumes two adjacent dollar ordinals (or two adjacent
+ * pairs for `$$…$$`), while every remaining dollar is literal. Enumerating
+ * disjoint adjacent math pairs covers those semantic interpretations without
+ * trying arbitrary delimiter subsets that can only create unmatched dollars.
+ * Interpretations with fewer math pairs run first, and a defensive cap keeps
+ * code-heavy fragments from producing unbounded work.
+ */
+function literalDollarRetryOptions(str: string): ExpandToRawHtmlOptions[] {
+    const dollarCount = getUnescapedDollarPositions(str).length;
+    if (dollarCount === 0) return [];
+
+    const variants: number[][] = [];
+    const seen = new Set<string>();
+    const add = (ordinals: number[]) => {
+        const key = ordinals.join(',');
+        if (
+            ordinals.length === 0
+            || seen.has(key)
+            || variants.length >= MAX_DOLLAR_RETRY_VARIANTS
+        ) return;
+        seen.add(key);
+        variants.push(ordinals);
+    };
+    const all = Array.from({ length: dollarCount }, (_value, index) => index);
+    add(all);
+
+    const collectWithMathPairs = (
+        nextOrdinal: number,
+        pairsRemaining: number,
+        mathOrdinals: Set<number>,
+    ) => {
+        if (variants.length >= MAX_DOLLAR_RETRY_VARIANTS) return;
+        if (pairsRemaining === 0) {
+            add(all.filter((ordinal) => !mathOrdinals.has(ordinal)));
+            return;
+        }
+
+        for (let first = nextOrdinal; first < dollarCount - 1; first++) {
+            mathOrdinals.add(first);
+            mathOrdinals.add(first + 1);
+            collectWithMathPairs(first + 2, pairsRemaining - 1, mathOrdinals);
+            mathOrdinals.delete(first);
+            mathOrdinals.delete(first + 1);
+            if (variants.length >= MAX_DOLLAR_RETRY_VARIANTS) return;
+        }
+    };
+
+    for (let pairCount = 1; pairCount <= Math.floor(dollarCount / 2); pairCount++) {
+        collectWithMathPairs(0, pairCount, new Set());
+        if (variants.length >= MAX_DOLLAR_RETRY_VARIANTS) break;
+    }
+
+    return variants.map((literalDollarOrdinals) => ({ literalDollarOrdinals }));
+}
+
 /**
  * Run each strategy in rank order and return the first one that produces at
  * least one match. Returns `null` when nothing matches — callers should
@@ -1095,8 +1394,34 @@ export function findBestMatch(
 ): MatchResult | null {
     for (const strategy of STRATEGIES) {
         const result = strategy.tryMatch(input, base);
-        if (result && result.matchCount > 0) return result;
+        if (result && result.matchCount > 0) {
+            return result;
+        }
     }
+
+    // Literal-dollar retries. The default expansion treats every syntactic
+    // `$…$` pair as math, but an anchor may contain literal dollars, or mix
+    // them with genuine math. Retry per dollar so `Formula $x$ uses
+    // "$schema" and "$ref"` can preserve the JSON-key dollars while retaining
+    // the real math wrapper around `$x$`.
+    if (input.oldString.includes('$')) {
+        for (const options of literalDollarRetryOptions(input.oldString)) {
+            let retryBase: BaseExpansion | null = null;
+            try {
+                retryBase = expandBase(input, options);
+            } catch {
+                retryBase = null;
+            }
+            if (!retryBase || retryBase.expandedOld === base.expandedOld) continue;
+            for (const strategy of STRATEGIES) {
+                const result = strategy.tryMatch(input, retryBase);
+                if (result && result.matchCount > 0) {
+                    return result;
+                }
+            }
+        }
+    }
+
     return null;
 }
 
@@ -1105,6 +1430,25 @@ export function findBestMatch(
  * old_string expansion fails before the ranked matcher can run.
  */
 export function findMarkdownRenderMatch(input: MatchInput): MatchResult | null {
-    const result = markdownRenderStrategy.tryMatch(input, { expandedOld: '', expandedNew: '' });
-    return result && result.matchCount > 0 ? result : null;
+    const base: BaseExpansion = { expandedOld: '', expandedNew: '' };
+    const result = markdownRenderStrategy.tryMatch(input, base);
+    if (result && result.matchCount > 0) return result;
+
+    // The single-edit path renders Markdown only after the normal matcher has
+    // already missed, so it cannot rely on findBestMatch's literal-dollar
+    // retries. Keep the default pass first so genuine rendered math wins.
+    if (input.renderedOldSimplified?.includes('$')) {
+        for (const options of literalDollarRetryOptions(input.renderedOldSimplified)) {
+            const retryResult = markdownRenderStrategy.tryMatch(input, {
+                expandedOld: '',
+                expandedNew: '',
+                options,
+            });
+            if (retryResult && retryResult.matchCount > 0) {
+                return retryResult;
+            }
+        }
+    }
+
+    return null;
 }

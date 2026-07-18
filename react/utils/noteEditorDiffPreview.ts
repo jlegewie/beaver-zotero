@@ -21,6 +21,7 @@ import type { EditNoteOperation } from '../types/agentActions/editNote';
 import {
     getOrSimplify,
     normalizeNoteHtml,
+    type SimplificationMetadata,
 } from '../../src/utils/noteHtmlSimplifier';
 import {
     expandToRawHtml,
@@ -43,6 +44,11 @@ import {
 import { getBeaverFooterAppendPoint } from '../../src/utils/noteEditFooter';
 import { containsPreviewMarkers } from '../../src/utils/notePreviewGuard';
 import { findTargetRawMatchPosition } from '../../src/utils/editNoteRawPosition';
+import {
+    expandBase,
+    findBestMatch,
+    type MatchInput,
+} from '../../src/utils/editNoteMatcher';
 import { store } from '../store';
 import {
     externalReferenceMappingAtom,
@@ -354,7 +360,8 @@ export async function showDiffPreview(
         const normalizedHtml = normalizeNoteHtml(rawHtml);
         const noteId = `${libraryId}-${zoteroKey}`;
         const pageLabelsByItemId = await preloadNotePageLabels(rawHtml, libraryId);
-        const { metadata } = getOrSimplify(noteId, rawHtml, libraryId, pageLabelsByItemId);
+        const { simplified, metadata } = getOrSimplify(noteId, rawHtml, libraryId, pageLabelsByItemId);
+        const strippedHtml = stripDataCitationItems(normalizedHtml);
         const externalRefContext = getExternalRefContext();
 
         // Resolve page labels for new-citation translation across every edit
@@ -382,29 +389,23 @@ export async function showDiffPreview(
                         targetAfterContext: edit.targetAfterContext,
                     });
                 } else {
-                    const expandedOld = edit.oldString ? expandToRawHtml(edit.oldString, metadata, 'old') : '';
-                    // For insert_after / insert_before, new_string is already
-                    // normalized by validation to merge old_string with
-                    // new_string (via normalized_action_data):
-                    //   - insert_after:  new_string = old_string + new_string
-                    //   - insert_before: new_string = new_string + old_string
-                    // so computeHtmlDiff will naturally show the anchor as
-                    // context and the insertion as addition.
-                    const expandedNew = edit.newString ? expandToRawHtml(edit.newString, metadata, 'new', externalRefContext, pageLabels) : '';
-                    if (expandedOld) {
-                        expandedEdits.push({
-                            expandedOld,
-                            expandedNew,
-                            operation: op,
-                            targetBeforeContext: edit.targetBeforeContext,
-                            targetAfterContext: edit.targetAfterContext,
-                        });
+                    const expanded = expandPreviewEditForCurrentNote(
+                        edit,
+                        op,
+                        metadata,
+                        simplified,
+                        strippedHtml,
+                        externalRefContext,
+                        pageLabels,
+                    );
+                    if (expanded) {
+                        expandedEdits.push(expanded);
                     } else {
                         logger(
-                            `showDiffPreview: dropping edit for ${noteKey} — expandedOld is empty `
+                            `showDiffPreview: dropping edit for ${noteKey} — matcher could not locate old_string `
                             + `(op=${op}, oldStringLen=${edit.oldString?.length ?? 0}, `
                             + `newStringLen=${edit.newString?.length ?? 0}) — `
-                            + `expandToRawHtml could not locate old_string in the current note`,
+                            + `the note may have changed since validation`,
                             1,
                         );
                     }
@@ -430,7 +431,8 @@ export async function showDiffPreview(
         if (!diffHtml) {
             logger(
                 `showDiffPreview: aborting for ${noteKey}, constructMultiDiffHtml returned null — `
-                + `expanded old_string not found via indexOf in the raw note HTML `
+                + `no edit could be positioned in the raw note HTML (unmatched old_string, or `
+                + `stale target anchors with a non-unique target) `
                 + `(${expandedEdits.length} expanded edit(s) attempted)`,
                 1,
             );
@@ -885,12 +887,55 @@ function findScrollContainer(element: Element): Element | null {
 // Diff Construction
 // =============================================================================
 
-interface PreviewExpandedEdit {
+export interface PreviewExpandedEdit {
     expandedOld: string;
     expandedNew: string;
     operation: EditNoteOperation;
     targetBeforeContext?: string;
     targetAfterContext?: string;
+}
+
+/**
+ * Expand a replacement preview through the same ranked matcher used by
+ * validation and execution. This is essential for retry-specific expansion
+ * modes (notably literal-dollar text), and also keeps preview positioning
+ * aligned with trim/unescape/wrapper/attribute/whitespace strategies.
+ */
+export function expandPreviewEditForCurrentNote(
+    edit: EditOperation,
+    operation: EditNoteOperation,
+    metadata: SimplificationMetadata,
+    simplified: string,
+    strippedHtml: string,
+    externalRefContext: ExternalRefContext,
+    pageLabels: PageLabelsByAttachmentId,
+): PreviewExpandedEdit | null {
+    if (!edit.oldString) return null;
+
+    const input: MatchInput = {
+        oldString: edit.oldString,
+        newString: edit.newString,
+        operation,
+        metadata,
+        simplified,
+        strippedHtml,
+        externalRefContext,
+        pageLabels,
+    };
+    const match = findBestMatch(input, expandBase(input));
+    if (!match) return null;
+
+    return {
+        expandedOld: match.expandedOld,
+        expandedNew: match.expandedNew,
+        operation,
+        targetBeforeContext: edit.targetBeforeContext !== undefined
+            ? match.normalizeAnchor(edit.targetBeforeContext)
+            : undefined,
+        targetAfterContext: edit.targetAfterContext !== undefined
+            ? match.normalizeAnchor(edit.targetAfterContext)
+            : undefined,
+    };
 }
 
 /**

@@ -146,12 +146,43 @@ function findRefInsensitiveMatchPositions(haystack: string, needle: string): num
     return positions;
 }
 
+function findRawMatchPositions(haystack: string, needle: string): number[] {
+    if (!needle) return [];
+    const positions: number[] = [];
+    let searchFrom = 0;
+    while (true) {
+        const position = haystack.indexOf(needle, searchFrom);
+        if (position === -1) return positions;
+        positions.push(position);
+        searchFrom = position + needle.length;
+    }
+}
+
+function mapExactSimplifiedOccurrenceByOrdinal(
+    strippedHtml: string,
+    simplified: string,
+    oldString: string,
+    expandedOld: string,
+    simplifiedMatchPos: number,
+): number | null {
+    const equivalentSimplifiedPositions = findRefInsensitiveMatchPositions(
+        simplified,
+        oldString,
+    );
+    const ordinal = equivalentSimplifiedPositions.indexOf(simplifiedMatchPos);
+    if (ordinal === -1) return null;
+
+    const rawPositions = findRawMatchPositions(strippedHtml, expandedOld);
+    if (rawPositions.length !== equivalentSimplifiedPositions.length) return null;
+    return rawPositions[ordinal] ?? null;
+}
+
 function findExactSimplifiedRawMatchPosition(
     strippedHtml: string,
     simplified: string,
     oldString: string,
     expandedOld: string,
-    metadata: SimplificationMetadata
+    metadata: SimplificationMetadata,
 ): number | null {
     const simplifiedMatchPos = simplified.indexOf(oldString);
     if (simplifiedMatchPos === -1) return null;
@@ -160,9 +191,27 @@ function findExactSimplifiedRawMatchPosition(
         return null;
     }
 
+    const rawPositions = findRawMatchPositions(strippedHtml, expandedOld);
+    if (rawPositions.length === 1) return rawPositions[0];
+
+    // Citation refs distinguish otherwise identical simplified occurrences,
+    // but those refs are absent from raw HTML. Map the selected simplified
+    // occurrence to the corresponding raw occurrence by document order. This
+    // avoids re-expanding the entire prefix with the target's dollar mode:
+    // the prefix may independently contain both real math nodes and literal
+    // dollar text.
+    const ordinalPosition = mapExactSimplifiedOccurrenceByOrdinal(
+        strippedHtml,
+        simplified,
+        oldString,
+        expandedOld,
+        simplifiedMatchPos,
+    );
+    if (ordinalPosition !== null) return ordinalPosition;
+
     try {
         const expandedBefore = expandToRawHtml(
-            simplified.substring(0, simplifiedMatchPos), metadata, 'old'
+            simplified.substring(0, simplifiedMatchPos), metadata, 'old',
         );
         // Simplified HTML strips the root wrapper div, so map the content-level
         // offset back into the raw note HTML before verifying the match.
@@ -190,10 +239,10 @@ export function captureValidatedEditTargetContext(
     simplified: string,
     oldString: string,
     expandedOld: string,
-    metadata: SimplificationMetadata
+    metadata: SimplificationMetadata,
 ): EditTargetContext | null {
     const rawPos = findExactSimplifiedRawMatchPosition(
-        strippedHtml, simplified, oldString, expandedOld, metadata
+        strippedHtml, simplified, oldString, expandedOld, metadata,
     );
     if (rawPos === null) return null;
 
@@ -279,7 +328,7 @@ export function findUniqueRawMatchPosition(
     simplified: string,
     oldString: string,
     expandedOld: string,
-    metadata: SimplificationMetadata
+    metadata: SimplificationMetadata,
 ): number | null {
     const matchPositions = findRefInsensitiveMatchPositions(simplified, oldString);
     if (matchPositions.length !== 1) {
@@ -287,9 +336,12 @@ export function findUniqueRawMatchPosition(
     }
     const simplifiedMatchPos = matchPositions[0];
 
+    const rawPositions = findRawMatchPositions(strippedHtml, expandedOld);
+    if (rawPositions.length === 1) return rawPositions[0];
+
     try {
         const expandedBefore = expandToRawHtml(
-            simplified.substring(0, simplifiedMatchPos), metadata, 'old'
+            simplified.substring(0, simplifiedMatchPos), metadata, 'old',
         );
         // Simplified HTML strips the root wrapper div, so map the content-level
         // offset back into the raw note HTML before verifying the match.

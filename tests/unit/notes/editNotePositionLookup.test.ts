@@ -73,6 +73,60 @@ describe('locateEditTarget', () => {
         const result = locateEditTarget({ strippedHtml, simplified, oldString, expandedOld, metadata });
         expect(result.kind).toBe('ambiguous');
     });
+
+    it('maps a citation-disambiguated literal-dollar target after genuine math', () => {
+        const rawCitation = '<span class="citation">Same citation</span>';
+        const metadata = {
+            elements: new Map([
+                ['c_DUP_0', {
+                    rawHtml: rawCitation,
+                    type: 'citation',
+                    originalAttrs: { item_id: '1-DUPLICAT' },
+                }],
+                ['c_DUP_1', {
+                    rawHtml: rawCitation,
+                    type: 'citation',
+                    originalAttrs: { item_id: '1-DUPLICAT' },
+                }],
+            ]),
+        } as any;
+        const first = '<p>value $x$ <citation ref="c_DUP_0" id="1-DUPLICAT"/></p>';
+        const second = '<p>value $x$ <citation ref="c_DUP_1" id="1-DUPLICAT"/></p>';
+        const genuineMathSimplified = '<p>Earlier genuine math: $g$</p>';
+        const simplified = genuineMathSimplified + first + second;
+        const rawParagraph = `<p>value $x$ ${rawCitation}</p>`;
+        const genuineMathRaw = '<p>Earlier genuine math: <span class="math">$g$</span></p>';
+        const strippedHtml = wrap(genuineMathRaw + rawParagraph + rawParagraph);
+        const expandedOld = expandToRawHtml(
+            second,
+            metadata,
+            'old',
+            undefined,
+            undefined,
+            undefined,
+            { expandMath: false },
+        );
+
+        const result = locateEditTarget({
+            strippedHtml,
+            simplified,
+            oldString: second,
+            expandedOld,
+            metadata,
+        });
+        // No fragment-wide math mode can map this prefix correctly: normal
+        // expansion corrupts the earlier literal target, while no-math
+        // expansion corrupts the genuine math node. Occurrence-order mapping
+        // identifies the ref-selected second raw paragraph without either.
+        expect(result.kind).toBe('context');
+        if (result.kind === 'context') {
+            const secondRawPos = strippedHtml.lastIndexOf(expandedOld);
+            expect(result.beforeContext).toBe(strippedHtml.substring(
+                Math.max(0, secondRawPos - 200),
+                secondRawPos,
+            ));
+        }
+    });
 });
 
 // =============================================================================
