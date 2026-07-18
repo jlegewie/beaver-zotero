@@ -10,6 +10,12 @@
  * Both operations snapshot the affected item IDs and the tag's color at
  * validation time so destructive operations (delete, merge-on-rename) can be
  * undone by the user.
+ *
+ * The source tag `name` is matched exactly first (Zotero tags are
+ * case-sensitive); if absent, a unique case/format-insensitive match in the
+ * target library is auto-resolved (see canonicalTagForm) and reported back
+ * via normalized_action_data. `new_name` is never auto-resolved — renaming
+ * to a different casing or merging into an existing tag are legitimate.
  */
 
 import {
@@ -50,12 +56,46 @@ async function itemIdsToKeys(libraryID: number, itemIDs: number[]): Promise<stri
  * 'cache_rebuilt' — initial getID miss, but a fresh Zotero.Tags.init() then
  *                   found the tag. Signals a transient cache desync; caller
  *                   should log this.
- * null tagID      — not found. `suggestions` holds up to 3 case-insensitive
- *                   matches the agent could retry with.
+ * 'normalized'    — exact lookup missed, but exactly one tag in the target
+ *                   library matches under canonicalTagForm (case/whitespace/
+ *                   apostrophe variants). `resolvedName` is the actual tag.
+ * null tagID      — not found. `suggestions` holds up to 3 near-matches the
+ *                   agent could retry with.
+ *
+ * `resolvedName` is always the actual tag name to operate on; callers must
+ * use it (not the raw input) for everything downstream.
  */
 type TagResolution =
-    | { tagID: number; source: 'cache' | 'cache_rebuilt' }
+    | { tagID: number; source: 'cache' | 'cache_rebuilt' | 'normalized'; resolvedName: string }
     | { tagID: null; suggestions: string[] };
+
+
+/**
+ * Canonical form used for unambiguous auto-resolution. Differences at this
+ * tier — letter case, whitespace runs, curly vs straight apostrophes/quotes,
+ * Unicode normalization form — are treated as "the same tag, typed
+ * differently". Deliberately does NOT strip diacritics: names differing only
+ * by an accent may be genuinely different tags.
+ */
+export function canonicalTagForm(name: string): string {
+    return name
+        .normalize('NFC')
+        .replace(/[‘’‚‛′]/g, "'")
+        .replace(/[“”„‟″]/g, '"')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .toLowerCase();
+}
+
+
+/**
+ * Looser form used only for "Did you mean" suggestions: additionally strips
+ * diacritics so accent mismatches still surface a hint. Never used for
+ * auto-resolution.
+ */
+export function suggestionTagForm(name: string): string {
+    return canonicalTagForm(name).normalize('NFD').replace(/\p{M}/gu, '');
+}
 
 
 // Shared in-flight rebuild promise. If multiple concurrent callers miss the
@@ -83,32 +123,55 @@ function rebuildTagCache(): Promise<void> {
 async function resolveTagByName(name: string, libraryID: number): Promise<TagResolution> {
     const cacheID = Zotero.Tags.getID(name);
     if (cacheID !== false && cacheID != null) {
-        return { tagID: cacheID, source: 'cache' };
+        return { tagID: cacheID, source: 'cache', resolvedName: name };
     }
 
     // Cache miss → rebuild (shared across concurrent callers) and retry.
     await rebuildTagCache();
     const retryID = Zotero.Tags.getID(name);
     if (retryID !== false && retryID != null) {
-        return { tagID: retryID, source: 'cache_rebuilt' };
+        return { tagID: retryID, source: 'cache_rebuilt', resolvedName: name };
     }
 
-    // Still missing. Probe case-insensitively for suggestions — init() doesn't
-    // help with case typos since getID is exact-case. Scope to the target
-    // library via itemTags so we only surface tags the user actually has here.
-    const suggestions: string[] = [];
+    // Still missing — the exact name provably does not exist. Probe the target
+    // library's tag names for near-matches. Scope via itemTags (Zotero.Tags
+    // and the `tags` table are global; itemTags is what scopes a tag to a
+    // library). Normalization happens in JS, not SQL: SQLite's LOWER() only
+    // folds ASCII and can't bridge apostrophe or Unicode-form variants.
+    const libraryTagNames: string[] = [];
     await Zotero.DB.queryAsync(
         'SELECT DISTINCT t.name FROM tags t '
             + 'JOIN itemTags it USING (tagID) '
             + 'JOIN items i USING (itemID) '
-            + 'WHERE i.libraryID = ? AND LOWER(t.name) = LOWER(?) LIMIT 3',
-        [libraryID, name],
+            + 'WHERE i.libraryID = ?',
+        [libraryID],
         {
             onRow: (row: any) => {
-                suggestions.push(row.getResultByIndex(0) as string);
+                libraryTagNames.push(row.getResultByIndex(0) as string);
             },
         },
     );
+
+    // Auto-resolve when exactly one library tag matches under the canonical
+    // form. Tags are case-sensitive in Zotero, but since the exact-cased name
+    // does not exist, a unique match cannot shadow a legitimately different
+    // tag; multiple matches (coexisting case variants) stay an error below.
+    const canonical = canonicalTagForm(name);
+    const canonicalMatches = libraryTagNames.filter((t) => canonicalTagForm(t) === canonical);
+    if (canonicalMatches.length === 1) {
+        const resolvedID = Zotero.Tags.getID(canonicalMatches[0]);
+        if (resolvedID !== false && resolvedID != null) {
+            return { tagID: resolvedID, source: 'normalized', resolvedName: canonicalMatches[0] };
+        }
+    }
+
+    // Ambiguous or no canonical match: surface up to 3 suggestions, falling
+    // back to the diacritic-insensitive form so accent mismatches still hint.
+    let suggestions = canonicalMatches.slice(0, 3);
+    if (suggestions.length === 0) {
+        const target = suggestionTagForm(name);
+        suggestions = libraryTagNames.filter((t) => suggestionTagForm(t) === target).slice(0, 3);
+    }
     return { tagID: null, suggestions };
 }
 
@@ -230,8 +293,11 @@ export async function validateManageTagsAction(
         };
     }
     const tagID = resolution.tagID;
+    const resolvedName = resolution.resolvedName;
     if (resolution.source === 'cache_rebuilt') {
         logger(`manage_tags: cache desync repaired for '${name}' in library ${libraryID} (Zotero.Tags.init rebuilt, tagID=${tagID})`, 1);
+    } else if (resolution.source === 'normalized') {
+        logger(`manage_tags: auto-resolved tag '${name}' → '${resolvedName}' (unique normalized match) in library ${libraryID} (tagID=${tagID})`, 1);
     }
 
     // Validate action-specific fields
@@ -249,13 +315,21 @@ export async function validateManageTagsAction(
                 preference: 'always_ask',
             };
         }
-        if (newName === name) {
+        if (newName === resolvedName) {
+            // When auto-resolution collapsed the source onto the requested
+            // target (e.g. rename 'Academic identity' → 'academic identity'
+            // and only the lowercase tag exists), the desired end state
+            // already holds — tell the model to move on rather than surfacing
+            // a confusing "must be different" error.
+            const alreadyNamed = resolvedName !== name;
             return {
                 type: 'agent_action_validate_response',
                 request_id: request.request_id,
                 valid: false,
-                error: 'new_name must be different from name',
-                error_code: 'invalid_new_name',
+                error: alreadyNamed
+                    ? `Tag is already named '${resolvedName}' in library '${library.name}'; nothing to rename.`
+                    : 'new_name must be different from the current name',
+                error_code: alreadyNamed ? 'rename_noop' : 'invalid_new_name',
                 preference: 'always_ask',
             };
         }
@@ -308,16 +382,18 @@ export async function validateManageTagsAction(
             library_ref: libraryRefForLibraryID(libraryID) ?? undefined,
             library_name: library.name,
             action,
-            name,
+            name: resolvedName,
             new_name: newName,
             is_merge: isMerge,
             item_count: itemCount,
         },
         // Only resolved scalars go into normalized_action_data. Snapshots are
-        // captured at execute time.
+        // captured at execute time. `name` carries the auto-resolved tag name
+        // so execute and the approval card operate on the actual tag.
         normalized_action_data: {
             library_id: libraryID,
             library_ref: libraryRefForLibraryID(libraryID) ?? undefined,
+            name: resolvedName,
         },
         preference,
     };
@@ -378,8 +454,11 @@ export async function executeManageTagsAction(
         // snapshot that the next undo can correctly reverse.
         const resolution = await resolveTagByName(name, resolvedLibraryId);
         const tagID = resolution.tagID;
+        const resolvedName = resolution.tagID !== null ? resolution.resolvedName : name;
         if (resolution.tagID !== null && resolution.source === 'cache_rebuilt') {
             logger(`executeManageTagsAction: cache desync repaired for '${name}' in library ${resolvedLibraryId} (Zotero.Tags.init rebuilt, tagID=${tagID})`, 1);
+        } else if (resolution.tagID !== null && resolution.source === 'normalized') {
+            logger(`executeManageTagsAction: auto-resolved tag '${name}' → '${resolvedName}' in library ${resolvedLibraryId} (tagID=${tagID})`, 1);
         }
 
         let affectedItemIds: string[] = [];
@@ -400,7 +479,7 @@ export async function executeManageTagsAction(
                 logger(`executeManageTagsAction: getTagItems snapshot failed: ${e}`, 1);
             }
         }
-        const rawColor = Zotero.Tags.getColor(resolvedLibraryId, name);
+        const rawColor = Zotero.Tags.getColor(resolvedLibraryId, resolvedName);
         const oldColor = rawColor && typeof rawColor === 'object'
             ? { color: (rawColor as any).color, position: (rawColor as any).position }
             : null;
@@ -424,8 +503,8 @@ export async function executeManageTagsAction(
             isMerge = existingTarget !== false && existingTarget != null;
 
             checkAborted(ctx, 'manage_tags:before_rename');
-            await Zotero.Tags.rename(resolvedLibraryId, name, target);
-            logger(`executeManageTagsAction: Renamed tag '${name}' → '${target}' in library ${resolvedLibraryId}`, 1);
+            await Zotero.Tags.rename(resolvedLibraryId, resolvedName, target);
+            logger(`executeManageTagsAction: Renamed tag '${resolvedName}' → '${target}' in library ${resolvedLibraryId}`, 1);
         } else if (action === 'delete') {
             if (tagID === null) {
                 // Already gone — treat as success with 0 affected items
@@ -435,7 +514,7 @@ export async function executeManageTagsAction(
                 // onProgress and types are optional at runtime (see Zotero.Tags.removeFromLibrary
                 // JSDoc in tags.js); the .d.ts in zotero-types marks them required. Pass undefined.
                 await (Zotero.Tags.removeFromLibrary as any)(resolvedLibraryId, [tagID]);
-                logger(`executeManageTagsAction: Deleted tag '${name}' from library ${resolvedLibraryId}`, 1);
+                logger(`executeManageTagsAction: Deleted tag '${resolvedName}' from library ${resolvedLibraryId}`, 1);
             }
         } else {
             return {
@@ -455,7 +534,7 @@ export async function executeManageTagsAction(
                 library_id: resolvedLibraryId,
                 library_ref: libraryRefForLibraryID(resolvedLibraryId) ?? undefined,
                 action,
-                name,
+                name: resolvedName,
                 new_name: new_name ?? null,
                 items_affected: affectedItemIds.length,
                 affected_item_ids: affectedItemIds,
