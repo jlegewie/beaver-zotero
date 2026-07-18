@@ -64,19 +64,17 @@ export function locateEditTarget(args: {
     expandedOld: string;
     metadata: SimplificationMetadata;
 }): EditTargetLocation {
-    const {
-        strippedHtml, simplified, oldString, expandedOld, metadata,
-    } = args;
+    const { strippedHtml, simplified, oldString, expandedOld, metadata } = args;
 
     const rawPos = findUniqueRawMatchPosition(
-        strippedHtml, simplified, oldString, expandedOld, metadata,
+        strippedHtml, simplified, oldString, expandedOld, metadata
     );
     if (rawPos !== null) {
         return { kind: 'position', rawPosition: rawPos };
     }
 
     const targetContext = captureValidatedEditTargetContext(
-        strippedHtml, simplified, oldString, expandedOld, metadata,
+        strippedHtml, simplified, oldString, expandedOld, metadata
     );
     if (targetContext) {
         return {
@@ -109,7 +107,7 @@ export function resolveEditTargetAtRuntime(args: {
     } = args;
 
     const uniquePos = findUniqueRawMatchPosition(
-        strippedHtml, simplified, oldString, expandedOld, metadata,
+        strippedHtml, simplified, oldString, expandedOld, metadata
     );
     if (uniquePos !== null) {
         return { rawPosition: uniquePos };

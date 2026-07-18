@@ -675,39 +675,6 @@ function buildExternalRefLinkHTML(ref: ExternalReference, page?: string): string
  *   page numbers on NEW citations into display labels. Resolve it up-front via
  *   `preloadPageLabelsForNewCitations`.
  */
-export interface ExpandToRawHtmlOptions {
-    /**
-     * Convert `$…$` / `$$…$$` dollar notation into math wrappers (default
-     * true). A caller may disable it for a fragment known to contain no math;
-     * the matcher normally uses the per-dollar option below instead.
-     */
-    expandMath?: boolean;
-    /**
-     * Source-string ranges whose dollar characters must remain literal while
-     * math outside those ranges is expanded normally. Used when a replacement
-     * copies literal-dollar anchor text but also adds independent math.
-     */
-    literalDollarRanges?: Array<{ start: number; end: number }>;
-    /**
-     * Zero-based UNESCAPED dollar ordinals to preserve, independent of
-     * character offsets. Escaped dollars inside math (`\$`) are content, not
-     * delimiters, and therefore never consume an ordinal.
-     */
-    literalDollarOrdinals?: number[];
-}
-
-/** Return source indices of dollar signs that are not backslash-escaped. */
-export function getUnescapedDollarPositions(str: string): number[] {
-    const positions: number[] = [];
-    for (let i = 0; i < str.length; i++) {
-        if (str.charAt(i) !== '$') continue;
-        let backslashes = 0;
-        for (let j = i - 1; j >= 0 && str.charAt(j) === '\\'; j--) backslashes++;
-        if (backslashes % 2 === 0) positions.push(i);
-    }
-    return positions;
-}
-
 export function expandToRawHtml(
     str: string,
     metadata: SimplificationMetadata,
@@ -715,43 +682,7 @@ export function expandToRawHtml(
     externalRefContext?: ExternalRefContext,
     pageLabels?: PageLabelsByAttachmentId,
     resolvedLocatorPages?: ResolvedLocatorPages,
-    options?: ExpandToRawHtmlOptions,
 ): string {
-    // Shield escaped dollars and explicitly preserved literal dollars before
-    // any semantic element expansion. An escaped dollar (`\$`) is content,
-    // never a math delimiter; leaving it visible lets the permissive math
-    // regex pair it with a later genuine delimiter (`\$5;$x$`). The
-    // placeholders survive citation/annotation/link rewriting and the math
-    // pass, then restore to literal `$` at the end.
-    const literalDollarPlaceholders: string[] = [];
-    if (options?.expandMath !== false) {
-        const ranges = options?.literalDollarRanges ?? [];
-        const ordinals = new Set(options?.literalDollarOrdinals ?? []);
-        let shielded = '';
-        const unescapedDollarPositions = getUnescapedDollarPositions(str);
-        const ordinalByPosition = new Map(
-            unescapedDollarPositions.map((position, ordinal) => [position, ordinal]),
-        );
-        for (let i = 0; i < str.length; i++) {
-            const isDollar = str.charAt(i) === '$';
-            const dollarOrdinal = ordinalByPosition.get(i);
-            if (
-                isDollar
-                && (
-                    dollarOrdinal === undefined
-                    || ordinals.has(dollarOrdinal)
-                    || ranges.some(({ start, end }) => i >= start && i < end)
-                )
-            ) {
-                const idx = literalDollarPlaceholders.push('$') - 1;
-                shielded += `__BEAVER_LITERAL_DOLLAR_${idx}__`;
-            } else {
-                shielded += str.charAt(i);
-            }
-        }
-        str = shielded;
-    }
-
     // Expand citations (all self-closing: <citation ... />)
     str = str.replace(
         /<citation\s+([^/]*?)\s*\/>/g,
@@ -986,36 +917,29 @@ export function expandToRawHtml(
     // it should render as display math (block-level <pre class="math">). Without
     // this, ProseMirror converts the paragraph-wrapped inline math to display math
     // itself, causing empty <p> wrappers and undo data mismatches.
-    //
-    // Skipped when options.expandMath === false: a note that stores dollar
-    // text VERBATIM (e.g. a `"$schema"` JSON block) never had math elements,
-    // so wrapping the needle would fabricate markup that cannot occur in the
-    // raw note. Per-dollar matcher retries shield selected delimiters above.
-    if (options?.expandMath !== false) {
-        // <p ...>$$...$$</p> → $$...$$ (unwrap paragraph around display math)
-        str = str.replace(
-            /<p(?:\s[^>]*)?>(\$\$[^<]+?\$\$)<\/p>/g,
-            (_match, content) => content
-        );
-        // <p ...>$...$</p> → $$...$$ (standalone single-dollar math = display intent)
-        str = str.replace(
-            /<p(?:\s[^>]*)?>(\s*)\$(?!\$)((?:[^$\\<]|\\.)+?)\$(?!\$)(\s*)<\/p>/g,
-            (_match, _ws1, content) => `$$${content}$$`
-        );
+    // <p ...>$$...$$</p> → $$...$$ (unwrap paragraph around display math)
+    str = str.replace(
+        /<p(?:\s[^>]*)?>(\$\$[^<]+?\$\$)<\/p>/g,
+        (_match, content) => content
+    );
+    // <p ...>$...$</p> → $$...$$ (standalone single-dollar math = display intent)
+    str = str.replace(
+        /<p(?:\s[^>]*)?>(\s*)\$(?!\$)((?:[^$\\<]|\\.)+?)\$(?!\$)(\s*)<\/p>/g,
+        (_match, _ws1, content) => `$$${content}$$`
+    );
 
-        // Display math: $$...$$ → <pre class="math">$$...$$</pre>
-        str = str.replace(
-            /\$\$([\s\S]+?)\$\$/g,
-            (match) => `<pre class="math">${match}</pre>`
-        );
-        // Inline math: $...$ → <span class="math">$...$</span>
-        // Rules: not adjacent to another $, content starts/ends with non-whitespace,
-        // allows backslash-escaped chars (e.g. \$ for literal dollar in LaTeX)
-        str = str.replace(
-            /(?<!\$)\$(?!\$)(?=\S)((?:[^$\\]|\\.)+?)(?<=\S)\$(?!\$)/g,
-            (match) => `<span class="math">${match}</span>`
-        );
-    }
+    // Display math: $$...$$ → <pre class="math">$$...$$</pre>
+    str = str.replace(
+        /\$\$([\s\S]+?)\$\$/g,
+        (match) => `<pre class="math">${match}</pre>`
+    );
+    // Inline math: $...$ → <span class="math">$...$</span>
+    // Rules: not adjacent to another $, content starts/ends with non-whitespace,
+    // allows backslash-escaped chars (e.g. \$ for literal dollar in LaTeX)
+    str = str.replace(
+        /(?<!\$)\$(?!\$)(?=\S)((?:[^$\\]|\\.)+?)(?<=\S)\$(?!\$)/g,
+        (match) => `<span class="math">${match}</span>`
+    );
 
     str = str.replace(
         /__BEAVER_RAW_MATH_(\d+)__/g,
@@ -1026,11 +950,6 @@ export function expandToRawHtml(
     str = str.replace(
         /__BEAVER_RAW_LINK_(\d+)__/g,
         (match, idx) => rawLinkAnchors[Number(idx)] ?? match
-    );
-
-    str = str.replace(
-        /__BEAVER_LITERAL_DOLLAR_(\d+)__/g,
-        (match, idx) => literalDollarPlaceholders[Number(idx)] ?? match,
     );
 
     return str;
