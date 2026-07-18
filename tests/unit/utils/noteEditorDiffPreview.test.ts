@@ -25,8 +25,8 @@ vi.mock('../../../react/agents/agentActions', () => ({}));
 
 // Partial mocks for the showDiffPreview flow tests: normalizeNoteHtml needs a
 // DOM (identity is fine for already-normalized fixtures), and the preload
-// helpers hit Zotero. Everything else (expandToRawHtml, countOccurrences, the
-// matcher) stays real so expansion/matching behave like production.
+// helpers hit Zotero. Everything else (expandToRawHtml and countOccurrences)
+// stays real so expansion behaves like production.
 vi.mock('../../../src/utils/noteHtmlSimplifier', async () => {
     const actual = await vi.importActual<typeof import('../../../src/utils/noteHtmlSimplifier')>(
         '../../../src/utils/noteHtmlSimplifier'
@@ -55,7 +55,6 @@ vi.mock('../../../src/utils/noteCitationExpand', async () => {
 
 import {
     constructMultiDiffHtml,
-    expandPreviewEditForCurrentNote,
     hashPreviewContent,
     noteContentDriftedFromPreview,
     showDiffPreview,
@@ -172,62 +171,6 @@ describe('constructMultiDiffHtml', () => {
         expect(result).toContain('Changed');
         expect(result!.indexOf('Alpha')).toBeLessThan(result!.indexOf('Changed'));
         expect(result!.indexOf('Changed')).toBeLessThan(result!.indexOf('Omega'));
-    });
-});
-
-describe('expandPreviewEditForCurrentNote', () => {
-    const metadata = { elements: new Map() } as any;
-    const externalRefContext = {
-        externalRefs: new Map(),
-        externalItemMapping: new Map(),
-    } as any;
-
-    it('uses the matcher literal-dollar retry for an accurate approval preview', () => {
-        const strippedHtml = '<p>Context: the value of $x+y$ in the model.</p>';
-        const expanded = expandPreviewEditForCurrentNote(
-            {
-                oldString: 'the value of $x+y$ in the model',
-                newString: 'the value of $x+z$ in the model',
-            },
-            'str_replace',
-            metadata,
-            strippedHtml,
-            strippedHtml,
-            externalRefContext,
-            {},
-        );
-
-        expect(expanded).toMatchObject({
-            expandedOld: 'the value of $x+y$ in the model',
-            expandedNew: 'the value of $x+z$ in the model',
-        });
-        const preview = constructMultiDiffHtml(strippedHtml, [expanded!]);
-        expect(preview).not.toBeNull();
-        expect(preview).toContain('$x+');
-        expect(preview).toContain('>y</span>');
-        expect(preview).toContain('>z</span>$');
-        expect(preview).not.toContain('class="math"');
-    });
-
-    it('combines literal-dollar mode with mutation strategies', () => {
-        const strippedHtml = '<p>the value of $x+y$ in the model</p>';
-        const expanded = expandPreviewEditForCurrentNote(
-            {
-                oldString: 'the value of $x+y$ in the model\n',
-                newString: 'the value of $x+z$ in the model\n',
-            },
-            'str_replace',
-            metadata,
-            strippedHtml,
-            strippedHtml,
-            externalRefContext,
-            {},
-        );
-
-        expect(expanded).toMatchObject({
-            expandedOld: 'the value of $x+y$ in the model',
-            expandedNew: 'the value of $x+z$ in the model',
-        });
     });
 });
 
