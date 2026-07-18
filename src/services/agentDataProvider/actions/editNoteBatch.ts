@@ -60,10 +60,9 @@ import {
     type EditValidationError,
     type ErrorCandidate,
 } from '../../agentProtocol';
-import { checkLibraryExcluded, excludedLibraryMessage } from '../utils';
+import { checkLibraryExcluded, excludedLibraryMessage, getDeferredToolPreference } from '../utils';
 import { TimeoutContext, checkAborted, TimeoutError } from '../timeout';
 import {
-    getEditNotePreference,
     getExternalRefContext,
     buildMarkdownRenderFields,
 } from './editNote';
@@ -513,7 +512,10 @@ async function validateEditNoteBatchAction(
             total_lines: totalLines,
             ...(isSingleRewrite ? { old_content: simplified } : {}),
         },
-        preference: getEditNotePreference(resolvedLibraryId, zotero_key),
+        preference: getDeferredToolPreference('edit_note_batch', {
+            library_id: resolvedLibraryId,
+            zotero_key,
+        }),
     };
     if (anyChanged) {
         response.normalized_action_data = {

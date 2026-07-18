@@ -379,43 +379,42 @@ Verify that banner buttons only affect `edit_note` actions for the previewed not
 
 ---
 
-## Category 5: "Apply All for This Note" (Auto-Approve)
+## Category 5: Run-Scoped Note-Edit Approval
 
-### Test 5.1: Auto-Approve Subsequent Edits for Same Note
+### Test 5.1: Approve Subsequent Note Edits in the Run
 
-Use the "Apply all for this note" option to auto-approve all future edit_note actions for the same note within the current run.
+Use the "Allow all note edits for this run" option to approve current and future edit_note actions within the current run.
 
 #### Guidelines
 - Send a prompt that will produce multiple sequential `edit_note` tool calls for the same note (e.g., "Make the following five changes to this note: (1) ..., (2) ..., (3) ..., (4) ..., (5) ...")
 - When the first approval appears, click the dropdown chevron on the split "Apply" button
-- Select "Apply all for this note" from the dropdown menu
+- Select "Allow all note edits for this run" from the dropdown menu
 - Observe that subsequent edit_note actions are automatically approved without user interaction
 
 #### Verify
 - [ ] First edit shows normal approval UI (split Apply button with chevron)
-- [ ] Clicking chevron shows dropdown with "Apply all for this note" option
+- [ ] Clicking chevron shows dropdown with "Allow all note edits for this run" option
 - [ ] After selecting: first edit is approved normally
-- [ ] Subsequent edit_note actions for the same note are auto-approved (no approval UI)
-- [ ] Auto-approved actions show "(auto)" label in the sidebar
+- [ ] Subsequent edit_note actions in the run are auto-approved (no approval UI)
 - [ ] All edits are correctly applied
 - [ ] Diff preview is dismissed after first approval (subsequent edits don't trigger preview)
 
 #### Test result
 
-- **Date**: 2026-04-01 | **Result**: NOT RUN — Requires precise timing of multiple sequential edit_note calls. The split button with "Apply all for this note" dropdown was visually confirmed present during Test 1.1 and 1.2, but the full auto-approve flow was not exercised.
+- **Date**: 2026-04-01 | **Result**: NOT RUN — Requires precise timing of multiple sequential edit_note calls. The former note-specific split button was visually confirmed during Test 1.1 and 1.2, but the run-scoped flow has not been exercised.
 
-### Test 5.2: Auto-Approve Does Not Apply to Different Notes
+### Test 5.2: Run Approval Applies to Different Notes
 
-Verify that "Apply all for this note" only auto-approves edits for the specific note, not other notes.
+Verify that the note-edit group grant applies to every note edited in the same run.
 
 #### Guidelines
 - Send a prompt requesting edits to two different notes
-- When the first approval for note A appears, use "Apply all for this note"
-- Verify that edits for note B still require manual approval
+- When the first approval for note A appears, use "Allow all note edits for this run"
+- Verify that edits for note B are also approved without another prompt
 
 #### Verify
 - [ ] Edits for note A are auto-approved after opting in
-- [ ] Edits for note B still show normal approval UI
+- [ ] Edits for note B do not show another approval UI
 - [ ] Each note's edits are applied correctly to the right note
 
 #### Test result
@@ -427,7 +426,7 @@ Verify that "Apply all for this note" only auto-approves edits for the specific 
 Verify that auto-approve state does not persist across agent runs.
 
 #### Guidelines
-- In run 1: Use "Apply all for this note" for a note
+- In run 1: Use "Allow all note edits for this run"
 - After run 1 completes, send a new message requesting another edit to the same note
 - Verify that run 2 requires manual approval again
 
@@ -1063,7 +1062,7 @@ Expected: `hasDiffStyles: false`
 - [ ] **Backend timeout (5 min)**: preview dismissed, actions left as "pending"
 - [ ] Diff HTML is NEVER saved to Zotero database
 - [ ] Apply → Undo → Re-Apply roundtrip works after banner approval
-- [ ] Auto-approve ("Apply all for this note") skips preview for subsequent edits
+- [ ] Run approval ("Allow all note edits for this run") skips preview for subsequent edits
 - [ ] Multiple edits for same note: single combined preview
 - [ ] Dark mode: banner and diff colors visible and correct
 - [ ] No Beaver-related errors in `zotero_read_errors`
@@ -1083,7 +1082,7 @@ Expected: `hasDiffStyles: false`
 | Banner doesn't appear | Editor instance not found in `Zotero.Notes._editorInstances` | Verify note is open in a tab; check `areEditorApisAvailable()` |
 | Diff HTML saved to DB | `_disableSaving` not set or restored too early | Check `_disableSaving` flag and 150ms delay on restoration |
 | Editor stays frozen after dismiss | `contentEditable` not restored to `'true'` | Check error handling in `dismissDiffPreview()` |
-| Preview shows for auto-approved edit | `autoApproveNoteKeysAtom` check not running before `addPendingApprovalAtom` | Verify auto-approve logic in `onDeferredApprovalRequest` |
+| Preview shows for a run-approved edit | Run tool-group policy check not running before `addPendingApprovalAtom` | Verify the run approval check in `onDeferredApprovalRequest` |
 | Banner buttons don't respond | Polling timer not started or `__beaverPreviewAction` not set on iframe | Check iframe communication; verify 200ms poll is running |
 | `diffPreviewNoteKeyAtom` stuck non-null | `onDismiss` callback not firing on dismiss | Check coordinator's `setOnDismiss` registration and `dismissDiffPreview()` path |
 | Multiple banners appear | Stale preview not dismissed before new one created | Check generation counter in `showDiffPreview()` |

@@ -199,11 +199,6 @@ vi.mock('../../../react/atoms/threads', () => ({
     currentThreadIdAtom: Symbol('currentThreadIdAtom'),
 }));
 
-vi.mock('../../../react/atoms/editNoteAutoApprove', () => ({
-    autoApproveNoteKeysAtom: Symbol('autoApproveNoteKeysAtom'),
-    makeNoteKey: vi.fn((libId: number, key: string) => `${libId}-${key}`),
-}));
-
 vi.mock('../../../src/services/agentDataProvider/utils', () => ({
     getDeferredToolPreference: vi.fn(() => 'always_ask'),
     resolveToPdfAttachment: vi.fn(),
@@ -368,12 +363,7 @@ beforeEach(() => {
         },
     };
 
-    vi.mocked(store.get).mockImplementation((atom: any) => {
-        if (typeof atom === 'symbol' && atom.description === 'autoApproveNoteKeysAtom') {
-            return new Set<string>();
-        }
-        return [1, 2];
-    });
+    vi.mocked(store.get).mockReturnValue([1, 2]);
 
     vi.mocked(getOrSimplify).mockReturnValue({
         simplified: NOTE_HTML,

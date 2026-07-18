@@ -15,6 +15,10 @@
 import { atom } from 'jotai';
 import { getPref, setPref } from '../../src/utils/prefs';
 import { logger } from '../../src/utils/logger';
+import {
+    DEFAULT_DEFERRED_TOOL_GROUPS,
+    RUN_APPROVAL_ACTION_TYPE_ALIASES,
+} from './runApprovalPolicy';
 
 // =============================================================================
 // Types
@@ -28,23 +32,6 @@ export interface DeferredToolPreferencesData {
     /** Maps group names to preference values */
     groupPreferences: Record<string, DeferredToolPreference>;
 }
-
-// Default group mappings for known tools
-const DEFAULT_TOOL_GROUPS: Record<string, string> = {
-    'edit_metadata': 'metadata_edits',
-    'edit_item': 'metadata_edits',
-    'edit_note': 'note_edits',
-    'edit_note_batch': 'note_edits',
-    'create_note': 'note_creation',
-    'create_collection': 'library_modifications',
-    'organize_items': 'library_modifications',
-    'manage_tags': 'library_structure',
-    'manage_collections': 'library_structure',
-    'create_highlight_annotations': 'annotations',
-    'create_note_annotations': 'annotations',
-    'create_item': 'create_items',
-    'create_items': 'create_items',
-};
 
 // Default preferences for groups
 const DEFAULT_GROUP_PREFERENCES: Record<string, DeferredToolPreference> = {
@@ -85,8 +72,15 @@ function loadPreferences(): DeferredToolPreferencesData {
         const prefString = getPref('deferredToolPreferences');
         if (prefString && typeof prefString === 'string') {
             const parsed = JSON.parse(prefString);
+            const storedToolToGroup = { ...(parsed.toolToGroup ?? {}) };
+            // Older versions persisted the full run-authorization alias map.
+            // Strip those action-record names so they cannot acquire a
+            // preference merely by being authorization aliases.
+            for (const actionType of Object.keys(RUN_APPROVAL_ACTION_TYPE_ALIASES)) {
+                delete storedToolToGroup[actionType];
+            }
             return {
-                toolToGroup: { ...DEFAULT_TOOL_GROUPS, ...parsed.toolToGroup },
+                toolToGroup: { ...DEFAULT_DEFERRED_TOOL_GROUPS, ...storedToolToGroup },
                 groupPreferences: { ...DEFAULT_GROUP_PREFERENCES, ...parsed.groupPreferences },
             };
         }
@@ -94,7 +88,7 @@ function loadPreferences(): DeferredToolPreferencesData {
         logger(`deferredToolPreferences: Failed to load preferences: ${error}`, 1);
     }
     return {
-        toolToGroup: { ...DEFAULT_TOOL_GROUPS },
+        toolToGroup: { ...DEFAULT_DEFERRED_TOOL_GROUPS },
         groupPreferences: { ...DEFAULT_GROUP_PREFERENCES },
     };
 }

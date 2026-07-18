@@ -21,6 +21,10 @@ import { addPopupMessageAtom } from '../../../react/utils/popupMessageUtils';
 import { wasItemAddedBeforeLastSync } from '../../../react/utils/sourceUtils';
 import { DeferredToolPreference } from '../agentProtocol';
 import { deferredToolPreferencesAtom } from '../../../react/atoms/deferredToolPreferences';
+import {
+    isActionApprovedForCurrentRun,
+    runApprovalPolicyAtom,
+} from '../../../react/atoms/runApprovalPolicy';
 import { isAgentSupportedItem } from '../../utils/agentItemSupport';
 import { store } from '../../../react/store';
 import { searchableLibraryIdsAtom } from '../../../react/atoms/profile';
@@ -922,8 +926,16 @@ export function validateLibraryAccess(libraryIdOrName: number | string | null | 
  * so that newly added tools (e.g. create_note) use their configured
  * default even before the user saves any preference change.
  */
-export function getDeferredToolPreference(toolName: string): DeferredToolPreference {
+export function getDeferredToolPreference(
+    toolName: string,
+    actionData?: Record<string, any>,
+): DeferredToolPreference {
     try {
+        const runPolicy = store.get(runApprovalPolicyAtom);
+        if (isActionApprovedForCurrentRun(runPolicy, toolName, actionData)) {
+            return 'always_apply';
+        }
+
         const data = store.get(deferredToolPreferencesAtom);
         const group = data.toolToGroup[toolName] ?? toolName;
         const preference = data.groupPreferences[group];

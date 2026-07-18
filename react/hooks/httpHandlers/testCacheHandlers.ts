@@ -187,8 +187,9 @@ export async function handleTestMcpCreateNoteHttpRequest(request: any) {
 }
 
 /**
- * Dev-only: snapshot of MuPDFWorkerClient dispatch / spawn counters and
- * the worker-side document cache.
+ * Dev-only: snapshot of MuPDFWorkerClient dispatch / spawn / proactive
+ * recycle counters, observed WASM heap size, and the worker-side document
+ * cache.
  *
  * Lets manual-test runners (`docs-zotero/manual-tests-fused-worker-ops.md`)
  * verify "exactly one extract dispatch", "no extra spawns", etc.
