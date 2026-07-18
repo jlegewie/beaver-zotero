@@ -44,7 +44,11 @@ vi.mock('../../../react/agents/agentActions', () => ({
     toAgentAction: vi.fn((action) => action),
 }));
 
-import { AgentService, WSConnectionError } from '../../../src/services/agentService';
+import {
+    AgentService,
+    WSConnectionClosedByClientError,
+    WSConnectionError,
+} from '../../../src/services/agentService';
 import type { AgentRunRequest, WSCallbacks } from '../../../src/services/agentProtocol';
 
 class MockWebSocket {
@@ -290,5 +294,45 @@ describe('AgentService reconnect handling', () => {
 
         expect(callbacks.onClose).toHaveBeenCalledTimes(1);
         expect(callbacks.onClose).toHaveBeenCalledWith(1008, 'invalid token', false, false);
+    });
+
+    it('settles a canceled pre-ready connect and allows the next run to connect', async () => {
+        const service = new AgentService('https://api.example.com');
+        const firstCallbacks = createCallbacks();
+        const request = { type: 'cancel-handshake-test' } as AgentRunRequest;
+
+        const initialCount = MockWebSocket.instances.length;
+        const firstConnect = service.connect(request, firstCallbacks);
+        const firstOutcome = firstConnect.then(
+            () => ({ ok: true as const }),
+            (error: unknown) => ({ ok: false as const, error }),
+        );
+
+        for (let i = 0; i < 20 && MockWebSocket.instances.length === initialCount; i++) {
+            await Promise.resolve();
+        }
+        const firstSocket = MockWebSocket.instances[initialCount];
+        if (!firstSocket) {
+            throw new Error('Expected AgentService.connect() to create a WebSocket');
+        }
+
+        // The transport is open and auth was sent, but the backend has not
+        // emitted ready yet: this is the handshake window from the report.
+        firstSocket.emitOpen();
+        await vi.advanceTimersByTimeAsync(50);
+        const cancelPromise = service.cancel(0);
+        await vi.advanceTimersByTimeAsync(0);
+        await cancelPromise;
+
+        const outcome = await firstOutcome;
+        expect(outcome.ok).toBe(false);
+        if (!outcome.ok) {
+            expect(outcome.error).toBeInstanceOf(WSConnectionClosedByClientError);
+        }
+
+        const secondCallbacks = createCallbacks();
+        const secondSocket = await completeConnect(service, secondCallbacks, request);
+        expect(secondSocket).not.toBe(firstSocket);
+        expect(secondCallbacks.onReady).toHaveBeenCalledTimes(1);
     });
 });

@@ -7,7 +7,11 @@
 
 import { atom, Getter, Setter } from 'jotai';
 import { v4 as uuidv4 } from 'uuid';
-import { agentService, WSConnectionError } from '../../src/services/agentService';
+import {
+    agentService,
+    WSConnectionClosedByClientError,
+    WSConnectionError,
+} from '../../src/services/agentService';
 import { notifyRunComplete, notifyUserQuestion } from '../../src/services/systemNotifications';
 import { reportConnectionFailure } from '../../src/services/diagnosticsService';
 import {
@@ -1541,12 +1545,11 @@ function createWSCallbacks(set: Setter): WSCallbacks {
                 ) {
                     const message =
                         'The connection to the server was lost before the run finished. Please try again.';
-                    const details = formatCloseCodeDetails(code, reason);
+                    const userFacingDetails = formatCloseCodeDetails(code);
                     set(wsErrorAtom, {
                         event: 'error',
                         type: 'connection_error',
                         message,
-                        details,
                         is_retryable: true,
                     });
                     set(activeRunAtom, (prev) =>
@@ -1557,7 +1560,7 @@ function createWSCallbacks(set: Setter): WSCallbacks {
                                   error: {
                                       type: 'connection_error',
                                       message,
-                                      details,
+                                      user_facing_details: userFacingDetails,
                                       is_retryable: true,
                                   },
                               }
@@ -1602,6 +1605,14 @@ async function executeWSRequest(
     } catch (error: any) {
         logger('WS connection error:', error, 1);
 
+        // A user cancellation intentionally settles an in-flight handshake.
+        // The cancellation path already updates run/UI state, so it must not
+        // be replaced with a connection failure.
+        if (error instanceof WSConnectionClosedByClientError) {
+            set(isWSChatPendingAtom, false);
+            return;
+        }
+
         // Check if an error was already set by the onError callback
         // If so, don't overwrite it with a generic connection_error
         const currentError = get(wsErrorAtom);
@@ -1619,12 +1630,11 @@ async function executeWSRequest(
         // rejections (1008, the common real-world server-side code), and
         // TLS failures (1015, rare in practice).
         const errorMessage = 'Could not connect to the server. Please check your internet connection and try again.';
-        const details = buildConnectionErrorDetails(error);
+        const userFacingDetails = buildConnectionUserFacingDetails(error);
         set(wsErrorAtom, {
             event: 'error',
             type: 'connection_error',
             message: errorMessage,
-            details,
             is_retryable: true,
         });
         set(activeRunAtom, (prev) => prev ? {
@@ -1633,7 +1643,7 @@ async function executeWSRequest(
             error: {
                 type: 'connection_error',
                 message: errorMessage,
-                details,
+                user_facing_details: userFacingDetails,
                 is_retryable: true,
             }
         } : prev);
@@ -1735,50 +1745,29 @@ function getCloseCodeExplanation(code: number): { hint: string; linkDocs: boolea
 }
 
 /**
- * Strip characters that would let a string be interpreted as an HTML tag by
- * parseTextWithLinksAndNewlines, which turns any `<a href="...">...</a>`
- * substring into a clickable element that opens the URL via
- * Zotero.launchURL. The WebSocket close `reason` is untrusted network
- * input — a middlebox or captive portal that completes the handshake
- * controls it — so it must always render as inert text, never as a link.
- */
-function sanitizeUntrustedText(text: string): string {
-    return text.replace(/[<>]/g, '');
-}
-
-/**
  * Build the user-facing `details` string for a connection_error from a
  * WebSocket close code. Used by both connect-phase failures and mid-run
  * drops so identical underlying causes always produce identical wording.
  * The rendered format is:
- *   "<user-oriented sentence>[ See <link>.][ Server message: "<reason>".] (error code NNNN)"
+ *   "<user-oriented sentence>[ See <link>.] (error code NNNN)"
  * The `<a>` tag is picked up by parseTextWithLinksAndNewlines in the UI.
- * `reason` is the server-supplied close reason, included when non-empty
- * since it's often the most specific explanation available (e.g. the exact
- * authentication failure). It is sanitized before interpolation since it's
- * untrusted network input (see sanitizeUntrustedText).
  */
-function formatCloseCodeDetails(code: number, reason?: string): string {
+function formatCloseCodeDetails(code: number): string {
     const { hint, linkDocs } = getCloseCodeExplanation(code);
     const link = linkDocs
         ? ` See our <a href="${CONNECTION_TROUBLESHOOTING_URL}">connection troubleshooting guide</a> for help.`
         : '';
-    const reasonText = reason ? ` Server message: "${sanitizeUntrustedText(reason)}"` : '';
-    return `${hint}${link}${reasonText} (error code ${code})`;
+    return `${hint}${link} (error code ${code})`;
 }
 
 /**
- * `details` string for a connection_error caught during the WebSocket
- * connect phase. Prefers the close-code explanation; falls back to the
- * underlying error message for pre-connect failures (e.g. auth token
- * fetch).
+ * Sanitized, user-facing details for a connection error caught during the
+ * WebSocket connect phase. Technical error messages are intentionally not
+ * copied into this field.
  */
-function buildConnectionErrorDetails(error: unknown): string | undefined {
+function buildConnectionUserFacingDetails(error: unknown): string | undefined {
     if (error instanceof WSConnectionError && error.close_code !== undefined) {
-        return formatCloseCodeDetails(error.close_code, error.close_reason);
-    }
-    if (error && typeof (error as { message?: unknown }).message === 'string') {
-        return (error as { message: string }).message || undefined;
+        return formatCloseCodeDetails(error.close_code);
     }
     return undefined;
 }

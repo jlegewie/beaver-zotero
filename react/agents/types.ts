@@ -246,6 +246,9 @@ export interface AgentRun {
     error?: {
         type: string;
         message: string;
+        /** Client-generated, sanitized details that are safe to render to users. */
+        user_facing_details?: string;
+        /** Technical debugging information; never render directly. */
         details?: string;
         is_retryable?: boolean;
         retry_after?: number;

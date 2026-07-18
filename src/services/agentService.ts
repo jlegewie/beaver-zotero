@@ -111,11 +111,24 @@ export class WSConnectionError extends Error {
     }
 }
 
+/**
+ * Error used to settle a connect attempt that the client intentionally closed.
+ * Callers can ignore this without presenting a transport failure to the user.
+ */
+export class WSConnectionClosedByClientError extends Error {
+    constructor(message: string = 'Agent connection closed by client') {
+        super(message);
+        this.name = 'WSConnectionClosedByClientError';
+    }
+}
+
 export class AgentService {
     private baseUrl: string;
     private ws: WebSocket | null = null;
     private callbacks: WSCallbacks | null = null;
     private connecting: boolean = false;
+    /** Settles the promise for the current pre-ready connection attempt. */
+    private activeConnectFinish: ((error?: Error) => void) | null = null;
     /** Queue to serialize async message processing */
     private messageQueue: Promise<void> = Promise.resolve();
     /** Queue to serialize action execution (prevents concurrent edits to the same resource) */
@@ -213,10 +226,19 @@ export class AgentService {
         // Close existing connection if any
         this.close(1000, 'Client closing', { notifyClose: false });
 
+        // close() increments connectionId. Capture the new value so an
+        // external close during the async auth-token lookup can abort setup
+        // before it creates a socket.
+        const setupConnectionId = this.connectionId;
+
         this.callbacks = callbacks;
 
         try {
             const token = await this.getAuthToken();
+
+            if (this.connectionId !== setupConnectionId) {
+                throw new WSConnectionClosedByClientError();
+            }
 
             // Auth message includes token, frontend version, and — when the
             // caller supplies them — the client identity and declared features.
@@ -236,6 +258,19 @@ export class AgentService {
 
             return new Promise<void>((resolve, reject) => {
                 let hasResolved = false;
+                const finish = (error?: Error) => {
+                    if (hasResolved) return;
+                    hasResolved = true;
+                    this.connecting = false;
+                    if (this.activeConnectFinish === finish) {
+                        this.activeConnectFinish = null;
+                    }
+                    if (error) reject(error);
+                    else resolve();
+                };
+                // close() invalidates this socket before its onclose handler
+                // runs, so expose the promise settler explicitly.
+                this.activeConnectFinish = finish;
 
                 // Wrap the onReady callback to send request after ready
                 const wrappedCallbacks: WSCallbacks = {
@@ -248,21 +283,13 @@ export class AgentService {
                         // Send the chat request now that server is ready
                         this.send(request);
                         // Resolve the connect promise
-                        if (!hasResolved) {
-                            hasResolved = true;
-                            this.connecting = false;
-                            resolve();
-                        }
+                        finish();
                     },
                     onError: (event: WSErrorEvent) => {
                         // Call the original error callback
                         callbacks.onError(event);
                         // If we haven't resolved yet, this is a connection-phase error
-                        if (!hasResolved) {
-                            hasResolved = true;
-                            this.connecting = false;
-                            reject(new Error(event.message));
-                        }
+                        finish(new Error(event.message));
                     }
                 };
 
@@ -334,9 +361,7 @@ export class AgentService {
                     this.resetConnectionState();
                     // If we haven't resolved yet, the connection closed before ready
                     if (!hasResolved) {
-                        hasResolved = true;
-                        this.connecting = false;
-                        reject(new WSConnectionError(
+                        finish(new WSConnectionError(
                             event.reason
                                 ? `Connection closed: ${event.reason}`
                                 : `Connection closed before ready (code ${event.code})`,
@@ -698,6 +723,7 @@ export class AgentService {
         const { notifyClose = true } = options;
         const wsToClose = this.ws;
         const callbacks = this.callbacks;
+        const finishConnect = this.activeConnectFinish;
         // Capture before resetConnectionState() clears it below.
         const hadReachedReady = this.hasReachedReady;
 
@@ -720,6 +746,7 @@ export class AgentService {
         if (notifyClose) {
             callbacks?.onClose?.(code, reason, true, hadReachedReady);
         }
+        finishConnect?.(new WSConnectionClosedByClientError(reason));
     }
 
     /**

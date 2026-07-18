@@ -11,7 +11,7 @@ If Beaver shows **"Connection Failed — Could not connect to the server"**, it 
 
 Beaver connects to two services from inside Zotero:
 
-- **The Beaver API** at `api.beaverapp.ai` on port **443** — over both **HTTPS** *and* **WebSocket Secure (`wss://`)**. Beaver streams responses over WebSocket, so allowing HTTPS alone is not enough.
+- **The Beaver API** at `beaver-backend-258989374544.us-central1.run.app` on port **443** — over both **HTTPS** *and* **WebSocket Secure (`wss://`)**. Beaver streams responses over WebSocket, so allowing HTTPS alone is not enough.
 - **Supabase** at `*.supabase.co` on port **443**, over HTTPS. This is used for sign‑in.
 
 If either of these is blocked, or if the connection is intercepted and re‑signed by security software, you'll see "Connection Failed".
@@ -37,7 +37,7 @@ If Beaver's error shows **error code 1006** (by far the most common) or the rare
 **What to do:**
 
 1. Temporarily disable your VPN or the "web protection" feature of your antivirus, and try again. If Beaver works, that program is the cause.
-2. Add an exception for `api.beaverapp.ai` in your security software so its traffic isn't inspected.
+2. Add an exception for `beaver-backend-258989374544.us-central1.run.app` in your security software so its traffic isn't inspected.
 3. On a corporate machine, your IT team is the right point of contact — see below.
 
 ## Temporary server issues
@@ -54,13 +54,13 @@ If a colleague at your organization is having trouble using Beaver, please allow
 
 | Host | Protocols |
 |------|-----------|
-| `api.beaverapp.ai` | HTTPS **and** WebSocket Secure (`wss://`) |
+| `beaver-backend-258989374544.us-central1.run.app` | HTTPS **and** WebSocket Secure (`wss://`) |
 | `*.supabase.co` | HTTPS |
 
 **Requirements:**
 
 - **WebSocket traffic must be permitted.** Beaver streams responses over `wss://`, not plain HTTPS. Proxies that strip or block the `Upgrade: websocket` and `Connection: Upgrade` request headers will cause "Connection Failed".
-- **Exempt `api.beaverapp.ai` from TLS/SSL inspection.** Many web filters and next‑gen firewalls (Zscaler, Netskope, Blue Coat, Palo Alto, Fortinet, etc.) inspect encrypted traffic by re‑signing it with an internal certificate. Zotero will not trust that certificate and the connection will fail.
+- **Exempt `beaver-backend-258989374544.us-central1.run.app` from TLS/SSL inspection.** Many web filters and next‑gen firewalls (Zscaler, Netskope, Blue Coat, Palo Alto, Fortinet, etc.) inspect encrypted traffic by re‑signing it with an internal certificate. Zotero will not trust that certificate and the connection will fail.
 - **No custom API endpoint or proxy setting is required inside Beaver.** Beaver uses whatever proxy is configured for Zotero (Edit → Settings (Zotero → Settings on macOS) → Advanced → Config Editor, `network.proxy.*`).
 
 If you need more information, please contact us at [support@beaverapp.ai](mailto:support@beaverapp.ai).

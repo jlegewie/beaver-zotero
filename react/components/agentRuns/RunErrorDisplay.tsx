@@ -14,6 +14,7 @@ import { openPreferencesWindow } from '../../../src/ui/openPreferencesWindow';
 interface RunError {
     type: string;
     message: string;
+    user_facing_details?: string;
     details?: string;
     is_retryable?: boolean;
     has_beaver_fallback?: boolean;
@@ -205,12 +206,12 @@ export const RunErrorDisplay: React.FC<RunErrorDisplayProps> = ({ runId, error, 
                                 <div className="text-base font-color-red">
                                     {parseTextWithLinksAndNewlines(displayMessage, "text-link-red")}
                                 </div>
-                                {error.details && (
+                                {error.user_facing_details && (
                                     <div
                                         className="text-sm font-color-red user-select-text"
                                         style={{ opacity: 0.75 }}
                                     >
-                                        {parseTextWithLinksAndNewlines(error.details, "text-link-red")}
+                                        {parseTextWithLinksAndNewlines(error.user_facing_details, "text-link-red")}
                                     </div>
                                 )}
                             </div>

@@ -115,7 +115,7 @@ If you see **"Connection Failed — Could not connect to the server"** on a work
 
 **What Beaver needs:**
 
-- Outbound **HTTPS (TCP 443)** to the Beaver API host (for example `api.beaverapp.ai`) and to `*.supabase.co` for authentication.
+- Outbound **HTTPS (TCP 443)** to the production Beaver API host, `beaver-backend-258989374544.us-central1.run.app`, and to `*.supabase.co` for authentication.
 - Outbound **WebSocket Secure (`wss://`, also TCP 443)** to the Beaver API host. Beaver streams agent responses over WebSocket, so allowing `https://` alone is not enough.
 - The proxy must preserve the `Upgrade: websocket` and `Connection: Upgrade` request headers.
 - If your organization uses TLS/SSL inspection (Zscaler, Netskope, Blue Coat, Palo Alto, Fortinet, etc.), please **exempt the Beaver API host** from inspection. Re-signed certificates typically break the WebSocket handshake.
