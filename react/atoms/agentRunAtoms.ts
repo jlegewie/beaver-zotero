@@ -1605,7 +1605,6 @@ async function executeWSRequest(
     set: Setter
 ): Promise<void> {
     const callbacks = createWSCallbacks(set);
-    let connectTimeoutId: ReturnType<typeof setTimeout> | undefined;
 
     try {
         logger('WS Starting connection for run:', run.id);
@@ -1616,20 +1615,11 @@ async function executeWSRequest(
         set(lastWSCloseInfoAtom, null);
         const frontendVersion = Zotero.Beaver.pluginVersion || '';
         const zoteroInstance = buildZoteroInstanceWire(get(searchableLibraryIdsAtom));
-        // Backstop timeout: if neither ready, a server error event, nor a
-        // close event ever settles the connect, fail the run instead of
-        // leaving it pending forever, and tear down the half-open attempt.
-        await Promise.race([
-            agentService.connect(request, callbacks, frontendVersion, ZOTERO_PLUGIN_CLIENT_TYPE, ZOTERO_PLUGIN_FEATURES, {
-                ...zoteroInstance,
-            }),
-            new Promise<never>((_, reject) => {
-                connectTimeoutId = setTimeout(() => {
-                    reject(new Error('Connection attempt timed out'));
-                    agentService.close(1000, 'Connection attempt timed out');
-                }, WS_CONNECT_TIMEOUT_MS);
-            }),
-        ]);
+        // connect() applies its own attempt-scoped backstop timeout, so this
+        // await cannot hang forever.
+        await agentService.connect(request, callbacks, frontendVersion, ZOTERO_PLUGIN_CLIENT_TYPE, ZOTERO_PLUGIN_FEATURES, {
+            ...zoteroInstance,
+        });
         logger('WS connect settled');
     } catch (error: any) {
         logger('WS connection error:', error, 1);
@@ -1680,13 +1670,8 @@ async function executeWSRequest(
             was_clean: closeInfo?.wasClean ?? null,
             run_id: run.id,
         });
-    } finally {
-        clearTimeout(connectTimeoutId);
     }
 }
-
-/** Backstop timeout for the WebSocket connect phase (auth + handshake + ready). */
-const WS_CONNECT_TIMEOUT_MS = 20_000;
 
 /** Public docs page with remediation steps for connection failures. */
 const CONNECTION_TROUBLESHOOTING_URL = 'https://www.beaverapp.ai/docs/connection-troubleshooting';

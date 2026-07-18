@@ -368,4 +368,80 @@ describe('AgentService reconnect handling', () => {
         await flushMicrotasks();
         expect(secondCallbacks.onPart).toHaveBeenCalledTimes(1);
     });
+
+    it('fails a connect attempt that never reaches ready via the backstop timeout', async () => {
+        const service = new AgentService('https://api.example.com');
+        const callbacks = createCallbacks();
+        const request = { type: 'timeout-test' } as AgentRunRequest;
+
+        const initialCount = MockWebSocket.instances.length;
+        const connectPromise = service.connect(request, callbacks);
+        const connectOutcome = connectPromise.then(
+            () => ({ ok: true as const }),
+            (error: unknown) => ({ ok: false as const, error }),
+        );
+
+        for (let i = 0; i < 20 && MockWebSocket.instances.length === initialCount; i++) {
+            await Promise.resolve();
+        }
+        const socket = MockWebSocket.instances[initialCount];
+        if (!socket) {
+            throw new Error('Expected AgentService.connect() to create a WebSocket');
+        }
+
+        // The transport opens and auth is sent, but the server never responds
+        // with ready, an error event, or a close.
+        socket.emitOpen();
+        await vi.advanceTimersByTimeAsync(50);
+        await vi.advanceTimersByTimeAsync(20_000);
+
+        const outcome = await connectOutcome;
+        expect(outcome.ok).toBe(false);
+        if (!outcome.ok) {
+            expect((outcome.error as Error).message).toContain('timed out');
+        }
+        expect(callbacks.onClose).toHaveBeenCalledWith(1000, 'Connection attempt timed out', true);
+
+        // The service recovered its state: a new connect succeeds.
+        const secondCallbacks = createCallbacks();
+        const secondSocket = await completeConnect(service, secondCallbacks, request);
+        expect(secondSocket).not.toBe(socket);
+        expect(secondCallbacks.onReady).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not let a stale backstop timeout tear down a newer connection', async () => {
+        const service = new AgentService('https://api.example.com');
+        const firstCallbacks = createCallbacks();
+        const request = { type: 'stale-timeout-test' } as AgentRunRequest;
+
+        // The first attempt's auth-token lookup hangs indefinitely.
+        mockSupabase.auth.getSession.mockReturnValueOnce(new Promise(() => {}));
+        const initialCount = MockWebSocket.instances.length;
+        const firstConnect = service.connect(request, firstCallbacks);
+        const firstOutcome = firstConnect.then(
+            () => ({ ok: true as const }),
+            (error: unknown) => ({ ok: false as const, error }),
+        );
+        await flushMicrotasks();
+        expect(MockWebSocket.instances.length).toBe(initialCount);
+
+        // The user cancels while the token lookup is pending, then starts a
+        // new run that connects normally.
+        const cancelPromise = service.cancel(0);
+        await vi.advanceTimersByTimeAsync(0);
+        await cancelPromise;
+
+        const secondCallbacks = createCallbacks();
+        const secondSocket = await completeConnect(service, secondCallbacks, request);
+
+        // When the abandoned attempt's backstop fires, it must not close the
+        // newer connection or reject anything.
+        await vi.advanceTimersByTimeAsync(20_000);
+        expect(secondSocket.close).not.toHaveBeenCalled();
+        expect(secondCallbacks.onClose).not.toHaveBeenCalled();
+
+        // The abandoned attempt settles quietly rather than as a failure.
+        const outcome = await firstOutcome;
+        expect(outcome.ok).toBe(true);
+    });
 });

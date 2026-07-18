@@ -81,6 +81,9 @@ export async function getWSAuthToken(): Promise<string> {
 // Agent Service
 // =============================================================================
 
+/** Backstop timeout for a full connect attempt (auth token + handshake + ready). */
+const CONNECT_TIMEOUT_MS = 20_000;
+
 export class AgentService {
     private baseUrl: string;
     private ws: WebSocket | null = null;
@@ -188,145 +191,32 @@ export class AgentService {
 
         this.callbacks = callbacks;
 
+        // Backstop: if neither ready, a server error event, nor a close event
+        // ever settles this attempt (including an auth-token lookup that
+        // hangs), fail it instead of leaving the caller pending forever.
+        // The timer is scoped to this attempt via its connection generation:
+        // a timer that outlives a superseded attempt (e.g. the user cancelled
+        // during the token lookup and a new run has since connected) must not
+        // tear down the newer connection.
+        let timeoutId: ReturnType<typeof setTimeout> | undefined;
+        const connectTimeout = new Promise<void>((resolve, reject) => {
+            timeoutId = setTimeout(() => {
+                if (this.connectionId !== setupConnectionId) {
+                    // Superseded while still unsettled: settle quietly,
+                    // mirroring an intentional client close.
+                    resolve();
+                    return;
+                }
+                reject(new Error('Connection attempt timed out'));
+                this.close(1000, 'Connection attempt timed out');
+            }, CONNECT_TIMEOUT_MS);
+        });
+
         try {
-            const token = await this.getAuthToken();
-
-            // A close() during the token lookup superseded this attempt (and
-            // already cleared `connecting`). An intentional client close is
-            // not a failure, so resolve quietly without creating a socket.
-            if (this.connectionId !== setupConnectionId) {
-                return;
-            }
-
-            // Auth message includes token, frontend version, and — when the
-            // caller supplies them — the client identity and declared features.
-            const authMessage: WSAuthMessage = {
-                type: 'auth',
-                token,
-                frontend_version: frontendVersion,
-                ...(clientType ? { client_type: clientType } : {}),
-                ...(clientFeatures ? { client_features: clientFeatures } : {}),
-                ...(zoteroInstance ? { zotero_instance: zoteroInstance } : {}),
-            };
-
-            // Connect with clean URL (no sensitive data in params)
-            const wsUrl = this.getWebSocketUrl();
-
-            logger(`AgentService: Connecting to ${wsUrl}`, 1);
-
-            return new Promise<void>((resolve, reject) => {
-                let hasResolved = false;
-                const finish = (error?: Error) => {
-                    if (hasResolved) return;
-                    hasResolved = true;
-                    this.connecting = false;
-                    if (this.activeConnectFinish === finish) {
-                        this.activeConnectFinish = null;
-                    }
-                    if (error) reject(error);
-                    else resolve();
-                };
-                // close() invalidates this socket before its onclose handler
-                // runs, so expose the promise settler explicitly.
-                this.activeConnectFinish = finish;
-
-                // Wrap the onReady callback to send request after ready
-                const wrappedCallbacks: WSCallbacks = {
-                    ...callbacks,
-                    onReady: (data: WSReadyData) => {
-                        logger('AgentService: Server ready, sending agent run request', 1);
-                        // Call the original onReady callback first
-                        callbacks.onReady(data);
-                        // Send the chat request now that server is ready
-                        this.send(request);
-                        // Resolve the connect promise
-                        finish();
-                    },
-                    onError: (event: WSErrorEvent) => {
-                        // Call the original error callback
-                        callbacks.onError(event);
-                        // If we haven't resolved yet, this is a connection-phase error
-                        finish(new Error(event.message));
-                    }
-                };
-
-                this.callbacks = wrappedCallbacks;
-                this.ws = new WebSocket(wsUrl);
-                
-                // Capture the WebSocket instance to avoid race conditions if connect()
-                // is called again before auth completes. The second connect() would call
-                // close() which sets this.ws = null, but we need the original instance.
-                const wsInstance = this.ws;
-
-                this.ws.onopen = () => {
-                    logger('AgentService: Connection established, sending auth message', 1);
-                    logger(
-                        `AgentService: WebSocket negotiated extensions="${wsInstance.extensions || '(none)'}" protocol="${wsInstance.protocol || '(none)'}"`,
-                        1,
-                    );
-                    // Small delay to ensure server has completed accept() before we send
-                    // This prevents a race condition where messages sent immediately in onopen
-                    // may be dropped if the server hasn't finished accepting the connection
-                    setTimeout(() => {
-                        // Use captured wsInstance instead of this.ws to handle case where
-                        // connect() is called again during the delay (which would null this.ws)
-                        if (wsInstance.readyState === WebSocket.OPEN) {
-                            wsInstance.send(JSON.stringify(authMessage));
-                            logger('AgentService: Auth message sent', 1);
-                        } else {
-                            logger(`AgentService: WebSocket not open for auth (state=${wsInstance.readyState}), connection may have been superseded`, 1);
-                        }
-                    }, 50); // 50ms delay to allow server to complete accept()
-                    callbacks.onOpen?.();
-                    // Note: Don't resolve here - wait for ready event
-                };
-
-                const connId = this.connectionId;
-                this.ws.onmessage = (event) => {
-                    // Capture arrival time so dispatch lag (message-queue
-                    // backlog) can be reported in request acks.
-                    const receivedAt = Date.now();
-                    // Chain onto the queue so async callbacks are processed in order.
-                    // connId check prevents stale messages from a previous connection
-                    // from being processed after a reconnect.
-                    this.messageQueue = this.messageQueue.then(() => {
-                        if (this.connectionId !== connId) return;
-                        return this.handleMessage(event.data, receivedAt);
-                    }).catch(err => {
-                        logger(`AgentService: Unhandled error in message queue: ${err}`, 1);
-                    });
-                };
-
-                // Note: onerror carries no useful info in browsers. Per the WebSocket
-                // spec, onclose always fires after onerror, so we defer rejection to
-                // onclose to capture the close code (useful for distinguishing proxy
-                // blocks, TLS failures, and server-side rejects).
-                this.ws.onerror = () => {
-                    logger(`AgentService: WebSocket error event (close will follow)`, 1);
-                };
-
-                this.ws.onclose = (event) => {
-                    if (this.ws !== wsInstance || this.connectionId !== connId) {
-                        logger('AgentService: Ignoring stale close event from superseded connection', 1);
-                        return;
-                    }
-                    logger(`AgentService: Connection closed - code=${event.code}, reason=${event.reason}, clean=${event.wasClean}`, 1);
-                    // Notify before resetConnectionState() so the callback can
-                    // still read connection-scoped state.
-                    callbacks.onClose?.(event.code, event.reason, event.wasClean);
-                    this.resetConnectionState();
-                    // If we haven't resolved yet, the connection closed before
-                    // ready. Close-code details for the error UI travel via the
-                    // onClose callback above, not the rejection.
-                    if (!hasResolved) {
-                        finish(new Error(
-                            event.reason
-                                ? `Connection closed: ${event.reason}`
-                                : `Connection closed before ready (code ${event.code})`
-                        ));
-                    }
-                };
-            });
+            await Promise.race([
+                this.establishConnection(request, callbacks, setupConnectionId, frontendVersion, clientType, clientFeatures, zoteroInstance),
+                connectTimeout,
+            ]);
         } catch (error) {
             logger(`AgentService: Connection setup error: ${error}`, 1);
             // Only reset if this attempt still owns the connection state — a
@@ -336,7 +226,163 @@ export class AgentService {
                 this.connecting = false;
             }
             throw error;
+        } finally {
+            clearTimeout(timeoutId);
         }
+    }
+
+    /**
+     * Fetch the auth token, open the socket, and settle once the server's
+     * `ready` event arrives (or the attempt fails). Split from connect() so
+     * the caller can race it against the attempt-scoped backstop timeout.
+     */
+    private async establishConnection(
+        request: AgentRunRequest,
+        callbacks: WSCallbacks,
+        setupConnectionId: number,
+        frontendVersion?: string,
+        clientType?: string,
+        clientFeatures?: string[],
+        zoteroInstance?: ZoteroInstanceWire,
+    ): Promise<void> {
+        const token = await this.getAuthToken();
+
+        // A close() during the token lookup superseded this attempt (and
+        // already cleared `connecting`). An intentional client close is
+        // not a failure, so resolve quietly without creating a socket.
+        if (this.connectionId !== setupConnectionId) {
+            return;
+        }
+
+        // Auth message includes token, frontend version, and — when the
+        // caller supplies them — the client identity and declared features.
+        const authMessage: WSAuthMessage = {
+            type: 'auth',
+            token,
+            frontend_version: frontendVersion,
+            ...(clientType ? { client_type: clientType } : {}),
+            ...(clientFeatures ? { client_features: clientFeatures } : {}),
+            ...(zoteroInstance ? { zotero_instance: zoteroInstance } : {}),
+        };
+
+        // Connect with clean URL (no sensitive data in params)
+        const wsUrl = this.getWebSocketUrl();
+
+        logger(`AgentService: Connecting to ${wsUrl}`, 1);
+
+        return new Promise<void>((resolve, reject) => {
+            let hasResolved = false;
+            const finish = (error?: Error) => {
+                if (hasResolved) return;
+                hasResolved = true;
+                this.connecting = false;
+                if (this.activeConnectFinish === finish) {
+                    this.activeConnectFinish = null;
+                }
+                if (error) reject(error);
+                else resolve();
+            };
+            // close() invalidates this socket before its onclose handler
+            // runs, so expose the promise settler explicitly.
+            this.activeConnectFinish = finish;
+
+            // Wrap the onReady callback to send request after ready
+            const wrappedCallbacks: WSCallbacks = {
+                ...callbacks,
+                onReady: (data: WSReadyData) => {
+                    logger('AgentService: Server ready, sending agent run request', 1);
+                    // Call the original onReady callback first
+                    callbacks.onReady(data);
+                    // Send the chat request now that server is ready
+                    this.send(request);
+                    // Resolve the connect promise
+                    finish();
+                },
+                onError: (event: WSErrorEvent) => {
+                    // Call the original error callback
+                    callbacks.onError(event);
+                    // If we haven't resolved yet, this is a connection-phase error
+                    finish(new Error(event.message));
+                }
+            };
+
+            this.callbacks = wrappedCallbacks;
+            this.ws = new WebSocket(wsUrl);
+            
+            // Capture the WebSocket instance to avoid race conditions if connect()
+            // is called again before auth completes. The second connect() would call
+            // close() which sets this.ws = null, but we need the original instance.
+            const wsInstance = this.ws;
+
+            this.ws.onopen = () => {
+                logger('AgentService: Connection established, sending auth message', 1);
+                logger(
+                    `AgentService: WebSocket negotiated extensions="${wsInstance.extensions || '(none)'}" protocol="${wsInstance.protocol || '(none)'}"`,
+                    1,
+                );
+                // Small delay to ensure server has completed accept() before we send
+                // This prevents a race condition where messages sent immediately in onopen
+                // may be dropped if the server hasn't finished accepting the connection
+                setTimeout(() => {
+                    // Use captured wsInstance instead of this.ws to handle case where
+                    // connect() is called again during the delay (which would null this.ws)
+                    if (wsInstance.readyState === WebSocket.OPEN) {
+                        wsInstance.send(JSON.stringify(authMessage));
+                        logger('AgentService: Auth message sent', 1);
+                    } else {
+                        logger(`AgentService: WebSocket not open for auth (state=${wsInstance.readyState}), connection may have been superseded`, 1);
+                    }
+                }, 50); // 50ms delay to allow server to complete accept()
+                callbacks.onOpen?.();
+                // Note: Don't resolve here - wait for ready event
+            };
+
+            const connId = this.connectionId;
+            this.ws.onmessage = (event) => {
+                // Capture arrival time so dispatch lag (message-queue
+                // backlog) can be reported in request acks.
+                const receivedAt = Date.now();
+                // Chain onto the queue so async callbacks are processed in order.
+                // connId check prevents stale messages from a previous connection
+                // from being processed after a reconnect.
+                this.messageQueue = this.messageQueue.then(() => {
+                    if (this.connectionId !== connId) return;
+                    return this.handleMessage(event.data, receivedAt);
+                }).catch(err => {
+                    logger(`AgentService: Unhandled error in message queue: ${err}`, 1);
+                });
+            };
+
+            // Note: onerror carries no useful info in browsers. Per the WebSocket
+            // spec, onclose always fires after onerror, so we defer rejection to
+            // onclose to capture the close code (useful for distinguishing proxy
+            // blocks, TLS failures, and server-side rejects).
+            this.ws.onerror = () => {
+                logger(`AgentService: WebSocket error event (close will follow)`, 1);
+            };
+
+            this.ws.onclose = (event) => {
+                if (this.ws !== wsInstance || this.connectionId !== connId) {
+                    logger('AgentService: Ignoring stale close event from superseded connection', 1);
+                    return;
+                }
+                logger(`AgentService: Connection closed - code=${event.code}, reason=${event.reason}, clean=${event.wasClean}`, 1);
+                // Notify before resetConnectionState() so the callback can
+                // still read connection-scoped state.
+                callbacks.onClose?.(event.code, event.reason, event.wasClean);
+                this.resetConnectionState();
+                // If we haven't resolved yet, the connection closed before
+                // ready. Close-code details for the error UI travel via the
+                // onClose callback above, not the rejection.
+                if (!hasResolved) {
+                    finish(new Error(
+                        event.reason
+                            ? `Connection closed: ${event.reason}`
+                            : `Connection closed before ready (code ${event.code})`
+                    ));
+                }
+            };
+        });
     }
 
     /**
