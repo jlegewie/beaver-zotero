@@ -81,53 +81,16 @@ export async function getWSAuthToken(): Promise<string> {
 // Agent Service
 // =============================================================================
 
-/**
- * Error thrown when the WebSocket connect phase fails.
- * Carries the underlying close code/reason so callers can distinguish
- * proxy/firewall blocks (commonly 1006) from TLS failures (rare, 1015)
- * or server-side rejections (e.g. 1008 for authentication/policy
- * failures, with `close_reason` describing the specific rejection).
- */
-export class WSConnectionError extends Error {
-    close_code?: number;
-    close_reason?: string;
-    was_clean?: boolean;
-    /** Always 'close' — this error is only constructed from a WebSocket close event. */
-    phase: 'close';
-
-    constructor(
-        message: string,
-        phase: 'close',
-        opts?: { close_code?: number; close_reason?: string; was_clean?: boolean }
-    ) {
-        super(message);
-        this.name = 'WSConnectionError';
-        this.phase = phase;
-        if (opts) {
-            this.close_code = opts.close_code;
-            this.close_reason = opts.close_reason;
-            this.was_clean = opts.was_clean;
-        }
-    }
-}
-
-/**
- * Error used to settle a connect attempt that the client intentionally closed.
- * Callers can ignore this without presenting a transport failure to the user.
- */
-export class WSConnectionClosedByClientError extends Error {
-    constructor(message: string = 'Agent connection closed by client') {
-        super(message);
-        this.name = 'WSConnectionClosedByClientError';
-    }
-}
-
 export class AgentService {
     private baseUrl: string;
     private ws: WebSocket | null = null;
     private callbacks: WSCallbacks | null = null;
     private connecting: boolean = false;
-    /** Settles the promise for the current pre-ready connection attempt. */
+    /**
+     * Settles the promise for the current pre-ready connection attempt.
+     * close() resolves it (an intentional client close is not a failure);
+     * the socket's own close event rejects it.
+     */
     private activeConnectFinish: ((error?: Error) => void) | null = null;
     /** Queue to serialize async message processing */
     private messageQueue: Promise<void> = Promise.resolve();
@@ -137,14 +100,6 @@ export class AgentService {
     private connectionId: number = 0;
     /** Whether the connected backend understands `request_received` acks (from the ready event) */
     private serverSupportsRequestAcks: boolean = false;
-    /**
-     * Whether the current connection attempt has received the `ready` event.
-     * Tracked per-connection (reset on every connect/close) so `onclose` can
-     * tell callers whether a drop happened during the connect handshake or
-     * after the connection was fully established, without depending on
-     * caller-side state that could go stale across reconnects.
-     */
-    private hasReachedReady: boolean = false;
     /**
      * Map of backend data-request event -> handler. Injectable so a non-Zotero
      * host can serve the same requests its own way. Defaults to the Zotero
@@ -169,7 +124,6 @@ export class AgentService {
         this.messageQueue = Promise.resolve();
         this.actionExecutionQueue = Promise.resolve();
         this.serverSupportsRequestAcks = false;
-        this.hasReachedReady = false;
     }
 
     /**
@@ -216,15 +170,16 @@ export class AgentService {
             logger('AgentService: connect() already in progress, ignoring duplicate call', 1);
             return;
         }
-        this.connecting = true;
 
         // Log if closing an existing connection
         if (this.ws) {
             logger(`AgentService: Closing existing connection before new connect (state=${this.ws.readyState})`, 1);
         }
-        
-        // Close existing connection if any
+
+        // Close existing connection if any. close() clears `connecting`, so
+        // this attempt claims the flag only after the old state is torn down.
         this.close(1000, 'Client closing', { notifyClose: false });
+        this.connecting = true;
 
         // close() increments connectionId. Capture the new value so an
         // external close during the async auth-token lookup can abort setup
@@ -236,8 +191,11 @@ export class AgentService {
         try {
             const token = await this.getAuthToken();
 
+            // A close() during the token lookup superseded this attempt (and
+            // already cleared `connecting`). An intentional client close is
+            // not a failure, so resolve quietly without creating a socket.
             if (this.connectionId !== setupConnectionId) {
-                throw new WSConnectionClosedByClientError();
+                return;
             }
 
             // Auth message includes token, frontend version, and — when the
@@ -277,7 +235,6 @@ export class AgentService {
                     ...callbacks,
                     onReady: (data: WSReadyData) => {
                         logger('AgentService: Server ready, sending agent run request', 1);
-                        this.hasReachedReady = true;
                         // Call the original onReady callback first
                         callbacks.onReady(data);
                         // Send the chat request now that server is ready
@@ -354,30 +311,30 @@ export class AgentService {
                         return;
                     }
                     logger(`AgentService: Connection closed - code=${event.code}, reason=${event.reason}, clean=${event.wasClean}`, 1);
-                    // Capture before resetConnectionState() clears it, so callers can
-                    // distinguish a connect-phase drop from a post-ready (mid-run) drop.
-                    const hadReachedReady = this.hasReachedReady;
-                    callbacks.onClose?.(event.code, event.reason, event.wasClean, hadReachedReady);
+                    // Notify before resetConnectionState() so the callback can
+                    // still read connection-scoped state.
+                    callbacks.onClose?.(event.code, event.reason, event.wasClean);
                     this.resetConnectionState();
-                    // If we haven't resolved yet, the connection closed before ready
+                    // If we haven't resolved yet, the connection closed before
+                    // ready. Close-code details for the error UI travel via the
+                    // onClose callback above, not the rejection.
                     if (!hasResolved) {
-                        finish(new WSConnectionError(
+                        finish(new Error(
                             event.reason
                                 ? `Connection closed: ${event.reason}`
-                                : `Connection closed before ready (code ${event.code})`,
-                            'close',
-                            {
-                                close_code: event.code,
-                                close_reason: event.reason,
-                                was_clean: event.wasClean,
-                            }
+                                : `Connection closed before ready (code ${event.code})`
                         ));
                     }
                 };
             });
         } catch (error) {
             logger(`AgentService: Connection setup error: ${error}`, 1);
-            this.connecting = false;
+            // Only reset if this attempt still owns the connection state — a
+            // close() or newer connect() during the token await has already
+            // moved on (and may have set `connecting` for its own attempt).
+            if (this.connectionId === setupConnectionId) {
+                this.connecting = false;
+            }
             throw error;
         }
     }
@@ -718,14 +675,21 @@ export class AgentService {
     close(
         code: number = 1000,
         reason: string = 'Client closing',
-        options: { notifyClose?: boolean } = {},
+        options: { notifyClose?: boolean; onlyIfConnectionId?: number } = {},
     ): void {
-        const { notifyClose = true } = options;
+        const { notifyClose = true, onlyIfConnectionId } = options;
+
+        // A caller that captured its connection generation up front (e.g. a
+        // deferred close inside cancel()) must not tear down a newer
+        // connection that superseded it in the meantime.
+        if (onlyIfConnectionId !== undefined && onlyIfConnectionId !== this.connectionId) {
+            logger('AgentService: Skipping close for superseded connection', 1);
+            return;
+        }
+
         const wsToClose = this.ws;
         const callbacks = this.callbacks;
         const finishConnect = this.activeConnectFinish;
-        // Capture before resetConnectionState() clears it below.
-        const hadReachedReady = this.hasReachedReady;
 
         if (wsToClose) {
             // Only attempt to close if not already closing/closed
@@ -743,10 +707,17 @@ export class AgentService {
             }
         }
         this.resetConnectionState();
+        // Clear the in-progress flag even when the attempt has not created
+        // its settle handle yet (i.e. it is still awaiting the auth token),
+        // so a new connect() is not silently swallowed by the overlap guard.
+        this.connecting = false;
         if (notifyClose) {
-            callbacks?.onClose?.(code, reason, true, hadReachedReady);
+            callbacks?.onClose?.(code, reason, true);
         }
-        finishConnect?.(new WSConnectionClosedByClientError(reason));
+        // Resolve (not reject) a pending connect: an intentional client close
+        // is not a transport failure, and the closing caller has already
+        // updated any run/UI state itself.
+        finishConnect?.();
     }
 
     /**
@@ -761,6 +732,10 @@ export class AgentService {
             return;
         }
 
+        // Capture the generation being cancelled: if a new run connects
+        // during the flush wait below, the deferred close must not tear it down.
+        const connectionIdToCancel = this.connectionId;
+
         // Send cancel message to backend
         logger('AgentService: Sending cancel message', 1);
         this.ws.send(JSON.stringify({ type: 'cancel' }));
@@ -768,8 +743,8 @@ export class AgentService {
         // Wait briefly to allow the message to be flushed
         await new Promise(resolve => setTimeout(resolve, waitMs));
 
-        // Close the connection
-        this.close(1000, 'User cancelled');
+        // Close the connection (no-op if a newer connection superseded it)
+        this.close(1000, 'User cancelled', { onlyIfConnectionId: connectionIdToCancel });
     }
 
     /**

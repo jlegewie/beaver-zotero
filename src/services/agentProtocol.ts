@@ -1950,10 +1950,6 @@ export interface WSCallbacks {
      * @param code Close code
      * @param reason Close reason
      * @param wasClean Whether the connection closed cleanly
-     * @param hadReachedReady Whether this connection had received the `ready`
-     *   event before it closed — false means the drop happened during the
-     *   connect handshake, true means it happened after the connection was
-     *   fully established (e.g. mid-run).
      */
-    onClose?: (code: number, reason: string, wasClean: boolean, hadReachedReady: boolean) => void;
+    onClose?: (code: number, reason: string, wasClean: boolean) => void;
 }

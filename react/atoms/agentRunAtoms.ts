@@ -7,11 +7,7 @@
 
 import { atom, Getter, Setter } from 'jotai';
 import { v4 as uuidv4 } from 'uuid';
-import {
-    agentService,
-    WSConnectionClosedByClientError,
-    WSConnectionError,
-} from '../../src/services/agentService';
+import { agentService } from '../../src/services/agentService';
 import { notifyRunComplete, notifyUserQuestion } from '../../src/services/systemNotifications';
 import { reportConnectionFailure } from '../../src/services/diagnosticsService';
 import {
@@ -930,6 +926,15 @@ export const wsRequestAckDataAtom = atom<WSRequestAckData | null>(null);
 /** Last error from WebSocket */
 export const wsErrorAtom = atom<WSErrorEvent | null>(null);
 
+/**
+ * Close details from the most recent unexpected WebSocket close, reset at the
+ * start of each connect attempt. Lets the connect-phase error path surface
+ * close-code details (proxy blocks, TLS interference, auth rejections)
+ * without threading them through promise rejections. Normal client closes
+ * (code 1000) are never recorded.
+ */
+const lastWSCloseInfoAtom = atom<{ code: number; reason: string; wasClean: boolean } | null>(null);
+
 /** Last warning from WebSocket */
 export const wsWarningAtom = atom<WSWarningEvent | null>(null);
 
@@ -1514,8 +1519,18 @@ function createWSCallbacks(set: Setter): WSCallbacks {
             set(isWSConnectedAtom, true);
         },
 
-        onClose: (code: number, reason: string, wasClean: boolean, hadReachedReady: boolean) => {
-            logger(`WS onClose: code=${code}, reason=${reason}, clean=${wasClean}, hadReachedReady=${hadReachedReady}`, 1);
+        onClose: (code: number, reason: string, wasClean: boolean) => {
+            logger(`WS onClose: code=${code}, reason=${reason}, clean=${wasClean}`, 1);
+            // Whether this connection had received the `ready` event, read
+            // before the flag is cleared below. Distinguishes a connect-phase
+            // failure (reported once by executeWSRequest's catch) from a
+            // post-ready drop (handled here).
+            const hadReachedReady = store.get(isWSReadyAtom);
+            // Record close details for the connect-phase error path. Code 1000
+            // is a normal closure (cancel, reconnect, shutdown), not an error.
+            if (code !== 1000) {
+                set(lastWSCloseInfoAtom, { code, reason, wasClean });
+            }
             // set(activeRunAtom, null);
             set(isWSConnectedAtom, false);
             set(isWSReadyAtom, false);
@@ -1527,16 +1542,13 @@ function createWSCallbacks(set: Setter): WSCallbacks {
             set(clearAllPendingQuestionsAtom);
             set(clearRunApprovalPolicyAtom);
 
-            // If the socket dropped uncleanly after the connection had reached
-            // the ready state, the server never delivered an error event for
-            // the in-flight run. Reuse the close-code classifier so mid-run
-            // drops surface the same actionable details as connect-phase
-            // failures. Gated on `hadReachedReady` (not just the active run's
-            // status) so a connect-phase failure — which also sees an
-            // `in_progress` active run, since the run is created before the
-            // socket connects — is handled once by executeWSRequest's catch
-            // instead of being reported here a second time.
-            if (!wasClean && hadReachedReady) {
+            // If the connection ended after reaching ready while a run was
+            // still in flight, the server never delivered a terminal event for
+            // it. This covers unclean drops and clean closes that carry an
+            // error code (e.g. a proxy or server closing with 1008/1013
+            // mid-run); a clean code-1000 close is a normal closure whose
+            // initiator has already updated run state.
+            if (hadReachedReady && !(code === 1000 && wasClean)) {
                 const activeRun = store.get(activeRunAtom);
                 if (
                     activeRun &&
@@ -1593,25 +1605,34 @@ async function executeWSRequest(
     set: Setter
 ): Promise<void> {
     const callbacks = createWSCallbacks(set);
+    let connectTimeoutId: ReturnType<typeof setTimeout> | undefined;
 
     try {
         logger('WS Starting connection for run:', run.id);
+        // A new connection attempt starts from a clean slate: a previous
+        // connection's ready flag or close info must not leak into this
+        // attempt's error handling.
+        set(isWSReadyAtom, false);
+        set(lastWSCloseInfoAtom, null);
         const frontendVersion = Zotero.Beaver.pluginVersion || '';
         const zoteroInstance = buildZoteroInstanceWire(get(searchableLibraryIdsAtom));
-        await agentService.connect(request, callbacks, frontendVersion, ZOTERO_PLUGIN_CLIENT_TYPE, ZOTERO_PLUGIN_FEATURES, {
-            ...zoteroInstance,
-        });
-        logger('WS Connection established and ready');
+        // Backstop timeout: if neither ready, a server error event, nor a
+        // close event ever settles the connect, fail the run instead of
+        // leaving it pending forever, and tear down the half-open attempt.
+        await Promise.race([
+            agentService.connect(request, callbacks, frontendVersion, ZOTERO_PLUGIN_CLIENT_TYPE, ZOTERO_PLUGIN_FEATURES, {
+                ...zoteroInstance,
+            }),
+            new Promise<never>((_, reject) => {
+                connectTimeoutId = setTimeout(() => {
+                    reject(new Error('Connection attempt timed out'));
+                    agentService.close(1000, 'Connection attempt timed out');
+                }, WS_CONNECT_TIMEOUT_MS);
+            }),
+        ]);
+        logger('WS connect settled');
     } catch (error: any) {
         logger('WS connection error:', error, 1);
-
-        // A user cancellation intentionally settles an in-flight handshake.
-        // The cancellation path already updates run/UI state, so it must not
-        // be replaced with a connection failure.
-        if (error instanceof WSConnectionClosedByClientError) {
-            set(isWSChatPendingAtom, false);
-            return;
-        }
 
         // Check if an error was already set by the onError callback
         // If so, don't overwrite it with a generic connection_error
@@ -1624,13 +1645,14 @@ async function executeWSRequest(
         }
 
         // No error was set yet, so set a generic connection error.
-        // If the failure came from the WebSocket connect phase, surface the
-        // close code and a human-readable label as details — useful for
-        // triaging corporate proxy/firewall blocks (1006), authentication
-        // rejections (1008, the common real-world server-side code), and
-        // TLS failures (1015, rare in practice).
+        // If the socket got far enough to close with a code, surface that
+        // code and a human-readable label as details — useful for triaging
+        // corporate proxy/firewall blocks (1006), authentication rejections
+        // (1008, the common real-world server-side code), and TLS failures
+        // (1015, rare in practice).
         const errorMessage = 'Could not connect to the server. Please check your internet connection and try again.';
-        const userFacingDetails = buildConnectionUserFacingDetails(error);
+        const closeInfo = get(lastWSCloseInfoAtom);
+        const userFacingDetails = closeInfo ? formatCloseCodeDetails(closeInfo.code) : undefined;
         set(wsErrorAtom, {
             event: 'error',
             type: 'connection_error',
@@ -1653,17 +1675,20 @@ async function executeWSRequest(
         // patterns in the wild.
         void reportConnectionFailure({
             phase: 'connect',
-            close_code: error instanceof WSConnectionError && error.close_code !== undefined
-                ? error.close_code
-                : null,
-            close_reason: error instanceof WSConnectionError ? (error.close_reason ?? '') : '',
-            was_clean: error instanceof WSConnectionError ? (error.was_clean ?? null) : null,
+            close_code: closeInfo?.code ?? null,
+            close_reason: closeInfo?.reason ?? '',
+            was_clean: closeInfo?.wasClean ?? null,
             run_id: run.id,
         });
+    } finally {
+        clearTimeout(connectTimeoutId);
     }
 }
 
-// Placeholder for the public docs page — replace when the page is live.
+/** Backstop timeout for the WebSocket connect phase (auth + handshake + ready). */
+const WS_CONNECT_TIMEOUT_MS = 20_000;
+
+/** Public docs page with remediation steps for connection failures. */
 const CONNECTION_TROUBLESHOOTING_URL = 'https://www.beaverapp.ai/docs/connection-troubleshooting';
 
 /**
@@ -1758,18 +1783,6 @@ function formatCloseCodeDetails(code: number): string {
         ? ` See our <a href="${CONNECTION_TROUBLESHOOTING_URL}">connection troubleshooting guide</a> for help.`
         : '';
     return `${hint}${link} (error code ${code})`;
-}
-
-/**
- * Sanitized, user-facing details for a connection error caught during the
- * WebSocket connect phase. Technical error messages are intentionally not
- * copied into this field.
- */
-function buildConnectionUserFacingDetails(error: unknown): string | undefined {
-    if (error instanceof WSConnectionError && error.close_code !== undefined) {
-        return formatCloseCodeDetails(error.close_code);
-    }
-    return undefined;
 }
 
 /**

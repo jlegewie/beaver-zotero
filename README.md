@@ -109,30 +109,13 @@ This is only one dimension of evaluation (and not the hardest). We will share mo
 
 More details are in the [documentation](https://www.beaverapp.ai/docs/getting-started).
 
-## Corporate networks, VPNs, and IT administrators
+## Connection problems (corporate networks, VPNs, IT administrators)
 
-If you see **"Connection Failed — Could not connect to the server"** on a work computer, the request is most likely being blocked before it reaches Beaver's servers. This is almost always a corporate proxy, firewall, or TLS-inspection appliance blocking WebSocket traffic.
+If you see **"Connection Failed — Could not connect to the server"**, the most common cause is a corporate proxy, firewall, or TLS-inspection appliance blocking Beaver's WebSocket traffic. In short, Beaver needs outbound HTTPS **and** WebSocket Secure (`wss://`) on TCP 443 to the Beaver API host, plus HTTPS to `*.supabase.co` for sign-in.
 
-**What Beaver needs:**
+The full guide — including the quick self-diagnosis steps, what each error code means, and the exact allowlist/TLS-bypass details for your IT team — is here:
 
-- Outbound **HTTPS (TCP 443)** to the production Beaver API host, `beaver-backend-258989374544.us-central1.run.app`, and to `*.supabase.co` for authentication.
-- Outbound **WebSocket Secure (`wss://`, also TCP 443)** to the Beaver API host. Beaver streams agent responses over WebSocket, so allowing `https://` alone is not enough.
-- The proxy must preserve the `Upgrade: websocket` and `Connection: Upgrade` request headers.
-- If your organization uses TLS/SSL inspection (Zscaler, Netskope, Blue Coat, Palo Alto, Fortinet, etc.), please **exempt the Beaver API host** from inspection. Re-signed certificates typically break the WebSocket handshake.
-
-**For your IT helpdesk:** please whitelist the Beaver API host for both HTTPS and WSS on port 443, and add it to the TLS-inspection bypass list. The exact host is configured at build time and appears in the Zotero debug log on the line `AgentService: Connecting to wss://...`.
-
-**Quick self-diagnosis:**
-
-1. In Zotero, go to **Help → Debug Output Logging → Enable**, reproduce the error, then **Help → Debug Output Logging → View Output**.
-2. Search the log for lines starting with `[Beaver]`. The error display in Beaver also shows a WebSocket error code (e.g. `error code 1006`). Common codes:
-   - **1006** (Abnormal Closure) — almost always a proxy, firewall, or filter dropping the WebSocket; can also occur when antivirus or TLS-inspecting security software intercepts the connection.
-   - **1008** — authentication or policy rejection. Try again; if it persists, sign out and sign back in.
-   - **1015** — TLS handshake failure. Rare in practice — TLS inspection issues on Zotero usually surface as 1006 above.
-   - **4xxx** — reserved for server-defined rejections.
-3. If `https://` works in your browser on the same network but Beaver fails, WebSocket is being blocked specifically.
-
-If you run Zotero through a corporate HTTP proxy, Zotero (based on Firefox) honors proxy settings from **Edit → Settings (Zotero → Settings on macOS) → Advanced → Config Editor**, keys under `network.proxy.*`.
+**[Connection troubleshooting](https://www.beaverapp.ai/docs/connection-troubleshooting)**
 
 ## Building from source
 

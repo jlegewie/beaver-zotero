@@ -44,11 +44,7 @@ vi.mock('../../../react/agents/agentActions', () => ({
     toAgentAction: vi.fn((action) => action),
 }));
 
-import {
-    AgentService,
-    WSConnectionClosedByClientError,
-    WSConnectionError,
-} from '../../../src/services/agentService';
+import { AgentService } from '../../../src/services/agentService';
 import type { AgentRunRequest, WSCallbacks } from '../../../src/services/agentProtocol';
 
 class MockWebSocket {
@@ -236,7 +232,7 @@ describe('AgentService reconnect handling', () => {
         });
 
         expect(callbacks.onClose).toHaveBeenCalledTimes(1);
-        expect(callbacks.onClose).toHaveBeenCalledWith(1000, 'User cancelled', true, true);
+        expect(callbacks.onClose).toHaveBeenCalledWith(1000, 'User cancelled', true);
     });
 
     it('notifies onClose for an unexpected transport close on the active socket', async () => {
@@ -253,10 +249,10 @@ describe('AgentService reconnect handling', () => {
         });
 
         expect(callbacks.onClose).toHaveBeenCalledTimes(1);
-        expect(callbacks.onClose).toHaveBeenCalledWith(1011, 'transport lost', false, true);
+        expect(callbacks.onClose).toHaveBeenCalledWith(1011, 'transport lost', false);
     });
 
-    it('reports hadReachedReady=false and rejects connect() when the socket closes before ready', async () => {
+    it('rejects connect() and notifies onClose when the socket closes before ready', async () => {
         const service = new AgentService('https://api.example.com');
         const callbacks = createCallbacks();
         const request = { type: 'pre-ready-close-test' } as AgentRunRequest;
@@ -279,8 +275,7 @@ describe('AgentService reconnect handling', () => {
         }
 
         // The transport opens (so auth is sent) but the server rejects the
-        // connection before the "ready" event — e.g. an invalid/expired
-        // token — so hasReachedReady must still be false.
+        // connection before the "ready" event — e.g. an invalid/expired token.
         socket.emitOpen();
         await vi.advanceTimersByTimeAsync(50);
         socket.emitClose({ code: 1008, reason: 'invalid token', wasClean: false });
@@ -288,15 +283,16 @@ describe('AgentService reconnect handling', () => {
         const outcome = await connectOutcome;
         expect(outcome.ok).toBe(false);
         if (!outcome.ok) {
-            expect(outcome.error).toBeInstanceOf(WSConnectionError);
-            expect((outcome.error as WSConnectionError).close_code).toBe(1008);
+            expect(outcome.error).toBeInstanceOf(Error);
+            expect((outcome.error as Error).message).toContain('invalid token');
         }
 
+        // The close details reach callers through onClose, not the rejection.
         expect(callbacks.onClose).toHaveBeenCalledTimes(1);
-        expect(callbacks.onClose).toHaveBeenCalledWith(1008, 'invalid token', false, false);
+        expect(callbacks.onClose).toHaveBeenCalledWith(1008, 'invalid token', false);
     });
 
-    it('settles a canceled pre-ready connect and allows the next run to connect', async () => {
+    it('resolves a canceled pre-ready connect and allows the next run to connect', async () => {
         const service = new AgentService('https://api.example.com');
         const firstCallbacks = createCallbacks();
         const request = { type: 'cancel-handshake-test' } as AgentRunRequest;
@@ -317,22 +313,59 @@ describe('AgentService reconnect handling', () => {
         }
 
         // The transport is open and auth was sent, but the backend has not
-        // emitted ready yet: this is the handshake window from the report.
+        // emitted ready yet — cancelling in this handshake window must settle
+        // the pending connect() instead of leaving it hanging.
         firstSocket.emitOpen();
         await vi.advanceTimersByTimeAsync(50);
         const cancelPromise = service.cancel(0);
         await vi.advanceTimersByTimeAsync(0);
         await cancelPromise;
 
+        // An intentional client close is not a transport failure: the
+        // pending connect resolves quietly.
         const outcome = await firstOutcome;
-        expect(outcome.ok).toBe(false);
-        if (!outcome.ok) {
-            expect(outcome.error).toBeInstanceOf(WSConnectionClosedByClientError);
-        }
+        expect(outcome.ok).toBe(true);
 
         const secondCallbacks = createCallbacks();
         const secondSocket = await completeConnect(service, secondCallbacks, request);
         expect(secondSocket).not.toBe(firstSocket);
         expect(secondCallbacks.onReady).toHaveBeenCalledTimes(1);
+    });
+
+    it('ignores a deferred cancel close when a newer connection has taken over', async () => {
+        const service = new AgentService('https://api.example.com');
+        const firstCallbacks = createCallbacks();
+        const firstRequest = { type: 'first' } as AgentRunRequest;
+
+        const firstSocket = await completeConnect(service, firstCallbacks, firstRequest);
+
+        // cancel() sends the cancel message, then waits before closing.
+        const cancelPromise = service.cancel(250);
+
+        // A new run connects during that wait and supersedes the first
+        // connection (bumping the connection generation).
+        const secondCallbacks = createCallbacks();
+        const secondRequest = { type: 'second' } as AgentRunRequest;
+        const secondSocket = await completeConnect(service, secondCallbacks, secondRequest);
+        expect(secondSocket).not.toBe(firstSocket);
+
+        // When the deferred close finally fires, it must not tear down the
+        // newer connection.
+        await vi.advanceTimersByTimeAsync(300);
+        await cancelPromise;
+
+        expect(secondSocket.close).not.toHaveBeenCalled();
+        expect(secondCallbacks.onClose).not.toHaveBeenCalled();
+
+        // The newer connection is still fully functional.
+        secondSocket.emitMessage({
+            event: 'part',
+            run_id: 'run-2',
+            message_index: 0,
+            part_index: 0,
+            part: { type: 'text', text: 'still streaming' },
+        });
+        await flushMicrotasks();
+        expect(secondCallbacks.onPart).toHaveBeenCalledTimes(1);
     });
 });
