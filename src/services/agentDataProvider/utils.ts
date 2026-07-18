@@ -25,6 +25,7 @@ import {
     isActionApprovedForCurrentRun,
     runApprovalPolicyAtom,
 } from '../../../react/atoms/runApprovalPolicy';
+import { activeRunAtom } from '../../../react/agents/atoms';
 import { isAgentSupportedItem } from '../../utils/agentItemSupport';
 import { store } from '../../../react/store';
 import { searchableLibraryIdsAtom } from '../../../react/atoms/profile';
@@ -932,7 +933,8 @@ export function getDeferredToolPreference(
 ): DeferredToolPreference {
     try {
         const runPolicy = store.get(runApprovalPolicyAtom);
-        if (isActionApprovedForCurrentRun(runPolicy, toolName, actionData)) {
+        const activeRunId = store.get(activeRunAtom)?.id ?? null;
+        if (isActionApprovedForCurrentRun(runPolicy, activeRunId, toolName, actionData)) {
             return 'always_apply';
         }
 

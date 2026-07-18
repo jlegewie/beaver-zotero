@@ -200,17 +200,19 @@ export function isActionApprovedForRun(
 }
 
 /**
- * Validation requests do not currently include run_id. There is only one live
- * agent WebSocket, so lifecycle cleanup makes the stored policy the active run.
+ * Validation requests do not currently include run_id, so callers must provide
+ * the actual active run ID. Comparing it separately prevents a late async grant
+ * from making stale policy state look current after a run boundary.
  */
 export function isActionApprovedForCurrentRun(
     policy: RunApprovalPolicy,
+    activeRunId: string | null,
     toolName: AgentActionType | string,
     actionData?: Record<string, any>,
 ): boolean {
-    return policy.runId !== null && isActionApprovedForRun(
+    return activeRunId !== null && isActionApprovedForRun(
         policy,
-        policy.runId,
+        activeRunId,
         toolName,
         actionData,
     );

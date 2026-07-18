@@ -1484,7 +1484,13 @@ function createWSCallbacks(set: Setter): WSCallbacks {
             // already in flight. Catch those requests here even though future
             // validations will return always_apply directly.
             const runPolicy = store.get(runApprovalPolicyAtom);
-            if (isActionApprovedForCurrentRun(runPolicy, event.action_type, event.action_data)) {
+            const activeRunId = store.get(activeRunAtom)?.id ?? null;
+            if (isActionApprovedForCurrentRun(
+                runPolicy,
+                activeRunId,
+                event.action_type,
+                event.action_data,
+            )) {
                 logger(`Auto-approving ${event.action_type} for the current run`, 1);
                 agentService.sendApprovalResponse(event.action_id, true);
                 return;

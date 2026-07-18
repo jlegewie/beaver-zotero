@@ -45,8 +45,8 @@ describe('runApprovalPolicy', () => {
 
         const policy = store.get(runApprovalPolicyAtom);
         expect(policy.runId).toBe('run-2');
-        expect(isActionApprovedForCurrentRun(policy, 'edit_note')).toBe(true);
-        expect(isActionApprovedForCurrentRun(policy, 'edit_metadata')).toBe(false);
+        expect(isActionApprovedForCurrentRun(policy, 'run-2', 'edit_note')).toBe(true);
+        expect(isActionApprovedForCurrentRun(policy, 'run-2', 'edit_metadata')).toBe(false);
     });
 
     it('allows only edits to a note created during the same run', () => {
@@ -93,11 +93,37 @@ describe('runApprovalPolicy', () => {
         });
 
         const policy = store.get(runApprovalPolicyAtom);
-        expect(isActionApprovedForCurrentRun(policy, 'edit_metadata')).toBe(true);
-        expect(isActionApprovedForCurrentRun(policy, 'edit_note', {
+        expect(isActionApprovedForCurrentRun(policy, 'run-1', 'edit_metadata')).toBe(true);
+        expect(isActionApprovedForCurrentRun(policy, 'run-1', 'edit_note', {
             library_id: 1,
             zotero_key: 'NOTE0001',
         })).toBe(true);
+    });
+
+    it('does not treat a stale late grant as approval for the active run', () => {
+        const store = createStore();
+        store.set(grantCreatedNoteEditsForRunAtom, {
+            runId: 'run-1',
+            libraryId: 1,
+            zoteroKey: 'NOTE0001',
+        });
+        store.set(clearRunApprovalPolicyAtom);
+        store.set(grantCreatedNoteEditsForRunAtom, {
+            runId: 'run-1',
+            libraryId: 1,
+            zoteroKey: 'NOTE0001',
+        });
+
+        const stalePolicy = store.get(runApprovalPolicyAtom);
+        expect(stalePolicy.runId).toBe('run-1');
+        expect(isActionApprovedForCurrentRun(stalePolicy, 'run-2', 'edit_note', {
+            library_id: 1,
+            zotero_key: 'NOTE0001',
+        })).toBe(false);
+        expect(isActionApprovedForCurrentRun(stalePolicy, null, 'edit_note', {
+            library_id: 1,
+            zotero_key: 'NOTE0001',
+        })).toBe(false);
     });
 
     it('clears group and resource grants at the run lifecycle boundary', () => {
