@@ -76,6 +76,7 @@ import {
     detectOverlaps,
     applyResolvedEdits,
     captureUndoContexts,
+    buildAmbiguousMatchError,
     type ResolveBatchContext,
     type ResolvedBatchEdit,
     type BatchEditFailure,
@@ -549,10 +550,9 @@ export async function executeEditNoteAction(
 
         if (rawPos === -1) {
             if (matchCount > 1) {
-                throw new Error(
-                    `The string to replace was found ${matchCount} times in the note. `
-                    + 'Use operation str_replace_all to replace all occurrences, or include more context.'
-                );
+                // insert_after / insert_before flow through this branch as a
+                // merged str_replace, so use the operation-aware wording.
+                throw new Error(buildAmbiguousMatchError(matchCount, operation));
             }
             rawPos = strippedHtml.indexOf(expandedOld);
         }
