@@ -153,6 +153,122 @@ function undoReplaceAllViaContexts(
     return result;
 }
 
+/**
+ * Undo a batch str_replace_all edit by replaying its occurrence anchors one
+ * at a time against the CURRENT evolving string, rather than resolving every
+ * occurrence's range up front against the original HTML. Each occurrence's
+ * before/after context is captured (see `applyResolvedEdits` /
+ * `captureUndoContexts` in `src/utils/editNoteBatchCore.ts`) against the
+ * document state at the exact point in replay where that occurrence reverts —
+ * every occurrence LATER in `occurrenceContextsDescending` is still applied,
+ * every occurrence EARLIER has already been reverted. Locating fresh after
+ * each splice keeps the remaining anchors valid even when occurrences sit
+ * back-to-back: reverting one seam separates it from the next, so contiguous
+ * zero-width deletions resolve to distinct positions step by step instead of
+ * collapsing onto one ambiguous point.
+ *
+ * Two occurrences whose before/after windows are byte-identical (a repeated
+ * template section) can make `findRangeByContexts` resolve BOTH contexts to
+ * the same match — the first pass consumes that position (whether it splices
+ * an applied fragment back to `undoOldHtml`, or finds the region already
+ * restored and skips it), and without a guard the second context would
+ * resolve onto that same range and be silently treated as an independent
+ * "already restored" retry while the real target occurrence stays untouched.
+ * To catch this, EVERY range a context resolves onto this run — spliced or
+ * skipped — is tracked in `consumedRanges` (in the CURRENT `result` string's
+ * coordinates, shifted after each subsequent splice) and a later context that
+ * resolves onto one of them fails loud instead of being treated as another
+ * legitimate skip. A genuine retry (e.g. undo invoked twice against an
+ * already fully-restored document) never triggers this: each context then
+ * resolves onto its own distinct already-restored range, so nothing overlaps.
+ *
+ * `occurrenceContextsDescending` must already be in descending document-
+ * position order (highest offset first) — callers pass the stored
+ * (ascending) array reversed. Returns the updated HTML, or `undefined` if any
+ * occurrence's context can no longer be located, its region matches neither
+ * the applied fragment nor the original one, or it resolves onto a range
+ * this run already consumed.
+ */
+export function undoBatchReplaceAllViaContexts(
+    strippedHtml: string,
+    undoOldHtml: string,
+    undoNewHtml: string,
+    occurrenceContextsDescending: Array<{ before: string; after: string }>,
+    libraryId: number
+): string | undefined {
+    const normalizedNew = normalizeUndoComparisonHtml(undoNewHtml, libraryId);
+    const normalizedOld = normalizeUndoComparisonHtml(undoOldHtml, libraryId);
+
+    // Ranges this run has resolved a context onto — spliced back to
+    // `undoOldHtml` or found already holding it — kept in the CURRENT
+    // `result` string's coordinates. Splicing at a lower offset shifts every
+    // range positioned after it, so entries are adjusted by the length delta
+    // after each splice — with descending replay, an already-recorded range
+    // sits at a HIGHER offset than the splice that just happened (it was
+    // consumed in an earlier, higher-offset step), so it is always the one
+    // that needs shifting, never the reverse.
+    const consumedRanges: Array<{ start: number; end: number }> = [];
+
+    let result = strippedHtml;
+    for (const ctx of occurrenceContextsDescending) {
+        const range = findRangeByContexts(result, ctx.before, ctx.after, undoNewHtml.length);
+        if (!range) return undefined;
+
+        // Zero-width ranges (deletion/insertion seams) need an equality
+        // check instead of the strict-inequality overlap test: two distinct
+        // zero-width ranges at the SAME point are indistinguishable ([s,s)
+        // vs [s,s)), and the strict test `a.start < b.end && b.start < a.end`
+        // always evaluates false for them, which would let a duplicate
+        // zero-width resolution through undetected. Zero-width ranges that
+        // sit at DIFFERENT points (e.g. successive seams separated by an
+        // earlier splice) still compare unequal and correctly don't overlap.
+        const isZeroWidth = range.start === range.end;
+        const overlapsConsumed = consumedRanges.some((r) => {
+            if (isZeroWidth && r.start === r.end) return r.start === range.start;
+            return range.start < r.end && r.start < range.end;
+        });
+        if (overlapsConsumed) return undefined;
+
+        const regionHtml = result.substring(range.start, range.end);
+        const alreadyRestored =
+            regionHtml === undoOldHtml || normalizeUndoComparisonHtml(regionHtml, libraryId) === normalizedOld;
+
+        if (!alreadyRestored) {
+            if (regionHtml !== undoNewHtml && normalizeUndoComparisonHtml(regionHtml, libraryId) !== normalizedNew) {
+                return undefined;
+            }
+
+            result = result.substring(0, range.start) + undoOldHtml + result.substring(range.end);
+
+            const delta = undoOldHtml.length - (range.end - range.start);
+            if (delta !== 0) {
+                for (const r of consumedRanges) {
+                    if (r.start >= range.end) {
+                        r.start += delta;
+                        r.end += delta;
+                    }
+                }
+            }
+        }
+
+        // Record the range this context resolved onto — whether just spliced
+        // or already holding `undoOldHtml` — so a later context resolving
+        // onto the same region is caught as ambiguous instead of being
+        // treated as another independent already-restored retry. A spliced
+        // region now holds `undoOldHtml` exactly; an already-restored region
+        // keeps its resolved extent, which normalization can make longer or
+        // shorter than `undoOldHtml` — recording anything narrower would let
+        // a later context resolve inside the uncovered remainder.
+        consumedRanges.push(
+            alreadyRestored
+                ? { start: range.start, end: range.end }
+                : { start: range.start, end: range.start + undoOldHtml.length },
+        );
+    }
+
+    return result;
+}
+
 /** Reject a local note mutation before any item lookup crosses the boundary. */
 function assertNoteLibraryNotExcluded(
     ref: { library_id?: number | null; library_ref?: string | null },
@@ -183,6 +299,39 @@ function isAlreadyUndone(
         return false;
     }
     return strippedHtml.includes(undoOldHtml);
+}
+
+/**
+ * Idempotency pre-check for a batch str_replace_all undo record. Batch
+ * records carry no record-level before/after context for str_replace_all
+ * (only the per-occurrence anchors in `undo_occurrence_contexts`), so this
+ * mirrors `isAlreadyUndone`'s context-less branch at document scope: true
+ * when the applied text is gone from the whole note (checked both verbatim
+ * and, since a ProseMirror-normalized variant of the applied text can remain
+ * present even once the raw bytes are gone, after whitespace/entity
+ * normalization) and the original text is still present (same verbatim +
+ * normalized check). Only meaningful for non-deletion records — a deletion's
+ * `undoOldHtml` was removed by the edit, so its mere presence elsewhere in
+ * the note is not a reliable "already undone" signal.
+ */
+export function isBatchReplaceAllAlreadyUndone(
+    strippedHtml: string,
+    undoOldHtml: string,
+    undoNewHtml: string,
+    libraryId: number
+): boolean {
+    if (strippedHtml.includes(undoNewHtml)) return false;
+
+    // Reused for both the applied-text-absence check below and the
+    // original-text-presence check further down.
+    const normalizedDoc = normalizeUndoComparisonHtml(strippedHtml, libraryId);
+    const normalizedNew = normalizeUndoComparisonHtml(undoNewHtml, libraryId);
+    if (normalizedNew.length > 0 && normalizedDoc.includes(normalizedNew)) return false;
+
+    if (strippedHtml.includes(undoOldHtml)) return true;
+    if (!undoOldHtml) return false;
+    const normalizedOld = normalizeUndoComparisonHtml(undoOldHtml, libraryId);
+    return normalizedOld.length > 0 && normalizedDoc.includes(normalizedOld);
 }
 
 const UNDO_CONTEXT_LENGTH = 200;
@@ -1391,8 +1540,13 @@ export async function executeEditNoteBatchAction(
  * needed):
  *   - `operation === 'rewrite'`        → unconditionally restore the full
  *                                        pre-edit body from `undo_old_html`.
- *   - `undo_occurrence_contexts` set   → str_replace_all: per-occurrence
- *                                        replay via `undoReplaceAllViaContexts`.
+ *   - `undo_occurrence_contexts` set   → str_replace_all: for a non-deletion
+ *                                        record, a document-wide idempotency
+ *                                        check first (see
+ *                                        `isBatchReplaceAllAlreadyUndone`),
+ *                                        then per-occurrence replay against
+ *                                        the evolving HTML via
+ *                                        `undoBatchReplaceAllViaContexts`.
  *   - `undo_new_html === ''`           → the edit deleted content (str_replace
  *                                        with an empty new_string): locate the
  *                                        seam via before/after context and
@@ -1425,10 +1579,26 @@ function applyBatchUndoRecord(
         if (occCtxs.length === 0) {
             throw new Error(`Cannot undo edit ${record.index}: no occurrence context data recorded for a str_replace_all edit.`);
         }
-        // Always replay through the per-occurrence anchors. A document-wide
-        // split/join would also rewrite matching text that this action never
-        // touched (including text added by the user after application).
-        const restored = undoReplaceAllViaContexts(
+
+        // Non-deletion records have no record-level context (only
+        // per-occurrence anchors), so a retried undo can't rely on the
+        // per-occurrence contexts alone: they were captured against the
+        // fully-applied document and no longer resolve once every occurrence
+        // has already been reverted. Check document-wide first, matching v1's
+        // idempotent re-undo behavior. Deletion records skip this — a
+        // reliable presence check for removed text needs more than a bare
+        // substring search, so double-undo of a deletion stays an error.
+        if (undoNewHtml !== '' && isBatchReplaceAllAlreadyUndone(strippedHtml, undoOldHtml, undoNewHtml, libraryId)) {
+            logger(`undoEditNoteBatchAction: edit ${record.index} already undone, skipping`, 1);
+            return strippedHtml;
+        }
+
+        // Replay through the per-occurrence anchors against the evolving
+        // HTML, one occurrence at a time (see undoBatchReplaceAllViaContexts).
+        // A document-wide split/join would also rewrite matching text that
+        // this action never touched (including text added by the user after
+        // application).
+        const restored = undoBatchReplaceAllViaContexts(
             strippedHtml, undoOldHtml, undoNewHtml, [...occCtxs].reverse(), libraryId,
         );
         if (!restored) {

@@ -49,6 +49,7 @@ import {
     detectPartialSimplifiedTag,
     buildPartialSimplifiedTagMessage,
 } from './editNoteValidation';
+import { logger } from './logger';
 
 // =============================================================================
 // Public types
@@ -704,16 +705,59 @@ interface FlatOp {
     finalStart: number;
 }
 
+/** One reverse-replay step: a single applied fragment to un-apply in the simulation. */
+interface UndoStep {
+    editIndex: number;
+    /** Pre-edit op start; drives the subset delta walk and orders collapsed occurrences. */
+    start: number;
+    /** Pre-edit op end. */
+    end: number;
+    /** Length of the applied replacement text (for the subset delta walk). */
+    replacementLength: number;
+    /** Offset of the undo fragment within the applied replacement. */
+    fragmentOffset: number;
+    /** Applied fragment length (chars of inserted text; 0 for a deletion seam). */
+    fragLength: number;
+    /** Fragment start in the fully-applied `html`; the replay-order sort key. */
+    fragStart: number;
+    /** Text spliced back in when this step reverts (empty for insert/append undo). */
+    undoOldHtml: string;
+    /** Draft that receives this step's sliced windows. */
+    draft: BatchUndoDraft;
+    /** Ascending occurrence slot for str_replace_all, or -1 for a single-fragment edit. */
+    slot: number;
+    /** True once the replay loop has reverted this step; later scans skip it. */
+    reverted: boolean;
+    /** Scratch: this fragment's start within the current still-applied subset. */
+    subsetFinalStart: number;
+}
+
 /**
  * Apply all resolved edits to `strippedHtml` in ONE pass and produce per-edit
- * undo drafts (with initial context anchors captured from the freshly-applied
- * HTML).
+ * undo drafts with replay-consistent context anchors.
  *
  * Splices run in DESCENDING start offset so earlier offsets stay valid;
  * same-position ties break by DESCENDING edit index so same-position insertions
  * land in ascending request order in the final text. Callers MUST reject
  * overlapping edits (via `detectOverlaps`) before calling this — apply assumes
  * non-intersecting ranges.
+ *
+ * Undo anchors are captured by a reverse-replay simulation. Batch undo replays
+ * records in DESCENDING index order against an evolving document, and within a
+ * str_replace_all record its occurrences in DESCENDING final-position order
+ * (see `react/utils/editNoteActions.ts`). Each step's 200-char before/after
+ * windows must therefore be sliced from the document state that step is located
+ * against at replay time: every step EARLIER in replay order already reverted,
+ * this step and every LATER step still applied. That state equals
+ * `apply(strippedHtml, subset)` for the still-applied subset (this step plus
+ * every later step), so each step's fragment position is recomputed by
+ * re-running the apply-side delta walk — the same ascending (start, index) walk
+ * apply itself uses — restricted to that subset, rather than by shifting offsets
+ * incrementally. Because every simulated state IS an apply output, equal-offset
+ * ordering (collapsed deletion seams, a fragment abutting a seam) is exact by
+ * construction, and reverting all steps reconstructs the pre-edit HTML.
+ * Occurrence contexts are stored in ASCENDING final-position order (replay
+ * reverses them).
  */
 export function applyResolvedEdits(
     strippedHtml: string,
@@ -752,7 +796,7 @@ export function applyResolvedEdits(
         delta += op.replacement.length - (op.end - op.start);
     }
 
-    // Group ops back by edit to build undo drafts.
+    // Group ops back by edit so each edit's occurrences get their own steps.
     const opsByEdit = new Map<number, FlatOp[]>();
     for (const op of flat) {
         const list = opsByEdit.get(op.editIndex);
@@ -760,6 +804,11 @@ export function applyResolvedEdits(
         else opsByEdit.set(op.editIndex, [op]);
     }
 
+    // Build the undo drafts and one reverse-replay step per applied fragment.
+    // `fragStart` is the fragment's position in the fully-applied `html` and is
+    // used only as the replay-order sort key; each step's position in its own
+    // capture state is recomputed from the still-applied subset below.
+    const steps: UndoStep[] = [];
     const undoDrafts: BatchUndoDraft[] = resolved.map((edit) => {
         const draft: BatchUndoDraft = {
             index: edit.index,
@@ -768,27 +817,92 @@ export function applyResolvedEdits(
             undo_old_html: edit.undoOldHtml,
             undo_new_html: edit.undoNewHtml,
         };
+        if (edit.operation === 'rewrite') return draft; // rewrite undo restores the full body; no anchors
 
-        const ops = (opsByEdit.get(edit.index) ?? []).sort((a, b) => a.finalStart - b.finalStart);
+        // Ascending (final position, then original position) fixes the stored
+        // occurrence order and the slot each step writes into.
+        const ops = (opsByEdit.get(edit.index) ?? [])
+            .slice()
+            .sort((a, b) => a.finalStart - b.finalStart || a.start - b.start);
+        if (ops.length === 0) return draft;
+
+        const makeStep = (op: FlatOp, slot: number): UndoStep => ({
+            editIndex: edit.index,
+            start: op.start,
+            end: op.end,
+            replacementLength: op.replacement.length,
+            fragmentOffset: op.fragmentOffset,
+            fragLength: op.fragmentLength,
+            fragStart: op.finalStart + op.fragmentOffset,
+            undoOldHtml: edit.undoOldHtml,
+            draft,
+            slot,
+            reverted: false,
+            subsetFinalStart: 0,
+        });
 
         if (edit.operation === 'str_replace_all') {
-            draft.undo_occurrence_contexts = ops.map((op) => {
-                const fragStart = op.finalStart + op.fragmentOffset;
-                const fragEnd = fragStart + op.fragmentLength;
-                return {
-                    before: html.substring(Math.max(0, fragStart - UNDO_CONTEXT_LENGTH), fragStart),
-                    after: html.substring(fragEnd, fragEnd + UNDO_CONTEXT_LENGTH),
-                };
-            });
-        } else if (ops.length > 0 && edit.operation !== 'rewrite') {
-            const op = ops[0];
-            const fragStart = op.finalStart + op.fragmentOffset;
-            const fragEnd = fragStart + op.fragmentLength;
-            draft.undo_before_context = html.substring(Math.max(0, fragStart - UNDO_CONTEXT_LENGTH), fragStart);
-            draft.undo_after_context = html.substring(fragEnd, fragEnd + UNDO_CONTEXT_LENGTH);
+            // Placeholders keep the array ascending; the reverse walk fills each slot.
+            draft.undo_occurrence_contexts = ops.map(() => ({ before: '', after: '' }));
+            ops.forEach((op, slot) => steps.push(makeStep(op, slot)));
+        } else {
+            steps.push(makeStep(ops[0], -1));
         }
         return draft;
     });
+
+    // Replay order: record index DESC, then final-position DESC within a record,
+    // then original-position DESC to order occurrences that collapse to one
+    // final position (contiguous str_replace_all deletion seams).
+    steps.sort((a, b) =>
+        b.editIndex - a.editIndex
+        || b.fragStart - a.fragStart
+        || b.start - a.start);
+
+    // Ascending (start, editIndex) order, computed ONCE (both arrays hold the
+    // same step objects, just ordered differently). The replay loop below marks
+    // each step reverted as it's consumed, so at any point the still-applied
+    // subset is exactly "ascSteps minus reverted steps" — no per-step copy or
+    // re-sort is needed to re-derive it.
+    const ascSteps = steps.slice().sort((a, b) => a.start - b.start || a.editIndex - b.editIndex);
+
+    let sim = html;
+    for (let i = 0; i < steps.length; i++) {
+        const step = steps[i];
+        // The still-applied subset is this step plus every step LATER in replay
+        // order. `sim` here equals `apply(strippedHtml, subset)`, so recompute
+        // this step's fragment position by re-running the apply-side delta walk
+        // over that subset: scan `ascSteps` in ascending order, skip steps already
+        // reverted, and accumulate the length change of every still-applied op
+        // up to (not including) this step. Equal-offset ordering is therefore
+        // decided the same way apply decides it, never by an incremental shift.
+        let subsetDelta = 0;
+        for (const op of ascSteps) {
+            if (op === step) break;
+            if (op.reverted) continue;
+            subsetDelta += op.replacementLength - (op.end - op.start);
+        }
+        step.subsetFinalStart = step.start + subsetDelta;
+
+        const fragStart = step.subsetFinalStart + step.fragmentOffset;
+        const fragEnd = fragStart + step.fragLength;
+        const before = sim.substring(Math.max(0, fragStart - UNDO_CONTEXT_LENGTH), fragStart);
+        const after = sim.substring(fragEnd, fragEnd + UNDO_CONTEXT_LENGTH);
+        if (step.slot >= 0) {
+            step.draft.undo_occurrence_contexts![step.slot] = { before, after };
+        } else {
+            step.draft.undo_before_context = before;
+            step.draft.undo_after_context = after;
+        }
+        // Revert this step. `sim` becomes `apply(strippedHtml, subset \ {step})`,
+        // the capture state for the next step in replay order.
+        sim = sim.slice(0, fragStart) + step.undoOldHtml + sim.slice(fragEnd);
+        step.reverted = true;
+    }
+
+    if (sim !== strippedHtml) {
+        logger('applyResolvedEdits: reverse undo simulation did not reconstruct the pre-edit HTML; undo anchors may be imprecise', 1);
+    }
 
     return { newStrippedHtml: html, undoDrafts };
 }
@@ -800,17 +914,27 @@ export function applyResolvedEdits(
 /**
  * Refresh each undo draft's context anchors against the FINAL saved,
  * data-citation-item-stripped HTML (post-footer, post-ProseMirror-normalization).
- * Apply-time contexts are already precise when no editor is open; this only
- * updates them when the fragment is uniquely locatable in the final HTML, and
- * otherwise keeps the apply-time values. Tolerant of not-found by design — undo
- * carries its own fuzzy fallbacks.
+ *
+ * Same replay-order reverse simulation as `applyResolvedEdits`, but positions
+ * are FOUND (the final HTML may differ from the applied HTML by a footer and by
+ * ProseMirror normalization) rather than known. Batch undo replays records in
+ * DESCENDING index order against an evolving document, and within a
+ * str_replace_all record its occurrences in DESCENDING stored-slot order (the
+ * stored array is ascending; replay reverses it — see
+ * `react/utils/editNoteActions.ts`). Each step is located against the evolving
+ * state and reverted before the next, so every refreshed window reflects the
+ * document state that step is replayed against.
+ *
+ * Tolerant by design: on ANY location failure the apply-time anchors are kept
+ * for that step AND every remaining step (they are already replay-consistent
+ * modulo normalization, and undo carries its own fuzzy fallbacks), and the
+ * refresh stops — the evolving state is unreliable once a step cannot be
+ * reverted.
  *
  * `appliedHtml` is the stripped HTML `applyResolvedEdits` produced (the string
- * every draft's apply-time fragments/contexts were sliced from). When it is
- * byte-identical to `finalStrippedHtml`, every fragment already sits at the
- * same offsets it was captured from, so re-scanning would relocate each one
- * back to that same position (or leave it untouched when ambiguous) — the
- * refresh is skipped entirely in that case.
+ * every draft's apply-time anchors were sliced from). When it is byte-identical
+ * to `finalStrippedHtml`, the apply-time anchors already reflect the final
+ * state — the refresh is skipped entirely.
  */
 export function captureUndoContexts(
     finalStrippedHtml: string,
@@ -819,91 +943,125 @@ export function captureUndoContexts(
 ): void {
     if (appliedHtml !== undefined && appliedHtml === finalStrippedHtml) return;
 
-    const refreshDeletionSeam = (
+    // Locate a deletion seam in `state` from its stored contexts. The context
+    // immediately before the deletion identifies the seam even when a Beaver
+    // footer inserts HTML between that seam and the old after-context.
+    const locateSeam = (
+        state: string,
         context: { before: string; after: string },
-    ): { before: string; after: string } | null => {
-        const beforePositions = context.before
-            ? findAllOccurrences(finalStrippedHtml, context.before)
-            : [];
-        const afterPositions = context.after
-            ? findAllOccurrences(finalStrippedHtml, context.after)
-            : [];
+    ): number | null => {
+        const beforePositions = context.before ? findAllOccurrences(state, context.before) : [];
+        const afterPositions = context.after ? findAllOccurrences(state, context.after) : [];
 
-        let seam: number | null = null;
-
-        // The context immediately before the deletion identifies the original
-        // seam even when adding/updating a Beaver footer inserts new HTML
-        // between that seam and the old after-context.
         if (beforePositions.length === 1) {
-            seam = beforePositions[0] + context.before.length;
-        } else if (afterPositions.length === 1) {
+            return beforePositions[0] + context.before.length;
+        }
+        if (afterPositions.length === 1) {
             if (beforePositions.length > 1) {
                 // Pair the unique after-context with its nearest preceding
                 // before-context when the latter repeats elsewhere.
                 const preceding = beforePositions
                     .map((p) => p + context.before.length)
                     .filter((p) => p <= afterPositions[0]);
-                if (preceding.length > 0) seam = Math.max(...preceding);
+                if (preceding.length > 0) return Math.max(...preceding);
             } else if (!context.before) {
-                seam = afterPositions[0];
+                return afterPositions[0];
             }
         }
-
-        if (seam === null) return null;
-        return {
-            before: finalStrippedHtml.substring(
-                Math.max(0, seam - UNDO_CONTEXT_LENGTH),
-                seam,
-            ),
-            after: finalStrippedHtml.substring(
-                seam,
-                seam + UNDO_CONTEXT_LENGTH,
-            ),
-        };
+        return null;
     };
 
-    for (const draft of drafts) {
+    // Flatten drafts into replay-ordered steps: records in DESCENDING array
+    // order (matching [...undoRecords].reverse() at replay), and within a
+    // str_replace_all record its occurrences in DESCENDING slot order.
+    interface CaptureStep {
+        draft: BatchUndoDraft;
+        /** Ascending occurrence slot for str_replace_all, or -1 for single-fragment. */
+        slot: number;
+        undoOldHtml: string;
+        undoNewHtml: string;
+        /** Apply-time context, used for seam location. */
+        applyBefore: string;
+        applyAfter: string;
+        /** Occurrences of this record not yet reverted at this step (>= 1). */
+        remainingCount: number;
+    }
+
+    const steps: CaptureStep[] = [];
+    for (let d = drafts.length - 1; d >= 0; d--) {
+        const draft = drafts[d];
         if (draft.operation === 'rewrite') continue; // rewrite undo restores the full body
-
+        const undoOldHtml = draft.undo_old_html;
+        const undoNewHtml = draft.undo_new_html;
         if (draft.undo_occurrence_contexts !== undefined) {
-            if (!draft.undo_new_html) {
-                draft.undo_occurrence_contexts = draft.undo_occurrence_contexts.map(
-                    (context) => refreshDeletionSeam(context) ?? context,
-                );
-                continue;
-            }
-
-            const positions = findAllOccurrences(finalStrippedHtml, draft.undo_new_html);
-            if (positions.length === draft.undo_occurrence_contexts.length) {
-                draft.undo_occurrence_contexts = positions.map((p) => {
-                    const end = p + draft.undo_new_html.length;
-                    return {
-                        before: finalStrippedHtml.substring(Math.max(0, p - UNDO_CONTEXT_LENGTH), p),
-                        after: finalStrippedHtml.substring(end, end + UNDO_CONTEXT_LENGTH),
-                    };
+            const occs = draft.undo_occurrence_contexts;
+            for (let slot = occs.length - 1; slot >= 0; slot--) {
+                steps.push({
+                    draft,
+                    slot,
+                    undoOldHtml,
+                    undoNewHtml,
+                    applyBefore: occs[slot].before,
+                    applyAfter: occs[slot].after,
+                    remainingCount: slot + 1,
                 });
             }
-            continue;
-        }
-
-        const frag = draft.undo_new_html;
-        if (!frag) {
-            const refreshed = refreshDeletionSeam({
-                before: draft.undo_before_context ?? '',
-                after: draft.undo_after_context ?? '',
+        } else {
+            steps.push({
+                draft,
+                slot: -1,
+                undoOldHtml,
+                undoNewHtml,
+                applyBefore: draft.undo_before_context ?? '',
+                applyAfter: draft.undo_after_context ?? '',
+                remainingCount: 1,
             });
-            if (refreshed) {
-                draft.undo_before_context = refreshed.before;
-                draft.undo_after_context = refreshed.after;
+        }
+    }
+
+    let state = finalStrippedHtml;
+    for (const step of steps) {
+        let start: number;
+        let end: number;
+        if (!step.undoNewHtml) {
+            // Deletion seam: relocate via the stored contexts.
+            const seam = locateSeam(state, { before: step.applyBefore, after: step.applyAfter });
+            if (seam === null) {
+                logger('captureUndoContexts: could not relocate a deletion seam in the final note HTML; keeping apply-time anchors for the remaining undo steps', 1);
+                break;
             }
-            continue;
+            start = seam;
+            end = seam;
+        } else {
+            const positions = findAllOccurrences(state, step.undoNewHtml);
+            if (step.slot >= 0) {
+                // str_replace_all occurrence: the applied fragment must appear
+                // exactly as many times as this record has occurrences not yet
+                // reverted; this occurrence is the last (highest) of them.
+                if (positions.length !== step.remainingCount) {
+                    logger('captureUndoContexts: str_replace_all occurrence count drifted in the final note HTML; keeping apply-time anchors for the remaining undo steps', 1);
+                    break;
+                }
+                start = positions[positions.length - 1];
+            } else {
+                if (positions.length !== 1) {
+                    logger('captureUndoContexts: applied fragment not uniquely locatable in the final note HTML; keeping apply-time anchors for the remaining undo steps', 1);
+                    break;
+                }
+                start = positions[0];
+            }
+            end = start + step.undoNewHtml.length;
         }
 
-        const positions = findAllOccurrences(finalStrippedHtml, frag);
-        if (positions.length !== 1) continue; // ambiguous/missing: keep apply-time contexts
-        const start = positions[0];
-        const end = start + frag.length;
-        draft.undo_before_context = finalStrippedHtml.substring(Math.max(0, start - UNDO_CONTEXT_LENGTH), start);
-        draft.undo_after_context = finalStrippedHtml.substring(end, end + UNDO_CONTEXT_LENGTH);
+        const before = state.substring(Math.max(0, start - UNDO_CONTEXT_LENGTH), start);
+        const after = state.substring(end, end + UNDO_CONTEXT_LENGTH);
+        if (step.slot >= 0) {
+            step.draft.undo_occurrence_contexts![step.slot] = { before, after };
+        } else {
+            step.draft.undo_before_context = before;
+            step.draft.undo_after_context = after;
+        }
+        // Revert this step so the next locates against the evolving state.
+        state = state.slice(0, start) + step.undoOldHtml + state.slice(end);
     }
 }
