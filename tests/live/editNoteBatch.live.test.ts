@@ -16,17 +16,24 @@
  *   4. Undo via the batch's per-edit undo records after a manual drift edit —
  *      both batch edits revert, the manual edit survives.
  *   5. Single-rewrite batch: apply + undo restores the original body.
+ *   6. Replay-order regression matrix: whole-batch undo through
+ *      `/beaver/test/note-undo` for batches that combine a deletion with a
+ *      nearby higher-index sibling edit, across distance, index order,
+ *      multiple deletions, a contiguous str_replace_all deletion, and
+ *      double-undo idempotency.
  *
- * Undo-path note: the production batch undo (`undoEditNoteBatchAction`) is
- * only dispatched from `/beaver/test/undo-action`, which requires a real
- * thread action produced by a live agent run (real credits, nondeterministic).
- * `/beaver/test/note-undo` is hardcoded to the v1 `undoEditNoteAction`. The
- * batch's per-edit undo RECORDS carry exactly the v1 undo field shape
- * (undo_old_html / undo_new_html / contexts), so these tests replay them
- * record-by-record in reverse request order — the same order the batch undo
- * uses — through the v1 undo machinery. That pins the drift-tolerance
- * property of the records themselves (the reason batch undo is per-edit);
- * the batch replay loop + single-save behavior is covered by unit tests.
+ * Undo-path note: `/beaver/test/note-undo` dispatches
+ * `undoEditNoteOrBatchAction`, which routes to the production batch undo
+ * (`undoEditNoteBatchAction`) when the posted action's `action_type` is
+ * `edit_note_batch`, or to the v1 single-edit undo otherwise. Section 6 below
+ * exercises the batch path directly: it posts the whole batch action
+ * (`proposed_data` = the executed `action_data`, `result_data` = the
+ * execute response's `result_data`, which carries the per-edit undo
+ * records) and lets `undoEditNoteBatchAction` replay those records itself.
+ * Sections 4 and 5 instead replay the per-edit undo records one at a time
+ * through the v1 undo machinery (`undoBatchViaRecords`) — that pins the
+ * drift-tolerance property of the records themselves, independent of the
+ * batch replay loop.
  *
  * Run: `ZOTERO_HTTP_PORT=<port> npx vitest run --config vitest.live.config.ts tests/live/editNoteBatch.live.test.ts`
  */
@@ -183,6 +190,58 @@ function countOccurrences(haystack: string, needle: string): number {
     let pos = 0;
     while ((pos = haystack.indexOf(needle, pos)) !== -1) { count++; pos += needle.length; }
     return count;
+}
+
+/**
+ * Collapses whitespace runs between adjacent tags (e.g. block separators the
+ * note editor's serializer inserts on save) so post-undo HTML can be compared
+ * against pre-edit fragments without being sensitive to that formatting.
+ */
+function collapseInterTagWhitespace(html: string): string {
+    return html.replace(/>\s+</g, '><');
+}
+
+/**
+ * Validate a batch action and apply it via the returned
+ * `normalized_action_data` — required for insert_after/insert_before edits,
+ * whose `new_string` is only merged with `old_string` by validate; executing
+ * the raw unmerged action produces a different result.
+ */
+async function applyBatch(
+    actionData: BatchActionData,
+): Promise<{ normalized: BatchActionData; exec: BatchExecuteResponse }> {
+    const validation = await validateBatch(actionData);
+    expect(validation.valid, validation.error ?? undefined).toBe(true);
+    const normalized = validation.normalized_action_data ?? actionData;
+    const exec = await executeBatch(normalized, { timeout: 20000 });
+    expect(exec.success, exec.error ?? undefined).toBe(true);
+    return { normalized, exec };
+}
+
+/**
+ * Undo an applied batch through the production batch-undo path
+ * (`undoEditNoteOrBatchAction` → `undoEditNoteBatchAction`), dispatched by
+ * `/beaver/test/note-undo` when the posted action's `action_type` is
+ * `edit_note_batch`.
+ */
+async function undoBatch(
+    normalized: BatchActionData,
+    exec: BatchExecuteResponse,
+): Promise<{ ok: boolean; error?: string }> {
+    return undoEditNote({
+        action_type: 'edit_note_batch',
+        proposed_data: normalized,
+        result_data: exec.result_data,
+        status: 'applied',
+    });
+}
+
+/** Builds a run of filler text at least `minChars` long, then truncates to exactly `minChars`. */
+function fillerText(minChars: number): string {
+    const words = 'filler padding buffer spacer margin gap distance words repeated to reach the requested length ';
+    let text = '';
+    while (text.length < minChars) text += words;
+    return text.slice(0, minChars);
 }
 
 // ---------------------------------------------------------------------------
@@ -477,4 +536,251 @@ describe('edit_note_batch single-rewrite', () => {
         expect(after.saved_html).toContain('Charlie section about gradient flow.');
         expect(after.saved_html).not.toContain('Wholesale batch replacement body.');
     }, 45000);
+});
+
+// ---------------------------------------------------------------------------
+// 6. Undo replay-order regression matrix
+// ---------------------------------------------------------------------------
+//
+// Batch undo replays per-edit undo records in DESCENDING index order against
+// one evolving document (see `undoEditNoteBatchAction`). A deletion record
+// (`str_replace` with an empty `new_string`) carries no applied fragment to
+// search for, so it is located purely from its stored before/after context —
+// and that context must describe the document state at the exact point in
+// replay where the deletion record is reverted, not the fully-applied
+// snapshot the batch produced. These tests pin that property across index
+// order, distance between edits, multiple deletions, a contiguous
+// str_replace_all deletion, and double-undo idempotency, by posting the whole
+// batch action straight to `/beaver/test/note-undo` (see file header).
+
+describe('edit_note_batch undo — replay-order regression matrix', () => {
+    beforeEach((ctx) => skipIfNoZotero(ctx, zoteroAvailable));
+
+    const OVERVIEW_NOTE_HTML =
+        '<h2>Overview</h2>'
+        + '<p>The programme ran for three years across four regions.</p>'
+        + '<p>An interim review was published in year two.</p>'
+        + '<h2>Key points</h2><ul>'
+        + '<li>Recruitment exceeded the original target.</li>'
+        + '<li>Retention varied by region.</li>'
+        + '<li>Costs stayed within budget.</li></ul>';
+    const DELETE_FRAGMENT = '<p>An interim review was published in year two.</p>';
+    const INSERTED_LI_TEXT = 'Data sharing agreements were signed.';
+
+    it('restores a deletion whose after-context region was edited by a higher-index insertion', async () => {
+        const ref = await seedNote(OVERVIEW_NOTE_HTML);
+        const actionData: BatchActionData = {
+            library_id: ref.library_id,
+            zotero_key: ref.zotero_key,
+            edits: [
+                { index: 0, operation: 'str_replace', old_string: DELETE_FRAGMENT, new_string: '' },
+                { index: 1, operation: 'insert_after', old_string: '<li>Costs stayed within budget.</li>', new_string: `<li>${INSERTED_LI_TEXT}</li>` },
+            ],
+        };
+
+        const { normalized, exec } = await applyBatch(actionData);
+        const mid = await readNote(ref.library_id, ref.zotero_key);
+        expect(mid.saved_html).not.toContain('An interim review was published in year two.');
+        expect(mid.saved_html).toContain(INSERTED_LI_TEXT);
+
+        const undo = await undoBatch(normalized, exec);
+        expect(undo.ok, undo.error ?? '').toBe(true);
+
+        const after = collapseInterTagWhitespace((await readNote(ref.library_id, ref.zotero_key)).saved_html);
+        expect(after).toContain(DELETE_FRAGMENT);
+        expect(after).not.toContain(INSERTED_LI_TEXT);
+    }, 30000);
+
+    it('restores identically when the insertion is given the lower index', async () => {
+        const ref = await seedNote(OVERVIEW_NOTE_HTML);
+        const actionData: BatchActionData = {
+            library_id: ref.library_id,
+            zotero_key: ref.zotero_key,
+            edits: [
+                { index: 0, operation: 'insert_after', old_string: '<li>Costs stayed within budget.</li>', new_string: `<li>${INSERTED_LI_TEXT}</li>` },
+                { index: 1, operation: 'str_replace', old_string: DELETE_FRAGMENT, new_string: '' },
+            ],
+        };
+
+        const { normalized, exec } = await applyBatch(actionData);
+        const undo = await undoBatch(normalized, exec);
+        expect(undo.ok, undo.error ?? '').toBe(true);
+
+        const after = collapseInterTagWhitespace((await readNote(ref.library_id, ref.zotero_key)).saved_html);
+        expect(after).toContain(DELETE_FRAGMENT);
+        expect(after).not.toContain(INSERTED_LI_TEXT);
+    }, 30000);
+
+    function buildDistanceCase(gapChars: number) {
+        const siblingOld = 'Retention varied by region across every measured site.';
+        const siblingNew = 'RETENTION VARIED ACROSS EVERY MEASURED SITE.';
+        const html =
+            '<h2>Overview</h2>'
+            + '<p>The programme ran for three years across four regions.</p>'
+            + DELETE_FRAGMENT
+            + `<p>${fillerText(gapChars)}</p>`
+            + `<p>${siblingOld}</p>`;
+        return { html, siblingOld, siblingNew };
+    }
+
+    it('restores a deletion whose higher-index str_replace sibling sits ~50 chars after the seam', async () => {
+        const { html, siblingOld, siblingNew } = buildDistanceCase(40);
+        const ref = await seedNote(html);
+        const actionData: BatchActionData = {
+            library_id: ref.library_id,
+            zotero_key: ref.zotero_key,
+            edits: [
+                { index: 0, operation: 'str_replace', old_string: DELETE_FRAGMENT, new_string: '' },
+                { index: 1, operation: 'str_replace', old_string: siblingOld, new_string: siblingNew },
+            ],
+        };
+
+        const { normalized, exec } = await applyBatch(actionData);
+        const undo = await undoBatch(normalized, exec);
+        expect(undo.ok, undo.error ?? '').toBe(true);
+
+        const after = collapseInterTagWhitespace((await readNote(ref.library_id, ref.zotero_key)).saved_html);
+        expect(after).toContain(DELETE_FRAGMENT);
+        expect(after).toContain(siblingOld);
+        expect(after).not.toContain(siblingNew);
+    }, 30000);
+
+    it('restores a deletion whose higher-index str_replace sibling sits ~400 chars after the seam', async () => {
+        const { html, siblingOld, siblingNew } = buildDistanceCase(390);
+        const ref = await seedNote(html);
+        const actionData: BatchActionData = {
+            library_id: ref.library_id,
+            zotero_key: ref.zotero_key,
+            edits: [
+                { index: 0, operation: 'str_replace', old_string: DELETE_FRAGMENT, new_string: '' },
+                { index: 1, operation: 'str_replace', old_string: siblingOld, new_string: siblingNew },
+            ],
+        };
+
+        const { normalized, exec } = await applyBatch(actionData);
+        const undo = await undoBatch(normalized, exec);
+        expect(undo.ok, undo.error ?? '').toBe(true);
+
+        const after = collapseInterTagWhitespace((await readNote(ref.library_id, ref.zotero_key)).saved_html);
+        expect(after).toContain(DELETE_FRAGMENT);
+        expect(after).toContain(siblingOld);
+        expect(after).not.toContain(siblingNew);
+    }, 30000);
+
+    it('restores two <p> deletions applied within the same 200-char window', async () => {
+        const firstFragment = '<p>First removable paragraph included here for the test.</p>';
+        const secondFragment = '<p>Second removable paragraph included immediately after it.</p>';
+        const html =
+            '<h2>Overview</h2>'
+            + '<p>The programme ran for three years across four regions.</p>'
+            + firstFragment
+            + secondFragment
+            + '<p>Trailing paragraph that remains in the note throughout.</p>';
+
+        const ref = await seedNote(html);
+        const actionData: BatchActionData = {
+            library_id: ref.library_id,
+            zotero_key: ref.zotero_key,
+            edits: [
+                { index: 0, operation: 'str_replace', old_string: firstFragment, new_string: '' },
+                { index: 1, operation: 'str_replace', old_string: secondFragment, new_string: '' },
+            ],
+        };
+
+        const { normalized, exec } = await applyBatch(actionData);
+        const undo = await undoBatch(normalized, exec);
+        expect(undo.ok, undo.error ?? '').toBe(true);
+
+        const after = collapseInterTagWhitespace((await readNote(ref.library_id, ref.zotero_key)).saved_html);
+        expect(after).toContain(firstFragment);
+        expect(after).toContain(secondFragment);
+    }, 30000);
+
+    it('restores all occurrences of a contiguous str_replace_all deletion', async () => {
+        const html = '<p>Begin redacted redacted redacted end of sentence.</p>';
+        const ref = await seedNote(html);
+        const actionData: BatchActionData = {
+            library_id: ref.library_id,
+            zotero_key: ref.zotero_key,
+            edits: [
+                { index: 0, operation: 'str_replace_all', old_string: 'redacted ', new_string: '' },
+            ],
+        };
+
+        const { normalized, exec } = await applyBatch(actionData);
+        const mid = await readNote(ref.library_id, ref.zotero_key);
+        expect(mid.saved_html).not.toContain('redacted');
+        expect(mid.saved_html).toContain('Begin end of sentence.');
+
+        const undo = await undoBatch(normalized, exec);
+        expect(undo.ok, undo.error ?? '').toBe(true);
+
+        const after = collapseInterTagWhitespace((await readNote(ref.library_id, ref.zotero_key)).saved_html);
+        expect(countOccurrences(after, 'redacted')).toBe(3);
+        expect(after).toContain('Begin redacted redacted redacted end of sentence.');
+    }, 30000);
+
+    it('undoing the same batch twice is idempotent — the second call no-ops without further changes', async () => {
+        const deleteFragment = '<p>This paragraph will be deleted for the idempotency test scenario.</p>';
+        const html =
+            '<h2>Overview</h2>'
+            + '<p>The programme delivers services across several sites nationally today.</p>'
+            + deleteFragment
+            + '<p>Investment in the region grew as the region matured and the region expanded its programs.</p>';
+
+        const ref = await seedNote(html);
+        const actionData: BatchActionData = {
+            library_id: ref.library_id,
+            zotero_key: ref.zotero_key,
+            edits: [
+                { index: 0, operation: 'str_replace', old_string: deleteFragment, new_string: '' },
+                { index: 1, operation: 'str_replace_all', old_string: 'region', new_string: 'district' },
+            ],
+        };
+
+        const { normalized, exec } = await applyBatch(actionData);
+
+        const undo1 = await undoBatch(normalized, exec);
+        expect(undo1.ok, undo1.error ?? '').toBe(true);
+        const afterFirst = collapseInterTagWhitespace((await readNote(ref.library_id, ref.zotero_key)).saved_html);
+        expect(afterFirst).toContain(deleteFragment);
+        expect(countOccurrences(afterFirst, 'region')).toBe(3);
+        expect(afterFirst).not.toContain('district');
+
+        const undo2 = await undoBatch(normalized, exec);
+        expect(undo2.ok, undo2.error ?? '').toBe(true);
+        const afterSecond = collapseInterTagWhitespace((await readNote(ref.library_id, ref.zotero_key)).saved_html);
+        expect(afterSecond).toBe(afterFirst);
+    }, 45000);
+
+    it('restores a deletion whose lower-offset before-context region was edited by a higher-index sibling', async () => {
+        const siblingOld = 'Sibling target sentence that sits well before the deletion point.';
+        const siblingNew = 'SIBLING TARGET SENTENCE UPDATED BEFORE THE DELETION POINT.';
+        const deleteFragment = '<p>Paragraph slated for deletion in this scenario entirely.</p>';
+        const html =
+            '<h2>Overview</h2>'
+            + `<p>${siblingOld}</p>`
+            + `<p>${fillerText(150)}</p>`
+            + deleteFragment
+            + '<p>Trailing paragraph that remains untouched throughout.</p>';
+
+        const ref = await seedNote(html);
+        const actionData: BatchActionData = {
+            library_id: ref.library_id,
+            zotero_key: ref.zotero_key,
+            edits: [
+                { index: 0, operation: 'str_replace', old_string: deleteFragment, new_string: '' },
+                { index: 1, operation: 'str_replace', old_string: siblingOld, new_string: siblingNew },
+            ],
+        };
+
+        const { normalized, exec } = await applyBatch(actionData);
+        const undo = await undoBatch(normalized, exec);
+        expect(undo.ok, undo.error ?? '').toBe(true);
+
+        const after = collapseInterTagWhitespace((await readNote(ref.library_id, ref.zotero_key)).saved_html);
+        expect(after).toContain(deleteFragment);
+        expect(after).toContain(siblingOld);
+        expect(after).not.toContain(siblingNew);
+    }, 30000);
 });

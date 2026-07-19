@@ -50,6 +50,7 @@ import {
     findAllOccurrences,
     buildAmbiguousMatchError,
     type BatchEditSpec,
+    type BatchUndoDraft,
     type ResolveBatchContext,
     type ResolvedBatchEdit,
 } from '../../../src/utils/editNoteBatchCore';
@@ -57,6 +58,7 @@ import {
     addOrUpdateEditFooter,
     getBeaverFooterAppendPoint,
 } from '../../../src/utils/noteEditFooter';
+import { logger } from '../../../src/utils/logger';
 import type { EditNoteOperation } from '../../../react/types/agentActions/editNote';
 
 // =============================================================================
@@ -111,6 +113,85 @@ function resolveOrThrow(ctx: ResolveBatchContext, specs: BatchEditSpec[]): Resol
     const { resolved, failures } = resolveBatchEdits(ctx, specs);
     expect(failures).toEqual([]);
     return resolved;
+}
+
+/**
+ * Locate one undo step's applied region in the CURRENT evolving HTML from its
+ * stored contexts. Deletion seam (`undoNewHtml === ''`): before+after (S1),
+ * else a unique before-end (S2), else after-start (S3). Non-deletion: the
+ * applied fragment bracketed by its before/after windows. At replay the HTML
+ * for each step equals that step's capture state, so the region is exact.
+ */
+function locateReplayRegion(
+    html: string,
+    undoNewHtml: string,
+    before: string,
+    after: string,
+): { start: number; end: number } | null {
+    if (undoNewHtml === '') {
+        const seamIdx = html.indexOf(before + after);
+        if (seamIdx !== -1) {
+            const p = seamIdx + before.length;
+            return { start: p, end: p };
+        }
+        if (before) {
+            const bIdx = html.indexOf(before);
+            if (bIdx !== -1 && html.indexOf(before, bIdx + 1) === -1) {
+                const p = bIdx + before.length;
+                return { start: p, end: p };
+            }
+        }
+        if (after) {
+            const aIdx = html.indexOf(after);
+            if (aIdx !== -1) return { start: aIdx, end: aIdx };
+        }
+        return null;
+    }
+    const bracketed = html.indexOf(before + undoNewHtml + after);
+    if (bracketed !== -1) {
+        const s = bracketed + before.length;
+        return { start: s, end: s + undoNewHtml.length };
+    }
+    const prefixed = html.indexOf(before + undoNewHtml);
+    if (prefixed !== -1) {
+        const s = prefixed + before.length;
+        return { start: s, end: s + undoNewHtml.length };
+    }
+    const positions = findAllOccurrences(html, undoNewHtml);
+    if (positions.length === 1) return { start: positions[0], end: positions[0] + undoNewHtml.length };
+    return null;
+}
+
+/**
+ * Faithful in-test batch-undo replay: records DESCENDING by index, and within a
+ * str_replace_all record its occurrences DESCENDING by stored slot. Each step is
+ * located in the evolving HTML via its stored contexts and its applied fragment
+ * is spliced back to `undo_old_html`. Proves the captured anchors are internally
+ * consistent: replaying them reconstructs the pre-edit HTML in the correct order.
+ */
+function replayBatchUndo(appliedHtml: string, drafts: BatchUndoDraft[]): string {
+    let html = appliedHtml;
+    const ordered = [...drafts].sort((a, b) => b.index - a.index);
+    for (const draft of ordered) {
+        if (draft.operation === 'rewrite') {
+            html = draft.undo_old_html;
+            continue;
+        }
+        const revert = (before: string, after: string) => {
+            const region = locateReplayRegion(html, draft.undo_new_html, before, after);
+            if (!region) throw new Error(`replay: step for edit ${draft.index} not locatable`);
+            html = html.slice(0, region.start) + draft.undo_old_html + html.slice(region.end);
+        };
+        if (draft.undo_occurrence_contexts) {
+            for (let slot = draft.undo_occurrence_contexts.length - 1; slot >= 0; slot--) {
+                const ctx = draft.undo_occurrence_contexts[slot];
+                revert(ctx.before, ctx.after);
+            }
+        } else {
+            revert(draft.undo_before_context ?? '', draft.undo_after_context ?? '');
+        }
+    }
+    return html;
 }
 
 // =============================================================================
@@ -392,8 +473,316 @@ describe('undo drafts', () => {
         expect(undoDrafts[0].undo_old_html).toBe('foo');
         expect(undoDrafts[0].undo_new_html).toBe('BAR');
         expect(undoDrafts[0].undo_occurrence_contexts).toHaveLength(2);
-        expect(undoDrafts[0].undo_occurrence_contexts![0]).toEqual({ before: 'x ', after: ' y BAR z' });
+        // Occurrence contexts are captured by reverse-replay simulation: the
+        // higher-position occurrence (slot 1) replays first, so the lower
+        // occurrence's after-context (slot 0) already reflects the higher one
+        // reverted to 'foo' — not the applied 'BAR'.
+        expect(undoDrafts[0].undo_occurrence_contexts![0]).toEqual({ before: 'x ', after: ' y foo z' });
         expect(undoDrafts[0].undo_occurrence_contexts![1]).toEqual({ before: 'x BAR y ', after: ' z' });
+    });
+});
+
+// =============================================================================
+// Replay-consistent undo anchors (reverse-replay simulation)
+// =============================================================================
+//
+// Batch undo replays records in DESCENDING index order against an evolving
+// document (within a str_replace_all record, occurrences DESCENDING by final
+// position). Each undo step's before/after windows must reflect the document
+// state it is located against at replay time: steps EARLIER in replay order
+// already reverted, this step + LATER steps still applied.
+
+describe('undo anchors reflect the evolving replay state', () => {
+    it('a deletion with a HIGHER-index sibling after the seam captures the sibling\'s OLD text', () => {
+        // edit 1 (higher index) replaces the paragraph after the deletion seam,
+        // so it reverts BEFORE the deletion — the deletion's after-context must
+        // quote the sibling's original text, not its applied replacement.
+        const html = '<p>Remove this line.</p><p>Original sentence.</p>';
+        const resolved = resolveOrThrow(makeCtx(html), [
+            spec(0, 'str_replace', '<p>Remove this line.</p>', ''),
+            spec(1, 'str_replace', '<p>Original sentence.</p>', '<p>Replaced sentence.</p>'),
+        ]);
+        const { undoDrafts } = applyResolvedEdits(html, resolved);
+        const deletion = undoDrafts.find((d) => d.index === 0)!;
+        expect(deletion.undo_after_context).toContain('Original sentence.');
+        expect(deletion.undo_after_context).not.toContain('Replaced');
+    });
+
+    it('a deletion with a LOWER-index sibling after the seam captures the sibling\'s NEW text', () => {
+        // The deletion (higher index) reverts FIRST, while the lower-index
+        // sibling is still applied — the deletion's after-context may quote the
+        // sibling's applied replacement.
+        const html = '<p>Remove this.</p><p>Target para.</p>';
+        const resolved = resolveOrThrow(makeCtx(html), [
+            spec(0, 'str_replace', '<p>Target para.</p>', '<p>Changed para.</p>'),
+            spec(1, 'str_replace', '<p>Remove this.</p>', ''),
+        ]);
+        const { undoDrafts } = applyResolvedEdits(html, resolved);
+        const deletion = undoDrafts.find((d) => d.index === 1)!;
+        expect(deletion.undo_after_context).toContain('Changed para.');
+        expect(deletion.undo_after_context).not.toContain('Target');
+    });
+
+    it('two deletions near each other each reflect the other\'s replay state', () => {
+        const html = '<p>First del.</p><p>Second del.</p><p>Keep.</p>';
+        const resolved = resolveOrThrow(makeCtx(html), [
+            spec(0, 'str_replace', '<p>First del.</p>', ''),
+            spec(1, 'str_replace', '<p>Second del.</p>', ''),
+        ]);
+        const { undoDrafts } = applyResolvedEdits(html, resolved);
+        const first = undoDrafts.find((d) => d.index === 0)!;
+        const second = undoDrafts.find((d) => d.index === 1)!;
+        // edit 1 reverts first (both deletions still applied) → its after-context
+        // is the trailing kept content only.
+        expect(second.undo_after_context).toContain('Keep.');
+        expect(second.undo_after_context).not.toContain('Second del.');
+        // edit 0 reverts second (edit 1 already reinserted) → its after-context
+        // quotes edit 1's restored text.
+        expect(first.undo_after_context).toContain('Second del.');
+    });
+
+    it('str_replace_all deletion over 3 CONTIGUOUS occurrences yields pairwise-distinct contexts', () => {
+        const html = '<div><p>x</p><p>x</p><p>x</p></div>';
+        const resolved = resolveOrThrow(makeCtx(html), [
+            spec(0, 'str_replace_all', '<p>x</p>', ''),
+        ]);
+        const { undoDrafts } = applyResolvedEdits(html, resolved);
+        const contexts = undoDrafts[0].undo_occurrence_contexts!;
+        expect(contexts).toHaveLength(3);
+        const keys = contexts.map((c) => `${c.before}||${c.after}`);
+        // Distinct contexts are what makes contiguous seams individually
+        // locatable when replayed one at a time.
+        expect(new Set(keys).size).toBe(3);
+    });
+
+    it('reverse simulation reconstructs the pre-edit HTML for varied edit shapes', () => {
+        const loggerMock = vi.mocked(logger);
+        const cases: Array<{ html: string; specs: BatchEditSpec[] }> = [
+            {
+                html: 'the quick brown fox jumps over',
+                specs: [
+                    spec(0, 'str_replace', 'quick', 'slow'),
+                    spec(1, 'str_replace', 'fox', 'cat'),
+                ],
+            },
+            {
+                html: '<p>drop me</p><p>keep me</p>',
+                specs: [
+                    spec(0, 'str_replace', '<p>drop me</p>', ''),
+                    spec(1, 'insert_after', '<p>keep me</p>', '<p>added</p>'),
+                ],
+            },
+            {
+                html: '<div data-schema-version="9"><p>Alpha.</p></div>',
+                specs: [
+                    spec(0, 'str_replace', 'Alpha.', 'Beta.'),
+                    spec(1, 'append', '', '<p>Appended.</p>'),
+                ],
+            },
+            {
+                html: 'a foo b foo c foo d',
+                specs: [
+                    spec(0, 'str_replace_all', 'foo', 'BAR'),
+                    spec(1, 'str_replace', 'd', 'D'),
+                ],
+            },
+        ];
+        for (const { html, specs } of cases) {
+            const resolved = resolveOrThrow(makeCtx(html), specs);
+            loggerMock.mockClear();
+            applyResolvedEdits(html, resolved);
+            // The end-of-simulation mismatch warning is the only path that logs;
+            // its absence asserts the reverse simulation rebuilt `strippedHtml`.
+            expect(loggerMock).not.toHaveBeenCalled();
+        }
+    });
+});
+
+// =============================================================================
+// Coincident final offsets (collapsed seams / abutting fragments)
+// =============================================================================
+//
+// When two steps land at the SAME final offset the capture must still place each
+// on the correct side of the boundary. Each simulated state equals
+// apply(strippedHtml, still-applied subset), so equal-offset ordering is exact
+// by construction and replaying the captured anchors reconstructs the original.
+
+describe('coincident-offset undo anchors', () => {
+    const loggerMock = vi.mocked(logger);
+
+    it('shape (a): two adjacent deletions with index order INVERTED vs document order', () => {
+        // Document order: LEFT block then RIGHT block (adjacent). Index order is
+        // inverted — edit 0 targets the document-later span, edit 1 the earlier
+        // one — so both deletion seams collapse to one final offset.
+        const html = '<p>keep</p><p>LEFT block</p><p>RIGHT block</p><p>tail</p>';
+        const resolved = resolveOrThrow(makeCtx(html), [
+            spec(0, 'str_replace', '<p>RIGHT block</p>', ''),
+            spec(1, 'str_replace', '<p>LEFT block</p>', ''),
+        ]);
+        loggerMock.mockClear();
+        const { newStrippedHtml, undoDrafts } = applyResolvedEdits(html, resolved);
+        expect(newStrippedHtml).toBe('<p>keep</p><p>tail</p>');
+        // End-state equals the input: no mismatch warning.
+        expect(loggerMock).not.toHaveBeenCalled();
+        // Replaying the anchors reconstructs the ORIGINAL order (LEFT before RIGHT).
+        expect(replayBatchUndo(newStrippedHtml, undoDrafts)).toBe(html);
+    });
+
+    it('shape (a) favorable: same two adjacent deletions with index order MATCHING document order', () => {
+        const html = '<p>keep</p><p>LEFT block</p><p>RIGHT block</p><p>tail</p>';
+        const resolved = resolveOrThrow(makeCtx(html), [
+            spec(0, 'str_replace', '<p>LEFT block</p>', ''),
+            spec(1, 'str_replace', '<p>RIGHT block</p>', ''),
+        ]);
+        loggerMock.mockClear();
+        const { newStrippedHtml, undoDrafts } = applyResolvedEdits(html, resolved);
+        expect(newStrippedHtml).toBe('<p>keep</p><p>tail</p>');
+        expect(loggerMock).not.toHaveBeenCalled();
+        expect(replayBatchUndo(newStrippedHtml, undoDrafts)).toBe(html);
+    });
+
+    it('shape (b): lower-index insert_after abutting a higher-index deletion of the following text', () => {
+        // The inserted fragment lands immediately before the deletion seam (they
+        // abut at a shared boundary). The deletion (higher index) reverts first.
+        const html = '<p>intro</p><p>ANCHOR.</p><p>Delete me.</p><p>tail</p>';
+        const resolved = resolveOrThrow(makeCtx(html), [
+            spec(0, 'insert_after', '<p>ANCHOR.</p>', '<p>Added.</p>'),
+            spec(1, 'str_replace', '<p>Delete me.</p>', ''),
+        ]);
+        loggerMock.mockClear();
+        const { newStrippedHtml, undoDrafts } = applyResolvedEdits(html, resolved);
+        expect(newStrippedHtml).toBe('<p>intro</p><p>ANCHOR.</p><p>Added.</p><p>tail</p>');
+        expect(loggerMock).not.toHaveBeenCalled();
+        expect(replayBatchUndo(newStrippedHtml, undoDrafts)).toBe(html);
+    });
+
+    it('shape (b) favorable: higher-index insert_after abutting a lower-index deletion of the following text', () => {
+        const html = '<p>intro</p><p>ANCHOR.</p><p>Delete me.</p><p>tail</p>';
+        const resolved = resolveOrThrow(makeCtx(html), [
+            spec(0, 'str_replace', '<p>Delete me.</p>', ''),
+            spec(1, 'insert_after', '<p>ANCHOR.</p>', '<p>Added.</p>'),
+        ]);
+        loggerMock.mockClear();
+        const { newStrippedHtml, undoDrafts } = applyResolvedEdits(html, resolved);
+        expect(newStrippedHtml).toBe('<p>intro</p><p>ANCHOR.</p><p>Added.</p><p>tail</p>');
+        expect(loggerMock).not.toHaveBeenCalled();
+        expect(replayBatchUndo(newStrippedHtml, undoDrafts)).toBe(html);
+    });
+
+    it('shape (b) collapse: lower-index append whose fragment starts exactly at a higher-index end-deletion seam', () => {
+        // The deleted block ends at the append point, so after deletion the
+        // append fragment start and the deletion seam collapse to one offset.
+        // The deletion (higher index) reverts first; its seam must be captured on
+        // the LEFT of the appended fragment for the replay to reconstruct order.
+        const html = '<div><p>keep</p><ul><li>a</li><li>b</li></ul></div>';
+        const resolved = resolveOrThrow(makeCtx(html), [
+            spec(0, 'append', '', '<p>appended</p>'),
+            spec(1, 'str_replace', '<ul><li>a</li><li>b</li></ul>', ''),
+        ]);
+        loggerMock.mockClear();
+        const { newStrippedHtml, undoDrafts } = applyResolvedEdits(html, resolved);
+        expect(newStrippedHtml).toBe('<div><p>keep</p><p>appended</p></div>');
+        expect(loggerMock).not.toHaveBeenCalled();
+        expect(replayBatchUndo(newStrippedHtml, undoDrafts)).toBe(html);
+    });
+
+    it('shape (b) collapse favorable: higher-index append with a lower-index end-deletion', () => {
+        const html = '<div><p>keep</p><ul><li>a</li><li>b</li></ul></div>';
+        const resolved = resolveOrThrow(makeCtx(html), [
+            spec(0, 'str_replace', '<ul><li>a</li><li>b</li></ul>', ''),
+            spec(1, 'append', '', '<p>appended</p>'),
+        ]);
+        loggerMock.mockClear();
+        const { newStrippedHtml, undoDrafts } = applyResolvedEdits(html, resolved);
+        expect(newStrippedHtml).toBe('<div><p>keep</p><p>appended</p></div>');
+        expect(loggerMock).not.toHaveBeenCalled();
+        expect(replayBatchUndo(newStrippedHtml, undoDrafts)).toBe(html);
+    });
+
+    it('reconstructs the input for a deterministic battery of adjacent/coincident/contiguous shapes', () => {
+        // One base document; a fixed set of hand-built non-overlapping edit
+        // combinations covering deletions, inserts, replaces and replace_all at
+        // adjacent, collapsed and contiguous boundaries. Every combination's
+        // reverse simulation must rebuild the input (no mismatch warning) and its
+        // anchors must replay back to the original.
+        const BASE = '<div data-schema-version="9">'
+            + '<h2>Heading</h2>'
+            + '<p>alpha one</p>'
+            + '<p>beta two</p>'
+            + '<p>gamma three</p>'
+            + '<p>delta four</p>'
+            + '<ul><li>x</li><li>x</li><li>x</li></ul>'
+            + '</div>';
+
+        const combos: BatchEditSpec[][] = [
+            // 1. adjacent deletions, inverted index order
+            [
+                spec(0, 'str_replace', '<p>gamma three</p>', ''),
+                spec(1, 'str_replace', '<p>beta two</p>', ''),
+            ],
+            // 2. adjacent deletions, favorable index order
+            [
+                spec(0, 'str_replace', '<p>beta two</p>', ''),
+                spec(1, 'str_replace', '<p>gamma three</p>', ''),
+            ],
+            // 3. insert_after abutting a following deletion
+            [
+                spec(0, 'insert_after', '<p>alpha one</p>', '<p>added</p>'),
+                spec(1, 'str_replace', '<p>beta two</p>', ''),
+            ],
+            // 4. insert_before collapsing with an immediately-preceding deletion
+            [
+                spec(0, 'insert_before', '<p>gamma three</p>', '<p>added</p>'),
+                spec(1, 'str_replace', '<p>beta two</p>', ''),
+            ],
+            // 5. append collapsing with an end-deletion at the append point
+            [
+                spec(0, 'append', '', '<p>appended</p>'),
+                spec(1, 'str_replace', '<ul><li>x</li><li>x</li><li>x</li></ul>', ''),
+            ],
+            // 6. str_replace_all deletion over 3 contiguous occurrences
+            [
+                spec(0, 'str_replace_all', '<li>x</li>', ''),
+            ],
+            // 7. str_replace_all non-deletion over 3 contiguous occurrences
+            [
+                spec(0, 'str_replace_all', '<li>x</li>', '<li>y</li>'),
+            ],
+            // 8. replace + insert + append, well separated
+            [
+                spec(0, 'str_replace', 'alpha one', 'ALPHA'),
+                spec(1, 'insert_after', '<p>delta four</p>', '<p>ins</p>'),
+                spec(2, 'append', '', 'END'),
+            ],
+            // 9. replace adjacent to a deletion
+            [
+                spec(0, 'str_replace', '<p>alpha one</p>', '<p>ALPHA</p>'),
+                spec(1, 'str_replace', '<p>beta two</p>', ''),
+            ],
+            // 10. replace_all plus an unrelated replace elsewhere
+            [
+                spec(0, 'str_replace_all', '<li>x</li>', '<li>z</li>'),
+                spec(1, 'str_replace', '<h2>Heading</h2>', '<h2>Head</h2>'),
+            ],
+            // 11. two inserts around a deletion
+            [
+                spec(0, 'insert_after', '<p>alpha one</p>', '<p>a1</p>'),
+                spec(1, 'insert_before', '<p>delta four</p>', '<p>d1</p>'),
+                spec(2, 'str_replace', '<p>gamma three</p>', ''),
+            ],
+        ];
+
+        for (const specs of combos) {
+            const resolved = resolveOrThrow(makeCtx(BASE), specs);
+            // Every combination must be genuinely non-overlapping.
+            expect(detectOverlaps(resolved)).toEqual([]);
+            loggerMock.mockClear();
+            const { newStrippedHtml, undoDrafts } = applyResolvedEdits(BASE, resolved);
+            // End-state === input: the mismatch warning is the only log path.
+            expect(loggerMock).not.toHaveBeenCalled();
+            // Anchors replay back to the pre-edit HTML.
+            expect(replayBatchUndo(newStrippedHtml, undoDrafts)).toBe(BASE);
+        }
     });
 });
 
@@ -489,6 +878,64 @@ describe('captureUndoContexts', () => {
 
         expect(undoDrafts[0].undo_before_context).toBe('<div><p>keep</p>');
         expect(undoDrafts[0].undo_after_context).toContain('Edited by Beaver');
+    });
+
+    it('keeps a deletion seam replay-consistent against a footered final HTML', () => {
+        // edit 1 (higher index) reverts before the deletion, so after the
+        // search-based refresh the deletion's after-context must still quote the
+        // sibling's ORIGINAL text — even though the final HTML shows the applied
+        // replacement plus an appended footer.
+        const html = '<div><p>Remove this line.</p><p>Original sentence.</p></div>';
+        const resolved = resolveOrThrow(makeCtx(html), [
+            spec(0, 'str_replace', '<p>Remove this line.</p>', ''),
+            spec(1, 'str_replace', '<p>Original sentence.</p>', '<p>Replaced sentence.</p>'),
+        ]);
+        const { newStrippedHtml, undoDrafts } = applyResolvedEdits(html, resolved);
+        const finalStripped = addOrUpdateEditFooter(newStrippedHtml, 'thread-1');
+
+        captureUndoContexts(finalStripped, undoDrafts);
+
+        const deletion = undoDrafts.find((d) => d.index === 0)!;
+        expect(deletion.undo_after_context).toContain('Original sentence.');
+        expect(deletion.undo_after_context).not.toContain('Replaced');
+    });
+
+    it('keeps two collapsed deletion seams (inverted index) replay-consistent against a footered final HTML', () => {
+        // The search-based refresh carries no offset arithmetic, so it stays
+        // consistent with the apply-time capture for collapsed seams: replaying
+        // the refreshed anchors reconstructs the original order plus the footer.
+        const html = '<div><p>keep</p><p>LEFT block</p><p>RIGHT block</p><p>tail</p></div>';
+        const resolved = resolveOrThrow(makeCtx(html), [
+            spec(0, 'str_replace', '<p>RIGHT block</p>', ''),
+            spec(1, 'str_replace', '<p>LEFT block</p>', ''),
+        ]);
+        const { newStrippedHtml, undoDrafts } = applyResolvedEdits(html, resolved);
+        const finalStripped = addOrUpdateEditFooter(newStrippedHtml, 'thread-1');
+
+        captureUndoContexts(finalStripped, undoDrafts);
+
+        expect(replayBatchUndo(finalStripped, undoDrafts)).toBe(
+            addOrUpdateEditFooter(html, 'thread-1'),
+        );
+    });
+
+    it('refreshes a non-deletion str_replace_all with evolving occurrence contexts against a footered final HTML', () => {
+        const html = '<div><p>foo one</p><p>foo two</p></div>';
+        const resolved = resolveOrThrow(makeCtx(html), [
+            spec(0, 'str_replace_all', 'foo', 'BAR'),
+        ]);
+        const { newStrippedHtml, undoDrafts } = applyResolvedEdits(html, resolved);
+        const finalStripped = addOrUpdateEditFooter(newStrippedHtml, 'thread-1');
+
+        captureUndoContexts(finalStripped, undoDrafts);
+
+        const contexts = undoDrafts[0].undo_occurrence_contexts!;
+        expect(contexts).toHaveLength(2);
+        // The higher-position occurrence (slot 1) refreshes first; the lower one
+        // (slot 0) is then located after slot 1 was reverted to 'foo', so its
+        // after-context quotes 'foo two', not the applied 'BAR two'.
+        expect(contexts[0].after).toContain('foo two');
+        expect(contexts[0].after).not.toContain('BAR two');
     });
 });
 
