@@ -404,7 +404,7 @@ export class AgentService {
                 })));
                 return;
             }
-            
+
             // Capture the WebSocket instance to avoid race conditions if connect()
             // is called again before auth completes. The second connect() would call
             // close() which sets this.ws = null, but we need the original instance.

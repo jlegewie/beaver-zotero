@@ -307,6 +307,19 @@ export function presentConnectionFailure(
         };
     }
 
+    // A clean code-1000 close after ready but before a terminal run event is
+    // a normal server-initiated closure that arrived mid-run (idle-connection
+    // release, graceful shutdown) — not a network or proxy problem, so the
+    // copy must not steer the user toward their local setup.
+    if (evidence.closeCode === 1000 && evidence.wasClean && evidence.readyReceived) {
+        return {
+            message: 'The connection ended before the run finished.',
+            details:
+                'The server ended the live connection before the run finished, so the response may be incomplete. This is usually temporary — please try again.' +
+                serverMessageSuffix(evidence.closeReason),
+        };
+    }
+
     if (evidence.closeCode !== null) {
         const standard = standardCloseDetails(evidence.closeCode);
         if (standard) {

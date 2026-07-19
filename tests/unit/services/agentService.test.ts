@@ -495,6 +495,95 @@ describe('AgentService reconnect handling', () => {
         }
     });
 
+    it('drops a queued done when the socket closes while run_complete is processing', async () => {
+        const service = new AgentService('https://api.example.com');
+        const callbacks = createCallbacks();
+        const request = { type: 'queued-done-test' } as AgentRunRequest;
+
+        // Hold the run_complete handler open so the queued `done` message
+        // stays behind it in the message queue.
+        let releaseRunComplete: () => void = () => {};
+        const runCompleteGate = new Promise<void>((resolve) => {
+            releaseRunComplete = resolve;
+        });
+        (callbacks.onRunComplete as ReturnType<typeof vi.fn>).mockImplementation(() => runCompleteGate);
+
+        const socket = await completeConnect(service, callbacks, request);
+
+        socket.emitMessage({
+            event: 'run_complete',
+            run_id: 'run-1',
+            usage: null,
+            cost: null,
+            citations: null,
+            agent_actions: null,
+        });
+        socket.emitMessage({ event: 'done' });
+        await flushMicrotasks();
+
+        // run_complete's handler is suspended awaiting onRunComplete, so the
+        // queued `done` has not been dispatched yet.
+        expect(callbacks.onRunComplete).toHaveBeenCalledTimes(1);
+        expect(callbacks.onDone).not.toHaveBeenCalled();
+
+        // The socket closes while that handler is still suspended. This
+        // bumps the connection id via resetConnectionState().
+        socket.emitClose({ code: 1000, reason: '', wasClean: true });
+
+        // Now let the suspended run_complete handler resume. The queued
+        // `done` handler runs next, but its stale-connection-id guard makes
+        // it a no-op because the id no longer matches.
+        releaseRunComplete();
+        await flushMicrotasks();
+
+        expect(callbacks.onRunComplete).toHaveBeenCalledTimes(1);
+        expect(callbacks.onClose).toHaveBeenCalledTimes(1);
+        // A `done` that was queued behind a still-processing run_complete is
+        // silently dropped once the socket has closed in the meantime. The
+        // React layer's onClose handler finalizes the run itself and relies
+        // on this behavior rather than expecting a late `done` event.
+        expect(callbacks.onDone).not.toHaveBeenCalled();
+    });
+
+    it('includes close evidence only for a real socket close, not a client-initiated one', async () => {
+        // A real transport close carries a `ConnectionFailureEvidence` object
+        // as the 4th onClose argument.
+        const serverCloseService = new AgentService('https://api.example.com');
+        const serverCloseCallbacks = createCallbacks();
+        await completeConnect(
+            serverCloseService,
+            serverCloseCallbacks,
+            { type: 'server-close-test' } as AgentRunRequest,
+        );
+        const serverSocket = MockWebSocket.instances[MockWebSocket.instances.length - 1];
+        serverSocket.emitClose({ code: 1011, reason: 'transport lost', wasClean: false });
+
+        expect(serverCloseCallbacks.onClose).toHaveBeenCalledTimes(1);
+        const serverCloseArgs = (serverCloseCallbacks.onClose as ReturnType<typeof vi.fn>).mock.calls[0];
+        expect(serverCloseArgs).toHaveLength(4);
+        expect(serverCloseArgs[3]).toEqual(expect.objectContaining({ closeCode: 1011 }));
+
+        // A client-initiated close (service.close(), including the deferred
+        // close inside cancel()) reports wasClean=true unconditionally and
+        // omits the evidence argument entirely, since there is no transport
+        // failure to characterize. This is the contract the React layer's
+        // onClose guard uses to tell a server close from a client close.
+        const clientCloseService = new AgentService('https://api.example.com');
+        const clientCloseCallbacks = createCallbacks();
+        await completeConnect(
+            clientCloseService,
+            clientCloseCallbacks,
+            { type: 'client-close-test' } as AgentRunRequest,
+        );
+        clientCloseService.close(1000, 'User cancelled');
+
+        expect(clientCloseCallbacks.onClose).toHaveBeenCalledTimes(1);
+        const clientCloseArgs = (clientCloseCallbacks.onClose as ReturnType<typeof vi.fn>).mock.calls[0];
+        expect(clientCloseArgs).toHaveLength(3);
+        expect(clientCloseArgs[2]).toBe(true);
+        expect(clientCloseArgs[3]).toBeUndefined();
+    });
+
     it('does not let a stale backstop timeout tear down a newer connection', async () => {
         const service = new AgentService('https://api.example.com');
         const firstCallbacks = createCallbacks();

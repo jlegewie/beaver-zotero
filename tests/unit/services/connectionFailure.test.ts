@@ -309,6 +309,66 @@ describe('presentConnectionFailure', () => {
         expect(result.details).toContain('sign out and sign back in');
     });
 
+    it('treats a clean code-1000 mid-run close as a normal server closure, not a local network problem', () => {
+        const result = presentConnectionFailure({
+            ...opening1006,
+            stage: 'mid_run',
+            closeCode: 1000,
+            wasClean: true,
+            socketOpened: true,
+            readyReceived: true,
+        });
+
+        expect(result.message).toBe('The connection ended before the run finished.');
+        expect(result.details).toContain('may be incomplete');
+        expect(result.details).not.toContain('firewall');
+        expect(result.details).not.toContain('VPN');
+        expect(result.details).not.toContain('connection-troubleshooting');
+        expect(result.details).not.toContain('(error code');
+    });
+
+    it('appends a sanitized server reason to the clean-1000 mid-run message', () => {
+        const result = presentConnectionFailure({
+            ...opening1006,
+            stage: 'mid_run',
+            closeCode: 1000,
+            wasClean: true,
+            socketOpened: true,
+            readyReceived: true,
+            closeReason: 'Session <b>expired</b>',
+        });
+
+        expect(result.message).toBe('The connection ended before the run finished.');
+        expect(result.details).toContain('The server reported: "Session expired"');
+        expect(result.details).not.toContain('<b>');
+    });
+
+    it('does not apply the clean-1000 branch when the close was not clean', () => {
+        const result = presentConnectionFailure({
+            ...opening1006,
+            stage: 'mid_run',
+            closeCode: 1000,
+            wasClean: false,
+            socketOpened: true,
+            readyReceived: true,
+        });
+
+        expect(result.message).not.toBe('The connection ended before the run finished.');
+    });
+
+    it('does not apply the clean-1000 branch before ready was received', () => {
+        const result = presentConnectionFailure({
+            ...opening1006,
+            stage: 'awaiting_ready',
+            closeCode: 1000,
+            wasClean: true,
+            socketOpened: true,
+            readyReceived: false,
+        });
+
+        expect(result.message).not.toBe('The connection ended before the run finished.');
+    });
+
     it('labels the numeric suffix "error code" to match the troubleshooting docs', () => {
         const result = presentConnectionFailure({
             ...opening1006,

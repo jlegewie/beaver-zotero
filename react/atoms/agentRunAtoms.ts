@@ -155,7 +155,7 @@ import { libraryRefForLibraryID, resolveItemReference, resolveLibraryRef } from 
 import { ZoteroItemReference, createZoteroItemReference } from '../types/zotero';
 import { markExternalReferenceImportedAtom } from './externalReferences';
 import type { CreateItemProposedData, CreateItemResultData } from '../types/agentActions/items';
-import { appendRunIfMissing, findResumeChainRoot, findRunForResume, hasOnlyThinkingParts, resolveErrorRunId, toRunError } from '../agents/runResumeHelpers';
+import { appendRunIfMissing, findResumeChainRoot, findRunForResume, hasOnlyThinkingParts, lingeringCompletedRun, resolveErrorRunId, toRunError } from '../agents/runResumeHelpers';
 import { prewarmMuPDFWorker } from '../../src/beaver-extract';
 import { BeaverTemporaryAnnotations } from '../utils/annotationUtils';
 import { isRejectedItemValidation, itemValidationResultsAtom } from './itemValidation';
@@ -1593,25 +1593,38 @@ function createWSCallbacks(set: Setter): WSCallbacks {
             set(clearAllPendingQuestionsAtom);
             set(clearRunApprovalPolicyAtom);
 
-            // If the connection ended after reaching ready while a run was
-            // still in flight, the server never delivered a terminal event for
-            // it. This covers unclean drops and clean closes that carry an
-            // error code (e.g. a proxy or server closing with 1008/1013
-            // mid-run); a clean code-1000 close is a normal closure whose
-            // initiator has already updated run state.
-            if (hadReachedReady && !(code === 1000 && wasClean)) {
+            // A run that reached `completed` (run_complete processed) but whose
+            // terminal `done` never arrived — the socket closed while run_complete
+            // post-processing was still draining the message queue, so the queued
+            // `done` was skipped by the connection-generation guard — lingers in
+            // activeRunAtom. Finalize it the way onDone would, so the next send does
+            // not overwrite and drop it from local history. Idempotent: the normal
+            // path nulls activeRunAtom in onDone before close, making this a no-op.
+            set(activeRunAtom, (prev) => {
+                const finalRun = lingeringCompletedRun(prev);
+                if (finalRun) {
+                    set(threadRunsAtom, (runs) => appendRunIfMissing(runs, finalRun));
+                    return null;
+                }
+                return prev;
+            });
+
+            // A post-ready close that carries transport evidence came from the real
+            // socket (the client's own close()/cancel() paths notify without
+            // evidence). When it lands while the run is still nonterminal the server
+            // never delivered a terminal event — including a clean code-1000 close,
+            // which would otherwise leave the run spinning forever with no error and
+            // no retry. Connect-phase failures (before ready) are reported by
+            // executeWSRequest's catch, so gate on hadReachedReady to avoid
+            // double-reporting them.
+            if (hadReachedReady && transportEvidence) {
                 const activeRun = store.get(activeRunAtom);
                 if (
                     activeRun &&
                     (activeRun.status === 'in_progress' ||
                         activeRun.status === 'awaiting_deferred')
                 ) {
-                    const evidence = transportEvidence ?? baselineConnectionEvidence('mid_run', {
-                        closeCode: code,
-                        closeReason: reason,
-                        wasClean,
-                    });
-                    surfaceAndDiagnoseConnectionFailure(set, activeRun.id, evidence);
+                    surfaceAndDiagnoseConnectionFailure(set, activeRun.id, transportEvidence);
                 }
             }
         }

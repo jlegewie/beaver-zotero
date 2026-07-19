@@ -48,14 +48,17 @@ export interface ConnectionFailureReport {
  * auto-refresh path stalling on the same broken network we are reporting on.
  */
 async function getAuthTokenBestEffort(): Promise<string | null> {
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
     try {
-        const timeout = new Promise<null>((resolve) =>
-            setTimeout(() => resolve(null), AUTH_TOKEN_TIMEOUT_MS),
-        );
+        const timeout = new Promise<null>((resolve) => {
+            timeoutId = setTimeout(() => resolve(null), AUTH_TOKEN_TIMEOUT_MS);
+        });
         const result = await Promise.race([supabase.auth.getSession(), timeout]);
         return result?.data.session?.access_token ?? null;
     } catch {
         return null;
+    } finally {
+        clearTimeout(timeoutId);
     }
 }
 
