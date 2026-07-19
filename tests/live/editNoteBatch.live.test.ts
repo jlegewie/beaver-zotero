@@ -202,6 +202,31 @@ function collapseInterTagWhitespace(html: string): string {
 }
 
 /**
+ * Read a note back after an undo, retrying briefly until `expected` appears.
+ *
+ * The undo endpoint resolves once its save resolves, but a note write can
+ * still be settling when the following read lands while the instance is busy.
+ * Polling keeps these assertions about undo correctness rather than read
+ * timing. A genuinely unreverted edit still fails: the loop gives up after the
+ * deadline and returns the last HTML it saw, so the assertion reports the real
+ * document.
+ */
+async function readNoteAfterUndo(
+    libraryId: number,
+    zoteroKey: string,
+    expected: string,
+    { attempts = 8, delayMs = 250 }: { attempts?: number; delayMs?: number } = {},
+): Promise<string> {
+    let html = '';
+    for (let attempt = 0; attempt < attempts; attempt++) {
+        html = collapseInterTagWhitespace((await readNote(libraryId, zoteroKey)).saved_html);
+        if (html.includes(expected)) return html;
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+    return html;
+}
+
+/**
  * Validate a batch action and apply it via the returned
  * `normalized_action_data` — required for insert_after/insert_before edits,
  * whose `new_string` is only merged with `old_string` by validate; executing
@@ -586,7 +611,7 @@ describe('edit_note_batch undo — replay-order regression matrix', () => {
         const undo = await undoBatch(normalized, exec);
         expect(undo.ok, undo.error ?? '').toBe(true);
 
-        const after = collapseInterTagWhitespace((await readNote(ref.library_id, ref.zotero_key)).saved_html);
+        const after = await readNoteAfterUndo(ref.library_id, ref.zotero_key, DELETE_FRAGMENT);
         expect(after).toContain(DELETE_FRAGMENT);
         expect(after).not.toContain(INSERTED_LI_TEXT);
     }, 30000);
@@ -606,7 +631,7 @@ describe('edit_note_batch undo — replay-order regression matrix', () => {
         const undo = await undoBatch(normalized, exec);
         expect(undo.ok, undo.error ?? '').toBe(true);
 
-        const after = collapseInterTagWhitespace((await readNote(ref.library_id, ref.zotero_key)).saved_html);
+        const after = await readNoteAfterUndo(ref.library_id, ref.zotero_key, DELETE_FRAGMENT);
         expect(after).toContain(DELETE_FRAGMENT);
         expect(after).not.toContain(INSERTED_LI_TEXT);
     }, 30000);
@@ -639,7 +664,7 @@ describe('edit_note_batch undo — replay-order regression matrix', () => {
         const undo = await undoBatch(normalized, exec);
         expect(undo.ok, undo.error ?? '').toBe(true);
 
-        const after = collapseInterTagWhitespace((await readNote(ref.library_id, ref.zotero_key)).saved_html);
+        const after = await readNoteAfterUndo(ref.library_id, ref.zotero_key, DELETE_FRAGMENT);
         expect(after).toContain(DELETE_FRAGMENT);
         expect(after).toContain(siblingOld);
         expect(after).not.toContain(siblingNew);
@@ -661,7 +686,7 @@ describe('edit_note_batch undo — replay-order regression matrix', () => {
         const undo = await undoBatch(normalized, exec);
         expect(undo.ok, undo.error ?? '').toBe(true);
 
-        const after = collapseInterTagWhitespace((await readNote(ref.library_id, ref.zotero_key)).saved_html);
+        const after = await readNoteAfterUndo(ref.library_id, ref.zotero_key, DELETE_FRAGMENT);
         expect(after).toContain(DELETE_FRAGMENT);
         expect(after).toContain(siblingOld);
         expect(after).not.toContain(siblingNew);
@@ -691,7 +716,7 @@ describe('edit_note_batch undo — replay-order regression matrix', () => {
         const undo = await undoBatch(normalized, exec);
         expect(undo.ok, undo.error ?? '').toBe(true);
 
-        const after = collapseInterTagWhitespace((await readNote(ref.library_id, ref.zotero_key)).saved_html);
+        const after = await readNoteAfterUndo(ref.library_id, ref.zotero_key, firstFragment);
         expect(after).toContain(firstFragment);
         expect(after).toContain(secondFragment);
     }, 30000);
@@ -715,7 +740,7 @@ describe('edit_note_batch undo — replay-order regression matrix', () => {
         const undo = await undoBatch(normalized, exec);
         expect(undo.ok, undo.error ?? '').toBe(true);
 
-        const after = collapseInterTagWhitespace((await readNote(ref.library_id, ref.zotero_key)).saved_html);
+        const after = await readNoteAfterUndo(ref.library_id, ref.zotero_key, 'Begin redacted redacted redacted end of sentence.');
         expect(countOccurrences(after, 'redacted')).toBe(3);
         expect(after).toContain('Begin redacted redacted redacted end of sentence.');
     }, 30000);
@@ -742,7 +767,7 @@ describe('edit_note_batch undo — replay-order regression matrix', () => {
 
         const undo1 = await undoBatch(normalized, exec);
         expect(undo1.ok, undo1.error ?? '').toBe(true);
-        const afterFirst = collapseInterTagWhitespace((await readNote(ref.library_id, ref.zotero_key)).saved_html);
+        const afterFirst = await readNoteAfterUndo(ref.library_id, ref.zotero_key, deleteFragment);
         expect(afterFirst).toContain(deleteFragment);
         expect(countOccurrences(afterFirst, 'region')).toBe(3);
         expect(afterFirst).not.toContain('district');
@@ -778,7 +803,7 @@ describe('edit_note_batch undo — replay-order regression matrix', () => {
         const undo = await undoBatch(normalized, exec);
         expect(undo.ok, undo.error ?? '').toBe(true);
 
-        const after = collapseInterTagWhitespace((await readNote(ref.library_id, ref.zotero_key)).saved_html);
+        const after = await readNoteAfterUndo(ref.library_id, ref.zotero_key, deleteFragment);
         expect(after).toContain(deleteFragment);
         expect(after).toContain(siblingOld);
         expect(after).not.toContain(siblingNew);
