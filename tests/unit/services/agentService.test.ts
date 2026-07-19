@@ -44,7 +44,7 @@ vi.mock('../../../react/agents/agentActions', () => ({
     toAgentAction: vi.fn((action) => action),
 }));
 
-import { AgentService } from '../../../src/services/agentService';
+import { AgentService, ConnectTimeoutError } from '../../../src/services/agentService';
 import type { AgentRunRequest, WSCallbacks } from '../../../src/services/agentProtocol';
 
 class MockWebSocket {
@@ -398,6 +398,10 @@ describe('AgentService reconnect handling', () => {
         const outcome = await connectOutcome;
         expect(outcome.ok).toBe(false);
         if (!outcome.ok) {
+            // The error type is the only signal a timeout leaves behind: the
+            // attempt is torn down with close code 1000, so callers cannot
+            // tell it apart from a network outage by close code alone.
+            expect(outcome.error).toBeInstanceOf(ConnectTimeoutError);
             expect((outcome.error as Error).message).toContain('timed out');
         }
         expect(callbacks.onClose).toHaveBeenCalledWith(1000, 'Connection attempt timed out', true);

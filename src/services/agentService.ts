@@ -82,7 +82,21 @@ export async function getWSAuthToken(): Promise<string> {
 // =============================================================================
 
 /** Backstop timeout for a full connect attempt (auth token + handshake + ready). */
-const CONNECT_TIMEOUT_MS = 20_000;
+export const CONNECT_TIMEOUT_MS = 20_000;
+
+/**
+ * Thrown when a connect attempt never settles within CONNECT_TIMEOUT_MS.
+ *
+ * The attempt is torn down with a normal close code, so the failure carries no
+ * WebSocket close code of its own. Callers must identify it by type rather than
+ * by close code, otherwise it is indistinguishable from a plain network outage.
+ */
+export class ConnectTimeoutError extends Error {
+    constructor(timeoutMs: number = CONNECT_TIMEOUT_MS) {
+        super(`Connection attempt timed out after ${timeoutMs}ms`);
+        this.name = 'ConnectTimeoutError';
+    }
+}
 
 export class AgentService {
     private baseUrl: string;
@@ -207,7 +221,10 @@ export class AgentService {
                     resolve();
                     return;
                 }
-                reject(new Error('Connection attempt timed out'));
+                // Reject before close(): close() resolves the pending
+                // establishConnection promise, so closing first would let the
+                // race settle as a success and mask the timeout.
+                reject(new ConnectTimeoutError(CONNECT_TIMEOUT_MS));
                 this.close(1000, 'Connection attempt timed out');
             }, CONNECT_TIMEOUT_MS);
         });

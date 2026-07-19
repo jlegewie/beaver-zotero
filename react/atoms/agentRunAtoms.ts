@@ -7,7 +7,7 @@
 
 import { atom, Getter, Setter } from 'jotai';
 import { v4 as uuidv4 } from 'uuid';
-import { agentService } from '../../src/services/agentService';
+import { agentService, ConnectTimeoutError, CONNECT_TIMEOUT_MS } from '../../src/services/agentService';
 import { notifyRunComplete, notifyUserQuestion } from '../../src/services/systemNotifications';
 import { reportConnectionFailure } from '../../src/services/diagnosticsService';
 import {
@@ -1653,8 +1653,17 @@ async function executeWSRequest(
         // corporate proxy/firewall blocks (1006), authentication rejections
         // (1008, the common real-world server-side code), and TLS failures
         // (1015, rare in practice).
-        const closeInfo = get(lastWSCloseInfoAtom);
-        const userFacingDetails = closeInfo ? formatCloseCodeDetails(closeInfo.code) : undefined;
+        //
+        // A connect timeout is torn down with a normal close code, so it
+        // leaves no close info behind and must be detected by error type —
+        // otherwise it is misreported as a plain network outage.
+        const timedOut = error instanceof ConnectTimeoutError;
+        const closeInfo = timedOut ? null : get(lastWSCloseInfoAtom);
+        const userFacingDetails = timedOut
+            ? formatConnectTimeoutDetails()
+            : closeInfo
+              ? formatCloseCodeDetails(closeInfo.code)
+              : undefined;
         // With a close code the details line states the cause and what to do,
         // so the headline must not repeat the advice. Without one there is no
         // details line, so the headline has to carry it.
@@ -1684,7 +1693,10 @@ async function executeWSRequest(
         void reportConnectionFailure({
             phase: 'connect',
             close_code: closeInfo?.code ?? null,
-            close_reason: closeInfo?.reason ?? '',
+            // A timeout has no close code, so tag it in the reason field —
+            // otherwise it is indistinguishable server-side from a connect
+            // failure that never opened a socket.
+            close_reason: timedOut ? CONNECT_TIMEOUT_REASON : (closeInfo?.reason ?? ''),
             was_clean: closeInfo?.wasClean ?? null,
             run_id: run.id,
         });
@@ -1693,6 +1705,26 @@ async function executeWSRequest(
 
 /** Public docs page with remediation steps for connection failures. */
 const CONNECTION_TROUBLESHOOTING_URL = 'https://www.beaverapp.ai/docs/connection-troubleshooting';
+
+/** Stable marker reported in place of a close code for connect timeouts. */
+const CONNECT_TIMEOUT_REASON = 'client_connect_timeout';
+
+/**
+ * Build the user-facing `details` string for a connect attempt that never
+ * settled. Kept separate from formatCloseCodeDetails because a timeout has no
+ * close code: the connection stalled rather than being refused or dropped,
+ * which points at a silently blocked or throttled network path.
+ */
+function formatConnectTimeoutDetails(): string {
+    const seconds = Math.round(CONNECT_TIMEOUT_MS / 1000);
+    return (
+        `Beaver could not reach the server within ${seconds} seconds. ` +
+        'This usually means a network, proxy, or firewall is silently blocking the connection, ' +
+        'or the server is unreachable. ' +
+        `See our <a href="${CONNECTION_TROUBLESHOOTING_URL}">connection troubleshooting guide</a> for help. ` +
+        '(connection timed out)'
+    );
+}
 
 /**
  * User-facing explanation for a WebSocket close code (RFC 6455 plus the
