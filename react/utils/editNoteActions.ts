@@ -152,8 +152,8 @@ function undoReplaceAllViaContexts(
     return result;
 }
 
-/** Reject a local batch mutation before any item lookup crosses the boundary. */
-function assertBatchLibraryNotExcluded(
+/** Reject a local note mutation before any item lookup crosses the boundary. */
+function assertNoteLibraryNotExcluded(
     ref: { library_id?: number | null; library_ref?: string | null },
 ): void {
     const libraryId = resolveLibraryRef(ref);
@@ -230,6 +230,13 @@ export async function executeEditNoteAction(
         target_before_context?: string;
         target_after_context?: string;
     };
+
+    // Library exclusions can change after validation/action creation. Enforce
+    // the boundary again before resolving or loading the note.
+    assertNoteLibraryNotExcluded({
+        library_id: requestedLibraryId,
+        library_ref,
+    });
 
     // 1. Load item. Resolve through library_ref (with legacy library_id
     //    fallback) so a note in a group library resolves to the right local
@@ -673,6 +680,13 @@ export async function undoEditNoteAction(
 
     const resultData = action.result_data as EditNoteResultData | undefined;
 
+    // Undo is a fresh mutation and must respect exclusions that changed after
+    // the action was originally applied. Check before resolving/loading.
+    assertNoteLibraryNotExcluded({
+        library_id: requestedLibraryId,
+        library_ref,
+    });
+
     // Resolve the note through library_ref (with legacy library_id fallback) so
     // undo targets the right note even when this device numbers a group library
     // differently than the device that applied the edit.
@@ -1096,7 +1110,7 @@ export async function executeEditNoteBatchAction(
 
     // Library exclusions can change after validation/action creation. Enforce
     // the boundary again before resolving or loading the note.
-    assertBatchLibraryNotExcluded({
+    assertNoteLibraryNotExcluded({
         library_id: requestedLibraryId,
         library_ref,
     });
@@ -1468,7 +1482,7 @@ export async function undoEditNoteBatchAction(action: AgentAction): Promise<void
 
     // Undo is a fresh mutation and must respect exclusions that changed after
     // the action was originally applied. Check before resolving/loading.
-    assertBatchLibraryNotExcluded({
+    assertNoteLibraryNotExcluded({
         library_id: requestedLibraryId,
         library_ref,
     });
