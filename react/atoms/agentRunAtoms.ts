@@ -91,6 +91,8 @@ import {
     isManageTagsAgentAction,
     isManageCollectionsAgentAction,
     isEditNoteAgentAction,
+    isEditNoteBatchAgentAction,
+    isAnyEditNoteAgentAction,
     isCreateNoteAgentAction,
     hasAppliedZoteroItem,
     hasAppliedBulkAnnotations,
@@ -115,7 +117,7 @@ import { undoCreateCollectionAction } from '../utils/createCollectionActions';
 import { undoOrganizeItemsAction } from '../utils/organizeItemsActions';
 import { undoManageTagsAction } from '../utils/manageTagsActions';
 import { undoManageCollectionsAction } from '../utils/manageCollectionsActions';
-import { undoEditNoteAction } from '../utils/editNoteActions';
+import { undoEditNoteAction, undoEditNoteBatchAction } from '../utils/editNoteActions';
 import { undoCreateNoteAction } from '../utils/createNoteActions';
 import { undoCreateAnnotationsAction } from '../utils/createAnnotationsActions';
 import { processToolReturnResults } from '../agents/toolResultProcessing';
@@ -620,6 +622,8 @@ async function undoAppliedActionsInReverse(actions: AgentAction[]): Promise<void
                 await undoEditMetadataAction(action, false);
             } else if (isEditNoteAgentAction(action)) {
                 await undoEditNoteAction(action);
+            } else if (isEditNoteBatchAgentAction(action)) {
+                await undoEditNoteBatchAction(action);
             } else if (isCreateItemAgentAction(action)) {
                 await undoCreateItemAction(action);
             } else if (isCreateCollectionAgentAction(action)) {
@@ -1480,7 +1484,13 @@ function createWSCallbacks(set: Setter): WSCallbacks {
             // already in flight. Catch those requests here even though future
             // validations will return always_apply directly.
             const runPolicy = store.get(runApprovalPolicyAtom);
-            if (isActionApprovedForCurrentRun(runPolicy, event.action_type, event.action_data)) {
+            const activeRunId = store.get(activeRunAtom)?.id ?? null;
+            if (isActionApprovedForCurrentRun(
+                runPolicy,
+                activeRunId,
+                event.action_type,
+                event.action_data,
+            )) {
                 logger(`Auto-approving ${event.action_type} for the current run`, 1);
                 agentService.sendApprovalResponse(event.action_id, true);
                 return;
@@ -2076,7 +2086,7 @@ export const regenerateFromRunAtom = atom(
                 .filter(isManageCollectionsAgentAction)
                 .filter(a => a.status === 'applied');
             const noteEditsToUndo = actionsInRemovedRuns
-                .filter(isEditNoteAgentAction)
+                .filter(isAnyEditNoteAgentAction)
                 .filter(a => a.status === 'applied');
             const createNotesToUndo = actionsInRemovedRuns
                 .filter(isCreateNoteAgentAction)
@@ -2263,7 +2273,7 @@ export const regenerateWithEditedPromptAtom = atom(
                 .filter(isManageCollectionsAgentAction)
                 .filter(a => a.status === 'applied');
             const noteEditsToUndo = actionsInRemovedRuns
-                .filter(isEditNoteAgentAction)
+                .filter(isAnyEditNoteAgentAction)
                 .filter(a => a.status === 'applied');
             const createNotesToUndo = actionsInRemovedRuns
                 .filter(isCreateNoteAgentAction)

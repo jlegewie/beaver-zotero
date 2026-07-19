@@ -3,6 +3,7 @@ import { WSAgentActionExecuteRequest, WSAgentActionExecuteResponse } from '../ag
 import { TimeoutContext, DEFAULT_TIMEOUT_SECONDS } from './timeout';
 import { TimeoutError } from './timeout';
 import { executeEditNoteAction } from './actions/editNote';
+import { executeEditNoteBatchAction } from './actions/editNoteBatch';
 import { executeEditMetadataAction } from './actions/editMetadata';
 import { executeOrganizeItemsAction } from './actions/organizeItems';
 import { executeCreateNoteAction } from './actions/createNote';
@@ -57,6 +58,8 @@ export async function handleAgentActionExecuteRequest(
             result = await executeCreateItemAction(request, ctx);
         } else if (request.action_type === 'edit_note') {
             result = await executeEditNoteAction(request, ctx);
+        } else if (request.action_type === 'edit_note_batch') {
+            result = await executeEditNoteBatchAction(request, ctx);
         } else if (request.action_type === 'create_note') {
             result = await executeCreateNoteAction(request, ctx);
         } else if (request.action_type === 'create_highlight_annotations') {

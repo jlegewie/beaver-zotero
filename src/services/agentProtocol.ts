@@ -1357,7 +1357,7 @@ export interface WSListLibrariesResponse {
 export type DeferredToolPreference = 'always_ask' | 'always_apply' | 'continue_without_applying';
 
 /** Agent action type for deferred tools */
-export type AgentActionType = 'highlight_annotation' | 'note_annotation' | 'create_highlight_annotations' | 'create_note_annotations' | 'zotero_note' | 'create_item' | 'edit_metadata' | 'create_collection' | 'organize_items' | 'manage_tags' | 'manage_collections' | 'confirm_extraction' | 'confirm_external_search' | 'edit_note' | 'create_note';
+export type AgentActionType = 'highlight_annotation' | 'note_annotation' | 'create_highlight_annotations' | 'create_note_annotations' | 'zotero_note' | 'create_item' | 'edit_metadata' | 'create_collection' | 'organize_items' | 'manage_tags' | 'manage_collections' | 'confirm_extraction' | 'confirm_external_search' | 'edit_note' | 'edit_note_batch' | 'create_note';
 
 /** Request from backend to validate an agent action */
 export interface WSAgentActionValidateRequest extends WSBaseEvent {
@@ -1392,6 +1392,15 @@ export interface ErrorCandidate {
     score: number;
 }
 
+/** Per-edit validation failure for batch actions (e.g. edit_note_batch). */
+export interface EditValidationError {
+    /** Position of the failing edit in the request's edits[] array */
+    index: number;
+    error: string;
+    error_code?: string | null;
+    error_candidates?: ErrorCandidate[];
+}
+
 /** Response to agent action validation request */
 export interface WSAgentActionValidateResponse {
     type: 'agent_action_validate_response';
@@ -1407,6 +1416,12 @@ export interface WSAgentActionValidateResponse {
      * truncated — do not re-truncate.
      */
     error_candidates?: ErrorCandidate[];
+    /**
+     * Per-edit validation failures for batch actions (e.g. edit_note_batch).
+     * Present only when validating a multi-edit payload and one or more edits
+     * fail; the whole batch is rejected (fail-closed).
+     */
+    edit_errors?: EditValidationError[];
     /** Current value for before/after tracking. Shape depends on action_type. */
     current_value?: any;
     /**
@@ -1679,6 +1694,8 @@ export const CLIENT_FEATURES = {
     PORTABLE_IDS: 'portable_ids',
     LIST_ITEMS_INCLUDE_CHILDREN: 'list_items_include_children',
     CREATE_NOTE_TAGS_COLLECTIONS: 'create_note_tags_collections',
+    /** Batch multi-edit note editing (edit_note_batch action type). */
+    EDIT_NOTE_BATCH: 'edit_note_batch',
 } as const;
 
 /** Client type identifier for the Zotero plugin. */

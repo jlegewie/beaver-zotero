@@ -593,6 +593,17 @@ function locateUndoSeam(
                     // span the gap so the undo replaces it.
                     return { kind: 'seam', insertionPoint: beforeEnd, gapEnd: afterIdx };
                 }
+                // afterCtx was stored but isn't near beforeCtx anymore. Only
+                // fall back to the before-only seam when afterCtx has
+                // drifted out of the ENTIRE document (not merely moved
+                // elsewhere, which would leave its true seam ambiguous) and
+                // beforeCtx pins down exactly one position in the note.
+                if (
+                    strippedHtml.indexOf(afterCtx) === -1
+                    && strippedHtml.indexOf(beforeCtx, beforeIdx + 1) === -1
+                ) {
+                    return { kind: 'seam', insertionPoint: beforeEnd };
+                }
             } else {
                 return { kind: 'seam', insertionPoint: beforeEnd };
             }

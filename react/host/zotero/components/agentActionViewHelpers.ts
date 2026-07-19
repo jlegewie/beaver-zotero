@@ -160,6 +160,8 @@ export function getActionLabel(
             return 'Edit';
         case 'edit_note':
             return 'Note Edit';
+        case 'edit_note_batch':
+            return 'Note Edits';
         case 'create_note':
             return 'Create Note';
         case 'create_highlight_annotations': {
@@ -204,6 +206,7 @@ export function getActionTitle(
         case 'edit_metadata':
         case 'edit_item':
         case 'edit_note':
+        case 'edit_note_batch':
             return itemTitle ? itemTitle : null;
         case 'create_note':
             return actionData?.title ?? null;

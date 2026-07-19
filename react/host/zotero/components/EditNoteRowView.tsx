@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { AgentRunStatus, ToolCallPart } from '../../../agents/types';
 import {
     AlertIcon,
@@ -14,7 +14,9 @@ import {
 import IconButton from '../../../components/ui/IconButton';
 import Tooltip from '../../../components/ui/Tooltip';
 import { ActionPreview } from './ActionPreview';
-import { useEditNoteActions } from './useEditNoteActions';
+import { useEditNoteActions, type EditNotePrecomputed } from './useEditNoteActions';
+import type { EditNoteRowDescriptor } from '../../../components/agentRuns/editNoteShared';
+import { buildBatchRowPreviewData } from './editNoteBatchPreviewData';
 
 interface EditNoteRowViewProps {
     part: ToolCallPart;
@@ -23,19 +25,39 @@ interface EditNoteRowViewProps {
     disabled?: boolean;
     externalUndoError?: string | null;
     onUndoErrorChange?: (toolcallId: string, error: string | null) => void;
+    /**
+     * Present when this row renders a single edit within an edit_note_batch
+     * action's edits[] rather than a v1 (single-edit) part. Drives the
+     * preview from the edit's own fields and suppresses per-row action
+     * buttons, since a batch applies/undoes atomically at the group level.
+     */
+    rowDescriptor?: EditNoteRowDescriptor;
+    /**
+     * Per-toolcall derivations the group already computed once for all sibling
+     * rows. Forwarded to the actions hook so each row skips re-deriving them.
+     */
+    precomputed?: EditNotePrecomputed;
+    /**
+     * Undo records of this toolcall's action indexed by edit index, prebuilt
+     * once by the group so each batch row resolves its record in O(1).
+     */
+    undoByIndex?: Map<number, any>;
 }
 
-export const EditNoteRowView: React.FC<EditNoteRowViewProps> = ({
+const EditNoteRowViewComponent: React.FC<EditNoteRowViewProps> = ({
     part,
     runId,
     runStatus,
     disabled = false,
     externalUndoError = null,
     onUndoErrorChange,
+    rowDescriptor,
+    precomputed,
+    undoByIndex,
 }) => {
     const {
         actions,
-        previewData,
+        previewData: hookPreviewData,
         previewStatus,
         previewIsStreaming,
         isProcessing,
@@ -43,26 +65,42 @@ export const EditNoteRowView: React.FC<EditNoteRowViewProps> = ({
         config,
         clickedButton,
         displayedUndoError,
-        showApply,
-        showReject,
-        showUndo,
-        showRetry,
+        showApply: hookShowApply,
+        showReject: hookShowReject,
+        showUndo: hookShowUndo,
+        showRetry: hookShowRetry,
         showOpenNoteAction,
-        openNoteTooltip,
         handleApprove,
         handleReject,
         handleApplyPending,
         handleRejectPending,
         handleUndo,
         handleRetry,
-        handleOpenNote,
+        handleOpenNoteForRow,
     } = useEditNoteActions({
         part,
         runId,
         runStatus,
         externalUndoError,
         onUndoErrorChange,
+        precomputed,
     });
+
+    const isBatchRow = rowDescriptor !== undefined;
+    const previewData = useMemo(
+        () => (isBatchRow
+            ? buildBatchRowPreviewData(hookPreviewData, rowDescriptor, undoByIndex)
+            : hookPreviewData),
+        [isBatchRow, hookPreviewData, rowDescriptor, undoByIndex],
+    );
+
+    // A batch (edit_note_batch) is applied/undone atomically for the whole
+    // action — only the group-level Apply All / Undo All / Retry All buttons
+    // may act, so per-row controls are suppressed for a batch row.
+    const showApply = !isBatchRow && hookShowApply;
+    const showReject = !isBatchRow && hookShowReject;
+    const showUndo = !isBatchRow && hookShowUndo;
+    const showRetry = !isBatchRow && hookShowRetry;
 
     const actionButtonsDisabled = disabled || isProcessing;
     const onApply = previewStatus === 'awaiting' ? handleApprove : handleApplyPending;
@@ -71,28 +109,33 @@ export const EditNoteRowView: React.FC<EditNoteRowViewProps> = ({
     return (
         <div className="agent-action-view rounded-md flex flex-col min-w-0">
             <div className="display-flex flex-row min-w-0">
-                <div className="display-flex flex-col items-center gap-25 px-2 py-2 flex-shrink-0" style={{ marginLeft: '0.225rem' }}>
-                    {isStreamingPlaceholder ? (
-                        <div className="display-flex items-center mt-010">
-                            <Spinner size={13} className="font-color-secondary scale-10" style={{ marginLeft: '0.185rem' }} />
-                        </div>
-                    ) : (
-                        config.icon && config.icon !== Spinner ? (
+                {/* Batch rows skip the status-icon gutter: the group header
+                    already carries the batch's status, so the column would
+                    only render an invisible placeholder and waste width. */}
+                {!isBatchRow && (
+                    <div className="display-flex flex-col items-center gap-25 px-2 py-2 flex-shrink-0" style={{ marginLeft: '0.225rem' }}>
+                        {isStreamingPlaceholder ? (
                             <div className="display-flex items-center mt-010">
-                                <Icon icon={config.icon} className={`${config.iconClassName}`} style={{ transform: 'scale(1)' }} />
+                                <Spinner size={13} className="font-color-secondary scale-10" style={{ marginLeft: '0.185rem' }} />
                             </div>
                         ) : (
-                            <div className="display-flex items-center mt-010 scale-10">
-                                <Icon icon={EditIcon} className="font-color-secondary opacity-0" />
-                            </div>
-                        )
-                    )}
-                </div>
+                            config.icon && config.icon !== Spinner ? (
+                                <div className="display-flex items-center mt-010">
+                                    <Icon icon={config.icon} className={`${config.iconClassName}`} style={{ transform: 'scale(1)' }} />
+                                </div>
+                            ) : (
+                                <div className="display-flex items-center mt-010 scale-10">
+                                    <Icon icon={EditIcon} className="font-color-secondary opacity-0" />
+                                </div>
+                            )
+                        )}
+                    </div>
+                )}
 
                 <div className="flex-1 min-w-0">
                     {previewData ? (
                         <ActionPreview
-                            toolName="edit_note"
+                            toolName={isBatchRow ? 'edit_note_batch' : 'edit_note'}
                             previewData={previewData}
                             status={previewStatus}
                             actions={actions}
@@ -103,8 +146,29 @@ export const EditNoteRowView: React.FC<EditNoteRowViewProps> = ({
                     )}
                 </div>
 
+                {/* Batch rows get a single navigation affordance on the right:
+                    open the note and jump to THIS edit's position. */}
+                {isBatchRow && !isStreamingPlaceholder && previewData && showOpenNoteAction && (
+                    <div className="display-flex flex-col py-2 mr-2 flex-shrink-0">
+                        <Tooltip content="Open note and jump to edit" showArrow singleLine>
+                            <IconButton
+                                icon={ArrowUpRightIcon}
+                                variant="ghost-secondary"
+                                iconClassName="font-color-secondary scale-10"
+                                onClick={() => { void handleOpenNoteForRow(rowDescriptor); }}
+                            />
+                        </Tooltip>
+                    </div>
+                )}
+
+                {/* A batch row never shows action buttons or its own processing
+                    spinner — the whole edit_note_batch action applies/undoes
+                    atomically via the group's Apply All / Undo All / Retry All —
+                    so the button column is omitted entirely to give the diff
+                    its full width. */}
+                {!isBatchRow && (
                 <div className="display-flex flex-col gap-25 py-2 mr-2">
-                    {isProcessing ? (
+                    {(isProcessing ? (
                         <>
                             {clickedButton === 'approve' && (
                                 <Tooltip content="Apply" showArrow singleLine>
@@ -205,8 +269,9 @@ export const EditNoteRowView: React.FC<EditNoteRowViewProps> = ({
                                 </Tooltip>
                             )}
                         </>
-                    )}
+                    ))}
                 </div>
+                )}
             </div>
 
             {displayedUndoError && (
@@ -222,5 +287,14 @@ export const EditNoteRowView: React.FC<EditNoteRowViewProps> = ({
         </div>
     );
 };
+
+/**
+ * Memoized so a group with N sibling rows re-renders only the rows whose data
+ * changed. All props from the group are referentially stable across the group's
+ * hover-driven re-renders (row descriptors, precomputed derivations and the
+ * undo index come from the group's memoized part state), so the default shallow
+ * comparison skips untouched rows without hiding real data changes.
+ */
+export const EditNoteRowView = React.memo(EditNoteRowViewComponent);
 
 export default EditNoteRowView;

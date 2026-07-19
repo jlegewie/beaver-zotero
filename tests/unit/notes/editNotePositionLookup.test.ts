@@ -398,6 +398,58 @@ describe('locateEditFragment — undo-seam intent', () => {
             expect(result.insertionPoint).toBe(0);
         }
     });
+
+    it('S2 rescue: uses the before-only seam when afterCtx is absent everywhere and beforeCtx is unique', () => {
+        const html = '<p>before-text</p><p>a sibling edit replaced the tail with new content</p>';
+        const beforeCtx = '<p>before-text</p>';
+        // Not present anywhere in html — the region it used to anchor was
+        // itself edited away by a sibling change.
+        const afterCtx = '<p>after-text</p>';
+
+        const result = locateEditFragment({
+            strippedHtml: html,
+            intent: { kind: 'undo-seam', beforeContext: beforeCtx, afterContext: afterCtx },
+        });
+
+        expect(result.kind).toBe('seam');
+        if (result.kind === 'seam') {
+            expect(result.insertionPoint).toBe(beforeCtx.length);
+            expect(result.gapEnd).toBeUndefined();
+        }
+    });
+
+    it('S2 rescue does not fire when afterCtx still exists elsewhere in the note (S3 locates it instead)', () => {
+        const html = '<p>before-text</p><p>unrelated filler content pushes the after context far away</p><p>after-text</p>';
+        const beforeCtx = '<p>before-text</p>';
+        const afterCtx = '<p>after-text</p>';
+        const beforeEnd = html.indexOf(beforeCtx) + beforeCtx.length;
+
+        const result = locateEditFragment({
+            strippedHtml: html,
+            intent: { kind: 'undo-seam', beforeContext: beforeCtx, afterContext: afterCtx },
+        });
+
+        expect(result.kind).toBe('seam');
+        if (result.kind === 'seam') {
+            // S3 locates the real afterCtx position; the S2 rescue must NOT
+            // substitute the before-only seam, which would be wrong here.
+            expect(result.insertionPoint).toBe(html.indexOf(afterCtx));
+            expect(result.insertionPoint).not.toBe(beforeEnd);
+        }
+    });
+
+    it('S2 rescue does not fire when beforeCtx is non-unique', () => {
+        const html = '<p>before-text</p><p>middle</p><p>before-text</p>';
+        const beforeCtx = '<p>before-text</p>';
+        const afterCtx = '<p>totally-absent-context</p>';
+
+        const result = locateEditFragment({
+            strippedHtml: html,
+            intent: { kind: 'undo-seam', beforeContext: beforeCtx, afterContext: afterCtx },
+        });
+
+        expect(result.kind).toBe('not-found');
+    });
 });
 
 describe('locateEditFragment — undo-fragment intent', () => {

@@ -34,6 +34,10 @@ import { logger } from '../../../utils/logger';
 // but must confirm with the user via a different flow.
 const MAX_SNAPSHOT_ITEMS = 5000;
 
+// Cap on the "Did you mean" suggestion list surfaced when a tag name can't
+// be auto-resolved, keeping the hint short and human-scannable.
+const MAX_TAG_SUGGESTIONS = 3;
+
 
 /**
  * Convert Zotero numeric item IDs to device-portable model-facing IDs.
@@ -137,8 +141,16 @@ async function resolveTagByName(name: string, libraryID: number): Promise<TagRes
     // library's tag names for near-matches. Scope via itemTags (Zotero.Tags
     // and the `tags` table are global; itemTags is what scopes a tag to a
     // library). Normalization happens in JS, not SQL: SQLite's LOWER() only
-    // folds ASCII and can't bridge apostrophe or Unicode-form variants.
-    const libraryTagNames: string[] = [];
+    // folds ASCII and can't bridge apostrophe or Unicode-form variants. A
+    // library can hold tens of thousands of distinct tags, so matching is
+    // done inside the row callback rather than materializing every name into
+    // an array — memory stays bounded to the handful of near-matches found.
+    const canonical = canonicalTagForm(name);
+    const suggestionTarget = suggestionTagForm(name);
+    let canonicalMatchCount = 0;
+    const canonicalSuggestions: string[] = [];
+    const diacriticSuggestions: string[] = [];
+
     await Zotero.DB.queryAsync(
         'SELECT DISTINCT t.name FROM tags t '
             + 'JOIN itemTags it USING (tagID) '
@@ -147,7 +159,18 @@ async function resolveTagByName(name: string, libraryID: number): Promise<TagRes
         [libraryID],
         {
             onRow: (row: any) => {
-                libraryTagNames.push(row.getResultByIndex(0) as string);
+                const tagName = row.getResultByIndex(0) as string;
+                if (canonicalTagForm(tagName) === canonical) {
+                    canonicalMatchCount++;
+                    if (canonicalSuggestions.length < MAX_TAG_SUGGESTIONS) {
+                        canonicalSuggestions.push(tagName);
+                    }
+                } else if (
+                    diacriticSuggestions.length < MAX_TAG_SUGGESTIONS
+                    && suggestionTagForm(tagName) === suggestionTarget
+                ) {
+                    diacriticSuggestions.push(tagName);
+                }
             },
         },
     );
@@ -156,22 +179,17 @@ async function resolveTagByName(name: string, libraryID: number): Promise<TagRes
     // form. Tags are case-sensitive in Zotero, but since the exact-cased name
     // does not exist, a unique match cannot shadow a legitimately different
     // tag; multiple matches (coexisting case variants) stay an error below.
-    const canonical = canonicalTagForm(name);
-    const canonicalMatches = libraryTagNames.filter((t) => canonicalTagForm(t) === canonical);
-    if (canonicalMatches.length === 1) {
-        const resolvedID = Zotero.Tags.getID(canonicalMatches[0]);
+    if (canonicalMatchCount === 1) {
+        const resolvedID = Zotero.Tags.getID(canonicalSuggestions[0]);
         if (resolvedID !== false && resolvedID != null) {
-            return { tagID: resolvedID, source: 'normalized', resolvedName: canonicalMatches[0] };
+            return { tagID: resolvedID, source: 'normalized', resolvedName: canonicalSuggestions[0] };
         }
     }
 
-    // Ambiguous or no canonical match: surface up to 3 suggestions, falling
-    // back to the diacritic-insensitive form so accent mismatches still hint.
-    let suggestions = canonicalMatches.slice(0, 3);
-    if (suggestions.length === 0) {
-        const target = suggestionTagForm(name);
-        suggestions = libraryTagNames.filter((t) => suggestionTagForm(t) === target).slice(0, 3);
-    }
+    // Ambiguous or no canonical match: surface the canonical near-matches
+    // found, falling back to the diacritic-insensitive matches so accent
+    // mismatches still produce a hint.
+    const suggestions = canonicalSuggestions.length > 0 ? canonicalSuggestions : diacriticSuggestions;
     return { tagID: null, suggestions };
 }
 
