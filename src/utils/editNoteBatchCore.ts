@@ -226,7 +226,7 @@ export function buildAmbiguousMatchError(matchCount: number, operation?: EditNot
 }
 
 /** Head-tail truncate a snippet for a single-line warning string. */
-function truncateForWarning(s: string, headTail = 30): string {
+export function truncateForWarning(s: string, headTail = 30): string {
     const escaped = s.replace(/\n/g, '\\n');
     const threshold = headTail * 2 + 5;
     if (escaped.length <= threshold) return escaped;

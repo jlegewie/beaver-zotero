@@ -73,25 +73,11 @@ import {
 import { checkLibraryExcluded, excludedLibraryMessage, getDeferredToolPreference } from '../utils';
 import { TimeoutContext, checkAborted } from '../timeout';
 import { TimeoutError } from '../timeout';
-
-/**
- * Merge old_string and new_string for insert_after / insert_before operations
- * so the result can be treated as a regular str_replace. Returns new_string
- * unchanged for non-insert operations.
- */
-function mergeInsertNewString(
-    operation: EditNoteOperation,
-    oldString: string,
-    newString: string,
-): string {
-    if (operation === 'insert_after') {
-        return newString.startsWith(oldString) ? newString : oldString + newString;
-    }
-    if (operation === 'insert_before') {
-        return newString.endsWith(oldString) ? newString : newString + oldString;
-    }
-    return newString;
-}
+import {
+    mergeInsertNewString,
+    buildAmbiguousMatchError,
+    buildInsertDedupWarning,
+} from '../../../utils/editNoteBatchCore';
 
 /** Combine optional warning strings into a `warnings` array, or undefined when empty. */
 function collectWarnings(...warnings: Array<string | null | undefined>): string[] | undefined {
@@ -293,69 +279,6 @@ function buildValidateSuccess(
         preference,
         ...(warnings && warnings.length > 0 ? { warnings } : {}),
     };
-}
-
-/**
- * Head-tail truncate a snippet for inclusion in a warning string. Keeps the
- * first and last `headTail` chars when the input exceeds `2 * headTail + 5`,
- * joined by `…`. Newlines are escaped so the warning stays single-line.
- */
-function truncateForWarning(s: string, headTail = 30): string {
-    const escaped = s.replace(/\n/g, '\\n');
-    const threshold = headTail * 2 + 5;
-    if (escaped.length <= threshold) return escaped;
-    return `${escaped.slice(0, headTail)}…${escaped.slice(-headTail)}`;
-}
-
-/**
- * When the model pre-copied old_string into the relevant end of new_string
- * for an insert operation, `mergeInsertNewString` silently dedupes. Emit a
- * warning so the model learns the correct shape, including a head-tail
- * snippet of the offending old_string copy so the model can identify
- * exactly what was deduplicated.
- * Returns null if no dedup applies.
- */
-function buildInsertDedupWarning(
-    operation: EditNoteOperation,
-    oldString: string,
-    newString: string,
-): string | null {
-    if (!oldString) return null;
-    const snippet = truncateForWarning(oldString);
-    if (operation === 'insert_after' && newString.startsWith(oldString)) {
-        return (
-            'For operation="insert_after", new_string should contain ONLY the '
-            + 'content to insert — old_string is preserved automatically. '
-            + `new_string started with a copy of old_string ("${snippet}"). `
-            + 'Only the trailing content was inserted after that anchor (no '
-            + 'duplication). To duplicate content, use operation="str_replace" '
-            + 'with new_string set to old_string followed by your inserted '
-            + 'content (or the full final shape) instead.'
-        );
-    }
-    if (operation === 'insert_before' && newString.endsWith(oldString)) {
-        return (
-            'For operation="insert_before", new_string should contain ONLY the '
-            + 'content to insert — old_string is preserved automatically. '
-            + `new_string ended with a copy of old_string ("${snippet}"). `
-            + 'Only the leading content was inserted before that anchor (no '
-            + 'duplication). To duplicate content, use operation="str_replace" '
-            + 'with new_string set to your inserted content followed by '
-            + 'old_string (or the full final shape) instead.'
-        );
-    }
-    return null;
-}
-
-function buildAmbiguousMatchError(matchCount: number, operation?: EditNoteOperation): string {
-    // str_replace_all is only a valid alternative for replacement edits; for
-    // inserts the anchor itself must be made unique.
-    if (operation === 'insert_after' || operation === 'insert_before') {
-        return `The insertion anchor was found ${matchCount} times in the note. `
-            + 'Include more surrounding context in old_string so the anchor matches exactly once.';
-    }
-    return `The string to replace was found ${matchCount} times in the note. `
-        + 'Use operation str_replace_all to replace all occurrences, or include more context to make the match unique.';
 }
 
 function buildAmbiguousMatchResponse(
