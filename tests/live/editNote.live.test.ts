@@ -85,18 +85,16 @@ function normalizeWhitespace(html: string): string {
 // ==========================================================================
 //
 // `executeEditNoteAction` holds no per-note lock; edits are serialized one
-// level up, by the agent action execution queue that the WebSocket dispatch
-// path marks `serialize: true`. The HTTP endpoint these tests post to calls
-// the handler directly and therefore does NOT serialize, so two edits fired
-// with `Promise.all` here genuinely race: each resolves the note from the
-// state it read, and the later save wins. Both calls still report success.
+// level up. The WebSocket dispatch map marks `agent_action_execute`
+// `serialize: true`, and the HTTP endpoint these tests post to chains onto the
+// same kind of queue, so concurrent executes run one at a time on both
+// transports. Each edit therefore reads the previous edit's result rather than
+// the state its sibling started from, and both survive.
 //
-// The tests below therefore assert the property that holds without the queue —
-// the note always lands in a consistent end state and is never half-applied —
-// rather than "every concurrent edit survives", which only the serialized
-// production path guarantees. Asserting the stronger property here made these
-// tests fail intermittently under load while the production path was correct.
-// Coverage of the serialized guarantee itself belongs with the queue.
+// That guarantee is the point of these tests: fire two executes together and
+// assert nothing is dropped. Before the HTTP path was serialized they raced —
+// the later save overwrote the earlier one while both calls still reported
+// success — which made them fail intermittently under load.
 
 describe('edit_note concurrent edits', () => {
     beforeEach((ctx) => skipIfNoZotero(ctx, zoteroAvailable));
@@ -158,7 +156,7 @@ describe('edit_note concurrent edits', () => {
         expect(after.saved_html).not.toContain('stabilizes');
     });
 
-    it('two str_replace edits fired in parallel leave the note in a consistent end state', async () => {
+    it('two str_replace edits fired in parallel both apply and final HTML contains both replacements', async () => {
         const ref = await seedNote('<p>Alpha Bravo Charlie Delta</p>');
 
         const editA: EditNoteActionData = {
@@ -181,8 +179,8 @@ describe('edit_note concurrent edits', () => {
             executeEditNote(editB, { timeout: 20000 }),
         ]);
 
-        // Neither edit may report a failure: both target text that exists in
-        // the note each one read, so both resolve their match.
+        // Both must succeed — if either fails, or either replacement is missing
+        // below, the execute queue is letting one edit clobber the other.
         expect(resA.error_code, `editA: ${resA.error}`).toBeFalsy();
         expect(resB.error_code, `editB: ${resB.error}`).toBeFalsy();
         expect(resA.success).toBe(true);
@@ -190,26 +188,7 @@ describe('edit_note concurrent edits', () => {
 
         const after = await readNote(ref.library_id, ref.zotero_key);
         const text = normalizeWhitespace(after.saved_html);
-
-        // Without the serializing queue the later save may overwrite the
-        // earlier one, so any of three end states is legitimate. What must
-        // never happen is a mangled or partially written body.
-        const bothApplied = text.includes('ALPHA Bravo Charlie DELTA');
-        const onlyA = text.includes('ALPHA Bravo Charlie Delta');
-        const onlyB = text.includes('Alpha Bravo Charlie DELTA');
-        expect(
-            bothApplied || onlyA || onlyB,
-            `unexpected end state: ${text}`,
-        ).toBe(true);
-
-        // At least one edit must be visible — losing both would mean the note
-        // was reverted to its seeded state, which no code path should produce.
-        expect(text.includes('ALPHA') || text.includes('DELTA')).toBe(true);
-
-        // Each word appears exactly once regardless of which save won.
-        for (const word of ['Bravo', 'Charlie']) {
-            expect((text.match(new RegExp(`\\b${word}\\b`, 'g')) ?? []).length).toBe(1);
-        }
+        expect(text, `lost update: ${text}`).toContain('ALPHA Bravo Charlie DELTA');
     });
 
     it('parallel rewrite + str_replace: final state is one of the two, not corrupted', async () => {
@@ -254,7 +233,7 @@ describe('edit_note concurrent edits', () => {
         expect(looksLikeRewrite || looksLikeReplace).toBe(true);
     });
 
-    it('parallel str_replace_all on overlapping targets never splits an operation', async () => {
+    it('parallel str_replace_all on overlapping targets: both apply without losing occurrences', async () => {
         const ref = await seedNote(
             '<p>foo bar foo bar foo</p><p>bar foo bar</p>',
         );
@@ -286,23 +265,13 @@ describe('edit_note concurrent edits', () => {
         const html = after.saved_html;
         const count = (token: string) => (html.match(new RegExp(`\\b${token}\\b`, 'g')) ?? []).length;
 
-        // The seeded body holds four of each token. A `str_replace_all` is
-        // applied as a single save, so whichever save wins, every occurrence
-        // of that token is replaced together: each token family must be
-        // entirely uppercase or entirely lowercase, never a mixture, and the
-        // total per family must be preserved.
-        for (const [lower, upper] of [['foo', 'FOO'], ['bar', 'BAR']] as const) {
-            const lowerCount = count(lower);
-            const upperCount = count(upper);
-            expect(
-                lowerCount === 0 || upperCount === 0,
-                `${lower}: operation applied to only part of the note (${lowerCount} lower, ${upperCount} upper)`,
-            ).toBe(true);
-            expect(lowerCount + upperCount).toBe(4);
-        }
-
-        // A lost update may drop one operation, but not both.
-        expect(count('FOO') === 4 || count('BAR') === 4).toBe(true);
+        // The seeded body holds four of each token. Serialized execution means
+        // the second edit sees the first one's result, so every occurrence of
+        // both tokens ends up replaced and none are lost to a clobbered save.
+        expect(count('foo'), `lost update: ${html}`).toBe(0);
+        expect(count('bar'), `lost update: ${html}`).toBe(0);
+        expect(count('FOO')).toBe(4);
+        expect(count('BAR')).toBe(4);
     });
 
     it('five serial edits in rapid succession: none are lost', async () => {
