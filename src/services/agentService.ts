@@ -92,6 +92,14 @@ interface ConnectionAttemptState {
     stage: ConnectionFailureStage;
     socketOpened: boolean;
     readyReceived: boolean;
+    /** When the socket's open event fired (null until then). */
+    openedAt: number | null;
+    /**
+     * When the last WebSocket message arrived (null until the first one).
+     * At failure time this separates idle-kill drops (proxies and load
+     * balancers closing a quiet connection) from mid-stream cuts.
+     */
+    lastMessageAt: number | null;
 }
 
 function navigatorOnline(): boolean | null {
@@ -104,6 +112,7 @@ function attemptEvidence(
     attempt: ConnectionAttemptState,
     overrides: Partial<ConnectionFailureEvidence> = {},
 ): ConnectionFailureEvidence {
+    const now = Date.now();
     return {
         stage: attempt.stage,
         closeCode: null,
@@ -113,6 +122,9 @@ function attemptEvidence(
         readyReceived: attempt.readyReceived,
         timedOut: false,
         navigatorOnline: navigatorOnline(),
+        wsUptimeMs: attempt.openedAt !== null ? Math.max(0, now - attempt.openedAt) : null,
+        msSinceLastWsMessageMs:
+            attempt.lastMessageAt !== null ? Math.max(0, now - attempt.lastMessageAt) : null,
         ...overrides,
     };
 }
@@ -253,6 +265,8 @@ export class AgentService {
             stage: 'auth',
             socketOpened: false,
             readyReceived: false,
+            openedAt: null,
+            lastMessageAt: null,
         };
 
         this.callbacks = callbacks;
@@ -408,6 +422,7 @@ export class AgentService {
             wsInstance.onopen = () => {
                 attempt.stage = 'authenticating';
                 attempt.socketOpened = true;
+                attempt.openedAt = Date.now();
                 logger('AgentService: Connection established, sending auth message', 1);
                 logger(
                     `AgentService: WebSocket negotiated extensions="${wsInstance.extensions || '(none)'}" protocol="${wsInstance.protocol || '(none)'}"`,
@@ -436,6 +451,7 @@ export class AgentService {
                 // Capture arrival time so dispatch lag (message-queue
                 // backlog) can be reported in request acks.
                 const receivedAt = Date.now();
+                attempt.lastMessageAt = receivedAt;
                 // Chain onto the queue so async callbacks are processed in order.
                 // connId check prevents stale messages from a previous connection
                 // from being processed after a reconnect.

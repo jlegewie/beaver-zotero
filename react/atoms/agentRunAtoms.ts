@@ -1084,6 +1084,11 @@ function surfaceAndDiagnoseConnectionFailure(
         diagnostic?: Awaited<ReturnType<typeof reportConnectionFailure>>,
     ) => {
         const presentation = presentConnectionFailure(evidence, diagnostic);
+        // The diagnostic POST can take several seconds; if the user retried in
+        // the meantime, this run is no longer active and the refined
+        // presentation must not resurface its error over the new run's state.
+        const activeId = store.get(activeRunAtom)?.id ?? null;
+        if (activeId !== runId) return;
         set(wsErrorAtom, (current) =>
             current?.type && current.type !== 'connection_error'
                 ? current

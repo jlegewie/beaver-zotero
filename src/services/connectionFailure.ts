@@ -24,6 +24,14 @@ export interface ConnectionFailureEvidence {
     timedOut: boolean;
     navigatorOnline: boolean | null;
     errorName?: string;
+    /** How long the socket had been open when the failure was observed (null if it never opened). */
+    wsUptimeMs?: number | null;
+    /**
+     * Time since the last WebSocket message arrived (null if none arrived).
+     * Separates idle-timeout kills by proxies/load balancers from abrupt
+     * mid-stream cuts.
+     */
+    msSinceLastWsMessageMs?: number | null;
 }
 
 export interface ConnectionDiagnosticResult {
@@ -45,8 +53,29 @@ export const CONNECTION_TROUBLESHOOTING_URL =
 
 const troubleshootingLink = ` See our <a href="${CONNECTION_TROUBLESHOOTING_URL}">connection troubleshooting guide</a> for help.`;
 
+// "error code" matches the wording used on the troubleshooting docs page.
 function codeSuffix(code: number | null): string {
-    return code === null ? '' : ` (connection code ${code})`;
+    return code === null ? '' : ` (error code ${code})`;
+}
+
+/**
+ * A close reason supplied by the server (or a middlebox) is often the most
+ * specific information available — e.g. "Authentication failed. Please try
+ * again." Flatten control characters, neutralize markup, and bound it for
+ * display. Markup removal is a hard requirement: the details string is parsed
+ * for <a href> links by the renderer, and peer-controlled text must never
+ * become a clickable link in privileged UI.
+ */
+function serverMessageSuffix(reason: string): string {
+    // eslint-disable-next-line no-control-regex -- intentionally strips control characters from server text
+    const flattened = reason.replace(/[\u0000-\u001f\u007f]+/g, ' ').trim();
+    const withoutMarkup = flattened
+        .replace(/<[^>]*>/g, ' ')
+        .replace(/[<>]/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+    if (!withoutMarkup) return '';
+    return ` The server reported: "${withoutMarkup.slice(0, 140)}"`;
 }
 
 function openingFailureDetails(
@@ -70,10 +99,14 @@ function openingFailureDetails(
     }
 
     if (diagnostic?.receivedHttpResponse) {
+        // A non-2xx response proves something answered over HTTPS, but not
+        // that it was Beaver — proxy block pages and captive portals respond
+        // too. Keep the cause open rather than asserting server trouble.
         const status = diagnostic.status ? ` (HTTP ${diagnostic.status})` : '';
         return (
-            `Beaver's server responded${status}, but could not accept the diagnostic request. ` +
-            'The service or its live-connection endpoint may be temporarily unavailable. Please try again in a moment.' +
+            `Beaver's live connection could not be established, and a follow-up check received an unexpected response${status}. ` +
+            'Beaver may be temporarily unavailable, or a VPN, proxy, firewall, or network filter may be intercepting the connection.' +
+            troubleshootingLink +
             suffix
         );
     }
@@ -149,11 +182,20 @@ export function presentConnectionFailure(
                 details: openingFailureDetails(evidence, diagnostic),
             };
         }
+        // The socket opened but the handshake stalled. A middlebox that
+        // permits the WebSocket upgrade and then drops frames (common with
+        // TLS-inspecting proxies) produces exactly this signature, so do not
+        // blame the sign-in session alone.
+        const stalledCause = diagnostic?.apiReachable
+            ? " Beaver's regular API is reachable, so a VPN, proxy, firewall, or security software that interferes with live (WebSocket) traffic may be blocking it, or Beaver's live-connection service may be temporarily unavailable."
+            : ' This can be caused by a slow or unstable connection, a VPN, proxy, firewall, or security software, or a temporary server issue.';
         return {
-            message: 'Beaver did not finish starting the live connection.',
+            message: 'Could not finish connecting to Beaver.',
             details:
-                'The server accepted the connection but did not finish the sign-in handshake in time. ' +
-                'Please try again; if the problem continues, sign out and sign back in.',
+                'The connection opened, but the sign-in handshake did not complete in time.' +
+                stalledCause +
+                ' Please try again; if the problem continues, sign out and sign back in.' +
+                troubleshootingLink,
         };
     }
 
@@ -173,9 +215,7 @@ export function presentConnectionFailure(
             : 'The live connection opened but ended before Beaver finished signing in.';
         const reachability = diagnostic?.apiReachable
             ? " Beaver's regular API is still reachable, so a temporary live-connection service issue, WebSocket interruption, or network/security software may be responsible."
-            : diagnostic
-              ? ' This can be caused by a temporary server or internet interruption, VPN, proxy, firewall, or security software.'
-              : ' This can be caused by a temporary server or internet interruption, VPN, proxy, firewall, or security software.';
+            : ' This can be caused by a temporary server or internet interruption, VPN, proxy, firewall, or security software.';
         return {
             message: evidence.readyReceived
                 ? 'The connection was lost before the run finished.'
@@ -195,7 +235,10 @@ export function presentConnectionFailure(
                 message: evidence.readyReceived
                     ? 'The connection was lost before the run finished.'
                     : 'Could not finish connecting to Beaver.',
-                details: standard + codeSuffix(evidence.closeCode),
+                details:
+                    standard +
+                    serverMessageSuffix(evidence.closeReason) +
+                    codeSuffix(evidence.closeCode),
             };
         }
 
@@ -204,7 +247,10 @@ export function presentConnectionFailure(
                 message: evidence.readyReceived
                     ? 'The server ended the connection before the run finished.'
                     : 'The server rejected the connection.',
-                details: `Beaver's server ended the live connection.${codeSuffix(evidence.closeCode)}`,
+                details:
+                    "Beaver's server ended the live connection." +
+                    serverMessageSuffix(evidence.closeReason) +
+                    codeSuffix(evidence.closeCode),
             };
         }
     }
@@ -215,6 +261,7 @@ export function presentConnectionFailure(
             : 'Could not connect to Beaver.',
         details:
             'A temporary server, internet, VPN, proxy, firewall, or security-software issue may be responsible.' +
+            serverMessageSuffix(evidence.closeReason) +
             troubleshootingLink +
             codeSuffix(evidence.closeCode),
     };

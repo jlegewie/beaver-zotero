@@ -258,6 +258,10 @@ describe('AgentService reconnect handling', () => {
                 socketOpened: true,
                 readyReceived: true,
                 closeCode: 1011,
+                // The socket opened and received the ready message, so both
+                // timing measurements are available for diagnostics.
+                wsUptimeMs: expect.any(Number),
+                msSinceLastWsMessageMs: expect.any(Number),
             }),
         );
     });
@@ -338,6 +342,9 @@ describe('AgentService reconnect handling', () => {
                 socketOpened: false,
                 readyReceived: false,
                 closeCode: 1006,
+                // Never opened, never received a message — no timing evidence.
+                wsUptimeMs: null,
+                msSinceLastWsMessageMs: null,
             });
         }
     });

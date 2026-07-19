@@ -92,4 +92,121 @@ describe('presentConnectionFailure', () => {
         expect(result.details).toContain('policy or account check');
         expect(result.details).not.toContain('could not verify your account');
     });
+
+    it('surfaces the server-supplied close reason when one is present', () => {
+        const result = presentConnectionFailure({
+            ...opening1006,
+            stage: 'awaiting_ready',
+            closeCode: 1008,
+            closeReason: 'Authentication failed. Please try again.',
+            socketOpened: true,
+        });
+
+        expect(result.details).toContain(
+            'The server reported: "Authentication failed. Please try again."',
+        );
+        expect(result.details).toContain('(error code 1008)');
+    });
+
+    it('neutralizes markup in a peer-supplied close reason so it cannot become a link', () => {
+        const result = presentConnectionFailure({
+            ...opening1006,
+            stage: 'mid_run',
+            closeCode: 4400,
+            closeReason: 'Blocked. <a href="https://evil.example">Click to fix</a> now',
+            socketOpened: true,
+            readyReceived: true,
+        });
+
+        // The renderer parses <a href> into clickable links that invoke
+        // Zotero.launchURL — peer text must arrive with no markup at all.
+        expect(result.details).not.toContain('<');
+        expect(result.details).not.toContain('>');
+        expect(result.details).not.toContain('evil.example');
+        expect(result.details).toContain('The server reported: "Blocked. Click to fix now"');
+    });
+
+    it('keeps only the trusted link when a reason with markup meets a linked branch', () => {
+        // Unknown close code in the 3xxx range takes the generic fallback,
+        // which appends the trusted troubleshooting link after the sanitized
+        // server text.
+        const result = presentConnectionFailure({
+            ...opening1006,
+            stage: 'mid_run',
+            closeCode: 3333,
+            closeReason: '<a href="https://evil.example">helpful link</a>',
+            socketOpened: true,
+            readyReceived: true,
+        });
+
+        expect(result.details).not.toContain('evil.example');
+        const anchorCount = (result.details.match(/<a /g) ?? []).length;
+        expect(anchorCount).toBe(1);
+        expect(result.details).toContain('connection-troubleshooting');
+    });
+
+    it('flattens control characters and bounds a hostile close reason', () => {
+        const result = presentConnectionFailure({
+            ...opening1006,
+            stage: 'mid_run',
+            closeCode: 4402,
+            closeReason: 'line one\nline two' + 'x'.repeat(300),
+            socketOpened: true,
+            readyReceived: true,
+        });
+
+        expect(result.details).toContain('The server reported: "line one line two');
+        expect(result.details).not.toContain('\n');
+        expect(result.details.length).toBeLessThan(400);
+    });
+
+    it('does not assert Beaver responded when the diagnostic got an unexpected HTTP response', () => {
+        const result = presentConnectionFailure(opening1006, {
+            apiReachable: false,
+            receivedHttpResponse: true,
+            status: 403,
+            durationMs: 120,
+        });
+
+        expect(result.details).toContain('unexpected response (HTTP 403)');
+        expect(result.details).toContain('intercepting');
+        expect(result.details).toContain('connection-troubleshooting');
+        expect(result.details).not.toContain("Beaver's server responded");
+    });
+
+    it('considers network interference for a handshake that opened but timed out', () => {
+        const result = presentConnectionFailure(
+            {
+                ...opening1006,
+                stage: 'awaiting_ready',
+                closeCode: null,
+                socketOpened: true,
+                timedOut: true,
+            },
+            {
+                apiReachable: true,
+                receivedHttpResponse: true,
+                status: 202,
+                durationMs: 40,
+            },
+        );
+
+        expect(result.message).toBe('Could not finish connecting to Beaver.');
+        expect(result.details).toContain('sign-in handshake did not complete');
+        expect(result.details).toContain('WebSocket');
+        expect(result.details).toContain('connection-troubleshooting');
+        expect(result.details).toContain('sign out and sign back in');
+    });
+
+    it('labels the numeric suffix "error code" to match the troubleshooting docs', () => {
+        const result = presentConnectionFailure({
+            ...opening1006,
+            stage: 'mid_run',
+            socketOpened: true,
+            readyReceived: true,
+        });
+
+        expect(result.details).toContain('(error code 1006)');
+        expect(result.details).not.toContain('connection code');
+    });
 });
