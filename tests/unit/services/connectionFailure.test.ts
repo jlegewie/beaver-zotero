@@ -81,6 +81,117 @@ describe('presentConnectionFailure', () => {
         expect(result.details).not.toContain('firewall');
     });
 
+    it('reports the offline cause for an auth-stage failure without a troubleshooting link', () => {
+        const result = presentConnectionFailure({
+            ...opening1006,
+            stage: 'auth',
+            closeCode: null,
+            navigatorOnline: false,
+        });
+
+        expect(result.message).toBe('Could not start the connection.');
+        expect(result.details).toContain('appears to be offline');
+        expect(result.details).not.toContain('connection-troubleshooting');
+    });
+
+    it('points at the network path when an auth-stage failure and the follow-up HTTPS probe both fail', () => {
+        const result = presentConnectionFailure(
+            {
+                ...opening1006,
+                stage: 'auth',
+                closeCode: null,
+            },
+            {
+                apiReachable: false,
+                receivedHttpResponse: false,
+                durationMs: 5_000,
+            },
+        );
+
+        expect(result.message).toBe('Could not start the connection.');
+        expect(result.details).toContain('could not reach Beaver either');
+        expect(result.details).toContain('firewall');
+        expect(result.details).toContain('connection-troubleshooting');
+        expect(result.details).not.toContain('sign out');
+    });
+
+    it('blames the sign-in session or a network filter when the auth-stage diagnostic shows the API is reachable', () => {
+        const result = presentConnectionFailure(
+            {
+                ...opening1006,
+                stage: 'auth',
+                closeCode: null,
+            },
+            {
+                apiReachable: true,
+                receivedHttpResponse: true,
+                status: 200,
+                durationMs: 30,
+            },
+        );
+
+        expect(result.message).toBe('Could not start the connection.');
+        expect(result.details).toContain("Beaver's API is reachable");
+        expect(result.details).toContain('sign out and sign back in');
+        expect(result.details).toContain('connection-troubleshooting');
+    });
+
+    it('keeps the cause open when an auth-stage follow-up check receives an unexpected response', () => {
+        const result = presentConnectionFailure(
+            {
+                ...opening1006,
+                stage: 'auth',
+                closeCode: null,
+            },
+            {
+                apiReachable: false,
+                receivedHttpResponse: true,
+                status: 503,
+                durationMs: 40,
+            },
+        );
+
+        expect(result.message).toBe('Could not start the connection.');
+        expect(result.details).toContain('unexpected response (HTTP 503)');
+        expect(result.details).toContain('may be intercepting');
+        expect(result.details).toContain('connection-troubleshooting');
+        expect(result.details).not.toContain('sign out');
+    });
+
+    it('gives sign-out advice for an auth-stage failure with no diagnostic yet', () => {
+        const result = presentConnectionFailure({
+            ...opening1006,
+            stage: 'auth',
+            closeCode: null,
+        });
+
+        expect(result.message).toBe('Could not start the connection.');
+        expect(result.details).toContain('could not check your sign-in session');
+        expect(result.details).toContain('sign out and sign back in');
+        expect(result.details).toContain('connection-troubleshooting');
+    });
+
+    it('preserves the timed-out lead for an auth-stage failure with a reachable-API diagnostic', () => {
+        const result = presentConnectionFailure(
+            {
+                ...opening1006,
+                stage: 'auth',
+                closeCode: null,
+                timedOut: true,
+            },
+            {
+                apiReachable: true,
+                receivedHttpResponse: true,
+                status: 200,
+                durationMs: 30,
+            },
+        );
+
+        expect(result.details).toContain('Beaver timed out while checking your sign-in session');
+        expect(result.details).toContain("Beaver's API is reachable");
+        expect(result.details).toContain('connection-troubleshooting');
+    });
+
     it('uses the standards meaning of policy code 1008 without claiming auth failure', () => {
         const result = presentConnectionFailure({
             ...opening1006,

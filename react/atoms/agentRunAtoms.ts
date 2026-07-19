@@ -11,6 +11,7 @@ import { agentService, AgentConnectionError } from '../../src/services/agentServ
 import { notifyRunComplete, notifyUserQuestion } from '../../src/services/systemNotifications';
 import { reportConnectionFailure } from '../../src/services/diagnosticsService';
 import {
+    baselineConnectionEvidence,
     ConnectionFailureEvidence,
     presentConnectionFailure,
 } from '../../src/services/connectionFailure';
@@ -1055,26 +1056,6 @@ function findToolCallArgs(
     return null;
 }
 
-function fallbackConnectionEvidence(
-    stage: ConnectionFailureEvidence['stage'],
-    overrides: Partial<ConnectionFailureEvidence> = {},
-): ConnectionFailureEvidence {
-    return {
-        stage,
-        closeCode: null,
-        closeReason: '',
-        wasClean: null,
-        socketOpened: stage !== 'auth' && stage !== 'opening',
-        readyReceived: stage === 'mid_run',
-        timedOut: false,
-        navigatorOnline:
-            typeof navigator !== 'undefined' && typeof navigator.onLine === 'boolean'
-                ? navigator.onLine
-                : null,
-        ...overrides,
-    };
-}
-
 function surfaceAndDiagnoseConnectionFailure(
     set: Setter,
     runId: string,
@@ -1625,7 +1606,7 @@ function createWSCallbacks(set: Setter): WSCallbacks {
                     (activeRun.status === 'in_progress' ||
                         activeRun.status === 'awaiting_deferred')
                 ) {
-                    const evidence = transportEvidence ?? fallbackConnectionEvidence('mid_run', {
+                    const evidence = transportEvidence ?? baselineConnectionEvidence('mid_run', {
                         closeCode: code,
                         closeReason: reason,
                         wasClean,
@@ -1677,7 +1658,7 @@ async function executeWSRequest(
 
         const evidence = error instanceof AgentConnectionError
             ? error.evidence
-            : fallbackConnectionEvidence('opening', {
+            : baselineConnectionEvidence('opening', {
                   errorName: error instanceof Error ? error.name : 'UnknownError',
               });
         surfaceAndDiagnoseConnectionFailure(set, run.id, evidence);
@@ -2082,11 +2063,17 @@ export const regenerateFromRunAtom = atom(
                 // The run is currently active - cancel it and resubmit
                 targetRun = activeRun;
                 runIndex = threadRuns.length;
-                await agentService.cancel();
+                // Clear the active run before awaiting cancel: agentService.cancel()
+                // waits for the cancel message to flush, and if the socket closes
+                // uncleanly during that window, the onclose handler must not see this
+                // run still marked active and misattribute the close as a connection
+                // failure. The pending flag stays set until cancel resolves so the
+                // composer guard keeps blocking new sends during the flush.
                 set(activeRunAtom, null);
+                await agentService.cancel();
                 set(isWSChatPendingAtom, false);
             }
-            
+
             if (!targetRun) {
                 logger(`regenerateFromRunAtom: Run ${runId} not found`, 1);
                 return;
@@ -2287,11 +2274,17 @@ export const regenerateWithEditedPromptAtom = atom(
                 // The run is currently active - cancel it and resubmit
                 targetRun = activeRun;
                 runIndex = threadRuns.length;
-                await agentService.cancel();
+                // Clear the active run before awaiting cancel: agentService.cancel()
+                // waits for the cancel message to flush, and if the socket closes
+                // uncleanly during that window, the onclose handler must not see this
+                // run still marked active and misattribute the close as a connection
+                // failure. The pending flag stays set until cancel resolves so the
+                // composer guard keeps blocking new sends during the flush.
                 set(activeRunAtom, null);
+                await agentService.cancel();
                 set(isWSChatPendingAtom, false);
             }
-            
+
             if (!targetRun) {
                 logger(`regenerateWithEditedPromptAtom: Run ${runId} not found`, 1);
                 return;

@@ -34,6 +34,37 @@ export interface ConnectionFailureEvidence {
     msSinceLastWsMessageMs?: number | null;
 }
 
+/** navigator.onLine when available; null in contexts without a navigator global. */
+export function navigatorOnlineState(): boolean | null {
+    return typeof navigator !== 'undefined' && typeof navigator.onLine === 'boolean'
+        ? navigator.onLine
+        : null;
+}
+
+/**
+ * Evidence with conservative defaults for failure paths that lack live
+ * attempt state. socketOpened/readyReceived are inferred from the stage;
+ * timing fields stay null because no attempt timestamps exist.
+ */
+export function baselineConnectionEvidence(
+    stage: ConnectionFailureStage,
+    overrides: Partial<ConnectionFailureEvidence> = {},
+): ConnectionFailureEvidence {
+    return {
+        stage,
+        closeCode: null,
+        closeReason: '',
+        wasClean: null,
+        socketOpened: stage !== 'auth' && stage !== 'opening',
+        readyReceived: stage === 'mid_run',
+        timedOut: false,
+        navigatorOnline: navigatorOnlineState(),
+        wsUptimeMs: null,
+        msSinceLastWsMessageMs: null,
+        ...overrides,
+    };
+}
+
 export interface ConnectionDiagnosticResult {
     /** Whether the post-failure HTTPS request reached Beaver and returned 2xx. */
     apiReachable: boolean;
@@ -169,10 +200,58 @@ export function presentConnectionFailure(
     diagnostic?: ConnectionDiagnosticResult,
 ): ConnectionFailurePresentation {
     if (evidence.stage === 'auth') {
-        const details = evidence.timedOut
-            ? 'Beaver timed out while checking your sign-in session. Please try again; if it continues, sign out and sign back in.'
-            : 'Beaver could not check your sign-in session. Please try again; if it continues, sign out and sign back in.';
-        return { message: 'Could not start the connection.', details };
+        const message = 'Could not start the connection.';
+        if (evidence.navigatorOnline === false) {
+            return {
+                message,
+                details: 'Your device appears to be offline. Reconnect to the internet and try again.',
+            };
+        }
+        const lead = evidence.timedOut
+            ? 'Beaver timed out while checking your sign-in session.'
+            : 'Beaver could not check your sign-in session.';
+        if (diagnostic && !diagnostic.receivedHttpResponse) {
+            // Both the sign-in check and the follow-up HTTPS probe failed,
+            // which points at the network path rather than the session itself.
+            return {
+                message,
+                details:
+                    lead +
+                    ' A follow-up check could not reach Beaver either, so your internet connection, VPN, proxy, firewall, or security software may be blocking access.' +
+                    troubleshootingLink,
+            };
+        }
+        if (diagnostic?.apiReachable) {
+            // Beaver itself answers, so the sign-in service is the outlier —
+            // a stale session, or a network filter blocking only that domain.
+            return {
+                message,
+                details:
+                    lead +
+                    " Beaver's API is reachable, so the problem is likely with the sign-in session itself or a network filter blocking the sign-in service. Please try again; if it continues, sign out and sign back in." +
+                    troubleshootingLink,
+            };
+        }
+        if (diagnostic?.receivedHttpResponse) {
+            // A non-2xx response proves something answered over HTTPS, but not
+            // that it was Beaver — proxy block pages and captive portals
+            // respond too — so re-auth advice alone would mislead here.
+            const status = diagnostic.status ? ` (HTTP ${diagnostic.status})` : '';
+            return {
+                message,
+                details:
+                    lead +
+                    ` A follow-up check received an unexpected response${status}, so Beaver may be temporarily unavailable, or a proxy, firewall, or network filter may be intercepting the connection.` +
+                    troubleshootingLink,
+            };
+        }
+        return {
+            message,
+            details:
+                lead +
+                ' Please try again; if it continues, sign out and sign back in.' +
+                troubleshootingLink,
+        };
     }
 
     if (evidence.timedOut) {

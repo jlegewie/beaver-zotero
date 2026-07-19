@@ -37,6 +37,7 @@ import {
     type PreparedJsonMessage,
 } from './preparedJsonMessage';
 import {
+    baselineConnectionEvidence,
     ConnectionFailureEvidence,
     ConnectionFailureStage,
 } from './connectionFailure';
@@ -102,31 +103,19 @@ interface ConnectionAttemptState {
     lastMessageAt: number | null;
 }
 
-function navigatorOnline(): boolean | null {
-    return typeof navigator !== 'undefined' && typeof navigator.onLine === 'boolean'
-        ? navigator.onLine
-        : null;
-}
-
 function attemptEvidence(
     attempt: ConnectionAttemptState,
     overrides: Partial<ConnectionFailureEvidence> = {},
 ): ConnectionFailureEvidence {
     const now = Date.now();
-    return {
-        stage: attempt.stage,
-        closeCode: null,
-        closeReason: '',
-        wasClean: null,
+    return baselineConnectionEvidence(attempt.stage, {
         socketOpened: attempt.socketOpened,
         readyReceived: attempt.readyReceived,
-        timedOut: false,
-        navigatorOnline: navigatorOnline(),
         wsUptimeMs: attempt.openedAt !== null ? Math.max(0, now - attempt.openedAt) : null,
         msSinceLastWsMessageMs:
             attempt.lastMessageAt !== null ? Math.max(0, now - attempt.lastMessageAt) : null,
         ...overrides,
-    };
+    });
 }
 
 export class AgentConnectionError extends Error {

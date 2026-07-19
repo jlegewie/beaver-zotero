@@ -24,7 +24,10 @@ import {
     clearBackendHttpSuccess,
     recordBackendHttpSuccess,
 } from '../../../src/services/backendReachability';
-import { reportConnectionFailure } from '../../../src/services/diagnosticsService';
+import {
+    clearConnectionFailureReportState,
+    reportConnectionFailure,
+} from '../../../src/services/diagnosticsService';
 import { supabase } from '../../../src/services/supabaseClient';
 import { getZoteroUserIdentifier } from '../../../src/utils/zoteroUtils';
 import type { ConnectionFailureEvidence } from '../../../src/services/connectionFailure';
@@ -50,6 +53,7 @@ describe('reportConnectionFailure', () => {
     beforeEach(() => {
         vi.restoreAllMocks();
         clearBackendHttpSuccess();
+        clearConnectionFailureReportState();
         // Default: signed out — no token attached, identity available.
         getSessionMock.mockResolvedValue({
             data: { session: null },
@@ -186,6 +190,93 @@ describe('reportConnectionFailure', () => {
             apiReachable: false,
             receivedHttpResponse: true,
             status: 503,
+        });
+    });
+
+    describe('offline short-circuit', () => {
+        it('resolves an unreachable result without calling fetch or looking up the session', async () => {
+            const fetchMock = vi.fn();
+            vi.stubGlobal('fetch', fetchMock);
+
+            const result = await reportConnectionFailure({
+                evidence: { ...evidence, navigatorOnline: false },
+            });
+
+            expect(result).toEqual({
+                apiReachable: false,
+                receivedHttpResponse: false,
+                durationMs: 0,
+            });
+            expect(fetchMock).not.toHaveBeenCalled();
+            expect(getSessionMock).not.toHaveBeenCalled();
+        });
+    });
+
+    describe('in-flight sharing and cooldown', () => {
+        it('shares the in-flight report between concurrent calls', async () => {
+            let resolveFetch: (value: Response) => void = () => {};
+            const fetchMock = vi.fn().mockReturnValue(
+                new Promise<Response>((resolve) => {
+                    resolveFetch = resolve;
+                }),
+            );
+            vi.stubGlobal('fetch', fetchMock);
+
+            const first = reportConnectionFailure({ evidence });
+            const second = reportConnectionFailure({ evidence });
+
+            resolveFetch(new Response(null, { status: 204 }));
+            const [firstResult, secondResult] = await Promise.all([first, second]);
+
+            expect(fetchMock).toHaveBeenCalledTimes(1);
+            expect(secondResult).toBe(firstResult);
+            expect(firstResult).toMatchObject({ apiReachable: true, status: 204 });
+        });
+
+        it('reuses an unreachable verdict for a failure within the cooldown window', async () => {
+            const fetchMock = vi
+                .fn()
+                .mockRejectedValue(new TypeError('NetworkError'));
+            vi.stubGlobal('fetch', fetchMock);
+
+            const first = await reportConnectionFailure({ evidence });
+            const second = await reportConnectionFailure({ evidence });
+
+            expect(fetchMock).toHaveBeenCalledTimes(1);
+            expect(first.apiReachable).toBe(false);
+            expect(second).toBe(first);
+        });
+
+        it('re-probes within the cooldown when the last report showed the API reachable', async () => {
+            const fetchMock = vi
+                .fn()
+                .mockResolvedValue(new Response(null, { status: 204 }));
+            vi.stubGlobal('fetch', fetchMock);
+
+            const first = await reportConnectionFailure({ evidence });
+            const second = await reportConnectionFailure({ evidence });
+
+            expect(first.apiReachable).toBe(true);
+            expect(fetchMock).toHaveBeenCalledTimes(2);
+            expect(second).not.toBe(first);
+        });
+
+        it('runs a fresh report once the cooldown window has elapsed', async () => {
+            const fetchMock = vi
+                .fn()
+                .mockRejectedValue(new TypeError('NetworkError'));
+            vi.stubGlobal('fetch', fetchMock);
+
+            let now = 1_000_000;
+            vi.spyOn(Date, 'now').mockImplementation(() => now);
+
+            await reportConnectionFailure({ evidence });
+            expect(fetchMock).toHaveBeenCalledTimes(1);
+
+            now += 30_000; // matches the module's cooldown window
+            await reportConnectionFailure({ evidence });
+
+            expect(fetchMock).toHaveBeenCalledTimes(2);
         });
     });
 });

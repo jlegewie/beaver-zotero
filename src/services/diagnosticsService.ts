@@ -7,6 +7,12 @@
  * when one is available so the backend can associate the report with a user,
  * but a missing or stale token never blocks or delays the report — the backend
  * accepts it anonymously.
+ *
+ * Reports are coalesced and throttled: repeated failures within the same
+ * outage add no new diagnostic information, so a call made while a report is
+ * already in flight reuses that in-flight result, and a call made shortly
+ * after the last report completed reuses its result instead of firing a new
+ * POST plus auth lookup.
  */
 
 import API_BASE_URL from '../utils/getAPIBaseURL';
@@ -22,6 +28,14 @@ import {
 const DIAGNOSTICS_ENDPOINT = '/api/v1/diagnostics/connection-failure';
 const REPORT_TIMEOUT_MS = 8_000;
 const AUTH_TOKEN_TIMEOUT_MS = 3_000;
+
+/** Minimum time between two real reports; calls within this window of the last completed report reuse its result. */
+const REPORT_COOLDOWN_MS = 30_000;
+
+/** The currently running report, shared by any calls that arrive while it is in flight. */
+let inFlightReport: Promise<ConnectionDiagnosticResult> | null = null;
+/** The most recently completed report, reused while still within REPORT_COOLDOWN_MS. */
+let lastReport: { at: number; result: ConnectionDiagnosticResult } | null = null;
 
 export interface ConnectionFailureReport {
     evidence: ConnectionFailureEvidence;
@@ -45,14 +59,15 @@ async function getAuthTokenBestEffort(): Promise<string | null> {
     }
 }
 
-export async function reportConnectionFailure(
+/**
+ * Builds and sends the diagnostic POST. Always resolves — network and auth
+ * failures are caught and turned into an unreachable result rather than a
+ * rejection — so `reportConnectionFailure` can safely share and cache it.
+ */
+async function executeReport(
     report: ConnectionFailureReport,
 ): Promise<ConnectionDiagnosticResult> {
     const startedAt = Date.now();
-    if (!API_BASE_URL) {
-        return { apiReachable: false, receivedHttpResponse: false, durationMs: 0 };
-    }
-
     const nav = typeof navigator !== 'undefined' ? navigator : undefined;
     const pluginVersion =
         (typeof Zotero !== 'undefined' && Zotero.Beaver?.pluginVersion) || '';
@@ -139,4 +154,55 @@ export async function reportConnectionFailure(
     } finally {
         clearTimeout(timeoutId);
     }
+}
+
+export async function reportConnectionFailure(
+    report: ConnectionFailureReport,
+): Promise<ConnectionDiagnosticResult> {
+    if (!API_BASE_URL) {
+        return { apiReachable: false, receivedHttpResponse: false, durationMs: 0 };
+    }
+
+    // Offline is a known, immediate cause: skip the auth lookup and POST
+    // entirely, and don't cache the result, so the next call (e.g. once the
+    // OS reports back online) runs a real report rather than reusing this one.
+    if (report.evidence.navigatorOnline === false) {
+        return { apiReachable: false, receivedHttpResponse: false, durationMs: 0 };
+    }
+
+    if (inFlightReport) return inFlightReport;
+    // Only an unreachable verdict is reused during the cooldown: it covers the
+    // persistent-outage case where repeated probes would spam identical
+    // reports. A cached reachable verdict is never reused — the network may
+    // have degraded since, and presenting a stale "API is reachable" for a
+    // new failure would misdirect the user — so a fresh probe runs instead.
+    if (
+        lastReport &&
+        !lastReport.result.apiReachable &&
+        Date.now() - lastReport.at < REPORT_COOLDOWN_MS
+    ) {
+        return lastReport.result;
+    }
+
+    const promise = executeReport(report)
+        .then((result) => {
+            lastReport = { at: Date.now(), result };
+            return result;
+        })
+        .finally(() => {
+            // Cleared unconditionally so a promise that rejects unexpectedly
+            // (executeReport is not expected to) can never wedge the guard.
+            inFlightReport = null;
+        });
+    inFlightReport = promise;
+    return promise;
+}
+
+/**
+ * Test-only: clears the in-flight and cooldown state tracked by
+ * `reportConnectionFailure` so each test starts from a clean slate.
+ */
+export function clearConnectionFailureReportState(): void {
+    inFlightReport = null;
+    lastReport = null;
 }
