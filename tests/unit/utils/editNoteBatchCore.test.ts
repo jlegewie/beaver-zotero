@@ -462,6 +462,34 @@ describe('captureUndoContexts', () => {
         expect(undoDrafts[0].undo_before_context).toBe(before);
         expect(undoDrafts[0].undo_after_context).toBe(after);
     });
+
+    it('appliedHtml identical to the final html skips the scan but matches the default path byte-for-byte', () => {
+        const html = '<div><p>keep</p><p>remove</p></div>';
+        const resolved = resolveOrThrow(makeCtx(html), [
+            spec(0, 'str_replace', '<p>remove</p>', ''),
+        ]);
+        const { newStrippedHtml, undoDrafts: draftsWithoutParam } = applyResolvedEdits(html, resolved);
+        const { undoDrafts: draftsWithParam } = applyResolvedEdits(html, resolved);
+
+        captureUndoContexts(newStrippedHtml, draftsWithoutParam);
+        captureUndoContexts(newStrippedHtml, draftsWithParam, newStrippedHtml);
+
+        expect(draftsWithParam).toEqual(draftsWithoutParam);
+    });
+
+    it('still refreshes when appliedHtml is provided but differs from the final html', () => {
+        const html = '<div><p>keep</p><p>remove</p></div>';
+        const resolved = resolveOrThrow(makeCtx(html), [
+            spec(0, 'str_replace', '<p>remove</p>', ''),
+        ]);
+        const { newStrippedHtml, undoDrafts } = applyResolvedEdits(html, resolved);
+        const finalStripped = addOrUpdateEditFooter(newStrippedHtml, 'thread-1');
+
+        captureUndoContexts(finalStripped, undoDrafts, newStrippedHtml);
+
+        expect(undoDrafts[0].undo_before_context).toBe('<div><p>keep</p>');
+        expect(undoDrafts[0].undo_after_context).toContain('Edited by Beaver');
+    });
 });
 
 // =============================================================================

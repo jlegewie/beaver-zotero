@@ -1238,7 +1238,7 @@ export async function executeEditNoteBatchAction(
 
     // 7. Refresh undo contexts against the final (post-footer, PM-normalized) HTML.
     const finalStripped = stripDataCitationItems(getLatestNoteHtml(item));
-    captureUndoContexts(finalStripped, undoDrafts);
+    captureUndoContexts(finalStripped, undoDrafts, newStrippedHtml);
 
     // 8. Warnings: per-edit duplicate-citation + batch locator warnings.
     const warnings: string[] = [...labels.locatorWarnings];

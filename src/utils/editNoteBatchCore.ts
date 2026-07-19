@@ -804,11 +804,21 @@ export function applyResolvedEdits(
  * updates them when the fragment is uniquely locatable in the final HTML, and
  * otherwise keeps the apply-time values. Tolerant of not-found by design — undo
  * carries its own fuzzy fallbacks.
+ *
+ * `appliedHtml` is the stripped HTML `applyResolvedEdits` produced (the string
+ * every draft's apply-time fragments/contexts were sliced from). When it is
+ * byte-identical to `finalStrippedHtml`, every fragment already sits at the
+ * same offsets it was captured from, so re-scanning would relocate each one
+ * back to that same position (or leave it untouched when ambiguous) — the
+ * refresh is skipped entirely in that case.
  */
 export function captureUndoContexts(
     finalStrippedHtml: string,
     drafts: BatchUndoDraft[],
+    appliedHtml?: string,
 ): void {
+    if (appliedHtml !== undefined && appliedHtml === finalStrippedHtml) return;
+
     const refreshDeletionSeam = (
         context: { before: string; after: string },
     ): { before: string; after: string } | null => {
