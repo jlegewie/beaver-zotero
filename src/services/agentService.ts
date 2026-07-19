@@ -36,6 +36,10 @@ import {
     withPreparedJsonEnvelope,
     type PreparedJsonMessage,
 } from './preparedJsonMessage';
+import {
+    ConnectionFailureEvidence,
+    ConnectionFailureStage,
+} from './connectionFailure';
 
 
 // =============================================================================
@@ -84,6 +88,45 @@ export async function getWSAuthToken(): Promise<string> {
 /** Backstop timeout for a full connect attempt (auth token + handshake + ready). */
 export const CONNECT_TIMEOUT_MS = 20_000;
 
+interface ConnectionAttemptState {
+    stage: ConnectionFailureStage;
+    socketOpened: boolean;
+    readyReceived: boolean;
+}
+
+function navigatorOnline(): boolean | null {
+    return typeof navigator !== 'undefined' && typeof navigator.onLine === 'boolean'
+        ? navigator.onLine
+        : null;
+}
+
+function attemptEvidence(
+    attempt: ConnectionAttemptState,
+    overrides: Partial<ConnectionFailureEvidence> = {},
+): ConnectionFailureEvidence {
+    return {
+        stage: attempt.stage,
+        closeCode: null,
+        closeReason: '',
+        wasClean: null,
+        socketOpened: attempt.socketOpened,
+        readyReceived: attempt.readyReceived,
+        timedOut: false,
+        navigatorOnline: navigatorOnline(),
+        ...overrides,
+    };
+}
+
+export class AgentConnectionError extends Error {
+    readonly evidence: ConnectionFailureEvidence;
+
+    constructor(message: string, evidence: ConnectionFailureEvidence) {
+        super(message);
+        this.name = 'AgentConnectionError';
+        this.evidence = evidence;
+    }
+}
+
 /**
  * Thrown when a connect attempt never settles within CONNECT_TIMEOUT_MS.
  *
@@ -91,9 +134,13 @@ export const CONNECT_TIMEOUT_MS = 20_000;
  * WebSocket close code of its own. Callers must identify it by type rather than
  * by close code, otherwise it is indistinguishable from a plain network outage.
  */
-export class ConnectTimeoutError extends Error {
-    constructor(timeoutMs: number = CONNECT_TIMEOUT_MS) {
-        super(`Connection attempt timed out after ${timeoutMs}ms`);
+export class ConnectTimeoutError extends AgentConnectionError {
+    constructor(evidence: ConnectionFailureEvidence, timeoutMs: number = CONNECT_TIMEOUT_MS) {
+        super(`Connection attempt timed out after ${timeoutMs}ms`, {
+            ...evidence,
+            timedOut: true,
+            errorName: 'ConnectTimeoutError',
+        });
         this.name = 'ConnectTimeoutError';
     }
 }
@@ -202,6 +249,11 @@ export class AgentService {
         // external close during the async auth-token lookup can abort setup
         // before it creates a socket.
         const setupConnectionId = this.connectionId;
+        const attempt: ConnectionAttemptState = {
+            stage: 'auth',
+            socketOpened: false,
+            readyReceived: false,
+        };
 
         this.callbacks = callbacks;
 
@@ -224,14 +276,14 @@ export class AgentService {
                 // Reject before close(): close() resolves the pending
                 // establishConnection promise, so closing first would let the
                 // race settle as a success and mask the timeout.
-                reject(new ConnectTimeoutError(CONNECT_TIMEOUT_MS));
+                reject(new ConnectTimeoutError(attemptEvidence(attempt), CONNECT_TIMEOUT_MS));
                 this.close(1000, 'Connection attempt timed out');
             }, CONNECT_TIMEOUT_MS);
         });
 
         try {
             await Promise.race([
-                this.establishConnection(request, callbacks, setupConnectionId, frontendVersion, clientType, clientFeatures, zoteroInstance),
+                this.establishConnection(request, callbacks, setupConnectionId, attempt, frontendVersion, clientType, clientFeatures, zoteroInstance),
                 connectTimeout,
             ]);
         } catch (error) {
@@ -257,12 +309,23 @@ export class AgentService {
         request: AgentRunRequest,
         callbacks: WSCallbacks,
         setupConnectionId: number,
+        attempt: ConnectionAttemptState,
         frontendVersion?: string,
         clientType?: string,
         clientFeatures?: string[],
         zoteroInstance?: ZoteroInstanceWire,
     ): Promise<void> {
-        const token = await this.getAuthToken();
+        let token: string;
+        try {
+            token = await this.getAuthToken();
+        } catch (error) {
+            if (error instanceof AgentConnectionError) throw error;
+            const message = error instanceof Error ? error.message : String(error);
+            throw new AgentConnectionError(message || 'Could not check user session', attemptEvidence(attempt, {
+                stage: 'auth',
+                errorName: error instanceof Error ? error.name : 'UnknownError',
+            }));
+        }
 
         // A close() during the token lookup superseded this attempt (and
         // already cleared `connecting`). An intentional client close is
@@ -284,6 +347,7 @@ export class AgentService {
 
         // Connect with clean URL (no sensitive data in params)
         const wsUrl = this.getWebSocketUrl();
+        attempt.stage = 'opening';
 
         logger(`AgentService: Connecting to ${wsUrl}`, 1);
 
@@ -307,6 +371,8 @@ export class AgentService {
             const wrappedCallbacks: WSCallbacks = {
                 ...callbacks,
                 onReady: (data: WSReadyData) => {
+                    attempt.stage = 'mid_run';
+                    attempt.readyReceived = true;
                     logger('AgentService: Server ready, sending agent run request', 1);
                     // Call the original onReady callback first
                     callbacks.onReady(data);
@@ -324,14 +390,24 @@ export class AgentService {
             };
 
             this.callbacks = wrappedCallbacks;
-            this.ws = new WebSocket(wsUrl);
+            let wsInstance: WebSocket;
+            try {
+                wsInstance = new WebSocket(wsUrl);
+                this.ws = wsInstance;
+            } catch (error) {
+                const message = error instanceof Error ? error.message : String(error);
+                finish(new AgentConnectionError(message || 'Could not create WebSocket', attemptEvidence(attempt, {
+                    errorName: error instanceof Error ? error.name : 'UnknownError',
+                })));
+                return;
+            }
             
             // Capture the WebSocket instance to avoid race conditions if connect()
             // is called again before auth completes. The second connect() would call
             // close() which sets this.ws = null, but we need the original instance.
-            const wsInstance = this.ws;
-
-            this.ws.onopen = () => {
+            wsInstance.onopen = () => {
+                attempt.stage = 'authenticating';
+                attempt.socketOpened = true;
                 logger('AgentService: Connection established, sending auth message', 1);
                 logger(
                     `AgentService: WebSocket negotiated extensions="${wsInstance.extensions || '(none)'}" protocol="${wsInstance.protocol || '(none)'}"`,
@@ -345,6 +421,7 @@ export class AgentService {
                     // connect() is called again during the delay (which would null this.ws)
                     if (wsInstance.readyState === WebSocket.OPEN) {
                         wsInstance.send(JSON.stringify(authMessage));
+                        attempt.stage = 'awaiting_ready';
                         logger('AgentService: Auth message sent', 1);
                     } else {
                         logger(`AgentService: WebSocket not open for auth (state=${wsInstance.readyState}), connection may have been superseded`, 1);
@@ -355,7 +432,7 @@ export class AgentService {
             };
 
             const connId = this.connectionId;
-            this.ws.onmessage = (event) => {
+            wsInstance.onmessage = (event) => {
                 // Capture arrival time so dispatch lag (message-queue
                 // backlog) can be reported in request acks.
                 const receivedAt = Date.now();
@@ -374,11 +451,11 @@ export class AgentService {
             // spec, onclose always fires after onerror, so we defer rejection to
             // onclose to capture the close code (useful for distinguishing proxy
             // blocks, TLS failures, and server-side rejects).
-            this.ws.onerror = () => {
+            wsInstance.onerror = () => {
                 logger(`AgentService: WebSocket error event (close will follow)`, 1);
             };
 
-            this.ws.onclose = (event) => {
+            wsInstance.onclose = (event) => {
                 if (this.ws !== wsInstance || this.connectionId !== connId) {
                     logger('AgentService: Ignoring stale close event from superseded connection', 1);
                     return;
@@ -386,16 +463,23 @@ export class AgentService {
                 logger(`AgentService: Connection closed - code=${event.code}, reason=${event.reason}, clean=${event.wasClean}`, 1);
                 // Notify before resetConnectionState() so the callback can
                 // still read connection-scoped state.
-                callbacks.onClose?.(event.code, event.reason, event.wasClean);
+                const evidence = attemptEvidence(attempt, {
+                    stage: attempt.readyReceived ? 'mid_run' : attempt.stage,
+                    closeCode: event.code,
+                    closeReason: event.reason,
+                    wasClean: event.wasClean,
+                });
+                callbacks.onClose?.(event.code, event.reason, event.wasClean, evidence);
                 this.resetConnectionState();
                 // If we haven't resolved yet, the connection closed before
                 // ready. Close-code details for the error UI travel via the
                 // onClose callback above, not the rejection.
                 if (!hasResolved) {
-                    finish(new Error(
+                    finish(new AgentConnectionError(
                         event.reason
                             ? `Connection closed: ${event.reason}`
-                            : `Connection closed before ready (code ${event.code})`
+                            : `Connection closed before ready (code ${event.code})`,
+                        evidence,
                     ));
                 }
             };

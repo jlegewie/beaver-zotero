@@ -24,6 +24,7 @@ import {
 } from '../atoms/profile';
 import { isTransientNetworkError } from '../utils/isTransientNetworkError';
 import { store } from '../store';
+import { recordBackendHttpSuccess } from '../../src/services/backendReachability';
 
 // Adaptive refresh intervals based on sidebar visibility
 const ACTIVE_REFRESH_INTERVAL = 15 * 60 * 1000; // 15 minutes when sidebar is visible
@@ -90,6 +91,9 @@ export const useProfileSync = () => {
         logger(`useProfileSync: Fetching profile and plan for ${userId}.`);
         try {
             const profileData = await accountService.getProfileWithPlan();
+            // This authenticated profile POST proves when Beaver's regular API
+            // was last reachable; connection diagnostics include its age.
+            recordBackendHttpSuccess('profile');
 
             // Store required data version and minimum frontend version
             setRequiredDataVersion(profileData.required_data_version);

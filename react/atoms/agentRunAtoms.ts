@@ -7,9 +7,13 @@
 
 import { atom, Getter, Setter } from 'jotai';
 import { v4 as uuidv4 } from 'uuid';
-import { agentService, ConnectTimeoutError, CONNECT_TIMEOUT_MS } from '../../src/services/agentService';
+import { agentService, AgentConnectionError } from '../../src/services/agentService';
 import { notifyRunComplete, notifyUserQuestion } from '../../src/services/systemNotifications';
 import { reportConnectionFailure } from '../../src/services/diagnosticsService';
+import {
+    ConnectionFailureEvidence,
+    presentConnectionFailure,
+} from '../../src/services/connectionFailure';
 import {
     WSCallbacks,
     AgentRunRequest,
@@ -930,15 +934,6 @@ export const wsRequestAckDataAtom = atom<WSRequestAckData | null>(null);
 /** Last error from WebSocket */
 export const wsErrorAtom = atom<WSErrorEvent | null>(null);
 
-/**
- * Close details from the most recent unexpected WebSocket close, reset at the
- * start of each connect attempt. Lets the connect-phase error path surface
- * close-code details (proxy blocks, TLS interference, auth rejections)
- * without threading them through promise rejections. Normal client closes
- * (code 1000) are never recorded.
- */
-const lastWSCloseInfoAtom = atom<{ code: number; reason: string; wasClean: boolean } | null>(null);
-
 /** Last warning from WebSocket */
 export const wsWarningAtom = atom<WSWarningEvent | null>(null);
 
@@ -1058,6 +1053,71 @@ function findToolCallArgs(
         }
     }
     return null;
+}
+
+function fallbackConnectionEvidence(
+    stage: ConnectionFailureEvidence['stage'],
+    overrides: Partial<ConnectionFailureEvidence> = {},
+): ConnectionFailureEvidence {
+    return {
+        stage,
+        closeCode: null,
+        closeReason: '',
+        wasClean: null,
+        socketOpened: stage !== 'auth' && stage !== 'opening',
+        readyReceived: stage === 'mid_run',
+        timedOut: false,
+        navigatorOnline:
+            typeof navigator !== 'undefined' && typeof navigator.onLine === 'boolean'
+                ? navigator.onLine
+                : null,
+        ...overrides,
+    };
+}
+
+function surfaceAndDiagnoseConnectionFailure(
+    set: Setter,
+    runId: string,
+    evidence: ConnectionFailureEvidence,
+): void {
+    const applyPresentation = (
+        diagnostic?: Awaited<ReturnType<typeof reportConnectionFailure>>,
+    ) => {
+        const presentation = presentConnectionFailure(evidence, diagnostic);
+        set(wsErrorAtom, (current) =>
+            current?.type && current.type !== 'connection_error'
+                ? current
+                : current?.run_id && current.run_id !== runId
+                  ? current
+                  : {
+                        event: 'error',
+                        type: 'connection_error',
+                        message: presentation.message,
+                        run_id: runId,
+                        is_retryable: true,
+                    },
+        );
+        set(activeRunAtom, (prev) =>
+            prev?.id === runId &&
+            (prev.status === 'in_progress' ||
+                prev.status === 'awaiting_deferred' ||
+                (prev.status === 'error' && prev.error?.type === 'connection_error'))
+                ? {
+                      ...prev,
+                      status: 'error',
+                      error: {
+                          type: 'connection_error',
+                          message: presentation.message,
+                          user_facing_details: presentation.details,
+                          is_retryable: true,
+                      },
+                  }
+                : prev,
+        );
+    };
+
+    applyPresentation();
+    void reportConnectionFailure({ evidence, run_id: runId }).then(applyPresentation);
 }
 
 /**
@@ -1529,18 +1589,13 @@ function createWSCallbacks(set: Setter): WSCallbacks {
             set(isWSConnectedAtom, true);
         },
 
-        onClose: (code: number, reason: string, wasClean: boolean) => {
+        onClose: (code: number, reason: string, wasClean: boolean, transportEvidence) => {
             logger(`WS onClose: code=${code}, reason=${reason}, clean=${wasClean}`, 1);
             // Whether this connection had received the `ready` event, read
             // before the flag is cleared below. Distinguishes a connect-phase
             // failure (reported once by executeWSRequest's catch) from a
             // post-ready drop (handled here).
             const hadReachedReady = store.get(isWSReadyAtom);
-            // Record close details for the connect-phase error path. Code 1000
-            // is a normal closure (cancel, reconnect, shutdown), not an error.
-            if (code !== 1000) {
-                set(lastWSCloseInfoAtom, { code, reason, wasClean });
-            }
             // set(activeRunAtom, null);
             set(isWSConnectedAtom, false);
             set(isWSReadyAtom, false);
@@ -1565,41 +1620,12 @@ function createWSCallbacks(set: Setter): WSCallbacks {
                     (activeRun.status === 'in_progress' ||
                         activeRun.status === 'awaiting_deferred')
                 ) {
-                    // The details line below always carries the cause and what
-                    // to do about it, so the headline stays a bare statement of
-                    // what happened rather than repeating the advice.
-                    const message =
-                        'The connection to the server was lost before the run finished.';
-                    const userFacingDetails = formatCloseCodeDetails(code);
-                    set(wsErrorAtom, {
-                        event: 'error',
-                        type: 'connection_error',
-                        message,
-                        is_retryable: true,
+                    const evidence = transportEvidence ?? fallbackConnectionEvidence('mid_run', {
+                        closeCode: code,
+                        closeReason: reason,
+                        wasClean,
                     });
-                    set(activeRunAtom, (prev) =>
-                        prev
-                            ? {
-                                  ...prev,
-                                  status: 'error',
-                                  error: {
-                                      type: 'connection_error',
-                                      message,
-                                      user_facing_details: userFacingDetails,
-                                      is_retryable: true,
-                                  },
-                              }
-                            : prev,
-                    );
-                    // Fire-and-forget telemetry so we can see mid-run drop
-                    // patterns in the wild.
-                    void reportConnectionFailure({
-                        phase: 'mid_run',
-                        close_code: code,
-                        close_reason: reason,
-                        was_clean: wasClean,
-                        run_id: activeRun.id,
-                    });
+                    surfaceAndDiagnoseConnectionFailure(set, activeRun.id, evidence);
                 }
             }
         }
@@ -1621,11 +1647,8 @@ async function executeWSRequest(
 
     try {
         logger('WS Starting connection for run:', run.id);
-        // A new connection attempt starts from a clean slate: a previous
-        // connection's ready flag or close info must not leak into this
-        // attempt's error handling.
+        // A new connection attempt starts from a clean ready state.
         set(isWSReadyAtom, false);
-        set(lastWSCloseInfoAtom, null);
         const frontendVersion = Zotero.Beaver.pluginVersion || '';
         const zoteroInstance = buildZoteroInstanceWire(get(searchableLibraryIdsAtom));
         // connect() applies its own attempt-scoped backstop timeout, so this
@@ -1647,177 +1670,14 @@ async function executeWSRequest(
             return;
         }
 
-        // No error was set yet, so set a generic connection error.
-        // If the socket got far enough to close with a code, surface that
-        // code and a human-readable label as details — useful for triaging
-        // corporate proxy/firewall blocks (1006), authentication rejections
-        // (1008, the common real-world server-side code), and TLS failures
-        // (1015, rare in practice).
-        //
-        // A connect timeout is torn down with a normal close code, so it
-        // leaves no close info behind and must be detected by error type —
-        // otherwise it is misreported as a plain network outage.
-        const timedOut = error instanceof ConnectTimeoutError;
-        const closeInfo = timedOut ? null : get(lastWSCloseInfoAtom);
-        const userFacingDetails = timedOut
-            ? formatConnectTimeoutDetails()
-            : closeInfo
-              ? formatCloseCodeDetails(closeInfo.code)
-              : undefined;
-        // With a close code the details line states the cause and what to do,
-        // so the headline must not repeat the advice. Without one there is no
-        // details line, so the headline has to carry it.
-        const errorMessage = userFacingDetails
-            ? 'Could not connect to the server.'
-            : 'Could not connect to the server. Please check your internet connection and try again.';
-        set(wsErrorAtom, {
-            event: 'error',
-            type: 'connection_error',
-            message: errorMessage,
-            is_retryable: true,
-        });
-        set(activeRunAtom, (prev) => prev ? {
-            ...prev,
-            status: 'error',
-            error: {
-                type: 'connection_error',
-                message: errorMessage,
-                user_facing_details: userFacingDetails,
-                is_retryable: true,
-            }
-        } : prev);
+        const evidence = error instanceof AgentConnectionError
+            ? error.evidence
+            : fallbackConnectionEvidence('opening', {
+                  errorName: error instanceof Error ? error.name : 'UnknownError',
+              });
+        surfaceAndDiagnoseConnectionFailure(set, run.id, evidence);
         set(isWSChatPendingAtom, false);
-
-        // Fire-and-forget telemetry so we can see connect-phase failure
-        // patterns in the wild.
-        void reportConnectionFailure({
-            phase: 'connect',
-            close_code: closeInfo?.code ?? null,
-            // A timeout has no close code, so tag it in the reason field —
-            // otherwise it is indistinguishable server-side from a connect
-            // failure that never opened a socket.
-            close_reason: timedOut ? CONNECT_TIMEOUT_REASON : (closeInfo?.reason ?? ''),
-            was_clean: closeInfo?.wasClean ?? null,
-            run_id: run.id,
-        });
     }
-}
-
-/** Public docs page with remediation steps for connection failures. */
-const CONNECTION_TROUBLESHOOTING_URL = 'https://www.beaverapp.ai/docs/connection-troubleshooting';
-
-/** Stable marker reported in place of a close code for connect timeouts. */
-const CONNECT_TIMEOUT_REASON = 'client_connect_timeout';
-
-/**
- * Build the user-facing `details` string for a connect attempt that never
- * settled. Kept separate from formatCloseCodeDetails because a timeout has no
- * close code: the connection stalled rather than being refused or dropped,
- * which points at a silently blocked or throttled network path.
- */
-function formatConnectTimeoutDetails(): string {
-    const seconds = Math.round(CONNECT_TIMEOUT_MS / 1000);
-    return (
-        `Beaver could not reach the server within ${seconds} seconds. ` +
-        'This usually means a network, proxy, or firewall is silently blocking the connection, ' +
-        'or the server is unreachable. ' +
-        `See our <a href="${CONNECTION_TROUBLESHOOTING_URL}">connection troubleshooting guide</a> for help. ` +
-        '(connection timed out)'
-    );
-}
-
-/**
- * User-facing explanation for a WebSocket close code (RFC 6455 plus the
- * 4xxx server-defined range). Grouped by remediation, not by RFC code —
- * two codes that need the same fix share the same wording.
- * `linkDocs` says whether the troubleshooting guide is relevant.
- */
-function getCloseCodeExplanation(code: number): { hint: string; linkDocs: boolean } {
-    switch (code) {
-        // Corporate/school proxies and firewalls dropping WebSocket traffic —
-        // by far the most common cause. Antivirus or TLS-inspecting security
-        // software that intercepts the connection can also surface as this
-        // code. (If plain HTTPS were blocked the user could not have signed
-        // in or loaded their profile, so a WebSocket-specific block is the
-        // most likely explanation.)
-        case 1005:
-        case 1006:
-            return {
-                hint: "Your network appears to be blocking Beaver's live connection. This is common on work, school, or public Wi‑Fi that doesn't allow WebSocket traffic, and can also happen when antivirus or TLS-inspecting security software intercepts the connection.",
-                linkDocs: true,
-            };
-
-        // TLS-inspection appliances, corporate VPNs, or aggressive antivirus.
-        // Rare in practice — most TLS interference surfaces as 1005/1006 above.
-        case 1015:
-            return {
-                hint: "Your network's security software (antivirus, VPN, or corporate proxy) is interfering with Beaver's secure connection.",
-                linkDocs: true,
-            };
-
-        // Server-side problems Beaver operators need to fix — user just retries.
-        case 1011:
-        case 1014:
-            return {
-                hint: "Beaver's server ran into a problem. Please try again in a moment.",
-                linkDocs: false,
-            };
-        case 1012:
-        case 1013:
-            return {
-                hint: "Beaver's server is temporarily unavailable. Please try again in a moment.",
-                linkDocs: false,
-            };
-
-        // Authentication or policy rejection (e.g. an expired/invalid session,
-        // or the connection origin isn't allowed). Distinct from the generic
-        // protocol-error codes below since re-authenticating fixes it, not
-        // updating Beaver.
-        case 1008:
-            return {
-                hint: 'Beaver could not verify your account for this connection. Please try again; if it keeps happening, sign out and sign back in.',
-                linkDocs: false,
-            };
-
-        // Protocol-level issues almost always mean the client is out of date.
-        case 1002:
-        case 1003:
-        case 1007:
-        case 1009:
-        case 1010:
-            return {
-                hint: 'Beaver ran into an unexpected connection issue. Please try again, or update Beaver to the latest version if the problem continues.',
-                linkDocs: false,
-            };
-
-        default:
-            if (code >= 4000 && code <= 4999) {
-                return {
-                    hint: 'The server rejected the connection. Please try again.',
-                    linkDocs: false,
-                };
-            }
-            return {
-                hint: 'Beaver ran into an unexpected connection issue. Please try again.',
-                linkDocs: false,
-            };
-    }
-}
-
-/**
- * Build the user-facing `details` string for a connection_error from a
- * WebSocket close code. Used by both connect-phase failures and mid-run
- * drops so identical underlying causes always produce identical wording.
- * The rendered format is:
- *   "<user-oriented sentence>[ See <link>.] (error code NNNN)"
- * The `<a>` tag is picked up by parseTextWithLinksAndNewlines in the UI.
- */
-function formatCloseCodeDetails(code: number): string {
-    const { hint, linkDocs } = getCloseCodeExplanation(code);
-    const link = linkDocs
-        ? ` See our <a href="${CONNECTION_TROUBLESHOOTING_URL}">connection troubleshooting guide</a> for help.`
-        : '';
-    return `${hint}${link} (error code ${code})`;
 }
 
 /**

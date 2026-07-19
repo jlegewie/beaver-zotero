@@ -1,77 +1,32 @@
 /**
- * Diagnostics service
- *
- * Reports client-side WebSocket connection failures to the backend via
- * a plain HTTPS POST. Fire-and-forget — nothing on the client depends
- * on the result. Users who reach this code path are already
- * authenticated (they've been using the app), so plain HTTPS is known
- * to work and the failure is inherently WebSocket-specific.
- *
- * Reports are anonymous by design: no auth token is attached, so this
- * path never touches the Supabase session (whose lookups can block on a
- * token refresh — exactly what must not happen right after a network
- * failure). The `run_id` allows correlation with a user's support
- * request when they share it.
- *
- * ---------------------------------------------------------------------------
- * Backend endpoint contract
- * ---------------------------------------------------------------------------
- * Method: POST
- * Path:   /api/v1/diagnostics/connection-failure
- * Auth:   None. Reports are accepted anonymously.
- * Rate:   Rate-limit server-side by (IP + close_code) at your discretion.
- *
- * Request body (JSON):
- *   {
- *     "phase":            "connect" | "mid_run",   // where in the run lifecycle
- *     "close_code":       number | null,           // WebSocket close code (RFC 6455)
- *     "close_reason":     string,                  // may be empty
- *     "was_clean":        boolean | null,          // WebSocket close event `wasClean`
- *     "run_id":           string | null,           // UUID for correlation, non-PII
- *     "plugin_version":   string,                  // e.g. "0.22.1"
- *     "zotero_version":   string,                  // e.g. "7.0.14" (may be empty)
- *     "platform":         string,                  // navigator.platform (may be empty)
- *     "user_agent":       string,                  // navigator.userAgent (may be empty)
- *     "navigator_online": boolean,                 // navigator.onLine at report time
- *     "client_time":      string                   // ISO-8601 UTC
- *   }
- *
- * Response body: anything 2xx. The client does not read it.
- *
- * Privacy: intentionally omits everything user-identifying. No chat
- * content, no library data, no message text, no URLs. IP is already
- * implicit in the request.
- * ---------------------------------------------------------------------------
+ * Reports client-side WebSocket failures through a fresh anonymous HTTPS POST.
+ * The POST both records structured backend telemetry and tells the caller
+ * whether Beaver's regular API is reachable at failure time.
  */
 
 import API_BASE_URL from '../utils/getAPIBaseURL';
 import { logger } from '../utils/logger';
+import { getLastBackendHttpSuccess, recordBackendHttpSuccess } from './backendReachability';
+import {
+    ConnectionDiagnosticResult,
+    ConnectionFailureEvidence,
+} from './connectionFailure';
 
 const DIAGNOSTICS_ENDPOINT = '/api/v1/diagnostics/connection-failure';
-
-/** How long to wait for the diagnostics POST before giving up. */
 const REPORT_TIMEOUT_MS = 8_000;
 
 export interface ConnectionFailureReport {
-    /** Where in the run lifecycle the failure occurred. */
-    phase: 'connect' | 'mid_run';
-    /** WebSocket close code (RFC 6455) or null if unknown. */
-    close_code: number | null;
-    /** WebSocket close reason (may be empty). */
-    close_reason: string;
-    /** WebSocket close event `wasClean`. */
-    was_clean: boolean | null;
-    /** UUID of the run this failure relates to (non-PII). */
+    evidence: ConnectionFailureEvidence;
     run_id?: string | null;
 }
 
-/**
- * Fire the connection-failure report to the backend. Never throws.
- * Fire-and-forget: callers should not await for correctness — the UI
- * has already surfaced the error by the time this runs.
- */
-export async function reportConnectionFailure(report: ConnectionFailureReport): Promise<void> {
-    if (!API_BASE_URL) return;
+export async function reportConnectionFailure(
+    report: ConnectionFailureReport,
+): Promise<ConnectionDiagnosticResult> {
+    const startedAt = Date.now();
+    if (!API_BASE_URL) {
+        return { apiReachable: false, receivedHttpResponse: false, durationMs: 0 };
+    }
 
     const nav = typeof navigator !== 'undefined' ? navigator : undefined;
     const pluginVersion =
@@ -79,24 +34,37 @@ export async function reportConnectionFailure(report: ConnectionFailureReport): 
     const zoteroVersion =
         (typeof Zotero !== 'undefined' && typeof Zotero.version === 'string' && Zotero.version) ||
         '';
+    const priorSuccess = getLastBackendHttpSuccess();
+    const { evidence } = report;
 
     const body: Record<string, unknown> = {
-        phase: report.phase,
-        close_code: report.close_code,
-        close_reason: report.close_reason ?? '',
-        was_clean: report.was_clean,
+        // Preserve the original coarse fields for older backend deployments.
+        phase: evidence.stage === 'mid_run' ? 'mid_run' : 'connect',
+        stage: evidence.stage,
+        close_code: evidence.closeCode,
+        close_reason: evidence.closeReason,
+        was_clean: evidence.wasClean,
+        socket_opened: evidence.socketOpened,
+        ready_received: evidence.readyReceived,
+        timed_out: evidence.timedOut,
+        error_name: evidence.errorName ?? null,
         run_id: report.run_id ?? null,
         plugin_version: pluginVersion,
         zotero_version: zoteroVersion,
         platform: nav?.platform ?? '',
         user_agent: nav?.userAgent ?? '',
-        navigator_online: nav?.onLine ?? true,
+        navigator_online: evidence.navigatorOnline,
+        prior_backend_http_success_at: priorSuccess
+            ? new Date(priorSuccess.at).toISOString()
+            : null,
+        prior_backend_http_success_source: priorSuccess?.source ?? null,
+        prior_backend_http_success_age_ms: priorSuccess
+            ? Math.max(0, startedAt - priorSuccess.at)
+            : null,
         client_time: new Date().toISOString(),
     };
 
-    const headers: Record<string, string> = {
-        'Content-Type': 'application/json',
-    };
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     if (pluginVersion) headers['X-Beaver-Version'] = pluginVersion;
     if (zoteroVersion) headers['X-Zotero-Version'] = zoteroVersion;
 
@@ -104,14 +72,26 @@ export async function reportConnectionFailure(report: ConnectionFailureReport): 
     const timeoutId = setTimeout(() => controller.abort(), REPORT_TIMEOUT_MS);
 
     try {
-        await fetch(`${API_BASE_URL}${DIAGNOSTICS_ENDPOINT}`, {
+        const response = await fetch(`${API_BASE_URL}${DIAGNOSTICS_ENDPOINT}`, {
             method: 'POST',
             headers,
             body: JSON.stringify(body),
             signal: controller.signal,
         });
+        if (response.ok) recordBackendHttpSuccess('connection_diagnostic');
+        return {
+            apiReachable: response.ok,
+            receivedHttpResponse: true,
+            status: response.status,
+            durationMs: Date.now() - startedAt,
+        };
     } catch (error) {
         logger(`DiagnosticsService: connection-failure report failed: ${error}`, 1);
+        return {
+            apiReachable: false,
+            receivedHttpResponse: false,
+            durationMs: Date.now() - startedAt,
+        };
     } finally {
         clearTimeout(timeoutId);
     }

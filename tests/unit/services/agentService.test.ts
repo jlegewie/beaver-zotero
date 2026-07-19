@@ -44,7 +44,7 @@ vi.mock('../../../react/agents/agentActions', () => ({
     toAgentAction: vi.fn((action) => action),
 }));
 
-import { AgentService, ConnectTimeoutError } from '../../../src/services/agentService';
+import { AgentConnectionError, AgentService, ConnectTimeoutError } from '../../../src/services/agentService';
 import type { AgentRunRequest, WSCallbacks } from '../../../src/services/agentProtocol';
 
 class MockWebSocket {
@@ -249,7 +249,17 @@ describe('AgentService reconnect handling', () => {
         });
 
         expect(callbacks.onClose).toHaveBeenCalledTimes(1);
-        expect(callbacks.onClose).toHaveBeenCalledWith(1011, 'transport lost', false);
+        expect(callbacks.onClose).toHaveBeenCalledWith(
+            1011,
+            'transport lost',
+            false,
+            expect.objectContaining({
+                stage: 'mid_run',
+                socketOpened: true,
+                readyReceived: true,
+                closeCode: 1011,
+            }),
+        );
     });
 
     it('rejects connect() and notifies onClose when the socket closes before ready', async () => {
@@ -289,7 +299,47 @@ describe('AgentService reconnect handling', () => {
 
         // The close details reach callers through onClose, not the rejection.
         expect(callbacks.onClose).toHaveBeenCalledTimes(1);
-        expect(callbacks.onClose).toHaveBeenCalledWith(1008, 'invalid token', false);
+        expect(callbacks.onClose).toHaveBeenCalledWith(
+            1008,
+            'invalid token',
+            false,
+            expect.objectContaining({
+                stage: 'awaiting_ready',
+                socketOpened: true,
+                readyReceived: false,
+                closeCode: 1008,
+            }),
+        );
+    });
+
+    it('distinguishes a 1006 opening failure from a socket that opened', async () => {
+        const service = new AgentService('https://api.example.com');
+        const callbacks = createCallbacks();
+        const initialCount = MockWebSocket.instances.length;
+        const outcomePromise = service.connect(
+            { type: 'refused-connection-test' } as AgentRunRequest,
+            callbacks,
+        ).then(
+            () => ({ ok: true as const }),
+            (error: unknown) => ({ ok: false as const, error }),
+        );
+
+        await flushMicrotasks();
+        const socket = MockWebSocket.instances[initialCount];
+        expect(socket).toBeDefined();
+        socket.emitClose({ code: 1006, reason: '', wasClean: false });
+
+        const outcome = await outcomePromise;
+        expect(outcome.ok).toBe(false);
+        if (!outcome.ok) {
+            expect(outcome.error).toBeInstanceOf(AgentConnectionError);
+            expect((outcome.error as AgentConnectionError).evidence).toMatchObject({
+                stage: 'opening',
+                socketOpened: false,
+                readyReceived: false,
+                closeCode: 1006,
+            });
+        }
     });
 
     it('resolves a canceled pre-ready connect and allows the next run to connect', async () => {
@@ -411,6 +461,31 @@ describe('AgentService reconnect handling', () => {
         const secondSocket = await completeConnect(service, secondCallbacks, request);
         expect(secondSocket).not.toBe(socket);
         expect(secondCallbacks.onReady).toHaveBeenCalledTimes(1);
+    });
+
+    it('identifies a timeout that occurs while checking the auth session', async () => {
+        const service = new AgentService('https://api.example.com');
+        const callbacks = createCallbacks();
+        const request = { type: 'auth-timeout-test' } as AgentRunRequest;
+        mockSupabase.auth.getSession.mockReturnValueOnce(new Promise(() => {}));
+
+        const outcomePromise = service.connect(request, callbacks).then(
+            () => ({ ok: true as const }),
+            (error: unknown) => ({ ok: false as const, error }),
+        );
+        await vi.advanceTimersByTimeAsync(20_000);
+
+        const outcome = await outcomePromise;
+        expect(outcome.ok).toBe(false);
+        if (!outcome.ok) {
+            expect(outcome.error).toBeInstanceOf(ConnectTimeoutError);
+            expect((outcome.error as ConnectTimeoutError).evidence).toMatchObject({
+                stage: 'auth',
+                socketOpened: false,
+                readyReceived: false,
+                timedOut: true,
+            });
+        }
     });
 
     it('does not let a stale backstop timeout tear down a newer connection', async () => {

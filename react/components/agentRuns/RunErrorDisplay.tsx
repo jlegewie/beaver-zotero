@@ -211,7 +211,10 @@ export const RunErrorDisplay: React.FC<RunErrorDisplayProps> = ({ runId, error, 
                                         className="text-base font-color-red user-select-text"
                                         style={{ opacity: 0.75 }}
                                     >
-                                        {parseTextWithLinksAndNewlines('Reason: ' + error.user_facing_details, "text-link-red")}
+                                        {parseTextWithLinksAndNewlines(
+                                            `${error.type === 'connection_error' ? 'Connection details' : 'Reason'}: ${error.user_facing_details}`,
+                                            "text-link-red",
+                                        )}
                                     </div>
                                 )}
                             </div>
