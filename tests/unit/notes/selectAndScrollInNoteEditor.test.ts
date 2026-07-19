@@ -1189,8 +1189,7 @@ describe('openNoteAndSearchEdit', () => {
 
     it('expands a single-char numeric diff to the containing word and selects it', async () => {
         // "200" → "250" highlights only the middle digit; the highlight must be
-        // expanded to the containing word instead of being discarded (which
-        // previously forced a whole-sentence fallback search).
+        // expanded to the containing word so the selection covers the full number.
         vi.mocked(computeDiff).mockReturnValue([
             {
                 type: 'deletion',
