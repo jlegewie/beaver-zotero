@@ -171,21 +171,44 @@ export interface PreloadedLabels {
     locatorWarnings: string[];
 }
 
-/** Preload the union of page labels + structural locators across every edit. */
+/**
+ * Separator inserted between edits' strings before they're concatenated for a
+ * single preload scan. It contains a literal `/`, which the citation-tag
+ * regex's attribute capture (`[^/]*?`) cannot span, so a partial tag at the
+ * end of one fragment can never merge with content from the next fragment
+ * into a false citation match.
+ */
+const BATCH_LABEL_SEPARATOR = '\n<!-- /edit-boundary/ -->\n';
+
+/**
+ * Preload the union of page labels + structural locators across every edit.
+ *
+ * Both `preloadPageLabelsForNewCitations` and `preloadStructuralLocatorPages`
+ * scan an arbitrary string for citation tags and dedupe/cache their lookups
+ * per attachment internally, so each is called ONCE over the concatenation of
+ * every edit's relevant string rather than once per edit. This keeps
+ * resolution for a given attachment sequential within the call — a cache miss
+ * in `preloadPageLabelsForNewCitations` triggers a full PDF extraction, and
+ * concurrent duplicate extractions of the same attachment must be avoided —
+ * while cutting a batch of N edits down from up to 3N sequential lookups to
+ * two.
+ */
 export async function preloadBatchLabels(edits: EditNoteBatchEditItem[]): Promise<PreloadedLabels> {
-    let pageLabels: PageLabelsByAttachmentId = {};
-    const resolvedLocatorPages: ResolvedLocatorPages = {};
+    const forPageLabels = edits
+        .map((edit) => `${edit.new_string}${BATCH_LABEL_SEPARATOR}${edit.old_string ?? ''}`)
+        .join(BATCH_LABEL_SEPARATOR);
+    const forStructuralLocators = edits.map((edit) => edit.new_string).join(BATCH_LABEL_SEPARATOR);
+
+    const [pageLabels, structural] = await Promise.all([
+        preloadPageLabelsForNewCitations(forPageLabels),
+        preloadStructuralLocatorPages(forStructuralLocators),
+    ]);
+
     const locatorWarnings: string[] = [];
-    for (const edit of edits) {
-        const newLabels = await preloadPageLabelsForNewCitations(edit.new_string);
-        const oldLabels = await preloadPageLabelsForNewCitations(edit.old_string ?? '');
-        pageLabels = { ...pageLabels, ...newLabels, ...oldLabels };
-        const structural = await preloadStructuralLocatorPages(edit.new_string);
-        Object.assign(resolvedLocatorPages, structural.pages);
-        const warning = buildUnresolvedLocatorWarning(structural.unresolved);
-        if (warning) locatorWarnings.push(warning);
-    }
-    return { pageLabels, resolvedLocatorPages, locatorWarnings };
+    const warning = buildUnresolvedLocatorWarning(structural.unresolved);
+    if (warning) locatorWarnings.push(warning);
+
+    return { pageLabels, resolvedLocatorPages: { ...structural.pages }, locatorWarnings };
 }
 
 /**
