@@ -303,6 +303,7 @@ describe('background queue — content_kind dispatch in processOnce', () => {
             content_kind: 'epub',
             payload_kind: 'structured',
             job_type: 'document_timeout_retry',
+            priority: 10,
             payload: { content_kind: 'epub' },
         });
 
@@ -330,6 +331,7 @@ describe('background queue — content_kind dispatch in processOnce', () => {
             content_kind: 'pdf',
             payload_kind: 'structured',
             job_type: 'document_timeout_retry',
+            priority: 10,
             payload: pdfPayload(null),
         });
 
@@ -354,6 +356,7 @@ describe('background queue — content_kind dispatch in processOnce', () => {
             content_kind: 'epub',
             payload_kind: 'structured',
             job_type: 'document_timeout_retry',
+            priority: 10,
             payload: { content_kind: 'epub' },
         });
 
@@ -378,6 +381,7 @@ describe('background queue — content_kind dispatch in processOnce', () => {
             content_kind: 'pdf',
             payload_kind: 'structured',
             job_type: 'document_timeout_retry',
+            priority: 10,
             payload: null,
         });
 
@@ -402,6 +406,7 @@ describe('background queue — content_kind dispatch in processOnce', () => {
             content_kind: 'pdf',
             payload_kind: 'structured',
             job_type: 'document_timeout_retry',
+            priority: 10,
             payload: { content_kind: 'epub' } as unknown as BackgroundJobPayload,
         });
 
@@ -422,7 +427,7 @@ describe('background queue — content_kind dispatch in processOnce', () => {
         // and extracts the single child PDF.
         const resolved = await resolveItem(PARENT_ITEM.library_id, PARENT_ITEM.zotero_key);
         expect(resolved.is_attachment).toBe(false);
-        expect(resolved.resolved_pdf_key).toBe(`${SMALL_PDF.library_id}-${SMALL_PDF.zotero_key}`);
+        expect(resolved.resolved_pdf_key).toBe(`u-${SMALL_PDF.zotero_key}`);
 
         // Start the resolved child cold so a populated cache proves extraction ran.
         await invalidateCache(SMALL_PDF.library_id, SMALL_PDF.zotero_key);
@@ -432,6 +437,7 @@ describe('background queue — content_kind dispatch in processOnce', () => {
             content_kind: 'pdf',
             payload_kind: 'structured',
             job_type: 'document_timeout_retry',
+            priority: 10,
             payload: pdfPayload(null),
         });
 

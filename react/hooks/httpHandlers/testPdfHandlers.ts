@@ -556,6 +556,15 @@ export async function handleTestPdfSearchScoredHttpRequest(request: any) {
 export async function handleTestPdfSentenceBBoxesHttpRequest(request: any) {
     const { getMuPDFWorkerClient } = await import('../../../src/beaver-extract');
     const pageIndex = Number(request?.page_index ?? request?.page);
+    if (!Number.isInteger(pageIndex) || pageIndex < 0) {
+        return {
+            ok: false,
+            error: {
+                name: 'Error',
+                message: 'page_index (non-negative integer) is required',
+            },
+        };
+    }
     const options = request?.options || {};
     return runPdfExtractorCall(
         request,
@@ -575,7 +584,19 @@ export async function handleTestPdfSentenceBBoxesHttpRequest(request: any) {
             }),
         (extraction) => {
             const page = extraction.debug.pages?.[String(pageIndex)];
-            if (!page) throw new Error(`page ${pageIndex} missing from trace`);
+            if (!page) {
+                return {
+                    ok: false,
+                    error: {
+                        name: 'ExtractionError',
+                        code: 'PAGE_OUT_OF_RANGE',
+                        message: `Page index ${pageIndex} is outside the document`,
+                        payload: {
+                            pageCount: extraction.result.document.pageCount,
+                        },
+                    },
+                };
+            }
             return {
                 ok: true,
                 result: {
@@ -762,6 +783,12 @@ export async function handleTestPdfRenderOverlayHttpRequest(request: any) {
             }
         }
     } catch (e) {
+        if (e instanceof Error && /^page \d+ missing from trace$/.test(e.message)) {
+            return {
+                ok: false,
+                error: { name: 'Error', message: e.message },
+            };
+        }
         if (e instanceof RangeError) {
             return {
                 ok: false,
@@ -933,6 +960,12 @@ export async function handleTestPdfExtractTraceHttpRequest(request: any) {
                     code: e.code,
                     message: e.message,
                 },
+            };
+        }
+        if (e instanceof Error && /^trace: page \d+ missing from debug projection$/.test(e.message)) {
+            return {
+                ok: false,
+                error: { name: 'Error', message: e.message },
             };
         }
         throw e;

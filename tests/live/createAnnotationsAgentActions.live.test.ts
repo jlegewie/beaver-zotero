@@ -286,14 +286,14 @@ describe("create_highlight_annotations: validate", () => {
         expect(res.error_code).toBe("no_items");
     }, 30000);
 
-    it("rejects a non-PDF attachment with invalid_attachment", async () => {
+    it("accepts an EPUB attachment without requiring PDF extraction", async () => {
         const res = await validateHighlight({
             requested_ref: ref(NON_PDF),
             resolved_ref: ref(NON_PDF),
             items: [highlightItem()],
         });
-        expect(res.valid).toBe(false);
-        expect(res.error_code).toBe("invalid_attachment");
+        expect(res.valid).toBe(true);
+        expect(res.current_value?.needs_extraction).toBe(false);
     }, 30000);
 
     it("rejects an attachment whose file is missing locally", async (ctx) => {
@@ -441,14 +441,15 @@ describe("create_highlight_annotations: execute", () => {
         expect(res.result_data?.failed[0].error_code).toBe("page_geometry_unavailable");
     }, 60000);
 
-    it("returns top-level invalid_attachment for a non-PDF resolved attachment", async () => {
+    it("handles an EPUB highlight as an item-level annotation attempt", async () => {
         const res = await executeHighlight({
             requested_ref: ref(NON_PDF),
             resolved_ref: ref(NON_PDF),
             items: [highlightItem()],
         });
-        expect(res.success).toBe(false);
-        expect(res.error_code).toBe("invalid_attachment");
+        expect(res.success).toBe(true);
+        expect((res.result_data?.total_created ?? 0) + (res.result_data?.total_failed ?? 0)).toBe(1);
+        expect(res.result_data?.failed[0]?.error_code).not.toBe("invalid_attachment");
     }, 60000);
 
     it("creates a highlight in a group library", async (ctx) => {
@@ -566,14 +567,15 @@ describe("create_note_annotations: validate + execute", () => {
         expect(res.result_data?.failed[0].client_item_id).toBe("nt-bad");
     }, 60000);
 
-    it("returns invalid_attachment for a non-PDF resolved attachment", async () => {
+    it("handles an EPUB note as an item-level annotation attempt", async () => {
         const res = await executeNote({
             requested_ref: ref(NON_PDF),
             resolved_ref: ref(NON_PDF),
             items: [noteItem()],
         });
-        expect(res.success).toBe(false);
-        expect(res.error_code).toBe("invalid_attachment");
+        expect(res.success).toBe(true);
+        expect((res.result_data?.total_created ?? 0) + (res.result_data?.total_failed ?? 0)).toBe(1);
+        expect(res.result_data?.failed[0]?.error_code).not.toBe("invalid_attachment");
     }, 60000);
 
     it("maps encrypted-PDF failures to page_extraction_failed", async () => {

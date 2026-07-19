@@ -85,7 +85,12 @@ describe('pdf-render-overlay (sentences) ↔ pdf-sentence-bboxes parity', () => 
                 (a, b) => a - b,
             );
             sortedGroupIndices.forEach((groupIdx, i) => {
-                const overlayFrags = sentenceGroups.get(groupIdx)!.map((r) => r.rect);
+                const overlayFrags = sentenceGroups.get(groupIdx)!.map((r) => [
+                    r.rect.l,
+                    r.rect.t,
+                    r.rect.r,
+                    r.rect.b,
+                ]);
                 const prodFrags = prodWithBboxes[i].bboxes;
                 expect(overlayFrags).toEqual(prodFrags);
             });
