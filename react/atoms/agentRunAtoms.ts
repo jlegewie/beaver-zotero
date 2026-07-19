@@ -1565,8 +1565,11 @@ function createWSCallbacks(set: Setter): WSCallbacks {
                     (activeRun.status === 'in_progress' ||
                         activeRun.status === 'awaiting_deferred')
                 ) {
+                    // The details line below always carries the cause and what
+                    // to do about it, so the headline stays a bare statement of
+                    // what happened rather than repeating the advice.
                     const message =
-                        'The connection to the server was lost before the run finished. Please try again.';
+                        'The connection to the server was lost before the run finished.';
                     const userFacingDetails = formatCloseCodeDetails(code);
                     set(wsErrorAtom, {
                         event: 'error',
@@ -1650,9 +1653,14 @@ async function executeWSRequest(
         // corporate proxy/firewall blocks (1006), authentication rejections
         // (1008, the common real-world server-side code), and TLS failures
         // (1015, rare in practice).
-        const errorMessage = 'Could not connect to the server. Please check your internet connection and try again.';
         const closeInfo = get(lastWSCloseInfoAtom);
         const userFacingDetails = closeInfo ? formatCloseCodeDetails(closeInfo.code) : undefined;
+        // With a close code the details line states the cause and what to do,
+        // so the headline must not repeat the advice. Without one there is no
+        // details line, so the headline has to carry it.
+        const errorMessage = userFacingDetails
+            ? 'Could not connect to the server.'
+            : 'Could not connect to the server. Please check your internet connection and try again.';
         set(wsErrorAtom, {
             event: 'error',
             type: 'connection_error',
