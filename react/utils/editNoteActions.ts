@@ -1546,3 +1546,29 @@ export async function undoEditNoteBatchAction(action: AgentAction): Promise<void
     // Invalidate simplification cache
     invalidateSimplificationCache(noteId);
 }
+
+// =============================================================================
+// Dispatchers: route by action_type to the single-edit or batch variant
+// =============================================================================
+
+/**
+ * Apply an edit_note or edit_note_batch action, routing by `action_type` to the
+ * matching variant.
+ */
+export async function executeEditNoteOrBatchAction(
+    action: AgentAction,
+): Promise<EditNoteResultData | EditNoteBatchResultData> {
+    return action.action_type === 'edit_note_batch'
+        ? executeEditNoteBatchAction(action)
+        : executeEditNoteAction(action);
+}
+
+/**
+ * Undo an edit_note or edit_note_batch action, routing by `action_type` to the
+ * matching variant.
+ */
+export async function undoEditNoteOrBatchAction(action: AgentAction): Promise<void> {
+    return action.action_type === 'edit_note_batch'
+        ? undoEditNoteBatchAction(action)
+        : undoEditNoteAction(action);
+}

@@ -20,10 +20,8 @@ import {
 } from '../../../atoms/agentRunAtoms';
 import { getToolCallStatus, toolResultsMapAtom } from '../../../agents/atoms';
 import {
-    executeEditNoteAction,
-    executeEditNoteBatchAction,
-    undoEditNoteAction,
-    undoEditNoteBatchAction,
+    executeEditNoteOrBatchAction,
+    undoEditNoteOrBatchAction,
 } from '../../../utils/editNoteActions';
 import { openNoteAndSearchEdit, openNoteByKey } from '../../../utils/sourceUtils';
 import {
@@ -289,9 +287,7 @@ export function useEditNoteActions({
         setClickedButton(button);
         try {
             await dismissActiveEditNotePreview();
-            const result = action.action_type === 'edit_note_batch'
-                ? await executeEditNoteBatchAction(action)
-                : await executeEditNoteAction(action);
+            const result = await executeEditNoteOrBatchAction(action);
             await ackAgentActions(runId, [{
                 action_id: action.id,
                 result_data: result,
@@ -358,11 +354,7 @@ export function useEditNoteActions({
         setClickedButton('undo');
         try {
             await dismissActiveEditNotePreview();
-            if (action.action_type === 'edit_note_batch') {
-                await undoEditNoteBatchAction(action);
-            } else {
-                await undoEditNoteAction(action);
-            }
+            await undoEditNoteOrBatchAction(action);
             undoAgentAction(action.id);
             logger(`useEditNoteActions: Undone ${action.action_type} action ${action.id}`, 1);
         } catch (error: any) {

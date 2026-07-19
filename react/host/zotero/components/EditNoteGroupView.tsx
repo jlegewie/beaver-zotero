@@ -47,10 +47,8 @@ import Tooltip from '../../../components/ui/Tooltip';
 import SplitApplyButton from '../../../components/ui/buttons/SplitApplyButton';
 import { openNoteByKey } from '../../../utils/sourceUtils';
 import {
-    executeEditNoteAction,
-    executeEditNoteBatchAction,
-    undoEditNoteAction,
-    undoEditNoteBatchAction,
+    executeEditNoteOrBatchAction,
+    undoEditNoteOrBatchAction,
 } from '../../../utils/editNoteActions';
 import { logger } from '../../../../src/utils/logger';
 import { UNRESOLVED_LIBRARY_ID } from '../../../../src/utils/libraryIdentity';
@@ -349,9 +347,7 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
 
             for (const action of reapplicableActions) {
                 try {
-                    const result = action.action_type === 'edit_note_batch'
-                        ? await executeEditNoteBatchAction(action)
-                        : await executeEditNoteAction(action);
+                    const result = await executeEditNoteOrBatchAction(action);
                     await ackAgentActions(runId, [{
                         action_id: action.id,
                         result_data: result,
@@ -484,11 +480,7 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
 
             for (const action of [...appliedActions].reverse()) {
                 try {
-                    if (action.action_type === 'edit_note_batch') {
-                        await undoEditNoteBatchAction(action);
-                    } else {
-                        await undoEditNoteAction(action);
-                    }
+                    await undoEditNoteOrBatchAction(action);
                     undoAgentAction(action.id);
                     logger(`EditNoteGroupView: Undone ${action.action_type} action ${action.id}`, 1);
                 } catch (error: any) {
@@ -529,9 +521,7 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
 
             for (const action of errorActions) {
                 try {
-                    const result = action.action_type === 'edit_note_batch'
-                        ? await executeEditNoteBatchAction(action)
-                        : await executeEditNoteAction(action);
+                    const result = await executeEditNoteOrBatchAction(action);
                     await ackAgentActions(runId, [{
                         action_id: action.id,
                         result_data: result,
