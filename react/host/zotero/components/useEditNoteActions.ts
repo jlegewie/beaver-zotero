@@ -4,7 +4,7 @@ import { AgentRunStatus, ToolCallPart } from '../../../agents/types';
 import {
     AgentAction,
     PendingApproval,
-    getAgentActionsByToolcallAtom,
+    agentActionsByToolcallAtom,
     pendingApprovalsAtom,
     removePendingApprovalAtom,
     ackAgentActionsAtom,
@@ -18,7 +18,7 @@ import {
     removeApprovalResponseIntentAtom,
     sendApprovalResponseAtom,
 } from '../../../atoms/agentRunAtoms';
-import { getToolCallStatus, toolResultsMapAtom } from '../../../agents/atoms';
+import { getToolCallStatus, toolResultsMapAtom, type ToolCallStatus } from '../../../agents/atoms';
 import {
     executeEditNoteOrBatchAction,
     undoEditNoteOrBatchAction,
@@ -101,12 +101,27 @@ export async function showEditNotePreviewForEdits(
     });
 }
 
+/**
+ * Per-toolcall derivations that are identical for every sibling row of one
+ * edit_note_batch tool call. When a group has already computed these once, it
+ * passes them here so each row bypasses the hook's own lookups (the actions
+ * index and the linear pending-approvals scan) instead of repeating them N
+ * times. Omitted by callers that render a toolcall in isolation, which then
+ * fall back to the hook's internal derivation.
+ */
+export interface EditNotePrecomputed {
+    actions: AgentAction[];
+    pendingApproval: PendingApproval | null;
+    toolCallStatus: ToolCallStatus;
+}
+
 interface UseEditNoteActionsOptions {
     part: ToolCallPart;
     runId: string;
     runStatus: AgentRunStatus;
     externalUndoError?: string | null;
     onUndoErrorChange?: (toolcallId: string, error: string | null) => void;
+    precomputed?: EditNotePrecomputed;
 }
 
 export interface EditNoteRowState {
@@ -141,11 +156,14 @@ export function useEditNoteActions({
     runStatus,
     externalUndoError = null,
     onUndoErrorChange,
+    precomputed,
 }: UseEditNoteActionsOptions): EditNoteRowState {
     const toolcallId = part.tool_call_id;
 
     const resultsMap = useAtomValue(toolResultsMapAtom);
-    const getAgentActionsByToolcall = useAtomValue(getAgentActionsByToolcallAtom);
+    // Subscribe to the grouped-actions map (not the stable getter atom) so the
+    // fallback path re-renders with fresh actions when an action changes.
+    const actionsByToolcall = useAtomValue(agentActionsByToolcallAtom);
     const allPendingApprovals = useAtomValue(pendingApprovalsAtom);
     const approvalResponseIntents = useAtomValue(approvalResponseIntentsAtom);
     const sendApprovalResponse = useSetAtom(sendApprovalResponseAtom);
@@ -157,18 +175,27 @@ export function useEditNoteActions({
     const undoAgentAction = useSetAtom(undoAgentActionAtom);
     const isRunPending = useAtomValue(isWSChatPendingAtom);
 
-    const actions = getAgentActionsByToolcall(toolcallId, (a) => a.run_id === runId);
+    const actions = precomputed?.actions
+        ?? (actionsByToolcall.get(toolcallId) ?? []).filter((a) => a.run_id === runId);
     // A single tool call always produces exactly one AgentAction, even for an
     // edit_note_batch call (the whole batch is one action with an edits[]
     // array in proposed_data) — actions[0] is never ambiguous here.
     const action = actions.length > 0 ? actions[0] : null;
+    // When the group supplies a precomputed effective pending approval, skip the
+    // linear scan over every pending approval so N sibling rows don't each redo it.
     const pendingApprovalFromMap = useMemo(
-        () => findPendingApprovalForToolcall(toolcallId, allPendingApprovals.values()),
-        [allPendingApprovals, toolcallId],
+        () => (precomputed
+            ? null
+            : findPendingApprovalForToolcall(toolcallId, allPendingApprovals.values())),
+        [precomputed, toolcallId, allPendingApprovals],
     );
-    const pendingApproval = getEffectiveEditNotePendingApproval(action, pendingApprovalFromMap);
+    const pendingApproval = precomputed
+        ? precomputed.pendingApproval
+        : getEffectiveEditNotePendingApproval(action, pendingApprovalFromMap);
     const hasToolReturn = resultsMap.get(toolcallId) !== undefined;
-    const toolCallStatus = getToolCallStatus(toolcallId, resultsMap, runStatus);
+    const toolCallStatus = precomputed
+        ? precomputed.toolCallStatus
+        : getToolCallStatus(toolcallId, resultsMap, runStatus);
 
     const parsedArgs = useMemo(
         () => part.streaming_args ?? parseEditNoteToolCallArgs(part.args),

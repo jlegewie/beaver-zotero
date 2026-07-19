@@ -14,17 +14,40 @@ export function getEditNotePreviewKind(
 }
 
 /**
+ * Index an edit_note_batch action's undo records by their edit index. Built
+ * once per action so a group with N rows resolves each row's record in O(1)
+ * instead of scanning the whole undo array once per row (O(N²) overall).
+ */
+export function buildUndoByIndex(
+    resultData: Record<string, any> | null | undefined,
+): Map<number, any> {
+    const map = new Map<number, any>();
+    const undo = resultData?.undo;
+    if (Array.isArray(undo)) {
+        for (const record of undo) {
+            if (record && typeof record.index === 'number') {
+                map.set(record.index, record);
+            }
+        }
+    }
+    return map;
+}
+
+/**
  * Scope a batch action's preview metadata to one rendered edit row without
- * discarding the snapshots needed after the action has been applied.
+ * discarding the snapshots needed after the action has been applied. The
+ * caller passes a prebuilt undo index (see buildUndoByIndex) so this stays
+ * O(1) per row.
  */
 export function buildBatchRowPreviewData(
     basePreviewData: PreviewData | null,
     row: EditNoteRowDescriptor,
+    undoByIndex?: Map<number, any>,
 ): PreviewData {
     const baseActionData = basePreviewData?.actionData ?? {};
     const baseResultData = basePreviewData?.resultData;
-    const matchingUndo = Array.isArray(baseResultData?.undo)
-        ? baseResultData.undo.find((record: any) => record?.index === row.editIndex)
+    const matchingUndo = row.editIndex != null
+        ? undoByIndex?.get(row.editIndex)
         : undefined;
 
     const scopedResultData: Record<string, any> = {};

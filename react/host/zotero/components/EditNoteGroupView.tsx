@@ -5,7 +5,7 @@ import { getToolCallStatus, toolResultsMapAtom } from '../../../agents/atoms';
 import {
     AgentAction,
     PendingApproval,
-    getAgentActionsByToolcallAtom,
+    agentActionsByToolcallAtom,
     pendingApprovalsAtom,
     ackAgentActionsAtom,
     rejectAgentActionAtom,
@@ -53,6 +53,7 @@ import {
 import { logger } from '../../../../src/utils/logger';
 import { UNRESOLVED_LIBRARY_ID } from '../../../../src/utils/libraryIdentity';
 import { EditNoteRowView } from './EditNoteRowView';
+import { buildUndoByIndex } from './editNoteBatchPreviewData';
 import { isDiffPreviewLive } from '../../../utils/diffPreviewCoordinator';
 import {
     dismissActiveEditNotePreview,
@@ -96,7 +97,11 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
     const [isHovered, setIsHovered] = useState(false);
 
     const resultsMap = useAtomValue(toolResultsMapAtom);
-    const getAgentActionsByToolcall = useAtomValue(getAgentActionsByToolcallAtom);
+    // Subscribe to the grouped-actions map itself (not the stable getter atom)
+    // so partStates re-derives whenever any agent action changes — the getter's
+    // identity never changes, which would leave memoized rows showing stale
+    // action state after a local apply/retry.
+    const actionsByToolcall = useAtomValue(agentActionsByToolcallAtom);
     const allPendingApprovals = useAtomValue(pendingApprovalsAtom);
     const setPendingApprovals = useSetAtom(pendingApprovalsAtom);
     const sendApprovalResponse = useSetAtom(sendApprovalResponseAtom);
@@ -109,7 +114,7 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
 
     const partStates = useMemo(() => {
         return parts.map((part) => {
-            const actions = getAgentActionsByToolcall(part.tool_call_id, (a) => a.run_id === runId);
+            const actions = (actionsByToolcall.get(part.tool_call_id) ?? []).filter((a) => a.run_id === runId);
             // A single tool call always produces exactly one AgentAction, even for
             // an edit_note_batch call (the whole batch is one action).
             const action = actions.length > 0 ? actions[0] : null;
@@ -134,6 +139,13 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
             });
             const isBatch = actionType === 'edit_note_batch'
                 || (actionType == null && Array.isArray(toolArgs?.edits));
+            // Derivations identical for every sibling row of this toolcall,
+            // computed once here and passed to each EditNoteRowView so the rows
+            // skip re-deriving them. The undo index mirrors the effective
+            // resultData the row's preview uses (a pending approval carries no
+            // result_data yet).
+            const precomputed = { actions, pendingApproval, toolCallStatus };
+            const undoByIndex = buildUndoByIndex(pendingApproval ? undefined : action?.result_data);
             return {
                 part,
                 actions,
@@ -143,9 +155,11 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
                 effectiveStatus,
                 rows,
                 isBatch,
+                precomputed,
+                undoByIndex,
             };
         });
-    }, [parts, runId, getAgentActionsByToolcall, allPendingApprovals, resultsMap, runStatus]);
+    }, [parts, runId, actionsByToolcall, allPendingApprovals, resultsMap, runStatus]);
 
     const allActions: AgentAction[] = useMemo(
         () => partStates.flatMap((state) => state.actions),
@@ -804,6 +818,8 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
                                         externalUndoError={perEditUndoErrors[part.tool_call_id] ?? null}
                                         onUndoErrorChange={handleChildUndoErrorChange}
                                         rowDescriptor={row}
+                                        precomputed={state.precomputed}
+                                        undoByIndex={state.undoByIndex}
                                     />
                                 </div>
                             ));

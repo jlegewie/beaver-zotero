@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
     buildBatchRowPreviewData,
+    buildUndoByIndex,
     getBatchRewriteOldContent,
     getEditNotePreviewKind,
 } from '../../../react/host/zotero/components/editNoteBatchPreviewData';
@@ -39,6 +40,13 @@ describe('edit_note_batch rewrite preview metadata', () => {
             operation: 'rewrite',
             undo_old_html: '<p>Original applied snapshot</p>',
         };
+        const resultData = {
+            applied: [{ index: 4, occurrences_replaced: 1 }],
+            undo: [
+                { index: 2, undo_old_html: '<p>Unrelated snapshot</p>' },
+                matchingUndo,
+            ],
+        };
         const preview = buildBatchRowPreviewData({
             actionType: 'edit_note_batch',
             actionData: {
@@ -46,19 +54,39 @@ describe('edit_note_batch rewrite preview metadata', () => {
                 zotero_key: 'NOTE0001',
                 edits: [],
             },
-            resultData: {
-                applied: [{ index: 4, occurrences_replaced: 1 }],
-                undo: [
-                    { index: 2, undo_old_html: '<p>Unrelated snapshot</p>' },
-                    matchingUndo,
-                ],
-            },
-        }, rewriteRow);
+            resultData,
+        }, rewriteRow, buildUndoByIndex(resultData));
 
         expect(preview.resultData?.undo).toEqual([matchingUndo]);
         expect(getBatchRewriteOldContent(preview, 4)).toBe(
             '<p>Original applied snapshot</p>',
         );
+    });
+});
+
+describe('buildUndoByIndex', () => {
+    it('indexes undo records by their edit index', () => {
+        const first = { index: 0, undo_old_html: '<p>a</p>' };
+        const second = { index: 2, undo_old_html: '<p>b</p>' };
+        const map = buildUndoByIndex({ undo: [first, second] });
+
+        expect(map.get(0)).toBe(first);
+        expect(map.get(2)).toBe(second);
+        expect(map.get(1)).toBeUndefined();
+    });
+
+    it('returns an empty map when there is no undo array', () => {
+        expect(buildUndoByIndex(undefined).size).toBe(0);
+        expect(buildUndoByIndex({}).size).toBe(0);
+        expect(buildUndoByIndex({ undo: 'nope' as any }).size).toBe(0);
+    });
+
+    it('skips undo records that lack a numeric index', () => {
+        const valid = { index: 3, undo_old_html: '<p>c</p>' };
+        const map = buildUndoByIndex({ undo: [{ undo_old_html: '<p>x</p>' }, null, valid] });
+
+        expect(map.size).toBe(1);
+        expect(map.get(3)).toBe(valid);
     });
 });
 

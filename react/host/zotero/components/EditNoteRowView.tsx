@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { AgentRunStatus, ToolCallPart } from '../../../agents/types';
 import {
     AlertIcon,
@@ -14,7 +14,7 @@ import {
 import IconButton from '../../../components/ui/IconButton';
 import Tooltip from '../../../components/ui/Tooltip';
 import { ActionPreview } from './ActionPreview';
-import { useEditNoteActions } from './useEditNoteActions';
+import { useEditNoteActions, type EditNotePrecomputed } from './useEditNoteActions';
 import type { EditNoteRowDescriptor } from '../../../components/agentRuns/editNoteShared';
 import { buildBatchRowPreviewData } from './editNoteBatchPreviewData';
 
@@ -32,9 +32,19 @@ interface EditNoteRowViewProps {
      * buttons, since a batch applies/undoes atomically at the group level.
      */
     rowDescriptor?: EditNoteRowDescriptor;
+    /**
+     * Per-toolcall derivations the group already computed once for all sibling
+     * rows. Forwarded to the actions hook so each row skips re-deriving them.
+     */
+    precomputed?: EditNotePrecomputed;
+    /**
+     * Undo records of this toolcall's action indexed by edit index, prebuilt
+     * once by the group so each batch row resolves its record in O(1).
+     */
+    undoByIndex?: Map<number, any>;
 }
 
-export const EditNoteRowView: React.FC<EditNoteRowViewProps> = ({
+const EditNoteRowViewComponent: React.FC<EditNoteRowViewProps> = ({
     part,
     runId,
     runStatus,
@@ -42,6 +52,8 @@ export const EditNoteRowView: React.FC<EditNoteRowViewProps> = ({
     externalUndoError = null,
     onUndoErrorChange,
     rowDescriptor,
+    precomputed,
+    undoByIndex,
 }) => {
     const {
         actions,
@@ -71,12 +83,16 @@ export const EditNoteRowView: React.FC<EditNoteRowViewProps> = ({
         runStatus,
         externalUndoError,
         onUndoErrorChange,
+        precomputed,
     });
 
     const isBatchRow = rowDescriptor !== undefined;
-    const previewData = isBatchRow
-        ? buildBatchRowPreviewData(hookPreviewData, rowDescriptor)
-        : hookPreviewData;
+    const previewData = useMemo(
+        () => (isBatchRow
+            ? buildBatchRowPreviewData(hookPreviewData, rowDescriptor, undoByIndex)
+            : hookPreviewData),
+        [isBatchRow, hookPreviewData, rowDescriptor, undoByIndex],
+    );
 
     // A batch (edit_note_batch) is applied/undone atomically for the whole
     // action — only the group-level Apply All / Undo All / Retry All buttons
@@ -271,5 +287,14 @@ export const EditNoteRowView: React.FC<EditNoteRowViewProps> = ({
         </div>
     );
 };
+
+/**
+ * Memoized so a group with N sibling rows re-renders only the rows whose data
+ * changed. All props from the group are referentially stable across the group's
+ * hover-driven re-renders (row descriptors, precomputed derivations and the
+ * undo index come from the group's memoized part state), so the default shallow
+ * comparison skips untouched rows without hiding real data changes.
+ */
+export const EditNoteRowView = React.memo(EditNoteRowViewComponent);
 
 export default EditNoteRowView;
