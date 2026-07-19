@@ -24,6 +24,7 @@ import { isAuthenticatedAtom } from '../atoms/auth';
 import { logger } from '../../src/utils/logger';
 import { getZoteroUserIdentifier } from '../../src/utils/zoteroUtils';
 import { providerConnection } from '../../src/services/providerConnection';
+import { enqueueMutatingAction } from '../../src/services/agentActionQueue';
 import { getPref, setPref } from '../../src/utils/prefs';
 import {
     handleZoteroDataRequest,
@@ -711,9 +712,11 @@ async function handleAgentActionValidateHttpRequest(request: any) {
         error: response.error,
         error_code: response.error_code,
         error_candidates: response.error_candidates,
+        edit_errors: response.edit_errors,
         current_value: response.current_value,
         normalized_action_data: response.normalized_action_data,
         preference: response.preference,
+        warnings: response.warnings,
     };
 }
 
@@ -726,7 +729,13 @@ async function handleAgentActionExecuteHttpRequest(request: any) {
         timeout_seconds: request.timeout_seconds,
     };
 
-    const response = await handleAgentActionExecuteRequest(wsRequest);
+    // Mirror the `serialize` flag the WebSocket dispatch map sets on
+    // `agent_action_execute`: action handlers hold no per-item lock, so two
+    // executes landing together on one item would each write back the content
+    // they read and the later save would drop the earlier edit.
+    const response = await enqueueMutatingAction(() =>
+        handleAgentActionExecuteRequest(wsRequest),
+    );
 
     return {
         success: response.success,
@@ -794,13 +803,22 @@ async function handleTestProviderCloseHttpRequest(_request: any) {
 // Registration Functions
 // =============================================================================
 
+/**
+ * Register the local HTTP surface.
+ *
+ * Callers must gate this on the build: `useHttpEndpoints` registers only in
+ * development and staging builds, so NONE of the paths below — not just the
+ * `/beaver/test/*` block near the end — reach a released build. The nested
+ * `NODE_ENV === 'development'` check further restricts the test-only endpoints
+ * to development, keeping them out of staging.
+ */
 function registerEndpoints(): boolean {
     if (!Zotero?.Server?.Endpoints) {
         logger('useHttpEndpoints: Zotero.Server.Endpoints not available', 2);
         return false;
     }
-    
-    Zotero.Server.Endpoints['/beaver/zotero-data'] = 
+
+    Zotero.Server.Endpoints['/beaver/zotero-data'] =
         createEndpoint(handleZoteroDataHttpRequest);
     
     Zotero.Server.Endpoints['/beaver/external-reference-check'] = 

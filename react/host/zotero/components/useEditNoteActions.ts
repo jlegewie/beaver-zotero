@@ -4,7 +4,7 @@ import { AgentRunStatus, ToolCallPart } from '../../../agents/types';
 import {
     AgentAction,
     PendingApproval,
-    getAgentActionsByToolcallAtom,
+    agentActionsByToolcallAtom,
     pendingApprovalsAtom,
     removePendingApprovalAtom,
     ackAgentActionsAtom,
@@ -18,12 +18,16 @@ import {
     removeApprovalResponseIntentAtom,
     sendApprovalResponseAtom,
 } from '../../../atoms/agentRunAtoms';
-import { getToolCallStatus, toolResultsMapAtom } from '../../../agents/atoms';
-import { executeEditNoteAction, undoEditNoteAction } from '../../../utils/editNoteActions';
+import { getToolCallStatus, toolResultsMapAtom, type ToolCallStatus } from '../../../agents/atoms';
+import {
+    executeEditNoteOrBatchAction,
+    undoEditNoteOrBatchAction,
+} from '../../../utils/editNoteActions';
 import { openNoteAndSearchEdit, openNoteByKey } from '../../../utils/sourceUtils';
 import {
     dismissDiffPreview,
     isDiffPreviewActive,
+    isDiffPreviewPending,
     isNoteOpenInEditor,
     showDiffPreview,
     type EditOperation,
@@ -42,26 +46,16 @@ import {
     isEditNoteStreamingPlaceholder,
     parseEditNoteToolCallArgs,
     resolveEditNoteTargetFromData,
+    type EditNoteRowDescriptor,
 } from '../../../components/agentRuns/editNoteShared';
-
-export function buildPreviewableEditOperations(
-    entries: Array<Record<string, any> | null | undefined>,
-): EditOperation[] {
-    const edits: EditOperation[] = [];
-    for (const entry of entries) {
-        if (!entry) continue;
-        const oldString = (entry.old_string as string | undefined) ?? '';
-        const newString = (entry.new_string as string | undefined) ?? '';
-        const operation = (entry.operation ?? 'str_replace') as EditOperation['operation'];
-        if (operation === 'rewrite' || operation === 'append' || oldString) {
-            edits.push({ oldString, newString, operation });
-        }
-    }
-    return edits;
-}
+import type { EditNoteOperation } from '../../../types/agentActions/editNote';
 
 export async function dismissActiveEditNotePreview(): Promise<void> {
-    if (!isDiffPreviewActive()) return;
+    // A deferred re-render (the revision guard's bounce) is pending-but-not-
+    // active; it must be cancelled here too, or resolving the action from
+    // the sidebar during that window would let the bounce resurrect a stale
+    // preview afterwards. dismissDiffPreview()'s generation bump cancels it.
+    if (!isDiffPreviewActive() && !isDiffPreviewPending()) return;
     await dismissDiffPreview();
     store.set(diffPreviewNoteKeyAtom, null);
 }
@@ -107,12 +101,27 @@ export async function showEditNotePreviewForEdits(
     });
 }
 
+/**
+ * Per-toolcall derivations that are identical for every sibling row of one
+ * edit_note_batch tool call. When a group has already computed these once, it
+ * passes them here so each row bypasses the hook's own lookups (the actions
+ * index and the linear pending-approvals scan) instead of repeating them N
+ * times. Omitted by callers that render a toolcall in isolation, which then
+ * fall back to the hook's internal derivation.
+ */
+export interface EditNotePrecomputed {
+    actions: AgentAction[];
+    pendingApproval: PendingApproval | null;
+    toolCallStatus: ToolCallStatus;
+}
+
 interface UseEditNoteActionsOptions {
     part: ToolCallPart;
     runId: string;
     runStatus: AgentRunStatus;
     externalUndoError?: string | null;
     onUndoErrorChange?: (toolcallId: string, error: string | null) => void;
+    precomputed?: EditNotePrecomputed;
 }
 
 export interface EditNoteRowState {
@@ -138,6 +147,7 @@ export interface EditNoteRowState {
     handleUndo: () => Promise<void>;
     handleRetry: () => Promise<void>;
     handleOpenNote: () => Promise<void>;
+    handleOpenNoteForRow: (row: EditNoteRowDescriptor) => Promise<void>;
 }
 
 export function useEditNoteActions({
@@ -146,11 +156,14 @@ export function useEditNoteActions({
     runStatus,
     externalUndoError = null,
     onUndoErrorChange,
+    precomputed,
 }: UseEditNoteActionsOptions): EditNoteRowState {
     const toolcallId = part.tool_call_id;
 
     const resultsMap = useAtomValue(toolResultsMapAtom);
-    const getAgentActionsByToolcall = useAtomValue(getAgentActionsByToolcallAtom);
+    // Subscribe to the grouped-actions map (not the stable getter atom) so the
+    // fallback path re-renders with fresh actions when an action changes.
+    const actionsByToolcall = useAtomValue(agentActionsByToolcallAtom);
     const allPendingApprovals = useAtomValue(pendingApprovalsAtom);
     const approvalResponseIntents = useAtomValue(approvalResponseIntentsAtom);
     const sendApprovalResponse = useSetAtom(sendApprovalResponseAtom);
@@ -162,15 +175,27 @@ export function useEditNoteActions({
     const undoAgentAction = useSetAtom(undoAgentActionAtom);
     const isRunPending = useAtomValue(isWSChatPendingAtom);
 
-    const actions = getAgentActionsByToolcall(toolcallId, (a) => a.run_id === runId);
+    const actions = precomputed?.actions
+        ?? (actionsByToolcall.get(toolcallId) ?? []).filter((a) => a.run_id === runId);
+    // A single tool call always produces exactly one AgentAction, even for an
+    // edit_note_batch call (the whole batch is one action with an edits[]
+    // array in proposed_data) — actions[0] is never ambiguous here.
     const action = actions.length > 0 ? actions[0] : null;
+    // When the group supplies a precomputed effective pending approval, skip the
+    // linear scan over every pending approval so N sibling rows don't each redo it.
     const pendingApprovalFromMap = useMemo(
-        () => findPendingApprovalForToolcall(toolcallId, allPendingApprovals.values()),
-        [allPendingApprovals, toolcallId],
+        () => (precomputed
+            ? null
+            : findPendingApprovalForToolcall(toolcallId, allPendingApprovals.values())),
+        [precomputed, toolcallId, allPendingApprovals],
     );
-    const pendingApproval = getEffectiveEditNotePendingApproval(action, pendingApprovalFromMap);
+    const pendingApproval = precomputed
+        ? precomputed.pendingApproval
+        : getEffectiveEditNotePendingApproval(action, pendingApprovalFromMap);
     const hasToolReturn = resultsMap.get(toolcallId) !== undefined;
-    const toolCallStatus = getToolCallStatus(toolcallId, resultsMap, runStatus);
+    const toolCallStatus = precomputed
+        ? precomputed.toolCallStatus
+        : getToolCallStatus(toolcallId, resultsMap, runStatus);
 
     const parsedArgs = useMemo(
         () => part.streaming_args ?? parseEditNoteToolCallArgs(part.args),
@@ -254,10 +279,23 @@ export function useEditNoteActions({
     });
     const config = STATUS_CONFIGS[effectiveStatus];
 
-    const basePreviewData = buildPreviewData('edit_note', pendingApproval, action);
+    // buildPreviewData derives actionType from pendingApproval/action when either
+    // is present, so the toolName argument only matters as the pre-action/pre-approval
+    // fallback below it — pass the real type when known for clarity.
+    const basePreviewData = buildPreviewData(
+        pendingApproval?.actionType ?? action?.action_type ?? 'edit_note',
+        pendingApproval,
+        action,
+    );
+    // Before any action/pendingApproval exists (pure streaming), detect a
+    // batch call from its args shape (`edits[]`) so the preview dispatches to
+    // the batch branch instead of defaulting to the v1 type.
+    const streamingActionType = parsedArgs && Array.isArray((parsedArgs as any).edits)
+        ? 'edit_note_batch'
+        : 'edit_note';
     const previewData = basePreviewData
         ?? (parsedArgs && Object.keys(parsedArgs).length > 0
-            ? { actionType: 'edit_note', actionData: parsedArgs }
+            ? { actionType: streamingActionType, actionData: parsedArgs }
             : null);
     const previewStatus: EditNoteDisplayStatus = previewData
         ? effectiveStatus
@@ -276,12 +314,12 @@ export function useEditNoteActions({
         setClickedButton(button);
         try {
             await dismissActiveEditNotePreview();
-            const result = await executeEditNoteAction(action);
+            const result = await executeEditNoteOrBatchAction(action);
             await ackAgentActions(runId, [{
                 action_id: action.id,
                 result_data: result,
             }]);
-            logger(`useEditNoteActions: Applied edit_note action ${action.id}`, 1);
+            logger(`useEditNoteActions: Applied ${action.action_type} action ${action.id}`, 1);
         } catch (error: any) {
             const errorMessage = error?.message || 'Failed to apply edit_note';
             const stackTrace = error?.stack || '';
@@ -320,6 +358,12 @@ export function useEditNoteActions({
     const handleRejectPending = useCallback(() => {
         if (!action || isProcessing) return;
         setClickedButton('reject');
+        // Dismiss (or cancel a pending re-render of) the preview before
+        // resolving — rejection via local action state has no approval for
+        // the coordinator to react to, so without this a deferred preview
+        // bounce could resurrect a stale preview whose Apply callback
+        // targets the now-rejected action.
+        void dismissActiveEditNotePreview();
         rejectAgentAction(action.id);
         setTimeout(() => setClickedButton(null), 100);
     }, [action, isProcessing, rejectAgentAction]);
@@ -337,9 +381,9 @@ export function useEditNoteActions({
         setClickedButton('undo');
         try {
             await dismissActiveEditNotePreview();
-            await undoEditNoteAction(action);
+            await undoEditNoteOrBatchAction(action);
             undoAgentAction(action.id);
-            logger(`useEditNoteActions: Undone edit_note action ${action.id}`, 1);
+            logger(`useEditNoteActions: Undone ${action.action_type} action ${action.id}`, 1);
         } catch (error: any) {
             const errorMessage = error?.message || 'Failed to undo edit_note';
             const stackTrace = error?.stack || '';
@@ -382,6 +426,39 @@ export function useEditNoteActions({
         await openNoteByKey(resolvedTarget.libraryId, resolvedTarget.zoteroKey);
     }, [resolvedTarget, action, pendingApproval]);
 
+    /**
+     * Open the note and jump to ONE edit of an edit_note_batch action. The
+     * row descriptor carries the edit's own strings; disambiguation anchors
+     * and undo contexts are joined from the action payload by edit index.
+     */
+    const handleOpenNoteForRow = useCallback(async (row: EditNoteRowDescriptor) => {
+        if (!resolvedTarget) return;
+        const batchData = action?.proposed_data ?? pendingApproval?.actionData;
+        const edits: any[] = Array.isArray(batchData?.edits) ? batchData.edits : [];
+        const fullEdit = row.editIndex !== null
+            ? edits.find((e: any) => e?.index === row.editIndex)
+            : undefined;
+        const undoRecords: any[] = Array.isArray(action?.result_data?.undo)
+            ? action.result_data.undo
+            : [];
+        const undoRecord = row.editIndex !== null
+            ? undoRecords.find((u: any) => u?.index === row.editIndex)
+            : undefined;
+
+        await openNoteAndSearchEdit(
+            resolvedTarget.libraryId,
+            resolvedTarget.zoteroKey,
+            row.oldString || '',
+            row.newString || '',
+            action?.status === 'applied',
+            undoRecord?.undo_before_context,
+            undoRecord?.undo_after_context,
+            fullEdit?.target_before_context,
+            fullEdit?.target_after_context,
+            row.operation as EditNoteOperation,
+        );
+    }, [resolvedTarget, action, pendingApproval]);
+
     return {
         actions,
         previewData,
@@ -405,5 +482,6 @@ export function useEditNoteActions({
         handleUndo,
         handleRetry,
         handleOpenNote,
+        handleOpenNoteForRow,
     };
 }

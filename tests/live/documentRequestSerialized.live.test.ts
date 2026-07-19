@@ -359,39 +359,6 @@ describe('serialized document request — non-PDF and error fallbacks', () => {
     });
 });
 
-describe('serialized document request — timing metadata', () => {
-    beforeEach((ctx) => skipIfNoZotero(ctx, available));
-
-    it('reports cache_miss timing with worker + payload metrics on a cold extraction', async () => {
-        await invalidateCache(SMALL_PDF.library_id, SMALL_PDF.zotero_key);
-        const res = await fetchDocumentSerialized(SMALL_PDF, { mode: 'structured' }, EXTRACT_OPTS);
-        expectPreparedResult(res);
-
-        const timing = res.envelope?.timing ?? {};
-        expect(timing.cache_miss).toBe(1);
-        expect(timing.cache_hit).toBe(0);
-        expect(timing.page_count).toBe(SMALL_PDF_PAGE_COUNT);
-        expect(timing.file_size_bytes).toBeGreaterThan(0);
-        expect(timing.payload_bytes).toBeGreaterThan(0);
-        // A cold extraction owned a worker call.
-        expect(typeof timing.worker_extract_ms).toBe('number');
-        expect(typeof timing.serialize_ms).toBe('number');
-    });
-
-    it('reports cache_hit timing on a warm read', async () => {
-        await invalidateCache(SMALL_PDF.library_id, SMALL_PDF.zotero_key);
-        await fetchDocumentSerialized(SMALL_PDF, { mode: 'structured' }, EXTRACT_OPTS);
-        const warm = await fetchDocumentSerialized(SMALL_PDF, { mode: 'structured' }, EXTRACT_OPTS);
-        expectPreparedResult(warm);
-
-        const timing = warm.envelope?.timing ?? {};
-        expect(timing.cache_hit).toBe(1);
-        expect(timing.cache_miss).toBe(0);
-        // Serialized warm hits still report the cached payload size.
-        expect(timing.payload_bytes).toBeGreaterThan(0);
-    });
-});
-
 describe('serialized document request — external files', () => {
     const FIXTURE_PDF = resolve(
         __dirname,

@@ -420,6 +420,7 @@ Verify that the note-edit group grant applies to every note edited in the same r
 #### Test result
 
 - **Date**: 2026-04-01 | **Result**: NOT RUN — Requires multi-note edit scenario.
+- **Date**: 2026-07-18 | **Result**: PASS — Prompt edited two notes in one run (two `edit_note_batch` actions, both pending). Selecting the split-button dropdown option (menu renders as "Allow for this run" with scope line "Note edits") approved BOTH groups; both notes' edits applied to the correct notes, citation in note B preserved. Note: the actual menu label differs from the wording used in this doc ("Allow all note edits for this run") — the rendered UI is "Allow for this run · Note edits".
 
 ### Test 5.3: Auto-Approve Resets on New Run
 

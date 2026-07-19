@@ -3186,6 +3186,104 @@ describe('Math apply-undo-apply cycle', () => {
 
 
 // =============================================================================
+// Code shielding: literal dollars inside <pre>/<code> are never treated as math
+// =============================================================================
+
+describe('Code shielding', () => {
+    function emptyMetadata(): SimplificationMetadata {
+        return { elements: new Map() };
+    }
+
+    it('keeps literal dollars in a shell code block', () => {
+        const input = '<pre>export PATH=$HOME/bin:$PATH</pre>';
+        const result = expandToRawHtml(input, emptyMetadata(), 'new');
+        expect(result).toBe(input);
+        expect(result).not.toContain('class="math"');
+    });
+
+    it('keeps literal dollars in an inline code span', () => {
+        const input = '<p>Use <code>df$a + df$b</code> in R</p>';
+        const result = expandToRawHtml(input, emptyMetadata(), 'new');
+        expect(result).toBe(input);
+        expect(result).not.toContain('class="math"');
+    });
+
+    it('keeps literal $schema in adjacent JSON code blocks and leaves prose untouched', () => {
+        const input = '<pre>{ "$schema": "a" }</pre><p>between</p><pre>{ "$schema": "b" }</pre>';
+        const result = expandToRawHtml(input, emptyMetadata(), 'new');
+        expect(result).toBe(input);
+        expect(result).not.toContain('class="math"');
+    });
+
+    it('expands prose math alongside a shielded code block', () => {
+        const input = '<p>Energy $E=mc^2$ is key.</p><pre>echo $x</pre><p>Also $y+z$ holds.</p>';
+        const result = expandToRawHtml(input, emptyMetadata(), 'new');
+        expect(result).toBe(
+            `<p>Energy ${rawInlineMath('E=mc^2')} is key.</p>`
+            + '<pre>echo $x</pre>'
+            + `<p>Also ${rawInlineMath('y+z')} holds.</p>`
+        );
+        expect(result).toContain('<pre>echo $x</pre>');
+    });
+
+    it('wraps display math adjacent to a shielded code block', () => {
+        const input = '$$\\int x$$<pre>echo $a</pre>$$\\sum y$$';
+        const result = expandToRawHtml(input, emptyMetadata(), 'new');
+        expect(result).toBe(
+            `${rawDisplayMath('\\int x')}<pre>echo $a</pre>${rawDisplayMath('\\sum y')}`
+        );
+        expect(result).toContain('<pre>echo $a</pre>');
+    });
+
+    it('does not pair dollars across a code block boundary', () => {
+        // The closing dollar must directly follow non-whitespace so an
+        // unsegmented inline pass would pair the two dollars across the block.
+        const input = '<p>cost $5</p><pre>echo hi</pre><p>$10 more</p>';
+        const result = expandToRawHtml(input, emptyMetadata(), 'new');
+        expect(result).toBe(input);
+        expect(result).not.toContain('class="math"');
+    });
+
+    it('shields code elements with mixed-case tag names', () => {
+        const input = '<p>Note:</p><PRE>export PATH=$HOME/bin:$PATH</PRE><p>Or <Code>df$a + df$b</Code> inline.</p>';
+        const result = expandToRawHtml(input, emptyMetadata(), 'new');
+        expect(result).toBe(input);
+        expect(result).not.toContain('class="math"');
+    });
+
+    it('restores math wrappers and links nested inside a shielded code block', () => {
+        const input = '<pre><span class="math">$x$</span> and <link href="https://example.com/a?b=1"/></pre>';
+        const result = expandToRawHtml(input, emptyMetadata(), 'new');
+        expect(result).toBe(
+            '<pre><span class="math">$x$</span> and '
+            + '<a href="https://example.com/a?b=1" rel="noopener noreferrer nofollow">https://example.com/a?b=1</a></pre>'
+        );
+        // No placeholder tokens leak into the output.
+        expect(result).not.toContain('__BEAVER_RAW_');
+    });
+
+    it('preserves literal placeholder text while still restoring a real code block', () => {
+        const input = '<p>Literal token __BEAVER_RAW_CODE_0__ here.</p><pre>echo $a</pre>';
+        const result = expandToRawHtml(input, emptyMetadata(), 'new');
+        // The literal placeholder text survives byte-for-byte (nonce bump avoids
+        // colliding with the real code placeholder) and the code block is restored.
+        expect(result).toContain('__BEAVER_RAW_CODE_0__');
+        expect(result).toContain('<pre>echo $a</pre>');
+        expect(result).toBe(input);
+    });
+
+    it('round-trips a code block with literal dollars through simplify then expand', () => {
+        const html = wrap('<p>Shell:</p><pre>export PATH=$HOME/bin:$PATH</pre>');
+        const { simplified, metadata } = simplifyNoteHtml(html, 1);
+        const expanded = expandToRawHtml(simplified, metadata, 'old');
+        expect(expanded).toBe(stripNoteWrapperDiv(stripDataCitationItems(normalizeNoteHtml(html))));
+        expect(expanded).toContain('<pre>export PATH=$HOME/bin:$PATH</pre>');
+        expect(expanded).not.toContain('class="math"');
+    });
+});
+
+
+// =============================================================================
 // translatePageNumberToLabel
 // =============================================================================
 
