@@ -193,6 +193,179 @@ function collectWarnings(...warnings: Array<string | null | undefined>): string[
     return filtered.length > 0 ? filtered : undefined;
 }
 
+interface RestoreEditFragmentParams {
+    strippedHtml: string;
+    /** Raw HTML fragment to put back (empty for insert/append undo). */
+    undoOldHtml: string;
+    /** Raw HTML fragment the edit inserted. `''` selects the deletion-seam path. */
+    undoNewHtml: string;
+    beforeCtx?: string;
+    afterCtx?: string;
+    libraryId: number;
+    /** Function-name prefix for diagnostic logs. */
+    logPrefix: string;
+    /** Per-caller identifier (note id / edit index) embedded in diagnostic logs. */
+    logLabel: string;
+    /** Deletion path: thrown when neither before/after context was stored. */
+    noContextError: string;
+    /** Deletion path: thrown when the deletion seam can no longer be located. */
+    seamNotFoundError: string;
+    /** General path: thrown when `undo_new_html` can no longer be located. */
+    fragmentNotFoundError: string;
+}
+
+type RestoreEditFragmentResult =
+    | { kind: 'restored'; html: string }
+    | { kind: 'already-undone' };
+
+/**
+ * Restore one edit's fragment against the current stripped note HTML, returning
+ * the updated HTML (or an `already-undone` no-op signal). Handles both the
+ * deletion-seam restore (`undoNewHtml === ''` → relocate the seam via
+ * before/after context and reinsert `undoOldHtml`) and the general
+ * single-occurrence restore (locate `undoNewHtml` — exact → entity-decode →
+ * whitespace-tolerant → context/fuzzy — and replace it with `undoOldHtml`).
+ *
+ * Callers own the caller-specific error strings and the `already-undone` log
+ * line; they also handle str_replace_all separately (its multi-occurrence
+ * replay is not part of this single-fragment chain).
+ */
+function restoreEditFragment(params: RestoreEditFragmentParams): RestoreEditFragmentResult {
+    const {
+        strippedHtml,
+        undoNewHtml,
+        libraryId,
+        logPrefix,
+        logLabel,
+        noContextError,
+        seamNotFoundError,
+        fragmentNotFoundError,
+    } = params;
+
+    // ── deletion: locate the seam via context and reinsert undo_old_html ──
+    if (undoNewHtml === '') {
+        let before = params.beforeCtx;
+        let after = params.afterCtx;
+        let restoreHtml = params.undoOldHtml;
+
+        if (before === undefined && after === undefined) {
+            throw new Error(noContextError);
+        }
+
+        // PM may have decoded HTML entities (e.g. &#x27; → ') since the undo
+        // data was stored. Try entity-decoded versions if the raw seam isn't found.
+        const seamRaw = (before || '') + (after || '');
+        if (seamRaw && !strippedHtml.includes(seamRaw)) {
+            const decodedBefore = before != null ? decodeHtmlEntities(before) : undefined;
+            const decodedAfter = after != null ? decodeHtmlEntities(after) : undefined;
+            const seamDecoded = (decodedBefore || '') + (decodedAfter || '');
+            if (seamDecoded !== seamRaw && strippedHtml.includes(seamDecoded)) {
+                before = decodedBefore;
+                after = decodedAfter;
+                restoreHtml = decodeHtmlEntities(restoreHtml);
+            }
+        }
+
+        // PM may have changed inter-tag whitespace (indentation, newlines).
+        const seamAfterDecode = (before || '') + (after || '');
+        if (seamAfterDecode && !strippedHtml.includes(seamAfterDecode)) {
+            const beforeWs = before ? findWhitespaceTolerant(strippedHtml, before) : null;
+            const afterWs = after ? findWhitespaceTolerant(strippedHtml, after) : null;
+            if (beforeWs || afterWs) {
+                logger(`${logPrefix}: whitespace-tolerant context match for ${logLabel} deletion undo`, 1);
+                if (beforeWs) before = strippedHtml.substring(beforeWs.start, beforeWs.end);
+                if (afterWs) after = strippedHtml.substring(afterWs.start, afterWs.end);
+                const oldWs = findWhitespaceTolerant(strippedHtml, restoreHtml);
+                if (oldWs) restoreHtml = strippedHtml.substring(oldWs.start, oldWs.end);
+            }
+        }
+
+        if (isAlreadyUndone(strippedHtml, restoreHtml, before, after)) {
+            return { kind: 'already-undone' };
+        }
+
+        const seamLoc = locateEditFragment({
+            strippedHtml,
+            intent: { kind: 'undo-seam', beforeContext: before, afterContext: after },
+        });
+        if (seamLoc.kind !== 'seam') {
+            throw new Error(seamNotFoundError);
+        }
+        logger(`${logPrefix}: ${logLabel} deletion seam at ${seamLoc.insertionPoint}`
+            + (seamLoc.gapEnd !== undefined ? ` (gap=${seamLoc.gapEnd - seamLoc.insertionPoint})` : ''), 1);
+        // When the editor inserted whitespace between the two contexts, span
+        // the gap so the undo replaces it (gapEnd marks the start of afterCtx).
+        const sliceEnd = seamLoc.gapEnd ?? seamLoc.insertionPoint;
+        return {
+            kind: 'restored',
+            html: strippedHtml.substring(0, seamLoc.insertionPoint) + restoreHtml + strippedHtml.substring(sliceEnd),
+        };
+    }
+
+    // ── general case: locate undo_new_html and restore undo_old_html there ──
+    let undoOldLocal = params.undoOldHtml;
+    let undoNewLocal = undoNewHtml;
+    let before = params.beforeCtx;
+    let after = params.afterCtx;
+
+    // PM may have decoded HTML entities since the undo data was stored. If the
+    // stored new_html isn't found, try entity-decoded versions so all
+    // subsequent matching works.
+    if (!strippedHtml.includes(undoNewLocal)) {
+        const decodedNew = decodeHtmlEntities(undoNewLocal);
+        if (decodedNew !== undoNewLocal && strippedHtml.includes(decodedNew)) {
+            undoNewLocal = decodedNew;
+            undoOldLocal = decodeHtmlEntities(undoOldLocal);
+            if (before != null) before = decodeHtmlEntities(before);
+            if (after != null) after = decodeHtmlEntities(after);
+        }
+    }
+
+    // PM may have changed inter-tag whitespace since the undo data was stored.
+    // If the exact string still isn't found, try whitespace-tolerant matching
+    // and update the undo strings + contexts to the PM-normalized versions.
+    if (!strippedHtml.includes(undoNewLocal)) {
+        const wsMatch = findWhitespaceTolerant(strippedHtml, undoNewLocal);
+        if (wsMatch) {
+            logger(`${logPrefix}: whitespace-tolerant match for undo_new_html on ${logLabel}`, 1);
+            undoNewLocal = strippedHtml.substring(wsMatch.start, wsMatch.end);
+            if (!strippedHtml.includes(undoOldLocal)) {
+                const oldWsMatch = findWhitespaceTolerant(strippedHtml, undoOldLocal);
+                if (oldWsMatch) undoOldLocal = strippedHtml.substring(oldWsMatch.start, oldWsMatch.end);
+            }
+            before = strippedHtml.substring(Math.max(0, wsMatch.start - UNDO_CONTEXT_LENGTH), wsMatch.start);
+            after = strippedHtml.substring(wsMatch.end, Math.min(strippedHtml.length, wsMatch.end + UNDO_CONTEXT_LENGTH));
+        }
+    }
+
+    const newStringFound = strippedHtml.includes(undoNewLocal);
+    if (!newStringFound && isAlreadyUndone(strippedHtml, undoOldLocal, before, after)) {
+        return { kind: 'already-undone' };
+    }
+
+    const fragment = locateEditFragment({
+        strippedHtml,
+        intent: {
+            kind: 'undo-fragment',
+            expectedHtml: undoNewLocal,
+            beforeContext: before,
+            afterContext: after,
+            libraryId,
+            allowFuzzy: true,
+        },
+    });
+    if (fragment.kind !== 'range') {
+        throw new Error(fragmentNotFoundError);
+    }
+    if (fragment.via !== 'exact') {
+        logger(`${logPrefix}: ${logLabel} restored via ${fragment.via}`, 1);
+    }
+    return {
+        kind: 'restored',
+        html: strippedHtml.substring(0, fragment.start) + undoOldLocal + strippedHtml.substring(fragment.end),
+    };
+}
+
 /**
  * Execute an edit_note agent action by applying string replacement on the note.
  * @param action The agent action to execute
@@ -769,75 +942,21 @@ export async function undoEditNoteAction(
 
     let restoredHtml: string | undefined;
 
-    if (isDeletion) {
-        // --- Deletion undo: use surrounding context to find insertion point ---
-        let beforeCtx = resultData?.undo_before_context;
-        let afterCtx = resultData?.undo_after_context;
-        let undoOldHtml = expandedOld!;
+    const restoreErrors = {
+        noContextError:
+            'Cannot undo deletion: no surrounding context stored in result_data. '
+            + 'This action was applied before deletion-undo support was added.',
+        seamNotFoundError:
+            'Cannot undo deletion: the note has been modified around the deletion point. '
+            + 'The surrounding context could not be found.',
+        fragmentNotFoundError:
+            'Cannot undo: the note has been modified since this edit was applied. '
+            + 'Neither the applied text nor the original text could be found.',
+    };
 
-        if (beforeCtx === undefined && afterCtx === undefined) {
-            throw new Error(
-                'Cannot undo deletion: no surrounding context stored in result_data. '
-                + 'This action was applied before deletion-undo support was added.'
-            );
-        }
-
-        // PM may have decoded HTML entities (e.g. &#x27; → ') in the note.
-        // If context anchors aren't found as-is, try entity-decoded versions.
-        const seamRaw = (beforeCtx || '') + (afterCtx || '');
-        if (seamRaw && !strippedHtml.includes(seamRaw)) {
-            const decodedBefore = beforeCtx != null ? decodeHtmlEntities(beforeCtx) : undefined;
-            const decodedAfter = afterCtx != null ? decodeHtmlEntities(afterCtx) : undefined;
-            const seamDecoded = (decodedBefore || '') + (decodedAfter || '');
-            if (seamDecoded !== seamRaw && strippedHtml.includes(seamDecoded)) {
-                beforeCtx = decodedBefore;
-                afterCtx = decodedAfter;
-                undoOldHtml = decodeHtmlEntities(undoOldHtml);
-            }
-        }
-
-        // PM may have changed inter-tag whitespace (indentation, newlines).
-        const seamAfterDecode = (beforeCtx || '') + (afterCtx || '');
-        if (seamAfterDecode && !strippedHtml.includes(seamAfterDecode)) {
-            const beforeWs = beforeCtx ? findWhitespaceTolerant(strippedHtml, beforeCtx) : null;
-            const afterWs = afterCtx ? findWhitespaceTolerant(strippedHtml, afterCtx) : null;
-            if (beforeWs || afterWs) {
-                logger(`undoEditNoteAction: whitespace-tolerant context match for deletion undo on note ${noteId}`, 1);
-                if (beforeWs) beforeCtx = strippedHtml.substring(beforeWs.start, beforeWs.end);
-                if (afterWs) afterCtx = strippedHtml.substring(afterWs.start, afterWs.end);
-                // Also update undoOldHtml whitespace if needed
-                const oldWs = findWhitespaceTolerant(strippedHtml, undoOldHtml);
-                if (oldWs) undoOldHtml = strippedHtml.substring(oldWs.start, oldWs.end);
-            }
-        }
-
-        // Check if already undone (old_string is back in the note) — context-aware
-        if (isAlreadyUndone(strippedHtml, undoOldHtml, beforeCtx, afterCtx)) {
-            logger(`undoEditNoteAction: Note ${noteId} already contains old_string, skipping`, 1);
-            return;
-        }
-
-        // Locate the deletion seam, tolerating editor-inserted whitespace.
-        const seamLoc = locateEditFragment({
-            strippedHtml,
-            intent: { kind: 'undo-seam', beforeContext: beforeCtx, afterContext: afterCtx },
-        });
-        if (seamLoc.kind !== 'seam') {
-            throw new Error(
-                'Cannot undo deletion: the note has been modified around the deletion point. '
-                + 'The surrounding context could not be found.'
-            );
-        }
-        logger(`undoEditNoteAction: deletion seam at ${seamLoc.insertionPoint}` +
-            (seamLoc.gapEnd !== undefined ? ` (gap=${seamLoc.gapEnd - seamLoc.insertionPoint})` : ''), 1);
-        // When the editor inserted whitespace between the two contexts, span
-        // the gap so the undo replaces it (gapEnd marks the start of afterCtx).
-        const sliceEnd = seamLoc.gapEnd ?? seamLoc.insertionPoint;
-        restoredHtml = strippedHtml.substring(0, seamLoc.insertionPoint)
-            + undoOldHtml
-            + strippedHtml.substring(sliceEnd);
-    } else {
-        // --- Non-deletion undo: reverse str-replace (new fragment → old fragment) ---
+    if (!isDeletion && operation === 'str_replace_all') {
+        // --- str_replace_all reverse: multi-occurrence replay, kept separate
+        //     from the single-fragment restore chain ---
         let undoOldHtml = expandedOld!;
         let undoNewHtml = expandedNew!;
 
@@ -893,54 +1012,42 @@ export async function undoEditNoteAction(
             return;
         }
 
-        if (operation === 'str_replace_all') {
-            if (!newStringFound) {
-                // str_replace_all fuzzy recovery: per-occurrence context anchors
-                const occCtxs = resultData?.undo_occurrence_contexts;
-                if (occCtxs && occCtxs.length > 0) {
-                    restoredHtml = undoReplaceAllViaContexts(
-                        strippedHtml, undoOldHtml, undoNewHtml, occCtxs, library_id
-                    );
-                    if (restoredHtml) {
-                        logger(`undoEditNoteAction: restored ${occCtxs.length} replace_all occurrences via contexts on note ${noteId}`, 1);
-                    }
+        if (!newStringFound) {
+            // str_replace_all fuzzy recovery: per-occurrence context anchors
+            const occCtxs = resultData?.undo_occurrence_contexts;
+            if (occCtxs && occCtxs.length > 0) {
+                restoredHtml = undoReplaceAllViaContexts(
+                    strippedHtml, undoOldHtml, undoNewHtml, occCtxs, library_id
+                );
+                if (restoredHtml) {
+                    logger(`undoEditNoteAction: restored ${occCtxs.length} replace_all occurrences via contexts on note ${noteId}`, 1);
                 }
-                if (!restoredHtml) {
-                    throw new Error(
-                        'Cannot undo: the note has been modified since this edit was applied. '
-                        + 'Neither the applied text nor the original text could be found.'
-                    );
-                }
-            } else {
-                // Exact match path — undoNewHtml found verbatim
-                restoredHtml = strippedHtml.split(undoNewHtml).join(undoOldHtml);
+            }
+            if (!restoredHtml) {
+                throw new Error(restoreErrors.fragmentNotFoundError);
             }
         } else {
-            // Single-occurrence: one orchestrator call handles exact +
-            // duplicate disambiguation + fuzzy recovery.
-            const fragment = locateEditFragment({
-                strippedHtml,
-                intent: {
-                    kind: 'undo-fragment',
-                    expectedHtml: undoNewHtml,
-                    beforeContext: beforeCtx,
-                    afterContext: afterCtx,
-                    libraryId: library_id,
-                    allowFuzzy: true,
-                },
-            });
-            if (fragment.kind !== 'range') {
-                throw new Error(
-                    'Cannot undo: the note has been modified since this edit was applied. '
-                    + 'Neither the applied text nor the original text could be found.'
-                );
-            }
-            if (fragment.via !== 'exact') {
-                logger(`undoEditNoteAction: restored via ${fragment.via} on note ${noteId}`, 1);
-            }
-            restoredHtml = strippedHtml.substring(0, fragment.start) + undoOldHtml
-                + strippedHtml.substring(fragment.end);
+            // Exact match path — undoNewHtml found verbatim
+            restoredHtml = strippedHtml.split(undoNewHtml).join(undoOldHtml);
         }
+    } else {
+        // --- Deletion + single-occurrence reverse via the shared restore chain ---
+        const restore = restoreEditFragment({
+            strippedHtml,
+            undoOldHtml: expandedOld!,
+            undoNewHtml: isDeletion ? '' : expandedNew!,
+            beforeCtx: resultData?.undo_before_context,
+            afterCtx: resultData?.undo_after_context,
+            libraryId: library_id,
+            logPrefix: 'undoEditNoteAction',
+            logLabel: `note ${noteId}`,
+            ...restoreErrors,
+        });
+        if (restore.kind === 'already-undone') {
+            logger(`undoEditNoteAction: Note ${noteId} already contains old_string, skipping`, 1);
+            return;
+        }
+        restoredHtml = restore.html;
     }
 
     // Rebuild data-citation-items, preserving the pre-undo itemData so
@@ -1338,123 +1445,29 @@ function applyBatchUndoRecord(
         return restored;
     }
 
-    // ── deletion (undo_new_html empty): locate the seam via context and reinsert undo_old_html ──
-    if (undoNewHtml === '') {
-        let beforeCtx = record.undo_before_context;
-        let afterCtx = record.undo_after_context;
-        let restoreHtml = undoOldHtml;
-
-        if (beforeCtx === undefined && afterCtx === undefined) {
-            throw new Error(`Cannot undo edit ${record.index}: no surrounding context stored for this deletion.`);
-        }
-
-        // PM may have decoded HTML entities (e.g. &#x27; → ') since the undo
-        // data was stored. Try entity-decoded versions if the raw seam isn't found.
-        const seamRaw = (beforeCtx || '') + (afterCtx || '');
-        if (seamRaw && !strippedHtml.includes(seamRaw)) {
-            const decodedBefore = beforeCtx != null ? decodeHtmlEntities(beforeCtx) : undefined;
-            const decodedAfter = afterCtx != null ? decodeHtmlEntities(afterCtx) : undefined;
-            const seamDecoded = (decodedBefore || '') + (decodedAfter || '');
-            if (seamDecoded !== seamRaw && strippedHtml.includes(seamDecoded)) {
-                beforeCtx = decodedBefore;
-                afterCtx = decodedAfter;
-                restoreHtml = decodeHtmlEntities(restoreHtml);
-            }
-        }
-
-        // PM may have changed inter-tag whitespace (indentation, newlines).
-        const seamAfterDecode = (beforeCtx || '') + (afterCtx || '');
-        if (seamAfterDecode && !strippedHtml.includes(seamAfterDecode)) {
-            const beforeWs = beforeCtx ? findWhitespaceTolerant(strippedHtml, beforeCtx) : null;
-            const afterWs = afterCtx ? findWhitespaceTolerant(strippedHtml, afterCtx) : null;
-            if (beforeWs || afterWs) {
-                logger(`undoEditNoteBatchAction: whitespace-tolerant context match for edit ${record.index} deletion undo`, 1);
-                if (beforeWs) beforeCtx = strippedHtml.substring(beforeWs.start, beforeWs.end);
-                if (afterWs) afterCtx = strippedHtml.substring(afterWs.start, afterWs.end);
-                const oldWs = findWhitespaceTolerant(strippedHtml, restoreHtml);
-                if (oldWs) restoreHtml = strippedHtml.substring(oldWs.start, oldWs.end);
-            }
-        }
-
-        if (isAlreadyUndone(strippedHtml, restoreHtml, beforeCtx, afterCtx)) {
-            logger(`undoEditNoteBatchAction: edit ${record.index} already undone, skipping`, 1);
-            return strippedHtml;
-        }
-
-        const seamLoc = locateEditFragment({
-            strippedHtml,
-            intent: { kind: 'undo-seam', beforeContext: beforeCtx, afterContext: afterCtx },
-        });
-        if (seamLoc.kind !== 'seam') {
-            throw new Error(
-                `Cannot undo edit ${record.index}: the note has been modified around the deletion point. `
-                + 'The surrounding context could not be found.'
-            );
-        }
-        logger(`undoEditNoteBatchAction: edit ${record.index} deletion seam at ${seamLoc.insertionPoint}`
-            + (seamLoc.gapEnd !== undefined ? ` (gap=${seamLoc.gapEnd - seamLoc.insertionPoint})` : ''), 1);
-        const sliceEnd = seamLoc.gapEnd ?? seamLoc.insertionPoint;
-        return strippedHtml.substring(0, seamLoc.insertionPoint) + restoreHtml + strippedHtml.substring(sliceEnd);
-    }
-
-    // ── general case (str_replace / insert_after / insert_before / append):
-    //    locate undo_new_html and restore undo_old_html in its place ──
-    let undoOldHtmlLocal = undoOldHtml;
-    let undoNewHtmlLocal = undoNewHtml;
-    let beforeCtx = record.undo_before_context;
-    let afterCtx = record.undo_after_context;
-
-    if (!strippedHtml.includes(undoNewHtmlLocal)) {
-        const decodedNew = decodeHtmlEntities(undoNewHtmlLocal);
-        if (decodedNew !== undoNewHtmlLocal && strippedHtml.includes(decodedNew)) {
-            undoNewHtmlLocal = decodedNew;
-            undoOldHtmlLocal = decodeHtmlEntities(undoOldHtmlLocal);
-            if (beforeCtx != null) beforeCtx = decodeHtmlEntities(beforeCtx);
-            if (afterCtx != null) afterCtx = decodeHtmlEntities(afterCtx);
-        }
-    }
-
-    if (!strippedHtml.includes(undoNewHtmlLocal)) {
-        const wsMatch = findWhitespaceTolerant(strippedHtml, undoNewHtmlLocal);
-        if (wsMatch) {
-            logger(`undoEditNoteBatchAction: whitespace-tolerant match for edit ${record.index}`, 1);
-            undoNewHtmlLocal = strippedHtml.substring(wsMatch.start, wsMatch.end);
-            if (!strippedHtml.includes(undoOldHtmlLocal)) {
-                const oldWsMatch = findWhitespaceTolerant(strippedHtml, undoOldHtmlLocal);
-                if (oldWsMatch) undoOldHtmlLocal = strippedHtml.substring(oldWsMatch.start, oldWsMatch.end);
-            }
-            beforeCtx = strippedHtml.substring(Math.max(0, wsMatch.start - UNDO_CONTEXT_LENGTH), wsMatch.start);
-            afterCtx = strippedHtml.substring(wsMatch.end, Math.min(strippedHtml.length, wsMatch.end + UNDO_CONTEXT_LENGTH));
-        }
-    }
-
-    const newStringFound = strippedHtml.includes(undoNewHtmlLocal);
-    if (!newStringFound && isAlreadyUndone(strippedHtml, undoOldHtmlLocal, beforeCtx, afterCtx)) {
+    // ── deletion + single-occurrence: replay through the shared restore chain ──
+    const restore = restoreEditFragment({
+        strippedHtml,
+        undoOldHtml,
+        undoNewHtml,
+        beforeCtx: record.undo_before_context,
+        afterCtx: record.undo_after_context,
+        libraryId,
+        logPrefix: 'undoEditNoteBatchAction',
+        logLabel: `edit ${record.index}`,
+        noContextError: `Cannot undo edit ${record.index}: no surrounding context stored for this deletion.`,
+        seamNotFoundError:
+            `Cannot undo edit ${record.index}: the note has been modified around the deletion point. `
+            + 'The surrounding context could not be found.',
+        fragmentNotFoundError:
+            `Cannot undo edit ${record.index}: the note has been modified since this edit was applied. `
+            + 'Neither the applied text nor the original text could be found.',
+    });
+    if (restore.kind === 'already-undone') {
         logger(`undoEditNoteBatchAction: edit ${record.index} already undone, skipping`, 1);
         return strippedHtml;
     }
-
-    const fragment = locateEditFragment({
-        strippedHtml,
-        intent: {
-            kind: 'undo-fragment',
-            expectedHtml: undoNewHtmlLocal,
-            beforeContext: beforeCtx,
-            afterContext: afterCtx,
-            libraryId,
-            allowFuzzy: true,
-        },
-    });
-    if (fragment.kind !== 'range') {
-        throw new Error(
-            `Cannot undo edit ${record.index}: the note has been modified since this edit was applied. `
-            + 'Neither the applied text nor the original text could be found.'
-        );
-    }
-    if (fragment.via !== 'exact') {
-        logger(`undoEditNoteBatchAction: edit ${record.index} restored via ${fragment.via}`, 1);
-    }
-    return strippedHtml.substring(0, fragment.start) + undoOldHtmlLocal + strippedHtml.substring(fragment.end);
+    return restore.html;
 }
 
 /**
