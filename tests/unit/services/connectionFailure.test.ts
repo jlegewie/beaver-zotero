@@ -35,7 +35,7 @@ describe('presentConnectionFailure', () => {
             durationMs: 20,
         });
 
-        expect(result.details).toContain("Beaver's regular API is reachable");
+        expect(result.details).toContain("Beaver's server is reachable");
         expect(result.details).toContain('may be blocking WebSocket traffic');
         expect(result.details).not.toContain(
             'server may be temporarily unavailable',
@@ -64,7 +64,7 @@ describe('presentConnectionFailure', () => {
         });
 
         expect(result.message).toBe(
-            'The connection was lost before the run finished.',
+            'The connection was lost before Beaver finished responding.',
         );
         expect(result.details).toContain('live connection was interrupted');
     });
@@ -89,7 +89,7 @@ describe('presentConnectionFailure', () => {
             navigatorOnline: false,
         });
 
-        expect(result.message).toBe('Could not start the connection.');
+        expect(result.message).toBe('Could not start the connection to Beaver.');
         expect(result.details).toContain('appears to be offline');
         expect(result.details).not.toContain('connection-troubleshooting');
     });
@@ -108,7 +108,7 @@ describe('presentConnectionFailure', () => {
             },
         );
 
-        expect(result.message).toBe('Could not start the connection.');
+        expect(result.message).toBe('Could not start the connection to Beaver.');
         expect(result.details).toContain('could not reach Beaver either');
         expect(result.details).toContain('firewall');
         expect(result.details).toContain('connection-troubleshooting');
@@ -130,8 +130,8 @@ describe('presentConnectionFailure', () => {
             },
         );
 
-        expect(result.message).toBe('Could not start the connection.');
-        expect(result.details).toContain("Beaver's API is reachable");
+        expect(result.message).toBe('Could not start the connection to Beaver.');
+        expect(result.details).toContain("Beaver's server is reachable");
         expect(result.details).toContain('sign out and sign back in');
         expect(result.details).toContain('connection-troubleshooting');
     });
@@ -151,7 +151,7 @@ describe('presentConnectionFailure', () => {
             },
         );
 
-        expect(result.message).toBe('Could not start the connection.');
+        expect(result.message).toBe('Could not start the connection to Beaver.');
         expect(result.details).toContain('unexpected response (HTTP 503)');
         expect(result.details).toContain('may be intercepting');
         expect(result.details).toContain('connection-troubleshooting');
@@ -165,7 +165,7 @@ describe('presentConnectionFailure', () => {
             closeCode: null,
         });
 
-        expect(result.message).toBe('Could not start the connection.');
+        expect(result.message).toBe('Could not start the connection to Beaver.');
         expect(result.details).toContain('could not check your sign-in session');
         expect(result.details).toContain('sign out and sign back in');
         expect(result.details).toContain('connection-troubleshooting');
@@ -188,7 +188,7 @@ describe('presentConnectionFailure', () => {
         );
 
         expect(result.details).toContain('Beaver timed out while checking your sign-in session');
-        expect(result.details).toContain("Beaver's API is reachable");
+        expect(result.details).toContain("Beaver's server is reachable");
         expect(result.details).toContain('connection-troubleshooting');
     });
 
@@ -303,7 +303,7 @@ describe('presentConnectionFailure', () => {
         );
 
         expect(result.message).toBe('Could not finish connecting to Beaver.');
-        expect(result.details).toContain('sign-in handshake did not complete');
+        expect(result.details).toContain('signing in did not finish in time');
         expect(result.details).toContain('WebSocket');
         expect(result.details).toContain('connection-troubleshooting');
         expect(result.details).toContain('sign out and sign back in');
@@ -319,7 +319,7 @@ describe('presentConnectionFailure', () => {
             readyReceived: true,
         });
 
-        expect(result.message).toBe('The connection ended before the run finished.');
+        expect(result.message).toBe('The connection ended before Beaver finished responding.');
         expect(result.details).toContain('may be incomplete');
         expect(result.details).not.toContain('firewall');
         expect(result.details).not.toContain('VPN');
@@ -338,7 +338,7 @@ describe('presentConnectionFailure', () => {
             closeReason: 'Session <b>expired</b>',
         });
 
-        expect(result.message).toBe('The connection ended before the run finished.');
+        expect(result.message).toBe('The connection ended before Beaver finished responding.');
         expect(result.details).toContain('The server reported: "Session expired"');
         expect(result.details).not.toContain('<b>');
     });
@@ -353,7 +353,7 @@ describe('presentConnectionFailure', () => {
             readyReceived: true,
         });
 
-        expect(result.message).not.toBe('The connection ended before the run finished.');
+        expect(result.message).not.toBe('The connection ended before Beaver finished responding.');
     });
 
     it('does not apply the clean-1000 branch before ready was received', () => {
@@ -366,7 +366,7 @@ describe('presentConnectionFailure', () => {
             readyReceived: false,
         });
 
-        expect(result.message).not.toBe('The connection ended before the run finished.');
+        expect(result.message).not.toBe('The connection ended before Beaver finished responding.');
     });
 
     it('labels the numeric suffix "error code" to match the troubleshooting docs', () => {

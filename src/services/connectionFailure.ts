@@ -106,7 +106,7 @@ function serverMessageSuffix(reason: string): string {
         .replace(/\s+/g, ' ')
         .trim();
     if (!withoutMarkup) return '';
-    return ` The server reported: "${withoutMarkup.slice(0, 140)}"`;
+    return ` The server reported: "${withoutMarkup.slice(0, 140)}".`;
 }
 
 function openingFailureDetails(
@@ -121,9 +121,8 @@ function openingFailureDetails(
 
     if (diagnostic?.apiReachable) {
         return (
-            "Beaver's regular API is reachable, but its live connection could not be established. " +
-            'A VPN, proxy, firewall, antivirus, or managed network may be blocking WebSocket traffic, ' +
-            "or Beaver's live-connection endpoint may be temporarily unavailable." +
+            "Beaver's server is reachable, but the live connection could not be established. " +
+            'A VPN, proxy, firewall, antivirus, or managed network may be blocking WebSocket traffic.' +
             troubleshootingLink +
             suffix
         );
@@ -162,30 +161,39 @@ function openingFailureDetails(
 function standardCloseDetails(code: number): string | null {
     switch (code) {
         case 1001:
-            return 'The server or client closed the connection because it was shutting down or restarting.';
+            return "Beaver's server reported that it is shutting down or restarting. Please try again in a moment.";
+        // 1002/1003/1007 all mean data arrived corrupted or in a form one side
+        // could not process — in practice most often a proxy, antivirus, or
+        // network filter altering traffic, so present them the same way.
         case 1002:
-            return 'The live connection ended because of a WebSocket protocol error.';
         case 1003:
-            return 'The live connection ended because unsupported data was received.';
         case 1007:
-            return 'The live connection ended because invalid message data was received.';
+            return (
+                'The live connection ended because data was corrupted or arrived in an unexpected format. ' +
+                'This can happen when a proxy, antivirus, or network filter alters traffic. Please try again.' +
+                troubleshootingLink
+            );
         case 1008:
-            return 'The server rejected the live connection because of a policy or account check.';
+            return "Beaver's server rejected the live connection because of a policy or account check. Please try again; if it continues, sign out and sign back in.";
         case 1009:
-            return 'The live connection ended because a message was too large.';
+            return 'The live connection ended because a message was too large to process. Please try again.';
         case 1010:
-            return 'The live connection could not negotiate a required WebSocket extension.';
+            return (
+                'The live connection ended because a required connection feature could not be negotiated. ' +
+                'A proxy or security software may be interfering. Please try again.' +
+                troubleshootingLink
+            );
         case 1011:
-            return "Beaver's server encountered an internal error. Please try again in a moment.";
+            return "Beaver's server reported an internal error. Please try again in a moment.";
         case 1012:
-            return "Beaver's server is restarting. Please try again in a moment.";
+            return "Beaver's server reported that it is restarting. This usually takes just a moment. Please try again shortly.";
         case 1013:
-            return "Beaver's server is temporarily busy or unavailable. Please try again in a moment.";
+            return "Beaver's server reported that it is temporarily busy or unavailable. Please try again in a moment.";
         case 1014:
-            return 'A gateway in front of Beaver received an invalid response. Please try again in a moment.';
+            return "A gateway reported an invalid response from Beaver's server. This is usually temporary. Please try again in a moment.";
         case 1015:
             return (
-                'The secure TLS handshake failed. A certificate problem, VPN, proxy, antivirus, or ' +
+                'The secure (TLS) connection failed. A certificate problem, VPN, proxy, antivirus, or ' +
                 'TLS-inspecting network may be interfering with the connection.' +
                 troubleshootingLink
             );
@@ -200,7 +208,7 @@ export function presentConnectionFailure(
     diagnostic?: ConnectionDiagnosticResult,
 ): ConnectionFailurePresentation {
     if (evidence.stage === 'auth') {
-        const message = 'Could not start the connection.';
+        const message = 'Could not start the connection to Beaver.';
         if (evidence.navigatorOnline === false) {
             return {
                 message,
@@ -228,7 +236,7 @@ export function presentConnectionFailure(
                 message,
                 details:
                     lead +
-                    " Beaver's API is reachable, so the problem is likely with the sign-in session itself or a network filter blocking the sign-in service. Please try again; if it continues, sign out and sign back in." +
+                    " Beaver's server is reachable, so the problem is likely with the sign-in session itself or a network filter blocking the sign-in service. Please try again; if it continues, sign out and sign back in." +
                     troubleshootingLink,
             };
         }
@@ -266,14 +274,14 @@ export function presentConnectionFailure(
         // TLS-inspecting proxies) produces exactly this signature, so do not
         // blame the sign-in session alone.
         const stalledCause = diagnostic?.apiReachable
-            ? " Beaver's regular API is reachable, so a VPN, proxy, firewall, or security software that interferes with live (WebSocket) traffic may be blocking it, or Beaver's live-connection service may be temporarily unavailable."
+            ? " Beaver's server is reachable, so a VPN, proxy, firewall, or security software that interferes with live (WebSocket) traffic may be blocking it, or Beaver's live-connection service may be temporarily unavailable."
             : ' This can be caused by a slow or unstable connection, a VPN, proxy, firewall, or security software, or a temporary server issue.';
         return {
             message: 'Could not finish connecting to Beaver.',
             details:
-                'The connection opened, but the sign-in handshake did not complete in time.' +
+                'The connection opened, but signing in did not finish in time.' +
                 stalledCause +
-                ' Please try again; if the problem continues, sign out and sign back in.' +
+                ' Please try again; if it continues, sign out and sign back in.' +
                 troubleshootingLink,
         };
     }
@@ -293,11 +301,11 @@ export function presentConnectionFailure(
             ? "Beaver's live connection was interrupted."
             : 'The live connection opened but ended before Beaver finished signing in.';
         const reachability = diagnostic?.apiReachable
-            ? " Beaver's regular API is still reachable, so a temporary live-connection service issue, WebSocket interruption, or network/security software may be responsible."
+            ? " Beaver's server is still reachable, so a temporary live-connection service issue, a brief network interruption, or security software may be responsible."
             : ' This can be caused by a temporary server or internet interruption, VPN, proxy, firewall, or security software.';
         return {
             message: evidence.readyReceived
-                ? 'The connection was lost before the run finished.'
+                ? 'The connection was lost before Beaver finished responding.'
                 : 'Could not finish connecting to Beaver.',
             details:
                 prefix +
@@ -313,9 +321,9 @@ export function presentConnectionFailure(
     // copy must not steer the user toward their local setup.
     if (evidence.closeCode === 1000 && evidence.wasClean && evidence.readyReceived) {
         return {
-            message: 'The connection ended before the run finished.',
+            message: 'The connection ended before Beaver finished responding.',
             details:
-                'The server ended the live connection before the run finished, so the response may be incomplete. This is usually temporary — please try again.' +
+                "Beaver's server ended the live connection before the response was finished, so it may be incomplete. This is usually temporary — please try again." +
                 serverMessageSuffix(evidence.closeReason),
         };
     }
@@ -325,7 +333,7 @@ export function presentConnectionFailure(
         if (standard) {
             return {
                 message: evidence.readyReceived
-                    ? 'The connection was lost before the run finished.'
+                    ? 'The connection was lost before Beaver finished responding.'
                     : 'Could not finish connecting to Beaver.',
                 details:
                     standard +
@@ -337,8 +345,8 @@ export function presentConnectionFailure(
         if (evidence.closeCode >= 4000 && evidence.closeCode <= 4999) {
             return {
                 message: evidence.readyReceived
-                    ? 'The server ended the connection before the run finished.'
-                    : 'The server rejected the connection.',
+                    ? "Beaver's server ended the connection before the response finished."
+                    : "Beaver's server rejected the connection.",
                 details:
                     "Beaver's server ended the live connection." +
                     serverMessageSuffix(evidence.closeReason) +
@@ -349,7 +357,7 @@ export function presentConnectionFailure(
 
     return {
         message: evidence.readyReceived
-            ? 'The connection was lost before the run finished.'
+            ? 'The connection was lost before Beaver finished responding.'
             : 'Could not connect to Beaver.',
         details:
             'A temporary server, internet, VPN, proxy, firewall, or security-software issue may be responsible.' +
