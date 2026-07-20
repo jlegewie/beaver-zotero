@@ -43,7 +43,7 @@ import {
     isWorkerDeadlineError,
 } from '../../beaver-extract';
 import { effectiveMaxFileSizeMB, effectiveMaxPageCount } from '../attachmentLimits';
-import { withWorkerDiagnostics } from './workerDiagnostics';
+import { createWorkerDispatchFlag, withWorkerDiagnostics } from './workerDiagnostics';
 import {
     DEFAULT_IMAGES_TIMEOUT_SECONDS,
     MAX_INTERACTIVE_PDF_TIMEOUT_SECONDS,
@@ -522,10 +522,7 @@ async function handleExternalFileViewRequest(
     );
     const { signal, timeoutSeconds, throwIfTimedOut, dispose } = timeout;
 
-    // True once the request has posted work to the PDF worker; gates the
-    // worker snapshot on timeout responses so pre-dispatch failures (file
-    // load, image conversion) are not labeled with unrelated worker activity.
-    let workerDispatched = false;
+    const workerDispatched = createWorkerDispatchFlag();
 
     try {
         // Size check against the hard cap (the copy is always local).
@@ -594,7 +591,7 @@ async function handleExternalFileViewRequest(
         // PDF: render the requested contiguous range via the MuPDF worker.
         resolvedKind = 'pdf';
         const extractor = new BeaverExtractor();
-        workerDispatched = true;
+        workerDispatched.mark();
         const totalPages = await extractor.getPageCount(fileBytes, signal);
         throwIfTimedOut('page_count_extraction');
         if (totalPages === 0) {
@@ -662,7 +659,7 @@ async function handleExternalFileViewRequest(
         ) {
             return withWorkerDiagnostics(
                 errorResponse(`Rendering timed out after ${timeoutSeconds} seconds`, 'timeout'),
-                { workerDispatched, leaseReaped: isWorkerDeadlineError(error) },
+                { workerDispatched: workerDispatched.value, leaseReaped: isWorkerDeadlineError(error) },
             );
         }
         if (error instanceof ExtractionError) {

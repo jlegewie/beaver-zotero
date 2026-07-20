@@ -566,9 +566,13 @@ export class MuPDFWorkerClient {
 
     /**
      * Reap a continuously busy worker whose oldest accepted operation has
-     * exhausted the slot lease. The oldest posted operation receives a
-     * non-retriable deadline error; innocent siblings retry through the normal
-     * stale-worker path.
+     * exhausted the slot lease. When the oldest in-flight item is a posted
+     * operation, it receives a non-retriable deadline error while innocent
+     * siblings retry through the normal stale-worker path. When the oldest
+     * item is a startup waiter (the worker is wedged in the configure
+     * handshake), no posted operation caused it, so no deadline error is
+     * issued: markStale rejects the startup waiters with a retriable stale
+     * error instead. Either way the reap counters record the event.
      */
     private reapOverdueWorker(): void {
         const leaseMs = this.busyLeaseMs;
@@ -591,13 +595,13 @@ export class MuPDFWorkerClient {
         let reapedOp = "startup";
         let oldestPendingId: number | null = null;
         let oldestPending: PendingEntry | null = null;
+        // pending iterates in dispatch order (monotonic ids), so the first
+        // entry matching the oldest start time is the oldest posted operation.
         for (const [id, entry] of this.pending) {
-            if (
-                entry.startedAt === oldestStartedAt
-                && (!oldestPending || id < oldestPendingId!)
-            ) {
+            if (entry.startedAt === oldestStartedAt) {
                 oldestPendingId = id;
                 oldestPending = entry;
+                break;
             }
         }
 

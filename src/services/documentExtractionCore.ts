@@ -1311,9 +1311,14 @@ export async function extractAndCacheResolvedPdfDocument(
             };
         }
 
+        // A watchdog lease reap is a definitive failure of this operation and
+        // must not be masked as an external abort even when the external signal
+        // happens to be aborted at the same time; let it fall through to the
+        // timeout branch so leaseReaped is reported.
         if (
             externalAbortSignal?.aborted
             && (error instanceof WorkerAbortError || signal.aborted)
+            && !isWorkerDeadlineError(error)
         ) {
             return {
                 kind: 'external_abort',

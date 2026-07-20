@@ -122,6 +122,8 @@ interface ExtractionLockEntry<T extends CacheablePayload = BeaverExtractResult> 
     waiters: Map<symbol, number | null>;
     settled: boolean;
     sharedTimer: ReturnType<typeof setTimeout> | null;
+    /** Wall-clock time the in-flight lock was created; anchors waiter deadlines. */
+    createdAt: number;
 }
 
 /** Full-document PDF extraction cache backed by SQLite metadata and gzip payload files. */
@@ -515,6 +517,7 @@ export class DocumentCache {
             settled: false,
             promise: Promise.resolve(null),
             sharedTimer: null,
+            createdAt: Date.now(),
         };
         entry.promise = (async () => {
             const refreshed = await readCached(ref);
@@ -607,6 +610,7 @@ export class DocumentCache {
             settled: false,
             promise: Promise.resolve(null),
             sharedTimer: null,
+            createdAt: Date.now(),
         };
         entry.promise = (async () => {
             const refreshed = await readCached(ref);
@@ -688,8 +692,15 @@ export class DocumentCache {
         sharedTimeoutMs?: number,
     ): Promise<T | null> {
         const waiter = Symbol('document-cache-waiter');
+        // The worker op's busy-lease age is measured from the leader's dispatch,
+        // so a waiter's deadline is anchored to the lock's creation, not this
+        // caller's join time. A late joiner anchored to its own join time would
+        // extend the shared deadline past the worker's busy lease, letting the
+        // lease watchdog reap work that is still within budget. Joining never
+        // shortens the armed deadline either, since the timer takes the max over
+        // all attached waiters.
         const deadline = sharedTimeoutMs != null && sharedTimeoutMs > 0
-            ? Date.now() + sharedTimeoutMs
+            ? entry.createdAt + sharedTimeoutMs
             : null;
         entry.waiters.set(waiter, deadline);
         this.updateSharedExtractionTimer(entry);

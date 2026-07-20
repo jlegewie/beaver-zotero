@@ -15,6 +15,7 @@ vi.mock('../../../src/beaver-extract', () => ({
 
 import {
     collectWorkerDiagnostics,
+    createWorkerDispatchFlag,
     withWorkerDiagnostics,
 } from '../../../src/services/agentDataProvider/workerDiagnostics';
 import type { WSWorkerDiagnostics } from '../../../src/services/agentProtocol';
@@ -123,5 +124,25 @@ describe('withWorkerDiagnostics', () => {
         expect(response).toBe(original);
         expect(response.worker_diagnostics).toBeUndefined();
         expect(getExistingMuPDFWorkerClient).not.toHaveBeenCalled();
+    });
+});
+
+describe('createWorkerDispatchFlag', () => {
+    it('starts false', () => {
+        const flag = createWorkerDispatchFlag();
+        expect(flag.value).toBe(false);
+    });
+
+    it('flips to true after mark()', () => {
+        const flag = createWorkerDispatchFlag();
+        flag.mark();
+        expect(flag.value).toBe(true);
+    });
+
+    it('stays true when mark() is called more than once', () => {
+        const flag = createWorkerDispatchFlag();
+        flag.mark();
+        flag.mark();
+        expect(flag.value).toBe(true);
     });
 });

@@ -155,6 +155,47 @@ describe('extractAndCacheDocument timeout handling', () => {
         });
     });
 
+    it('classifies a worker deadline as a lease-reaped timeout even when the external signal is already aborted', async () => {
+        (globalThis as any).IOUtils.stat = vi.fn().mockResolvedValue({ size: 4 });
+        (globalThis as any).IOUtils.read = vi.fn().mockResolvedValue(
+            new Uint8Array([0x25, 0x50, 0x44, 0x46]),
+        );
+        const external = new AbortController();
+        // The worker call aborts the external signal and rejects with the
+        // watchdog deadline in the same tick: the reap must win over the
+        // coincidental external abort.
+        workerClientMocks.getPageCount.mockImplementationOnce(async () => {
+            external.abort();
+            throw new WorkerDeadlineError();
+        });
+
+        const result = await extractAndCacheResolvedPdfDocument({
+            source: {
+                kind: 'external',
+                filePath: '/tmp/deadline-external-race.pdf',
+                itemRef: { id: 0, libraryID: -1, key: 'EXTTEST5' },
+            },
+            resolvedKey: 'external-EXTTEST5',
+            contentType: 'application/pdf',
+            mode: 'structured',
+            maxPages: null,
+            maxFileSizeMB: 10,
+            timeoutSeconds: 40,
+            workerName: 'hot',
+            externalAbortSignal: external.signal,
+        });
+
+        expect(result).toMatchObject({
+            kind: 'timeout',
+            leaseReaped: true,
+            workerDispatched: true,
+            resolvedAttachment: {
+                libraryId: -1,
+                zoteroKey: 'EXTTEST5',
+            },
+        });
+    });
+
     it('preserves worker dispatch metadata when an external deadline aborts a worker call', async () => {
         vi.useFakeTimers();
         const external = new AbortController();

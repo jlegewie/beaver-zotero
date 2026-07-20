@@ -24,7 +24,7 @@ import {
     isWorkerDeadlineError,
 } from '../../beaver-extract';
 import { makeRemoteFilePath } from '../documentFileIdentity';
-import { withWorkerDiagnostics } from './workerDiagnostics';
+import { createWorkerDispatchFlag, withWorkerDiagnostics } from './workerDiagnostics';
 import {
     preflightZoteroAttachmentRequest,
     validateZoteroItemReference,
@@ -91,10 +91,7 @@ export async function handleZoteroAttachmentSearchRequest(
     );
     const { signal, timeoutSeconds, throwIfTimedOut, dispose } = timeout;
 
-    // True once the request has posted work to the PDF worker; gates the
-    // worker snapshot on timeout responses so pre-dispatch failures (item
-    // lookup, file download) are not labeled with unrelated worker activity.
-    let workerDispatched = false;
+    const workerDispatched = createWorkerDispatchFlag();
 
     try {
         const zoteroItem = await Zotero.Items.getByLibraryAndKeyAsync(
@@ -250,7 +247,7 @@ export async function handleZoteroAttachmentSearchRequest(
         // `cachedMeta.page_count > maxPageCount` case before any worker call.
         const extractor = new BeaverExtractor();
         const maxPageCount = effectiveMaxPageCount();
-        workerDispatched = true;
+        workerDispatched.mark();
         const searchResult = await extractor.search(
             pdfData,
             query,
@@ -315,7 +312,7 @@ export async function handleZoteroAttachmentSearchRequest(
                     'timeout',
                     totalPages,
                 ),
-                { workerDispatched, leaseReaped: isWorkerDeadlineError(error) },
+                { workerDispatched: workerDispatched.value, leaseReaped: isWorkerDeadlineError(error) },
             );
         }
 

@@ -23,7 +23,7 @@ import {
     isWorkerDeadlineError,
 } from '../../beaver-extract';
 import { makeRemoteFilePath } from '../documentFileIdentity';
-import { withWorkerDiagnostics } from './workerDiagnostics';
+import { createWorkerDispatchFlag, withWorkerDiagnostics } from './workerDiagnostics';
 import {
     preflightZoteroAttachmentRequest,
     resolveToPdfAttachment,
@@ -96,10 +96,7 @@ export async function handleZoteroAttachmentPageImagesRequest(
     );
     const { signal, timeoutSeconds, throwIfTimedOut, dispose } = timeout;
 
-    // True once the request has posted work to the PDF worker; gates the
-    // worker snapshot on timeout responses so pre-dispatch failures (item
-    // lookup, file download) are not labeled with unrelated worker activity.
-    let workerDispatched = false;
+    const workerDispatched = createWorkerDispatchFlag();
 
     try {
         const zoteroItem = await Zotero.Items.getByLibraryAndKeyAsync(
@@ -215,7 +212,7 @@ export async function handleZoteroAttachmentPageImagesRequest(
                 cachedMeta,
                 extractor,
                 signal,
-                () => { workerDispatched = true; },
+                workerDispatched.mark,
             );
             throwIfTimedOut('page_label_resolution');
             pageLabels = labelResult.labels;
@@ -263,7 +260,7 @@ export async function handleZoteroAttachmentPageImagesRequest(
                     }
                 }
             }
-            workerDispatched = true;
+            workerDispatched.mark();
             totalPages = await extractor.getPageCount(pdfData, signal);
             throwIfTimedOut('page_count_extraction');
         }
@@ -370,7 +367,7 @@ export async function handleZoteroAttachmentPageImagesRequest(
             + `pageIndices=${JSON.stringify(pageIndicesArg ?? null)} (allPages=${requestingAllPages})`,
             3,
         );
-        workerDispatched = true;
+        workerDispatched.mark();
         const renderResult = await extractor.renderPages(pdfData, {
             pageIndices: pageIndicesArg,
             options: renderOptions,
@@ -424,7 +421,7 @@ export async function handleZoteroAttachmentPageImagesRequest(
                     'timeout',
                     resolvedCachedPageCount,
                 ),
-                { workerDispatched, leaseReaped: isWorkerDeadlineError(error) },
+                { workerDispatched: workerDispatched.value, leaseReaped: isWorkerDeadlineError(error) },
             );
         }
 

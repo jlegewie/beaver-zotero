@@ -67,3 +67,21 @@ export function withWorkerDiagnostics<
     const diagnostics = collectWorkerDiagnostics('hot', opts.leaseReaped);
     return diagnostics ? { ...response, worker_diagnostics: diagnostics } : response;
 }
+
+/**
+ * Tracks whether a request has posted work to the PDF worker. Handlers create
+ * one per request, call `mark()` immediately before each worker dispatch, and
+ * pass `.value` into `withWorkerDiagnostics` so a timeout during item lookup
+ * or file download is not labeled with unrelated worker activity.
+ */
+export function createWorkerDispatchFlag(): { mark: () => void; readonly value: boolean } {
+    let dispatched = false;
+    return {
+        mark: () => {
+            dispatched = true;
+        },
+        get value() {
+            return dispatched;
+        },
+    };
+}
