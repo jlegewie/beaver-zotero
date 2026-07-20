@@ -71,7 +71,10 @@ vi.mock('../../../src/beaver-extract', () => {
         BeaverExtractor: MockPDFExtractor,
         ExtractionError: MockExtractionError,
         WorkerAbortError: MockWorkerAbortError,
-        isWorkerDeadlineError: () => false,
+        // Mirrors the real name-based fallback in isWorkerDeadlineError so
+        // tests can simulate a busy-lease reap with a plain tagged Error.
+        isWorkerDeadlineError: (error: unknown) =>
+            (error as { name?: unknown } | null | undefined)?.name === 'WorkerDeadlineError',
         getExistingMuPDFWorkerClient: () => ({
             getStats: () => ({
                 hasWorker: true,
@@ -263,6 +266,41 @@ describe('handleZoteroAttachmentPageImagesRequest page labels', () => {
                 in_flight: 1,
             },
         });
+    });
+
+    it('attaches lease_reaped worker diagnostics when the eager label load hits a busy-lease deadline', async () => {
+        // A WorkerDeadlineError from the eager label-metadata load must
+        // propagate to the handler's timeout classification (rather than
+        // being swallowed into a null-labels fallback) so the lease reap is
+        // visible in worker_diagnostics.
+        setupRequestScenario({ cachedPageCount: null, cachedPageLabels: null });
+        const deadlineError = Object.assign(new Error('worker busy-age lease exceeded'), {
+            name: 'WorkerDeadlineError',
+        });
+        mockState.metadataImpl = async () => {
+            throw deadlineError;
+        };
+
+        const response = await handleZoteroAttachmentPageImagesRequest({
+            event: 'zotero_attachment_page_images_request',
+            request_id: 'req-label-deadline',
+            attachment: { library_id: 1, zotero_key: 'ABCD1234' },
+            pages: [1],
+            skip_local_limits: true,
+            prefer_page_labels: true,
+        });
+
+        expect(response).toMatchObject({
+            error_code: 'timeout',
+            worker_diagnostics: {
+                slot: 'hot',
+                lease_reaped: true,
+                has_worker: true,
+                in_flight: 1,
+            },
+        });
+        // The render call never happens — the eager load's rethrow short-circuits it.
+        expect(mockState.renderCalls).toHaveLength(0);
     });
 
     it('does NOT write metadata after a successful render even when a prior writer confirmed text-layer status', async () => {

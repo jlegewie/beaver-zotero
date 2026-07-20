@@ -14,6 +14,7 @@ import {
     ensurePageLabelsForResolution,
 } from '../../../src/services/agentDataProvider/pageLabelResolution';
 import type { DocumentCacheMetadata } from '../../../src/services/documentCache';
+import { WorkerDeadlineError } from '../../../src/beaver-extract';
 
 // Mock the logger to keep test output clean
 vi.mock('../../../src/utils/logger', () => ({
@@ -376,6 +377,30 @@ describe('ensurePageLabelsForResolution', () => {
     it('returns null labels gracefully when extractor fails', async () => {
         mockIOUtils.read.mockResolvedValueOnce(new Uint8Array([1]));
         const extractor = makeMockExtractor(new Error('malformed PDF'));
+
+        const result = await ensurePageLabelsForResolution('/data/test.pdf', null, extractor);
+
+        expect(result.labels).toBeNull();
+        expect(result.pageCount).toBeNull();
+        expect(result.pdfData).toBeNull();
+    });
+
+    it('rethrows worker deadline errors from the eager load', async () => {
+        mockIOUtils.read.mockResolvedValueOnce(new Uint8Array([1]));
+        const deadlineError = new WorkerDeadlineError('worker busy-age lease exceeded');
+        const extractor = makeMockExtractor(deadlineError);
+
+        await expect(
+            ensurePageLabelsForResolution('/data/test.pdf', null, extractor),
+        ).rejects.toBe(deadlineError);
+    });
+
+    it('still swallows a stale-worker error to the null fallback', async () => {
+        mockIOUtils.read.mockResolvedValueOnce(new Uint8Array([1]));
+        const staleError = Object.assign(new Error('stale worker: configured worker changed'), {
+            name: 'StaleWorkerError',
+        });
+        const extractor = makeMockExtractor(staleError);
 
         const result = await ensurePageLabelsForResolution('/data/test.pdf', null, extractor);
 

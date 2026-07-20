@@ -8,7 +8,7 @@
  *
  */
 
-import { BeaverExtractor } from '../../beaver-extract';
+import { BeaverExtractor, isWorkerDeadlineError } from '../../beaver-extract';
 import type { DocumentCacheMetadata, PageLabels } from '../documentCache';
 import { logger } from '../../utils/logger';
 
@@ -159,7 +159,9 @@ export interface PageLabelLoadResult {
  *      "already checked, no custom labels")
  *   2. Eager metadata-only load via `BeaverExtractor.getMetadata` —
  *      opens the PDF once, reads the catalog, closes. No text extraction.
- *   3. Returns `labels: null` on failure; caller falls back to numeric resolution.
+ *   3. Returns `labels: null` on failure; caller falls back to numeric
+ *      resolution. Exception: a worker busy-lease deadline error is rethrown
+ *      so the caller can classify it as a timeout instead.
  *
  * Empty label maps are normalised to `null` so the resolver can treat
  * "no labels" as a single case.
@@ -192,6 +194,10 @@ export async function ensurePageLabelsForResolution(
         const normalised = Object.keys(pageLabels).length > 0 ? pageLabels : null;
         return { labels: normalised, pageCount, pdfData };
     } catch (error) {
+        // A busy-lease reap must reach the caller's timeout classification
+        // (and the worker diagnostics attached there) rather than being
+        // hidden behind the best-effort null fallback below.
+        if (isWorkerDeadlineError(error)) throw error;
         logger(`ensurePageLabelsForResolution: eager load failed for ${filePath}: ${error}`, 1);
         return { labels: null, pageCount: null, pdfData: null };
     }
