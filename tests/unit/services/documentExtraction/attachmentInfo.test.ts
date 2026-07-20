@@ -545,4 +545,96 @@ describe('getAttachmentInfo PDF analysis retry', () => {
         });
         expect(mockGetMetadata).toHaveBeenCalledTimes(1);
     });
+
+    it('passes an abort signal to both worker analysis calls', async () => {
+        mockGetMetadata.mockResolvedValue({ pageCount: 5, pageLabels: {}, pages: null });
+        mockAnalyzeOCRNeeds.mockResolvedValue({ needsOCR: false });
+
+        await getAttachmentInfo(makeAttachment());
+
+        expect(mockGetMetadata).toHaveBeenCalledWith(
+            expect.any(Uint8Array),
+            expect.any(AbortSignal),
+        );
+        expect(mockAnalyzeOCRNeeds).toHaveBeenCalledWith(
+            expect.any(Uint8Array),
+            expect.anything(),
+            expect.any(AbortSignal),
+        );
+    });
+
+    it('gives each worker call its own deadline rather than one shared budget', async () => {
+        // The busy-age lease the deadline protects is measured per operation, so
+        // a document whose metadata and OCR probes are each individually within
+        // budget must analyze successfully.
+        const signals: (AbortSignal | undefined)[] = [];
+        mockGetMetadata.mockImplementation(async (_data: unknown, signal?: AbortSignal) => {
+            signals.push(signal);
+            return { pageCount: 5, pageLabels: {}, pages: null };
+        });
+        mockAnalyzeOCRNeeds.mockImplementation(
+            async (_data: unknown, _opts: unknown, signal?: AbortSignal) => {
+                signals.push(signal);
+                return { needsOCR: false };
+            },
+        );
+
+        const info = await getAttachmentInfo(makeAttachment());
+
+        expect(info).toMatchObject({ content_kind: 'pdf', status: 'readable' });
+        expect(signals).toHaveLength(2);
+        expect(signals[0]).toBeInstanceOf(AbortSignal);
+        expect(signals[1]).toBeInstanceOf(AbortSignal);
+        expect(signals[0]).not.toBe(signals[1]);
+    });
+
+    it('maps a worker abort (internal deadline) to pdf_analysis_error without retrying', async () => {
+        // Simulate the internal deadline firing mid-op: the worker rejects with
+        // a non-retriable WorkerAbortError.
+        const abortError = Object.assign(new Error('worker operation aborted by caller'), {
+            name: 'WorkerAbortError',
+        });
+        mockGetMetadata.mockRejectedValue(abortError);
+
+        const info = await getAttachmentInfo(makeAttachment());
+
+        expect(info).toMatchObject({
+            content_kind: 'pdf',
+            status: 'unreadable',
+            status_code: 'pdf_analysis_error',
+        });
+        expect(mockGetMetadata).toHaveBeenCalledTimes(1);
+    });
+
+    it('threads a caller-provided signal into the analysis signal', async () => {
+        const callerController = new AbortController();
+        let observedAborted = false;
+        mockGetMetadata.mockImplementation(async (_data: unknown, signal?: AbortSignal) => {
+            // Abort via the caller while the worker call is in flight; the
+            // effective analysis signal must reflect it synchronously.
+            callerController.abort();
+            observedAborted = !!signal?.aborted;
+            return { pageCount: 5, pageLabels: {}, pages: null };
+        });
+        mockAnalyzeOCRNeeds.mockResolvedValue({ needsOCR: false });
+
+        await getAttachmentInfo(makeAttachment(), { signal: callerController.signal });
+
+        expect(observedAborted).toBe(true);
+    });
+
+    it('propagates an already-aborted caller signal to the analysis calls', async () => {
+        const callerController = new AbortController();
+        callerController.abort();
+        let capturedSignal: AbortSignal | undefined;
+        mockGetMetadata.mockImplementation(async (_data: unknown, signal?: AbortSignal) => {
+            capturedSignal = signal;
+            return { pageCount: 5, pageLabels: {}, pages: null };
+        });
+        mockAnalyzeOCRNeeds.mockResolvedValue({ needsOCR: false });
+
+        await getAttachmentInfo(makeAttachment(), { signal: callerController.signal });
+
+        expect(capturedSignal?.aborted).toBe(true);
+    });
 });

@@ -47,6 +47,20 @@ import type { ParagraphDetectionSettings } from "./ParagraphDetector";
 
 const DEFAULT_IDLE_TIMEOUT_MS_HOT = 5 * 60 * 1000;
 const DEFAULT_IDLE_TIMEOUT_MS_BACKGROUND = 60 * 1000;
+// Last-resort backstops: a lease must stay a few seconds ABOVE the longest
+// deadline after which callers legitimately reclaim a slot operation
+// themselves (per-request timeouts — including backend-provided
+// timeout_seconds — plus any shared-extraction grace), so the lease only
+// fires when those reclaim paths failed. A lease at or below such a deadline
+// would reap in-budget work instead. Interactive hot-slot request timeouts
+// are clamped to MAX_INTERACTIVE_PDF_TIMEOUT_SECONDS (agentDataProvider
+// timeout module) to keep the hot invariant enforced; raise the lease
+// alongside any increase to those budgets (hot:
+// MAX_INTERACTIVE_PDF_TIMEOUT_SECONDS plus the shared-extraction grace;
+// background: MAX_PDF_TIMEOUT_SECONDS).
+export const DEFAULT_BUSY_LEASE_MS_HOT = 65_000;
+export const DEFAULT_BUSY_LEASE_MS_BACKGROUND = 240_000;
+const BUSY_LEASE_WATCHDOG_SLACK_MS = 1_000;
 const DEFAULT_RECYCLE_HEAP_BYTES = 512 * 1024 * 1024;
 const DEFAULT_RECYCLE_AFTER_DATA_OPERATIONS_HOT = 32;
 const PROACTIVE_RECYCLE_FOLLOWUP_DATA_OPERATIONS = 1;
@@ -57,6 +71,12 @@ function defaultIdleTimeoutForSlot(name: PDFWorkerSlotName): number {
     return name === "background"
         ? DEFAULT_IDLE_TIMEOUT_MS_BACKGROUND
         : DEFAULT_IDLE_TIMEOUT_MS_HOT;
+}
+
+function defaultBusyLeaseForSlot(name: PDFWorkerSlotName): number {
+    return name === "background"
+        ? DEFAULT_BUSY_LEASE_MS_BACKGROUND
+        : DEFAULT_BUSY_LEASE_MS_HOT;
 }
 
 function defaultRecycleHeapBytesForSlot(
@@ -118,6 +138,43 @@ export function __resetIdleTimeoutForTest(
     const existing = slot?.get() as MuPDFWorkerClient | undefined;
     if (existing) {
         existing.setIdleTimeoutForTest(defaultIdleTimeoutForSlot(name));
+    }
+}
+
+/**
+ * Test-time busy-lease overrides keyed by slot name. New `MuPDFWorkerClient`
+ * instances pick these up at construction, mirroring the idle-timeout hook.
+ */
+const testBusyLeaseOverrides: Partial<Record<PDFWorkerSlotName, number>> = {};
+
+/**
+ * Test-only override of the busy-age lease. Production leases sit ABOVE every
+ * caller-side reclaim deadline (see `DEFAULT_BUSY_LEASE_MS_HOT`), so the reap
+ * path is otherwise unreachable in a live process without wedging a worker for
+ * over a minute. Shortening the lease lets a test drive a real reap against a
+ * genuinely long operation.
+ */
+export function __setBusyLeaseForTest(
+    name: PDFWorkerSlotName,
+    ms: number,
+): void {
+    testBusyLeaseOverrides[name] = ms;
+    const slot = isConfigured() ? getConfig().workerClientSlots[name] : null;
+    const existing = slot?.get() as MuPDFWorkerClient | undefined;
+    if (existing) {
+        existing.setBusyLeaseForTest(ms);
+    }
+}
+
+/** Test-only: restore the production busy lease for a slot (default hot). */
+export function __resetBusyLeaseForTest(
+    name: PDFWorkerSlotName = "hot",
+): void {
+    delete testBusyLeaseOverrides[name];
+    const slot = isConfigured() ? getConfig().workerClientSlots[name] : null;
+    const existing = slot?.get() as MuPDFWorkerClient | undefined;
+    if (existing) {
+        existing.setBusyLeaseForTest(defaultBusyLeaseForSlot(name));
     }
 }
 
@@ -238,6 +295,10 @@ export interface MuPDFWorkerStats {
     lastProactiveRecycleTime: number | null;
     lastProactiveRecycleHeapBytes: number | null;
     lastProactiveRecycleDataOperations: number | null;
+    leaseReapCount: number;
+    lastLeaseReapTime: number | null;
+    lastLeaseReapOp: string | null;
+    lastLeaseReapAgeMs: number | null;
 }
 
 /**
@@ -273,9 +334,29 @@ export class WorkerAbortError extends Error {
     }
 }
 
+/**
+ * Sentinel rejection for worker-level policy expiration. Unlike
+ * `WorkerAbortError`, this is not caller-initiated cancellation, and unlike
+ * `StaleWorkerError`, the operation whose lease expired must not be retried.
+ */
+export class WorkerDeadlineError extends Error {
+    constructor(message = "worker busy-age lease exceeded") {
+        super(message);
+        this.name = "WorkerDeadlineError";
+    }
+}
+
+/** Cross-bundle-safe classification for worker-level deadline expiration. */
+export function isWorkerDeadlineError(error: unknown): boolean {
+    return error instanceof WorkerDeadlineError
+        || (error as { name?: unknown } | null | undefined)?.name
+            === "WorkerDeadlineError";
+}
+
 export class MuPDFWorkerClient {
     private readonly slotName: PDFWorkerSlotName;
     private idleTimeoutMs: number;
+    private busyLeaseMs: number | null;
     private readonly recycleHeapThresholdBytes: number | null;
     private readonly recycleDataOperationThreshold: number | null;
     private worker: Worker | null = null;
@@ -315,6 +396,7 @@ export class MuPDFWorkerClient {
     private fatalOperationEntries: Array<{ key: string; prefix: string }> = [];
     private fatalOperationPrefixCounts = new Map<string, number>();
     private idleTimerId: ReturnType<typeof setTimeout> | undefined;
+    private busyLeaseWatchdogTimerId: ReturnType<typeof setTimeout> | undefined;
     private proactiveRecycleTimerId: ReturnType<typeof setTimeout> | undefined;
     private proactiveRecycleReason: ProactiveRecycleReason | null = null;
     private proactiveRecycleFollowupDataOperationsRemaining = 0;
@@ -328,6 +410,10 @@ export class MuPDFWorkerClient {
     private lastProactiveRecycleTime: number | null = null;
     private lastProactiveRecycleHeapBytes: number | null = null;
     private lastProactiveRecycleDataOperations: number | null = null;
+    private leaseReapCount = 0;
+    private lastLeaseReapTime: number | null = null;
+    private lastLeaseReapOp: string | null = null;
+    private lastLeaseReapAgeMs: number | null = null;
     // Populated only after a fatal reply so healthy dispatch never walks a
     // whole PDF on the UI thread before posting work to the worker.
     private pdfDigestCache = new WeakMap<object, Map<string, string>>();
@@ -336,6 +422,7 @@ export class MuPDFWorkerClient {
         opts: {
             slotName?: PDFWorkerSlotName;
             idleTimeoutMs?: number;
+            busyLeaseMs?: number | null;
             recycleHeapBytes?: number | null;
             recycleAfterDataOperations?: number | null;
         } = {},
@@ -346,6 +433,12 @@ export class MuPDFWorkerClient {
             opts.idleTimeoutMs
             ?? override
             ?? defaultIdleTimeoutForSlot(this.slotName);
+        const leaseOverride = testBusyLeaseOverrides[this.slotName];
+        this.busyLeaseMs = normalizePositiveThreshold(
+            opts.busyLeaseMs === undefined
+                ? (leaseOverride ?? defaultBusyLeaseForSlot(this.slotName))
+                : opts.busyLeaseMs,
+        );
         this.recycleHeapThresholdBytes = normalizePositiveThreshold(
             opts.recycleHeapBytes === undefined
                 ? defaultRecycleHeapBytesForSlot(this.slotName)
@@ -400,6 +493,7 @@ export class MuPDFWorkerClient {
         this.oldestStartupWaitStartedAt = this.oldestStartupWaitStartedAt === null
             ? startedAt
             : Math.min(this.oldestStartupWaitStartedAt, startedAt);
+        this.syncBusyLeaseWatchdog();
         return id;
     }
 
@@ -418,6 +512,7 @@ export class MuPDFWorkerClient {
             }
             this.oldestStartupWaitStartedAt = oldest;
         }
+        this.syncBusyLeaseWatchdog();
         return removedStartedAt;
     }
 
@@ -431,6 +526,7 @@ export class MuPDFWorkerClient {
         this.oldestPendingStartedAt = this.oldestPendingStartedAt === null
             ? startedAt
             : Math.min(this.oldestPendingStartedAt, startedAt);
+        this.syncBusyLeaseWatchdog();
     }
 
     /** Remove an operation and refresh age tracking outside the stats hot path. */
@@ -447,6 +543,7 @@ export class MuPDFWorkerClient {
             }
             this.oldestPendingStartedAt = oldest;
         }
+        this.syncBusyLeaseWatchdog();
         return true;
     }
 
@@ -458,9 +555,126 @@ export class MuPDFWorkerClient {
         return entries;
     }
 
+    private clearBusyLeaseWatchdog(): void {
+        if (this.busyLeaseWatchdogTimerId === undefined) return;
+        clearTimeout(this.busyLeaseWatchdogTimerId);
+        this.busyLeaseWatchdogTimerId = undefined;
+    }
+
+    /** Keep one worker-level watchdog aligned with the oldest accepted work. */
+    private syncBusyLeaseWatchdog(): void {
+        this.clearBusyLeaseWatchdog();
+        const leaseMs = this.busyLeaseMs;
+        const worker = this.worker;
+        const oldestStartedAt = this.oldestInFlightStartedAt;
+        if (
+            this.disposed
+            || leaseMs === null
+            || !worker
+            || this.inFlight === 0
+            || oldestStartedAt === 0
+        ) {
+            return;
+        }
+
+        const delayMs = Math.max(
+            0,
+            oldestStartedAt + leaseMs + BUSY_LEASE_WATCHDOG_SLACK_MS - Date.now(),
+        );
+        const id = setTimeout(() => {
+            this.busyLeaseWatchdogTimerId = undefined;
+            if (
+                this.disposed
+                || this.worker !== worker
+                || this.inFlight === 0
+                || this.busyLeaseMs === null
+            ) {
+                return;
+            }
+            const ageMs = Date.now() - this.oldestInFlightStartedAt;
+            if (ageMs >= this.busyLeaseMs) {
+                this.reapOverdueWorker();
+            } else {
+                this.syncBusyLeaseWatchdog();
+            }
+        }, delayMs);
+        (id as any)?.unref?.();
+        this.busyLeaseWatchdogTimerId = id;
+    }
+
+    /**
+     * Reap a continuously busy worker whose oldest accepted operation has
+     * exhausted the slot lease. When the oldest in-flight item is a posted
+     * operation, it receives a non-retriable deadline error while innocent
+     * siblings retry through the normal stale-worker path. When the oldest
+     * item is a startup waiter (the worker is wedged in the configure
+     * handshake), no posted operation caused it, so no deadline error is
+     * issued: markStale rejects the startup waiters with a retriable stale
+     * error instead. Either way the reap counters record the event.
+     */
+    private reapOverdueWorker(): void {
+        const leaseMs = this.busyLeaseMs;
+        const oldestStartedAt = this.oldestInFlightStartedAt;
+        if (
+            leaseMs === null
+            || !this.worker
+            || this.inFlight === 0
+            || oldestStartedAt === 0
+        ) {
+            return;
+        }
+
+        const ageMs = Date.now() - oldestStartedAt;
+        if (ageMs < leaseMs) {
+            this.syncBusyLeaseWatchdog();
+            return;
+        }
+
+        let reapedOp = "startup";
+        let oldestPendingId: number | null = null;
+        let oldestPending: PendingEntry | null = null;
+        // pending iterates in dispatch order (monotonic ids), so the first
+        // entry matching the oldest start time is the oldest posted operation.
+        for (const [id, entry] of this.pending) {
+            if (entry.startedAt === oldestStartedAt) {
+                oldestPendingId = id;
+                oldestPending = entry;
+                break;
+            }
+        }
+
+        if (oldestPendingId !== null && oldestPending) {
+            reapedOp = oldestPending.op;
+            this.deletePending(oldestPendingId);
+            oldestPending.reject(
+                new WorkerDeadlineError(
+                    `worker busy-age lease exceeded (op=${reapedOp}, age=${ageMs}ms)`,
+                ),
+            );
+        }
+
+        this.leaseReapCount += 1;
+        this.lastLeaseReapTime = Date.now();
+        this.lastLeaseReapOp = reapedOp;
+        this.lastLeaseReapAgeMs = ageMs;
+        this.markStale(
+            `busy-age lease exceeded (op=${reapedOp}, age=${ageMs}ms)`,
+        );
+    }
+
     /** Test-only: change the idle timeout on a live instance. */
     setIdleTimeoutForTest(ms: number): void {
         this.idleTimeoutMs = ms;
+    }
+
+    /**
+     * Test-only: change the busy-age lease on a live instance. Re-arms the
+     * watchdog so a lease shortened while work is already in flight still
+     * reaps against the currently oldest operation.
+     */
+    setBusyLeaseForTest(ms: number | null): void {
+        this.busyLeaseMs = normalizePositiveThreshold(ms);
+        this.syncBusyLeaseWatchdog();
     }
 
     private clearIdleTimer(): void {
@@ -571,10 +785,15 @@ export class MuPDFWorkerClient {
         if (
             this.pending.size !== 0
             || this.startupWaiters.size !== 0
-            || this.proactiveRecycleTimerId !== undefined
         ) {
             return;
         }
+        if (this.proactiveRecycleBarrierPromise) {
+            this.clearProactiveRecycleTimer();
+            this.performProactiveRecycle(worker);
+            return;
+        }
+        if (this.proactiveRecycleTimerId !== undefined) return;
 
         const id = setTimeout(() => {
             this.proactiveRecycleTimerId = undefined;
@@ -944,6 +1163,7 @@ export class MuPDFWorkerClient {
         opts?: { startError?: boolean; proactive?: boolean },
     ): void {
         this.clearIdleTimer();
+        this.clearBusyLeaseWatchdog();
         this.clearProactiveRecycleTimer();
         const w = this.worker;
         this.worker = null;
@@ -1036,6 +1256,7 @@ export class MuPDFWorkerClient {
         args: Record<string, unknown>,
         signal?: AbortSignal,
     ): Promise<T> {
+        this.reapOverdueWorker();
         if (signal?.aborted) {
             return Promise.reject(new WorkerAbortError());
         }
@@ -1585,6 +1806,10 @@ export class MuPDFWorkerClient {
             lastProactiveRecycleHeapBytes: this.lastProactiveRecycleHeapBytes,
             lastProactiveRecycleDataOperations:
                 this.lastProactiveRecycleDataOperations,
+            leaseReapCount: this.leaseReapCount,
+            lastLeaseReapTime: this.lastLeaseReapTime,
+            lastLeaseReapOp: this.lastLeaseReapOp,
+            lastLeaseReapAgeMs: this.lastLeaseReapAgeMs,
         };
     }
 
@@ -1601,6 +1826,10 @@ export class MuPDFWorkerClient {
         this.lastProactiveRecycleTime = null;
         this.lastProactiveRecycleHeapBytes = null;
         this.lastProactiveRecycleDataOperations = null;
+        this.leaseReapCount = 0;
+        this.lastLeaseReapTime = null;
+        this.lastLeaseReapOp = null;
+        this.lastLeaseReapAgeMs = null;
     }
 
     /**

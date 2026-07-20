@@ -648,6 +648,39 @@ export type ZoteroDocumentErrorCode =
     | 'schema_version_mismatch'
     | 'mode_mismatch';
 
+/**
+ * Compact health snapshot of the local PDF worker slot, attached to timeout
+ * error responses so backend traces can distinguish a wedged worker (lease
+ * reap, respawn churn) from a merely slow operation. Only attached when the
+ * timed-out request actually posted work to the worker slot — never for
+ * pre-dispatch failures or non-PDF paths, whose timeouts are unrelated to
+ * worker state. Counters are cumulative for the current Zotero session.
+ */
+export interface WSWorkerDiagnostics {
+    /** Worker slot that served the request. */
+    slot: string;
+    /** True when this failure was the busy-lease watchdog reaping the operation. */
+    lease_reaped: boolean;
+    /** Lease reaps this session. */
+    lease_reap_count: number;
+    /** Op name of the most recent lease reap. */
+    last_lease_reap_op?: string | null;
+    /** Busy age (ms) of the most recent lease reap. */
+    last_lease_reap_age_ms?: number | null;
+    /** Worker spawns this session (respawn-churn signal). */
+    spawn_count: number;
+    /** Stale-worker retries this session. */
+    retry_count: number;
+    /** Consecutive worker start failures. */
+    consecutive_start_failures: number;
+    /** Whether a live worker exists right now. */
+    has_worker: boolean;
+    /** Accepted operations currently in flight on the slot. */
+    in_flight: number;
+    /** Age (ms) of the oldest in-flight operation; null when idle. */
+    oldest_in_flight_age_ms?: number | null;
+}
+
 /** Response to whole-document extraction request */
 export interface WSZoteroDocumentResponse {
     type: 'zotero_document';
@@ -672,6 +705,8 @@ export interface WSZoteroDocumentResponse {
     total_pages?: number | null;
     error?: string | null;
     error_code?: ZoteroDocumentErrorCode | null;
+    /** Worker health snapshot, attached to timeout error responses. */
+    worker_diagnostics?: WSWorkerDiagnostics | null;
 }
 
 /** Error codes for attachment page image rendering failures */
@@ -710,6 +745,8 @@ export interface WSZoteroAttachmentPageImagesResponse {
     error?: string | null;
     /** Error code for programmatic handling */
     error_code?: AttachmentPageImagesErrorCode | null;
+    /** Worker health snapshot, attached to timeout error responses. */
+    worker_diagnostics?: WSWorkerDiagnostics | null;
 }
 
 /** Error codes for attachment image failures */
@@ -821,6 +858,8 @@ export interface WSZoteroViewImagesResponse {
     error?: string | null;
     /** Error code for programmatic handling */
     error_code?: ViewImagesErrorCode | null;
+    /** Worker health snapshot, attached to timeout error responses. */
+    worker_diagnostics?: WSWorkerDiagnostics | null;
 }
 
 /** Error codes for attachment search failures */
@@ -904,6 +943,8 @@ export interface WSZoteroAttachmentSearchResponse {
     error?: string | null;
     /** Error code for programmatic handling */
     error_code?: AttachmentSearchErrorCode | null;
+    /** Worker health snapshot, attached to timeout error responses. */
+    worker_diagnostics?: WSWorkerDiagnostics | null;
 }
 
 // =============================================================================

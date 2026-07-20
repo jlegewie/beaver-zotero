@@ -198,6 +198,41 @@ describe('externalFiles', () => {
             await new Promise((resolve) => setTimeout(resolve, 0));
             expect(db.setExternalFilePageCount).not.toHaveBeenCalled();
         });
+
+        it('passes an abort signal to the page-count worker call', async () => {
+            setupGlobals();
+            await attachExternalFile('/home/user/paper.pdf');
+            await new Promise((resolve) => setTimeout(resolve, 0));
+            expect(getPageCountMock).toHaveBeenCalledWith(
+                expect.any(Uint8Array),
+                expect.any(AbortSignal),
+            );
+        });
+
+        it('passes an abort signal to the OCR compatibility worker call', async () => {
+            setupGlobals();
+            await attachExternalFile('/home/user/scanned.pdf', {
+                supportsVision: false,
+                canHandleOCRLocally: false,
+            });
+            expect(analyzeOCRNeedsMock).toHaveBeenCalledWith(
+                expect.any(Uint8Array),
+                undefined,
+                expect.any(AbortSignal),
+            );
+        });
+
+        it('attaches (fails open) when the OCR compatibility check throws', async () => {
+            // A worker abort/timeout rejects the OCR probe; the blanket catch
+            // keeps the attach flowing rather than blocking it.
+            setupGlobals();
+            analyzeOCRNeedsMock.mockRejectedValueOnce(new Error('worker aborted'));
+            const result = await attachExternalFile('/home/user/scanned.pdf', {
+                supportsVision: false,
+                canHandleOCRLocally: false,
+            });
+            expect(result.status).toBe('attached');
+        });
     });
 
     describe('deduplication by content hash', () => {

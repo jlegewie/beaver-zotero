@@ -763,6 +763,10 @@ export interface WorkerStatsSnapshot {
     lastProactiveRecycleTime: number | null;
     lastProactiveRecycleHeapBytes: number | null;
     lastProactiveRecycleDataOperations: number | null;
+    leaseReapCount: number;
+    lastLeaseReapTime: number | null;
+    lastLeaseReapOp: string | null;
+    lastLeaseReapAgeMs: number | null;
 }
 
 export interface WorkerStatsResponse {

@@ -13,6 +13,7 @@
  */
 
 import { logger } from '../utils/logger';
+import { createAbortController } from '../utils/abortController';
 import { effectiveMaxFileSizeMB } from './attachmentLimits';
 import {
     isExternalFileContentKind,
@@ -20,6 +21,18 @@ import {
     type ExternalFileRecord,
 } from './database';
 import { getMuPDFWorkerClient } from '../beaver-extract/MuPDFWorkerClient';
+import { MAX_INTERACTIVE_PDF_TIMEOUT_SECONDS } from './agentDataProvider/timeout';
+
+/**
+ * Internal deadline for the external-file PDF worker probes (page count and OCR
+ * needs). Each probe runs on the shared hot MuPDF worker, so it must never age
+ * a worker op past that worker's busy-age lease. The deadline equals the
+ * interactive hot-slot ceiling (MAX_INTERACTIVE_PDF_TIMEOUT_SECONDS), which is
+ * kept at or below that lease; on expiry the worker call aborts and each
+ * caller's existing failure handling applies (page count stays null; the OCR
+ * check fails open).
+ */
+const PDF_WORKER_PROBE_DEADLINE_MS = MAX_INTERACTIVE_PDF_TIMEOUT_SECONDS * 1000;
 
 /**
  * Sentinel library id used when external files are keyed into structures that
@@ -160,10 +173,16 @@ async function resolveKindAndMime(
 function schedulePageCount(record: ExternalFileRecord): void {
     (async () => {
         const data = await IOUtils.read(record.storedPath);
-        const count = await getMuPDFWorkerClient().getPageCount(data);
-        if (Number.isFinite(count) && count > 0) {
-            await getDB().setExternalFilePageCount(record.extKey, count);
-            record.pageCount = count;
+        const controller = createAbortController();
+        const timer = setTimeout(() => controller.abort(), PDF_WORKER_PROBE_DEADLINE_MS);
+        try {
+            const count = await getMuPDFWorkerClient().getPageCount(data, controller.signal);
+            if (Number.isFinite(count) && count > 0) {
+                await getDB().setExternalFilePageCount(record.extKey, count);
+                record.pageCount = count;
+            }
+        } finally {
+            clearTimeout(timer);
         }
     })().catch((error) => {
         logger(`externalFiles: page count failed for ${record.extKey} ('${record.filename}'): ${error}`, 2);
@@ -180,9 +199,14 @@ async function checkPdfOcrCompatibility(
     options: AttachExternalFileOptions,
 ): Promise<AttachExternalFileResult | null> {
     if (options.canHandleOCRLocally !== false) return null;
+    // Everything that can fail stays inside the try so this check keeps failing
+    // open: an unreadable file or an expired probe must not block the attach.
+    let timer: ReturnType<typeof setTimeout> | undefined;
     try {
+        const controller = createAbortController();
+        timer = setTimeout(() => controller.abort(), PDF_WORKER_PROBE_DEADLINE_MS);
         const data = await IOUtils.read(sourcePath);
-        const ocr = await getMuPDFWorkerClient().analyzeOCRNeeds(data);
+        const ocr = await getMuPDFWorkerClient().analyzeOCRNeeds(data, undefined, controller.signal);
         if (ocr.needsOCR) {
             return {
                 status: 'rejected',
@@ -192,6 +216,8 @@ async function checkPdfOcrCompatibility(
         }
     } catch (error) {
         logger(`externalFiles: OCR compatibility check failed for '${filename}': ${error}`, 2);
+    } finally {
+        clearTimeout(timer);
     }
     return null;
 }
