@@ -248,6 +248,120 @@ export async function handleTestWorkerCacheClearHttpRequest(request: any) {
 }
 
 /**
+ * Dev-only: drive a real busy-age lease reap ("wedge") and report the outcome.
+ *
+ * Production leases sit above every caller-side reclaim deadline, so the reap
+ * path is unreachable in a live process without wedging a worker for over a
+ * minute. This endpoint shortens the lease for the duration of one probe, runs
+ * a genuinely long operation against a real PDF, and reports how each caller
+ * was settled plus the before/after stats.
+ *
+ * Body: {
+ *   library_id, zotero_key,     // the long-running document
+ *   op,                         // extractSerialized | renderPages | search |
+ *                               // getPageCount | analyzeLayout
+ *   leaseMs,                    // shortened lease (default 4000)
+ *   sibling                     // also dispatch a concurrent op (default true)
+ * }
+ *
+ * The lease is always restored, even when the probe throws.
+ */
+export async function handleTestWorkerWedgeProbeHttpRequest(request: any) {
+    const {
+        getMuPDFWorkerClient,
+        __setBusyLeaseForTest,
+        __resetBusyLeaseForTest,
+    } = await import('../../../src/beaver-extract/MuPDFWorkerClient');
+
+    const { library_id, zotero_key, op, sibling } = request || {};
+    const leaseMs = typeof request?.leaseMs === 'number' ? request.leaseMs : 4000;
+    const opName = typeof op === 'string' ? op : 'extractSerialized';
+    const withSibling = sibling !== false;
+
+    if (library_id == null || zotero_key == null) {
+        return { ok: false, error: 'Provide library_id + zotero_key' };
+    }
+    const item = await Zotero.Items.getByLibraryAndKeyAsync(library_id, zotero_key);
+    if (!item || !item.isAttachment() || !item.isPDFAttachment()) {
+        return { ok: false, error: 'Item is not a PDF attachment' };
+    }
+    const filePath = await item.getFilePathAsync();
+    if (!filePath) return { ok: false, error: 'PDF file not available locally' };
+    const pdfData: Uint8Array = await IOUtils.read(filePath);
+
+    const client = getMuPDFWorkerClient();
+
+    const dispatch = (name: string): Promise<any> => {
+        switch (name) {
+            case 'getPageCount':
+                return client.getPageCount(pdfData);
+            case 'renderPages':
+                return client.renderPages(pdfData, {
+                    pageRange: {
+                        startIndex: 0,
+                        endIndex:
+                            typeof request?.renderEndIndex === 'number'
+                                ? request.renderEndIndex
+                                : 39,
+                    },
+                });
+            case 'search':
+                return client.search(pdfData, 'the');
+            case 'analyzeLayout':
+                return client.analyzeLayout(pdfData);
+            case 'extractSerialized':
+            default:
+                return client.extractSerialized(pdfData);
+        }
+    };
+
+    const settle = async (label: string, p: Promise<any>) => {
+        const t0 = Date.now();
+        try {
+            await p;
+            return { label, status: 'fulfilled', ms: Date.now() - t0 };
+        } catch (e: any) {
+            return {
+                label,
+                status: 'rejected',
+                ms: Date.now() - t0,
+                errorName: e?.name ?? typeof e,
+                errorMessage: String(e?.message ?? e).slice(0, 200),
+            };
+        }
+    };
+
+    const before = client.getStats();
+    let results: any[];
+    try {
+        __setBusyLeaseForTest('hot', leaseMs);
+        const tasks = [settle(opName, dispatch(opName))];
+        if (withSibling) {
+            // Dispatched after the primary so the primary stays the oldest
+            // in-flight entry and is therefore the one the reap targets.
+            tasks.push(settle('sibling:getPageCount', client.getPageCount(pdfData)));
+        }
+        results = await Promise.all(tasks);
+    } finally {
+        __resetBusyLeaseForTest('hot');
+    }
+
+    return {
+        ok: true,
+        leaseMs,
+        op: opName,
+        results,
+        before: {
+            spawnCount: before.spawnCount,
+            retryCount: before.retryCount,
+            leaseReapCount: before.leaseReapCount,
+            pendingCount: before.pendingCount,
+        },
+        after: client.getStats(),
+    };
+}
+
+/**
  * Dev-only: invoke `getAttachmentFileStatus(item, isPrimary)` directly.
  *
  * Manual tests 2.3 (step 3), 5.4, and 7.2 need to trigger the file-status

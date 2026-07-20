@@ -141,6 +141,43 @@ export function __resetIdleTimeoutForTest(
     }
 }
 
+/**
+ * Test-time busy-lease overrides keyed by slot name. New `MuPDFWorkerClient`
+ * instances pick these up at construction, mirroring the idle-timeout hook.
+ */
+const testBusyLeaseOverrides: Partial<Record<PDFWorkerSlotName, number>> = {};
+
+/**
+ * Test-only override of the busy-age lease. Production leases sit ABOVE every
+ * caller-side reclaim deadline (see `DEFAULT_BUSY_LEASE_MS_HOT`), so the reap
+ * path is otherwise unreachable in a live process without wedging a worker for
+ * over a minute. Shortening the lease lets a test drive a real reap against a
+ * genuinely long operation.
+ */
+export function __setBusyLeaseForTest(
+    name: PDFWorkerSlotName,
+    ms: number,
+): void {
+    testBusyLeaseOverrides[name] = ms;
+    const slot = isConfigured() ? getConfig().workerClientSlots[name] : null;
+    const existing = slot?.get() as MuPDFWorkerClient | undefined;
+    if (existing) {
+        existing.setBusyLeaseForTest(ms);
+    }
+}
+
+/** Test-only: restore the production busy lease for a slot (default hot). */
+export function __resetBusyLeaseForTest(
+    name: PDFWorkerSlotName = "hot",
+): void {
+    delete testBusyLeaseOverrides[name];
+    const slot = isConfigured() ? getConfig().workerClientSlots[name] : null;
+    const existing = slot?.get() as MuPDFWorkerClient | undefined;
+    if (existing) {
+        existing.setBusyLeaseForTest(defaultBusyLeaseForSlot(name));
+    }
+}
+
 interface PendingEntry {
     resolve: (value: any) => void;
     reject: (reason: any) => void;
@@ -319,7 +356,7 @@ export function isWorkerDeadlineError(error: unknown): boolean {
 export class MuPDFWorkerClient {
     private readonly slotName: PDFWorkerSlotName;
     private idleTimeoutMs: number;
-    private readonly busyLeaseMs: number | null;
+    private busyLeaseMs: number | null;
     private readonly recycleHeapThresholdBytes: number | null;
     private readonly recycleDataOperationThreshold: number | null;
     private worker: Worker | null = null;
@@ -396,9 +433,10 @@ export class MuPDFWorkerClient {
             opts.idleTimeoutMs
             ?? override
             ?? defaultIdleTimeoutForSlot(this.slotName);
+        const leaseOverride = testBusyLeaseOverrides[this.slotName];
         this.busyLeaseMs = normalizePositiveThreshold(
             opts.busyLeaseMs === undefined
-                ? defaultBusyLeaseForSlot(this.slotName)
+                ? (leaseOverride ?? defaultBusyLeaseForSlot(this.slotName))
                 : opts.busyLeaseMs,
         );
         this.recycleHeapThresholdBytes = normalizePositiveThreshold(
@@ -627,6 +665,16 @@ export class MuPDFWorkerClient {
     /** Test-only: change the idle timeout on a live instance. */
     setIdleTimeoutForTest(ms: number): void {
         this.idleTimeoutMs = ms;
+    }
+
+    /**
+     * Test-only: change the busy-age lease on a live instance. Re-arms the
+     * watchdog so a lease shortened while work is already in flight still
+     * reaps against the currently oldest operation.
+     */
+    setBusyLeaseForTest(ms: number | null): void {
+        this.busyLeaseMs = normalizePositiveThreshold(ms);
+        this.syncBusyLeaseWatchdog();
     }
 
     private clearIdleTimer(): void {
