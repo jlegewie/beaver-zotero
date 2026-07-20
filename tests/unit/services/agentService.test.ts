@@ -44,7 +44,7 @@ vi.mock('../../../react/agents/agentActions', () => ({
     toAgentAction: vi.fn((action) => action),
 }));
 
-import { AgentService } from '../../../src/services/agentService';
+import { AgentConnectionError, AgentService, ConnectTimeoutError } from '../../../src/services/agentService';
 import type { AgentRunRequest, WSCallbacks } from '../../../src/services/agentProtocol';
 
 class MockWebSocket {
@@ -249,6 +249,374 @@ describe('AgentService reconnect handling', () => {
         });
 
         expect(callbacks.onClose).toHaveBeenCalledTimes(1);
-        expect(callbacks.onClose).toHaveBeenCalledWith(1011, 'transport lost', false);
+        expect(callbacks.onClose).toHaveBeenCalledWith(
+            1011,
+            'transport lost',
+            false,
+            expect.objectContaining({
+                stage: 'mid_run',
+                socketOpened: true,
+                readyReceived: true,
+                closeCode: 1011,
+                // The socket opened and received the ready message, so both
+                // timing measurements are available for diagnostics.
+                wsUptimeMs: expect.any(Number),
+                msSinceLastWsMessageMs: expect.any(Number),
+            }),
+        );
+    });
+
+    it('rejects connect() and notifies onClose when the socket closes before ready', async () => {
+        const service = new AgentService('https://api.example.com');
+        const callbacks = createCallbacks();
+        const request = { type: 'pre-ready-close-test' } as AgentRunRequest;
+
+        const initialCount = MockWebSocket.instances.length;
+        const connectPromise = service.connect(request, callbacks);
+        // Attach a handler immediately so the eventual rejection (triggered
+        // further down, once the mock socket exists) is never left unhandled.
+        const connectOutcome = connectPromise.then(
+            () => ({ ok: true as const }),
+            (error: unknown) => ({ ok: false as const, error }),
+        );
+
+        for (let i = 0; i < 20 && MockWebSocket.instances.length === initialCount; i++) {
+            await Promise.resolve();
+        }
+        const socket = MockWebSocket.instances[initialCount];
+        if (!socket) {
+            throw new Error('Expected AgentService.connect() to create a WebSocket');
+        }
+
+        // The transport opens (so auth is sent) but the server rejects the
+        // connection before the "ready" event — e.g. an invalid/expired token.
+        socket.emitOpen();
+        await vi.advanceTimersByTimeAsync(50);
+        socket.emitClose({ code: 1008, reason: 'invalid token', wasClean: false });
+
+        const outcome = await connectOutcome;
+        expect(outcome.ok).toBe(false);
+        if (!outcome.ok) {
+            expect(outcome.error).toBeInstanceOf(Error);
+            expect((outcome.error as Error).message).toContain('invalid token');
+        }
+
+        // The close details reach callers through onClose, not the rejection.
+        expect(callbacks.onClose).toHaveBeenCalledTimes(1);
+        expect(callbacks.onClose).toHaveBeenCalledWith(
+            1008,
+            'invalid token',
+            false,
+            expect.objectContaining({
+                stage: 'awaiting_ready',
+                socketOpened: true,
+                readyReceived: false,
+                closeCode: 1008,
+            }),
+        );
+    });
+
+    it('distinguishes a 1006 opening failure from a socket that opened', async () => {
+        const service = new AgentService('https://api.example.com');
+        const callbacks = createCallbacks();
+        const initialCount = MockWebSocket.instances.length;
+        const outcomePromise = service.connect(
+            { type: 'refused-connection-test' } as AgentRunRequest,
+            callbacks,
+        ).then(
+            () => ({ ok: true as const }),
+            (error: unknown) => ({ ok: false as const, error }),
+        );
+
+        await flushMicrotasks();
+        const socket = MockWebSocket.instances[initialCount];
+        expect(socket).toBeDefined();
+        socket.emitClose({ code: 1006, reason: '', wasClean: false });
+
+        const outcome = await outcomePromise;
+        expect(outcome.ok).toBe(false);
+        if (!outcome.ok) {
+            expect(outcome.error).toBeInstanceOf(AgentConnectionError);
+            expect((outcome.error as AgentConnectionError).evidence).toMatchObject({
+                stage: 'opening',
+                socketOpened: false,
+                readyReceived: false,
+                closeCode: 1006,
+                // Never opened, never received a message — no timing evidence.
+                wsUptimeMs: null,
+                msSinceLastWsMessageMs: null,
+            });
+        }
+    });
+
+    it('resolves a canceled pre-ready connect and allows the next run to connect', async () => {
+        const service = new AgentService('https://api.example.com');
+        const firstCallbacks = createCallbacks();
+        const request = { type: 'cancel-handshake-test' } as AgentRunRequest;
+
+        const initialCount = MockWebSocket.instances.length;
+        const firstConnect = service.connect(request, firstCallbacks);
+        const firstOutcome = firstConnect.then(
+            () => ({ ok: true as const }),
+            (error: unknown) => ({ ok: false as const, error }),
+        );
+
+        for (let i = 0; i < 20 && MockWebSocket.instances.length === initialCount; i++) {
+            await Promise.resolve();
+        }
+        const firstSocket = MockWebSocket.instances[initialCount];
+        if (!firstSocket) {
+            throw new Error('Expected AgentService.connect() to create a WebSocket');
+        }
+
+        // The transport is open and auth was sent, but the backend has not
+        // emitted ready yet — cancelling in this handshake window must settle
+        // the pending connect() instead of leaving it hanging.
+        firstSocket.emitOpen();
+        await vi.advanceTimersByTimeAsync(50);
+        const cancelPromise = service.cancel(0);
+        await vi.advanceTimersByTimeAsync(0);
+        await cancelPromise;
+
+        // An intentional client close is not a transport failure: the
+        // pending connect resolves quietly.
+        const outcome = await firstOutcome;
+        expect(outcome.ok).toBe(true);
+
+        const secondCallbacks = createCallbacks();
+        const secondSocket = await completeConnect(service, secondCallbacks, request);
+        expect(secondSocket).not.toBe(firstSocket);
+        expect(secondCallbacks.onReady).toHaveBeenCalledTimes(1);
+    });
+
+    it('ignores a deferred cancel close when a newer connection has taken over', async () => {
+        const service = new AgentService('https://api.example.com');
+        const firstCallbacks = createCallbacks();
+        const firstRequest = { type: 'first' } as AgentRunRequest;
+
+        const firstSocket = await completeConnect(service, firstCallbacks, firstRequest);
+
+        // cancel() sends the cancel message, then waits before closing.
+        const cancelPromise = service.cancel(250);
+
+        // A new run connects during that wait and supersedes the first
+        // connection (bumping the connection generation).
+        const secondCallbacks = createCallbacks();
+        const secondRequest = { type: 'second' } as AgentRunRequest;
+        const secondSocket = await completeConnect(service, secondCallbacks, secondRequest);
+        expect(secondSocket).not.toBe(firstSocket);
+
+        // When the deferred close finally fires, it must not tear down the
+        // newer connection.
+        await vi.advanceTimersByTimeAsync(300);
+        await cancelPromise;
+
+        expect(secondSocket.close).not.toHaveBeenCalled();
+        expect(secondCallbacks.onClose).not.toHaveBeenCalled();
+
+        // The newer connection is still fully functional.
+        secondSocket.emitMessage({
+            event: 'part',
+            run_id: 'run-2',
+            message_index: 0,
+            part_index: 0,
+            part: { type: 'text', text: 'still streaming' },
+        });
+        await flushMicrotasks();
+        expect(secondCallbacks.onPart).toHaveBeenCalledTimes(1);
+    });
+
+    it('fails a connect attempt that never reaches ready via the backstop timeout', async () => {
+        const service = new AgentService('https://api.example.com');
+        const callbacks = createCallbacks();
+        const request = { type: 'timeout-test' } as AgentRunRequest;
+
+        const initialCount = MockWebSocket.instances.length;
+        const connectPromise = service.connect(request, callbacks);
+        const connectOutcome = connectPromise.then(
+            () => ({ ok: true as const }),
+            (error: unknown) => ({ ok: false as const, error }),
+        );
+
+        for (let i = 0; i < 20 && MockWebSocket.instances.length === initialCount; i++) {
+            await Promise.resolve();
+        }
+        const socket = MockWebSocket.instances[initialCount];
+        if (!socket) {
+            throw new Error('Expected AgentService.connect() to create a WebSocket');
+        }
+
+        // The transport opens and auth is sent, but the server never responds
+        // with ready, an error event, or a close.
+        socket.emitOpen();
+        await vi.advanceTimersByTimeAsync(50);
+        await vi.advanceTimersByTimeAsync(20_000);
+
+        const outcome = await connectOutcome;
+        expect(outcome.ok).toBe(false);
+        if (!outcome.ok) {
+            // The error type is the only signal a timeout leaves behind: the
+            // attempt is torn down with close code 1000, so callers cannot
+            // tell it apart from a network outage by close code alone.
+            expect(outcome.error).toBeInstanceOf(ConnectTimeoutError);
+            expect((outcome.error as Error).message).toContain('timed out');
+        }
+        expect(callbacks.onClose).toHaveBeenCalledWith(1000, 'Connection attempt timed out', true);
+
+        // The service recovered its state: a new connect succeeds.
+        const secondCallbacks = createCallbacks();
+        const secondSocket = await completeConnect(service, secondCallbacks, request);
+        expect(secondSocket).not.toBe(socket);
+        expect(secondCallbacks.onReady).toHaveBeenCalledTimes(1);
+    });
+
+    it('identifies a timeout that occurs while checking the auth session', async () => {
+        const service = new AgentService('https://api.example.com');
+        const callbacks = createCallbacks();
+        const request = { type: 'auth-timeout-test' } as AgentRunRequest;
+        mockSupabase.auth.getSession.mockReturnValueOnce(new Promise(() => {}));
+
+        const outcomePromise = service.connect(request, callbacks).then(
+            () => ({ ok: true as const }),
+            (error: unknown) => ({ ok: false as const, error }),
+        );
+        await vi.advanceTimersByTimeAsync(20_000);
+
+        const outcome = await outcomePromise;
+        expect(outcome.ok).toBe(false);
+        if (!outcome.ok) {
+            expect(outcome.error).toBeInstanceOf(ConnectTimeoutError);
+            expect((outcome.error as ConnectTimeoutError).evidence).toMatchObject({
+                stage: 'auth',
+                socketOpened: false,
+                readyReceived: false,
+                timedOut: true,
+            });
+        }
+    });
+
+    it('drops a queued done when the socket closes while run_complete is processing', async () => {
+        const service = new AgentService('https://api.example.com');
+        const callbacks = createCallbacks();
+        const request = { type: 'queued-done-test' } as AgentRunRequest;
+
+        // Hold the run_complete handler open so the queued `done` message
+        // stays behind it in the message queue.
+        let releaseRunComplete: () => void = () => {};
+        const runCompleteGate = new Promise<void>((resolve) => {
+            releaseRunComplete = resolve;
+        });
+        (callbacks.onRunComplete as ReturnType<typeof vi.fn>).mockImplementation(() => runCompleteGate);
+
+        const socket = await completeConnect(service, callbacks, request);
+
+        socket.emitMessage({
+            event: 'run_complete',
+            run_id: 'run-1',
+            usage: null,
+            cost: null,
+            citations: null,
+            agent_actions: null,
+        });
+        socket.emitMessage({ event: 'done' });
+        await flushMicrotasks();
+
+        // run_complete's handler is suspended awaiting onRunComplete, so the
+        // queued `done` has not been dispatched yet.
+        expect(callbacks.onRunComplete).toHaveBeenCalledTimes(1);
+        expect(callbacks.onDone).not.toHaveBeenCalled();
+
+        // The socket closes while that handler is still suspended. This
+        // bumps the connection id via resetConnectionState().
+        socket.emitClose({ code: 1000, reason: '', wasClean: true });
+
+        // Now let the suspended run_complete handler resume. The queued
+        // `done` handler runs next, but its stale-connection-id guard makes
+        // it a no-op because the id no longer matches.
+        releaseRunComplete();
+        await flushMicrotasks();
+
+        expect(callbacks.onRunComplete).toHaveBeenCalledTimes(1);
+        expect(callbacks.onClose).toHaveBeenCalledTimes(1);
+        // A `done` that was queued behind a still-processing run_complete is
+        // silently dropped once the socket has closed in the meantime. The
+        // React layer's onClose handler finalizes the run itself and relies
+        // on this behavior rather than expecting a late `done` event.
+        expect(callbacks.onDone).not.toHaveBeenCalled();
+    });
+
+    it('includes close evidence only for a real socket close, not a client-initiated one', async () => {
+        // A real transport close carries a `ConnectionFailureEvidence` object
+        // as the 4th onClose argument.
+        const serverCloseService = new AgentService('https://api.example.com');
+        const serverCloseCallbacks = createCallbacks();
+        await completeConnect(
+            serverCloseService,
+            serverCloseCallbacks,
+            { type: 'server-close-test' } as AgentRunRequest,
+        );
+        const serverSocket = MockWebSocket.instances[MockWebSocket.instances.length - 1];
+        serverSocket.emitClose({ code: 1011, reason: 'transport lost', wasClean: false });
+
+        expect(serverCloseCallbacks.onClose).toHaveBeenCalledTimes(1);
+        const serverCloseArgs = (serverCloseCallbacks.onClose as ReturnType<typeof vi.fn>).mock.calls[0];
+        expect(serverCloseArgs).toHaveLength(4);
+        expect(serverCloseArgs[3]).toEqual(expect.objectContaining({ closeCode: 1011 }));
+
+        // A client-initiated close (service.close(), including the deferred
+        // close inside cancel()) reports wasClean=true unconditionally and
+        // omits the evidence argument entirely, since there is no transport
+        // failure to characterize. This is the contract the React layer's
+        // onClose guard uses to tell a server close from a client close.
+        const clientCloseService = new AgentService('https://api.example.com');
+        const clientCloseCallbacks = createCallbacks();
+        await completeConnect(
+            clientCloseService,
+            clientCloseCallbacks,
+            { type: 'client-close-test' } as AgentRunRequest,
+        );
+        clientCloseService.close(1000, 'User cancelled');
+
+        expect(clientCloseCallbacks.onClose).toHaveBeenCalledTimes(1);
+        const clientCloseArgs = (clientCloseCallbacks.onClose as ReturnType<typeof vi.fn>).mock.calls[0];
+        expect(clientCloseArgs).toHaveLength(3);
+        expect(clientCloseArgs[2]).toBe(true);
+        expect(clientCloseArgs[3]).toBeUndefined();
+    });
+
+    it('does not let a stale backstop timeout tear down a newer connection', async () => {
+        const service = new AgentService('https://api.example.com');
+        const firstCallbacks = createCallbacks();
+        const request = { type: 'stale-timeout-test' } as AgentRunRequest;
+
+        // The first attempt's auth-token lookup hangs indefinitely.
+        mockSupabase.auth.getSession.mockReturnValueOnce(new Promise(() => {}));
+        const initialCount = MockWebSocket.instances.length;
+        const firstConnect = service.connect(request, firstCallbacks);
+        const firstOutcome = firstConnect.then(
+            () => ({ ok: true as const }),
+            (error: unknown) => ({ ok: false as const, error }),
+        );
+        await flushMicrotasks();
+        expect(MockWebSocket.instances.length).toBe(initialCount);
+
+        // The user cancels while the token lookup is pending, then starts a
+        // new run that connects normally.
+        const cancelPromise = service.cancel(0);
+        await vi.advanceTimersByTimeAsync(0);
+        await cancelPromise;
+
+        const secondCallbacks = createCallbacks();
+        const secondSocket = await completeConnect(service, secondCallbacks, request);
+
+        // When the abandoned attempt's backstop fires, it must not close the
+        // newer connection or reject anything.
+        await vi.advanceTimersByTimeAsync(20_000);
+        expect(secondSocket.close).not.toHaveBeenCalled();
+        expect(secondCallbacks.onClose).not.toHaveBeenCalled();
+
+        // The abandoned attempt settles quietly rather than as a failure.
+        const outcome = await firstOutcome;
+        expect(outcome.ok).toBe(true);
     });
 });

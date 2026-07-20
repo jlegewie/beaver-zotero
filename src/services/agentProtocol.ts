@@ -9,6 +9,7 @@ import { AttachmentData, ItemData } from '../../react/types/zotero';
 import type { BeaverExtractResult } from '../beaver-extract/schema/schema';
 import type { ExtractContentKind } from './documentExtraction/shared/contentKinds';
 import type { DocumentExtractResult } from './documentExtraction/shared/documentExtractResult';
+import type { ConnectionFailureEvidence } from './connectionFailure';
 
 // =============================================================================
 // WebSocket Event Types (matching backend ws_events.py)
@@ -1968,5 +1969,10 @@ export interface WSCallbacks {
      * @param reason Close reason
      * @param wasClean Whether the connection closed cleanly
      */
-    onClose?: (code: number, reason: string, wasClean: boolean) => void;
+    onClose?: (
+        code: number,
+        reason: string,
+        wasClean: boolean,
+        evidence?: ConnectionFailureEvidence,
+    ) => void;
 }
