@@ -5,6 +5,7 @@ import { citationMapAtom } from '../../../../react/atoms/citations';
 import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '../../../../react/atoms/externalReferences';
 import { currentThreadIdAtom } from '../../../../react/atoms/threads';
 import { grantCreatedNoteEditsForRunAtom } from '../../../../react/atoms/runApprovalPolicy';
+import { activeRunAtom } from '../../../../react/agents/atoms';
 import { renderToHTML } from '../../../../react/utils/citationRenderers';
 import { prepareCitationRenderContext } from '../../../../react/utils/citationRenderContext';
 import { wrapWithSchemaVersion, getBeaverNoteFooterHTML } from '../../../../react/utils/noteActions';
@@ -703,7 +704,7 @@ async function executeCreateNoteAction(
 
         // A note created by the agent is a safe, narrow continuation target:
         // allow only edits to this exact note for the remainder of this run.
-        if (runId) {
+        if (runId && store.get(activeRunAtom)?.id === runId) {
             store.set(grantCreatedNoteEditsForRunAtom, {
                 runId,
                 libraryId: zoteroNote.libraryID,

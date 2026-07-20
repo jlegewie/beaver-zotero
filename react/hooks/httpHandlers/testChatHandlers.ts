@@ -54,7 +54,7 @@ import { undoOrganizeItemsAction } from '../../utils/organizeItemsActions';
 import { undoManageTagsAction } from '../../utils/manageTagsActions';
 import { undoManageCollectionsAction } from '../../utils/manageCollectionsActions';
 import { undoCreateNoteAction } from '../../utils/createNoteActions';
-import { undoEditNoteAction } from '../../utils/editNoteActions';
+import { undoEditNoteAction, undoEditNoteBatchAction } from '../../utils/editNoteActions';
 import { undoCreateAnnotationsAction } from '../../utils/createAnnotationsActions';
 import { undoCreateItemActions } from '../../utils/createItemActions';
 
@@ -402,6 +402,9 @@ export async function handleTestUndoActionHttpRequest(request: any) {
                 break;
             case 'edit_note':
                 await undoEditNoteAction(action);
+                break;
+            case 'edit_note_batch':
+                await undoEditNoteBatchAction(action);
                 break;
             case 'create_highlight_annotations':
             case 'create_note_annotations':

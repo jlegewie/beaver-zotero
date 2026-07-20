@@ -120,9 +120,10 @@ describe('validateItem — attachment content kinds (default capabilities)', () 
         expect(res.reason).toContain('web links');
     });
 
-    it('marks an HTML snapshot as unreadable', async () => {
+    it('marks a local HTML snapshot as unreadable', async (ctx) => {
         const res = await validateItem(SNAPSHOT_ATTACHMENT.library_id, SNAPSHOT_ATTACHMENT.zotero_key);
         expect(res.ok).toBe(true);
+        if (res.status_code === 'file_not_local_remote') ctx.skip();
         expect(res.state).toBe('unreadable');
         expect(res.content_kind).toBe('snapshot');
         expect(res.reason).toContain('snapshot');
