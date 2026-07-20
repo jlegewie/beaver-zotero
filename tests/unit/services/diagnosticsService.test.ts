@@ -111,6 +111,14 @@ describe('reportConnectionFailure', () => {
         expect(body.prior_backend_http_success_age_ms).toBeGreaterThanOrEqual(
             1_000,
         );
+        expect(body.user_message).toBe(
+            'The connection was lost before Beaver finished responding.',
+        );
+        expect(body.user_details).toContain(
+            "Beaver's live connection was interrupted.",
+        );
+        expect(body.user_details).toContain('(error code 1006)');
+        expect(body.user_details).not.toContain('<');
     });
 
     it('attaches the cached session token so the backend can associate the user', async () => {

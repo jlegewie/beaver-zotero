@@ -23,6 +23,7 @@ import { getLastBackendHttpSuccess, recordBackendHttpSuccess } from './backendRe
 import {
     ConnectionDiagnosticResult,
     ConnectionFailureEvidence,
+    presentConnectionFailure,
 } from './connectionFailure';
 
 const DIAGNOSTICS_ENDPOINT = '/api/v1/diagnostics/connection-failure';
@@ -93,6 +94,17 @@ async function executeReport(
         // Identity lookup must never block a failure report.
     }
 
+    // What the user was shown when the failure surfaced. This is the initial
+    // presentation, computed without a reachability diagnostic — the refined
+    // message depends on this report's own outcome, so it cannot be included.
+    // Details are flattened to plain text: the renderer-facing markup (the
+    // troubleshooting link) carries no telemetry value.
+    const presentation = presentConnectionFailure(evidence);
+    const userDetails = presentation.details
+        .replace(/<[^>]*>/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+
     const body: Record<string, unknown> = {
         // Preserve the original coarse fields for older backend deployments.
         phase: evidence.stage === 'mid_run' ? 'mid_run' : 'connect',
@@ -122,6 +134,8 @@ async function executeReport(
             ? Math.max(0, startedAt - priorSuccess.at)
             : null,
         client_time: new Date().toISOString(),
+        user_message: presentation.message.slice(0, 200),
+        user_details: userDetails.slice(0, 600),
     };
 
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
