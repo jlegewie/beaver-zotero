@@ -83,6 +83,18 @@ function normalizeWhitespace(html: string): string {
 // ==========================================================================
 // Scenario (a): concurrent edits to the same note
 // ==========================================================================
+//
+// `executeEditNoteAction` holds no per-note lock; edits are serialized one
+// level up. The WebSocket dispatch map marks `agent_action_execute`
+// `serialize: true`, and the HTTP endpoint these tests post to chains onto the
+// same kind of queue, so concurrent executes run one at a time on both
+// transports. Each edit therefore reads the previous edit's result rather than
+// the state its sibling started from, and both survive.
+//
+// That guarantee is the point of these tests: fire two executes together and
+// assert nothing is dropped. Before the HTTP path was serialized they raced —
+// the later save overwrote the earlier one while both calls still reported
+// success — which made them fail intermittently under load.
 
 describe('edit_note concurrent edits', () => {
     beforeEach((ctx) => skipIfNoZotero(ctx, zoteroAvailable));
@@ -167,17 +179,16 @@ describe('edit_note concurrent edits', () => {
             executeEditNote(editB, { timeout: 20000 }),
         ]);
 
-        // Both should succeed — if they don't, the serialization / stabilization
-        // logic is letting a second edit clobber the first.
+        // Both must succeed — if either fails, or either replacement is missing
+        // below, the execute queue is letting one edit clobber the other.
         expect(resA.error_code, `editA: ${resA.error}`).toBeFalsy();
         expect(resB.error_code, `editB: ${resB.error}`).toBeFalsy();
         expect(resA.success).toBe(true);
         expect(resB.success).toBe(true);
 
         const after = await readNote(ref.library_id, ref.zotero_key);
-        expect(after.saved_html).toContain('ALPHA');
-        expect(after.saved_html).toContain('DELTA');
-        expect(after.saved_html).not.toContain('Alpha Bravo Charlie Delta');
+        const text = normalizeWhitespace(after.saved_html);
+        expect(text, `lost update: ${text}`).toContain('ALPHA Bravo Charlie DELTA');
     });
 
     it('parallel rewrite + str_replace: final state is one of the two, not corrupted', async () => {
@@ -251,14 +262,16 @@ describe('edit_note concurrent edits', () => {
         expect(resB.success, `editB: ${resB.error}`).toBe(true);
 
         const after = await readNote(ref.library_id, ref.zotero_key);
-        // No lowercase "foo" or "bar" should remain if both edits applied.
-        // (Allow surrounding HTML tags to differ — just check the tokens.)
-        const lowerFoo = (after.saved_html.match(/\bfoo\b/g) ?? []).length;
-        const lowerBar = (after.saved_html.match(/\bbar\b/g) ?? []).length;
-        expect(lowerFoo).toBe(0);
-        expect(lowerBar).toBe(0);
-        expect((after.saved_html.match(/\bFOO\b/g) ?? []).length).toBeGreaterThanOrEqual(3);
-        expect((after.saved_html.match(/\bBAR\b/g) ?? []).length).toBeGreaterThanOrEqual(3);
+        const html = after.saved_html;
+        const count = (token: string) => (html.match(new RegExp(`\\b${token}\\b`, 'g')) ?? []).length;
+
+        // The seeded body holds four of each token. Serialized execution means
+        // the second edit sees the first one's result, so every occurrence of
+        // both tokens ends up replaced and none are lost to a clobbered save.
+        expect(count('foo'), `lost update: ${html}`).toBe(0);
+        expect(count('bar'), `lost update: ${html}`).toBe(0);
+        expect(count('FOO')).toBe(4);
+        expect(count('BAR')).toBe(4);
     });
 
     it('five serial edits in rapid succession: none are lost', async () => {

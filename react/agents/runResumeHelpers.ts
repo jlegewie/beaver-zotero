@@ -5,6 +5,20 @@ export function appendRunIfMissing(runs: AgentRun[], run: AgentRun): AgentRun[] 
     return runs.some(existing => existing.id === run.id) ? runs : [...runs, run];
 }
 
+/**
+ * A run that reached `completed` but never received its terminal `done`
+ * event (the socket closed while run_complete post-processing was still
+ * draining the message queue) lingers as the active run. Returns the run
+ * to archive into thread history, or null when nothing needs finalizing.
+ */
+export function lingeringCompletedRun(activeRun: AgentRun | null): AgentRun | null {
+    if (!activeRun || activeRun.status !== 'completed') return null;
+    return {
+        ...activeRun,
+        completed_at: activeRun.completed_at || new Date().toISOString(),
+    };
+}
+
 export function findRunForResume(
     threadRuns: AgentRun[],
     activeRun: AgentRun | null,

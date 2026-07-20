@@ -40,6 +40,9 @@ vi.mock('../../../src/utils/agentItemSupport', () => ({
 vi.mock('../../../react/store', () => ({
     store: { get: vi.fn() },
 }));
+vi.mock('../../../react/agents/atoms', () => ({
+    activeRunAtom: Symbol('activeRunAtom'),
+}));
 vi.mock('../../../react/atoms/profile', () => ({
     searchableLibraryIdsAtom: Symbol('searchableLibraryIdsAtom'),
 }));

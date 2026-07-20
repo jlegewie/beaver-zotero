@@ -1259,6 +1259,131 @@ describe('DocumentCache payloads', () => {
         expect(await db.getDocumentCachePayloadCount()).toBe(1);
     });
 
+    it('anchors a late joiner shared deadline to lock creation, not join time', async () => {
+        const item = createCacheAttachment();
+        const expectedSourceIdentity = await cache.getSourceIdentitySnapshot(sourcePath);
+        const metadata = (result: BeaverExtractResult) => ({
+            pageCount: result.document.pageCount,
+            pageLabels: result.document.pageLabels ?? null,
+            pages: onePageGeometry,
+        });
+        // Worker op that never resolves on its own; only the shared-extraction
+        // budget's abort can end it.
+        const create = vi.fn((_signal: AbortSignal) => new Promise<BeaverExtractResult>(() => {}));
+
+        vi.useFakeTimers();
+        try {
+            const leader = cache.getOrCreateResult({
+                item,
+                filePath: sourcePath,
+                mode: 'structured',
+                sourceSizeBytes: 3,
+                contentType: 'application/pdf',
+                sharedTimeoutMs: 62_000,
+                expectedSourceIdentity,
+                readCached: async () => null,
+                create,
+                metadata,
+            });
+            leader.catch(() => undefined);
+
+            // Let the leader register the in-flight lock and arm the shared timer.
+            while ((cache as any).extractionLocks.size === 0) await Promise.resolve();
+            const entry = [...(cache as any).extractionLocks.values()][0] as {
+                controller: AbortController;
+            };
+
+            // A late joiner arrives 45s into the shared extraction with a fresh
+            // 62s budget.
+            await vi.advanceTimersByTimeAsync(45_000);
+            const joiner = cache.getOrCreateResult({
+                item,
+                filePath: sourcePath,
+                mode: 'structured',
+                sourceSizeBytes: 3,
+                contentType: 'application/pdf',
+                sharedTimeoutMs: 62_000,
+                expectedSourceIdentity,
+                readCached: async () => null,
+                create,
+                metadata,
+            });
+            joiner.catch(() => undefined);
+
+            // The joiner must not push the deadline to join+62s (107s). It stays
+            // anchored at creation+62s, so the extraction is still alive just
+            // before 62s and aborted just after.
+            await vi.advanceTimersByTimeAsync(16_999);
+            expect(entry.controller.signal.aborted).toBe(false);
+            await vi.advanceTimersByTimeAsync(2);
+            expect(entry.controller.signal.aborted).toBe(true);
+
+            // create ran once (leader); the joiner shared the in-flight slot.
+            expect(create).toHaveBeenCalledTimes(1);
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    it('leaves the shared extraction uncapped when an uncapped waiter joins', async () => {
+        const item = createCacheAttachment();
+        const expectedSourceIdentity = await cache.getSourceIdentitySnapshot(sourcePath);
+        const metadata = (result: BeaverExtractResult) => ({
+            pageCount: result.document.pageCount,
+            pageLabels: result.document.pageLabels ?? null,
+            pages: onePageGeometry,
+        });
+        const create = vi.fn((_signal: AbortSignal) => new Promise<BeaverExtractResult>(() => {}));
+
+        vi.useFakeTimers();
+        try {
+            const leader = cache.getOrCreateResult({
+                item,
+                filePath: sourcePath,
+                mode: 'structured',
+                sourceSizeBytes: 3,
+                contentType: 'application/pdf',
+                sharedTimeoutMs: 62_000,
+                expectedSourceIdentity,
+                readCached: async () => null,
+                create,
+                metadata,
+            });
+            leader.catch(() => undefined);
+
+            while ((cache as any).extractionLocks.size === 0) await Promise.resolve();
+            const entry = [...(cache as any).extractionLocks.values()][0] as {
+                controller: AbortController;
+                sharedTimer: ReturnType<typeof setTimeout> | null;
+            };
+            expect(entry.sharedTimer).not.toBeNull();
+
+            // A waiter with no budget joins: the shared timer is cleared and the
+            // extraction runs uncapped.
+            const joiner = cache.getOrCreateResult({
+                item,
+                filePath: sourcePath,
+                mode: 'structured',
+                sourceSizeBytes: 3,
+                contentType: 'application/pdf',
+                sharedTimeoutMs: undefined,
+                expectedSourceIdentity,
+                readCached: async () => null,
+                create,
+                metadata,
+            });
+            joiner.catch(() => undefined);
+
+            expect(entry.sharedTimer).toBeNull();
+
+            // Well past the leader's 62s budget the extraction is still alive.
+            await vi.advanceTimersByTimeAsync(120_000);
+            expect(entry.controller.signal.aborted).toBe(false);
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
     it('startup GC removes cache rows whose schema version mismatches the content kind', async () => {
         const item = createCacheAttachment();
         await cache.putResult({

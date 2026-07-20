@@ -29,6 +29,82 @@ export type EditNoteRenderItem =
         target: EditNoteResolvedTarget | null;
     };
 
+/**
+ * One renderable row of an edit_note run: either the whole part (a v1
+ * single-edit call, `editIndex: null`) or one edit within an edit_note_batch
+ * action's ordered `edits[]` (`editIndex` is that edit's position).
+ */
+export interface EditNoteRowDescriptor {
+    editIndex: number | null;
+    operation: string;
+    oldString: string;
+    newString: string;
+    occurrencesReplaced?: number;
+}
+
+/**
+ * Derive the row(s) a single edit_note / edit_note_batch tool-call part
+ * contributes to the group view. A v1 call always yields exactly one row
+ * built from its flat fields. A batch call (recognized by `action_type ===
+ * 'edit_note_batch'`, or — while still streaming and no action/pendingApproval
+ * exists yet — by the tool args carrying an `edits` array) yields one row per
+ * edit, in request order, with `occurrencesReplaced` joined from
+ * `resultData.applied[]` by `index`.
+ *
+ * `actionData` (the authoritative proposed_data from a stored action or
+ * pending approval) takes precedence over `toolArgs` (streaming/finalized
+ * tool-call args) wherever both are available.
+ */
+export function deriveEditNoteRows({
+    toolArgs,
+    actionType,
+    actionData,
+    resultData,
+}: {
+    toolArgs?: Record<string, any>;
+    actionType?: string;
+    actionData?: Record<string, any>;
+    resultData?: Record<string, any>;
+}): EditNoteRowDescriptor[] {
+    const isBatch = actionType === 'edit_note_batch'
+        || (actionType == null && Array.isArray(toolArgs?.edits));
+
+    if (isBatch) {
+        const edits: any[] = Array.isArray(actionData?.edits)
+            ? actionData!.edits
+            : (Array.isArray(toolArgs?.edits) ? toolArgs!.edits : []);
+
+        const appliedByIndex = new Map<number, number>();
+        const applied = resultData?.applied;
+        if (Array.isArray(applied)) {
+            for (const entry of applied) {
+                if (entry && typeof entry.index === 'number') {
+                    appliedByIndex.set(entry.index, entry.occurrences_replaced);
+                }
+            }
+        }
+
+        return edits.map((edit, position) => {
+            const editIndex = typeof edit?.index === 'number' ? edit.index : position;
+            return {
+                editIndex,
+                operation: edit?.operation ?? 'str_replace',
+                oldString: edit?.old_string ?? '',
+                newString: edit?.new_string ?? '',
+                occurrencesReplaced: appliedByIndex.get(editIndex),
+            };
+        });
+    }
+
+    return [{
+        editIndex: null,
+        operation: actionData?.operation ?? toolArgs?.operation ?? 'str_replace',
+        oldString: actionData?.old_string ?? toolArgs?.old_string ?? '',
+        newString: actionData?.new_string ?? toolArgs?.new_string ?? '',
+        occurrencesReplaced: resultData?.occurrences_replaced,
+    }];
+}
+
 export function getEditNoteGroupInstanceId(parts: ToolCallPart[]): string {
     return parts[0]?.tool_call_id ?? 'unknown';
 }

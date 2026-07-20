@@ -1187,6 +1187,88 @@ describe('openNoteAndSearchEdit', () => {
         );
     });
 
+    it('expands a single-char numeric diff to the containing word and selects it', async () => {
+        // "200" → "250" highlights only the middle digit; the highlight must be
+        // expanded to the containing word so the selection covers the full number.
+        vi.mocked(computeDiff).mockReturnValue([
+            {
+                type: 'deletion',
+                text: 'Gamma paragraph describes the sample size of 200.',
+                segments: [
+                    { text: 'Gamma paragraph describes the sample size of 2', highlighted: false },
+                    { text: '0', highlighted: true },
+                    { text: '0.', highlighted: false },
+                ],
+            },
+            {
+                type: 'addition',
+                text: 'Gamma paragraph describes the sample size of 250.',
+                segments: [
+                    { text: 'Gamma paragraph describes the sample size of 2', highlighted: false },
+                    { text: '5', highlighted: true },
+                    { text: '0.', highlighted: false },
+                ],
+            },
+        ]);
+
+        const fullText = 'Intro. Gamma paragraph describes the sample size of 200. Outro.';
+        const { view, TextSelectionClass } = createMockEditorView(fullText);
+        installMockEditorInstance(1, view);
+        (globalThis as any).Zotero.Notes.open = vi.fn().mockResolvedValue(undefined);
+
+        await openNoteAndSearchEdit(
+            1,
+            'NOTE0001',
+            '<p>Gamma paragraph describes the sample size of 200.</p>',
+            '<p>Gamma paragraph describes the sample size of 250.</p>',
+            false,
+        );
+
+        // Selects the word containing the change ("200."), not the whole sentence.
+        const wordStart = fullText.indexOf('200.');
+        expect(TextSelectionClass.create).toHaveBeenCalledWith(
+            expect.anything(),
+            wordStart,
+            wordStart + '200.'.length,
+        );
+    });
+
+    it('still locates a tiny diff via the expanded word when the sentence has drifted', async () => {
+        vi.mocked(computeDiff).mockReturnValue([
+            {
+                type: 'deletion',
+                text: 'Gamma paragraph describes the sample size of 200.',
+                segments: [
+                    { text: 'Gamma paragraph describes the sample size of 2', highlighted: false },
+                    { text: '0', highlighted: true },
+                    { text: '0.', highlighted: false },
+                ],
+            },
+        ]);
+
+        // The note drifted after the edit was proposed: extra text was inserted
+        // mid-sentence, so the full old sentence no longer occurs verbatim.
+        const fullText = 'Gamma paragraph EXTRA WORDS describes the sample size of 200. Tail.';
+        const { view, TextSelectionClass } = createMockEditorView(fullText);
+        installMockEditorInstance(1, view);
+        (globalThis as any).Zotero.Notes.open = vi.fn().mockResolvedValue(undefined);
+
+        await openNoteAndSearchEdit(
+            1,
+            'NOTE0001',
+            '<p>Gamma paragraph describes the sample size of 200.</p>',
+            '<p>Gamma paragraph describes the sample size of 250.</p>',
+            false,
+        );
+
+        const wordStart = fullText.indexOf('200.');
+        expect(TextSelectionClass.create).toHaveBeenCalledWith(
+            expect.anything(),
+            wordStart,
+            wordStart + '200.'.length,
+        );
+    });
+
     it('retries alternate citation page wording variants before falling back to old citation text', async () => {
         vi.mocked(computeDiff).mockReturnValue([
             {

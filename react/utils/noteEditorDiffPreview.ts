@@ -14,6 +14,11 @@
  * - Sets contentEditable=false to prevent user edits during preview
  * - Injects CSS to dim toolbar and signal preview mode
  * - Restores original HTML and state on dismiss
+ * - Banner Apply re-renders instead of applying when the note's stored
+ *   content changed since the preview rendered (revision guard). Best-effort:
+ *   the check and the eventual execution are not atomic, and the guard fails
+ *   open on read errors — execute's fail-closed re-resolution remains the
+ *   hard backstop.
  */
 
 import { logger } from '../../src/utils/logger';
@@ -42,6 +47,7 @@ import {
 } from '../../src/utils/noteHtmlEntities';
 import { getBeaverFooterAppendPoint } from '../../src/utils/noteEditFooter';
 import { containsPreviewMarkers } from '../../src/utils/notePreviewGuard';
+import { findTargetRawMatchPosition } from '../../src/utils/editNoteRawPosition';
 import { store } from '../store';
 import {
     externalReferenceMappingAtom,
@@ -114,13 +120,19 @@ export interface EditOperation {
     oldString: string;
     newString: string;
     operation?: EditNoteOperation;
+    /** Validation-captured raw context anchoring a repeated oldString target. */
+    targetBeforeContext?: string;
+    targetAfterContext?: string;
 }
 
 export interface DiffPreviewOptions {
     /**
      * Per-preview action handler. When set, banner Approve/Reject buttons
      * call this instead of the global onBannerAction (coordinator).
-     * Used by AgentActionView for post-run single-edit previews.
+     * Used by the edit-note views (via useEditNoteActions) for post-run
+     * previews — note edits never render through the generic
+     * AgentActionView, so cleanup hooks for these previews belong in the
+     * edit-note components only.
      */
     onAction?: (action: 'approve' | 'reject') => void;
 }
@@ -134,9 +146,31 @@ interface DiffPreviewState {
     pollTimer: ReturnType<typeof setInterval> | null;
     editsHash: string;
     onAction: ((action: 'approve' | 'reject') => void) | null;
+    /**
+     * Hash of the note HTML the preview was rendered from. Best-effort
+     * revision guard: if the stored note changes between render and the
+     * banner's Apply click (sync, another window), the preview re-renders
+     * instead of applying, keeping the authorization aligned with what the
+     * user saw. Not atomic with execution — see the approveAll guard in the
+     * poll timer.
+     */
+    contentHash: string;
+    /** Inputs kept for re-rendering the preview after a drift bounce. */
+    edits: EditOperation[];
+    showOptions?: DiffPreviewOptions;
 }
 
 let activePreview: DiffPreviewState | null = null;
+
+/**
+ * The most recent dismissal's still-running editor-restore work.
+ * `dismissDiffPreview()` clears `activePreview` synchronously, but the
+ * restore can take up to 1.5 s — any dismissal call landing in that window
+ * (e.g. an execute handler canceling a pending re-render before mutating
+ * the note) must wait for it, or the in-flight restore could overwrite the
+ * newly written editor state with older HTML.
+ */
+let activeTeardown: Promise<void> | null = null;
 
 /**
  * Marker for a showDiffPreview call whose async setup is still running (the
@@ -342,6 +376,22 @@ export async function showDiffPreview(
         }
 
         const rawHtml = getLatestNoteHtml(item);
+        // Revision-guard baseline, captured NOW — before the awaited
+        // page-label/expansion work — so a change landing during those awaits
+        // reads as drift on the first Apply (hashing at activePreview
+        // creation instead would stamp the NEWER content onto a preview
+        // rendered from the OLDER snapshot, silently defeating the guard).
+        //
+        // Basis: the content everyone EXCEPT this preview editor sees —
+        // stored content, or another editor's unsaved snapshot when one
+        // exists. That mirrors the approve-time read (the frozen preview
+        // editor is skipped via _disableSaving there) AND what execute's
+        // flushLiveEditorToDB will promote to the DB before matching, so
+        // another window's edits count as drift while this editor's own
+        // unsaved state never does.
+        const contentBaselineHash = hashPreviewContent(
+            getLatestNoteHtml(item, { excludeInstance: inst }),
+        );
         // Normalize through ProseMirror to match what simplifyNoteHtml exposes
         // to the model. Without this, entity encoding differences (e.g. the
         // note has `&#x27;` but the model wrote `'`) cause constructMultiDiffHtml's
@@ -364,13 +414,19 @@ export async function showDiffPreview(
         }
 
         // Expand all edits
-        const expandedEdits: Array<{ expandedOld: string; expandedNew: string; operation: EditNoteOperation }> = [];
+        const expandedEdits: PreviewExpandedEdit[] = [];
         for (const edit of edits) {
             const op = edit.operation ?? 'str_replace';
             try {
                 if (op === 'rewrite' || op === 'append') {
                     const expandedNew = edit.newString ? expandToRawHtml(edit.newString, metadata, 'new', externalRefContext, pageLabels) : '';
-                    expandedEdits.push({ expandedOld: '', expandedNew, operation: op });
+                    expandedEdits.push({
+                        expandedOld: '',
+                        expandedNew,
+                        operation: op,
+                        targetBeforeContext: edit.targetBeforeContext,
+                        targetAfterContext: edit.targetAfterContext,
+                    });
                 } else {
                     const expandedOld = edit.oldString ? expandToRawHtml(edit.oldString, metadata, 'old') : '';
                     // For insert_after / insert_before, new_string is already
@@ -382,7 +438,13 @@ export async function showDiffPreview(
                     // context and the insertion as addition.
                     const expandedNew = edit.newString ? expandToRawHtml(edit.newString, metadata, 'new', externalRefContext, pageLabels) : '';
                     if (expandedOld) {
-                        expandedEdits.push({ expandedOld, expandedNew, operation: op });
+                        expandedEdits.push({
+                            expandedOld,
+                            expandedNew,
+                            operation: op,
+                            targetBeforeContext: edit.targetBeforeContext,
+                            targetAfterContext: edit.targetAfterContext,
+                        });
                     } else {
                         logger(
                             `showDiffPreview: dropping edit for ${noteKey} — expandedOld is empty `
@@ -447,6 +509,12 @@ export async function showDiffPreview(
             editorInstance: inst, wasSavingDisabled,
             pollTimer: null, editsHash: hash,
             onAction: options?.onAction ?? null,
+            // Stored-content baseline captured alongside the render snapshot
+            // (see above), NOT rawHtml: rawHtml may be an unsaved live-editor
+            // snapshot, and the approve-time comparison reads stored content.
+            contentHash: contentBaselineHash,
+            edits,
+            showOptions: options,
         };
 
         // Poll for banner button clicks + editor liveness
@@ -455,6 +523,42 @@ export async function showDiffPreview(
             const action = readIframeAction(activePreview.editorInstance._iframeWindow);
             if (action) {
                 clearIframeAction(activePreview.editorInstance._iframeWindow);
+                // Revision guard (best-effort): if the note's stored content
+                // changed since the preview rendered (sync, another window —
+                // the previewed editor itself is frozen), re-render the
+                // preview against the current content instead of applying,
+                // so the banner authorization stays aligned with what the
+                // user saw. This check is NOT atomic with execution; the
+                // hard backstop is execute's fail-closed re-resolution.
+                // Reject/close stay unguarded: declining is always safe.
+                if (action === 'approveAll' && noteContentDriftedFromPreview(
+                    activePreview.itemId, activePreview.contentHash,
+                )) {
+                    logger('showDiffPreview: note content changed since the preview rendered; re-rendering instead of applying', 1);
+                    const { libraryId: lib, zoteroKey: key, edits: stateEdits, showOptions } = activePreview;
+                    // The re-render is deferred behind the dismissal. Register
+                    // it as a pending show IMMEDIATELY and guard it with the
+                    // generation token, so approval-resolution paths (the
+                    // coordinator and the execute handlers gate on
+                    // isDiffPreviewPendingFor → dismissDiffPreview, whose
+                    // generation bump cancels us) can stop the continuation —
+                    // otherwise it could resurrect a preview, with a stale
+                    // action callback, after the approval was applied or
+                    // rejected elsewhere.
+                    const myBounce = { key: `${lib}-${key}` };
+                    const dismissal = dismissDiffPreview();
+                    pendingShow = myBounce;
+                    const genAfterDismiss = generation;
+                    dismissal.then(() => {
+                        if (generation !== genAfterDismiss || pendingShow !== myBounce) {
+                            if (pendingShow === myBounce) pendingShow = null;
+                            return;
+                        }
+                        pendingShow = null;
+                        void showDiffPreview(lib, key, stateEdits, showOptions);
+                    });
+                    return;
+                }
                 if (action === 'close') {
                     dismissDiffPreview();
                 } else if (activePreview.onAction) {
@@ -497,6 +601,16 @@ export function isDiffPreviewPendingFor(libraryId: number, zoteroKey: string): b
 }
 
 /**
+ * True while ANY preview setup or deferred re-render is pending (not yet an
+ * active preview). Resolution paths that dismiss "the active preview" must
+ * treat a pending one the same way — calling dismissDiffPreview() bumps the
+ * generation token, which cancels the pending work.
+ */
+export function isDiffPreviewPending(): boolean {
+    return pendingShow !== null;
+}
+
+/**
  * Dismiss the preview: remove banner/styles, re-enable editing, and restore
  * the editor content from the item's current database state. No-op if no
  * preview active.
@@ -522,7 +636,9 @@ export function isDiffPreviewPendingFor(libraryId: number, zoteroKey: string): b
  */
 export function dismissDiffPreview(): Promise<void> {
     generation++;
-    if (!activePreview) return Promise.resolve();
+    // No active preview: still hand back any outstanding teardown so callers
+    // that proceed to edit the note serialize behind the in-flight restore.
+    if (!activePreview) return activeTeardown ?? Promise.resolve();
 
     const { editorInstance: inst, wasSavingDisabled, pollTimer, itemId } = activePreview;
     activePreview = null;
@@ -564,7 +680,7 @@ export function dismissDiffPreview(): Promise<void> {
         // system=true, which posts an 'update' message back.  Listening
         // for that message guarantees ProseMirror holds the clean HTML
         // before saving resumes — unlike a fixed timeout.
-        return new Promise<void>((resolve) => {
+        const teardown = new Promise<void>((resolve) => {
             let settled = false;
             let quietTimer: ReturnType<typeof setTimeout> | null = null;
             let fallbackTimer: ReturnType<typeof setTimeout> | null = null;
@@ -625,6 +741,11 @@ export function dismissDiffPreview(): Promise<void> {
             // dropped).
             fallbackTimer = setTimeout(restoreSaving, 1500);
         });
+        activeTeardown = teardown;
+        teardown.then(() => {
+            if (activeTeardown === teardown) activeTeardown = null;
+        });
+        return teardown;
     } catch (e: any) {
         logger(`dismissDiffPreview: error: ${e.message}`, 1);
         restoreSavingGuarded(inst, wasSavingDisabled);
@@ -734,9 +855,44 @@ function findEditorInstance(itemId: number): any | null {
     } catch { return null; }
 }
 
+/**
+ * Cheap content fingerprint (djb2) for the preview revision guard. Not
+ * cryptographic — it only needs to distinguish "same note bytes" from
+ * "note changed since the preview rendered".
+ */
+export function hashPreviewContent(html: string): string {
+    let h = 5381;
+    for (let i = 0; i < html.length; i++) {
+        h = ((h << 5) + h + html.charCodeAt(i)) | 0;
+    }
+    return `${html.length}:${(h >>> 0).toString(36)}`;
+}
+
+/**
+ * True when the content execute would act on no longer matches the baseline
+ * captured when the preview rendered. Both sides read "the content everyone
+ * except the preview editor sees": here `getLatestNoteHtml` skips the frozen
+ * preview editor via `_disableSaving` and includes other editors' unsaved
+ * snapshots — the same content execute's `flushLiveEditorToDB` promotes to
+ * the DB before matching. The preview editor's own unsaved state never
+ * counts as drift (it is excluded from the baseline too). Read failures
+ * return false: the guard is best-effort UI safety, and execute still
+ * re-resolves fail-closed.
+ */
+export function noteContentDriftedFromPreview(itemId: number, contentHash: string): boolean {
+    try {
+        const item = Zotero.Items.get(itemId);
+        if (!item) return false;
+        return hashPreviewContent(getLatestNoteHtml(item)) !== contentHash;
+    } catch {
+        return false;
+    }
+}
+
 function computeEditsHash(edits: EditOperation[]): string {
     return edits.map(e =>
-        `${e.oldString.length}:${e.newString.length}:${e.operation ?? 'str_replace'}:${e.oldString}`,
+        `${e.oldString.length}:${e.newString.length}:${e.operation ?? 'str_replace'}:${e.oldString}`
+        + `:${e.targetBeforeContext ?? ''}:${e.targetAfterContext ?? ''}`,
     ).join('|');
 }
 
@@ -868,6 +1024,14 @@ function findScrollContainer(element: Element): Element | null {
 // Diff Construction
 // =============================================================================
 
+interface PreviewExpandedEdit {
+    expandedOld: string;
+    expandedNew: string;
+    operation: EditNoteOperation;
+    targetBeforeContext?: string;
+    targetAfterContext?: string;
+}
+
 /**
  * Try to locate edit.expandedOld in `stripped`, falling back through entity
  * decode/encode variants the way the validation/execution paths do (see
@@ -884,8 +1048,8 @@ function findScrollContainer(element: Element): Element | null {
  */
 function resolveExpandedOldForMatch(
     stripped: string,
-    edit: { expandedOld: string; expandedNew: string; operation: EditNoteOperation },
-): { expandedOld: string; expandedNew: string; operation: EditNoteOperation } | null {
+    edit: PreviewExpandedEdit,
+): PreviewExpandedEdit | null {
     if (stripped.indexOf(edit.expandedOld) !== -1) return edit;
 
     const decodedOld = decodeHtmlEntities(edit.expandedOld);
@@ -894,6 +1058,12 @@ function resolveExpandedOldForMatch(
             expandedOld: decodedOld,
             expandedNew: decodeHtmlEntities(edit.expandedNew),
             operation: edit.operation,
+            targetBeforeContext: edit.targetBeforeContext !== undefined
+                ? decodeHtmlEntities(edit.targetBeforeContext)
+                : undefined,
+            targetAfterContext: edit.targetAfterContext !== undefined
+                ? decodeHtmlEntities(edit.targetAfterContext)
+                : undefined,
         };
     }
 
@@ -904,6 +1074,12 @@ function resolveExpandedOldForMatch(
                 expandedOld: encodedOld,
                 expandedNew: encodeTextEntities(edit.expandedNew, form),
                 operation: edit.operation,
+                targetBeforeContext: edit.targetBeforeContext !== undefined
+                    ? encodeTextEntities(edit.targetBeforeContext, form)
+                    : undefined,
+                targetAfterContext: edit.targetAfterContext !== undefined
+                    ? encodeTextEntities(edit.targetAfterContext, form)
+                    : undefined,
             };
         }
     }
@@ -998,7 +1174,7 @@ function logExpandedOldMismatch(
 
 export function constructMultiDiffHtml(
     fullHtml: string,
-    edits: Array<{ expandedOld: string; expandedNew: string; operation: EditNoteOperation }>,
+    edits: PreviewExpandedEdit[],
 ): string | null {
     const existingCitationCache = extractDataCitationItems(fullHtml);
     const stripped = stripDataCitationItems(fullHtml);
@@ -1043,6 +1219,64 @@ export function constructMultiDiffHtml(
         const edit = resolveExpandedOldForMatch(stripped, origEdit);
         if (!edit) {
             logExpandedOldMismatch(stripped, origEdit);
+            continue;
+        }
+
+        const hasTargetAnchors = edit.targetBeforeContext !== undefined
+            || edit.targetAfterContext !== undefined;
+        if (edit.operation !== 'str_replace_all' && hasTargetAnchors) {
+            let targetPosition = findTargetRawMatchPosition(
+                stripped,
+                edit.expandedOld,
+                edit.targetBeforeContext,
+                edit.targetAfterContext,
+            );
+            // Anchors go stale whenever the note changes after validation
+            // (apply → undo round-trips re-serialize the HTML; users edit the
+            // note). Falling back to a UNIQUE occurrence mirrors what execute
+            // will actually do: both the batch core (resolveSingleTarget) and
+            // v1 execute short-circuit on matchCount === 1 without consulting
+            // anchors, so a sole surviving occurrence IS the apply target —
+            // even when it is not the occurrence validation originally
+            // anchored. Previewing it keeps the preview faithful to the
+            // apply outcome; suppressing it would make the user approve
+            // blind. With zero or multiple occurrences execute would fail or
+            // need the anchors, so never guess: omit the edit instead.
+            if (targetPosition === null) {
+                const first = stripped.indexOf(edit.expandedOld);
+                // Advance by the needle length, mirroring the executor's
+                // countOccurrences semantics: a self-overlapping needle
+                // ("aa" in "aaa") is ONE occurrence there, so it must count
+                // as unique here too or the preview would suppress an edit
+                // the executor happily applies.
+                const second = first === -1 ? -1 : stripped.indexOf(edit.expandedOld, first + edit.expandedOld.length);
+                if (first !== -1 && second === -1) {
+                    logger(
+                        'constructMultiDiffHtml: target anchors stale but expanded '
+                        + 'old_string is unique; previewing its only occurrence',
+                        1,
+                    );
+                    targetPosition = first;
+                } else {
+                    logger(
+                        'constructMultiDiffHtml: target anchors did not resolve uniquely; '
+                        + 'skipping the edit instead of previewing the first occurrence',
+                        1,
+                    );
+                    continue;
+                }
+            }
+            const { prefix, oldMiddle, newMiddle, suffix } = computeHtmlDiff(
+                edit.expandedOld,
+                edit.expandedNew,
+            );
+            const styledOld = oldMiddle ? wrapTextNodesWithStyle(oldMiddle, DEL_STYLE) : '';
+            const styledNew = newMiddle ? wrapTextNodesWithStyle(newMiddle, ADD_STYLE) : '';
+            ops.push({
+                pos: targetPosition,
+                oldLen: edit.expandedOld.length,
+                replacement: prefix + styledOld + styledNew + suffix,
+            });
             continue;
         }
 

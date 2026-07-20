@@ -14,6 +14,7 @@ export const DEFAULT_DEFERRED_TOOL_GROUPS: Record<string, string> = {
     edit_metadata: 'metadata_edits',
     edit_item: 'metadata_edits',
     edit_note: 'note_edits',
+    edit_note_batch: 'note_edits',
     create_note: 'note_creation',
     create_collection: 'library_modifications',
     organize_items: 'library_modifications',
@@ -191,7 +192,7 @@ export function isActionApprovedForRun(
 ): boolean {
     if (policy.runId !== runId) return false;
     if (isToolGroupApprovedForRun(policy, runId, toolName)) return true;
-    if (toolName !== 'edit_note') return false;
+    if (toolName !== 'edit_note' && toolName !== 'edit_note_batch') return false;
     const target = getNoteEditTarget(actionData);
     return target !== null && policy.approvedResources.has(
         noteEditResourceKey(target.libraryId, target.zoteroKey),
@@ -199,17 +200,19 @@ export function isActionApprovedForRun(
 }
 
 /**
- * Validation requests do not currently include run_id. There is only one live
- * agent WebSocket, so lifecycle cleanup makes the stored policy the active run.
+ * Validation requests do not currently include run_id, so callers must provide
+ * the actual active run ID. Comparing it separately prevents a late async grant
+ * from making stale policy state look current after a run boundary.
  */
 export function isActionApprovedForCurrentRun(
     policy: RunApprovalPolicy,
+    activeRunId: string | null,
     toolName: AgentActionType | string,
     actionData?: Record<string, any>,
 ): boolean {
-    return policy.runId !== null && isActionApprovedForRun(
+    return activeRunId !== null && isActionApprovedForRun(
         policy,
-        policy.runId,
+        activeRunId,
         toolName,
         actionData,
     );

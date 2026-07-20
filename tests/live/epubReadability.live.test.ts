@@ -35,23 +35,28 @@ interface MetadataResponse {
     error?: string | null;
 }
 
-function epubItemId(): string {
+function legacyEpubItemId(): string {
     return `${EPUB_WITH_PARENT.library_id}-${EPUB_WITH_PARENT.zotero_key}`;
+}
+
+function portableEpubItemId(): string {
+    return `u-${EPUB_WITH_PARENT.zotero_key}`;
 }
 
 /** Fetch the EPUB's parent item metadata including attachment infos. */
 async function fetchParentMetadataWithAttachments(): Promise<Record<string, any>> {
     // Resolve the parent key from the attachment's own metadata.
     const attachmentRes = await post<MetadataResponse>('/beaver/library/metadata', {
-        item_ids: [epubItemId()],
+        item_ids: [legacyEpubItemId()],
     });
     const attachmentItem = attachmentRes.items?.[0];
     expect(attachmentItem, 'EPUB fixture metadata').toBeTruthy();
-    const parentKey = attachmentItem!.parentItem;
-    expect(parentKey, 'EPUB fixture must have a parent item').toBeTruthy();
+    expect(attachmentItem!.library_ref).toBe('u');
+    const parentItemId = attachmentItem!.parent_item_id;
+    expect(parentItemId, 'EPUB fixture must have a parent item').toBeTruthy();
 
     const parentRes = await post<MetadataResponse>('/beaver/library/metadata', {
-        item_ids: [`${EPUB_WITH_PARENT.library_id}-${parentKey}`],
+        item_ids: [parentItemId],
         include_attachments: true,
     });
     const parentItem = parentRes.items?.[0];
@@ -61,7 +66,7 @@ async function fetchParentMetadataWithAttachments(): Promise<Record<string, any>
 
 function findEpubAttachmentInfo(parentItem: Record<string, any>): Record<string, any> {
     const attachments: Array<Record<string, any>> = parentItem.attachments ?? [];
-    const info = attachments.find((a) => a.attachment_id === epubItemId());
+    const info = attachments.find((a) => a.attachment_id === portableEpubItemId());
     expect(info, 'EPUB attachment info on parent').toBeTruthy();
     return info!;
 }

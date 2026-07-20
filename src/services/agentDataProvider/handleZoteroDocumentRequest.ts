@@ -44,6 +44,7 @@ import {
     validateZoteroItemReference,
 } from './utils';
 import { EXTERNAL_LIBRARY_ID, resolveExternalFile } from '../externalFiles';
+import { withWorkerDiagnostics } from './workerDiagnostics';
 import type { ExternalFileRecord } from '../database';
 import { serializeAttachmentStub, serializeItemStub } from '../../utils/zoteroSerializers';
 import { libraryRefForLibraryID, modelObjectIdFromReference } from '../../utils/libraryIdentity';
@@ -590,13 +591,19 @@ export async function handleZoteroDocumentRequest(
             } catch (e) {
                 logger(`handleZoteroDocumentRequest: background enqueue failed: ${e}`, 1);
             }
-            return errorResponse(
-                `PDF extraction timed out after ${
-                    result.kind === 'timeout' ? result.timeoutSeconds : timeout.timeoutSeconds
-                } seconds`,
-                'timeout',
-                result.pageCount,
-                'pdf',
+            return withWorkerDiagnostics(
+                errorResponse(
+                    `PDF extraction timed out after ${
+                        result.kind === 'timeout' ? result.timeoutSeconds : timeout.timeoutSeconds
+                    } seconds`,
+                    'timeout',
+                    result.pageCount,
+                    'pdf',
+                ),
+                {
+                    workerDispatched: result.workerDispatched === true,
+                    leaseReaped: result.kind === 'timeout' && result.leaseReaped === true,
+                },
             );
         }
 
@@ -613,6 +620,9 @@ export async function handleZoteroDocumentRequest(
             ?? (result.resolvedAttachment && result.code !== 'unsupported_type' ? 'pdf' : undefined);
         return errorResponse(result.message, result.code, result.pageCount, contentKindOnError);
     } catch (error) {
+        // No worker snapshot here: this catch also covers non-PDF document
+        // paths (EPUB, snapshot, text) and pre-dispatch phases, where worker
+        // state would describe unrelated concurrent activity.
         if (error instanceof TimeoutError) {
             return errorResponse(
                 `Document request timed out after ${error.timeoutSeconds} seconds`,
@@ -822,13 +832,19 @@ async function handleExternalFileDocumentRequest(
         if (result.kind === 'timeout' || result.kind === 'external_abort') {
             // No background retry for external files: the background extractor
             // resolves Zotero items and cannot serve the external-files store.
-            return errorResponse(
-                result.kind === 'timeout'
-                    ? `PDF extraction timed out after ${result.timeoutSeconds} seconds`
-                    : 'PDF extraction interrupted',
-                'timeout',
-                result.pageCount,
-                'pdf',
+            return withWorkerDiagnostics(
+                errorResponse(
+                    result.kind === 'timeout'
+                        ? `PDF extraction timed out after ${result.timeoutSeconds} seconds`
+                        : 'PDF extraction interrupted',
+                    'timeout',
+                    result.pageCount,
+                    'pdf',
+                ),
+                {
+                    workerDispatched: result.workerDispatched === true,
+                    leaseReaped: result.kind === 'timeout' && result.leaseReaped === true,
+                },
             );
         }
 

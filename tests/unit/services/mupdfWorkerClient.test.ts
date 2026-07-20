@@ -21,14 +21,29 @@ import {
 } from '../../helpers/mockWorker';
 
 import {
+    MuPDFWorkerClient,
     getMuPDFWorkerClient,
     getExistingMuPDFWorkerClient,
     disposeMuPDFWorker,
+    DEFAULT_BUSY_LEASE_MS_BACKGROUND,
+    DEFAULT_BUSY_LEASE_MS_HOT,
     WorkerAbortError,
+    WorkerDeadlineError,
+    StaleWorkerError,
     WorkerSpawnError,
+    isWorkerDeadlineError,
     __setIdleTimeoutForTest,
     __resetIdleTimeoutForTest,
 } from '../../../src/beaver-extract/MuPDFWorkerClient';
+import {
+    DEFAULT_ATTACHMENT_IMAGE_TIMEOUT_SECONDS,
+    DEFAULT_IMAGES_TIMEOUT_SECONDS,
+    DEFAULT_PAGES_TIMEOUT_SECONDS,
+    DEFAULT_SEARCH_TIMEOUT_SECONDS,
+    DEFAULT_TIMEOUT_SECONDS,
+    MAX_INTERACTIVE_PDF_TIMEOUT_SECONDS,
+    MAX_PDF_TIMEOUT_SECONDS,
+} from '../../../src/services/agentDataProvider/timeout';
 import {
     ExtractionError,
     ExtractionErrorCode,
@@ -394,6 +409,735 @@ describe('MuPDFWorkerClient', () => {
             await disposeMuPDFWorker();
             vi.useRealTimers();
         }
+    });
+
+    describe('proactive recycling', () => {
+        afterEach(() => {
+            vi.useRealTimers();
+        });
+
+        it('recycles an idle hot worker after its observed heap reaches the limit', async () => {
+            vi.useFakeTimers();
+            const client = new MuPDFWorkerClient({
+                recycleHeapBytes: 512,
+                recycleAfterDataOperations: 32,
+            });
+            try {
+                const firstOp = client.getPageCount(new Uint8Array([1]));
+                const first = MockWorker.instances[0];
+                first.replyToLast({
+                    ok: true,
+                    result: { count: 1 },
+                    heapBytes: 512,
+                });
+                await expect(firstOp).resolves.toBe(1);
+
+                expect(client.getStats()).toMatchObject({
+                    hasWorker: true,
+                    workerHeapBytes: 512,
+                    peakWorkerHeapBytes: 512,
+                    completedDataOperationsSinceSpawn: 1,
+                    proactiveRecyclePending: true,
+                    proactiveRecycleCount: 0,
+                });
+
+                await vi.advanceTimersByTimeAsync(0);
+
+                expect(first.terminate).toHaveBeenCalledOnce();
+                expect(client.getStats()).toMatchObject({
+                    hasWorker: false,
+                    workerHeapBytes: null,
+                    completedDataOperationsSinceSpawn: 0,
+                    proactiveRecyclePending: false,
+                    proactiveRecycleCount: 1,
+                    lastProactiveRecycleReason: 'heap_limit',
+                    lastProactiveRecycleHeapBytes: 512,
+                    lastProactiveRecycleDataOperations: 1,
+                });
+
+                const secondOp = client.getPageCount(new Uint8Array([2]));
+                const second = MockWorker.instances[1];
+                expect(second).toBeDefined();
+                second.replyToLast({
+                    ok: true,
+                    result: { count: 2 },
+                    heapBytes: 64,
+                });
+                await expect(secondOp).resolves.toBe(2);
+                expect(client.getStats()).toMatchObject({
+                    hasWorker: true,
+                    spawnCount: 2,
+                    workerHeapBytes: 64,
+                    completedDataOperationsSinceSpawn: 1,
+                });
+            } finally {
+                client.dispose();
+            }
+        });
+
+        it('applies the heap guard to the background slot without an operation-count limit', async () => {
+            vi.useFakeTimers();
+            const client = new MuPDFWorkerClient({ slotName: 'background' });
+            try {
+                expect(client.getStats()).toMatchObject({
+                    recycleHeapThresholdBytes: 512 * 1024 * 1024,
+                    recycleDataOperationThreshold: null,
+                });
+
+                const op = client.getPageCount(new Uint8Array([1]));
+                const worker = MockWorker.instances[0];
+                worker.replyToLast({
+                    ok: true,
+                    result: { count: 1 },
+                    heapBytes: 512 * 1024 * 1024,
+                });
+                await expect(op).resolves.toBe(1);
+                await vi.advanceTimersByTimeAsync(0);
+
+                expect(worker.terminate).toHaveBeenCalledOnce();
+                expect(client.getStats()).toMatchObject({
+                    hasWorker: false,
+                    proactiveRecycleCount: 1,
+                    lastProactiveRecycleReason: 'heap_limit',
+                });
+            } finally {
+                client.dispose();
+            }
+        });
+
+        it('waits for every accepted operation before count-based recycling', async () => {
+            vi.useFakeTimers();
+            const client = new MuPDFWorkerClient({
+                recycleHeapBytes: null,
+                recycleAfterDataOperations: 2,
+            });
+            try {
+                const firstOp = client.getPageCount(new Uint8Array([1]));
+                const secondOp = client.getPageCount(new Uint8Array([2]));
+                const worker = MockWorker.instances[0];
+                const firstId = worker.posted[0].message.id;
+                const secondId = worker.posted[1].message.id;
+
+                worker.onmessage?.({
+                    data: {
+                        id: firstId,
+                        ok: true,
+                        result: { count: 1 },
+                        heapBytes: 64,
+                    },
+                });
+                await expect(firstOp).resolves.toBe(1);
+                expect(client.getStats()).toMatchObject({
+                    pendingCount: 1,
+                    completedDataOperationsSinceSpawn: 1,
+                    proactiveRecyclePending: false,
+                });
+                await vi.advanceTimersByTimeAsync(0);
+                expect(worker.terminate).not.toHaveBeenCalled();
+
+                worker.onmessage?.({
+                    data: {
+                        id: secondId,
+                        ok: true,
+                        result: { count: 2 },
+                        heapBytes: 64,
+                    },
+                });
+                await expect(secondOp).resolves.toBe(2);
+                expect(client.getStats()).toMatchObject({
+                    pendingCount: 0,
+                    completedDataOperationsSinceSpawn: 2,
+                    proactiveRecyclePending: true,
+                });
+
+                await vi.advanceTimersByTimeAsync(0);
+                expect(worker.terminate).toHaveBeenCalledOnce();
+                expect(client.getStats()).toMatchObject({
+                    hasWorker: false,
+                    proactiveRecycleCount: 1,
+                    lastProactiveRecycleReason: 'data_operation_limit',
+                    lastProactiveRecycleDataOperations: 2,
+                });
+            } finally {
+                client.dispose();
+            }
+        });
+
+        it('allows one chained follow-up, then routes the next sequential operation to a fresh worker', async () => {
+            vi.useFakeTimers();
+            const client = new MuPDFWorkerClient({
+                recycleHeapBytes: null,
+                recycleAfterDataOperations: 1,
+            });
+            try {
+                const firstOp = client.getPageCount(new Uint8Array([1]));
+                const worker = MockWorker.instances[0];
+                worker.replyToLast({
+                    ok: true,
+                    result: { count: 1 },
+                    heapBytes: 64,
+                });
+
+                // Awaiting the first call resumes in a microtask, before the
+                // zero-delay recycle check. A related follow-up dispatch can
+                // therefore stay on the warm worker.
+                await expect(firstOp).resolves.toBe(1);
+                const secondOp = client.getPageCount(new Uint8Array([2]));
+                expect(worker.posted).toHaveLength(2);
+                expect(MockWorker.instances).toHaveLength(1);
+
+                await vi.advanceTimersByTimeAsync(0);
+                expect(worker.terminate).not.toHaveBeenCalled();
+
+                worker.replyToLast({
+                    ok: true,
+                    result: { count: 2 },
+                    heapBytes: 64,
+                });
+                await expect(secondOp).resolves.toBe(2);
+
+                // A sequential loop resumes before the retirement timer too,
+                // but the one-operation grace is now exhausted. This dispatch
+                // synchronously retires the idle worker and uses a fresh one.
+                const thirdOp = client.getPageCount(new Uint8Array([3]));
+                expect(worker.terminate).toHaveBeenCalledOnce();
+                expect(worker.posted).toHaveLength(2);
+                expect(MockWorker.instances).toHaveLength(2);
+
+                const replacement = MockWorker.instances[1];
+                replacement.replyToLast({
+                    ok: true,
+                    result: { count: 3 },
+                    heapBytes: 64,
+                });
+                await expect(thirdOp).resolves.toBe(3);
+                expect(client.getStats()).toMatchObject({
+                    proactiveRecycleCount: 1,
+                    lastProactiveRecycleReason: 'data_operation_limit',
+                });
+            } finally {
+                client.dispose();
+            }
+        });
+
+        it('holds operations beyond the grace behind the drain barrier', async () => {
+            vi.useFakeTimers();
+            const client = new MuPDFWorkerClient({
+                recycleHeapBytes: null,
+                recycleAfterDataOperations: 1,
+            });
+            try {
+                const firstOp = client.getPageCount(new Uint8Array([1]));
+                const worker = MockWorker.instances[0];
+                worker.replyToLast({
+                    ok: true,
+                    result: { count: 1 },
+                    heapBytes: 64,
+                });
+                await expect(firstOp).resolves.toBe(1);
+
+                const followupOp = client.getPageCount(new Uint8Array([2]));
+                const blockedOp = client.getPageCount(new Uint8Array([3]));
+                expect(worker.posted).toHaveLength(2);
+                expect(client.getStats().pendingCount).toBe(1);
+
+                worker.replyToLast({
+                    ok: true,
+                    result: { count: 2 },
+                    heapBytes: 64,
+                });
+                await expect(followupOp).resolves.toBe(2);
+                await vi.advanceTimersByTimeAsync(0);
+
+                expect(worker.terminate).toHaveBeenCalledOnce();
+                expect(worker.posted).toHaveLength(2);
+                expect(MockWorker.instances).toHaveLength(2);
+
+                const replacement = MockWorker.instances[1];
+                replacement.replyToLast({
+                    ok: true,
+                    result: { count: 3 },
+                    heapBytes: 64,
+                });
+                await expect(blockedOp).resolves.toBe(3);
+            } finally {
+                client.dispose();
+            }
+        });
+
+        it('keeps fatal-operation suppression after a proactive recycle', async () => {
+            vi.useFakeTimers();
+            const client = new MuPDFWorkerClient({
+                recycleHeapBytes: null,
+                recycleAfterDataOperations: 1,
+            });
+            try {
+                const badBytes = new Uint8Array([2]);
+                const bad = client.getPageCount(badBytes);
+                const first = MockWorker.instances[0];
+                first.replyToLast({
+                    ok: false,
+                    error: {
+                        name: 'ExtractionError',
+                        code: ExtractionErrorCode.WASM_ERROR,
+                        message: 'fatal parser failure',
+                    },
+                    heapBytes: 128,
+                });
+                await expect(bad).rejects.toMatchObject({
+                    code: ExtractionErrorCode.WASM_ERROR,
+                });
+
+                const good = client.getPageCount(new Uint8Array([3]));
+                const second = MockWorker.instances[1];
+                second.replyToLast({
+                    ok: true,
+                    result: { count: 3 },
+                    heapBytes: 128,
+                });
+                await expect(good).resolves.toBe(3);
+                await vi.advanceTimersByTimeAsync(0);
+                expect(second.terminate).toHaveBeenCalledOnce();
+
+                await expect(
+                    client.getPageCount(new Uint8Array([2])),
+                ).rejects.toMatchObject({
+                    code: ExtractionErrorCode.WASM_ERROR,
+                });
+                expect(MockWorker.instances).toHaveLength(2);
+            } finally {
+                client.dispose();
+            }
+        });
+    });
+
+    describe('busy-age lease', () => {
+        afterEach(() => {
+            vi.useRealTimers();
+        });
+
+        function replyToOp(
+            worker: MockWorker,
+            op: string,
+            result: unknown,
+        ): void {
+            const posted = worker.posted.find((entry) => entry.message.op === op);
+            expect(posted).toBeDefined();
+            worker.onmessage?.({
+                data: { id: posted!.message.id, ok: true, result },
+            });
+        }
+
+        it('reaps the overdue oldest op without retrying it while siblings recover', async () => {
+            vi.useFakeTimers();
+            vi.setSystemTime(10_000);
+            const client = new MuPDFWorkerClient({
+                busyLeaseMs: 100,
+                recycleHeapBytes: null,
+                recycleAfterDataOperations: null,
+            });
+            try {
+                const oldest = client.call<number>('opA');
+                const oldestOutcome = oldest.catch((error) => error);
+                const sibling = client.call<number>('opB');
+                const first = MockWorker.instances[0];
+
+                vi.setSystemTime(10_100);
+                const triggering = client.call<number>('opC');
+                await vi.advanceTimersByTimeAsync(0);
+
+                expect(first.terminate).toHaveBeenCalledOnce();
+                expect(first.posted.map((entry) => entry.message.op)).toEqual([
+                    'opA',
+                    'opB',
+                ]);
+                const replacement = MockWorker.instances[1];
+                expect(replacement).toBeDefined();
+                expect(replacement.posted.map((entry) => entry.message.op).sort()).toEqual([
+                    'opB',
+                    'opC',
+                ]);
+
+                replyToOp(replacement, 'opB', 2);
+                replyToOp(replacement, 'opC', 3);
+
+                await expect(oldestOutcome).resolves.toBeInstanceOf(WorkerDeadlineError);
+                await expect(sibling).resolves.toBe(2);
+                await expect(triggering).resolves.toBe(3);
+                expect(
+                    MockWorker.instances.flatMap((worker) =>
+                        worker.posted.filter((entry) => entry.message.op === 'opA'),
+                    ),
+                ).toHaveLength(1);
+                expect(client.getStats()).toMatchObject({
+                    retryCount: 1,
+                    leaseReapCount: 1,
+                    lastLeaseReapOp: 'opA',
+                    lastLeaseReapAgeMs: 100,
+                });
+            } finally {
+                client.dispose();
+            }
+        });
+
+        it('does not reap operations before the lease or before the watchdog deadline', async () => {
+            vi.useFakeTimers();
+            vi.setSystemTime(20_000);
+            const client = new MuPDFWorkerClient({ busyLeaseMs: 2_000 });
+            try {
+                const firstOp = client.call<number>('first');
+                const worker = MockWorker.instances[0];
+
+                await vi.advanceTimersByTimeAsync(1_999);
+                const secondOp = client.call<number>('second');
+                expect(worker.terminate).not.toHaveBeenCalled();
+                expect(client.getStats().leaseReapCount).toBe(0);
+
+                replyToOp(worker, 'first', 1);
+                replyToOp(worker, 'second', 2);
+                await expect(firstOp).resolves.toBe(1);
+                await expect(secondOp).resolves.toBe(2);
+
+                await vi.advanceTimersByTimeAsync(10_000);
+                expect(worker.terminate).not.toHaveBeenCalled();
+                expect(client.getStats().leaseReapCount).toBe(0);
+            } finally {
+                client.dispose();
+            }
+        });
+
+        it('watchdog reaps a wedged worker without a subsequent dispatch', async () => {
+            vi.useFakeTimers();
+            vi.setSystemTime(30_000);
+            const client = new MuPDFWorkerClient({ busyLeaseMs: 100 });
+            try {
+                const operation = client.call<number>('wedged');
+                const outcome = operation.catch((error) => error);
+                const worker = MockWorker.instances[0];
+
+                await vi.advanceTimersByTimeAsync(1_100);
+
+                await expect(outcome).resolves.toBeInstanceOf(WorkerDeadlineError);
+                expect(worker.terminate).toHaveBeenCalledOnce();
+                expect(client.inFlight).toBe(0);
+                expect(client.getStats()).toMatchObject({
+                    hasWorker: false,
+                    leaseReapCount: 1,
+                    lastLeaseReapTime: 31_100,
+                    lastLeaseReapOp: 'wedged',
+                    lastLeaseReapAgeMs: 1_100,
+                });
+            } finally {
+                client.dispose();
+            }
+        });
+
+        it('clears the watchdog after normal drain, stale recovery, and dispose', async () => {
+            vi.useFakeTimers();
+            vi.setSystemTime(40_000);
+
+            const drained = new MuPDFWorkerClient({ busyLeaseMs: 100 });
+            const drainedOp = drained.call<number>('drained');
+            const drainedWorker = MockWorker.instances[0];
+            replyToOp(drainedWorker, 'drained', 1);
+            await expect(drainedOp).resolves.toBe(1);
+            await vi.advanceTimersByTimeAsync(1_100);
+            expect(drainedWorker.terminate).not.toHaveBeenCalled();
+            expect(drained.getStats().leaseReapCount).toBe(0);
+            drained.dispose();
+
+            const recovered = new MuPDFWorkerClient({ busyLeaseMs: 100 });
+            const recoveredOp = recovered.call<number>('recovered');
+            const staleWorker = MockWorker.instances[1];
+            recovered.markStaleForTest();
+            await vi.advanceTimersByTimeAsync(0);
+            const freshWorker = MockWorker.instances[2];
+            replyToOp(freshWorker, 'recovered', 2);
+            await expect(recoveredOp).resolves.toBe(2);
+            await vi.advanceTimersByTimeAsync(1_100);
+            expect(staleWorker.terminate).toHaveBeenCalledOnce();
+            expect(freshWorker.terminate).not.toHaveBeenCalled();
+            expect(recovered.getStats().leaseReapCount).toBe(0);
+            recovered.dispose();
+
+            const disposed = new MuPDFWorkerClient({ busyLeaseMs: 100 });
+            const disposedOp = disposed.call<number>('disposed');
+            const disposedOutcome = disposedOp.catch((error) => error);
+            const disposedWorker = MockWorker.instances[3];
+            disposed.dispose();
+            await expect(disposedOutcome).resolves.toBeInstanceOf(StaleWorkerError);
+            await vi.advanceTimersByTimeAsync(1_100);
+            expect(disposedWorker.terminate).toHaveBeenCalledOnce();
+            expect(disposed.getStats().leaseReapCount).toBe(0);
+        });
+
+        it('reschedules the watchdog when the oldest operation completes', async () => {
+            vi.useFakeTimers();
+            vi.setSystemTime(50_000);
+            const client = new MuPDFWorkerClient({ busyLeaseMs: 100 });
+            try {
+                const firstOp = client.call<number>('first');
+                const worker = MockWorker.instances[0];
+                await vi.advanceTimersByTimeAsync(50);
+                const secondOp = client.call<number>('second');
+                const secondOutcome = secondOp.catch((error) => error);
+
+                await vi.advanceTimersByTimeAsync(50);
+                replyToOp(worker, 'first', 1);
+                await expect(firstOp).resolves.toBe(1);
+
+                await vi.advanceTimersByTimeAsync(1_000);
+                expect(worker.terminate).not.toHaveBeenCalled();
+                await vi.advanceTimersByTimeAsync(50);
+
+                await expect(secondOutcome).resolves.toBeInstanceOf(WorkerDeadlineError);
+                expect(worker.terminate).toHaveBeenCalledOnce();
+                expect(client.getStats()).toMatchObject({
+                    lastLeaseReapOp: 'second',
+                    lastLeaseReapAgeMs: 1_100,
+                });
+            } finally {
+                client.dispose();
+            }
+        });
+
+        it('reaps before parking a new call on an overdue recycle barrier', async () => {
+            vi.useFakeTimers();
+            vi.setSystemTime(60_000);
+            const client = new MuPDFWorkerClient({
+                busyLeaseMs: 100,
+                recycleHeapBytes: null,
+                recycleAfterDataOperations: 1,
+            });
+            try {
+                const thresholdOp = client.call<number>('threshold');
+                const first = MockWorker.instances[0];
+                first.replyToLast({ ok: true, result: 1, heapBytes: 64 });
+                await expect(thresholdOp).resolves.toBe(1);
+
+                const wedged = client.call<number>('wedged');
+                const wedgedOutcome = wedged.catch((error) => error);
+                const blocked = client.call<number>('blocked');
+                expect(first.posted.map((entry) => entry.message.op)).toEqual([
+                    'threshold',
+                    'wedged',
+                ]);
+
+                vi.setSystemTime(60_100);
+                const triggering = client.call<number>('triggering');
+                await vi.advanceTimersByTimeAsync(0);
+
+                expect(first.terminate).toHaveBeenCalledOnce();
+                const replacement = MockWorker.instances[1];
+                expect(replacement.posted.map((entry) => entry.message.op).sort()).toEqual([
+                    'blocked',
+                    'triggering',
+                ]);
+                replyToOp(replacement, 'blocked', 2);
+                replyToOp(replacement, 'triggering', 3);
+
+                await expect(wedgedOutcome).resolves.toBeInstanceOf(WorkerDeadlineError);
+                await expect(blocked).resolves.toBe(2);
+                await expect(triggering).resolves.toBe(3);
+                expect(client.getStats()).toMatchObject({
+                    leaseReapCount: 1,
+                    lastLeaseReapOp: 'wedged',
+                });
+            } finally {
+                client.dispose();
+            }
+        });
+
+        it('recycles synchronously when the final posted op drains with barrier waiters', async () => {
+            vi.useFakeTimers();
+            const client = new MuPDFWorkerClient({
+                recycleHeapBytes: null,
+                recycleAfterDataOperations: 1,
+            });
+            try {
+                const thresholdOp = client.call<number>('threshold');
+                const first = MockWorker.instances[0];
+                first.replyToLast({ ok: true, result: 1, heapBytes: 64 });
+                await expect(thresholdOp).resolves.toBe(1);
+
+                const followup = client.call<number>('followup');
+                const blocked = client.call<number>('blocked');
+                expect(first.posted).toHaveLength(2);
+
+                replyToOp(first, 'followup', 2);
+                expect(first.terminate).toHaveBeenCalledOnce();
+                await expect(followup).resolves.toBe(2);
+                await Promise.resolve();
+
+                const replacement = MockWorker.instances[1];
+                replyToOp(replacement, 'blocked', 3);
+                await expect(blocked).resolves.toBe(3);
+                expect(client.getStats().proactiveRecycleCount).toBe(1);
+            } finally {
+                client.dispose();
+            }
+        });
+
+        it('reaps a startup wedge and lets original and triggering calls recover', async () => {
+            vi.useFakeTimers();
+            vi.setSystemTime(70_000);
+            MockWorker.dropNextConfigureAck = true;
+            const client = new MuPDFWorkerClient({ busyLeaseMs: 100 });
+            try {
+                const original = client.call<number>('original');
+                const first = MockWorker.instances[0];
+                expect(first.posted).toHaveLength(0);
+
+                vi.setSystemTime(70_100);
+                const triggering = client.call<number>('triggering');
+                await vi.advanceTimersByTimeAsync(0);
+
+                expect(first.terminate).toHaveBeenCalledOnce();
+                const replacement = MockWorker.instances[1];
+                replyToOp(replacement, 'original', 1);
+                replyToOp(replacement, 'triggering', 2);
+                await expect(original).resolves.toBe(1);
+                await expect(triggering).resolves.toBe(2);
+                expect(client.getStats()).toMatchObject({
+                    leaseReapCount: 1,
+                    lastLeaseReapOp: 'startup',
+                    lastLeaseReapAgeMs: 100,
+                });
+            } finally {
+                client.dispose();
+            }
+        });
+
+        it('propagates stale failure when the one startup retry also wedges', async () => {
+            vi.useFakeTimers();
+            vi.setSystemTime(80_000);
+            MockWorker.dropNextConfigureAck = true;
+            const client = new MuPDFWorkerClient({ busyLeaseMs: 100 });
+            try {
+                const original = client.call<number>('original');
+                const originalOutcome = original.catch((error) => error);
+
+                vi.setSystemTime(80_100);
+                MockWorker.dropNextConfigureAck = true;
+                const triggering = client.call<number>('triggering');
+                const triggeringOutcome = triggering.catch((error) => error);
+                await vi.advanceTimersByTimeAsync(0);
+                expect(MockWorker.instances[1].posted).toHaveLength(0);
+
+                await vi.advanceTimersByTimeAsync(1_100);
+                await expect(originalOutcome).resolves.toBeInstanceOf(StaleWorkerError);
+
+                const third = MockWorker.instances[2];
+                expect(third).toBeDefined();
+                replyToOp(third, 'triggering', 3);
+                await expect(triggeringOutcome).resolves.toBe(3);
+                expect(client.getStats()).toMatchObject({
+                    leaseReapCount: 2,
+                    lastLeaseReapOp: 'startup',
+                });
+            } finally {
+                client.dispose();
+            }
+        });
+
+        it('uses slot defaults, accepts an override, and allows disabling the lease', async () => {
+            vi.useFakeTimers();
+            vi.setSystemTime(100_000);
+            const hot = new MuPDFWorkerClient({ slotName: 'hot' });
+            const background = new MuPDFWorkerClient({ slotName: 'background' });
+            const hotOutcome = hot.call<number>('hot').catch((error) => error);
+            const backgroundOutcome = background.call<number>('background').catch((error) => error);
+            const hotWorker = MockWorker.instances[0];
+            const backgroundWorker = MockWorker.instances[1];
+
+            await vi.advanceTimersByTimeAsync(DEFAULT_BUSY_LEASE_MS_HOT + 1_000);
+            await expect(hotOutcome).resolves.toBeInstanceOf(WorkerDeadlineError);
+            expect(hotWorker.terminate).toHaveBeenCalledOnce();
+            expect(backgroundWorker.terminate).not.toHaveBeenCalled();
+
+            await vi.advanceTimersByTimeAsync(
+                DEFAULT_BUSY_LEASE_MS_BACKGROUND - DEFAULT_BUSY_LEASE_MS_HOT,
+            );
+            await expect(backgroundOutcome).resolves.toBeInstanceOf(WorkerDeadlineError);
+            expect(backgroundWorker.terminate).toHaveBeenCalledOnce();
+            hot.dispose();
+            background.dispose();
+
+            const overridden = new MuPDFWorkerClient({ busyLeaseMs: 100 });
+            const overrideOutcome = overridden.call<number>('override').catch((error) => error);
+            await vi.advanceTimersByTimeAsync(1_100);
+            await expect(overrideOutcome).resolves.toBeInstanceOf(WorkerDeadlineError);
+            overridden.dispose();
+
+            const disabled = new MuPDFWorkerClient({ busyLeaseMs: null });
+            const disabledOp = disabled.call<number>('disabled');
+            const disabledOutcome = disabledOp.catch((error) => error);
+            const disabledWorker = MockWorker.instances.at(-1)!;
+            await vi.advanceTimersByTimeAsync(DEFAULT_BUSY_LEASE_MS_BACKGROUND * 2);
+            expect(disabledWorker.terminate).not.toHaveBeenCalled();
+            expect(disabled.getStats().leaseReapCount).toBe(0);
+            disabled.dispose();
+            await expect(disabledOutcome).resolves.toBeInstanceOf(StaleWorkerError);
+        });
+
+        it('classifies deadline errors across bundle identities', () => {
+            expect(isWorkerDeadlineError(new WorkerDeadlineError())).toBe(true);
+            expect(isWorkerDeadlineError({ name: 'WorkerDeadlineError' })).toBe(true);
+            expect(isWorkerDeadlineError(new Error('different'))).toBe(false);
+        });
+
+        it('resetStats clears lease enforcement telemetry', async () => {
+            vi.useFakeTimers();
+            vi.setSystemTime(200_000);
+            const client = new MuPDFWorkerClient({ busyLeaseMs: 100 });
+            try {
+                const outcome = client.call<number>('wedged').catch((error) => error);
+                await vi.advanceTimersByTimeAsync(1_100);
+                await expect(outcome).resolves.toBeInstanceOf(WorkerDeadlineError);
+                expect(client.getStats()).toMatchObject({
+                    leaseReapCount: 1,
+                    lastLeaseReapTime: 201_100,
+                    lastLeaseReapOp: 'wedged',
+                    lastLeaseReapAgeMs: 1_100,
+                });
+
+                client.resetStats();
+                expect(client.getStats()).toMatchObject({
+                    leaseReapCount: 0,
+                    lastLeaseReapTime: null,
+                    lastLeaseReapOp: null,
+                    lastLeaseReapAgeMs: null,
+                });
+            } finally {
+                client.dispose();
+            }
+        });
+
+        it('keeps the hot lease above every hot-path default timeout', () => {
+            const hotPathDefaultsMs = [
+                DEFAULT_TIMEOUT_SECONDS,
+                DEFAULT_PAGES_TIMEOUT_SECONDS,
+                DEFAULT_SEARCH_TIMEOUT_SECONDS,
+                DEFAULT_IMAGES_TIMEOUT_SECONDS,
+                DEFAULT_ATTACHMENT_IMAGE_TIMEOUT_SECONDS,
+            ].map((seconds) => seconds * 1_000);
+
+            expect(DEFAULT_BUSY_LEASE_MS_HOT).toBeGreaterThan(
+                Math.max(...hotPathDefaultsMs),
+            );
+        });
+
+        it('keeps the hot lease above the interactive request ceiling', () => {
+            expect(DEFAULT_BUSY_LEASE_MS_HOT).toBeGreaterThan(
+                MAX_INTERACTIVE_PDF_TIMEOUT_SECONDS * 1_000,
+            );
+        });
+
+        it('keeps the background lease above the shared-extraction ceiling', () => {
+            expect(DEFAULT_BUSY_LEASE_MS_BACKGROUND).toBeGreaterThan(
+                MAX_PDF_TIMEOUT_SECONDS * 1_000,
+            );
+        });
     });
 
     it('rehydrates an ExtractionError from a structured failure reply', async () => {
@@ -1048,6 +1792,9 @@ describe('MuPDFWorkerClient', () => {
             const after = client.getStats();
             // __cacheStats must NOT pollute dispatchCounts.
             expect(after.dispatchCounts).toEqual(before.dispatchCounts);
+            expect(after.completedDataOperationsSinceSpawn).toBe(
+                before.completedDataOperationsSinceSpawn,
+            );
             // Verify the wire op is __cacheStats, not 'getCacheStats' or similar.
             const lastPosted = MockWorker.instances[0].posted[
                 MockWorker.instances[0].posted.length - 1
@@ -1244,6 +1991,14 @@ describe('MuPDFWorkerClient', () => {
             expect(hot).not.toBe(bg);
             expect((hot as any).name).toBe('hot');
             expect((bg as any).name).toBe('background');
+            expect(hot.getStats()).toMatchObject({
+                recycleHeapThresholdBytes: 512 * 1024 * 1024,
+                recycleDataOperationThreshold: 32,
+            });
+            expect(bg.getStats()).toMatchObject({
+                recycleHeapThresholdBytes: 512 * 1024 * 1024,
+                recycleDataOperationThreshold: null,
+            });
         });
 
         it('parks each instance in its own slot', () => {

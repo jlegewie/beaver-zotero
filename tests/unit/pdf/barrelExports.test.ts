@@ -63,6 +63,8 @@ describe("pdf barrel exports", () => {
     it("exposes the intended runtime API surface", () => {
         const expected = [
             "BeaverExtractor",
+            "DEFAULT_BUSY_LEASE_MS_BACKGROUND",
+            "DEFAULT_BUSY_LEASE_MS_HOT",
             "DEFAULT_EXTRACTION_SETTINGS",
             "DEFAULT_MARGINS",
             "DEFAULT_MARGIN_ZONE",
@@ -82,6 +84,7 @@ describe("pdf barrel exports", () => {
             "StaleWorkerError",
             "StyleAnalyzer",
             "WorkerAbortError",
+            "WorkerDeadlineError",
             "WorkerSpawnError",
             "bboxFromXYWH",
             "bboxHeight",
@@ -110,6 +113,7 @@ describe("pdf barrel exports", () => {
             "getMuPDFWorkerClient",
             "isConfigured",
             "isTransientWorkerError",
+            "isWorkerDeadlineError",
             "logColumnDetection",
             "logLineDetection",
             "logParagraphDetection",

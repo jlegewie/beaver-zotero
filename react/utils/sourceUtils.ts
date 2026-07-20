@@ -655,8 +655,8 @@ function extractHighlightedDiffText(
         .join('')
         .trim();
     selectText = stripEllipsis(selectText);
-    if (!selectText || selectText.length < 2) {
-        logger(`extractHighlightedDiffText(${targetType}): selectText too short after stripping`, 1);
+    if (!selectText) {
+        logger(`extractHighlightedDiffText(${targetType}): highlighted segments empty after stripping`, 1);
         return null;
     }
 
@@ -680,6 +680,25 @@ function extractHighlightedDiffText(
         if (combinedIdx !== -1) {
             selectOffset = combinedIdx + ctx.length;
         }
+    }
+
+    // A tiny highlight (e.g. the single differing digit of "200" → "250") is
+    // a poor search/selection target on its own. Expand it to the word that
+    // contains the change so downstream matching can still locate the edit —
+    // including when the surrounding sentence has drifted and only the
+    // changed word survives in the note.
+    if (selectText.length < 2) {
+        if (selectOffset === -1) {
+            logger(`extractHighlightedDiffText(${targetType}): selectText too short and not locatable in line`, 1);
+            return null;
+        }
+        let wordStart = selectOffset;
+        while (wordStart > 0 && !/\s/.test(fullLineText[wordStart - 1]) && selectOffset - wordStart < 30) wordStart--;
+        let wordEnd = selectOffset + selectText.length;
+        while (wordEnd < fullLineText.length && !/\s/.test(fullLineText[wordEnd]) && wordEnd - wordStart < 60) wordEnd++;
+        selectText = fullLineText.slice(wordStart, wordEnd);
+        selectOffset = wordStart;
+        logger(`extractHighlightedDiffText(${targetType}): expanded short highlight to word "${selectText}"`, 1);
     }
 
     // Build searchText from the full line, truncated to a window centered

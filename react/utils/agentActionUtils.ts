@@ -5,9 +5,9 @@
 import { Setter } from 'jotai';
 import { AgentAction, isAnnotationAgentAction, isZoteroNoteAgentAction, isCreateNoteAgentAction, hasAppliedZoteroItem, ackAgentActionsAtom, threadAgentActionsAtom } from '../agents/agentActions';
 import { NoteProposedData } from '../types/agentActions/base';
-import { ModelMessage } from '../agents/types';
+import { AgentRun, ModelMessage } from '../agents/types';
 import { ZoteroItemReference } from '../types/zotero';
-import { activeRunAtom } from '../agents/atoms';
+import { activeRunAtom, threadRunsAtom } from '../agents/atoms';
 import { loadFullItemDataWithAllTypes, isLibraryEditable } from '../../src/utils/zoteroUtils';
 import { getLibraryByIdOrName, getCollectionByIdOrName, isLibrarySearchable } from '../../src/services/agentDataProvider/utils';
 import { getPref } from '../../src/utils/prefs';
@@ -279,12 +279,19 @@ export function extractNoteBlocksFromMessages(messages: ModelMessage[]): ParsedN
 }
 
 /**
- * Extract note blocks from the active run (reads from activeRunAtom).
- * Used by autoCreateNoteAgentActions during onRunComplete.
+ * Extract note blocks from the run, preferring the active run and falling
+ * back to thread history: the socket's onClose handler can archive a
+ * completed run into threadRunsAtom (and clear activeRunAtom) while
+ * onRunComplete post-processing is still awaiting, so the run this id
+ * refers to may have moved by the time auto note creation runs.
  */
 function extractNoteBlocksFromRun(runId: string): ParsedNoteBlock[] {
-    const run = store.get(activeRunAtom);
-    if (!run || run.id !== runId) return [];
+    const active = store.get(activeRunAtom);
+    const run =
+        active?.id === runId
+            ? active
+            : store.get(threadRunsAtom).find((r: AgentRun) => r.id === runId);
+    if (!run) return [];
     return extractNoteBlocksFromMessages(run.model_messages);
 }
 

@@ -6,6 +6,7 @@ import {
     findResumeChainRoot,
     findRunForResume,
     hasOnlyThinkingParts,
+    lingeringCompletedRun,
     resolveErrorRunId,
     toRunError,
 } from '../../../react/agents/runResumeHelpers';
@@ -182,6 +183,57 @@ describe('runResumeHelpers', () => {
                 },
             ];
             expect(hasOnlyThinkingParts(run)).toBe(true);
+        });
+    });
+
+    describe('lingeringCompletedRun', () => {
+        it('returns null for a null active run', () => {
+            expect(lingeringCompletedRun(null)).toBeNull();
+        });
+
+        it('returns null for a run still in progress', () => {
+            expect(lingeringCompletedRun(makeRun('run-1', 'in_progress'))).toBeNull();
+        });
+
+        it('returns null for an errored run', () => {
+            expect(lingeringCompletedRun(makeRun('run-1', 'error'))).toBeNull();
+        });
+
+        it('returns null for a canceled run', () => {
+            expect(lingeringCompletedRun(makeRun('run-1', 'canceled'))).toBeNull();
+        });
+
+        it('returns null for a run awaiting deferred approval', () => {
+            expect(lingeringCompletedRun(makeRun('run-1', 'awaiting_deferred'))).toBeNull();
+        });
+
+        it('archives a completed run and backfills completed_at when missing', () => {
+            const run = makeRun('run-1', 'completed');
+            expect(run.completed_at).toBeUndefined();
+
+            const finalized = lingeringCompletedRun(run);
+
+            expect(finalized).not.toBeNull();
+            expect(finalized!.id).toBe('run-1');
+            expect(finalized!.status).toBe('completed');
+            expect(typeof finalized!.completed_at).toBe('string');
+            expect(finalized!.completed_at).not.toBe('');
+        });
+
+        it('preserves an existing completed_at on a completed run', () => {
+            const run = makeRun('run-1', 'completed');
+            run.completed_at = '2020-01-01T00:00:00.000Z';
+
+            const finalized = lingeringCompletedRun(run);
+
+            expect(finalized!.completed_at).toBe('2020-01-01T00:00:00.000Z');
+        });
+
+        it('keeps every other field of the archived run unchanged', () => {
+            const run = makeRun('run-1', 'completed');
+            run.completed_at = '2020-01-01T00:00:00.000Z';
+
+            expect(lingeringCompletedRun(run)).toEqual(run);
         });
     });
 

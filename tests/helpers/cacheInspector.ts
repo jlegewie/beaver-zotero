@@ -752,6 +752,21 @@ export interface WorkerStatsSnapshot {
     dispatchCounts: Record<string, number>;
     lastSpawnTime: number | null;
     idleTimerArmed: boolean;
+    workerHeapBytes: number | null;
+    peakWorkerHeapBytes: number | null;
+    completedDataOperationsSinceSpawn: number;
+    recycleHeapThresholdBytes: number | null;
+    recycleDataOperationThreshold: number | null;
+    proactiveRecyclePending: boolean;
+    proactiveRecycleCount: number;
+    lastProactiveRecycleReason: "heap_limit" | "data_operation_limit" | null;
+    lastProactiveRecycleTime: number | null;
+    lastProactiveRecycleHeapBytes: number | null;
+    lastProactiveRecycleDataOperations: number | null;
+    leaseReapCount: number;
+    lastLeaseReapTime: number | null;
+    lastLeaseReapOp: string | null;
+    lastLeaseReapAgeMs: number | null;
 }
 
 export interface WorkerStatsResponse {

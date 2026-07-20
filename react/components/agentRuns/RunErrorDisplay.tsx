@@ -14,6 +14,7 @@ import { openPreferencesWindow } from '../../../src/ui/openPreferencesWindow';
 interface RunError {
     type: string;
     message: string;
+    user_facing_details?: string;
     details?: string;
     is_retryable?: boolean;
     has_beaver_fallback?: boolean;
@@ -201,8 +202,21 @@ export const RunErrorDisplay: React.FC<RunErrorDisplayProps> = ({ runId, error, 
                 {isExpanded && (
                     <div className="p-3" id={`run-error-content-${runId}`}>
                         <div className="display-flex flex-col gap-4">
-                            <div className="text-base font-color-red">
-                                {parseTextWithLinksAndNewlines(displayMessage, "text-link-red")}
+                            <div className="display-flex flex-col gap-1">
+                                <div className="text-base font-color-red">
+                                    {parseTextWithLinksAndNewlines(displayMessage, "text-link-red")}
+                                </div>
+                                {error.user_facing_details && (
+                                    <div
+                                        className="text-base font-color-red user-select-text"
+                                        style={{ opacity: 0.75 }}
+                                    >
+                                        {parseTextWithLinksAndNewlines(
+                                            `${error.type === 'connection_error' ? 'Connection details' : 'Reason'}: ${error.user_facing_details}`,
+                                            "text-link-red",
+                                        )}
+                                    </div>
+                                )}
                             </div>
 
                             <div className="display-flex flex-row gap-3 items-center">
