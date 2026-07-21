@@ -27,6 +27,7 @@ import { dismissHighTokenWarningForThreadAtom, dismissedHighTokenWarningByThread
 import { getLastRequestInputTokens } from '../../utils/runUsage';
 import { getPref, setPref } from '../../../src/utils/prefs';
 import { LexicalEditorInput, LexicalEditorInputHandle, SlashCommandDescriptor } from './lexical/LexicalEditorInput';
+import { isImeKeyEvent } from '../../utils/ime';
 import { useSlashMenu } from '../../hooks/useSlashMenu';
 import { sendComposedMessageAtom } from '../../atoms/actions';
 
@@ -314,6 +315,9 @@ const InputArea: React.FC<InputAreaProps> = ({
     ]);
 
     const handleEditorKeyDown = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
+        // Keys owned by an active IME composition must not drive menus or
+        // shortcuts (and must not be preventDefault'ed away from the IME).
+        if (isImeKeyEvent(e.nativeEvent)) return;
         if (handleSlashMenuKeyDown(e)) return;
         if ((e.key === 'n' || e.key === 'N') && ((Zotero.isMac && e.metaKey) || (!Zotero.isMac && e.ctrlKey))) {
             e.preventDefault();
