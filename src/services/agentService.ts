@@ -38,6 +38,7 @@ import {
 } from './preparedJsonMessage';
 import {
     baselineConnectionEvidence,
+    connectRecoveryAuthFields,
     ConnectRecoveryAuthFields,
     ConnectionFailureEvidence,
     ConnectionFailureStage,
@@ -239,6 +240,7 @@ export class AgentService {
         zoteroInstance?: ZoteroInstanceWire,
         connectRecovery?: ConnectRecoveryAuthFields,
     ): Promise<void> {
+        const connectTelemetry = connectRecovery ?? connectRecoveryAuthFields(1, null);
         // Guard: Don't allow overlapping connect attempts
         if (this.connecting) {
             logger('AgentService: connect() already in progress, ignoring duplicate call', 1);
@@ -304,7 +306,7 @@ export class AgentService {
                     clientType,
                     clientFeatures,
                     zoteroInstance,
-                    connectRecovery,
+                    connectTelemetry,
                 ),
                 connectTimeout,
             ]);
@@ -336,7 +338,7 @@ export class AgentService {
         clientType?: string,
         clientFeatures?: string[],
         zoteroInstance?: ZoteroInstanceWire,
-        connectRecovery?: ConnectRecoveryAuthFields,
+        connectTelemetry?: ConnectRecoveryAuthFields,
     ): Promise<void> {
         let token: string;
         try {
@@ -360,14 +362,16 @@ export class AgentService {
         // Auth message includes token, frontend version, and — when the
         // caller supplies them — the client identity, declared features, and
         // optional connect-recovery telemetry after client-side auto-retry.
-        const authMessage: WSAuthMessage = {
+        const resolvedConnectTelemetry = connectTelemetry ?? connectRecoveryAuthFields(1, null);
+        const { connect_started_at_ms: connectStartedAtMs, ...wireTelemetry } = resolvedConnectTelemetry;
+        const authMessageBase: Omit<WSAuthMessage, 'connect_latency_ms'> = {
             type: 'auth',
             token,
             frontend_version: frontendVersion,
             ...(clientType ? { client_type: clientType } : {}),
             ...(clientFeatures ? { client_features: clientFeatures } : {}),
             ...(zoteroInstance ? { zotero_instance: zoteroInstance } : {}),
-            ...(connectRecovery ?? {}),
+            ...wireTelemetry,
         };
 
         // Connect with clean URL (no sensitive data in params)
@@ -446,6 +450,13 @@ export class AgentService {
                     // Use captured wsInstance instead of this.ws to handle case where
                     // connect() is called again during the delay (which would null this.ws)
                     if (wsInstance.readyState === WebSocket.OPEN) {
+                        const authMessage: WSAuthMessage = {
+                            ...authMessageBase,
+                            connect_latency_ms: Math.max(
+                                0,
+                                Date.now() - connectStartedAtMs,
+                            ),
+                        };
                         wsInstance.send(JSON.stringify(authMessage));
                         attempt.stage = 'awaiting_ready';
                         logger('AgentService: Auth message sent', 1);

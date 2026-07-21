@@ -1677,6 +1677,7 @@ async function executeWSRequest(
     const callbacks = createWSCallbacks(set);
     let lastFailure: unknown = null;
     let attemptsMade = 0;
+    const connectStartedAtMs = Date.now();
 
     for (let attempt = 1; attempt <= CONNECT_MAX_ATTEMPTS; attempt++) {
         attemptsMade = attempt;
@@ -1689,6 +1690,7 @@ async function executeWSRequest(
             const recovery = connectRecoveryAuthFields(
                 attemptsMade,
                 lastFailure instanceof AgentConnectionError ? lastFailure.evidence : null,
+                connectStartedAtMs,
             );
             // connect() applies its own attempt-scoped backstop timeout, so this
             // await cannot hang forever.

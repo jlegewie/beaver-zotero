@@ -470,13 +470,17 @@ describe('isRetryablePreReadyConnectFailure', () => {
 });
 
 describe('connectRecoveryAuthFields', () => {
-    it('omits fields on first-try success', () => {
-        expect(connectRecoveryAuthFields(1, opening1006)).toBeUndefined();
+    it('includes attempt count and start time on first-try success', () => {
+        expect(connectRecoveryAuthFields(1, null, 1_000)).toEqual({
+            connect_attempts: 1,
+            connect_started_at_ms: 1_000,
+        });
     });
 
     it('includes attempt count and last failure after a retry', () => {
-        expect(connectRecoveryAuthFields(2, opening1006)).toEqual({
+        expect(connectRecoveryAuthFields(2, opening1006, 1_000)).toEqual({
             connect_attempts: 2,
+            connect_started_at_ms: 1_000,
             last_connect_failure: {
                 stage: 'opening',
                 close_code: 1006,
@@ -486,8 +490,9 @@ describe('connectRecoveryAuthFields', () => {
     });
 
     it('includes attempt count even when evidence is missing', () => {
-        expect(connectRecoveryAuthFields(3, null)).toEqual({
+        expect(connectRecoveryAuthFields(3, null, 1_000)).toEqual({
             connect_attempts: 3,
+            connect_started_at_ms: 1_000,
         });
     });
 });

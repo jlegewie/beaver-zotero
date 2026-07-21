@@ -1683,10 +1683,14 @@ export interface WSAuthMessage {
     wake_instance_id?: string;
     /**
      * Total connect attempts for this handshake including the successful one.
-     * Present only when the client auto-retried a transient pre-ready failure
-     * (`> 1`). Absent on first-try success.
+     * New clients always send this, including `1` on first-try success.
      */
-    connect_attempts?: number;
+    connect_attempts: number;
+    /**
+     * Milliseconds from the start of the initial connection attempt until auth
+     * was sent on this socket. Includes failed attempts and retry backoff.
+     */
+    connect_latency_ms: number;
     /** Compact summary of the failed attempt that triggered auto-retry. */
     last_connect_failure?: {
         stage: string;

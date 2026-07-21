@@ -103,12 +103,13 @@ export function isRetryablePreReadyConnectFailure(
 }
 
 /**
- * Compact wire fields attached to the WebSocket auth message when a connect
- * succeeds after client-side auto-retry. Lets the backend measure recovered
- * flakes without a separate diagnostics POST.
+ * Connect telemetry prepared by the retry orchestrator for the WebSocket auth
+ * message. `connect_started_at_ms` is client-only input used by AgentService to
+ * calculate the wire-level latency when it actually sends auth.
  */
 export interface ConnectRecoveryAuthFields {
     connect_attempts: number;
+    connect_started_at_ms: number;
     last_connect_failure?: {
         stage: ConnectionFailureStage;
         close_code: number | null;
@@ -117,16 +118,17 @@ export interface ConnectRecoveryAuthFields {
 }
 
 /**
- * Build auth-message recovery fields for a successful connect that followed
- * one or more auto-retries. Returns undefined on first-try success.
+ * Build auth-message connection telemetry. Attempt count and timing are always
+ * included; last-failure evidence is only present after a retry.
  */
 export function connectRecoveryAuthFields(
     attemptsMade: number,
     evidence: ConnectionFailureEvidence | null | undefined,
-): ConnectRecoveryAuthFields | undefined {
-    if (attemptsMade <= 1) return undefined;
+    connectStartedAtMs: number = Date.now(),
+): ConnectRecoveryAuthFields {
     return {
         connect_attempts: attemptsMade,
+        connect_started_at_ms: connectStartedAtMs,
         ...(evidence
             ? {
                 last_connect_failure: {
