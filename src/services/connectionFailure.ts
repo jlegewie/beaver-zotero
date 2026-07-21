@@ -65,6 +65,82 @@ export function baselineConnectionEvidence(
     };
 }
 
+/**
+ * 1005/1006 are synthetic absence-of-close-frame codes: the transport dropped
+ * without either side sending a close frame. They mark abrupt transport loss
+ * (network interruption, proxy/DPI kill, instance scale-down) as opposed to a
+ * deliberate close or an application-level rejection.
+ */
+export function isAbruptTransportCloseCode(code: number | null): boolean {
+    return code === 1005 || code === 1006;
+}
+
+/**
+ * Whether a failed connect attempt is worth retrying automatically.
+ *
+ * Only pre-`ready` transport failures qualify: an abrupt transport drop
+ * (1005/1006) while opening, authenticating, or awaiting ready, or a connect
+ * attempt that timed out after the socket started opening. These are the
+ * failures that a cold-starting instance, a scale event, or a momentary
+ * network block produce, and they routinely succeed on a quick retry.
+ *
+ * Auth-stage failures (the session lookup itself), policy rejections (1008),
+ * and application-level errors are excluded — they will not fix themselves
+ * and should surface immediately.
+ */
+export function isRetryablePreReadyConnectFailure(
+    evidence: ConnectionFailureEvidence,
+): boolean {
+    if (
+        evidence.stage !== 'opening' &&
+        evidence.stage !== 'authenticating' &&
+        evidence.stage !== 'awaiting_ready'
+    ) {
+        return false;
+    }
+    if (evidence.timedOut) return true;
+    return isAbruptTransportCloseCode(evidence.closeCode);
+}
+
+/**
+ * Connect telemetry prepared by the retry orchestrator for the WebSocket auth
+ * message. `connect_started_at_ms` is client-only input used by AgentService to
+ * calculate the wire-level latency when it actually sends auth.
+ */
+export interface ConnectRecoveryAuthFields {
+    connect_attempts: number;
+    connect_started_at_ms: number;
+    last_connect_failure?: {
+        stage: ConnectionFailureStage;
+        close_code: number | null;
+        timed_out: boolean;
+    };
+}
+
+/**
+ * Build auth-message connection telemetry. Attempt count and timing are always
+ * included; last-failure evidence is only present after a retry.
+ */
+export function connectRecoveryAuthFields(
+    attemptsMade: number,
+    evidence: ConnectionFailureEvidence | null | undefined,
+    connectStartedAtMs: number = Date.now(),
+): ConnectRecoveryAuthFields {
+    return {
+        connect_attempts: attemptsMade,
+        connect_started_at_ms: connectStartedAtMs,
+        ...(evidence
+            ? {
+                last_connect_failure: {
+                    stage: evidence.stage,
+                    close_code: evidence.closeCode,
+                    timed_out: evidence.timedOut,
+                },
+            }
+            : {}),
+    };
+}
+
 export interface ConnectionDiagnosticResult {
     /** Whether the post-failure HTTPS request reached Beaver and returned 2xx. */
     apiReachable: boolean;
