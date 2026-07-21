@@ -12,6 +12,7 @@ import {
     isLibraryAccessReadyAtom,
     searchableLibraryIdsAtom,
 } from '../atoms/profile';
+import { isBeaverWindowOpenAtom, isSidebarVisibleAtom } from '../atoms/ui';
 import { BeaverTemporaryAnnotations, ZoteroReader } from '../utils/annotationUtils';
 import { store } from '../store';
 import { threadAgentActionsAtom, getZoteroItemReferenceFromAgentAction, hasAppliedBulkAnnotations, AgentAction } from '../agents/agentActions';
@@ -26,12 +27,14 @@ import type { CreatedAnnotationResult } from '../types/agentActions/createAnnota
 let moduleReaderTabNotifierId: string | null = null;
 
 /**
- * Manages text selection listening for the currently active Zotero reader tab.
- * This hook should only be mounted when the reader sidebar is visible.
- * It initializes selection state, listens for changes, and handles switching
- * between reader tabs.
+ * Manages the current reader attachment and text selection for the active
+ * Zotero reader tab. It initializes selection state, listens for changes, and
+ * handles switching between reader tabs.
  */
 export function useReaderTabSelection() {
+    const isSidebarVisible = useAtomValue(isSidebarVisibleAtom);
+    const isBeaverWindowOpen = useAtomValue(isBeaverWindowOpenAtom);
+    const isBeaverVisible = isSidebarVisible || isBeaverWindowOpen;
     const isAuthenticated = useAtomValue(isAuthenticatedAtom);
     const hasAuthorized = useAtomValue(hasAuthorizedAccessAtom);
     const isDeviceAuthorized = useAtomValue(isDeviceAuthorizedAtom);
@@ -171,6 +174,7 @@ export function useReaderTabSelection() {
 
 
     useEffect(() => {
+        if (!isBeaverVisible) return;
         if (!isAuthenticated || !hasAuthorized || !isDeviceAuthorized || !isLibraryAccessReady) return;
         logger("useReaderTabSelection: Hook mounted");
 
@@ -183,8 +187,13 @@ export function useReaderTabSelection() {
                 logger(`useReaderTabSelection: Initial reader detected (itemID: ${initialReader.itemID})`);
                 if (isMounted) await setupReader(initialReader);
             } else {
+                // The active tab is not a reader (library or note tab) — make sure
+                // no stale reader context is left attached to the composer.
                 logger("useReaderTabSelection: No active reader on mount.");
-                if (isMounted) setReaderTextSelection(null); // Ensure selection is null if no reader
+                if (isMounted) {
+                    setReaderTextSelection(null);
+                    await updateReaderAttachment();
+                }
             }
         };
         initializeReader().catch(error => {
@@ -334,6 +343,6 @@ export function useReaderTabSelection() {
                 logger(`useReaderTabSelection: Error cleaning up temporary annotations on unmount: ${error}`);
             });
         };
-    }, [setupReader, setReaderTextSelection, updateReaderAttachment, setReaderAttachment, mainWindow, waitForInternalReader, isAuthenticated, isDeviceAuthorized, hasAuthorized, isLibraryAccessReady, searchableLibraryIdsKey]);
+    }, [setupReader, setReaderTextSelection, updateReaderAttachment, setReaderAttachment, mainWindow, waitForInternalReader, isBeaverVisible, isAuthenticated, isDeviceAuthorized, hasAuthorized, isLibraryAccessReady, searchableLibraryIdsKey]);
 
 }

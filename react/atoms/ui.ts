@@ -22,6 +22,12 @@ export const isSidebarVisibleAtom = atom(
     }
 );
 
+/**
+ * Whether the separate Beaver window is open. Set by `WindowSidebar` when its
+ * React root mounts/unmounts (the window's load/unload handlers drive that).A
+ */
+export const isBeaverWindowOpenAtom = atom(false);
+
 export const isLibraryTabAtom = atom(false);
 export const selectedZoteroTabIdAtom = atom<string | null>(null);
 export const isWebSearchEnabledAtom = atom(false);
