@@ -102,6 +102,43 @@ export function isRetryablePreReadyConnectFailure(
     return isAbruptTransportCloseCode(evidence.closeCode);
 }
 
+/**
+ * Compact wire fields attached to the WebSocket auth message when a connect
+ * succeeds after client-side auto-retry. Lets the backend measure recovered
+ * flakes without a separate diagnostics POST.
+ */
+export interface ConnectRecoveryAuthFields {
+    connect_attempts: number;
+    last_connect_failure?: {
+        stage: ConnectionFailureStage;
+        close_code: number | null;
+        timed_out: boolean;
+    };
+}
+
+/**
+ * Build auth-message recovery fields for a successful connect that followed
+ * one or more auto-retries. Returns undefined on first-try success.
+ */
+export function connectRecoveryAuthFields(
+    attemptsMade: number,
+    evidence: ConnectionFailureEvidence | null | undefined,
+): ConnectRecoveryAuthFields | undefined {
+    if (attemptsMade <= 1) return undefined;
+    return {
+        connect_attempts: attemptsMade,
+        ...(evidence
+            ? {
+                last_connect_failure: {
+                    stage: evidence.stage,
+                    close_code: evidence.closeCode,
+                    timed_out: evidence.timedOut,
+                },
+            }
+            : {}),
+    };
+}
+
 export interface ConnectionDiagnosticResult {
     /** Whether the post-failure HTTPS request reached Beaver and returned 2xx. */
     apiReachable: boolean;

@@ -38,6 +38,7 @@ import {
 } from './preparedJsonMessage';
 import {
     baselineConnectionEvidence,
+    ConnectRecoveryAuthFields,
     ConnectionFailureEvidence,
     ConnectionFailureStage,
 } from './connectionFailure';
@@ -229,7 +230,15 @@ export class AgentService {
      * @param callbacks Event callbacks
      * @returns Promise that resolves when connection is established and ready, rejects on error
      */
-    async connect(request: AgentRunRequest, callbacks: WSCallbacks, frontendVersion?: string, clientType?: string, clientFeatures?: string[], zoteroInstance?: ZoteroInstanceWire): Promise<void> {
+    async connect(
+        request: AgentRunRequest,
+        callbacks: WSCallbacks,
+        frontendVersion?: string,
+        clientType?: string,
+        clientFeatures?: string[],
+        zoteroInstance?: ZoteroInstanceWire,
+        connectRecovery?: ConnectRecoveryAuthFields,
+    ): Promise<void> {
         // Guard: Don't allow overlapping connect attempts
         if (this.connecting) {
             logger('AgentService: connect() already in progress, ignoring duplicate call', 1);
@@ -286,7 +295,17 @@ export class AgentService {
 
         try {
             await Promise.race([
-                this.establishConnection(request, callbacks, setupConnectionId, attempt, frontendVersion, clientType, clientFeatures, zoteroInstance),
+                this.establishConnection(
+                    request,
+                    callbacks,
+                    setupConnectionId,
+                    attempt,
+                    frontendVersion,
+                    clientType,
+                    clientFeatures,
+                    zoteroInstance,
+                    connectRecovery,
+                ),
                 connectTimeout,
             ]);
         } catch (error) {
@@ -317,6 +336,7 @@ export class AgentService {
         clientType?: string,
         clientFeatures?: string[],
         zoteroInstance?: ZoteroInstanceWire,
+        connectRecovery?: ConnectRecoveryAuthFields,
     ): Promise<void> {
         let token: string;
         try {
@@ -338,7 +358,8 @@ export class AgentService {
         }
 
         // Auth message includes token, frontend version, and — when the
-        // caller supplies them — the client identity and declared features.
+        // caller supplies them — the client identity, declared features, and
+        // optional connect-recovery telemetry after client-side auto-retry.
         const authMessage: WSAuthMessage = {
             type: 'auth',
             token,
@@ -346,6 +367,7 @@ export class AgentService {
             ...(clientType ? { client_type: clientType } : {}),
             ...(clientFeatures ? { client_features: clientFeatures } : {}),
             ...(zoteroInstance ? { zotero_instance: zoteroInstance } : {}),
+            ...(connectRecovery ?? {}),
         };
 
         // Connect with clean URL (no sensitive data in params)

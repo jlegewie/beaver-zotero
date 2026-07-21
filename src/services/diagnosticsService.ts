@@ -43,8 +43,8 @@ export interface ConnectionFailureReport {
     run_id?: string | null;
     /**
      * Total connect attempts made for the request before this failure was
-     * surfaced (1 = no auto-retry happened). Lets the backend measure how much
-     * automatic retrying recovers versus how many failures are hard.
+     * surfaced (1 = no auto-retry happened). Recovered connects that succeed
+     * after retry report via the WebSocket auth handshake instead.
      */
     connect_attempts?: number | null;
 }

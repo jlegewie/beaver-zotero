@@ -1681,6 +1681,18 @@ export interface WSAuthMessage {
     /** Provider-mode handshakes only: echo of the originating backend
      * `instance_id` from the wake broadcast (multi-instance routing seam). */
     wake_instance_id?: string;
+    /**
+     * Total connect attempts for this handshake including the successful one.
+     * Present only when the client auto-retried a transient pre-ready failure
+     * (`> 1`). Absent on first-try success.
+     */
+    connect_attempts?: number;
+    /** Compact summary of the failed attempt that triggered auto-retry. */
+    last_connect_failure?: {
+        stage: string;
+        close_code?: number | null;
+        timed_out?: boolean;
+    };
 }
 
 /**

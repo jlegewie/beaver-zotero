@@ -13,6 +13,7 @@ import { reportConnectionFailure } from '../../src/services/diagnosticsService';
 import {
     baselineConnectionEvidence,
     ConnectionFailureEvidence,
+    connectRecoveryAuthFields,
     isRetryablePreReadyConnectFailure,
     presentConnectionFailure,
 } from '../../src/services/connectionFailure';
@@ -1663,8 +1664,9 @@ const CONNECT_RETRY_BACKOFF_MS = [500, 2000];
  * retried automatically with jittered backoff before anything is surfaced to
  * the user: a cold-starting instance or momentary network block routinely
  * succeeds on the next attempt. Auth and application-level failures are never
- * retried. One error surface and one diagnostics report (carrying the attempt
- * count) happen only after the final attempt fails.
+ * retried. A recovered connect reports attempt count on the auth handshake;
+ * one error surface and one diagnostics report (carrying the attempt count)
+ * happen only after the final attempt fails.
  */
 async function executeWSRequest(
     run: AgentRun,
@@ -1684,11 +1686,21 @@ async function executeWSRequest(
             set(isWSReadyAtom, false);
             const frontendVersion = Zotero.Beaver.pluginVersion || '';
             const zoteroInstance = buildZoteroInstanceWire(get(searchableLibraryIdsAtom));
+            const recovery = connectRecoveryAuthFields(
+                attemptsMade,
+                lastFailure instanceof AgentConnectionError ? lastFailure.evidence : null,
+            );
             // connect() applies its own attempt-scoped backstop timeout, so this
             // await cannot hang forever.
-            await agentService.connect(request, callbacks, frontendVersion, ZOTERO_PLUGIN_CLIENT_TYPE, ZOTERO_PLUGIN_FEATURES, {
-                ...zoteroInstance,
-            });
+            await agentService.connect(
+                request,
+                callbacks,
+                frontendVersion,
+                ZOTERO_PLUGIN_CLIENT_TYPE,
+                ZOTERO_PLUGIN_FEATURES,
+                { ...zoteroInstance },
+                recovery,
+            );
             logger('WS connect settled');
             set(wsReconnectingAtom, null);
             return;
