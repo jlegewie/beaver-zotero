@@ -34,6 +34,8 @@ import {
     isWorkerDeadlineError,
     __setIdleTimeoutForTest,
     __resetIdleTimeoutForTest,
+    __setModuleWindowForTest,
+    __resetModuleWindowForTest,
 } from '../../../src/beaver-extract/MuPDFWorkerClient';
 import {
     DEFAULT_ATTACHMENT_IMAGE_TIMEOUT_SECONDS,
@@ -2052,6 +2054,98 @@ describe('MuPDFWorkerClient', () => {
             await disposeMuPDFWorker('hot', { force: true });
             expect(stale.dispose).toHaveBeenCalledTimes(2);
             expect((globalThis as any).Zotero.__beaverMuPDFWorkerClient_hot).toBeUndefined();
+        });
+    });
+
+    describe('realm-safe timers and creator-realm self-heal', () => {
+        afterEach(() => {
+            __resetModuleWindowForTest();
+        });
+
+        it('schedules internal watchdogs through config-injected timers', async () => {
+            const scheduledDelays: number[] = [];
+            const cleared: unknown[] = [];
+            let nextTimerId = 1;
+            configurePDFForTests({
+                slotHost: (globalThis as any).Zotero,
+                getWorkerHost: () => ({ Worker: MockWorker }) as unknown as Window,
+                timers: {
+                    setTimeout: (_callback, delayMs) => {
+                        scheduledDelays.push(delayMs);
+                        return nextTimerId++;
+                    },
+                    clearTimeout: (id) => cleared.push(id),
+                },
+            });
+
+            const client = getMuPDFWorkerClient();
+            const buf = new Uint8Array([0x25, 0x50, 0x44, 0x46]); // "%PDF"
+            const promise = client.getPageCount(buf);
+            const worker = MockWorker.instances[0];
+
+            // The configure-handshake timeout and the busy-lease watchdog
+            // both arm through the injected scheduler.
+            expect(scheduledDelays).toContain(15000);
+            expect(
+                scheduledDelays.some((ms) => ms > DEFAULT_BUSY_LEASE_MS_HOT),
+            ).toBe(true);
+            // The synchronous configure ack cancels its timeout through the
+            // same injected implementation.
+            expect(cleared.length).toBeGreaterThan(0);
+
+            worker.replyToLast({ ok: true, result: { count: 3 } });
+            await expect(promise).resolves.toBe(3);
+        });
+
+        it('replaces the shared client when its creating window is gone', async () => {
+            const creatorWindow = { closed: false } as unknown as Window;
+            __setModuleWindowForTest(creatorWindow);
+            const first = getMuPDFWorkerClient();
+            expect(first.createdFromWindow).toBe(creatorWindow);
+            expect(getMuPDFWorkerClient()).toBe(first);
+
+            // Leave an operation in flight so replacement must tear the old
+            // client down, not merely drop the slot reference.
+            const buf = new Uint8Array([0x25, 0x50, 0x44, 0x46]); // "%PDF"
+            const inFlight = first.getPageCount(buf);
+            const firstWorker = MockWorker.instances[0];
+            expect(firstWorker).toBeDefined();
+
+            // Close the creating window; the next lookup happens from a
+            // reopened window's bundle and must replace the stale client.
+            (creatorWindow as { closed: boolean }).closed = true;
+            const reopenedWindow = { closed: false } as unknown as Window;
+            __setModuleWindowForTest(reopenedWindow);
+
+            const second = getMuPDFWorkerClient();
+            expect(second).not.toBe(first);
+            expect(second.createdFromWindow).toBe(reopenedWindow);
+            expect(getExistingMuPDFWorkerClient()).toBe(second);
+            // Stable once the creating window is live again.
+            expect(getMuPDFWorkerClient()).toBe(second);
+
+            // The old client was disposed: its worker terminated and its
+            // in-flight op rejected (no silent orphan).
+            expect(firstWorker.terminate).toHaveBeenCalled();
+            await expect(inFlight).rejects.toThrow(StaleWorkerError);
+        });
+
+        it('replaces a slot instance that predates creator-realm tracking', () => {
+            const legacy = { dispose: vi.fn() };
+            (globalThis as any).Zotero.__beaverMuPDFWorkerClient_hot = legacy;
+
+            const replacement = getMuPDFWorkerClient();
+            expect(replacement).not.toBe(legacy);
+            expect(legacy.dispose).toHaveBeenCalledOnce();
+            expect(getExistingMuPDFWorkerClient()).toBe(replacement);
+        });
+
+        it('keeps a client with no creating window (non-window realm)', () => {
+            __setModuleWindowForTest(null);
+            const client = getMuPDFWorkerClient();
+            expect(client.createdFromWindow).toBeNull();
+            expect(client.isCreatorRealmDead).toBe(false);
+            expect(getMuPDFWorkerClient()).toBe(client);
         });
     });
 });

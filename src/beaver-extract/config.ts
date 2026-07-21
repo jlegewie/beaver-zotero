@@ -33,6 +33,29 @@ export interface PDFWorkerClientSlot {
 export type PDFWorkerSlotName = "hot" | "background";
 
 /**
+ * Timer functions used for the package's internal watchdogs (idle reap,
+ * busy-age lease, configure-handshake timeout, recycle scheduling).
+ *
+ * When the host embeds this package in a window-scoped bundle, bare
+ * `setTimeout` binds timers to that window's lifetime. A shared client
+ * instance can outlive its creating window (the cross-bundle slots live on
+ * a host global), and timers armed via a closed window's `setTimeout`
+ * silently never fire — leaving every watchdog inert while the client
+ * otherwise keeps working. Hosts should supply timer functions whose
+ * lifetime matches the application, not a window (in Firefox-based hosts:
+ * `resource://gre/modules/Timer.sys.mjs`).
+ */
+export interface PDFTimerFunctions {
+    /**
+     * Must return a handle other than `undefined` (the package reserves
+     * `undefined` as its "not armed" sentinel; an `undefined` return is
+     * normalized to `null`).
+     */
+    setTimeout: (callback: () => void, delayMs: number) => unknown;
+    clearTimeout: (id: unknown) => void;
+}
+
+/**
  * Per-name slots — separate WASM heaps so user-facing agent work
  * (`hot`) is not contended by long-running background extraction
  * (`background`).
@@ -73,6 +96,14 @@ export interface PDFConfig {
 
     /** Optional host hook fired when a worker fails to *start* */
     onWorkerStartFailure?: (info: WorkerStartFailureInfo) => void;
+
+    /**
+     * Optional realm-independent timers for internal watchdogs (see
+     * `PDFTimerFunctions`). Defaults to the module realm's globals, which
+     * is only safe when the module realm cannot outlive its timers (Node,
+     * tests).
+     */
+    timers?: PDFTimerFunctions;
 
     /** URLs forwarded to the worker via the configure message. */
     worker: PDFWorkerUrls;

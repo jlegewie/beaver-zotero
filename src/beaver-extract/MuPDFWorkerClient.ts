@@ -16,6 +16,7 @@
 import {
     getConfig,
     isConfigured,
+    type PDFTimerFunctions,
     type PDFWorkerSlotName,
     type PDFWorkerUrls,
 } from "./config";
@@ -178,6 +179,49 @@ export function __resetBusyLeaseForTest(
     }
 }
 
+/**
+ * The window whose bundle loaded this module, or null outside a window
+ * realm (Node, workers). Captured so a client stored in a cross-bundle
+ * slot can detect that its creating realm is gone: the shared instance
+ * survives on a host global across a window close/reopen, but timers and
+ * closures created in the dead realm are inert.
+ */
+// eslint-disable-next-line no-restricted-globals -- deliberately this bundle's window, not the host's current main window
+let moduleWindow: Window | null = typeof window !== "undefined" ? window : null;
+const realModuleWindow = moduleWindow;
+
+/** Test-only: simulate the module having been loaded by a given window. */
+export function __setModuleWindowForTest(win: Window | null): void {
+    moduleWindow = win;
+}
+
+/** Test-only: restore the real module window. */
+export function __resetModuleWindowForTest(): void {
+    moduleWindow = realModuleWindow;
+}
+
+/**
+ * Resolve the timer functions for a new client: host-injected
+ * realm-independent timers when configured, else the module realm's
+ * globals (safe in Node/tests, where the realm cannot outlive the
+ * process). Snapshotted per instance so schedule and cancel always go
+ * through the same implementation.
+ */
+function resolveTimerFunctions(): PDFTimerFunctions {
+    const injected = isConfigured() ? getConfig().timers : undefined;
+    if (injected) return injected;
+    return {
+        setTimeout: (callback, delayMs) => {
+            const id = setTimeout(callback, delayMs);
+            // Node returns a Timeout handle that would otherwise hold the
+            // process open (CLI paths); window/system timer ids are numbers.
+            (id as any)?.unref?.();
+            return id;
+        },
+        clearTimeout: (id) => clearTimeout(id as any),
+    };
+}
+
 interface PendingEntry {
     resolve: (value: any) => void;
     reject: (reason: any) => void;
@@ -194,7 +238,7 @@ interface StartupEntry {
     resolve: () => void;
     reject: (reason: any) => void;
     configured: boolean;
-    timeoutId: ReturnType<typeof setTimeout> | undefined;
+    timeoutId: unknown | undefined;
 }
 
 interface FatalOperationCandidate {
@@ -395,9 +439,9 @@ export class MuPDFWorkerClient {
     private fatalOperationKeys = new Set<string>();
     private fatalOperationEntries: Array<{ key: string; prefix: string }> = [];
     private fatalOperationPrefixCounts = new Map<string, number>();
-    private idleTimerId: ReturnType<typeof setTimeout> | undefined;
-    private busyLeaseWatchdogTimerId: ReturnType<typeof setTimeout> | undefined;
-    private proactiveRecycleTimerId: ReturnType<typeof setTimeout> | undefined;
+    private idleTimerId: unknown | undefined;
+    private busyLeaseWatchdogTimerId: unknown | undefined;
+    private proactiveRecycleTimerId: unknown | undefined;
     private proactiveRecycleReason: ProactiveRecycleReason | null = null;
     private proactiveRecycleFollowupDataOperationsRemaining = 0;
     private proactiveRecycleBarrierPromise: Promise<void> | null = null;
@@ -418,6 +462,20 @@ export class MuPDFWorkerClient {
     // whole PDF on the UI thread before posting work to the worker.
     private pdfDigestCache = new WeakMap<object, Map<string, string>>();
 
+    /**
+     * Timer implementation snapshotted at construction (host-injected
+     * realm-independent timers, or the module realm's globals). All
+     * internal watchdogs schedule and cancel through this one pair.
+     */
+    private readonly timers: PDFTimerFunctions;
+
+    /**
+     * The window whose bundle constructed this client, or null outside a
+     * window realm. Used to detect a client that outlived its creating
+     * realm (see `isCreatorRealmDead`).
+     */
+    private readonly createdFromWindowInternal: Window | null;
+
     constructor(
         opts: {
             slotName?: PDFWorkerSlotName;
@@ -428,6 +486,8 @@ export class MuPDFWorkerClient {
         } = {},
     ) {
         this.slotName = opts.slotName ?? "hot";
+        this.timers = resolveTimerFunctions();
+        this.createdFromWindowInternal = moduleWindow;
         const override = testIdleTimeoutOverrides[this.slotName];
         this.idleTimeoutMs =
             opts.idleTimeoutMs
@@ -451,9 +511,69 @@ export class MuPDFWorkerClient {
         );
     }
 
+    /**
+     * Schedule through the snapshotted timer implementation. Normalizes an
+     * `undefined` return to `null` (the fields reserve `undefined` as the
+     * "not armed" sentinel) and tolerates a throwing host implementation —
+     * a lost watchdog degrades the safety net but must never break
+     * dispatch or spawn.
+     */
+    private scheduleTimer(
+        callback: () => void,
+        delayMs: number,
+    ): unknown | undefined {
+        try {
+            const id = this.timers.setTimeout(callback, delayMs);
+            return id === undefined ? null : id;
+        } catch (e) {
+            if (isConfigured()) {
+                getConfig().log(
+                    `[MuPDFWorkerClient ${this.slotName}] host timer setTimeout threw: ${e instanceof Error ? e.message : String(e)}`,
+                    1,
+                );
+            }
+            return undefined;
+        }
+    }
+
+    /**
+     * Cancel through the snapshotted timer implementation. Cancellation
+     * runs inside teardown paths (markStale / dispose) that must complete
+     * even if the host canceller throws.
+     */
+    private cancelTimer(id: unknown): void {
+        try {
+            this.timers.clearTimeout(id);
+        } catch {
+            // best-effort — teardown continues regardless
+        }
+    }
+
     /** The window that spawned the current worker. Used for stale detection. */
     get spawnedFromWindow(): Window | null {
         return this.spawnedFromWindowInternal;
+    }
+
+    /** The window whose bundle constructed this client, or null. */
+    get createdFromWindow(): Window | null {
+        return this.createdFromWindowInternal;
+    }
+
+    /**
+     * True when the window realm that constructed this client is gone.
+     * Such a client can still drive workers (they respawn from the current
+     * host window), but timers and closures created in the dead realm may
+     * be inert — callers should dispose it and create a fresh instance.
+     */
+    get isCreatorRealmDead(): boolean {
+        const win = this.createdFromWindowInternal;
+        if (!win) return false;
+        try {
+            return win.closed === true;
+        } catch {
+            // Accessing a nuked window proxy throws — realm is gone.
+            return true;
+        }
     }
 
     /** The logical slot name this client owns. */
@@ -577,7 +697,7 @@ export class MuPDFWorkerClient {
 
     private clearBusyLeaseWatchdog(): void {
         if (this.busyLeaseWatchdogTimerId === undefined) return;
-        clearTimeout(this.busyLeaseWatchdogTimerId);
+        this.cancelTimer(this.busyLeaseWatchdogTimerId);
         this.busyLeaseWatchdogTimerId = undefined;
     }
 
@@ -601,7 +721,7 @@ export class MuPDFWorkerClient {
             0,
             oldestStartedAt + leaseMs + BUSY_LEASE_WATCHDOG_SLACK_MS - Date.now(),
         );
-        const id = setTimeout(() => {
+        this.busyLeaseWatchdogTimerId = this.scheduleTimer(() => {
             this.busyLeaseWatchdogTimerId = undefined;
             if (
                 this.disposed
@@ -618,8 +738,6 @@ export class MuPDFWorkerClient {
                 this.syncBusyLeaseWatchdog();
             }
         }, delayMs);
-        (id as any)?.unref?.();
-        this.busyLeaseWatchdogTimerId = id;
     }
 
     /**
@@ -699,7 +817,7 @@ export class MuPDFWorkerClient {
 
     private clearIdleTimer(): void {
         if (this.idleTimerId === undefined) return;
-        clearTimeout(this.idleTimerId);
+        this.cancelTimer(this.idleTimerId);
         this.idleTimerId = undefined;
     }
 
@@ -707,18 +825,16 @@ export class MuPDFWorkerClient {
         this.clearIdleTimer();
         if (this.disposed || !this.worker || this.pending.size !== 0) return;
 
-        const id = setTimeout(() => {
+        this.idleTimerId = this.scheduleTimer(() => {
             this.idleTimerId = undefined;
             if (this.disposed || !this.worker || this.pending.size !== 0) return;
             this.markStale("idle timeout");
         }, this.idleTimeoutMs);
-        (id as any)?.unref?.();
-        this.idleTimerId = id;
     }
 
     private clearProactiveRecycleTimer(): void {
         if (this.proactiveRecycleTimerId === undefined) return;
-        clearTimeout(this.proactiveRecycleTimerId);
+        this.cancelTimer(this.proactiveRecycleTimerId);
         this.proactiveRecycleTimerId = undefined;
     }
 
@@ -815,7 +931,7 @@ export class MuPDFWorkerClient {
         }
         if (this.proactiveRecycleTimerId !== undefined) return;
 
-        const id = setTimeout(() => {
+        this.proactiveRecycleTimerId = this.scheduleTimer(() => {
             this.proactiveRecycleTimerId = undefined;
             if (
                 this.disposed
@@ -829,8 +945,6 @@ export class MuPDFWorkerClient {
 
             this.performProactiveRecycle(worker);
         }, 0);
-        (id as any)?.unref?.();
-        this.proactiveRecycleTimerId = id;
     }
 
     /** Retire the current worker after all accepted work has drained. */
@@ -1029,7 +1143,7 @@ export class MuPDFWorkerClient {
                 if (entry.configured) return;
                 entry.configured = true;
                 if (entry.timeoutId !== undefined) {
-                    clearTimeout(entry.timeoutId);
+                    this.cancelTimer(entry.timeoutId);
                     entry.timeoutId = undefined;
                 }
                 resolve();
@@ -1037,7 +1151,7 @@ export class MuPDFWorkerClient {
             reject: (reason: any) => {
                 if (entry.configured) return;
                 if (entry.timeoutId !== undefined) {
-                    clearTimeout(entry.timeoutId);
+                    this.cancelTimer(entry.timeoutId);
                     entry.timeoutId = undefined;
                 }
                 reject(reason);
@@ -1045,11 +1159,10 @@ export class MuPDFWorkerClient {
             configured: false,
             timeoutId: undefined,
         };
-        entry.timeoutId = setTimeout(() => {
+        entry.timeoutId = this.scheduleTimer(() => {
             if (this.startup !== entry || entry.configured) return;
             this.markStale("configure handshake timed out", { startError: true });
         }, 15000);
-        (entry.timeoutId as any)?.unref?.();
         return entry;
     }
 
@@ -2207,7 +2320,33 @@ export function getMuPDFWorkerClient(
 ): MuPDFWorkerClient {
     const slot = getConfig().workerClientSlots[name];
     const existing = slot.get() as MuPDFWorkerClient | undefined;
-    if (existing) return existing;
+    if (existing) {
+        // Self-heal: a client whose creating window is gone (close-then-
+        // reopen keeps the shared slot alive) still drives workers, but its
+        // dead-realm timers make every watchdog inert. Replace it. An
+        // instance from a build without creator-realm tracking cannot
+        // prove its realm is alive, so it is replaced once too; a nuked
+        // proxy (property access throws) counts as dead.
+        let replaceExisting: boolean;
+        try {
+            replaceExisting =
+                !("isCreatorRealmDead" in (existing as object))
+                || existing.isCreatorRealmDead === true;
+        } catch {
+            replaceExisting = true;
+        }
+        if (!replaceExisting) return existing;
+        getConfig().log(
+            `[MuPDFWorkerClient ${name}] creating window is gone; replacing stale client`,
+            2,
+        );
+        try {
+            existing.dispose();
+        } catch {
+            // best-effort — never let a dead-realm client block replacement
+        }
+        slot.set(undefined);
+    }
     const client = new MuPDFWorkerClient({ slotName: name });
     slot.set(client);
     return client;
