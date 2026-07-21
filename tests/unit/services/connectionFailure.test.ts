@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
     ConnectionFailureEvidence,
+    connectRecoveryAuthFields,
     isAbruptTransportCloseCode,
     isRetryablePreReadyConnectFailure,
     presentConnectionFailure,
@@ -465,5 +466,28 @@ describe('isRetryablePreReadyConnectFailure', () => {
                 readyReceived: true,
             }),
         ).toBe(false);
+    });
+});
+
+describe('connectRecoveryAuthFields', () => {
+    it('omits fields on first-try success', () => {
+        expect(connectRecoveryAuthFields(1, opening1006)).toBeUndefined();
+    });
+
+    it('includes attempt count and last failure after a retry', () => {
+        expect(connectRecoveryAuthFields(2, opening1006)).toEqual({
+            connect_attempts: 2,
+            last_connect_failure: {
+                stage: 'opening',
+                close_code: 1006,
+                timed_out: false,
+            },
+        });
+    });
+
+    it('includes attempt count even when evidence is missing', () => {
+        expect(connectRecoveryAuthFields(3, null)).toEqual({
+            connect_attempts: 3,
+        });
     });
 });
