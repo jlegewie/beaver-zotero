@@ -149,6 +149,7 @@ export class ProviderConnection {
         this.connectAborted = false;
         this.cancelScheduledReconnect();
         this.lastWakeId = options.wakeId ?? null;
+        const connectStartedAtMs = Date.now();
 
         try {
             const token = await getWSAuthToken();
@@ -159,13 +160,14 @@ export class ProviderConnection {
                 throw new Error('Provider connection closed during setup');
             }
 
-            const authMessage: WSAuthMessage = {
+            const authMessageBase: Omit<WSAuthMessage, 'connect_latency_ms'> = {
                 type: 'auth',
                 token,
                 frontend_version: Zotero.Beaver?.pluginVersion || '',
                 client_type: ZOTERO_PLUGIN_CLIENT_TYPE,
                 client_features: ZOTERO_PLUGIN_FEATURES,
                 zotero_instance: getZoteroInstanceWire(),
+                connect_attempts: 1,
                 ...(options.wakeId ? { wake_id: options.wakeId } : {}),
                 ...(options.wakeInstanceId ? { wake_instance_id: options.wakeInstanceId } : {}),
             };
@@ -198,6 +200,10 @@ export class ProviderConnection {
                     // (same race guard as the chat connection).
                     setTimeout(() => {
                         if (wsInstance.readyState === WebSocket.OPEN) {
+                            const authMessage: WSAuthMessage = {
+                                ...authMessageBase,
+                                connect_latency_ms: Math.max(0, Date.now() - connectStartedAtMs),
+                            };
                             wsInstance.send(JSON.stringify(authMessage));
                         }
                     }, 50);

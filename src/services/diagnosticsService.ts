@@ -41,6 +41,12 @@ let lastReport: { at: number; result: ConnectionDiagnosticResult } | null = null
 export interface ConnectionFailureReport {
     evidence: ConnectionFailureEvidence;
     run_id?: string | null;
+    /**
+     * Total connect attempts made for the request before this failure was
+     * surfaced (1 = no auto-retry happened). Recovered connects that succeed
+     * after retry report via the WebSocket auth handshake instead.
+     */
+    connect_attempts?: number | null;
 }
 
 /**
@@ -119,6 +125,7 @@ async function executeReport(
         ws_uptime_ms: evidence.wsUptimeMs ?? null,
         ms_since_last_ws_message_ms: evidence.msSinceLastWsMessageMs ?? null,
         run_id: report.run_id ?? null,
+        connect_attempts: report.connect_attempts ?? null,
         plugin_version: pluginVersion,
         zotero_version: zoteroVersion,
         platform: nav?.platform ?? '',

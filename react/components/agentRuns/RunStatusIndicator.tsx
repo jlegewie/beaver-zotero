@@ -2,7 +2,7 @@ import React from 'react';
 import { useAtomValue } from 'jotai';
 import { Icon, Spinner, RepeatIcon } from '../icons/icons';
 import { AgentRunStatus } from '../../agents/types';
-import { wsRetryAtom } from '../../atoms/agentRunAtoms';
+import { wsReconnectingAtom, wsRetryAtom } from '../../atoms/agentRunAtoms';
 
 interface RunStatusIndicatorProps {
     status: AgentRunStatus;
@@ -14,19 +14,28 @@ interface RunStatusIndicatorProps {
 
 /**
  * Displays the current status of an agent run.
- * Shows a spinner for in-progress runs, retry info when backend is retrying.
+ * Shows a spinner for in-progress runs, retry info when backend is retrying,
+ * and reconnect progress while the client transparently recovers a dropped
+ * connection.
  * Note: Errors are displayed separately by RunErrorDisplay.
  */
 export const RunStatusIndicator: React.FC<RunStatusIndicatorProps> = ({ status, runId, lastMessageHasToolCall }) => {
     const retryState = useAtomValue(wsRetryAtom);
-    
+    const reconnectState = useAtomValue(wsReconnectingAtom);
+
     // Check if retry state applies to this run
     const isRetrying = retryState && runId && retryState.runId === runId;
-    
-    const text = isRetrying
-        // ? `Retrying (${retryState.attempt}/${retryState.maxAttempts}): ${retryState.reason}`
-        ? `Retrying...`
-        : 'Generating';
+
+    // Reconnect state is connection-scoped (one active connection at a time),
+    // so it applies to whichever run the indicator is spinning for.
+    const text = reconnectState
+        ? (reconnectState.attempt > 1
+            ? `Reconnecting… (${reconnectState.attempt}/${reconnectState.maxAttempts})`
+            : 'Reconnecting…')
+        : isRetrying
+            // ? `Retrying (${retryState.attempt}/${retryState.maxAttempts}): ${retryState.reason}`
+            ? `Retrying...`
+            : 'Generating';
 
     // Structure matches ThinkingPartView for smooth visual transition
     return (
