@@ -168,7 +168,34 @@ export class BeaverUIFactory {
                 if (root) roots.add(root);
                 ztoolkit.log("registerChatPanel: renderAiSidebar mounted for reader");
             }
+
+            // Auxiliary windows survive closing the last main window on macOS.
+            // Reconnect their React roots to this newly loaded bundle so they
+            // use the same atom instances as the new global initializer.
+            this.reconnectAuxiliaryWindows(win);
         };
+    }
+
+    static reconnectAuxiliaryWindows(win: BeaverWindow): void {
+        if (!win.BeaverReact) return;
+
+        const auxiliaryWindows = [
+            this.findBeaverWindow(),
+            this.findPreferencesWindow(),
+        ];
+
+        for (const auxiliaryWindow of auxiliaryWindows) {
+            if (!auxiliaryWindow || auxiliaryWindow.closed) continue;
+
+            const reconnect = (auxiliaryWindow as any).reconnectToBeaverReact;
+            if (typeof reconnect !== 'function') continue;
+
+            try {
+                reconnect(win.BeaverReact);
+            } catch (error) {
+                ztoolkit.log(`Failed to reconnect Beaver auxiliary window: ${error}`);
+            }
+        }
     }
 
     private static addToolbarButton(win: BeaverWindow) {

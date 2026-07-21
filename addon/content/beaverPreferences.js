@@ -5,6 +5,48 @@ var { Zotero } = ChromeUtils.importESModule("chrome://zotero/content/zotero.mjs"
 var BeaverReact;
 var root;
 
+function getInitialView() {
+    var initialTab = null;
+    var initialActionsCategoryFilter = null;
+    var initialActionId = null;
+    try {
+        if (window.arguments && window.arguments[0]) {
+            initialTab = window.arguments[0].tab || null;
+            initialActionsCategoryFilter = window.arguments[0].actionsCategoryFilter || null;
+            initialActionId = window.arguments[0].actionId || null;
+        }
+    } catch (e) {
+        // Ignore errors reading arguments
+    }
+    return { initialTab, initialActionsCategoryFilter, initialActionId };
+}
+
+function reconnectToBeaverReact(nextBeaverReact) {
+    const container = document.getElementById("beaver-pane-preferences");
+    if (!container || !nextBeaverReact ||
+        typeof nextBeaverReact.renderPreferencesWindow !== "function") {
+        return;
+    }
+
+    try {
+        if (BeaverReact && typeof BeaverReact.unmountFromElement === "function") {
+            BeaverReact.unmountFromElement(container);
+        }
+    } catch (e) {
+        Zotero.debug("Beaver: Error disconnecting stale preferences React root: " + e);
+    }
+
+    const initialView = getInitialView();
+    BeaverReact = nextBeaverReact;
+    root = BeaverReact.renderPreferencesWindow(
+        container,
+        initialView.initialTab,
+        initialView.initialActionsCategoryFilter,
+        initialView.initialActionId
+    );
+    Zotero.debug("Beaver: Preferences window reconnected to Main Window React instance");
+}
+
 async function onLoad() {
     // Wait for Zotero initialization
     await Zotero.initializationPromise;
@@ -31,42 +73,11 @@ async function onLoad() {
 
     // Read the initial tab (and, for the Actions tab, an initial category filter
     // or an action to open in edit mode) from window arguments (if passed)
-    var initialTab = null;
-    var initialActionsCategoryFilter = null;
-    var initialActionId = null;
-    try {
-        if (window.arguments && window.arguments[0]) {
-            if (window.arguments[0].tab) {
-                initialTab = window.arguments[0].tab;
-            }
-            if (window.arguments[0].actionsCategoryFilter) {
-                initialActionsCategoryFilter = window.arguments[0].actionsCategoryFilter;
-            }
-            if (window.arguments[0].actionId) {
-                initialActionId = window.arguments[0].actionId;
-            }
-        }
-    } catch (e) {
-        // Ignore errors reading arguments
-    }
-
     // Use the main window's BeaverReact instance to ensure shared state (Jotai store)
     const mainWindow = Zotero.getMainWindow();
 
     if (mainWindow && mainWindow.BeaverReact) {
-        BeaverReact = mainWindow.BeaverReact;
-
-        if (typeof BeaverReact.renderPreferencesWindow === "function") {
-            const container = document.getElementById("beaver-pane-preferences");
-            if (container) {
-                root = BeaverReact.renderPreferencesWindow(container, initialTab, initialActionsCategoryFilter, initialActionId);
-                Zotero.debug("Beaver: Preferences window React component mounted");
-            } else {
-                Zotero.debug("Beaver Error: Container element #beaver-pane-preferences not found");
-            }
-        } else {
-            Zotero.debug("Beaver Error: renderPreferencesWindow function not found on Main Window instance");
-        }
+        reconnectToBeaverReact(mainWindow.BeaverReact);
     } else {
         Zotero.debug("Beaver Error: Main Window BeaverReact instance not found for preferences window");
     }
@@ -89,6 +100,8 @@ function onUnload() {
     BeaverReact = null;
     root = null;
 }
+
+window.reconnectToBeaverReact = reconnectToBeaverReact;
 
 // Set up event listeners
 window.addEventListener("load", onLoad, { once: true });

@@ -5,6 +5,29 @@ var { Zotero } = ChromeUtils.importESModule("chrome://zotero/content/zotero.mjs"
 var BeaverReact;
 var root;
 
+function reconnectToBeaverReact(nextBeaverReact) {
+    const container = document.getElementById("beaver-pane-window");
+    if (!container || !nextBeaverReact ||
+        typeof nextBeaverReact.renderWindowSidebar !== "function") {
+        return;
+    }
+
+    // The previous main-window bundle owns this root. Ask that exact bundle
+    // to unmount it before replacing the reference; a newly loaded bundle's
+    // roots map cannot see roots created by the obsolete bundle.
+    try {
+        if (BeaverReact && typeof BeaverReact.unmountFromElement === "function") {
+            BeaverReact.unmountFromElement(container);
+        }
+    } catch (e) {
+        Zotero.debug("Beaver: Error disconnecting stale separate-window React root: " + e);
+    }
+
+    BeaverReact = nextBeaverReact;
+    root = BeaverReact.renderWindowSidebar(container);
+    Zotero.debug("Beaver: Separate window reconnected to Main Window React instance");
+}
+
 async function onLoad() {
     // Wait for Zotero initialization
     await Zotero.initializationPromise;
@@ -35,21 +58,7 @@ async function onLoad() {
     const mainWindow = Zotero.getMainWindow();
     
     if (mainWindow && mainWindow.BeaverReact) {
-        BeaverReact = mainWindow.BeaverReact;
-        
-        if (typeof BeaverReact.renderWindowSidebar === "function") {
-            // Note: We use "beaver-pane-window" to match the CSS selectors in beaver.css
-            const container = document.getElementById("beaver-pane-window");
-            if (container) {
-                // Render into this window's container using the main window's React instance
-                root = BeaverReact.renderWindowSidebar(container);
-                Zotero.debug("Beaver: Separate window React component mounted using Main Window instance");
-            } else {
-                Zotero.debug("Beaver Error: Container element #beaver-pane-window not found");
-            }
-        } else {
-            Zotero.debug("Beaver Error: renderWindowSidebar function not found on Main Window instance");
-        }
+        reconnectToBeaverReact(mainWindow.BeaverReact);
     } else {
         Zotero.debug("Beaver Error: Main Window BeaverReact instance not found");
         
@@ -77,6 +86,10 @@ function onUnload() {
     BeaverReact = null;
     root = null;
 }
+
+// Expose the reconnect hook to the lifecycle bundle. Top-level functions are
+// not reliably visible as window properties across all script configurations.
+window.reconnectToBeaverReact = reconnectToBeaverReact;
 
 // Set up event listeners
 window.addEventListener("load", onLoad, { once: true });

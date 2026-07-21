@@ -473,6 +473,16 @@ async function onMainWindowUnload(win: Window): Promise<void> {
         unregisterMainWindowFtl(win);
 
         if (!isLastWindow) {
+            // If an auxiliary window was mounted from the bundle belonging to
+            // the window that just closed, hand it to a surviving bundle now.
+            // Unlike the last-window/reopen path, no future bundle load is
+            // guaranteed to trigger this handoff.
+            const replacementWindow = remainingWindows.find(
+                candidate => Boolean((candidate as any).BeaverReact),
+            );
+            if (replacementWindow) {
+                BeaverUIFactory.reconnectAuxiliaryWindows(replacementWindow as any);
+            }
             ztoolkit.log("onMainWindowUnload: Other windows remain, skipping global cleanup");
             return;
         }

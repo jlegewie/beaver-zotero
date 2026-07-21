@@ -51,4 +51,17 @@ describe('reader context tracking mount point', () => {
         expect(windowSidebar).toContain('setIsBeaverWindowOpen(true)');
         expect(windowSidebar).toContain('setIsBeaverWindowOpen(false)');
     });
+
+    it('reconnects a surviving separate window when a new main-window bundle loads', () => {
+        const uiFactory = read('src/ui/ui.ts');
+        const lifecycle = read('src/hooks.ts');
+        const separateWindow = read('addon/content/beaverWindow.js');
+
+        expect(uiFactory).toContain('this.reconnectAuxiliaryWindows(win)');
+        expect(uiFactory).toContain('reconnect(win.BeaverReact)');
+        expect(lifecycle).toContain('BeaverUIFactory.reconnectAuxiliaryWindows(replacementWindow as any)');
+        expect(separateWindow).toContain('window.reconnectToBeaverReact = reconnectToBeaverReact');
+        expect(separateWindow).toContain('BeaverReact.unmountFromElement(container)');
+        expect(separateWindow).toContain('BeaverReact.renderWindowSidebar(container)');
+    });
 });
