@@ -475,15 +475,7 @@ export class AgentService {
                     wasClean: event.wasClean,
                 });
                 callbacks.onClose?.(event.code, event.reason, event.wasClean, evidence);
-                // The onClose callback may synchronously start a replacement
-                // connection (mid-run auto-resume). That connect() supersedes
-                // this generation via close(); resetting again here would
-                // invalidate the replacement attempt's setup and wedge its
-                // overlap guard, so only reset while this connection still
-                // owns the state.
-                if (this.connectionId === connId) {
-                    this.resetConnectionState();
-                }
+                this.resetConnectionState();
                 // If we haven't resolved yet, the connection closed before
                 // ready. Close-code details for the error UI travel via the
                 // onClose callback above, not the rejection.

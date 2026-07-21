@@ -456,7 +456,7 @@ describe('isRetryablePreReadyConnectFailure', () => {
         ).toBe(false);
     });
 
-    it('does not retry a mid-run drop (handled by auto-resume, not connect retry)', () => {
+    it('does not retry a mid-run drop (connect retry only covers pre-ready failures)', () => {
         expect(
             isRetryablePreReadyConnectFailure({
                 ...opening1006,

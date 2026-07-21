@@ -13,7 +13,6 @@ import { reportConnectionFailure } from '../../src/services/diagnosticsService';
 import {
     baselineConnectionEvidence,
     ConnectionFailureEvidence,
-    isAbruptTransportCloseCode,
     isRetryablePreReadyConnectFailure,
     presentConnectionFailure,
 } from '../../src/services/connectionFailure';
@@ -953,24 +952,15 @@ export const wsRetryAtom = atom<RetryState | null>(null);
 const scheduledAutoResumeRunIdsAtom = atom<Set<string>>(new Set<string>());
 
 /**
- * Transient reconnect state while the client automatically retries a dropped
- * connection (connect retry or mid-run auto-resume). Drives the status
- * indicator's "Reconnecting…" copy instead of a user-visible error.
+ * Transient reconnect state while the client automatically retries a failed
+ * connect attempt. Drives the status indicator's "Reconnecting…" copy instead
+ * of a user-visible error.
  */
 export interface ReconnectState {
     attempt: number;
     maxAttempts: number;
 }
 export const wsReconnectingAtom = atom<ReconnectState | null>(null);
-
-/**
- * Consecutive mid-run transport auto-resumes dispatched without user-visible
- * forward progress. Not part of resetWSStateAtom on purpose: the resume path
- * itself runs prepareForNewRunAtom, which must not wipe the loop guard it is
- * being guarded by. Reset on forward progress, budget exhaustion, run
- * completion, and thread clear.
- */
-const transportAutoResumeCountAtom = atom(0);
 
 // =============================================================================
 // Action Atoms
@@ -1132,99 +1122,6 @@ function surfaceAndDiagnoseConnectionFailure(
         run_id: runId,
         connect_attempts: connectAttempts ?? null,
     }).then(applyPresentation);
-}
-
-/**
- * Recover a mid-run transport drop (1005/1006 with no server error event) by
- * dispatching the existing auto-resume/auto-retry machinery, instead of
- * surfacing a retryable error the user must click. The backend supports
- * resuming via `resumes_run_id`/`retry_run_id`, so the streamed text and tool
- * calls already in the run are preserved by the resume path.
- *
- * Loop guard: at most MAX_TRANSPORT_AUTO_RESUMES consecutive auto-resumes are
- * dispatched without forward progress (user-visible text or tool calls
- * streamed since the last (re)start). On exhaustion this returns false and
- * the caller falls back to the manual retryable-error surface; the budget is
- * restored at that point so the user's next manual attempt gets automatic
- * recovery again.
- *
- * Returns true when an auto-resume/auto-retry was dispatched.
- */
-function maybeAutoResumeTransportDrop(
-    set: Setter,
-    activeRun: AgentRun,
-    evidence: ConnectionFailureEvidence,
-): boolean {
-    if (!isAbruptTransportCloseCode(evidence.closeCode)) return false;
-    const droppedRunId = activeRun.id;
-    if (store.get(scheduledAutoResumeRunIdsAtom).has(droppedRunId)) return false;
-
-    // Text or tool calls streamed since this run started count as forward
-    // progress and restore the auto-resume budget: each resume preserves that
-    // content, so continuing is strictly better than stopping. Thinking-only
-    // runs restart from scratch (see retryInsteadOfResume below) and therefore
-    // must consume the budget, or a connection that dies after a few thinking
-    // tokens would retry forever.
-    const madeForwardProgress = !hasOnlyThinkingParts(activeRun);
-    const priorResumes = madeForwardProgress ? 0 : store.get(transportAutoResumeCountAtom);
-    if (priorResumes >= MAX_TRANSPORT_AUTO_RESUMES) {
-        logger(`WS transport drop: auto-resume budget exhausted for run ${droppedRunId}, falling back to manual retry`, 1);
-        set(transportAutoResumeCountAtom, 0);
-        return false;
-    }
-    set(transportAutoResumeCountAtom, priorResumes + 1);
-
-    logger(`WS transport drop: auto-resuming run ${droppedRunId} (attempt ${priorResumes + 1}/${MAX_TRANSPORT_AUTO_RESUMES})`, 1);
-
-    // Keep one diagnostics report per drop so the mid_run rate and the resume
-    // success rate stay measurable; the result never touches the UI.
-    void reportConnectionFailure({ evidence, run_id: droppedRunId });
-
-    // The resume machinery only accepts runs in error state, so mark the drop
-    // the way a backend error event would. The replacement run is set in the
-    // same synchronous batch below, so the error state never flashes in the UI.
-    const presentation = presentConnectionFailure(evidence);
-    set(activeRunAtom, (prev) =>
-        prev?.id === droppedRunId
-            ? {
-                  ...prev,
-                  status: 'error',
-                  error: {
-                      type: 'connection_error',
-                      message: presentation.message,
-                      user_facing_details: presentation.details,
-                      is_retryable: true,
-                      is_resumable: true,
-                  },
-              }
-            : prev,
-    );
-
-    set(scheduledAutoResumeRunIdsAtom, (prev: Set<string>) => {
-        const next = new Set(prev);
-        next.add(droppedRunId);
-        return next;
-    });
-
-    // Mirror the backend-driven auto-resume branch: restart when only thinking
-    // has streamed (nothing user-visible to preserve), resume otherwise.
-    const retryInsteadOfResume =
-        !activeRun.user_prompt.is_resume && hasOnlyThinkingParts(activeRun);
-    if (retryInsteadOfResume) {
-        store.set(autoRetryErroredRunAtom, droppedRunId);
-    } else {
-        store.set(autoResumeErroredRunAtom, droppedRunId);
-    }
-
-    // The dispatch above runs synchronously up to the replacement run's
-    // connect, clearing WS state via prepareForNewRunAtom on the way — so the
-    // reconnect indicator must be set after it. Gate on the pending flag so a
-    // dispatch that bailed early (no model, run not found) does not leave a
-    // stale "Reconnecting…" behind.
-    if (store.get(isWSChatPendingAtom)) {
-        set(wsReconnectingAtom, { attempt: 1, maxAttempts: CONNECT_MAX_ATTEMPTS });
-    }
-    return true;
 }
 
 /**
@@ -1462,8 +1359,6 @@ function createWSCallbacks(set: Setter): WSCallbacks {
 
             agentService.close();
             set(isWSChatPendingAtom, false);
-            // A finished request means any reconnect loop recovered fully.
-            set(transportAutoResumeCountAtom, 0);
             // Clear pending approvals and dismiss diff preview
             set(clearAllPendingApprovalsAtom);
             set(clearAllPendingQuestionsAtom);
@@ -1740,10 +1635,6 @@ function createWSCallbacks(set: Setter): WSCallbacks {
             // no retry. Connect-phase failures (before ready) are reported by
             // executeWSRequest's catch, so gate on hadReachedReady to avoid
             // double-reporting them.
-            //
-            // An abrupt transport drop (1005/1006) is recovered automatically
-            // via the auto-resume path first; only clean/deliberate closes and
-            // exhausted resume budgets surface a retryable error.
             if (hadReachedReady && transportEvidence) {
                 const activeRun = store.get(activeRunAtom);
                 if (
@@ -1751,9 +1642,7 @@ function createWSCallbacks(set: Setter): WSCallbacks {
                     (activeRun.status === 'in_progress' ||
                         activeRun.status === 'awaiting_deferred')
                 ) {
-                    if (!maybeAutoResumeTransportDrop(set, activeRun, transportEvidence)) {
-                        surfaceAndDiagnoseConnectionFailure(set, activeRun.id, transportEvidence);
-                    }
+                    surfaceAndDiagnoseConnectionFailure(set, activeRun.id, transportEvidence);
                 }
             }
         }
@@ -1764,8 +1653,6 @@ function createWSCallbacks(set: Setter): WSCallbacks {
 export const CONNECT_MAX_ATTEMPTS = 3;
 /** Full-jitter backoff caps before the 2nd and 3rd connect attempts. */
 const CONNECT_RETRY_BACKOFF_MS = [500, 2000];
-/** Consecutive no-progress mid-run auto-resumes before falling back to a manual retry. */
-const MAX_TRANSPORT_AUTO_RESUMES = 2;
 
 /**
  * Execute a WebSocket request with the given run and request.
@@ -2729,7 +2616,6 @@ export const clearThreadAtom = atom(null, (_get, set) => {
     set(activeRunAtom, null);
     set(currentThreadIdAtom, null);
     set(resetWSStateAtom);
-    set(transportAutoResumeCountAtom, 0);
     // Clear agent actions, citations, and warnings for the thread
     set(clearAgentActionsAtom);
     set(citationsAtom, []);
