@@ -2130,6 +2130,21 @@ describe('MuPDFWorkerClient', () => {
             await expect(inFlight).rejects.toThrow(StaleWorkerError);
         });
 
+        it('does not expose an existing client whose creating window is gone', () => {
+            const creatorWindow = { closed: false } as unknown as Window;
+            __setModuleWindowForTest(creatorWindow);
+            const client = getMuPDFWorkerClient();
+
+            (creatorWindow as { closed: boolean }).closed = true;
+
+            expect(getExistingMuPDFWorkerClient()).toBeNull();
+            // Peeking remains non-mutating; the spawning accessor owns stale
+            // client disposal and replacement.
+            expect(
+                (globalThis as any).Zotero.__beaverMuPDFWorkerClient_hot,
+            ).toBe(client);
+        });
+
         it('replaces a slot instance that predates creator-realm tracking', () => {
             const legacy = { dispose: vi.fn() };
             (globalThis as any).Zotero.__beaverMuPDFWorkerClient_hot = legacy;
@@ -2138,6 +2153,33 @@ describe('MuPDFWorkerClient', () => {
             expect(replacement).not.toBe(legacy);
             expect(legacy.dispose).toHaveBeenCalledOnce();
             expect(getExistingMuPDFWorkerClient()).toBe(replacement);
+        });
+
+        it('does not expose a slot instance that predates creator-realm tracking', () => {
+            const legacy = { dispose: vi.fn() };
+            (globalThis as any).Zotero.__beaverMuPDFWorkerClient_hot = legacy;
+
+            expect(getExistingMuPDFWorkerClient()).toBeNull();
+            expect(legacy.dispose).not.toHaveBeenCalled();
+            expect(
+                (globalThis as any).Zotero.__beaverMuPDFWorkerClient_hot,
+            ).toBe(legacy);
+            delete (globalThis as any).Zotero.__beaverMuPDFWorkerClient_hot;
+        });
+
+        it('does not expose a nuked cross-realm wrapper', () => {
+            const nuked = new Proxy(
+                {},
+                {
+                    has: () => {
+                        throw new Error("can't access dead object");
+                    },
+                },
+            );
+            (globalThis as any).Zotero.__beaverMuPDFWorkerClient_hot = nuked;
+
+            expect(getExistingMuPDFWorkerClient()).toBeNull();
+            delete (globalThis as any).Zotero.__beaverMuPDFWorkerClient_hot;
         });
 
         it('keeps a client with no creating window (non-window realm)', () => {

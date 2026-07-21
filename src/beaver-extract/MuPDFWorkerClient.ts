@@ -2327,15 +2327,7 @@ export function getMuPDFWorkerClient(
         // instance from a build without creator-realm tracking cannot
         // prove its realm is alive, so it is replaced once too; a nuked
         // proxy (property access throws) counts as dead.
-        let replaceExisting: boolean;
-        try {
-            replaceExisting =
-                !("isCreatorRealmDead" in (existing as object))
-                || existing.isCreatorRealmDead === true;
-        } catch {
-            replaceExisting = true;
-        }
-        if (!replaceExisting) return existing;
+        if (isLiveTrackedWorkerClient(existing)) return existing;
         getConfig().log(
             `[MuPDFWorkerClient ${name}] creating window is gone; replacing stale client`,
             2,
@@ -2353,10 +2345,10 @@ export function getMuPDFWorkerClient(
 }
 
 /**
- * Read the existing client in `name`'s slot without spawning. Returns
- * `null` when the slot is empty or the package isn't configured. Used by
- * introspection paths (dev stats, cooperative throttle) that must not
- * pollute the slot just to peek.
+ * Read the existing live, creator-realm-tracked client in `name`'s slot
+ * without spawning. Returns `null` when the slot is empty, stale, untracked,
+ * or the package isn't configured. Used by introspection paths (dev stats,
+ * cooperative throttle) that must not pollute the slot just to peek.
  */
 export function getExistingMuPDFWorkerClient(
     name: PDFWorkerSlotName = "hot",
@@ -2364,7 +2356,27 @@ export function getExistingMuPDFWorkerClient(
     if (!isConfigured()) return null;
     const slot = getConfig().workerClientSlots[name];
     const existing = slot.get() as MuPDFWorkerClient | undefined;
-    return existing ?? null;
+    return isLiveTrackedWorkerClient(existing) ? existing! : null;
+}
+
+/**
+ * A shared slot may outlive the window/bundle that populated it. Only expose
+ * clients that support creator-realm tracking and can prove that realm is
+ * still alive. Keep every cross-bundle property access inside the guard: a
+ * nuked wrapper can throw even for feature detection.
+ */
+function isLiveTrackedWorkerClient(
+    existing: MuPDFWorkerClient | undefined,
+): boolean {
+    if (!existing) return false;
+    try {
+        return (
+            "isCreatorRealmDead" in (existing as object)
+            && existing.isCreatorRealmDead === false
+        );
+    } catch {
+        return false;
+    }
 }
 
 /**
