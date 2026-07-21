@@ -584,6 +584,56 @@ describe('AgentService reconnect handling', () => {
         expect(clientCloseArgs[3]).toBeUndefined();
     });
 
+    it('lets onClose start a replacement connection synchronously without wiping its state', async () => {
+        const service = new AgentService('https://api.example.com');
+        const callbacks = createCallbacks();
+        const request = { type: 'auto-resume-test' } as AgentRunRequest;
+        const socket = await completeConnect(service, callbacks, request);
+
+        // Mirror the React layer's mid-run auto-resume: the onClose callback
+        // dispatches a resume that calls connect() again while the old
+        // socket's close handler is still on the stack. The handler's own
+        // resetConnectionState() must not invalidate the new attempt.
+        const resumeCallbacks = createCallbacks();
+        let resumeConnect: Promise<void> | null = null;
+        (callbacks.onClose as ReturnType<typeof vi.fn>).mockImplementation(() => {
+            resumeConnect = service.connect(request, resumeCallbacks);
+        });
+
+        const countBefore = MockWebSocket.instances.length;
+        socket.emitClose({ code: 1006, reason: '', wasClean: false });
+        expect(resumeConnect).not.toBeNull();
+
+        // The replacement attempt proceeds: the token lookup resolves, a new
+        // socket is created, and its handshake completes normally.
+        for (let i = 0; i < 20 && MockWebSocket.instances.length === countBefore; i++) {
+            await Promise.resolve();
+        }
+        const resumeSocket = MockWebSocket.instances[countBefore];
+        expect(resumeSocket).toBeDefined();
+        resumeSocket.emitOpen();
+        await vi.advanceTimersByTimeAsync(50);
+        resumeSocket.emitMessage({
+            event: 'ready',
+            subscription_status: 'active',
+            processing_mode: 'fast',
+            indexing_complete: true,
+        });
+        await resumeConnect!;
+        expect(resumeCallbacks.onReady).toHaveBeenCalledTimes(1);
+
+        // The replacement connection is live and receives messages.
+        resumeSocket.emitMessage({
+            event: 'part',
+            run_id: 'resume-run',
+            message_index: 0,
+            part_index: 0,
+            part: { type: 'text', text: 'resumed' },
+        });
+        await flushMicrotasks();
+        expect(resumeCallbacks.onPart).toHaveBeenCalledTimes(1);
+    });
+
     it('does not let a stale backstop timeout tear down a newer connection', async () => {
         const service = new AgentService('https://api.example.com');
         const firstCallbacks = createCallbacks();

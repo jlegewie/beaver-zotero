@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
     ConnectionFailureEvidence,
+    isAbruptTransportCloseCode,
+    isRetryablePreReadyConnectFailure,
     presentConnectionFailure,
 } from '../../../src/services/connectionFailure';
 
@@ -379,5 +381,89 @@ describe('presentConnectionFailure', () => {
 
         expect(result.details).toContain('(error code 1006)');
         expect(result.details).not.toContain('connection code');
+    });
+});
+
+describe('isAbruptTransportCloseCode', () => {
+    it('matches only the synthetic no-close-frame codes', () => {
+        expect(isAbruptTransportCloseCode(1006)).toBe(true);
+        expect(isAbruptTransportCloseCode(1005)).toBe(true);
+        expect(isAbruptTransportCloseCode(1000)).toBe(false);
+        expect(isAbruptTransportCloseCode(1008)).toBe(false);
+        expect(isAbruptTransportCloseCode(1011)).toBe(false);
+        expect(isAbruptTransportCloseCode(null)).toBe(false);
+    });
+});
+
+describe('isRetryablePreReadyConnectFailure', () => {
+    it('retries an abrupt transport drop in every pre-ready stage', () => {
+        for (const stage of ['opening', 'authenticating', 'awaiting_ready'] as const) {
+            for (const closeCode of [1005, 1006]) {
+                expect(
+                    isRetryablePreReadyConnectFailure({ ...opening1006, stage, closeCode }),
+                ).toBe(true);
+            }
+        }
+    });
+
+    it('retries a connect attempt that timed out without a close code', () => {
+        expect(
+            isRetryablePreReadyConnectFailure({
+                ...opening1006,
+                stage: 'awaiting_ready',
+                closeCode: null,
+                timedOut: true,
+                socketOpened: true,
+            }),
+        ).toBe(true);
+    });
+
+    it('does not retry auth-stage failures, even timeouts', () => {
+        expect(
+            isRetryablePreReadyConnectFailure({
+                ...opening1006,
+                stage: 'auth',
+                closeCode: null,
+            }),
+        ).toBe(false);
+        expect(
+            isRetryablePreReadyConnectFailure({
+                ...opening1006,
+                stage: 'auth',
+                closeCode: null,
+                timedOut: true,
+            }),
+        ).toBe(false);
+    });
+
+    it('does not retry policy rejections or deliberate closes', () => {
+        expect(
+            isRetryablePreReadyConnectFailure({
+                ...opening1006,
+                stage: 'awaiting_ready',
+                closeCode: 1008,
+                socketOpened: true,
+            }),
+        ).toBe(false);
+        expect(
+            isRetryablePreReadyConnectFailure({
+                ...opening1006,
+                stage: 'awaiting_ready',
+                closeCode: 1000,
+                wasClean: true,
+                socketOpened: true,
+            }),
+        ).toBe(false);
+    });
+
+    it('does not retry a mid-run drop (handled by auto-resume, not connect retry)', () => {
+        expect(
+            isRetryablePreReadyConnectFailure({
+                ...opening1006,
+                stage: 'mid_run',
+                socketOpened: true,
+                readyReceived: true,
+            }),
+        ).toBe(false);
     });
 });
