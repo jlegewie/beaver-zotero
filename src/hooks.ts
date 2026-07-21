@@ -481,7 +481,10 @@ async function onMainWindowUnload(win: Window): Promise<void> {
                 candidate => Boolean((candidate as any).BeaverReact),
             );
             if (replacementWindow) {
-                BeaverUIFactory.reconnectAuxiliaryWindows(replacementWindow as any);
+                BeaverUIFactory.reconnectAuxiliaryWindows(
+                    replacementWindow as any,
+                    (win as any).BeaverReact,
+                );
             }
             ztoolkit.log("onMainWindowUnload: Other windows remain, skipping global cleanup");
             return;

@@ -59,9 +59,22 @@ describe('reader context tracking mount point', () => {
 
         expect(uiFactory).toContain('this.reconnectAuxiliaryWindows(win)');
         expect(uiFactory).toContain('reconnect(win.BeaverReact)');
-        expect(lifecycle).toContain('BeaverUIFactory.reconnectAuxiliaryWindows(replacementWindow as any)');
+        expect(uiFactory).toContain('liveBeaverReactInstances.includes(currentInstance)');
+        expect(lifecycle).toContain('(win as any).BeaverReact');
         expect(separateWindow).toContain('window.reconnectToBeaverReact = reconnectToBeaverReact');
+        expect(separateWindow).toContain('window.getBeaverReactInstance = () => BeaverReact');
+        expect(separateWindow).toContain('if (BeaverReact === nextBeaverReact)');
         expect(separateWindow).toContain('BeaverReact.unmountFromElement(container)');
         expect(separateWindow).toContain('BeaverReact.renderWindowSidebar(container)');
+    });
+
+    it('preserves the active preferences tab during a real bundle handoff', () => {
+        const preferencesWindow = read('addon/content/beaverPreferences.js');
+        const preferencesComponent = read('react/components/PreferencesWindow.tsx');
+
+        expect(preferencesWindow).toContain('Zotero.__beaverGetPreferencesTab()');
+        expect(preferencesWindow).toContain('initialActionsCategoryFilter: null');
+        expect(preferencesWindow).toContain('initialActionId: null');
+        expect(preferencesComponent).toContain('__beaverGetPreferencesTab = () => activeTabRef.current');
     });
 });

@@ -12,6 +12,12 @@ function reconnectToBeaverReact(nextBeaverReact) {
         return;
     }
 
+    // Loading or unloading an unrelated main window must not disturb an
+    // auxiliary window that is already owned by this bundle.
+    if (BeaverReact === nextBeaverReact) {
+        return;
+    }
+
     // The previous main-window bundle owns this root. Ask that exact bundle
     // to unmount it before replacing the reference; a newly loaded bundle's
     // roots map cannot see roots created by the obsolete bundle.
@@ -90,6 +96,7 @@ function onUnload() {
 // Expose the reconnect hook to the lifecycle bundle. Top-level functions are
 // not reliably visible as window properties across all script configurations.
 window.reconnectToBeaverReact = reconnectToBeaverReact;
+window.getBeaverReactInstance = () => BeaverReact;
 
 // Set up event listeners
 window.addEventListener("load", onLoad, { once: true });

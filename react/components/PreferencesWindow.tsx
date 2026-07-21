@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from 'react';
-import { useSetAtom } from 'jotai';
+import { useAtomValue, useSetAtom } from 'jotai';
 import { isPreferencePageVisibleAtom, activePreferencePageTabAtom, pendingActionsCategoryFilterAtom, pendingActionEditRequestAtom, PreferencePageTab } from '../atoms/ui';
 import { prefWindowFocusRefreshAtom } from '../atoms/profile';
 import type { ActionCategoryFilter } from '../types/actions';
@@ -13,6 +13,9 @@ interface PreferencesWindowProps {
 }
 
 const PreferencesWindow: React.FC<PreferencesWindowProps> = ({ initialTab, initialActionsCategoryFilter, initialActionId }) => {
+    const activeTab = useAtomValue(activePreferencePageTabAtom);
+    const activeTabRef = useRef(activeTab);
+    activeTabRef.current = activeTab;
     const setPreferencePageVisible = useSetAtom(isPreferencePageVisibleAtom);
     const setActiveTab = useSetAtom(activePreferencePageTabAtom);
     const setPendingActionsCategoryFilter = useSetAtom(pendingActionsCategoryFilterAtom);
@@ -45,10 +48,12 @@ const PreferencesWindow: React.FC<PreferencesWindowProps> = ({ initialTab, initi
                 }
             }
         };
+        (Zotero as any).__beaverGetPreferencesTab = () => activeTabRef.current;
 
         return () => {
             setPreferencePageVisible(false);
             delete (Zotero as any).__beaverOpenPreferencesTab;
+            delete (Zotero as any).__beaverGetPreferencesTab;
         };
     }, []);
 

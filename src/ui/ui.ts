@@ -21,7 +21,7 @@ interface BeaverWindow extends Window {
         renderGlobalInitializer: (container: Element) => any;
         renderWindowSidebar: (container: Element) => any;
         renderFloatingPopup: (container: Element) => any;
-        renderPreferencesWindow: (container: Element, initialTab?: PreferencePageTab | null, initialActionsCategoryFilter?: ActionCategoryFilter | null) => any;
+        renderPreferencesWindow: (container: Element, initialTab?: PreferencePageTab | null, initialActionsCategoryFilter?: ActionCategoryFilter | null, initialActionId?: string | null) => any;
         unmountFromElement: (container: Element) => boolean;
     };
 }
@@ -176,8 +176,15 @@ export class BeaverUIFactory {
         };
     }
 
-    static reconnectAuxiliaryWindows(win: BeaverWindow): void {
+    static reconnectAuxiliaryWindows(win: BeaverWindow, disconnectedBeaverReact?: BeaverWindow['BeaverReact']): void {
         if (!win.BeaverReact) return;
+
+        const liveBeaverReactInstances = disconnectedBeaverReact
+            ? []
+            : (Zotero.getMainWindows?.() ?? [])
+                .filter(candidate => candidate && !candidate.closed)
+                .map(candidate => (candidate as BeaverWindow).BeaverReact)
+                .filter(Boolean);
 
         const auxiliaryWindows = [
             this.findBeaverWindow(),
@@ -189,6 +196,20 @@ export class BeaverUIFactory {
 
             const reconnect = (auxiliaryWindow as any).reconnectToBeaverReact;
             if (typeof reconnect !== 'function') continue;
+
+            const getCurrentInstance = (auxiliaryWindow as any).getBeaverReactInstance;
+            const currentInstance = typeof getCurrentInstance === 'function'
+                ? getCurrentInstance()
+                : undefined;
+
+            // During unload, only roots owned by the closing bundle need a
+            // handoff. During load/reload, keep any root whose owner is still
+            // represented by a live main window.
+            if (disconnectedBeaverReact) {
+                if (currentInstance !== disconnectedBeaverReact) continue;
+            } else if (currentInstance && liveBeaverReactInstances.includes(currentInstance)) {
+                continue;
+            }
 
             try {
                 reconnect(win.BeaverReact);

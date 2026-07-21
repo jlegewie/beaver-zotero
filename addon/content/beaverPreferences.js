@@ -28,6 +28,25 @@ function reconnectToBeaverReact(nextBeaverReact) {
         return;
     }
 
+    // Loading or unloading an unrelated main window must not disturb an
+    // auxiliary window that is already owned by this bundle.
+    if (BeaverReact === nextBeaverReact) {
+        return;
+    }
+
+    // window.arguments describes only the original open request. On a real
+    // bundle handoff, preserve the tab the user is viewing and do not replay
+    // one-shot category/action requests from that original request.
+    const view = BeaverReact
+        ? {
+            initialTab: typeof Zotero.__beaverGetPreferencesTab === "function"
+                ? Zotero.__beaverGetPreferencesTab()
+                : null,
+            initialActionsCategoryFilter: null,
+            initialActionId: null,
+        }
+        : getInitialView();
+
     try {
         if (BeaverReact && typeof BeaverReact.unmountFromElement === "function") {
             BeaverReact.unmountFromElement(container);
@@ -36,13 +55,12 @@ function reconnectToBeaverReact(nextBeaverReact) {
         Zotero.debug("Beaver: Error disconnecting stale preferences React root: " + e);
     }
 
-    const initialView = getInitialView();
     BeaverReact = nextBeaverReact;
     root = BeaverReact.renderPreferencesWindow(
         container,
-        initialView.initialTab,
-        initialView.initialActionsCategoryFilter,
-        initialView.initialActionId
+        view.initialTab,
+        view.initialActionsCategoryFilter,
+        view.initialActionId
     );
     Zotero.debug("Beaver: Preferences window reconnected to Main Window React instance");
 }
@@ -102,6 +120,7 @@ function onUnload() {
 }
 
 window.reconnectToBeaverReact = reconnectToBeaverReact;
+window.getBeaverReactInstance = () => BeaverReact;
 
 // Set up event listeners
 window.addEventListener("load", onLoad, { once: true });
