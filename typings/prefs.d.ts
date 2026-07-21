@@ -23,6 +23,8 @@ declare namespace _ZoteroTypes {
       "annotationToolEnabled": boolean;
       "maxAddAttachmentToMessage": number;
       "readerExplainPrompt": string;
+      "imeCompositionOrderFix": boolean;
+      "debugImeTrace": boolean;
       "accessRemoteFiles": boolean;
       "dataProviderEnabled": boolean;
       "autoApplyAnnotations": boolean;

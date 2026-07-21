@@ -39,7 +39,10 @@ import {
     slashDescriptorsEqual,
     type SlashCommandDescriptor,
 } from '../../../utils/slashCommands';
+import { isImeKeyEvent } from '../../../utils/ime';
 import { getHost } from '../../../host';
+import { getPref } from '../../../../src/utils/prefs';
+import { registerCompositionEndDeferral, registerImeTrace } from './imeComposition';
 import { SlashCommandHoverCardPlugin } from './SlashCommandHoverCardPlugin';
 import {
     $getFlatSelectionOffsets,
@@ -708,6 +711,10 @@ const SubmitOnEnterPlugin: React.FC<{ onSubmit: () => void }> = ({ onSubmit }) =
             KEY_ENTER_COMMAND,
             (event) => {
                 if (!event) return false;
+                // An Enter owned by an active IME composition (e.g. confirming
+                // a candidate) must not submit; the next Enter, once the
+                // composition is committed, does.
+                if (editor.isComposing() || isImeKeyEvent(event)) return false;
                 if (event.shiftKey) return false;
                 event.preventDefault();
                 onSubmit();
@@ -716,6 +723,34 @@ const SubmitOnEnterPlugin: React.FC<{ onSubmit: () => void }> = ({ onSubmit }) =
             COMMAND_PRIORITY_HIGH,
         );
     }, [editor, onSubmit]);
+    return null;
+};
+
+/**
+ * Applies the Windows IME composition-order workaround to this editor (see
+ * registerCompositionEndDeferral). Windows-only; the `imeCompositionOrderFix`
+ * pref is a kill-switch in case an IME interacts badly with the deferral.
+ */
+const WindowsImeCompositionOrderPlugin: React.FC = () => {
+    const [editor] = useLexicalComposerContext();
+    useEffect(() => {
+        if (!Zotero.isWin) return;
+        if (getPref('imeCompositionOrderFix') === false) return;
+        return registerCompositionEndDeferral(editor);
+    }, [editor]);
+    return null;
+};
+
+/**
+ * Verbose IME event tracing (pref `debugImeTrace`), for diagnosing
+ * composition issues from user reports without a local reproduction.
+ */
+const ImeTracePlugin: React.FC = () => {
+    const [editor] = useLexicalComposerContext();
+    useEffect(() => {
+        if (!getPref('debugImeTrace')) return;
+        return registerImeTrace(editor);
+    }, [editor]);
     return null;
 };
 
@@ -776,6 +811,10 @@ const CaretNavigationPlugin: React.FC<{
         const handler = (e: KeyboardEvent) => {
             // While a menu (slash / attachment) is open, let it own the keys.
             if (suspendedRef.current) return;
+            // While an IME composition is active the IME owns the navigation
+            // keys (candidate-window movement); moving the DOM selection here
+            // would force Gecko to commit the composition.
+            if (isImeKeyEvent(e) || editor.isComposing()) return;
             const key = e.key;
             const isNavKey =
                 key === 'ArrowLeft' || key === 'ArrowRight' ||
@@ -1568,6 +1607,8 @@ export const LexicalEditorInput = forwardRef<LexicalEditorInputHandle, LexicalEd
                     <SlashCommandClickPlugin />
                     <SlashCommandHoverCardPlugin />
                     <SubmitOnEnterPlugin onSubmit={onSubmit} />
+                    <WindowsImeCompositionOrderPlugin />
+                    <ImeTracePlugin />
                     <EditorApi
                         ref={ref}
                         pinnedEndCaretRef={pinnedEndCaretRef}
