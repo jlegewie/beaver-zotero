@@ -471,6 +471,26 @@ export class MuPDFWorkerClient {
         return this.pending.size + this.startupWaiters.size;
     }
 
+    /**
+     * Whether a live worker is currently attached to this slot. Like
+     * `inFlight`, an O(1) read for busy-context snapshots (accessed
+     * cross-bundle via the `Zotero.__beaverMuPDFWorkerClient_*` globals):
+     * distinguishes a wedged-but-live worker from a slot stuck respawning.
+     */
+    get hasWorker(): boolean {
+        return this.worker !== null;
+    }
+
+    /** Cumulative worker spawns since this client was created. O(1) read. */
+    get totalSpawnCount(): number {
+        return this.spawnCount;
+    }
+
+    /** Cumulative busy-age lease reaps since this client was created. O(1) read. */
+    get totalLeaseReapCount(): number {
+        return this.leaseReapCount;
+    }
+
     /** Epoch-ms for the oldest in-flight operation, or 0 while idle. */
     get oldestInFlightStartedAt(): number {
         if (this.oldestPendingStartedAt === null) {
