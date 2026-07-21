@@ -15,8 +15,39 @@
  *  - webpack (`react/`): from `react/index.tsx` at module-init time.
  */
 
-import { configurePDF, type WorkerStartFailureInfo } from "../beaver-extract/config";
+import {
+    configurePDF,
+    type PDFTimerFunctions,
+    type WorkerStartFailureInfo,
+} from "../beaver-extract/config";
 import { logger } from "./logger";
+
+/**
+ * Realm-independent timers for the PDF package's internal watchdogs (idle
+ * reap, busy-age lease, configure timeout). The package's module realm is
+ * a specific window's bundle; bare `setTimeout` there dies with that
+ * window even though the shared client survives on the `Zotero` global
+ * (macOS can close the last window without quitting). `Timer.sys.mjs`
+ * timers live in the shared system global, so watchdogs keep firing
+ * across window generations.
+ */
+function getRealmSafeTimers(): PDFTimerFunctions | undefined {
+    try {
+        const { setTimeout: systemSetTimeout, clearTimeout: systemClearTimeout } =
+            (globalThis as any).ChromeUtils.importESModule(
+                "resource://gre/modules/Timer.sys.mjs",
+            );
+        return {
+            setTimeout: (callback: () => void, delayMs: number) =>
+                systemSetTimeout(callback, delayMs),
+            clearTimeout: (id: unknown) => systemClearTimeout(id),
+        };
+    } catch {
+        // Non-Gecko host (unit tests): the package falls back to the
+        // module realm's timers, which cannot outlive the process there.
+        return undefined;
+    }
+}
 
 /**
  * Options for `configurePDFForBeaver`.
@@ -36,6 +67,7 @@ export function configurePDFForBeaver(options: ConfigurePDFForBeaverOptions = {}
         workerUrl: "chrome://beaver/content/scripts/mupdf-worker.js",
         getWorkerHost: () => Zotero.getMainWindow?.() ?? null,
         onWorkerStartFailure: options.onWorkerStartFailure,
+        timers: getRealmSafeTimers(),
         workerClientSlots: {
             hot: {
                 get: () => (Zotero as any).__beaverMuPDFWorkerClient_hot,
