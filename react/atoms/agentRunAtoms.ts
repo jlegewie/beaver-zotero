@@ -1651,9 +1651,13 @@ function createWSCallbacks(set: Setter): WSCallbacks {
 }
 
 /** Total connect attempts per WS request (initial attempt + auto-retries). */
-export const CONNECT_MAX_ATTEMPTS = 3;
-/** Full-jitter backoff caps before the 2nd and 3rd connect attempts. */
-const CONNECT_RETRY_BACKOFF_MS = [500, 2000];
+export const CONNECT_MAX_ATTEMPTS = 4;
+/** Bounded-jitter backoff ranges before the 2nd, 3rd, and 4th attempts. */
+const CONNECT_RETRY_BACKOFF_MS = [
+    { min: 50, max: 200 },
+    { min: 200, max: 1000 },
+    { min: 500, max: 2500 },
+];
 
 /**
  * Execute a WebSocket request with the given run and request.
@@ -1736,10 +1740,12 @@ async function executeWSRequest(
             set(isWSChatPendingAtom, true);
             set(wsReconnectingAtom, { attempt: attempt + 1, maxAttempts: CONNECT_MAX_ATTEMPTS });
 
-            const backoffCap = CONNECT_RETRY_BACKOFF_MS[
+            const backoffRange = CONNECT_RETRY_BACKOFF_MS[
                 Math.min(attempt - 1, CONNECT_RETRY_BACKOFF_MS.length - 1)
             ];
-            await new Promise((resolve) => setTimeout(resolve, Math.random() * backoffCap));
+            const backoffMs = backoffRange.min
+                + Math.random() * (backoffRange.max - backoffRange.min);
+            await new Promise((resolve) => setTimeout(resolve, backoffMs));
 
             // The user may have cancelled or replaced the run during the wait.
             const activeRun = store.get(activeRunAtom);
