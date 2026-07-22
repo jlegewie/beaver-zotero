@@ -202,86 +202,105 @@ const ExcludedLibrariesList: React.FC = () => {
     };
 
     const personalExcluded = isPersonalLibraryExcluded(excludedLibraries);
+    const accessibleLibraryNames = unexcludedLibraries.map(library => library.name).join(', ');
 
     return (
-        <div className="display-flex flex-col gap-2">
-            <div className="display-flex flex-row items-center justify-between gap-3">
-                <div className="text-base font-color-secondary">
-                    Excluded libraries are not indexed, searched, read, or modified by Beaver.
-                </div>
-                <button
-                    ref={buttonRef}
-                    type="button"
-                    className="variant-outline"
-                    style={{ marginRight: '1px', padding: '4px 6px' }}
-                    onClick={handleButtonClick}
-                    disabled={unexcludedLibraries.length === 0 || isUpdating}
-                    aria-label="Exclude a library"
-                >
-                    <Icon icon={PlusSignIcon} className="scale-11" />
-                    <span>Exclude a library...</span>
-                </button>
-            </div>
-
-            {(personalExcluded || allLibrariesExcluded) && (
-                <div
-                    className="display-flex flex-row items-start gap-2 text-sm p-2 rounded-md"
-                    style={{ color: 'var(--tag-red-secondary)', border: '1px solid var(--tag-red-tertiary)', background: 'var(--tag-red-quinary)' }}
-                >
-                    <Icon icon={AlertIcon} className="scale-11 mt-015 flex-none" />
-                    <span>
-                        {allLibrariesExcluded
-                            ? "All libraries are excluded. Beaver can't access any libraries."
-                            : "Your personal library is excluded on every device connected to this account."}
-                    </span>
+        <div className="display-flex flex-col gap-3">
+            {allLibraries.length > 0 && (
+                <div className="text-base font-color-secondary" style={{ paddingLeft: '2px' }}>
+                    {unexcludedLibraries.length === 0
+                        ? "Beaver can't access any libraries."
+                        : excludedKeys.size === 0
+                            ? `Beaver can access all your libraries: ${accessibleLibraryNames}`
+                            : `Beaver can access the following libraries: ${accessibleLibraryNames}`
+                    }
                 </div>
             )}
 
-            <div className="display-flex flex-col rounded-md border-popup">
-                {excludedRows.length === 0 ? (
-                    <div className="p-2 text-base font-color-secondary">
-                        No libraries excluded. Beaver can access all your libraries.
+            <div className="display-flex flex-col gap-2">
+                <div className="display-flex flex-row items-center justify-between gap-3">
+                    <div
+                        role="heading"
+                        aria-level={3}
+                        className="text-base font-color-primary font-medium"
+                        style={{ paddingLeft: '2px', fontSize: '1.05rem' }}
+                    >
+                        Excluded Libraries
                     </div>
-                ) : (
-                    excludedRows.map((library, index) => {
-                        const stats = libraryStatsById[library.library_id];
-                        return (
-                            <div
-                                key={library.library_id}
-                                className={`display-flex flex-row items-center justify-between p-3 ${index > 0 ? 'border-top-quinary' : ''}`}
-                            >
-                                <div className="display-flex flex-row items-start gap-2 min-w-0">
-                                    <span className="scale-90 -mt-010">
-                                        <CSSIcon
-                                            name={library.is_group ? 'library-group' : 'library'}
-                                            className="icon-16 font-color-secondary"
-                                        />
-                                    </span>
-                                    <div className="display-flex flex-col min-w-0 gap-1">
-                                        <div className="font-color-primary truncate">{library.name}</div>
-                                        <div className="text-sm font-color-tertiary">
-                                            {isLoadingStats && !stats
-                                                ? 'Loading...'
-                                                : stats ? `${stats.itemCount.toLocaleString()} items, ${stats.attachmentCount.toLocaleString()} attachments` : '...'
-                                            }
+                    <button
+                        ref={buttonRef}
+                        type="button"
+                        className="variant-outline"
+                        style={{ marginRight: '1px', padding: '4px 6px' }}
+                        onClick={handleButtonClick}
+                        disabled={unexcludedLibraries.length === 0 || isUpdating}
+                        aria-label="Exclude a library"
+                    >
+                        <Icon icon={PlusSignIcon} className="scale-11" />
+                        <span>Exclude a library...</span>
+                    </button>
+                </div>
+
+                {(personalExcluded || allLibrariesExcluded) && (
+                    <div
+                        className="display-flex flex-row items-start gap-2 text-sm p-2 rounded-md"
+                        style={{ color: 'var(--tag-red-secondary)', border: '1px solid var(--tag-red-tertiary)', background: 'var(--tag-red-quinary)' }}
+                    >
+                        <Icon icon={AlertIcon} className="scale-11 mt-015 flex-none" />
+                        <span>
+                            {allLibrariesExcluded
+                                ? "All libraries are excluded. Beaver can't access any libraries."
+                                : "Your personal library is excluded on every device connected to this account."}
+                        </span>
+                    </div>
+                )}
+
+                <div className="display-flex flex-col rounded-md border-popup">
+                    {excludedRows.length === 0 ? (
+                        <div className="p-2 text-base font-color-secondary">
+                            No libraries excluded.
+                        </div>
+                    ) : (
+                        excludedRows.map((library, index) => {
+                            const stats = libraryStatsById[library.library_id];
+                            return (
+                                <div
+                                    key={library.library_id}
+                                    className={`display-flex flex-row items-center justify-between p-3 ${index > 0 ? 'border-top-quinary' : ''}`}
+                                >
+                                    <div className="display-flex flex-row items-start gap-2 min-w-0">
+                                        <span className="scale-90 -mt-010">
+                                            <CSSIcon
+                                                name={library.is_group ? 'library-group' : 'library'}
+                                                className="icon-16 font-color-secondary"
+                                            />
+                                        </span>
+                                        <div className="display-flex flex-col min-w-0 gap-1">
+                                            <div className="font-color-primary truncate">{library.name}</div>
+                                            <div className="text-sm font-color-tertiary">
+                                                {isLoadingStats && !stats
+                                                    ? 'Loading...'
+                                                    : stats ? `${stats.itemCount.toLocaleString()} items, ${stats.attachmentCount.toLocaleString()} attachments` : '...'
+                                                }
+                                            </div>
                                         </div>
                                     </div>
+                                    <div className="display-flex flex-row items-center gap-4 mr-1">
+                                        <IconButton
+                                            onClick={() => handleToggleLibrary(library)}
+                                            variant="ghost-secondary"
+                                            ariaLabel="Restore Library"
+                                            disabled={isUpdating}
+                                            title="Restore Library"
+                                            icon={UndoIcon}
+                                            className="scale-11"
+                                        />
+                                    </div>
                                 </div>
-                                <div className="display-flex flex-row items-center gap-4 mr-1">
-                                    <IconButton
-                                        onClick={() => handleToggleLibrary(library)}
-                                        variant="ghost-secondary"
-                                        ariaLabel="Restore Library"
-                                        disabled={isUpdating}
-                                        title="Restore Library"
-                                        icon={UndoIcon}
-                                        className="scale-11"
-                                    />
-                                </div>
-                            </div>
-                        );
-                    })
-                )}
+                            );
+                        })
+                    )}
+                </div>
             </div>
 
             <SearchMenu
