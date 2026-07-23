@@ -65,14 +65,17 @@ export function baselineConnectionEvidence(
     };
 }
 
+/** Client-initiated close used when the application heartbeat times out. */
+export const HEARTBEAT_TIMEOUT_CLOSE_CODE = 4008;
+export const HEARTBEAT_TIMEOUT_CLOSE_REASON = 'heartbeat_timeout';
+
 /**
- * 1005/1006 are synthetic absence-of-close-frame codes: the transport dropped
- * without either side sending a close frame. They mark abrupt transport loss
- * (network interruption, proxy/DPI kill, instance scale-down) as opposed to a
- * deliberate close or an application-level rejection.
+ * Recoverable transport-loss codes for the mid-run reattach path. 1005/1006
+ * mean no close frame arrived; 4008 is the equivalent condition detected by
+ * the application heartbeat before the browser reports a native close.
  */
 export function isAbruptTransportCloseCode(code: number | null): boolean {
-    return code === 1005 || code === 1006;
+    return code === 1005 || code === 1006 || code === HEARTBEAT_TIMEOUT_CLOSE_CODE;
 }
 
 /**
@@ -99,7 +102,9 @@ export function isRetryablePreReadyConnectFailure(
         return false;
     }
     if (evidence.timedOut) return true;
-    return isAbruptTransportCloseCode(evidence.closeCode);
+    // The heartbeat only starts after ready, so its synthetic 4008 is a
+    // mid-run recovery signal, never a pre-ready retry signal.
+    return evidence.closeCode === 1005 || evidence.closeCode === 1006;
 }
 
 /**
@@ -401,6 +406,20 @@ export function presentConnectionFailure(
             details:
                 "Beaver's server ended the live connection before the response was finished, so it may be incomplete. This is usually temporary — please try again." +
                 serverMessageSuffix(evidence.closeReason),
+        };
+    }
+
+    if (evidence.closeCode === HEARTBEAT_TIMEOUT_CLOSE_CODE) {
+        const reachability = diagnostic?.apiReachable
+            ? " Beaver's server is still reachable, so a brief network interruption or security software may be responsible."
+            : ' This can be caused by a temporary server or internet interruption, VPN, proxy, firewall, or security software.';
+        return {
+            message: 'The connection was lost before Beaver finished responding.',
+            details:
+                'The live connection stopped responding, so Beaver closed it.' +
+                reachability +
+                troubleshootingLink +
+                codeSuffix(evidence.closeCode),
         };
     }
 

@@ -28,6 +28,8 @@ export interface WSReadyEvent extends WSBaseEvent {
     processing_mode: ProcessingMode;
     indexing_complete: boolean;
     supports_request_acks?: boolean;
+    /** Whether the backend understands the client's post-ready heartbeat pings. Absent on old backends. */
+    supports_heartbeat?: boolean;
 }
 
 /**
@@ -101,6 +103,11 @@ export interface WSRunCompleteEvent extends WSBaseEvent {
 /** Done event signaling the request is fully complete (after persistence, usage logging, etc.) */
 export interface WSDoneEvent extends WSBaseEvent {
     event: 'done';
+}
+
+/** Reply to the client's application-level heartbeat `ping` (see WSPingMessage). */
+export interface WSPongEvent extends WSBaseEvent {
+    event: 'pong';
 }
 
 /** Streaming done event: all LLM tokens sent, post-processing (citations) still in progress */
@@ -1614,6 +1621,7 @@ export type WSEvent =
     | WSRunCompleteEvent
     | WSStreamingDoneEvent
     | WSDoneEvent
+    | WSPongEvent
     | WSThreadEvent
     | WSThreadNameEvent
     | WSErrorEvent
@@ -1652,6 +1660,11 @@ export type WSEvent =
 // =============================================================================
 // Client Message Types (sent from frontend to backend)
 // =============================================================================
+
+/** Application-level heartbeat sent periodically after `ready`. */
+export interface WSPingMessage {
+    type: 'ping';
+}
 
 /**
  * Authentication message sent immediately after WebSocket connection opens.
@@ -1886,6 +1899,8 @@ export interface WSReadyData {
     subscriptionStatus: SubscriptionStatus;
     processingMode: ProcessingMode;
     indexingComplete: boolean;
+    /** Whether the backend understands the client's post-ready heartbeat pings. Absent on old backends. */
+    supports_heartbeat?: boolean;
 }
 
 /** Data received in the request_ack event */

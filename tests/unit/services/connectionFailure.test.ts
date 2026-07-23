@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import {
     ConnectionFailureEvidence,
     connectRecoveryAuthFields,
+    HEARTBEAT_TIMEOUT_CLOSE_CODE,
+    HEARTBEAT_TIMEOUT_CLOSE_REASON,
     isAbruptTransportCloseCode,
     isRetryablePreReadyConnectFailure,
     presentConnectionFailure,
@@ -383,12 +385,30 @@ describe('presentConnectionFailure', () => {
         expect(result.details).toContain('(error code 1006)');
         expect(result.details).not.toContain('connection code');
     });
+
+    it('presents a heartbeat timeout as a lost connection, not a server action', () => {
+        const result = presentConnectionFailure({
+            ...opening1006,
+            stage: 'mid_run',
+            closeCode: HEARTBEAT_TIMEOUT_CLOSE_CODE,
+            closeReason: HEARTBEAT_TIMEOUT_CLOSE_REASON,
+            wasClean: true,
+            socketOpened: true,
+            readyReceived: true,
+        });
+
+        expect(result.message).toBe('The connection was lost before Beaver finished responding.');
+        expect(result.details).toContain('stopped responding, so Beaver closed it');
+        expect(result.details).not.toContain("Beaver's server ended");
+        expect(result.details).not.toContain(HEARTBEAT_TIMEOUT_CLOSE_REASON);
+    });
 });
 
 describe('isAbruptTransportCloseCode', () => {
-    it('matches only the synthetic no-close-frame codes', () => {
+    it('matches native and heartbeat-detected transport loss', () => {
         expect(isAbruptTransportCloseCode(1006)).toBe(true);
         expect(isAbruptTransportCloseCode(1005)).toBe(true);
+        expect(isAbruptTransportCloseCode(HEARTBEAT_TIMEOUT_CLOSE_CODE)).toBe(true);
         expect(isAbruptTransportCloseCode(1000)).toBe(false);
         expect(isAbruptTransportCloseCode(1008)).toBe(false);
         expect(isAbruptTransportCloseCode(1011)).toBe(false);

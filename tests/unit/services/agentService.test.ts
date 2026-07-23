@@ -44,7 +44,14 @@ vi.mock('../../../react/agents/agentActions', () => ({
     toAgentAction: vi.fn((action) => action),
 }));
 
-import { AgentConnectionError, AgentService, ConnectTimeoutError } from '../../../src/services/agentService';
+import {
+    AgentConnectionError,
+    AgentService,
+    CONNECT_TIMEOUT_MS,
+    ConnectTimeoutError,
+    HEARTBEAT_DEAD_THRESHOLD_MS,
+    HEARTBEAT_INTERVAL_MS,
+} from '../../../src/services/agentService';
 import type { AgentRunRequest, WSCallbacks } from '../../../src/services/agentProtocol';
 
 class MockWebSocket {
@@ -95,7 +102,7 @@ class MockWebSocket {
     }
 }
 
-function createCallbacks(): WSCallbacks {
+function createCallbacks(overrides: Partial<WSCallbacks> = {}): WSCallbacks {
     return {
         onReady: vi.fn(),
         onRequestAck: vi.fn(),
@@ -116,6 +123,7 @@ function createCallbacks(): WSCallbacks {
         onDeferredApprovalRequest: vi.fn(),
         onOpen: vi.fn(),
         onClose: vi.fn(),
+        ...overrides,
     };
 }
 
@@ -130,6 +138,7 @@ async function completeConnect(
     callbacks: WSCallbacks,
     request: AgentRunRequest,
     frontendVersion?: string,
+    readyOverrides: Record<string, unknown> = {},
 ): Promise<MockWebSocket> {
     const initialCount = MockWebSocket.instances.length;
     const connectPromise = service.connect(request, callbacks, frontendVersion);
@@ -153,6 +162,7 @@ async function completeConnect(
         subscription_status: 'active',
         processing_mode: 'fast',
         indexing_complete: true,
+        ...readyOverrides,
     });
     await connectPromise;
 
@@ -215,6 +225,44 @@ describe('AgentService reconnect handling', () => {
         expect(firstCallbacks.onClose).not.toHaveBeenCalled();
         expect(secondCallbacks.onClose).not.toHaveBeenCalled();
         expect(secondCallbacks.onPart).toHaveBeenCalledTimes(1);
+    });
+
+    it('preserves a replacement connection started synchronously from onClose', async () => {
+        const service = new AgentService('https://api.example.com');
+        const replacementCallbacks = createCallbacks();
+        let replacementConnect: Promise<void> | undefined;
+        const firstCallbacks = createCallbacks({
+            onClose: vi.fn(() => {
+                replacementConnect = service.connect(
+                    { type: 'replacement' } as AgentRunRequest,
+                    replacementCallbacks,
+                );
+            }),
+        });
+        const firstSocket = await completeConnect(
+            service,
+            firstCallbacks,
+            { type: 'first' } as AgentRunRequest,
+        );
+
+        firstSocket.emitClose({ code: 1006, reason: '', wasClean: false });
+        await flushMicrotasks();
+
+        const replacementSocket = MockWebSocket.instances.at(-1);
+        expect(replacementSocket).toBeDefined();
+        expect(replacementSocket).not.toBe(firstSocket);
+        replacementSocket!.emitOpen();
+        await vi.advanceTimersByTimeAsync(50);
+        replacementSocket!.emitMessage({
+            event: 'ready',
+            subscription_status: 'active',
+            processing_mode: 'fast',
+            indexing_complete: true,
+        });
+        await replacementConnect;
+
+        expect(replacementCallbacks.onReady).toHaveBeenCalledTimes(1);
+        expect(service.isConnected()).toBe(true);
     });
 
     it('notifies close once for an explicit client close and ignores the later socket event', async () => {
@@ -618,5 +666,145 @@ describe('AgentService reconnect handling', () => {
         // The abandoned attempt settles quietly rather than as a failure.
         const outcome = await firstOutcome;
         expect(outcome.ok).toBe(true);
+    });
+});
+
+describe('AgentService heartbeat', () => {
+    const pingMessage = JSON.stringify({ type: 'ping' });
+
+    beforeEach(() => {
+        vi.useFakeTimers();
+        MockWebSocket.instances = [];
+        vi.stubGlobal('WebSocket', MockWebSocket);
+        mockSupabase.auth.getSession.mockReset();
+        mockSupabase.auth.refreshSession.mockReset();
+        mockSupabase.auth.getSession.mockResolvedValue({
+            data: {
+                session: {
+                    access_token: 'token',
+                    expires_at: Math.floor(Date.now() / 1000) + 3600,
+                },
+            },
+            error: null,
+        });
+    });
+
+    afterEach(() => {
+        vi.unstubAllGlobals();
+        vi.useRealTimers();
+    });
+
+    it('does not ping before ready', async () => {
+        const service = new AgentService('https://api.example.com');
+        const initialCount = MockWebSocket.instances.length;
+        void service.connect(
+            { type: 'pre-ready' } as AgentRunRequest,
+            createCallbacks(),
+        ).catch(() => {});
+        await flushMicrotasks();
+        const socket = MockWebSocket.instances[initialCount];
+        socket.emitOpen();
+
+        await vi.advanceTimersByTimeAsync(CONNECT_TIMEOUT_MS - 1_000);
+
+        expect(socket.send.mock.calls.filter((call) => call[0] === pingMessage)).toHaveLength(0);
+    });
+
+    it('keeps pre-heartbeat behavior when an old backend omits the capability flag', async () => {
+        const service = new AgentService('https://api.example.com');
+        const socket = await completeConnect(
+            service,
+            createCallbacks(),
+            { type: 'old-backend' } as AgentRunRequest,
+        );
+        socket.send.mockClear();
+
+        await vi.advanceTimersByTimeAsync(HEARTBEAT_DEAD_THRESHOLD_MS * 2);
+
+        expect(socket.send.mock.calls.filter((call) => call[0] === pingMessage)).toHaveLength(0);
+        expect(socket.close).not.toHaveBeenCalled();
+    });
+
+    it('sends pings when the backend advertises heartbeat support', async () => {
+        const service = new AgentService('https://api.example.com');
+        const socket = await completeConnect(
+            service,
+            createCallbacks(),
+            { type: 'heartbeat' } as AgentRunRequest,
+            undefined,
+            { supports_heartbeat: true },
+        );
+        socket.send.mockClear();
+
+        await vi.advanceTimersByTimeAsync(HEARTBEAT_INTERVAL_MS * 2);
+
+        expect(socket.send.mock.calls.filter((call) => call[0] === pingMessage)).toHaveLength(2);
+    });
+
+    it('counts every incoming server message as liveness', async () => {
+        const service = new AgentService('https://api.example.com');
+        const socket = await completeConnect(
+            service,
+            createCallbacks(),
+            { type: 'liveness' } as AgentRunRequest,
+            undefined,
+            { supports_heartbeat: true },
+        );
+
+        for (let i = 0; i < 5; i++) {
+            await vi.advanceTimersByTimeAsync(HEARTBEAT_INTERVAL_MS);
+            socket.emitMessage({ event: 'pong' });
+        }
+
+        expect(socket.close).not.toHaveBeenCalled();
+    });
+
+    it('closes and reports evidence after prolonged silence', async () => {
+        const service = new AgentService('https://api.example.com');
+        const callbacks = createCallbacks();
+        const socket = await completeConnect(
+            service,
+            callbacks,
+            { type: 'timeout' } as AgentRunRequest,
+            undefined,
+            { supports_heartbeat: true },
+        );
+
+        await vi.advanceTimersByTimeAsync(HEARTBEAT_INTERVAL_MS * 3);
+        expect(socket.close).toHaveBeenCalledWith(4008, 'heartbeat_timeout');
+
+        socket.emitClose({ code: 4008, reason: 'heartbeat_timeout', wasClean: true });
+        expect(callbacks.onClose).toHaveBeenCalledWith(
+            4008,
+            'heartbeat_timeout',
+            true,
+            expect.objectContaining({ stage: 'mid_run', closeCode: 4008 }),
+        );
+    });
+
+    it('never lets a stale heartbeat close a replacement socket', async () => {
+        const service = new AgentService('https://api.example.com');
+        const first = await completeConnect(
+            service,
+            createCallbacks(),
+            { type: 'first' } as AgentRunRequest,
+            undefined,
+            { supports_heartbeat: true },
+        );
+        const second = await completeConnect(
+            service,
+            createCallbacks(),
+            { type: 'second' } as AgentRunRequest,
+            undefined,
+            { supports_heartbeat: true },
+        );
+
+        for (let i = 0; i < 5; i++) {
+            await vi.advanceTimersByTimeAsync(HEARTBEAT_INTERVAL_MS);
+            second.emitMessage({ event: 'pong' });
+        }
+
+        expect(first.close).toHaveBeenCalledWith(4008, 'heartbeat_timeout');
+        expect(second.close).not.toHaveBeenCalled();
     });
 });

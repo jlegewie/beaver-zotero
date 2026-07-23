@@ -23,6 +23,7 @@ import {
     WSErrorEvent,
     WSCallbacks,
     WSAuthMessage,
+    WSPingMessage,
     WSReadyData,
     WSRequestAckData,
     WSRequestReceivedAck,
@@ -42,6 +43,8 @@ import {
     ConnectRecoveryAuthFields,
     ConnectionFailureEvidence,
     ConnectionFailureStage,
+    HEARTBEAT_TIMEOUT_CLOSE_CODE,
+    HEARTBEAT_TIMEOUT_CLOSE_REASON,
 } from './connectionFailure';
 
 
@@ -90,6 +93,11 @@ export async function getWSAuthToken(): Promise<string> {
 
 /** Backstop timeout for a full connect attempt (auth token + handshake + ready). */
 export const CONNECT_TIMEOUT_MS = 20_000;
+
+/** Interval between application-level heartbeat pings sent after `ready`. */
+export const HEARTBEAT_INTERVAL_MS = 20_000;
+/** Maximum silence before the connection is considered dead. */
+export const HEARTBEAT_DEAD_THRESHOLD_MS = 45_000;
 
 interface ConnectionAttemptState {
     stage: ConnectionFailureStage;
@@ -382,6 +390,7 @@ export class AgentService {
 
         return new Promise<void>((resolve, reject) => {
             let hasResolved = false;
+            let heartbeatIntervalId: ReturnType<typeof setInterval> | undefined;
             const finish = (error?: Error) => {
                 if (hasResolved) return;
                 hasResolved = true;
@@ -402,6 +411,32 @@ export class AgentService {
                 onReady: (data: WSReadyData) => {
                     attempt.stage = 'mid_run';
                     attempt.readyReceived = true;
+                    // Old backends omit this capability flag. In that case the
+                    // client retains its pre-heartbeat behavior and never
+                    // mistakes a quiet old backend for a dead connection.
+                    if (data.supports_heartbeat === true) {
+                        heartbeatIntervalId ??= setInterval(() => {
+                            const idleMs = attempt.lastMessageAt !== null
+                                ? Date.now() - attempt.lastMessageAt
+                                : 0;
+                            if (idleMs > HEARTBEAT_DEAD_THRESHOLD_MS) {
+                                logger(`AgentService: Heartbeat detected a dead connection (${idleMs}ms since last message), closing`, 1);
+                                if (heartbeatIntervalId !== undefined) {
+                                    clearInterval(heartbeatIntervalId);
+                                    heartbeatIntervalId = undefined;
+                                }
+                                try {
+                                    wsInstance.close(HEARTBEAT_TIMEOUT_CLOSE_CODE, HEARTBEAT_TIMEOUT_CLOSE_REASON);
+                                } catch (err) {
+                                    logger(`AgentService: Error closing dead connection: ${err}`, 1);
+                                }
+                                return;
+                            }
+                            if (wsInstance.readyState !== WebSocket.OPEN) return;
+                            const ping: WSPingMessage = { type: 'ping' };
+                            wsInstance.send(JSON.stringify(ping));
+                        }, HEARTBEAT_INTERVAL_MS);
+                    }
                     logger('AgentService: Server ready, sending agent run request', 1);
                     // Call the original onReady callback first
                     callbacks.onReady(data);
@@ -494,6 +529,10 @@ export class AgentService {
             };
 
             wsInstance.onclose = (event) => {
+                if (heartbeatIntervalId !== undefined) {
+                    clearInterval(heartbeatIntervalId);
+                    heartbeatIntervalId = undefined;
+                }
                 if (this.ws !== wsInstance || this.connectionId !== connId) {
                     logger('AgentService: Ignoring stale close event from superseded connection', 1);
                     return;
@@ -508,7 +547,11 @@ export class AgentService {
                     wasClean: event.wasClean,
                 });
                 callbacks.onClose?.(event.code, event.reason, event.wasClean, evidence);
-                this.resetConnectionState();
+                // A future mid-run reattach starts its replacement synchronously
+                // from onClose. Do not let this old socket invalidate that attempt.
+                if (this.ws === wsInstance && this.connectionId === connId) {
+                    this.resetConnectionState();
+                }
                 // If we haven't resolved yet, the connection closed before
                 // ready. Close-code details for the error UI travel via the
                 // onClose callback above, not the rejection.
@@ -676,6 +719,7 @@ export class AgentService {
                         subscriptionStatus: event.subscription_status,
                         processingMode: event.processing_mode,
                         indexingComplete: event.indexing_complete,
+                        supports_heartbeat: event.supports_heartbeat,
                     };
                     this.callbacks.onReady(readyData);
                     break;
@@ -719,6 +763,10 @@ export class AgentService {
 
                 case 'done':
                     this.callbacks.onDone();
+                    break;
+
+                case 'pong':
+                    // Arrival already refreshed attempt.lastMessageAt.
                     break;
 
                 case 'thread':
