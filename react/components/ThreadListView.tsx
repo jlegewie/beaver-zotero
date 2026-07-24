@@ -3,7 +3,7 @@ import { useAtomValue, useSetAtom } from 'jotai';
 import { SearchIcon, EditIcon, DeleteIcon, TickIcon, CancelIcon } from './icons/icons';
 import Spinner from './icons/Spinner';
 import IconButton from './ui/IconButton';
-import { isThreadListViewAtom, threadListFilterAtom } from '../atoms/ui';
+import { isThreadListViewAtom, threadListFilterAtom, showAllThreadInstancesAtom } from '../atoms/ui';
 import { ThreadData, loadThreadAtom, newThreadAtom } from '../atoms/threads';
 import { currentThreadIdAtom } from '../agents/atoms';
 import { userAtom } from '../atoms/auth';
@@ -117,10 +117,13 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
     // by default; "Show all" reveals them. Read live — the Zotero account id
     // can appear/disappear when the user logs in or out without remounting.
     const instanceRef = currentZoteroInstanceRef();
-    const [showAllInstances, setShowAllInstances] = useState(false);
+    // Global so the choice survives closing and reopening the thread list.
+    const showAllInstances = useAtomValue(showAllThreadInstancesAtom);
+    const setShowAllInstances = useSetAtom(showAllThreadInstancesAtom);
     // Read inside fetch callbacks (kept out of their deps so toggling in
-    // item-filtered mode doesn't trigger a needless by-item refetch).
-    const showAllInstancesRef = useRef(false);
+    // item-filtered mode doesn't trigger a needless by-item refetch). Seeded
+    // from the atom so the first fetch after a remount honors a prior opt-out.
+    const showAllInstancesRef = useRef(showAllInstances);
     const [otherInstanceCount, setOtherInstanceCount] = useState<number | null>(null);
 
     const [searchQuery, setSearchQuery] = useState('');
@@ -149,6 +152,11 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
     useEffect(() => {
         activeQueryRef.current = activeQuery;
     }, [activeQuery]);
+
+    // Keeps the ref honest if the atom is changed outside this component.
+    useEffect(() => {
+        showAllInstancesRef.current = showAllInstances;
+    }, [showAllInstances]);
 
     // Fetch threads (initial load or after search)
     const fetchThreads = useCallback(async (query: string) => {
