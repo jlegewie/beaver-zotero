@@ -622,6 +622,14 @@ export const updateReaderAttachmentAtom = atom(
         const item = await Zotero.Items.getAsync(reader.itemID);
         // A newer update (or a clear) ran while the item was loading
         if (generation !== readerAttachmentGeneration) return;
+        // The user can exclude the library while the item loads. Re-check
+        // rather than trust the decision made before the await: this atom is
+        // the choke point, so nothing excluded may be stored here or handed to
+        // background validation.
+        if (!isReaderLibrarySearchable(get(searchableLibraryIdsAtom), reader)) {
+            set(currentReaderAttachmentAtom, null);
+            return;
+        }
         if (item) {
             set(currentReaderAttachmentAtom, item);
             validateItemsInBackground(get, set, [item], true);

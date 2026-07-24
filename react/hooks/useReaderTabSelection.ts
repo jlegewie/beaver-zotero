@@ -76,6 +76,18 @@ export function useReaderTabSelection() {
     const selectionCleanupRef = useRef<(() => void) | null>(null);
     const currentReaderIdRef = useRef<number | null>(null);
     const currentReaderRef = useRef<ZoteroReader | null>(null);
+    /**
+     * Identifies the current reader setup. Bumped whenever tracking stops, so
+     * every async continuation of an older setup can tell that it no longer
+     * owns the reader context.
+     *
+     * A ref, not effect state: the hook stays mounted while its effect re-runs
+     * (Beaver opened/closed, exclusions changed), and the callbacks that must
+     * be invalidated — `waitForInternalReader`'s timer chain, selection-change
+     * handlers — outlive a single effect run. Reader id alone is not enough,
+     * since tracking can stop and restart for the very same attachment.
+     */
+    const setupGenerationRef = useRef(0);
 
     // Define main window
     const mainWindow = Zotero.getMainWindow();
@@ -129,6 +141,7 @@ export function useReaderTabSelection() {
      * while a transition is still awaiting must no longer match.
      */
     const detachActiveReader = useCallback((): ZoteroReader | null => {
+        setupGenerationRef.current++;
         if (selectionCleanupRef.current) {
             logger(`useReaderTabSelection: Removing selection listener for reader ${currentReaderIdRef.current}`);
             selectionCleanupRef.current();
@@ -141,15 +154,8 @@ export function useReaderTabSelection() {
         return previousReader;
     }, [setReaderTextSelection]);
 
-    /**
-     * Start tracking `reader`.
-     *
-     * `isCurrent` reports whether the transition that requested this setup is
-     * still the newest one. Tab selections overlap (see the observer below), so
-     * a setup whose transition has been superseded must not write state the
-     * winning transition already owns.
-     */
-    const setupReader = useCallback(async (reader: any, isCurrent: () => boolean = () => true) => {
+    // Function to set up listeners and state for a given reader
+    const setupReader = useCallback(async (reader: any) => {
         if (!reader) {
             logger("useReaderTabSelection:setupReader: No reader provided.");
             detachActiveReader();
@@ -171,6 +177,33 @@ export function useReaderTabSelection() {
 
         currentReaderIdRef.current = reader.itemID; // Store just the ID
         currentReaderRef.current = reader;
+        // Claim this setup. Any later detach (tab change, Beaver closed,
+        // exclusions changed) invalidates it, including when tracking restarts
+        // for the same attachment — the reader instance would then differ too.
+        const setupGeneration = setupGenerationRef.current;
+        const isActiveSetup = () => setupGenerationRef.current === setupGeneration
+            && currentReaderIdRef.current === reader.itemID
+            && currentReaderRef.current === reader;
+
+        /**
+         * Re-checks access immediately before each read of this reader.
+         *
+         * The check at setup time is a cached decision: excluding the library
+         * re-runs the effect, but the notifier callbacks and timers below can
+         * fire in the interval before React tears this setup down. Reading the
+         * reader's text — or publishing it as staged context — must never
+         * happen on a stale allow. Stops tracking outright when access is gone
+         * rather than just skipping one read.
+         */
+        const canStillReadReader = () => {
+            if (isReaderLibrarySearchable(store.get(searchableLibraryIdsAtom), reader)) return true;
+            logger(`useReaderTabSelection: Reader ${reader.itemID} is no longer in a searchable library. Stopping tracking.`);
+            if (isActiveSetup()) {
+                detachActiveReader();
+                clearReaderAttachment();
+            }
+            return false;
+        };
         logger(`useReaderTabSelection:setupReader: Setting up for reader ${reader.itemID}`);
 
         // Update reader attachment for the new reader
@@ -180,9 +213,9 @@ export function useReaderTabSelection() {
             logger(`useReaderTabSelection:setupReader: Failed to update reader attachment for ${reader.itemID}: ${error instanceof Error ? error.message : String(error)}`);
         }
 
-        // A newer tab transition took over while the item was loading; it owns
-        // the reader context now.
-        if (!isCurrent()) {
+        // Tracking stopped or moved on while the item was loading; whoever owns
+        // the context now must not be disturbed.
+        if (!isActiveSetup()) {
             logger(`useReaderTabSelection:setupReader: Setup for reader ${reader.itemID} was superseded. Skipping.`);
             return;
         }
@@ -191,17 +224,19 @@ export function useReaderTabSelection() {
         // loaded); make sure no reader is left marked active.
         if (!store.get(currentReaderAttachmentAtom)) {
             logger(`useReaderTabSelection:setupReader: No trackable attachment for reader ${reader.itemID}. Skipping selection setup.`);
-            if (currentReaderIdRef.current === reader.itemID) detachActiveReader();
+            detachActiveReader();
             return;
         }
 
         // Wait for the reader to be ready before setting initial selection and listener
         waitForInternalReader(reader, async () => {
-            // Check if the reader context is still the same after waiting
-            if (currentReaderIdRef.current !== reader.itemID) {
+            // Check if this setup still owns the reader context after waiting
+            if (!isActiveSetup()) {
                 logger(`useReaderTabSelection:setupReader: Reader changed after waitForInternalReader for ${reader.itemID}. Skipping setup.`);
                 return;
             }
+
+            if (!canStillReadReader()) return;
 
             // Get current selection and update state
             const initialSelection = getSelectedTextAsTextSelection(reader);
@@ -212,7 +247,7 @@ export function useReaderTabSelection() {
             // closed). Re-check before touching state: a listener installed
             // after teardown would never be removed, and the selection would
             // belong to a reader the user already left.
-            if (currentReaderIdRef.current !== reader.itemID) {
+            if (!isActiveSetup()) {
                 logger(`useReaderTabSelection:setupReader: Reader ${reader.itemID} no longer active after item load. Skipping setup.`);
                 return;
             }
@@ -224,6 +259,8 @@ export function useReaderTabSelection() {
                     return;
                 }
             }
+            if (!canStillReadReader()) return;
+
             // Set the initial selection
             setReaderTextSelection(initialSelection);
 
@@ -232,13 +269,14 @@ export function useReaderTabSelection() {
             selectionCleanupRef.current = addSelectionChangeListener(
                 reader, 
                 async (newSelection: TextSelection | null) => {
-                    // Ensure the event is for the currently active reader this hook manages
-                    if (currentReaderIdRef.current === reader.itemID) {
+                    // Ensure the event belongs to the setup that installed this
+                    // listener, not a later one for the same attachment
+                    if (isActiveSetup()) {
                         logger(`useReaderTabSelection: Selection changed in reader ${reader.itemID}, updating selection to "${newSelection ? newSelection.text : 'null'}"`);
                         // Ensure the reader item is valid
                         const item = await Zotero.Items.getAsync(reader.itemID);
                         // Re-check: tracking can stop while the item loads
-                        if (currentReaderIdRef.current !== reader.itemID) {
+                        if (!isActiveSetup()) {
                             logger(`useReaderTabSelection: Reader ${reader.itemID} no longer active after item load. Dropping selection.`);
                             return;
                         }
@@ -249,12 +287,17 @@ export function useReaderTabSelection() {
                                 return;
                             }
                         }
+                        if (!canStillReadReader()) return;
+
                         // Set the new selection
                         setReaderTextSelection(newSelection);
                     } else {
                          logger(`useReaderTabSelection: Stale selection event received for reader ${reader.itemID}. Current reader ID is ${currentReaderIdRef.current}. Ignoring.`);
                     }
-                }
+                },
+                // Gates the read itself, so an excluded library's text is never
+                // pulled out of the document — not just dropped afterwards.
+                () => isActiveSetup() && canStillReadReader(),
             );
         });
 
@@ -279,13 +322,10 @@ export function useReaderTabSelection() {
 
         // Initial setup: Get the current reader and set it up
         const initializeReader = async () => {
-            const transition = ++tabTransitionGeneration;
             const initialReader = getCurrentReader(mainWindow);
             if (initialReader) {
                 logger(`useReaderTabSelection: Initial reader detected (itemID: ${initialReader.itemID})`);
-                if (isMounted) {
-                    await setupReader(initialReader, () => transition === tabTransitionGeneration);
-                }
+                if (isMounted) await setupReader(initialReader);
             } else {
                 logger("useReaderTabSelection: No active reader on mount.");
                 // No reader means no reader context at all — including any
@@ -335,7 +375,7 @@ export function useReaderTabSelection() {
                         if (!isMounted || transition !== tabTransitionGeneration) return;
                         if (newReader) {
                             logger(`useReaderTabSelection: Tab changed to a different reader (itemID: ${newReader.itemID}). Setting up new reader.`);
-                            await setupReader(newReader, () => transition === tabTransitionGeneration);
+                            await setupReader(newReader);
                         } else {
                             logger("useReaderTabSelection: Tab changed to reader, but could not get reader instance.");
                             // Nothing to report on a reader tab whose reader
@@ -367,6 +407,19 @@ export function useReaderTabSelection() {
                         // reader tab — must not touch the draft message.
                         const activeReaderItemID = currentReaderIdRef.current;
                         if (activeReaderItemID === null) return;
+
+                        // Gate on the library BEFORE reading the item. Tracking
+                        // only starts for searchable libraries, but exclusions
+                        // can change between the preference write and this
+                        // observer being torn down and re-registered, so the
+                        // active-reader id alone is not proof of access.
+                        const annotationLibraryAndKey = Zotero.Items.getLibraryAndKeyFromID(Number(ids[0]));
+                        if (!annotationLibraryAndKey) return;
+                        if (!store.get(searchableLibraryIdsAtom).includes(annotationLibraryAndKey.libraryID)) {
+                            logger(`useReaderTabSelection: Ignoring annotation in excluded library ${annotationLibraryAndKey.libraryID}`, 3);
+                            return;
+                        }
+
                         try {
                             const item = Zotero.Items.get(ids[0]);
                             if(!item.isAnnotation() || !isValidAnnotationType(item.annotationType)) return;

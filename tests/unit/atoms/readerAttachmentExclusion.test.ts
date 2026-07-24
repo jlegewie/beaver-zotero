@@ -37,13 +37,20 @@ vi.mock('../../../react/utils/popupMessageUtils', async () => {
     };
 });
 
+// Spy on validation so tests can assert that an excluded item is never handed
+// to it, not merely kept out of the atom.
+const { validateItemsMock } = vi.hoisted(() => ({ validateItemsMock: vi.fn() }));
+
 vi.mock('../../../react/atoms/itemValidation', async () => {
     const { atom: jotaiAtom } = await import('jotai');
     return {
         getItemValidationAtom: jotaiAtom(() => () => undefined),
         isHardBlockedValidation: vi.fn(() => false),
         isRejectedItemValidation: vi.fn(() => false),
-        validateItemsAtom: jotaiAtom(null, () => Promise.resolve()),
+        validateItemsAtom: jotaiAtom(null, (_get, _set, payload: unknown) => {
+            validateItemsMock(payload);
+            return Promise.resolve();
+        }),
         validateRegularItemAtom: jotaiAtom(null, () => Promise.resolve()),
     };
 });
@@ -163,6 +170,20 @@ describe('updateReaderAttachmentAtom staleness', () => {
         });
         return { release: release! };
     }
+
+    it('drops the attachment when the library is excluded during the lookup', async () => {
+        const { release } = stubZoteroWithPendingLookup('EXCLUDEDMID');
+        const store = createStore();
+
+        const update = store.set(updateReaderAttachmentAtom, { itemID: READER_ITEM_ID });
+        // The user excludes the library in Preferences while the item loads.
+        store.set(searchableLibraryIdsTestAtom, []);
+        release();
+        await update;
+
+        expect(store.get(currentReaderAttachmentAtom)).toBeNull();
+        expect(validateItemsMock).not.toHaveBeenCalled();
+    });
 
     it('does not repopulate the attachment after it was cleared', async () => {
         const { release } = stubZoteroWithPendingLookup('LEFTREADER');
