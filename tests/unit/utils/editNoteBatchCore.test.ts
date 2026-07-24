@@ -965,6 +965,46 @@ describe('resolveBatchEdits failures', () => {
     });
 });
 
+describe('execute-time target resolution vs stored anchors', () => {
+    // Pins the contract the diff preview's stale-anchor fallback mirrors:
+    // when the CURRENT note contains exactly one occurrence, execute resolves
+    // to it and ignores anchors captured at validation time. If this changes,
+    // constructMultiDiffHtml's unique-occurrence fallback must change too.
+    it('applies to the sole surviving occurrence even when stale anchors point elsewhere', () => {
+        const original = '<div data-schema-version="9"><p>Repeat</p><p>Middle</p><p>Repeat</p></div>';
+        const secondStart = original.lastIndexOf('Repeat');
+        // The originally anchored (second) occurrence is gone; one survives.
+        const drifted = '<div data-schema-version="9"><p>Repeat</p><p>Middle</p><p>Other</p></div>';
+
+        const ctx = makeCtx(drifted, { mode: 'execute' });
+        const { resolved, failures } = resolveBatchEdits(ctx, [
+            spec(0, 'str_replace', 'Repeat', 'Changed', {
+                targetBeforeContext: original.substring(0, secondStart),
+                targetAfterContext: original.substring(secondStart + 'Repeat'.length),
+            }),
+        ]);
+
+        expect(failures).toHaveLength(0);
+        expect(resolved).toHaveLength(1);
+        // Resolved to the surviving FIRST occurrence, not the anchored one.
+        expect(resolved[0].ranges[0].start).toBe(drifted.indexOf('Repeat'));
+    });
+
+    it('still fails when the current note has multiple occurrences and anchors are stale', () => {
+        const drifted = '<div data-schema-version="9"><p>Repeat</p><p>Repeat</p></div>';
+        const ctx = makeCtx(drifted, { mode: 'execute' });
+        const { failures } = resolveBatchEdits(ctx, [
+            spec(0, 'str_replace', 'Repeat', 'Changed', {
+                targetBeforeContext: '<p>vanished context</p>',
+                targetAfterContext: '<p>also vanished</p>',
+            }),
+        ]);
+
+        expect(failures).toHaveLength(1);
+        expect(failures[0].index).toBe(0);
+    });
+});
+
 describe('buildAmbiguousMatchError', () => {
     it('suggests str_replace_all for replacement edits', () => {
         const msg = buildAmbiguousMatchError(3, 'str_replace');

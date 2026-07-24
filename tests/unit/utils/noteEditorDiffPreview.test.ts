@@ -154,6 +154,29 @@ describe('constructMultiDiffHtml', () => {
         expect(result).toContain('bb');
     });
 
+    it('previews the surviving occurrence when the anchored occurrence was removed (execute parity)', () => {
+        // Validation anchored the SECOND of two identical occurrences; the
+        // note has since drifted so only the first survives. Apply resolves a
+        // unique current match without consulting anchors (resolveSingleTarget
+        // matchCount === 1 short-circuit), so it WILL land on the survivor —
+        // the preview must show that same location rather than hide it.
+        const original = '<div><p>Repeat</p><p>Middle</p><p>Repeat</p></div>';
+        const secondStart = original.lastIndexOf('Repeat');
+        const drifted = '<div><p>Repeat</p><p>Middle</p><p>Other text</p></div>';
+        const result = constructMultiDiffHtml(drifted, [{
+            expandedOld: 'Repeat',
+            expandedNew: 'Changed',
+            operation: 'str_replace',
+            targetBeforeContext: original.substring(0, secondStart),
+            targetAfterContext: original.substring(secondStart + 'Repeat'.length),
+        }]);
+
+        expect(result).not.toBeNull();
+        expect(result).toContain('Changed');
+        // Rendered at the surviving first occurrence, before "Middle".
+        expect(result!.indexOf('Changed')).toBeLessThan(result!.indexOf('Middle'));
+    });
+
     it('previews the only occurrence when anchors are stale but old_string is unique', () => {
         // Apply → undo round-trips re-serialize the note, so validation-time
         // anchors routinely go stale; a unique target has no ambiguity for

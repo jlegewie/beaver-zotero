@@ -45,6 +45,78 @@ describe('reader context tracking mount point', () => {
         expect(hook).toContain('if (!isBeaverVisible) return;');
     });
 
+    it('only stages annotation adds from the active reader attachment', () => {
+        const hook = read('react/hooks/useReaderTabSelection.ts');
+        expect(hook).toContain('const activeReader = getCurrentReader(mainWindow);');
+        expect(hook).toContain('activeReader.itemID !== currentReaderIdRef.current');
+        expect(hook).toContain('item.parentItemID !== activeReader.itemID');
+    });
+
+    it('clears reader context before awaiting annotation cleanup', () => {
+        const hook = read('react/hooks/useReaderTabSelection.ts');
+        const nonReaderBranch = hook.slice(
+            hook.indexOf('// Tab switched to something other than a reader'),
+            hook.indexOf('// Annotation events'),
+        );
+        const clearIndex = nonReaderBranch.indexOf(
+            'const { readerToClean } = clearReaderContext();',
+        );
+        const cleanupIndex = nonReaderBranch.indexOf(
+            'await BeaverTemporaryAnnotations.cleanupAll(readerToClean as ZoteroReader);',
+        );
+
+        expect(clearIndex).toBeGreaterThan(-1);
+        expect(cleanupIndex).toBeGreaterThan(clearIndex);
+
+        const clearReaderContext = hook.slice(
+            hook.indexOf('const clearReaderContext = useCallback'),
+            hook.indexOf('// Function to poll for reader._internalReader readiness'),
+        );
+        expect(clearReaderContext).toContain('currentReaderIdRef.current = null;');
+        expect(clearReaderContext).toContain('currentReaderRef.current = null;');
+        expect(clearReaderContext).toContain('setReaderTextSelection(null);');
+        expect(clearReaderContext).toContain('clearReaderAttachment();');
+    });
+
+    it('does not set up a reader from a stale asynchronous tab transition', () => {
+        const hook = read('react/hooks/useReaderTabSelection.ts');
+        const readerTransition = hook.slice(
+            hook.indexOf('if (newReader && newReader.itemID !== currentReaderIdRef.current)'),
+            hook.indexOf('} else if (!newReader)'),
+        );
+        const cleanupIndex = readerTransition.indexOf(
+            'await BeaverTemporaryAnnotations.cleanupAll(readerToClean as ZoteroReader);',
+        );
+        const generationCheckIndex = readerTransition.indexOf(
+            'generation !== readerTransitionGenerationRef.current',
+        );
+        const activeReaderCheckIndex = readerTransition.indexOf(
+            'activeReader?.itemID !== newReader.itemID',
+        );
+        const setupIndex = readerTransition.indexOf('await setupReader(newReader, generation);');
+
+        expect(cleanupIndex).toBeGreaterThan(-1);
+        expect(generationCheckIndex).toBeGreaterThan(cleanupIndex);
+        expect(activeReaderCheckIndex).toBeGreaterThan(cleanupIndex);
+        expect(setupIndex).toBeGreaterThan(activeReaderCheckIndex);
+    });
+
+    it('removes the reader validation popup when clearing the attachment', () => {
+        const atoms = read('react/atoms/messageComposition.ts');
+        const clearReaderAttachment = atoms.slice(
+            atoms.indexOf('export const clearReaderAttachmentAtom'),
+            atoms.indexOf('/**\n* Update current reader attachment'),
+        );
+
+        expect(clearReaderAttachment).toContain(
+            'const currentReaderAttachmentKey = get(currentReaderAttachmentKeyAtom);',
+        );
+        expect(clearReaderAttachment).toContain(
+            'set(removePopupMessageAtom, currentReaderAttachmentKey);',
+        );
+        expect(clearReaderAttachment).toContain('set(currentReaderAttachmentAtom, null);');
+    });
+
     it('publishes the separate window as open while it is mounted', () => {
         const windowSidebar = read('react/components/WindowSidebar.tsx');
         expect(windowSidebar).toContain('isBeaverWindowOpenAtom');

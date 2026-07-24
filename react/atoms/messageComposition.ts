@@ -560,6 +560,20 @@ export const updateMessageItemsFromZoteroSelectionAtom = atom(
 
 
 /**
+* Clear the current reader attachment and its persistent validation popup.
+*/
+export const clearReaderAttachmentAtom = atom(
+    null,
+    (get, set) => {
+        const currentReaderAttachmentKey = get(currentReaderAttachmentKeyAtom);
+        if (currentReaderAttachmentKey) {
+            set(removePopupMessageAtom, currentReaderAttachmentKey);
+        }
+        set(currentReaderAttachmentAtom, null);
+    }
+);
+
+/**
 * Update current reader attachment
 */
 export const updateReaderAttachmentAtom = atom(
@@ -583,7 +597,10 @@ export const updateReaderAttachmentAtom = atom(
 
         // Get reader item
         const item = await Zotero.Items.getAsync(reader.itemID);
-        if (item) {
+        // The lookup can outlive the tab that initiated it. Never republish an
+        // attachment after the user has moved to another reader or tab.
+        const activeReader = getCurrentReader();
+        if (item && activeReader?.itemID === reader.itemID) {
             set(currentReaderAttachmentAtom, item);
             validateItemsInBackground(get, set, [item], true);
         }
