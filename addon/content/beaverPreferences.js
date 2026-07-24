@@ -5,6 +5,46 @@ var { Zotero } = ChromeUtils.importESModule("chrome://zotero/content/zotero.mjs"
 var BeaverReact;
 var root;
 
+function disconnectStaleRoot(container) {
+    if (!BeaverReact && !root) {
+        return container;
+    }
+
+    let unmounted = false;
+    try {
+        if (BeaverReact && typeof BeaverReact.unmountFromElement === "function") {
+            unmounted = BeaverReact.unmountFromElement(container) === true;
+        }
+    } catch (e) {
+        Zotero.debug("Beaver: Error disconnecting stale preferences React root via bundle: " + e);
+    }
+
+    if (!unmounted) {
+        try {
+            if (root && typeof root.unmount === "function") {
+                root.unmount();
+                unmounted = true;
+            }
+        } catch (e) {
+            Zotero.debug("Beaver: Error disconnecting stale preferences React root directly: " + e);
+        }
+    }
+
+    root = null;
+    if (unmounted) {
+        return container;
+    }
+
+    const replacement = container.cloneNode(false);
+    container.replaceWith(replacement);
+    try {
+        Zotero.UIProperties.registerRoot(replacement);
+    } catch (e) {
+        Zotero.debug("Beaver: Error registering replacement preferences mount point: " + e);
+    }
+    return replacement;
+}
+
 function getInitialView() {
     var initialTab = null;
     var initialActionsCategoryFilter = null;
@@ -37,27 +77,31 @@ function reconnectToBeaverReact(nextBeaverReact) {
     // window.arguments describes only the original open request. On a real
     // bundle handoff, preserve the tab the user is viewing and do not replay
     // one-shot category/action requests from that original request.
-    const view = BeaverReact
-        ? {
-            initialTab: typeof Zotero.__beaverGetPreferencesTab === "function"
-                ? Zotero.__beaverGetPreferencesTab()
-                : null,
-            initialActionsCategoryFilter: null,
-            initialActionId: null,
-        }
-        : getInitialView();
-
+    let view = getInitialView();
     try {
-        if (BeaverReact && typeof BeaverReact.unmountFromElement === "function") {
-            BeaverReact.unmountFromElement(container);
+        if (BeaverReact) {
+            view = {
+                initialTab: typeof Zotero.__beaverGetPreferencesTab === "function"
+                    ? Zotero.__beaverGetPreferencesTab()
+                    : null,
+                initialActionsCategoryFilter: null,
+                initialActionId: null,
+            };
         }
     } catch (e) {
-        Zotero.debug("Beaver: Error disconnecting stale preferences React root: " + e);
+        Zotero.debug("Beaver: Error reading stale preferences view state: " + e);
+        view = {
+            initialTab: null,
+            initialActionsCategoryFilter: null,
+            initialActionId: null,
+        };
     }
+
+    const mountContainer = disconnectStaleRoot(container);
 
     BeaverReact = nextBeaverReact;
     root = BeaverReact.renderPreferencesWindow(
-        container,
+        mountContainer,
         view.initialTab,
         view.initialActionsCategoryFilter,
         view.initialActionId

@@ -137,7 +137,10 @@ describe('reader context tracking mount point', () => {
         expect(separateWindow).toContain('window.getBeaverReactInstance = () => BeaverReact');
         expect(separateWindow).toContain('if (BeaverReact === nextBeaverReact)');
         expect(separateWindow).toContain('BeaverReact.unmountFromElement(container)');
-        expect(separateWindow).toContain('BeaverReact.renderWindowSidebar(container)');
+        expect(separateWindow).toContain('root.unmount()');
+        expect(separateWindow).toContain('const replacement = container.cloneNode(false)');
+        expect(separateWindow).toContain('container.replaceWith(replacement)');
+        expect(separateWindow).toContain('BeaverReact.renderWindowSidebar(mountContainer)');
     });
 
     it('preserves the active preferences tab during a real bundle handoff', () => {
@@ -147,6 +150,12 @@ describe('reader context tracking mount point', () => {
         expect(preferencesWindow).toContain('Zotero.__beaverGetPreferencesTab()');
         expect(preferencesWindow).toContain('initialActionsCategoryFilter: null');
         expect(preferencesWindow).toContain('initialActionId: null');
+        expect(preferencesWindow).toContain('BeaverReact.unmountFromElement(container)');
+        expect(preferencesWindow).toContain('root.unmount()');
+        expect(preferencesWindow).toContain('const replacement = container.cloneNode(false)');
+        expect(preferencesWindow).toContain('container.replaceWith(replacement)');
+        expect(preferencesWindow).toContain('BeaverReact.renderPreferencesWindow(');
+        expect(preferencesWindow).toContain('mountContainer,');
         expect(preferencesComponent).toContain('__beaverGetPreferencesTab = () => activeTabRef.current');
     });
 });

@@ -5,6 +5,51 @@ var { Zotero } = ChromeUtils.importESModule("chrome://zotero/content/zotero.mjs"
 var BeaverReact;
 var root;
 
+function disconnectStaleRoot(container) {
+    if (!BeaverReact && !root) {
+        return container;
+    }
+
+    let unmounted = false;
+    try {
+        if (BeaverReact && typeof BeaverReact.unmountFromElement === "function") {
+            unmounted = BeaverReact.unmountFromElement(container) === true;
+        }
+    } catch (e) {
+        Zotero.debug("Beaver: Error disconnecting stale separate-window React root via bundle: " + e);
+    }
+
+    // The bundle namespace and the returned root are separate cross-window
+    // wrappers. The former can be dead while the latter is still callable.
+    if (!unmounted) {
+        try {
+            if (root && typeof root.unmount === "function") {
+                root.unmount();
+                unmounted = true;
+            }
+        } catch (e) {
+            Zotero.debug("Beaver: Error disconnecting stale separate-window React root directly: " + e);
+        }
+    }
+
+    root = null;
+    if (unmounted) {
+        return container;
+    }
+
+    // React cannot safely create a second root on the same element. If both
+    // handles belong to a destroyed compartment, detach that element and
+    // mount the replacement bundle into a fresh container.
+    const replacement = container.cloneNode(false);
+    container.replaceWith(replacement);
+    try {
+        Zotero.UIProperties.registerRoot(replacement);
+    } catch (e) {
+        Zotero.debug("Beaver: Error registering replacement separate-window mount point: " + e);
+    }
+    return replacement;
+}
+
 function reconnectToBeaverReact(nextBeaverReact) {
     const container = document.getElementById("beaver-pane-window");
     if (!container || !nextBeaverReact ||
@@ -21,16 +66,10 @@ function reconnectToBeaverReact(nextBeaverReact) {
     // The previous main-window bundle owns this root. Ask that exact bundle
     // to unmount it before replacing the reference; a newly loaded bundle's
     // roots map cannot see roots created by the obsolete bundle.
-    try {
-        if (BeaverReact && typeof BeaverReact.unmountFromElement === "function") {
-            BeaverReact.unmountFromElement(container);
-        }
-    } catch (e) {
-        Zotero.debug("Beaver: Error disconnecting stale separate-window React root: " + e);
-    }
+    const mountContainer = disconnectStaleRoot(container);
 
     BeaverReact = nextBeaverReact;
-    root = BeaverReact.renderWindowSidebar(container);
+    root = BeaverReact.renderWindowSidebar(mountContainer);
     Zotero.debug("Beaver: Separate window reconnected to Main Window React instance");
 }
 
