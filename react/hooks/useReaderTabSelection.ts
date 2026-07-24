@@ -58,6 +58,19 @@ export function useReaderTabSelection() {
     const mainWindow = Zotero.getMainWindow();
 
     /**
+     * Check reader access from Zotero's primary identity cache, without
+     * loading item data from a library Beaver is not allowed to read.
+     */
+    const isReaderLibrarySearchable = useCallback((reader: any) => {
+        if (!reader?.itemID) return false;
+        const identity = Zotero.Items.getLibraryAndKeyFromID(reader.itemID);
+        return Boolean(
+            identity &&
+            store.get(searchableLibraryIdsAtom).includes(identity.libraryID)
+        );
+    }, []);
+
+    /**
      * Stop publishing the current reader context synchronously. Cleanup of
      * temporary annotations can touch the database/UI and must happen only
      * after the composer can no longer attach the reader that was just left.
@@ -126,6 +139,11 @@ export function useReaderTabSelection() {
             setReaderTextSelection(null);
             return;
         }
+        if (!isReaderLibrarySearchable(reader)) {
+            logger(`useReaderTabSelection:setupReader: Reader ${reader.itemID} belongs to a non-searchable library. Clearing reader context.`);
+            clearReaderContext();
+            return;
+        }
 
         // Cleanup any existing selection listener first
         if (selectionCleanupRef.current) {
@@ -146,6 +164,10 @@ export function useReaderTabSelection() {
         }
 
         const activeReader = getCurrentReader(mainWindow);
+        if (!isReaderLibrarySearchable(reader)) {
+            clearReaderContext();
+            return;
+        }
         if (
             transitionGeneration !== readerTransitionGenerationRef.current ||
             activeReader?.itemID !== reader.itemID
@@ -156,6 +178,10 @@ export function useReaderTabSelection() {
 
         // Wait for the reader to be ready before setting initial selection and listener
         waitForInternalReader(reader, async () => {
+            if (!isReaderLibrarySearchable(reader)) {
+                clearReaderContext();
+                return;
+            }
             // Check if the reader context is still the same after waiting
             if (
                 transitionGeneration !== readerTransitionGenerationRef.current ||
@@ -178,6 +204,10 @@ export function useReaderTabSelection() {
                     return;
                 }
             }
+            if (!isReaderLibrarySearchable(reader)) {
+                clearReaderContext();
+                return;
+            }
             if (
                 transitionGeneration !== readerTransitionGenerationRef.current ||
                 currentReaderIdRef.current !== reader.itemID ||
@@ -194,10 +224,15 @@ export function useReaderTabSelection() {
             selectionCleanupRef.current = addSelectionChangeListener(
                 reader, 
                 async (newSelection: TextSelection | null) => {
+                    if (!isReaderLibrarySearchable(reader)) {
+                        clearReaderContext();
+                        return;
+                    }
                     // Ensure the event is for the currently active reader this hook manages
                     if (
                         transitionGeneration === readerTransitionGenerationRef.current &&
-                        currentReaderIdRef.current === reader.itemID
+                        currentReaderIdRef.current === reader.itemID &&
+                        isReaderLibrarySearchable(reader)
                     ) {
                         logger(`useReaderTabSelection: Selection changed in reader ${reader.itemID}, updating selection to "${newSelection ? newSelection.text : 'null'}"`);
                         // Ensure the reader item is valid
@@ -208,6 +243,10 @@ export function useReaderTabSelection() {
                                 logger(`useReaderTabSelection:setupReader: Reader ${reader.itemID} is rejected. Skipping setup.`);
                                 return;
                             }
+                        }
+                        if (!isReaderLibrarySearchable(reader)) {
+                            clearReaderContext();
+                            return;
                         }
                         if (
                             transitionGeneration !== readerTransitionGenerationRef.current ||
@@ -223,7 +262,7 @@ export function useReaderTabSelection() {
             );
         });
 
-    }, [mainWindow, setReaderTextSelection, updateReaderAttachment, waitForInternalReader]); // Dependencies
+    }, [clearReaderContext, isReaderLibrarySearchable, mainWindow, setReaderTextSelection, updateReaderAttachment, waitForInternalReader]); // Dependencies
 
 
     useEffect(() => {
@@ -238,7 +277,13 @@ export function useReaderTabSelection() {
             const initialReader = getCurrentReader(mainWindow);
             if (initialReader) {
                 logger(`useReaderTabSelection: Initial reader detected (itemID: ${initialReader.itemID})`);
-                if (isMounted) await setupReader(initialReader);
+                if (isMounted) {
+                    if (isReaderLibrarySearchable(initialReader)) {
+                        await setupReader(initialReader);
+                    } else {
+                        clearReaderContext();
+                    }
+                }
             } else {
                 // The active tab is not a reader (library or note tab) — make sure
                 // no stale reader context is left attached to the composer.
@@ -281,6 +326,10 @@ export function useReaderTabSelection() {
                                 generation !== readerTransitionGenerationRef.current ||
                                 activeReader?.itemID !== newReader.itemID
                             ) return;
+                            if (!isReaderLibrarySearchable(newReader)) {
+                                clearReaderContext();
+                                return;
+                            }
                             await setupReader(newReader, generation);
                         } else if (!newReader) {
                             logger("useReaderTabSelection: Tab changed to reader, but could not get reader instance.");
@@ -305,6 +354,11 @@ export function useReaderTabSelection() {
                     // Add events
                     if (event === 'add') {
                         try {
+                            const itemIdentity = Zotero.Items.getLibraryAndKeyFromID(Number(ids[0]));
+                            if (
+                                !itemIdentity ||
+                                !store.get(searchableLibraryIdsAtom).includes(itemIdentity.libraryID)
+                            ) return;
                             const item = Zotero.Items.get(ids[0]);
                             if(!item.isAnnotation() || !isValidAnnotationType(item.annotationType)) return;
                             const activeReader = getCurrentReader(mainWindow);
@@ -388,6 +442,6 @@ export function useReaderTabSelection() {
                 logger(`useReaderTabSelection: Error cleaning up temporary annotations on unmount: ${error}`);
             });
         };
-    }, [setupReader, clearReaderContext, mainWindow, isBeaverVisible, isAuthenticated, isDeviceAuthorized, hasAuthorized, isLibraryAccessReady, searchableLibraryIdsKey]);
+    }, [setupReader, clearReaderContext, isReaderLibrarySearchable, mainWindow, isBeaverVisible, isAuthenticated, isDeviceAuthorized, hasAuthorized, isLibraryAccessReady, searchableLibraryIdsKey]);
 
 }

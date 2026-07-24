@@ -52,6 +52,50 @@ describe('reader context tracking mount point', () => {
         expect(hook).toContain('item.parentItemID !== activeReader.itemID');
     });
 
+    it('gates reader and annotation loading on searchable libraries', () => {
+        const hook = read('react/hooks/useReaderTabSelection.ts');
+        const setupReader = hook.slice(
+            hook.indexOf('const setupReader = useCallback'),
+            hook.indexOf('useEffect(() =>'),
+        );
+        const setupGateIndex = setupReader.indexOf('if (!isReaderLibrarySearchable(reader))');
+        const attachmentUpdateIndex = setupReader.indexOf('await updateReaderAttachment(reader);');
+        expect(setupGateIndex).toBeGreaterThan(-1);
+        expect(attachmentUpdateIndex).toBeGreaterThan(setupGateIndex);
+        expect(setupReader).toContain('clearReaderContext();');
+
+        const annotationAdd = hook.slice(
+            hook.indexOf("if (event === 'add')"),
+            hook.indexOf('// Delete events'),
+        );
+        const identityGateIndex = annotationAdd.indexOf(
+            'Zotero.Items.getLibraryAndKeyFromID(Number(ids[0]))',
+        );
+        const itemLoadIndex = annotationAdd.indexOf('Zotero.Items.get(ids[0])');
+        expect(identityGateIndex).toBeGreaterThan(-1);
+        expect(itemLoadIndex).toBeGreaterThan(identityGateIndex);
+        expect(annotationAdd).toContain(
+            'store.get(searchableLibraryIdsAtom).includes(itemIdentity.libraryID)',
+        );
+
+        const atoms = read('react/atoms/messageComposition.ts');
+        const updateReaderAttachment = atoms.slice(
+            atoms.indexOf('export const updateReaderAttachmentAtom'),
+            atoms.indexOf('/**\n* Update the current note tab item'),
+        );
+        const readerIdentityIndex = updateReaderAttachment.indexOf(
+            'Zotero.Items.getLibraryAndKeyFromID(reader.itemID)',
+        );
+        const asyncItemLoadIndex = updateReaderAttachment.indexOf(
+            'Zotero.Items.getAsync(reader.itemID)',
+        );
+        expect(readerIdentityIndex).toBeGreaterThan(-1);
+        expect(asyncItemLoadIndex).toBeGreaterThan(readerIdentityIndex);
+        expect(updateReaderAttachment).toContain(
+            '!searchableLibraryIds.includes(readerIdentity.libraryID)',
+        );
+    });
+
     it('clears reader context before awaiting annotation cleanup', () => {
         const hook = read('react/hooks/useReaderTabSelection.ts');
         const nonReaderBranch = hook.slice(

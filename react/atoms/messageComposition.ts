@@ -595,12 +595,25 @@ export const updateReaderAttachmentAtom = atom(
             return;
         }
 
+        // Enforce the excluded-library boundary before loading or validating
+        // the reader attachment.
+        const readerIdentity = Zotero.Items.getLibraryAndKeyFromID(reader.itemID);
+        const searchableLibraryIds = get(searchableLibraryIdsAtom);
+        if (!readerIdentity || !searchableLibraryIds.includes(readerIdentity.libraryID)) {
+            set(currentReaderAttachmentAtom, null);
+            return;
+        }
+
         // Get reader item
         const item = await Zotero.Items.getAsync(reader.itemID);
         // The lookup can outlive the tab that initiated it. Never republish an
         // attachment after the user has moved to another reader or tab.
         const activeReader = getCurrentReader();
-        if (item && activeReader?.itemID === reader.itemID) {
+        if (
+            item &&
+            activeReader?.itemID === reader.itemID &&
+            get(searchableLibraryIdsAtom).includes(item.libraryID)
+        ) {
             set(currentReaderAttachmentAtom, item);
             validateItemsInBackground(get, set, [item], true);
         }
