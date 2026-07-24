@@ -394,9 +394,8 @@ export const loadThreadAtom = atom(
                 resolvedName = resolvedName ?? (thread.name || null);
             } catch (error) {
                 // An unknown identity must abort rather than degrade to
-                // "matching": this confirm is the only gate before applied
-                // actions are validated (and possibly auto-undone) against the
-                // current library.
+                // "matching": without it we cannot decide whether applied
+                // actions are safe to validate against this library.
                 logger(`loadThreadAtom: Failed to fetch thread ${threadId}: ${error}`, 1);
                 set(pendingScrollToRunAtom, null);
                 set(isLoadingThreadAtom, false);
@@ -405,11 +404,16 @@ export const loadThreadAtom = atom(
         }
         // Legacy non-stateful threads live in this install's local DB — always matching.
 
+        // Mismatched threads keep applied-action status unchanged on load:
+        // personal-library refs resolve to *this* install's library, so a miss
+        // would look like a user revert and auto-undo would corrupt history.
+        const isMismatchedInstance = identity !== undefined
+            && isThreadInstanceMismatch(currentZoteroInstanceRef(), identity);
+
         if (
-            identity !== undefined
+            isMismatchedInstance
             && !skipInstanceMismatchConfirm
             && !confirmedMismatchedThreadIds.has(threadId)
-            && isThreadInstanceMismatch(currentZoteroInstanceRef(), identity)
         ) {
             if (!confirmOpenMismatchedThread()) {
                 set(pendingScrollToRunAtom, null);
@@ -602,19 +606,28 @@ export const loadThreadAtom = atom(
                 }
 
                 // Validate agent actions and undo those verifiably reverted in
-                // Zotero. 'unverifiable' means the reference points at a library
-                // this device can't check (group libraryIDs are device-local)
+                // Zotero. Skip on mismatched-instance threads — misses there are
+                // not proof of revert (see isMismatchedInstance above).
+                // 'unverifiable' means the reference points at a library this
+                // device can't check (group libraryIDs are device-local).
                 if (agent_actions && agent_actions.length > 0) {
-                    await Promise.all(agent_actions.map(async (action: AgentAction) => {
-                        const validity = await validateAppliedAgentAction(action);
-                        if (validity === 'invalid') {
-                            logger(`loadThreadAtom: undoing agent action ${action.id} because it is not valid`, 1);
-                            set(undoAgentActionAtom, action.id);
-                        } else if (validity === 'unverifiable') {
-                            logger(`loadThreadAtom: agent action ${action.id} references a library not available on this device; leaving status unchanged`, 1);
-                        }
-                        return validity;
-                    }));
+                    if (isMismatchedInstance) {
+                        logger(
+                            `loadThreadAtom: skipping applied-action validation for mismatched-instance thread ${threadId}`,
+                            1
+                        );
+                    } else {
+                        await Promise.all(agent_actions.map(async (action: AgentAction) => {
+                            const validity = await validateAppliedAgentAction(action);
+                            if (validity === 'invalid') {
+                                logger(`loadThreadAtom: undoing agent action ${action.id} because it is not valid`, 1);
+                                set(undoAgentActionAtom, action.id);
+                            } else if (validity === 'unverifiable') {
+                                logger(`loadThreadAtom: agent action ${action.id} references a library not available on this device; leaving status unchanged`, 1);
+                            }
+                            return validity;
+                        }));
+                    }
                 }
                 
                 // Check for create_item agent actions and populate external reference cache

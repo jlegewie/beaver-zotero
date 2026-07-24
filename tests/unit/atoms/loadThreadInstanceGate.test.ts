@@ -103,13 +103,17 @@ vi.mock('../../../react/atoms/agentRunAtoms', async () => {
     };
 });
 
+const validateAppliedAgentActionMock = vi.fn(async () => 'valid' as const);
+const undoAgentActionWriteMock = vi.fn();
 vi.mock('../../../react/agents/agentActions', async () => {
     const { atom } = await import('jotai');
     return {
         threadAgentActionsAtom: atom<unknown[]>([]),
         isCreateItemAgentAction: vi.fn(() => false),
-        validateAppliedAgentAction: vi.fn(async () => 'valid'),
-        undoAgentActionAtom: atom(null, () => {}),
+        validateAppliedAgentAction: (...args: unknown[]) => validateAppliedAgentActionMock(...args),
+        undoAgentActionAtom: atom(null, (_get: unknown, _set: unknown, actionId: string) => {
+            undoAgentActionWriteMock(actionId);
+        }),
         clearAllPendingApprovalsAtom: atom(null, () => {}),
     };
 });
@@ -207,6 +211,54 @@ describe('loadThreadAtom instance-mismatch gate', () => {
         });
         expect(reloaded).toBe(true);
         expect(confirmMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not auto-undo applied actions when opening a mismatched thread', async () => {
+        const threadId = nextThreadId();
+        validateAppliedAgentActionMock.mockResolvedValue('invalid');
+        getThreadRunsMock.mockResolvedValue({
+            runs: [{
+                id: 'run-1',
+                status: 'completed',
+                completed_at: '2024-01-01T00:00:00Z',
+                user_prompt: { attachments: [] },
+                model_messages: [],
+                metadata: {},
+            }],
+            agent_actions: [{ id: 'action-1', status: 'applied' }],
+        });
+
+        const loaded = await store.set(loadThreadAtom, {
+            user_id: 'u1', threadId, threadName: 'Foreign', threadIdentity: FOREIGN,
+        });
+
+        expect(loaded).toBe(true);
+        expect(validateAppliedAgentActionMock).not.toHaveBeenCalled();
+        expect(undoAgentActionWriteMock).not.toHaveBeenCalled();
+    });
+
+    it('still auto-undos invalid applied actions on a matching-instance thread', async () => {
+        const threadId = nextThreadId();
+        validateAppliedAgentActionMock.mockResolvedValue('invalid');
+        getThreadRunsMock.mockResolvedValue({
+            runs: [{
+                id: 'run-1',
+                status: 'completed',
+                completed_at: '2024-01-01T00:00:00Z',
+                user_prompt: { attachments: [] },
+                model_messages: [],
+                metadata: {},
+            }],
+            agent_actions: [{ id: 'action-1', status: 'applied' }],
+        });
+
+        const loaded = await store.set(loadThreadAtom, {
+            user_id: 'u1', threadId, threadName: 'Mine', threadIdentity: CURRENT,
+        });
+
+        expect(loaded).toBe(true);
+        expect(validateAppliedAgentActionMock).toHaveBeenCalled();
+        expect(undoAgentActionWriteMock).toHaveBeenCalledWith('action-1');
     });
 
     it('matching and unattributed identities load without a confirm', async () => {

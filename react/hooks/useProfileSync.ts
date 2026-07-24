@@ -39,18 +39,29 @@ const computeRetryDelay = (attempts: number) =>
     Math.min(RETRY_BACKOFF_BASE_MS * Math.pow(RETRY_BACKOFF_FACTOR, attempts), RETRY_BACKOFF_MAX_MS);
 
 /**
- * Automatically claims pre-sync threads: threads created before the user
- * enabled Zotero sync carry only this install's localUserKey and would be
- * hidden on the user's other synced devices. Once a Zotero account id is
- * available, stamp it onto those threads — throttled to once per
- * (beaverUser, zoteroUser, install) combination via the threadsClaimKey pref.
+ * Automatically claims pre-sync threads: threads created while logged out of
+ * a Zotero account carry only this install's localUserKey and would be hidden
+ * on the user's other devices once they share an account id. Once a Zotero
+ * account id is available, stamp it onto those threads — throttled to once
+ * per (beaverUser, zoteroUser, install) combination via threadsClaimKey.
+ *
+ * Logging out of Zotero clears the throttle so a later login (same or other
+ * account) can claim any threads created while logged out. Disabling sync
+ * alone does not clear the Zotero user id; only account logout does.
  *
  * Exported for tests.
  */
 export const claimPreSyncThreads = async (userId: string): Promise<void> => {
     try {
         const { userID: zoteroUserId, localUserKey } = getZoteroUserIdentifier();
-        if (!zoteroUserId) return;
+        if (!zoteroUserId) {
+            // Logged out of Zotero: drop the throttle so the next login re-claims
+            // any local-only threads created while the account id was absent.
+            if (getPref('threadsClaimKey')) {
+                setPref('threadsClaimKey', '');
+            }
+            return;
+        }
         const claimKey = `${userId}:${zoteroUserId}:${localUserKey}`;
         if (getPref('threadsClaimKey') === claimKey) return;
         // Stale-refresh guard (mirrors the userEmail sentinel): never claim for
@@ -182,12 +193,13 @@ export const useProfileSync = () => {
                 setPref("userEmail", currentUser.email);
             }
 
-            // Stamp the Zotero account id onto this install's pre-sync threads
-            // so they surface on the user's other synced devices. Deliberately
-            // not awaited: a slow claim request must not delay profile
-            // readiness, and the function's own stale-user re-checks (plus the
-            // backend's expected_user_id verification) keep it safe to finish
-            // after this sync returns.
+            // Stamp the Zotero account id onto this install's local-only threads
+            // (created while logged out of Zotero) so they surface on other
+            // devices that share the account. Deliberately not awaited: a slow
+            // claim request must not delay profile readiness, and the
+            // function's own stale-user re-checks (plus the backend's
+            // expected_user_id verification) keep it safe to finish after this
+            // sync returns.
             void claimPreSyncThreads(userId);
 
             try {

@@ -48,6 +48,21 @@ const CACHE_TTL = 60_000; // 1 minute
 const FOREIGN_THREAD_LABEL = 'Other Zotero profile';
 const FOREIGN_THREAD_TITLE = 'Created in a different Zotero account or profile';
 
+/**
+ * Cache key for a thread-list fetch. Includes the live instance identity so
+ * enabling/logging into Zotero (or switching accounts) cannot reuse a prior
+ * identity's scoped results under the same "scoped" bucket.
+ */
+function threadListCacheKey(
+    userId: string,
+    query: string,
+    showAll: boolean,
+    scope: { zoteroUserId?: string | null; zoteroLocalId?: string | null } | null | undefined
+): string {
+    if (showAll) return `${userId}:${query}:all`;
+    return `${userId}:${query}:scoped:${scope?.zoteroUserId ?? ''}:${scope?.zoteroLocalId ?? ''}`;
+}
+
 // Module-level cache: persists across mount/unmount cycles
 const searchCache = new Map<string, CacheEntry>();
 
@@ -99,9 +114,9 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
     const [fetchError, setFetchError] = useState<FetchError>(null);
 
     // Instance scoping: hide threads stamped by other Zotero accounts/installs
-    // by default; "Show all" reveals them. The current install's identity is
-    // stable for the lifetime of the view.
-    const instanceRef = useMemo(() => currentZoteroInstanceRef(), []);
+    // by default; "Show all" reveals them. Read live — the Zotero account id
+    // can appear/disappear when the user logs in or out without remounting.
+    const instanceRef = currentZoteroInstanceRef();
     const [showAllInstances, setShowAllInstances] = useState(false);
     // Read inside fetch callbacks (kept out of their deps so toggling in
     // item-filtered mode doesn't trigger a needless by-item refetch).
@@ -187,8 +202,10 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
         }
 
         const showAll = showAllInstancesRef.current;
-        const scope = showAll ? undefined : (instanceRef ?? undefined);
-        const cacheKey = `${user.id}:${query}:${showAll ? 'all' : 'scoped'}`;
+        // Live identity for every fetch — do not close over a mount-time snapshot.
+        const liveInstance = currentZoteroInstanceRef();
+        const scope = showAll ? undefined : (liveInstance ?? undefined);
+        const cacheKey = threadListCacheKey(user.id, query, showAll, liveInstance);
 
         // Check cache with TTL
         const cached = searchCache.get(cacheKey);
@@ -241,7 +258,7 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
         } finally {
             if (seq === fetchSeqRef.current) setIsLoading(false);
         }
-    }, [user, filter, searchableLibraryIds, instanceRef]);
+    }, [user, filter, searchableLibraryIds]);
 
     // Toggle between the scoped and all-instances list. Unfiltered mode
     // refetches (cache-hit when warm); item-filtered mode only flips the
@@ -292,7 +309,14 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
             setActiveQuery(searchQuery);
             if (filter) return;
             // Invalidate cache for this query to get fresh results on Enter
-            if (user) searchCache.delete(`${user.id}:${searchQuery}:${showAllInstancesRef.current ? 'all' : 'scoped'}`);
+            if (user) {
+                searchCache.delete(threadListCacheKey(
+                    user.id,
+                    searchQuery,
+                    showAllInstancesRef.current,
+                    currentZoteroInstanceRef()
+                ));
+            }
             fetchThreads(searchQuery);
         }
     };
@@ -311,8 +335,9 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
         setIsLoading(true);
         try {
             const showAll = showAllInstancesRef.current;
-            const scope = showAll ? undefined : (instanceRef ?? undefined);
-            const cacheKey = `${user.id}:${activeQuery}:${showAll ? 'all' : 'scoped'}`;
+            const liveInstance = currentZoteroInstanceRef();
+            const scope = showAll ? undefined : (liveInstance ?? undefined);
+            const cacheKey = threadListCacheKey(user.id, activeQuery, showAll, liveInstance);
             let response;
             if (activeQuery) {
                 response = await threadService.searchThreads(activeQuery, PAGE_SIZE, nextCursor, scope);
