@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 import { useSetAtom, useAtomValue } from 'jotai';
 import { recentThreadsAtom } from '../atoms/threads';
-import { ThreadData } from '../atoms/threads';
+import { threadModelToThreadData } from '../utils/threadMatches';
 import { supabase } from '../../src/services/supabaseClient';
 import { isAuthenticatedAtom, userAtom } from '../atoms/auth';
 
@@ -20,19 +20,13 @@ export const useRecentThreads = (): void => {
         // Skip if user is not authenticated
         if (!isAuthenticated || !user) return;
 
-        // Format thread data from the database to match our ThreadData interface
-        const formatThread = (thread: any): ThreadData => ({
-            id: thread.id,
-            name: thread.name,
-            createdAt: thread.created_at,
-            updatedAt: thread.updated_at,
-        });
-
-        // Initial fetch of recent threads
+        // Initial fetch of recent threads. The identity columns must be part of
+        // the select: rows in recentThreadsAtom flow into thread-open paths,
+        // and identity-less rows would read as unattributed (never mismatched).
         const fetchRecentThreads = async () => {
             const { data, error } = await supabase
                 .from('threads')
-                .select('id, name, created_at, updated_at')
+                .select('id, name, created_at, updated_at, zotero_user_id, zotero_local_id')
                 .eq('user_id', user.id)
                 .order('updated_at', { ascending: false })
                 .limit(MAX_THREADS);
@@ -42,7 +36,7 @@ export const useRecentThreads = (): void => {
                 return;
             }
 
-            setRecentThreads(data.map(formatThread));
+            setRecentThreads(data.map(threadModelToThreadData));
         };
 
         // Execute initial fetch
@@ -61,7 +55,7 @@ export const useRecentThreads = (): void => {
                 (payload) => {
                     // Handle thread insertion or update
                     if (['INSERT', 'UPDATE'].includes(payload.eventType)) {
-                        const updatedThread = formatThread(payload.new);
+                        const updatedThread = threadModelToThreadData(payload.new as any);
                         
                         setRecentThreads(current => {
                             // Remove the thread if it already exists in the list

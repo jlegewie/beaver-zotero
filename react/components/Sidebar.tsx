@@ -17,7 +17,6 @@ import HomePage from './pages/HomePage';
 import LoginPage from './pages/LoginPage';
 import ProfileLoadingPage from './pages/ProfileLoadingPage';
 import OnboardingRouter from './pages/OnboardingRouter';
-import DeviceAuthorizationPage from './pages/DeviceAuthorizationPage';
 import { isAuthenticatedAtom } from '../atoms/auth';
 import DragDropWrapper from './input/DragDropWrapper';
 import DialogContainer from './dialog/DialogContainer';
@@ -35,7 +34,6 @@ import {
     hasAuthorizedFreeAccessAtom,
     hasAuthorizedProAccessAtom,
     hasCompletedOnboardingAtom,
-    isDeviceAuthorizedAtom,
     isProfileLoadedAtom,
     isMigratingDataAtom,
     profileWithPlanAtom,
@@ -163,7 +161,6 @@ const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
     const hasAuthorizedProAccess = useAtomValue(hasAuthorizedProAccessAtom);
     const syncedLibraries = useAtomValue(syncedLibrariesAtom);
     const isDatabaseSyncSupported = useAtomValue(isDatabaseSyncSupportedAtom);
-    const isDeviceAuthorized = useAtomValue(isDeviceAuthorizedAtom);
     const isProfileLoaded = useAtomValue(isProfileLoadedAtom);
     const isLoadingThread = useAtomValue(isLoadingThreadAtom);
     const isMigratingData = useAtomValue(isMigratingDataAtom);
@@ -313,17 +310,6 @@ const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
             <SidebarShell isWindow={isWindow}>
                 <Header isWindow={isWindow} />
                 <OnboardingRouter />
-                <DialogContainer />
-            </SidebarShell>
-        );
-    }
-
-    {/* Device authorization page */}
-    if (!isDeviceAuthorized) {
-        return (
-            <SidebarShell isWindow={isWindow}>
-                <Header isWindow={isWindow} />
-                <DeviceAuthorizationPage />
                 <DialogContainer />
             </SidebarShell>
         );

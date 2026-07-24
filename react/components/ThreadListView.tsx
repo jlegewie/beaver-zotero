@@ -3,20 +3,22 @@ import { useAtomValue, useSetAtom } from 'jotai';
 import { SearchIcon, EditIcon, DeleteIcon, TickIcon, CancelIcon } from './icons/icons';
 import Spinner from './icons/Spinner';
 import IconButton from './ui/IconButton';
-import { isThreadListViewAtom, threadListFilterAtom } from '../atoms/ui';
+import { isThreadListViewAtom, threadListFilterAtom, showAllThreadInstancesAtom } from '../atoms/ui';
 import { ThreadData, loadThreadAtom, newThreadAtom } from '../atoms/threads';
 import { currentThreadIdAtom } from '../agents/atoms';
 import { userAtom } from '../atoms/auth';
 import { searchableLibraryIdsAtom } from '../atoms/profile';
 import { threadService } from '../../src/services/threadService';
+import { currentZoteroInstanceRef } from '../../src/utils/zoteroUtils';
 import { getDateGroup } from '../utils/dateUtils';
 import { formatTimeAgo } from '../utils/formatTimeAgo';
 import { buildThreadItemFilter } from '../utils/threadItemFilter';
-import { deduplicateByThread } from '../utils/threadMatches';
+import { deduplicateByThread, threadModelToThreadData, isThreadInstanceMismatch } from '../utils/threadMatches';
 import Button from './ui/Button';
 import { ChipButton } from './agentRuns/requestChips/ChipButton';
 import { CSSIcon, CSSItemTypeIcon } from './icons/zotero';
 import ThreadFilterMenu from './ui/menus/ThreadFilterMenu';
+import Tooltip from './ui/Tooltip';
 import { clearRecentChatsCache } from './RecentChats';
 import { isTransientNetworkError } from '../utils/isTransientNetworkError';
 
@@ -31,10 +33,35 @@ interface CacheEntry {
     hasMore: boolean;
     nextCursor: string | null;
     timestamp: number;
+    // Last known count of threads hidden by instance scoping for this variant;
+    // null when the response didn't carry one (search, later pages).
+    otherInstanceCount?: number | null;
 }
 
 const PAGE_SIZE = 15;
 const CACHE_TTL = 60_000; // 1 minute
+
+// Marks a chat created in a different Zotero install. Always says "Zotero" —
+// a bare "account" would read as the user's Beaver account, which never
+// differs here. A mismatch always implies a different profile (see
+// `isThreadInstanceMismatch`), so one label covers every case.
+const FOREIGN_THREAD_LABEL = 'Other Zotero profile';
+const FOREIGN_THREAD_TITLE = 'Created in a different Zotero account or profile';
+
+/**
+ * Cache key for a thread-list fetch. Includes the live instance identity so
+ * enabling/logging into Zotero (or switching accounts) cannot reuse a prior
+ * identity's scoped results under the same "scoped" bucket.
+ */
+function threadListCacheKey(
+    userId: string,
+    query: string,
+    showAll: boolean,
+    scope: { zoteroUserId?: string | null; zoteroLocalId?: string | null } | null | undefined
+): string {
+    if (showAll) return `${userId}:${query}:all`;
+    return `${userId}:${query}:scoped:${scope?.zoteroUserId ?? ''}:${scope?.zoteroLocalId ?? ''}`;
+}
 
 // Module-level cache: persists across mount/unmount cycles
 const searchCache = new Map<string, CacheEntry>();
@@ -86,6 +113,19 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
     const [nextCursor, setNextCursor] = useState<string | null>(null);
     const [fetchError, setFetchError] = useState<FetchError>(null);
 
+    // Instance scoping: hide threads stamped by other Zotero accounts/installs
+    // by default; "Show all" reveals them. Read live — the Zotero account id
+    // can appear/disappear when the user logs in or out without remounting.
+    const instanceRef = currentZoteroInstanceRef();
+    // Global so the choice survives closing and reopening the thread list.
+    const showAllInstances = useAtomValue(showAllThreadInstancesAtom);
+    const setShowAllInstances = useSetAtom(showAllThreadInstancesAtom);
+    // Read inside fetch callbacks (kept out of their deps so toggling in
+    // item-filtered mode doesn't trigger a needless by-item refetch). Seeded
+    // from the atom so the first fetch after a remount honors a prior opt-out.
+    const showAllInstancesRef = useRef(showAllInstances);
+    const [otherInstanceCount, setOtherInstanceCount] = useState<number | null>(null);
+
     const [searchQuery, setSearchQuery] = useState('');
     const [activeQuery, setActiveQuery] = useState('');
     const activeQueryRef = useRef('');
@@ -112,6 +152,11 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
     useEffect(() => {
         activeQueryRef.current = activeQuery;
     }, [activeQuery]);
+
+    // Keeps the ref honest if the atom is changed outside this component.
+    useEffect(() => {
+        showAllInstancesRef.current = showAllInstances;
+    }, [showAllInstances]);
 
     // Fetch threads (initial load or after search)
     const fetchThreads = useCallback(async (query: string) => {
@@ -164,7 +209,11 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
             return;
         }
 
-        const cacheKey = `${user.id}:${query}`;
+        const showAll = showAllInstancesRef.current;
+        // Live identity for every fetch — do not close over a mount-time snapshot.
+        const liveInstance = currentZoteroInstanceRef();
+        const scope = showAll ? undefined : (liveInstance ?? undefined);
+        const cacheKey = threadListCacheKey(user.id, query, showAll, liveInstance);
 
         // Check cache with TTL
         const cached = searchCache.get(cacheKey);
@@ -172,6 +221,8 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
             setThreads(cached.threads);
             setHasMore(cached.hasMore);
             setNextCursor(cached.nextCursor);
+            // Retain the last known count when this variant has none cached.
+            if (cached.otherInstanceCount != null) setOtherInstanceCount(cached.otherInstanceCount);
             setFetchError(null);
             setIsLoading(false);
             return;
@@ -179,45 +230,28 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
 
         setIsLoading(true);
         try {
-            if (query) {
-                const response = await threadService.searchThreads(query, PAGE_SIZE);
-                const mapped = response.data.map(t => ({
-                    id: t.id,
-                    name: t.name || '',
-                    createdAt: t.created_at,
-                    updatedAt: t.updated_at,
-                } as ThreadData));
-                if (seq === fetchSeqRef.current) {
-                    setThreads(mapped);
-                    setNextCursor(response.next_cursor);
-                    setHasMore(response.has_more);
+            const response = query
+                ? await threadService.searchThreads(query, PAGE_SIZE, null, scope)
+                // Only the scoped first page can report how many threads the
+                // scoping hides.
+                : await threadService.getPaginatedThreads(PAGE_SIZE, null, scope, scope !== undefined);
+            const mapped = response.data.map(threadModelToThreadData);
+            if (seq === fetchSeqRef.current) {
+                setThreads(mapped);
+                setNextCursor(response.next_cursor);
+                setHasMore(response.has_more);
+                // Search responses carry no count — retain the last known one.
+                if (response.other_instance_count != null) {
+                    setOtherInstanceCount(response.other_instance_count);
                 }
-                searchCache.set(cacheKey, {
-                    threads: mapped,
-                    hasMore: response.has_more,
-                    nextCursor: response.next_cursor,
-                    timestamp: Date.now(),
-                });
-            } else {
-                const response = await threadService.getPaginatedThreads(PAGE_SIZE);
-                const mapped = response.data.map(t => ({
-                    id: t.id,
-                    name: t.name || '',
-                    createdAt: t.created_at,
-                    updatedAt: t.updated_at,
-                } as ThreadData));
-                if (seq === fetchSeqRef.current) {
-                    setThreads(mapped);
-                    setNextCursor(response.next_cursor);
-                    setHasMore(response.has_more);
-                }
-                searchCache.set(cacheKey, {
-                    threads: mapped,
-                    hasMore: response.has_more,
-                    nextCursor: response.next_cursor,
-                    timestamp: Date.now(),
-                });
             }
+            searchCache.set(cacheKey, {
+                threads: mapped,
+                hasMore: response.has_more,
+                nextCursor: response.next_cursor,
+                timestamp: Date.now(),
+                otherInstanceCount: response.other_instance_count ?? null,
+            });
             if (seq === fetchSeqRef.current) setFetchError(null);
         } catch (error) {
             console.error('Error fetching threads:', error);
@@ -233,6 +267,15 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
             if (seq === fetchSeqRef.current) setIsLoading(false);
         }
     }, [user, filter, searchableLibraryIds]);
+
+    // Toggle between the scoped and all-instances list. Unfiltered mode
+    // refetches (cache-hit when warm); item-filtered mode only flips the
+    // display partition of the already-fetched matches.
+    const toggleShowAllInstances = (next: boolean) => {
+        showAllInstancesRef.current = next;
+        setShowAllInstances(next);
+        if (!filter) fetchThreads(activeQueryRef.current);
+    };
 
     // Initial fetch, and refetch (with the in-progress query) whenever the
     // filter is set/cleared/switched.
@@ -274,7 +317,14 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
             setActiveQuery(searchQuery);
             if (filter) return;
             // Invalidate cache for this query to get fresh results on Enter
-            if (user) searchCache.delete(`${user.id}:${searchQuery}`);
+            if (user) {
+                searchCache.delete(threadListCacheKey(
+                    user.id,
+                    searchQuery,
+                    showAllInstancesRef.current,
+                    currentZoteroInstanceRef()
+                ));
+            }
             fetchThreads(searchQuery);
         }
     };
@@ -292,19 +342,17 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
         const seq = ++fetchSeqRef.current;
         setIsLoading(true);
         try {
-            const cacheKey = `${user.id}:${activeQuery}`;
+            const showAll = showAllInstancesRef.current;
+            const liveInstance = currentZoteroInstanceRef();
+            const scope = showAll ? undefined : (liveInstance ?? undefined);
+            const cacheKey = threadListCacheKey(user.id, activeQuery, showAll, liveInstance);
             let response;
             if (activeQuery) {
-                response = await threadService.searchThreads(activeQuery, PAGE_SIZE, nextCursor);
+                response = await threadService.searchThreads(activeQuery, PAGE_SIZE, nextCursor, scope);
             } else {
-                response = await threadService.getPaginatedThreads(PAGE_SIZE, nextCursor);
+                response = await threadService.getPaginatedThreads(PAGE_SIZE, nextCursor, scope);
             }
-            const mapped = response.data.map(t => ({
-                id: t.id,
-                name: t.name || '',
-                createdAt: t.created_at,
-                updatedAt: t.updated_at,
-            } as ThreadData));
+            const mapped = response.data.map(threadModelToThreadData);
             const combined = [...threads, ...mapped];
             if (seq === fetchSeqRef.current) {
                 setThreads(combined);
@@ -316,6 +364,8 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
                 hasMore: response.has_more,
                 nextCursor: response.next_cursor,
                 timestamp: Date.now(),
+                // Later pages carry no count — keep the variant's last known one.
+                otherInstanceCount: searchCache.get(cacheKey)?.otherInstanceCount ?? null,
             });
             if (seq === fetchSeqRef.current) setFetchError(null);
         } catch (error) {
@@ -330,12 +380,26 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
     };
 
     // Thread actions
-    const handleSelectThread = async (threadId: string, threadName?: string) => {
+    const handleSelectThread = async (thread: ThreadData) => {
         if (!user) return;
-        setIsThreadListView(false);
-        if (threadId === currentThreadId) return;
+        // Clicking the already-open thread just closes the list.
+        if (thread.id === currentThreadId) {
+            setIsThreadListView(false);
+            return;
+        }
         try {
-            await loadThread({ user_id: user.id, threadId, threadName });
+            const loaded = await loadThread({
+                user_id: user.id,
+                threadId: thread.id,
+                threadName: thread.name,
+                threadIdentity: {
+                    zoteroUserId: thread.zoteroUserId ?? null,
+                    zoteroLocalId: thread.zoteroLocalId ?? null,
+                },
+            });
+            // Keep the list open when the load was aborted (e.g. the user
+            // canceled the other-instance confirm) or failed.
+            if (loaded) setIsThreadListView(false);
         } catch (error) {
             console.error('Error loading thread:', error);
         }
@@ -411,10 +475,50 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
         }
     };
 
-    const displayedThreads = useMemo(() =>
-        (!filter || !activeQuery) ? threads
-            : threads.filter(t => (t.name || 'Unnamed conversation').toLowerCase().includes(activeQuery.toLowerCase())),
-        [filter, activeQuery, threads]);
+    // Item-filtered mode fetches unscoped and partitions client-side (the
+    // deduplicated match set is bounded); unfiltered mode is server-scoped, so
+    // no partition is needed there.
+    const filteredMismatchCount = useMemo(
+        () => filter
+            ? threads.filter(t => isThreadInstanceMismatch(instanceRef, {
+                zoteroUserId: t.zoteroUserId, zoteroLocalId: t.zoteroLocalId,
+            })).length
+            : 0,
+        [filter, threads, instanceRef]
+    );
+
+    const displayedThreads = useMemo(() => {
+        let visible = threads;
+        if (filter && !showAllInstances) {
+            visible = visible.filter(t => !isThreadInstanceMismatch(instanceRef, {
+                zoteroUserId: t.zoteroUserId, zoteroLocalId: t.zoteroLocalId,
+            }));
+        }
+        if (filter && activeQuery) {
+            visible = visible.filter(t => (t.name || 'Unnamed conversation').toLowerCase().includes(activeQuery.toLowerCase()));
+        }
+        return visible;
+    }, [filter, activeQuery, threads, showAllInstances, instanceRef]);
+
+    // Threads hidden by instance scoping: exact client-side count when
+    // item-filtered, the backend-reported count otherwise.
+    const hiddenInstanceCount = filter ? filteredMismatchCount : (otherInstanceCount ?? 0);
+    // Whether the escape hatch out of instance scoping should be offered.
+    const canShowHidden = !isLoading && !showAllInstances && hiddenInstanceCount > 0;
+    // Search responses carry no count, so the retained one describes the
+    // unfiltered list rather than the current results — drop the number there.
+    // Item-filtered mode partitions client-side, so its count is exact.
+    const hasExactHiddenCount = !!filter || !activeQuery;
+    const hiddenCountSummary = !hasExactHiddenCount
+        ? 'Chats from other Zotero profiles are hidden'
+        : hiddenInstanceCount === 1
+            ? '1 chat from a different Zotero profile is hidden'
+            : `${hiddenInstanceCount} chats from other Zotero profiles are hidden`;
+    const hiddenExplanation = !hasExactHiddenCount
+        ? 'Some of your chats were created in a different Zotero profile. Beaver keeps chat history separate for each one.'
+        : hiddenInstanceCount === 1
+            ? 'You have 1 chat that was created in a different Zotero profile. Beaver keeps chat history separate for each one.'
+            : `You have ${hiddenInstanceCount} chats that were created in a different Zotero profile. Beaver keeps chat history separate for each one.`;
 
     const groupedThreads = groupThreadsByDate(displayedThreads);
 
@@ -479,6 +583,29 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
                         </ChipButton>
                     </>
                 )}
+                {/* Active-scope chip mirroring the item-filter chip beside it:
+                    it names the current scope, and clicking it (the "x") drops
+                    back to this profile. The entry point into "show all" lives
+                    in the footer / empty state below the list. */}
+                {showAllInstances && (
+                    <div className="thread-filter-row-end">
+                        <Tooltip
+                            content="Showing all Zotero profiles"
+                            secondaryContent="Beaver normally shows only chats created with this Zotero profile."
+                            width="220px"
+                        >
+                            <ChipButton
+                                onClick={() => toggleShowAllInstances(false)}
+                                aria-label="Showing chats from all Zotero profiles. Show only this profile's chats"
+                            >
+                                <span className="truncate">All profiles</span>
+                                <span className="thread-filter-chip-remove" aria-hidden="true">
+                                    <CSSIcon name="x-8" className="icon-16 scale-80" />
+                                </span>
+                            </ChipButton>
+                        </Tooltip>
+                    </div>
+                )}
             </div>
             {filter && !isLoading && (
                 <div className="thread-filter-count">
@@ -498,6 +625,11 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
                                 const isCurrent = thread.id === currentThreadId;
                                 const isEditing = editingThreadId === thread.id;
                                 const isHovered = hoveredThreadId === thread.id;
+                                // Only ever true while showing all instances — the scoped
+                                // list contains no foreign threads to label.
+                                const isForeign = isThreadInstanceMismatch(instanceRef, {
+                                    zoteroUserId: thread.zoteroUserId, zoteroLocalId: thread.zoteroLocalId,
+                                });
 
                                 return (
                                     <div
@@ -505,10 +637,10 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
                                         className={`thread-list-item ${isEditing ? 'thread-list-item-editing' : ''} ${isHovered ? 'thread-list-item-hovered' : ''}`}
                                         role={isEditing ? undefined : 'button'}
                                         tabIndex={isEditing ? undefined : 0}
-                                        aria-label={isEditing ? undefined : `${threadName}, ${formatTimeAgo(thread.updatedAt)}${isCurrent ? ', current chat' : ''}`}
+                                        aria-label={isEditing ? undefined : `${threadName}, ${formatTimeAgo(thread.updatedAt)}${isCurrent ? ', current chat' : ''}${isForeign ? `, ${FOREIGN_THREAD_TITLE}` : ''}`}
                                         onClick={() => {
                                             if (!isEditing) {
-                                                handleSelectThread(thread.id, thread.name);
+                                                handleSelectThread(thread);
                                             }
                                         }}
                                         onKeyDown={isEditing ? undefined : (e) => {
@@ -518,7 +650,7 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
                                             if (e.target !== e.currentTarget) return;
                                             if (e.key === 'Enter' || e.key === ' ') {
                                                 e.preventDefault();
-                                                handleSelectThread(thread.id, thread.name);
+                                                handleSelectThread(thread);
                                             }
                                         }}
                                         onMouseEnter={() => setHoveredThreadId(thread.id)}
@@ -542,6 +674,11 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
                                             )}
                                             <div className="thread-list-item-time">
                                                 {formatTimeAgo(thread.updatedAt)}{isCurrent && ' (current chat)'}
+                                                {isForeign && (
+                                                    <span className="thread-list-item-badge" title={FOREIGN_THREAD_TITLE}>
+                                                        {FOREIGN_THREAD_LABEL}
+                                                    </span>
+                                                )}
                                             </div>
                                         </div>
                                         <div className="thread-list-item-actions">
@@ -624,8 +761,30 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
                     </div>
                 )}
 
+                {/* Empty state — prominent variant. With nothing else on screen
+                    the hidden chats are the whole story, so they get the full
+                    explanation plus the escape hatch instead of a footer note. */}
+                {!isLoading && displayedThreads.length === 0 && !fetchError && canShowHidden && (
+                    <div className="display-flex flex-col items-center justify-center gap-3 py-6 text-center px-3 mt-2">
+                        <span className="font-color-primary font-semibold text-base">
+                            {activeQuery ? 'No matching chats' : filter ? `No chats about ${filter.label}` : 'No chats on this Zotero profile'}
+                        </span>
+                        <span className="font-color-secondary text-base">
+                            {hiddenExplanation}
+                        </span>
+                        <Button
+                            variant="outline"
+                            onClick={() => toggleShowAllInstances(true)}
+                            type="button"
+                            className="mt-2"
+                        >
+                            Show all chats
+                        </Button>
+                    </div>
+                )}
+
                 {/* Empty state */}
-                {!isLoading && displayedThreads.length === 0 && !fetchError && (
+                {!isLoading && displayedThreads.length === 0 && !fetchError && !canShowHidden && (
                     <div className="display-flex items-center justify-center py-6">
                         <span className="font-color-tertiary text-sm">
                             {activeQuery ? 'No matching chats' : filter ? `No chats about ${filter.label}` : 'No chats yet'}
@@ -672,6 +831,25 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
                     </div>
                 )}
             </div>
+
+            {/* Footer: instance-scoping escape hatch. Outside the scroll area so
+                it stays visible, and only while the list has rows — an empty
+                list gets the prominent variant above instead. */}
+            {canShowHidden && displayedThreads.length > 0 && (
+                <div className="thread-filter-footer-note">
+                    {hiddenCountSummary}
+                    {' · '}
+                    <span
+                        role="button"
+                        tabIndex={0}
+                        className="font-color-accent-blue cursor-pointer"
+                        onClick={() => toggleShowAllInstances(true)}
+                        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleShowAllInstances(true); } }}
+                    >
+                        Show all
+                    </span>
+                </div>
+            )}
         </div>
     );
 };
