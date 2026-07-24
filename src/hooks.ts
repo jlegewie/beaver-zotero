@@ -371,25 +371,27 @@ async function onMainWindowUnload(win: Window): Promise<void> {
     ztoolkit.log("onMainWindowUnload: Starting cleanup");
 
     try {
-        // Worker-window hygiene: the MuPDF workers are owned by the realm
-        // that spawned them. If the closing window is that realm for either
-        // slot, terminate the corresponding worker now — even on early-return
-        // paths — otherwise the singleton on Zotero outlives its parent
-        // window and the next postMessage throws. The next caller will
-        // lazily respawn the slot against the new window.
+        // Worker-window hygiene: dispose a slot's client when the closing
+        // window is either the realm that spawned its worker (the next
+        // postMessage would throw) or the realm whose bundle constructed
+        // the client itself.
         try {
             const hotClient = (Zotero as any).__beaverMuPDFWorkerClient_hot as
-                | { spawnedFromWindow: Window | null }
+                | { spawnedFromWindow: Window | null; createdFromWindow?: Window | null }
                 | undefined;
             const backgroundClient = (Zotero as any).__beaverMuPDFWorkerClient_background as
-                | { spawnedFromWindow: Window | null }
+                | { spawnedFromWindow: Window | null; createdFromWindow?: Window | null }
                 | undefined;
             const slots: Array<["hot" | "background", typeof hotClient]> = [
                 ["hot", hotClient],
                 ["background", backgroundClient],
             ];
             for (const [name, client] of slots) {
-                if (client?.spawnedFromWindow === win) {
+                if (
+                    client
+                    && (client.spawnedFromWindow === win
+                        || client.createdFromWindow === win)
+                ) {
                     // For the background slot, abort the processor's
                     // in-flight job FIRST.
                     if (name === "background" && addon.backgroundExtractor) {

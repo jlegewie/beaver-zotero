@@ -121,6 +121,34 @@ describe('reportConnectionFailure', () => {
         expect(body.user_details).not.toContain('<');
     });
 
+    it('carries the connect attempt count when the caller retried before reporting', async () => {
+        const fetchMock = vi
+            .fn()
+            .mockResolvedValue(new Response(null, { status: 204 }));
+        vi.stubGlobal('fetch', fetchMock);
+
+        await reportConnectionFailure({
+            evidence,
+            run_id: 'run-3',
+            connect_attempts: 3,
+        });
+
+        const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
+        expect(body.connect_attempts).toBe(3);
+    });
+
+    it('reports connect_attempts as null when the caller does not track attempts', async () => {
+        const fetchMock = vi
+            .fn()
+            .mockResolvedValue(new Response(null, { status: 204 }));
+        vi.stubGlobal('fetch', fetchMock);
+
+        await reportConnectionFailure({ evidence });
+
+        const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
+        expect(body.connect_attempts).toBeNull();
+    });
+
     it('attaches the cached session token so the backend can associate the user', async () => {
         getSessionMock.mockResolvedValue({
             data: { session: { access_token: 'cached-token' } },

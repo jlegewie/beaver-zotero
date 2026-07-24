@@ -6,12 +6,10 @@
     "resolveJsonModule": true,
     "skipLibCheck": true,
     "strict": true,
-    "baseUrl": ".",
+    // Prefer path prefixes over baseUrl
     "paths": {
-      "zotero-plugin-toolkit/*": ["node_modules/zotero-plugin-toolkit/*"],
-      "../../addon/content/reactBundle": ["typings/reactBundle.d.ts"],
-      "react": ["node_modules/react"],
-      "react/*": ["node_modules/react/*"]
+      "zotero-plugin-toolkit/*": ["./node_modules/zotero-plugin-toolkit/*"],
+      "../../addon/content/reactBundle": ["./typings/reactBundle.d.ts"]
     },
     "jsx": "react",
     "esModuleInterop": true,

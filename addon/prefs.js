@@ -20,6 +20,15 @@ pref("annotationToolEnabled", true);
 pref("maxAddAttachmentToMessage", 10);
 pref("readerExplainPrompt", "Explain the selected passage or annotation(s) from this paper in plain language. Provide context for any technical terms, statistical methods, or domain-specific concepts. If it references other work, briefly explain that context too.");
 
+// Chat composer IME handling: on Windows, defer Lexical's composition-end
+// processing until the composition's final input event (prevents IMEs such as
+// Sogou Pinyin from discarding committed text). Kill-switch in case an IME
+// interacts badly with the deferral.
+pref("imeCompositionOrderFix", true);
+// Verbose IME event tracing in the chat composer, for diagnosing composition
+// issues from debug output.
+pref("debugImeTrace", false);
+
 pref("accessRemoteFiles", true);
 
 // Data provider: keep a provider-wake subscription open while logged in so
@@ -98,6 +107,12 @@ pref("onboardingCitationTipShown", false);
 pref("onboardingWelcomeShownAt", "");
 pref("versionUpdatePopupShownAt", "");
 pref("onboardingSignInTextShown", false);
+
+// Throttle for the automatic pre-sync thread claim: the
+// `${beaverUserId}:${zoteroUserId}:${localUserKey}` combination that was
+// last claimed successfully. Empty = never claimed (or cleared after
+// logging out of the Zotero account so the next login can re-claim).
+pref("threadsClaimKey", "");
 
 // MCP server
 pref("mcpServerEnabled", false);

@@ -36,6 +36,18 @@ export interface BusyContext {
     extracting_hot_oldest_ms: number;
     /** Age in ms of the oldest background-worker operation, or 0 while idle */
     extracting_background_oldest_ms: number;
+    /** 1 if the hot slot currently has a live worker attached */
+    extracting_hot_has_worker: number;
+    /** Cumulative hot-worker spawns since the client was created */
+    extracting_hot_spawn_count: number;
+    /** Cumulative hot-worker busy-lease reaps since the client was created */
+    extracting_hot_lease_reap_count: number;
+    /** 1 if the background slot currently has a live worker attached */
+    extracting_background_has_worker: number;
+    /** Cumulative background-worker spawns since the client was created */
+    extracting_background_spawn_count: number;
+    /** Cumulative background-worker busy-lease reaps since the client was created */
+    extracting_background_lease_reap_count: number;
     /**
      * 1 if the window is hidden/occluded. The platform throttles timers in
      * hidden/occluded windows, which can inflate `event_loop_lag_ms`, so the
@@ -142,6 +154,12 @@ export function getBusyContext(): BusyContext {
     let extractingBackgroundPending = 0;
     let extractingHotOldestMs = 0;
     let extractingBackgroundOldestMs = 0;
+    let extractingHotHasWorker = 0;
+    let extractingHotSpawnCount = 0;
+    let extractingHotLeaseReapCount = 0;
+    let extractingBackgroundHasWorker = 0;
+    let extractingBackgroundSpawnCount = 0;
+    let extractingBackgroundLeaseReapCount = 0;
     let windowHidden = 0;
     try {
         // `as any`: syncInProgress is a defineProperty getter and may be
@@ -167,6 +185,17 @@ export function getBusyContext(): BusyContext {
             extractingBackgroundPending > 0 && backgroundStartedAt > 0
                 ? Math.max(0, now - backgroundStartedAt)
                 : 0;
+
+        // Worker-health counters: with these on every ack, backend traces can
+        // tell a wedged-but-live worker (has_worker=1, oldest age growing,
+        // reap count static) from spawn churn — even when the timed-out
+        // request itself never reached the worker slot.
+        extractingHotHasWorker = hot?.hasWorker ? 1 : 0;
+        extractingHotSpawnCount = hot?.totalSpawnCount ?? 0;
+        extractingHotLeaseReapCount = hot?.totalLeaseReapCount ?? 0;
+        extractingBackgroundHasWorker = background?.hasWorker ? 1 : 0;
+        extractingBackgroundSpawnCount = background?.totalSpawnCount ?? 0;
+        extractingBackgroundLeaseReapCount = background?.totalLeaseReapCount ?? 0;
     } catch {
         // Never let diagnostics break request handling
     }
@@ -190,6 +219,12 @@ export function getBusyContext(): BusyContext {
         extracting_background_pending: extractingBackgroundPending,
         extracting_hot_oldest_ms: extractingHotOldestMs,
         extracting_background_oldest_ms: extractingBackgroundOldestMs,
+        extracting_hot_has_worker: extractingHotHasWorker,
+        extracting_hot_spawn_count: extractingHotSpawnCount,
+        extracting_hot_lease_reap_count: extractingHotLeaseReapCount,
+        extracting_background_has_worker: extractingBackgroundHasWorker,
+        extracting_background_spawn_count: extractingBackgroundSpawnCount,
+        extracting_background_lease_reap_count: extractingBackgroundLeaseReapCount,
         window_hidden: windowHidden,
         event_loop_lag_ms: Math.max(0, now - lastTick - HEARTBEAT_INTERVAL_MS),
     };

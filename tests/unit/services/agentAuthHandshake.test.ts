@@ -112,6 +112,9 @@ describe('AgentService auth handshake envelope', () => {
         );
         expect(auth.type).toBe('auth');
         expect(auth.token).toBe('jwt-token');
+        expect(auth.connect_attempts).toBe(1);
+        expect(auth.connect_latency_ms).toBe(50);
+        expect('connect_started_at_ms' in auth).toBe(false);
         // conditional spread: absent keys must NOT appear (backend treats absence
         // as defaults; presence of an empty/garbage value would change behavior)
         expect('client_type' in auth).toBe(false);
@@ -167,5 +170,37 @@ describe('AgentService auth handshake envelope', () => {
         expect(auth.client_features).toEqual(['library_management']);
         // no zotero_instance for a non-Zotero client
         expect('zotero_instance' in auth).toBe(false);
+    });
+
+    it('reports retries and latency from the initial attempt start', async () => {
+        vi.setSystemTime(2_000);
+        const service = new AgentService('https://api.example.com');
+        const auth = await captureAuthMessage(service, () =>
+            service.connect(
+                { type: 'chat' } as AgentRunRequest,
+                createCallbacks(),
+                undefined,
+                undefined,
+                undefined,
+                undefined,
+                {
+                    connect_attempts: 2,
+                    connect_started_at_ms: 1_000,
+                    last_connect_failure: {
+                        stage: 'opening',
+                        close_code: 1006,
+                        timed_out: false,
+                    },
+                },
+            ),
+        );
+        expect(auth.connect_attempts).toBe(2);
+        expect(auth.connect_latency_ms).toBe(1_050);
+        expect(auth.last_connect_failure).toEqual({
+            stage: 'opening',
+            close_code: 1006,
+            timed_out: false,
+        });
+        expect('connect_started_at_ms' in auth).toBe(false);
     });
 });

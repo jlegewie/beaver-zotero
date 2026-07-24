@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState, ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { Icon, SearchIcon } from '../../icons/icons';
 import { getWindowFromElement, getDocumentFromElement } from '../../../utils/windowContext';
+import { isImeKeyEvent } from '../../../utils/ime';
 
 /**
 * Menu item interface for search menu
@@ -245,6 +246,9 @@ const SearchMenu: React.FC<SearchMenuProps> = ({
         };
         
         const handleEscape = (e: KeyboardEvent) => {
+            // An Escape owned by an IME composition cancels the composition,
+            // not the menu.
+            if (isImeKeyEvent(e)) return;
             if (e.key === 'Escape') {
                 onClose();
             }
@@ -269,6 +273,9 @@ const SearchMenu: React.FC<SearchMenuProps> = ({
             : menuItems;
         
         const handleKeyNav = (e: KeyboardEvent) => {
+            // Keys owned by an active IME composition (e.g. candidate-window
+            // navigation) must not drive the menu.
+            if (isImeKeyEvent(e)) return;
             // Only handle navigation keys if not coming from the input field
             if (e.target === inputRef.current) {
                 // For input field, only handle arrow keys and enter

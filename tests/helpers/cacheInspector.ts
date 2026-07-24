@@ -793,6 +793,87 @@ export async function workerMarkStale(
     return post('/beaver/test/worker-mark-stale', body);
 }
 
+/** One task outcome from the wedge-probe endpoint. */
+export interface WedgeProbeTaskResult {
+    label: string;
+    status: 'fulfilled' | 'rejected';
+    ms: number;
+    errorName?: string;
+    errorMessage?: string;
+}
+
+/**
+ * Drive a real busy-lease reap: shortens the hot slot's lease, dispatches a
+ * long worker op (plus an innocent sibling), and reports per-task outcomes
+ * and before/after stats. The lease is always restored server-side.
+ */
+export async function workerWedgeProbe(
+    fixture: { library_id: number; zotero_key: string },
+    body: {
+        leaseMs?: number;
+        op?: 'extractSerialized' | 'renderPages' | 'getPageCount' | 'search' | 'analyzeLayout';
+        sibling?: boolean;
+        renderEndIndex?: number;
+    } = {},
+): Promise<{
+    ok: boolean;
+    error?: string;
+    leaseMs?: number;
+    op?: string;
+    results?: WedgeProbeTaskResult[];
+    before?: Pick<
+        WorkerStatsSnapshot,
+        'spawnCount' | 'retryCount' | 'pendingCount' | 'leaseReapCount'
+    >;
+    after?: WorkerStatsSnapshot;
+}> {
+    return post('/beaver/test/worker-wedge-probe', { ...fixture, ...body });
+}
+
+/**
+ * Drive a real idle-timer reap on the hot slot (proves the injected
+ * realm-independent timers fire). Restores the production idle timeout
+ * server-side.
+ */
+export async function workerIdleProbe(
+    body: { idleMs?: number; waitMs?: number } = {},
+): Promise<{
+    ok: boolean;
+    idleMs: number;
+    waitMs: number;
+    hasWorkerAfterPing: boolean;
+    idleTimerArmedAfterPing: boolean;
+    hasWorkerAfterWait: boolean;
+    idleTimerArmedAfterWait: boolean;
+}> {
+    return post('/beaver/test/worker-idle-probe', body);
+}
+
+/** Realm/timer wiring info and self-heal probes for the hot worker slot. */
+export async function workerRealmProbe(
+    action: 'info' | 'identity' | 'simulate-dead-realm' | 'legacy-stub',
+): Promise<{
+    ok: boolean;
+    error?: string;
+    // info
+    timersInjected?: boolean;
+    hasCreatorTracking?: boolean;
+    isCreatorRealmDead?: boolean;
+    createdFromWindowRecorded?: boolean;
+    // identity
+    sameInstance?: boolean;
+    // simulate-dead-realm
+    doomedReportedDead?: boolean;
+    replaced?: boolean;
+    doomedDisposed?: boolean;
+    replacementIsCreatorRealmDead?: boolean;
+    replacementHasTracking?: boolean;
+    // legacy-stub
+    stubDisposed?: boolean;
+}> {
+    return post('/beaver/test/worker-realm-probe', { action });
+}
+
 // ---------------------------------------------------------------------------
 // Sync suppression (dev-only)
 //

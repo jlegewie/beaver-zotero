@@ -5,6 +5,7 @@ import { zoteroDocumentExport } from './citationExport';
 import { zoteroNoteWriter } from './noteWriter';
 import { zoteroConfig } from './config';
 import { zoteroComponents } from './components';
+import { zoteroDialogs } from './dialogs';
 
 /**
  * Assemble and register the Zotero client host. Call once at webpack bundle
@@ -20,5 +21,6 @@ export function registerZoteroHost(): void {
         noteWriter: zoteroNoteWriter,
         config: zoteroConfig,
         components: zoteroComponents,
+        dialogs: zoteroDialogs,
     });
 }

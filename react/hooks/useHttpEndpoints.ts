@@ -64,6 +64,8 @@ import {
     handleTestWorkerMarkStaleHttpRequest,
     handleTestWorkerCacheClearHttpRequest,
     handleTestWorkerWedgeProbeHttpRequest,
+    handleTestWorkerIdleProbeHttpRequest,
+    handleTestWorkerRealmProbeHttpRequest,
     handleTestFileStatusHttpRequest,
     handleTestResolveItemHttpRequest,
     handleTestResolveReadableHttpRequest,
@@ -253,6 +255,8 @@ const ENDPOINT_PATHS = [
     '/beaver/test/worker-mark-stale',
     '/beaver/test/worker-cache-clear',
     '/beaver/test/worker-wedge-probe',
+    '/beaver/test/worker-idle-probe',
+    '/beaver/test/worker-realm-probe',
     // Test-only endpoint (file-status side-effect trigger)
     '/beaver/test/file-status',
     // Test-only endpoints (MuPDF worker plumbing)
@@ -947,6 +951,12 @@ function registerEndpoints(): boolean {
 
         Zotero.Server.Endpoints['/beaver/test/worker-wedge-probe'] =
             createEndpoint(handleTestWorkerWedgeProbeHttpRequest);
+
+        Zotero.Server.Endpoints['/beaver/test/worker-idle-probe'] =
+            createEndpoint(handleTestWorkerIdleProbeHttpRequest);
+
+        Zotero.Server.Endpoints['/beaver/test/worker-realm-probe'] =
+            createEndpoint(handleTestWorkerRealmProbeHttpRequest);
 
         // File-status side-effect trigger (dev-only)
         Zotero.Server.Endpoints['/beaver/test/file-status'] =

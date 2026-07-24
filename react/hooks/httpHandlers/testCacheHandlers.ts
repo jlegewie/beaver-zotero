@@ -362,6 +362,132 @@ export async function handleTestWorkerWedgeProbeHttpRequest(request: any) {
 }
 
 /**
+ * Dev-only: drive a real idle-timer reap on the hot worker slot.
+ *
+ * Ensures a live worker (ping), shortens the idle timeout via the module
+ * test hook, pings again so the idle timer re-arms with the short value,
+ * waits past it, and reports whether the worker was reaped. The idle timer
+ * shares the client's watchdog timer plumbing, so this proves the injected
+ * (realm-independent) timers actually fire in the live process. Always
+ * restores the production idle timeout.
+ */
+export async function handleTestWorkerIdleProbeHttpRequest(request: any) {
+    const { getMuPDFWorkerClient, __setIdleTimeoutForTest, __resetIdleTimeoutForTest } =
+        await import('../../../src/beaver-extract/MuPDFWorkerClient');
+
+    const idleMs = typeof request?.idleMs === 'number' ? request.idleMs : 1200;
+    const waitMs = typeof request?.waitMs === 'number' ? request.waitMs : idleMs + 2000;
+    const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+    const client = getMuPDFWorkerClient();
+    try {
+        await client.ping();
+        __setIdleTimeoutForTest('hot', idleMs);
+        await client.ping();
+        const afterPing = client.getStats();
+        await sleep(waitMs);
+        const afterWait = client.getStats();
+        return {
+            ok: true,
+            idleMs,
+            waitMs,
+            hasWorkerAfterPing: afterPing.hasWorker,
+            idleTimerArmedAfterPing: afterPing.idleTimerArmed,
+            hasWorkerAfterWait: afterWait.hasWorker,
+            idleTimerArmedAfterWait: afterWait.idleTimerArmed,
+        };
+    } finally {
+        __resetIdleTimeoutForTest('hot');
+    }
+}
+
+/**
+ * Dev-only: exercise the creator-realm tracking and slot self-heal in
+ * `getMuPDFWorkerClient` without any window lifecycle.
+ *
+ * Actions:
+ *  - `info` — realm/timer wiring of the current client (creates one if
+ *    absent): are host timers injected, does the instance carry creator
+ *    tracking, is its creating realm alive?
+ *  - `identity` — two consecutive lookups return the same healthy
+ *    instance (no replacement churn).
+ *  - `simulate-dead-realm` — construct a client whose recorded creating
+ *    window reports `closed === true` (via the module-window test hook),
+ *    then look the slot up again and report whether the dead client was
+ *    replaced by a fresh tracked one.
+ *  - `legacy-stub` — plant a minimal instance without creator tracking in
+ *    the slot and report whether lookup replaces and disposes it.
+ *
+ * Every action leaves the slot holding a healthy, current-realm client.
+ */
+export async function handleTestWorkerRealmProbeHttpRequest(request: any) {
+    const {
+        getMuPDFWorkerClient,
+        disposeMuPDFWorker,
+        __setModuleWindowForTest,
+        __resetModuleWindowForTest,
+    } = await import('../../../src/beaver-extract/MuPDFWorkerClient');
+    const { isConfigured, getConfig } = await import('../../../src/beaver-extract/config');
+
+    const action = typeof request?.action === 'string' ? request.action : 'info';
+
+    if (action === 'info') {
+        const client = getMuPDFWorkerClient();
+        return {
+            ok: true,
+            timersInjected: isConfigured() && !!getConfig().timers,
+            hasCreatorTracking: 'isCreatorRealmDead' in client,
+            isCreatorRealmDead: client.isCreatorRealmDead,
+            createdFromWindowRecorded: client.createdFromWindow !== null,
+        };
+    }
+
+    if (action === 'identity') {
+        const first = getMuPDFWorkerClient();
+        const second = getMuPDFWorkerClient();
+        return { ok: true, sameInstance: first === second };
+    }
+
+    if (action === 'simulate-dead-realm') {
+        await disposeMuPDFWorker('hot', { force: true });
+        let doomed: any = null;
+        try {
+            __setModuleWindowForTest({ closed: true } as any);
+            doomed = getMuPDFWorkerClient();
+        } finally {
+            __resetModuleWindowForTest();
+        }
+        const doomedReportedDead = doomed.isCreatorRealmDead === true;
+        const replacement = getMuPDFWorkerClient();
+        return {
+            ok: true,
+            doomedReportedDead,
+            replaced: replacement !== doomed,
+            doomedDisposed: doomed.getStats().disposed === true,
+            replacementIsCreatorRealmDead: replacement.isCreatorRealmDead,
+            replacementHasTracking: 'isCreatorRealmDead' in replacement,
+        };
+    }
+
+    if (action === 'legacy-stub') {
+        await disposeMuPDFWorker('hot', { force: true });
+        let stubDisposeCalls = 0;
+        const stub = { dispose: () => { stubDisposeCalls += 1; } };
+        (Zotero as any).__beaverMuPDFWorkerClient_hot = stub;
+        const replacement = getMuPDFWorkerClient();
+        return {
+            ok: true,
+            replaced: (replacement as any) !== stub,
+            stubDisposed: stubDisposeCalls === 1,
+            replacementHasTracking: 'isCreatorRealmDead' in replacement,
+            replacementIsCreatorRealmDead: replacement.isCreatorRealmDead,
+        };
+    }
+
+    return { ok: false, error: `Unknown action: ${action}` };
+}
+
+/**
  * Dev-only: invoke `getAttachmentFileStatus(item, isPrimary)` directly.
  *
  * Manual tests 2.3 (step 3), 5.4, and 7.2 need to trigger the file-status
