@@ -432,6 +432,16 @@ export interface ComponentsHost {
     pendingActionsReview(props: { run: AgentRun }): ReactNode;
 }
 
+export interface DialogsHost {
+    /**
+     * Show a blocking two-button confirm dialog and return whether the user
+     * confirmed. Synchronous by design — callers gate irreversible transitions
+     * (interrupting a run, opening a thread from another Zotero instance) on
+     * the answer before mutating any state.
+     */
+    confirm(opts: { title: string; text: string; confirmLabel: string }): boolean;
+}
+
 /**
  * Aggregate client host. Registered once per client at bundle init via
  * {@link setHost}. Slices are optional — check before use.
@@ -443,4 +453,5 @@ export interface ClientHost {
     noteWriter?: NoteWriterHost;
     config?: ConfigHost;
     components?: ComponentsHost;
+    dialogs?: DialogsHost;
 }

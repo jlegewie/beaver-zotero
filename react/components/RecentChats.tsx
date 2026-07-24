@@ -7,7 +7,8 @@ import { currentThreadIdAtom } from '../agents/atoms';
 import { searchableLibraryIdsAtom } from '../atoms/profile';
 import { threadService } from '../../src/services/threadService';
 import { convertUTCToLocal } from '../utils/dateUtils';
-import { deduplicateByThread } from '../utils/threadMatches';
+import { deduplicateByThread, threadModelToThreadData, isThreadInstanceMismatch } from '../utils/threadMatches';
+import { currentZoteroInstanceRef } from '../../src/utils/zoteroUtils';
 import { getReaderOrNoteContextItem } from '../utils/zoteroTabContext';
 import { buildThreadItemFilter } from '../utils/threadItemFilter';
 import { buildRecentChatsCacheKey, buildRecentChatsItemLookup } from '../utils/recentChatsLookup';
@@ -163,6 +164,10 @@ const RecentChats: React.FC = () => {
                 ? buildRecentChatsItemLookup(libraryId, itemKeys, searchableLibraryIds)
                 : null;
 
+            // Silently scope to the current Zotero instance — RecentChats has
+            // no "Show all" affordance (the full ThreadListView does).
+            const instanceScope = currentZoteroInstanceRef() ?? undefined;
+
             // Reader/note context: try item-specific threads first. Excluded
             // libraries produce no lookup payload (privacy boundary), so neither
             // their stable identity nor item keys reach the backend.
@@ -172,7 +177,13 @@ const RecentChats: React.FC = () => {
                         itemLookup.libraryId, itemLookup.zoteroKeys, 'both'
                     );
                     if (isCancelled()) return;
-                    const deduped = deduplicateByThread(matches);
+                    // By-item results are scoped client-side from the identity
+                    // columns (bounded set; no server-side by-item scoping).
+                    const deduped = deduplicateByThread(matches).filter(t =>
+                        !isThreadInstanceMismatch(instanceScope ?? null, {
+                            zoteroUserId: t.zoteroUserId, zoteroLocalId: t.zoteroLocalId,
+                        })
+                    );
                     if (deduped.length > 0) {
                         resultThreads = deduped.slice(0, MAX_RECENT);
                         resultContextType = noteKey ? 'note' : 'file';
@@ -185,14 +196,9 @@ const RecentChats: React.FC = () => {
 
             // Fallback: general recent chats
             if (resultThreads.length === 0) {
-                const response = await threadService.getPaginatedThreads(MAX_RECENT);
+                const response = await threadService.getPaginatedThreads(MAX_RECENT, null, instanceScope);
                 if (isCancelled()) return;
-                resultThreads = response.data.map(t => ({
-                    id: t.id,
-                    name: t.name || '',
-                    createdAt: t.created_at,
-                    updatedAt: t.updated_at,
-                }));
+                resultThreads = response.data.map(threadModelToThreadData);
                 resultContextType = 'recent';
             }
 
@@ -233,10 +239,18 @@ const RecentChats: React.FC = () => {
         return unregister;
     }, []);
 
-    const handleSelectThread = async (threadId: string, threadName?: string) => {
-        if (!user || threadId === currentThreadId) return;
+    const handleSelectThread = async (thread: ThreadData) => {
+        if (!user || thread.id === currentThreadId) return;
         try {
-            await loadThread({ user_id: user.id, threadId, threadName });
+            await loadThread({
+                user_id: user.id,
+                threadId: thread.id,
+                threadName: thread.name,
+                threadIdentity: {
+                    zoteroUserId: thread.zoteroUserId ?? null,
+                    zoteroLocalId: thread.zoteroLocalId ?? null,
+                },
+            });
         } catch (error) {
             console.error('RecentChats: error loading thread:', error);
         }
@@ -287,11 +301,11 @@ const RecentChats: React.FC = () => {
                     role="button"
                     tabIndex={0}
                     aria-label={`${thread.name || 'Unnamed conversation'}, ${formatCompactTime(thread.updatedAt)}`}
-                    onClick={() => handleSelectThread(thread.id, thread.name)}
+                    onClick={() => handleSelectThread(thread)}
                     onKeyDown={(e) => {
                         if (e.key === 'Enter' || e.key === ' ') {
                             e.preventDefault();
-                            handleSelectThread(thread.id, thread.name);
+                            handleSelectThread(thread);
                         }
                     }}
                 >

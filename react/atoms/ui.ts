@@ -81,6 +81,15 @@ export interface ThreadItemFilter {
  */
 export const threadListFilterAtom = atom<ThreadItemFilter | null>(null);
 
+/**
+ * Whether the thread list shows chats from every Zotero account/profile
+ * instead of only those created with the current one. Deliberately global and
+ * not reset when the thread list view closes: a user who opted out of instance
+ * scoping should stay opted out for the rest of the session rather than having
+ * to re-enable it every time they reopen the list.
+ */
+export const showAllThreadInstancesAtom = atom(false);
+
 const isThreadListViewBaseAtom = atom(false);
 
 /**

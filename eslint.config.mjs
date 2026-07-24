@@ -134,6 +134,9 @@ export default tseslint.config(
             // side display names through getHost(), not the Zotero global.
             "react/components/agentRuns/ToolCallPartView.tsx",
             "react/agents/toolLabels.ts",
+            // Pure thread-list helpers incl. the instance-mismatch check —
+            // identities are passed in, never read from the Zotero global.
+            "react/utils/threadMatches.ts",
         ],
         rules: {
             "no-restricted-globals": [

@@ -3,6 +3,7 @@ import { ZoteroItemReference } from "../../react/types/zotero";
 import type { CreatorJSON } from "../../react/types/agentActions/base";
 import { logger } from "./logger";
 import { libraryRefForLibraryID, UNRESOLVED_LIBRARY_ID } from "./libraryIdentity";
+import type { ZoteroInstanceRef } from "../services/threadService";
 
 function makeZoteroItemReference(libraryID: number, zoteroKey: string): ZoteroItemReference {
     return {
@@ -386,6 +387,21 @@ export function getZoteroUserIdentifier(): ZoteroInstanceIdentity {
         localUserKey: `${localUserKey}`,
         accountName,
         deviceName,
+    }
+}
+
+/**
+ * The current install's identity as a `ZoteroInstanceRef` — the single mapping
+ * point from Zotero's `{userID, localUserKey}` to the client-agnostic shape
+ * used for thread scoping and mismatch checks. Returns `null` when the Zotero
+ * user API is unavailable (callers then skip scoping entirely).
+ */
+export function currentZoteroInstanceRef(): ZoteroInstanceRef | null {
+    try {
+        const { userID, localUserKey } = getZoteroUserIdentifier();
+        return { zoteroUserId: userID ?? null, zoteroLocalId: localUserKey };
+    } catch {
+        return null;
     }
 }
 

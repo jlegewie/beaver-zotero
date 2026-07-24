@@ -108,6 +108,12 @@ pref("onboardingWelcomeShownAt", "");
 pref("versionUpdatePopupShownAt", "");
 pref("onboardingSignInTextShown", false);
 
+// Throttle for the automatic pre-sync thread claim: the
+// `${beaverUserId}:${zoteroUserId}:${localUserKey}` combination that was
+// last claimed successfully. Empty = never claimed (or cleared after
+// logging out of the Zotero account so the next login can re-claim).
+pref("threadsClaimKey", "");
+
 // MCP server
 pref("mcpServerEnabled", false);
 pref("mcpCreateNoteToolEnabled", false);

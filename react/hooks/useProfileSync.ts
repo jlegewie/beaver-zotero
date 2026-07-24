@@ -4,13 +4,14 @@ import { fileUploader } from '../../src/services/FileUploader';
 import { isAuthenticatedAtom, logoutAtom, userAtom, isWaitingForProfileAtom } from '../atoms/auth';
 import { accountService } from '../../src/services/accountService';
 import { logger } from '../../src/utils/logger';
-import { SessionExpiredError, ZoteroInstanceMismatchError } from '../../react/types/apiErrors';
+import { SessionExpiredError } from '../../react/types/apiErrors';
+import { threadService } from '../../src/services/threadService';
+import { getZoteroUserIdentifier } from '../../src/utils/zoteroUtils';
 import { setModelsAtom } from '../atoms/models';
 import { isSidebarVisibleAtom, isPreferencePageVisibleAtom } from '../atoms/ui';
 import { serializeZoteroLibrary } from '../../src/utils/zoteroSerializers';
 import { getPref, setPref } from '../../src/utils/prefs';
 import {
-    isProfileInvalidAtom,
     isProfileLoadedAtom,
     profileWithPlanAtom,
     isMigratingDataAtom,
@@ -37,6 +38,62 @@ const RETRY_BACKOFF_MAX_MS = 60 * 1000;
 const computeRetryDelay = (attempts: number) =>
     Math.min(RETRY_BACKOFF_BASE_MS * Math.pow(RETRY_BACKOFF_FACTOR, attempts), RETRY_BACKOFF_MAX_MS);
 
+/**
+ * Automatically claims pre-sync threads: threads created before this install
+ * had a Zotero account id carry only its localUserKey and would be hidden on
+ * the user's other devices once they share an account id. Once a Zotero
+ * account id is available, stamp it onto those threads — throttled to once
+ * per (beaverUser, zoteroUser, install) combination via threadsClaimKey.
+ *
+ * An absent account id clears the throttle so a later login can claim any
+ * threads created while it was absent. Note that neither disabling sync nor
+ * unlinking the Zotero account clears the account id: Zotero only removes the
+ * API key and keeps `settings('account','userID')`, so `getCurrentUserID()`
+ * keeps returning it. The id disappears only when the Zotero data directory is
+ * reset (unlink with "Remove my data", or an account switch) — which mints a
+ * new localUserKey too, so the install is then a fresh instance whose own
+ * pre-sync threads are the ones a later login claims.
+ *
+ * Exported for tests.
+ */
+export const claimPreSyncThreads = async (userId: string): Promise<void> => {
+    try {
+        const { userID: zoteroUserId, localUserKey } = getZoteroUserIdentifier();
+        if (!zoteroUserId) {
+            // No Zotero account id: either never synced, or the data directory
+            // was reset. Drop the throttle so the next login re-claims any
+            // local-only threads created while the account id was absent. This
+            // matters after a data-directory reset in particular: the pref lives
+            // in the Zotero profile directory and survives the reset, so a stale
+            // key from the previous install would otherwise suppress the claim.
+            if (getPref('threadsClaimKey')) {
+                setPref('threadsClaimKey', '');
+            }
+            return;
+        }
+        const claimKey = `${userId}:${zoteroUserId}:${localUserKey}`;
+        if (getPref('threadsClaimKey') === claimKey) return;
+        // Stale-refresh guard (mirrors the userEmail sentinel): never claim for
+        // a Beaver account the session has moved away from.
+        if (store.get(userAtom)?.id !== userId) return;
+        const { claimed } = await threadService.claimThreads(
+            { zoteroUserId, zoteroLocalId: localUserKey },
+            userId
+        );
+        // Re-check before persisting the throttle: the account may have
+        // switched while the request was in flight (the backend independently
+        // verifies expected_user_id).
+        if (store.get(userAtom)?.id !== userId) return;
+        setPref('threadsClaimKey', claimKey);
+        if (claimed > 0) {
+            logger(`useProfileSync: Claimed ${claimed} pre-sync threads for Zotero account ${zoteroUserId}.`);
+        }
+    } catch (error: any) {
+        // Leave the throttle pref unset so the next profile sync retries.
+        logger(`useProfileSync: Failed to claim pre-sync threads: ${error?.message ?? error}`, 2);
+    }
+};
+
 // Module-level singleton for cross-React-root retry-button calls. The singleton useProfileSync
 // hook in GlobalContextInitializer assigns this; ProfileLoadingPage (which mounts in a different
 // React root than the hook) reads it. Cleared on hook unmount.
@@ -56,7 +113,6 @@ export const triggerProfileRefresh = (): Promise<void> | undefined => externalRe
 export const useProfileSync = () => {
     const setProfileWithPlan = useSetAtom(profileWithPlanAtom);
     const setIsProfileLoaded = useSetAtom(isProfileLoadedAtom);
-    const setIsProfileInvalid = useSetAtom(isProfileInvalidAtom);
     const setIsWaitingForProfile = useSetAtom(isWaitingForProfileAtom);
     const setModels = useSetAtom(setModelsAtom);
     const setIsMigratingData = useSetAtom(isMigratingDataAtom);
@@ -109,7 +165,7 @@ export const useProfileSync = () => {
                     setProfileWithPlan(updatedProfileData.profile);
                     setModels(updatedProfileData.model_configs);
                 } catch (migrationError: any) {
-                    if (migrationError instanceof SessionExpiredError || migrationError instanceof ZoteroInstanceMismatchError) {
+                    if (migrationError instanceof SessionExpiredError) {
                         throw migrationError;
                     }
                     logger(`useProfileSync: Migration failed: ${migrationError?.message}`, 3);
@@ -132,10 +188,9 @@ export const useProfileSync = () => {
 
             // Persist the authenticated email as the install's account sentinel.
             // Onboarding pages also write this, but already-authorized users
-            // skip onboarding — without this, the SignInForm mismatch prompt
-            // wouldn't fire on later switches. Deferred until profile validates
-            // so a 403 ZoteroInstanceMismatchError doesn't stick a rejected
-            // email into the pref.
+            // skip onboarding — without this, the SignInForm account-switch
+            // prompt wouldn't fire on later switches. Deferred until the
+            // profile fetch succeeds.
             //
             // Re-read the userAtom from the store (rather than the closed-over
             // `user`) and confirm it still matches the userId this fetch was
@@ -146,6 +201,15 @@ export const useProfileSync = () => {
             if (currentUser?.id === userId && currentUser.email && getPref("userEmail") !== currentUser.email) {
                 setPref("userEmail", currentUser.email);
             }
+
+            // Stamp the Zotero account id onto this install's local-only threads
+            // (created before it had an account id) so they surface on other
+            // devices that share the account. Deliberately not awaited: a slow
+            // claim request must not delay profile readiness, and the
+            // function's own stale-user re-checks (plus the backend's
+            // expected_user_id verification) keep it safe to finish after this
+            // sync returns.
+            void claimPreSyncThreads(userId);
 
             try {
                 const allLibraries = Zotero.Libraries.getAll();
@@ -160,7 +224,6 @@ export const useProfileSync = () => {
             }
 
             setIsProfileLoaded(true);
-            setIsProfileInvalid(false);
             setIsWaitingForProfile(false);
             setProfileSyncStatus({ kind: 'ok' });
             retryAttemptsRef.current = 0;
@@ -168,12 +231,6 @@ export const useProfileSync = () => {
             logger(`useProfileSync: Successfully fetched profile and plan for ${userId}.`, profileData.profile);
 
         } catch (error: any) {
-            if (error instanceof ZoteroInstanceMismatchError) {
-                logger(`useProfileSync: Zotero instance mismatch for ${userId}. Signing out user.`, 2);
-                setIsProfileInvalid(true);
-                await logout();
-                return;
-            }
             if (error instanceof SessionExpiredError) {
                 logger(`useProfileSync: Session expired during profile fetch for ${userId}. Signing out user.`, 2);
                 await logout();
@@ -209,7 +266,7 @@ export const useProfileSync = () => {
                 setTimeout(() => syncProfileData(userId), 0);
             }
         }
-    }, [user, setProfileWithPlan, setIsProfileLoaded, setIsProfileInvalid, setIsWaitingForProfile, setModels, setIsMigratingData, setRequiredDataVersion, setMinimumFrontendVersion, setLocalZoteroLibraries, setProfileSyncStatus, logout]);
+    }, [user, setProfileWithPlan, setIsProfileLoaded, setIsWaitingForProfile, setModels, setIsMigratingData, setRequiredDataVersion, setMinimumFrontendVersion, setLocalZoteroLibraries, setProfileSyncStatus, logout]);
 
     const refreshProfile = useCallback(async (force = false) => {
         if (!user) return;

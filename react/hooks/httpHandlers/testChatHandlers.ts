@@ -213,7 +213,7 @@ export async function handleTestChatSendHttpRequest(request: any) {
             if (!userId) {
                 return { ok: false, error: 'No user_id to load requested threadId (not logged in?)' };
             }
-            await store.set(loadThreadAtom, { user_id: userId, threadId });
+            await store.set(loadThreadAtom, { user_id: userId, threadId, skipInstanceMismatchConfirm: true });
         }
     }
 
@@ -280,13 +280,16 @@ export async function handleTestLoadThreadHttpRequest(request: any) {
     if (!userId) {
         return { ok: false, error: 'No user_id (not logged in?)' };
     }
-    await store.set(loadThreadAtom, {
+    const loaded = await store.set(loadThreadAtom, {
         user_id: userId,
         threadId,
         threadName: request?.threadName,
+        // Never hang headless drivers on the native other-instance confirm.
+        skipInstanceMismatchConfirm: true,
     });
     return {
         ok: true,
+        loaded,
         ...currentIds(),
         actions: threadActions().map((a) => ({
             id: a.id,
