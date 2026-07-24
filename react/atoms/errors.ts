@@ -1,6 +1,6 @@
 import { atom } from "jotai";
 import { planFeaturesAtom } from "./profile";
-import { ErrorCode } from "src/services/attachmentsService";
+import { ErrorCode } from "../../src/services/attachmentsService";
 
 
 interface ErrorGroup {

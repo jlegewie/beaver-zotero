@@ -1,6 +1,6 @@
 import { atom } from 'jotai';
 import { FileStatus, FileStatusSummary, ConnectionStatus } from '../types/fileStatus';
-import { ErrorCodeStats } from 'src/services/attachmentsService';
+import { ErrorCodeStats } from '../../src/services/attachmentsService';
 import { errorMapping } from './errors';
 
 // File upload status

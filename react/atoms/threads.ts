@@ -5,9 +5,11 @@ import { isLibraryTabAtom, isWebSearchEnabledAtom, removePopupMessagesByTypeAtom
 import { citationsAtom, citationMapAtom, processCitationsAtom, resetCitationMarkersAtom, mergePageLabelsByAttachmentIdAtom } from "./citations";
 import { preloadPageLabelsForCitations } from "../utils/pageLabels";
 import { agentRunService, agentService } from "../../src/services/agentService";
-import { threadService } from "../../src/services/threadService";
+import { threadService, ZoteroInstanceRef } from "../../src/services/threadService";
 import { getPref } from "../../src/utils/prefs";
-import { loadFullItemDataWithAllTypes } from "../../src/utils/zoteroUtils";
+import { loadFullItemDataWithAllTypes, currentZoteroInstanceRef } from "../../src/utils/zoteroUtils";
+import { isThreadInstanceMismatch } from "../utils/threadMatches";
+import { getHost } from "../host";
 import { logger } from "../../src/utils/logger";
 import { ApiError } from "../types/apiErrors";
 import { resetMessageUIStateAtom } from "./messageUIState";
@@ -117,6 +119,12 @@ export interface ThreadData {
     name: string;
     createdAt: string;
     updatedAt: string;
+    // Zotero install identity of the device that created the thread; null for
+    // unattributed threads (visible on every instance). Map these through
+    // wherever ThreadData is built — a dropped field makes a foreign thread
+    // masquerade as unattributed and bypass the mismatch confirm.
+    zoteroUserId?: string | null;
+    zoteroLocalId?: string | null;
 }
 
 // Thread messages and attachments
@@ -200,15 +208,25 @@ export const recentThreadsAtom = atom<ThreadData[]>([]);
  * Returns true if the user confirmed (or there was nothing to confirm).
  */
 function confirmInterruptActiveRun(title: string, text: string, confirmLabel: string): boolean {
-    const buttonIndex = Zotero.Prompt.confirm({
-        window: Zotero.getMainWindow(),
-        title,
-        text,
-        button0: confirmLabel,
-        button1: Zotero.Prompt.BUTTON_TITLE_CANCEL,
-        defaultButton: 1,
-    });
-    return buttonIndex === 0;
+    // Hosts without a dialogs slice proceed as confirmed.
+    return getHost().dialogs?.confirm({ title, text, confirmLabel }) ?? true;
+}
+
+/**
+ * Thread ids whose instance-mismatch warning the user has already confirmed
+ * this session — don't re-prompt when switching back and forth.
+ */
+const confirmedMismatchedThreadIds = new Set<string>();
+
+function confirmOpenMismatchedThread(): boolean {
+    return getHost().dialogs?.confirm({
+        title: 'Open chat from another Zotero?',
+        text: 'This chat was created with a different Zotero account or database. '
+            + 'Cited items and links may not work here. Any library changes like '
+            + 'editing metadata, adding PDF annotations, or organizing items '
+            + 'may not apply or even change the incorrect Zotero items.',
+        confirmLabel: 'Open Chat',
+    }) ?? true;
 }
 
 /**
@@ -326,7 +344,25 @@ export const isLoadingThreadAtom = atom<boolean>(false);
  */
 export const loadThreadAtom = atom(
     null,
-    async (get, set, { user_id, threadId, threadName }: { user_id: string; threadId: string; threadName?: string }) => {
+    async (
+        get,
+        set,
+        { user_id, threadId, threadName, threadIdentity, skipInstanceMismatchConfirm }: {
+            user_id: string;
+            threadId: string;
+            threadName?: string;
+            /**
+             * The thread's stamped instance identity when the caller already has
+             * it (thread-list rows). Omit to have the atom fetch it. Only pass
+             * identities from sources that carry the identity fields — a
+             * fabricated `{null, null}` reads as unattributed and skips the
+             * mismatch confirm.
+             */
+            threadIdentity?: ZoteroInstanceRef;
+            /** Skip the instance-mismatch confirm (headless test drivers). */
+            skipInstanceMismatchConfirm?: boolean;
+        }
+    ): Promise<boolean> => {
         // Confirm before interrupting a run that's actively streaming in the current thread
         const hasActiveWork = get(isWSChatPendingAtom) || get(activeRunAtom);
         if (hasActiveWork && !confirmInterruptActiveRun(
@@ -334,12 +370,56 @@ export const loadThreadAtom = atom(
             'Beaver is still generating a response in this chat. Switching chats will stop it.',
             'Switch Chat',
         )) {
-            return;
+            // A canceled load can't fulfill a pending deep-link scroll target.
+            set(pendingScrollToRunAtom, null);
+            return false;
         }
 
         // Show loading state immediately for instant UI feedback
         set(isLoadingThreadAtom, true);
 
+        // Resolve the thread's instance identity (and name, from the same
+        // request) BEFORE any thread-state mutation, so a canceled mismatch
+        // confirm or a failed identity fetch aborts without side effects.
+        const statefulChat = getPref('statefulChat');
+        let identity = threadIdentity;
+        let resolvedName = threadName ?? null;
+        if (identity === undefined && statefulChat) {
+            try {
+                const thread = await threadService.getThread(threadId);
+                identity = {
+                    zoteroUserId: thread.zotero_user_id ?? null,
+                    zoteroLocalId: thread.zotero_local_id ?? null,
+                };
+                resolvedName = resolvedName ?? (thread.name || null);
+            } catch (error) {
+                // An unknown identity must abort rather than degrade to
+                // "matching": this confirm is the only gate before applied
+                // actions are validated (and possibly auto-undone) against the
+                // current library.
+                logger(`loadThreadAtom: Failed to fetch thread ${threadId}: ${error}`, 1);
+                set(pendingScrollToRunAtom, null);
+                set(isLoadingThreadAtom, false);
+                return false;
+            }
+        }
+        // Legacy non-stateful threads live in this install's local DB — always matching.
+
+        if (
+            identity !== undefined
+            && !skipInstanceMismatchConfirm
+            && !confirmedMismatchedThreadIds.has(threadId)
+            && isThreadInstanceMismatch(currentZoteroInstanceRef(), identity)
+        ) {
+            if (!confirmOpenMismatchedThread()) {
+                set(pendingScrollToRunAtom, null);
+                set(isLoadingThreadAtom, false);
+                return false;
+            }
+            confirmedMismatchedThreadIds.add(threadId);
+        }
+
+        let loaded = false;
         try {
             // Cancel any active run before loading a different thread
             await cancelActiveRunIfNeeded(get, set);
@@ -347,13 +427,13 @@ export const loadThreadAtom = atom(
             await BeaverTemporaryAnnotations.cleanupAll().catch(error => {
                 logger(`loadThreadAtom: Error cleaning up temporary annotations: ${error}`);
             });
-            
+
             // Reset scroll state for both sidebar and window
             set(userScrolledAtom, false);
             set(windowUserScrolledAtom, false);
             // Set the current thread ID and name
             set(currentThreadIdAtom, threadId);
-            set(currentThreadNameAtom, threadName ?? null);
+            set(currentThreadNameAtom, resolvedName);
             set(clearExternalReferenceCacheAtom);
             set(isWebSearchEnabledAtom, false);
             set(resetCitationMarkersAtom);
@@ -362,21 +442,15 @@ export const loadThreadAtom = atom(
             set(clearAllPendingApprovalsAtom);
             set(clearAllPendingQuestionsAtom);
 
-            // Fetch thread name if not provided (e.g., from protocol handler deep links).
-            // Check cached recentThreadsAtom first to avoid a network/DB round-trip.
-            const threadNamePromise = !threadName
+            // Legacy non-stateful path: fetch the name from the local DB when
+            // not provided (the stateful path already resolved it above).
+            const threadNamePromise = !resolvedName && !statefulChat
                 ? (async () => {
                     const cached = get(recentThreadsAtom).find(t => t.id === threadId);
                     if (cached?.name) return cached.name;
                     try {
-                        const statefulChat = getPref('statefulChat');
-                        if (statefulChat) {
-                            const thread = await threadService.getThread(threadId);
-                            return thread.name || null;
-                        } else {
-                            const thread = await Zotero.Beaver.db.getThread(user_id, threadId);
-                            return thread?.name || null;
-                        }
+                        const thread = await Zotero.Beaver.db.getThread(user_id, threadId);
+                        return thread?.name || null;
                     } catch (error) {
                         logger(`loadThreadAtom: Failed to fetch thread name: ${error}`);
                         return null;
@@ -567,6 +641,7 @@ export const loadThreadAtom = atom(
                     set(currentThreadNameAtom, fetchedName);
                 }
             }
+            loaded = true;
         } catch (error) {
             // Load failed, so any pending deep-link target can no longer be fulfilled.
             set(pendingScrollToRunAtom, null);
@@ -591,5 +666,6 @@ export const loadThreadAtom = atom(
         set(removePopupMessagesByTypeAtom, ['items_summary']);
         set(currentMessageContentAtom, '');
         set(currentMessagePillsAtom, []);
+        return loaded;
     }
 );

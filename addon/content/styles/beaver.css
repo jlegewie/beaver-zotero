@@ -2814,6 +2814,15 @@
     max-width: 180px;
 }
 
+/* Pushes a trailing control (e.g. the active-scope chip) to the right edge of
+   the filter row, regardless of what precedes it. Never shrinks — the item
+   filter chip beside it truncates instead, since it has a title to fall back
+   on while this chip's short label does not. */
+[id^="beaver-pane-"] .thread-filter-row-end {
+    margin-left: auto;
+    flex-shrink: 0;
+}
+
 [id^="beaver-pane-"] .thread-filter-chip-remove {
     display: flex;
     align-items: center;
@@ -2828,9 +2837,12 @@
 }
 
 [id^="beaver-pane-"] .thread-filter-footer-note {
-    padding: 4px 12px;
+    flex-shrink: 0;
+    padding: 6px 12px;
+    border-top: 1px solid var(--fill-quinary);
     font-size: 0.85rem;
-    color: var(--fill-tertiary);
+    line-height: 1.35;
+    color: var(--fill-secondary);
     text-align: center;
 }
 
@@ -2864,10 +2876,32 @@
     line-height: 1.3;
 }
 
+/* Flex so the trailing badge sits on the same baseline row as the timestamp
+   and can shrink instead of widening the item past the sidebar. */
 [id^="beaver-pane-"] .thread-list-item-time {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
     font-size: 0.9rem;
     color: var(--fill-tertiary);
     margin-top: 1px;
+}
+
+/* Marks a chat created in a different Zotero profile. Only visible while the
+   list is showing all instances. */
+[id^="beaver-pane-"] .thread-list-item-badge {
+    flex-shrink: 1;
+    min-width: 0;
+    padding: 0 4px;
+    border: 1px solid var(--fill-quarternary);
+    border-radius: 4px;
+    font-size: 0.8rem;
+    line-height: 1.5;
+    color: var(--fill-secondary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 [id^="beaver-pane-"] .thread-list-item-actions {
