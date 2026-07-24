@@ -1,11 +1,12 @@
 import { useEffect, useRef, useCallback } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { readerTextSelectionAtom } from '../atoms/messageComposition';
-import { currentReaderAttachmentAtom, updateReaderAttachmentAtom, addItemToCurrentMessageItemsAtom, currentMessageItemsAtom } from '../atoms/messageComposition';
+import { currentReaderAttachmentAtom, updateReaderAttachmentAtom, clearReaderAttachmentAtom, isReaderLibrarySearchable, addItemToCurrentMessageItemsAtom, currentMessageItemsAtom } from '../atoms/messageComposition';
 import { logger } from '../../src/utils/logger';
 import { addSelectionChangeListener, getCurrentReader, getSelectedTextAsTextSelection } from '../utils/readerUtils';
 import { isValidAnnotationType, TextSelection } from '../types/attachments/apiTypes';
 import { isAuthenticatedAtom } from "../atoms/auth";
+import { isBeaverUIVisibleAtom } from '../atoms/ui';
 import {
     hasAuthorizedAccessAtom,
     isDeviceAuthorizedAtom,
@@ -26,12 +27,38 @@ import type { CreatedAnnotationResult } from '../types/agentActions/createAnnota
 let moduleReaderTabNotifierId: string | null = null;
 
 /**
- * Manages text selection listening for the currently active Zotero reader tab.
- * This hook should only be mounted when the reader sidebar is visible.
- * It initializes selection state, listens for changes, and handles switching
- * between reader tabs.
+ * Resolve the reader instance for a freshly selected tab.
+ *
+ * Opening an attachment adds and selects its tab from the `ReaderTab`
+ * constructor, so the `select` notification can reach observers before Zotero
+ * registers the instance. Poll briefly instead of treating that as "no reader",
+ * and stop as soon as the tab is no longer the selected one.
+ */
+async function waitForReaderByTabID(tabID: string, timeoutMs = 2000): Promise<any | undefined> {
+    const mainWindow = Zotero.getMainWindow();
+    const deadline = Date.now() + timeoutMs;
+    for (;;) {
+        const reader = Zotero.Reader.getByTabID(tabID);
+        if (reader) return reader;
+        if (Date.now() >= deadline) return undefined;
+        if (mainWindow?.Zotero_Tabs?.selectedID !== tabID) return undefined;
+        await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+}
+
+/**
+ * Tracks the currently active Zotero reader tab: the open attachment
+ * (`currentReaderAttachmentAtom`), its text selection
+ * (`readerTextSelectionAtom`), and newly created annotations.
+ *
+ * Mounted once globally (`GlobalContextInitializer`) and active whenever a
+ * Beaver chat surface is open — the main-window sidebar OR the separate Beaver
+ * window. Both share one store, so this must not be tied to either surface's
+ * own mount; window-only users would otherwise get no reader context at all
+ * (no current attachment, no page number in `application_state`, no selection).
  */
 export function useReaderTabSelection() {
+    const isBeaverUIVisible = useAtomValue(isBeaverUIVisibleAtom);
     const isAuthenticated = useAtomValue(isAuthenticatedAtom);
     const hasAuthorized = useAtomValue(hasAuthorizedAccessAtom);
     const isDeviceAuthorized = useAtomValue(isDeviceAuthorizedAtom);
@@ -39,8 +66,8 @@ export function useReaderTabSelection() {
     const searchableLibraryIds = useAtomValue(searchableLibraryIdsAtom);
     const searchableLibraryIdsKey = searchableLibraryIds.join(',');
     const updateReaderAttachment = useSetAtom(updateReaderAttachmentAtom);
+    const clearReaderAttachment = useSetAtom(clearReaderAttachmentAtom);
     const setReaderTextSelection = useSetAtom(readerTextSelectionAtom);
-    const setReaderAttachment = useSetAtom(currentReaderAttachmentAtom);
     const setCurrentMessageItems = useSetAtom(currentMessageItemsAtom);
     const addItemToCurrentMessageItems = useSetAtom(addItemToCurrentMessageItemsAtom);
     const getValidation = useAtomValue(getItemValidationAtom);
@@ -49,6 +76,18 @@ export function useReaderTabSelection() {
     const selectionCleanupRef = useRef<(() => void) | null>(null);
     const currentReaderIdRef = useRef<number | null>(null);
     const currentReaderRef = useRef<ZoteroReader | null>(null);
+    /**
+     * Identifies the current reader setup. Bumped whenever tracking stops, so
+     * every async continuation of an older setup can tell that it no longer
+     * owns the reader context.
+     *
+     * A ref, not effect state: the hook stays mounted while its effect re-runs
+     * (Beaver opened/closed, exclusions changed), and the callbacks that must
+     * be invalidated — `waitForInternalReader`'s timer chain, selection-change
+     * handlers — outlive a single effect run. Reader id alone is not enough,
+     * since tracking can stop and restart for the very same attachment.
+     */
+    const setupGenerationRef = useRef(0);
 
     // Define main window
     const mainWindow = Zotero.getMainWindow();
@@ -91,23 +130,80 @@ export function useReaderTabSelection() {
         poll();
     }, []);
 
+    /**
+     * Stop tracking the active reader: drop its selection listener, the staged
+     * selection, and the active-reader refs. Returns the reader that was
+     * active so callers can run slower cleanup (temporary annotations) after
+     * tracking has already stopped.
+     *
+     * Clearing the refs synchronously matters: the annotation observer treats
+     * `currentReaderIdRef` as "the reader the user is in", so anything created
+     * while a transition is still awaiting must no longer match.
+     */
+    const detachActiveReader = useCallback((): ZoteroReader | null => {
+        setupGenerationRef.current++;
+        if (selectionCleanupRef.current) {
+            logger(`useReaderTabSelection: Removing selection listener for reader ${currentReaderIdRef.current}`);
+            selectionCleanupRef.current();
+            selectionCleanupRef.current = null;
+        }
+        const previousReader = currentReaderRef.current;
+        currentReaderIdRef.current = null;
+        currentReaderRef.current = null;
+        setReaderTextSelection(null);
+        return previousReader;
+    }, [setReaderTextSelection]);
+
     // Function to set up listeners and state for a given reader
     const setupReader = useCallback(async (reader: any) => {
         if (!reader) {
             logger("useReaderTabSelection:setupReader: No reader provided.");
-            setReaderTextSelection(null);
+            detachActiveReader();
             return;
         }
 
-        // Cleanup any existing selection listener first
-        if (selectionCleanupRef.current) {
-            logger(`useReaderTabSelection:setupReader: Cleaning up previous selection listener for reader ${currentReaderIdRef.current}`);
-            selectionCleanupRef.current();
-            selectionCleanupRef.current = null;
+        // Libraries the user excluded from Beaver are never tracked: no
+        // attachment, no selection listener, and no active-reader id — the
+        // annotation observer keys off that id, so leaving it set would let
+        // excluded-library annotations into the draft message.
+        if (!isReaderLibrarySearchable(store.get(searchableLibraryIdsAtom), reader)) {
+            logger(`useReaderTabSelection:setupReader: Reader ${reader.itemID} is in an excluded library. Not tracking.`);
+            detachActiveReader();
+            clearReaderAttachment();
+            return;
         }
+
+        detachActiveReader();
 
         currentReaderIdRef.current = reader.itemID; // Store just the ID
         currentReaderRef.current = reader;
+        // Claim this setup. Any later detach (tab change, Beaver closed,
+        // exclusions changed) invalidates it, including when tracking restarts
+        // for the same attachment — the reader instance would then differ too.
+        const setupGeneration = setupGenerationRef.current;
+        const isActiveSetup = () => setupGenerationRef.current === setupGeneration
+            && currentReaderIdRef.current === reader.itemID
+            && currentReaderRef.current === reader;
+
+        /**
+         * Re-checks access immediately before each read of this reader.
+         *
+         * The check at setup time is a cached decision: excluding the library
+         * re-runs the effect, but the notifier callbacks and timers below can
+         * fire in the interval before React tears this setup down. Reading the
+         * reader's text — or publishing it as staged context — must never
+         * happen on a stale allow. Stops tracking outright when access is gone
+         * rather than just skipping one read.
+         */
+        const canStillReadReader = () => {
+            if (isReaderLibrarySearchable(store.get(searchableLibraryIdsAtom), reader)) return true;
+            logger(`useReaderTabSelection: Reader ${reader.itemID} is no longer in a searchable library. Stopping tracking.`);
+            if (isActiveSetup()) {
+                detachActiveReader();
+                clearReaderAttachment();
+            }
+            return false;
+        };
         logger(`useReaderTabSelection:setupReader: Setting up for reader ${reader.itemID}`);
 
         // Update reader attachment for the new reader
@@ -117,19 +213,44 @@ export function useReaderTabSelection() {
             logger(`useReaderTabSelection:setupReader: Failed to update reader attachment for ${reader.itemID}: ${error instanceof Error ? error.message : String(error)}`);
         }
 
+        // Tracking stopped or moved on while the item was loading; whoever owns
+        // the context now must not be disturbed.
+        if (!isActiveSetup()) {
+            logger(`useReaderTabSelection:setupReader: Setup for reader ${reader.itemID} was superseded. Skipping.`);
+            return;
+        }
+
+        // Nothing to track without an attachment (e.g. the item could not be
+        // loaded); make sure no reader is left marked active.
+        if (!store.get(currentReaderAttachmentAtom)) {
+            logger(`useReaderTabSelection:setupReader: No trackable attachment for reader ${reader.itemID}. Skipping selection setup.`);
+            detachActiveReader();
+            return;
+        }
+
         // Wait for the reader to be ready before setting initial selection and listener
         waitForInternalReader(reader, async () => {
-            // Check if the reader context is still the same after waiting
-            if (currentReaderIdRef.current !== reader.itemID) {
+            // Check if this setup still owns the reader context after waiting
+            if (!isActiveSetup()) {
                 logger(`useReaderTabSelection:setupReader: Reader changed after waitForInternalReader for ${reader.itemID}. Skipping setup.`);
                 return;
             }
+
+            if (!canStillReadReader()) return;
 
             // Get current selection and update state
             const initialSelection = getSelectedTextAsTextSelection(reader);
             logger(`useReaderTabSelection:setupReader: Initial selection for reader ${reader.itemID}: ${initialSelection?.text ? '"' + initialSelection.text + '"' : 'null'}`);
             // Ensure the reader item is valid
             const item = await Zotero.Items.getAsync(reader.itemID);
+            // Tracking can stop while the item loads (tab switched, Beaver
+            // closed). Re-check before touching state: a listener installed
+            // after teardown would never be removed, and the selection would
+            // belong to a reader the user already left.
+            if (!isActiveSetup()) {
+                logger(`useReaderTabSelection:setupReader: Reader ${reader.itemID} no longer active after item load. Skipping setup.`);
+                return;
+            }
             if (item) {
                 const validation = getValidation(item);
                 if (isRejectedItemValidation(item, validation)) {
@@ -138,6 +259,8 @@ export function useReaderTabSelection() {
                     return;
                 }
             }
+            if (!canStillReadReader()) return;
+
             // Set the initial selection
             setReaderTextSelection(initialSelection);
 
@@ -146,11 +269,17 @@ export function useReaderTabSelection() {
             selectionCleanupRef.current = addSelectionChangeListener(
                 reader, 
                 async (newSelection: TextSelection | null) => {
-                    // Ensure the event is for the currently active reader this hook manages
-                    if (currentReaderIdRef.current === reader.itemID) {
+                    // Ensure the event belongs to the setup that installed this
+                    // listener, not a later one for the same attachment
+                    if (isActiveSetup()) {
                         logger(`useReaderTabSelection: Selection changed in reader ${reader.itemID}, updating selection to "${newSelection ? newSelection.text : 'null'}"`);
                         // Ensure the reader item is valid
                         const item = await Zotero.Items.getAsync(reader.itemID);
+                        // Re-check: tracking can stop while the item loads
+                        if (!isActiveSetup()) {
+                            logger(`useReaderTabSelection: Reader ${reader.itemID} no longer active after item load. Dropping selection.`);
+                            return;
+                        }
                         if (item) {
                             const validation = getValidation(item);
                             if (isRejectedItemValidation(item, validation)) {
@@ -158,23 +287,38 @@ export function useReaderTabSelection() {
                                 return;
                             }
                         }
+                        if (!canStillReadReader()) return;
+
                         // Set the new selection
                         setReaderTextSelection(newSelection);
                     } else {
                          logger(`useReaderTabSelection: Stale selection event received for reader ${reader.itemID}. Current reader ID is ${currentReaderIdRef.current}. Ignoring.`);
                     }
-                }
+                },
+                // Gates the read itself, so an excluded library's text is never
+                // pulled out of the document — not just dropped afterwards.
+                () => isActiveSetup() && canStillReadReader(),
             );
         });
 
-    }, [setReaderTextSelection, updateReaderAttachment, waitForInternalReader]); // Dependencies
+    }, [detachActiveReader, clearReaderAttachment, setReaderTextSelection, updateReaderAttachment, waitForInternalReader]); // Dependencies
 
 
     useEffect(() => {
+        // Inert while no Beaver surface is open. Re-running the effect with the
+        // gate closed first runs the previous run's cleanup, which clears the
+        // reader atoms and unregisters the observers.
+        if (!isBeaverUIVisible) return;
         if (!isAuthenticated || !hasAuthorized || !isDeviceAuthorized || !isLibraryAccessReady) return;
         logger("useReaderTabSelection: Hook mounted");
 
         let isMounted = true;
+
+        // Serializes overlapping tab transitions. Zotero dispatches tab
+        // notifications without awaiting observers, so rapid A → B → C
+        // selections interleave at every await: a superseded callback must not
+        // resume and clear or replace the context of the tab that won.
+        let tabTransitionGeneration = 0;
 
         // Initial setup: Get the current reader and set it up
         const initializeReader = async () => {
@@ -184,7 +328,12 @@ export function useReaderTabSelection() {
                 if (isMounted) await setupReader(initialReader);
             } else {
                 logger("useReaderTabSelection: No active reader on mount.");
-                if (isMounted) setReaderTextSelection(null); // Ensure selection is null if no reader
+                // No reader means no reader context at all — including any
+                // attachment left over from the last time tracking ran.
+                if (isMounted) {
+                    detachActiveReader();
+                    clearReaderAttachment();
+                }
             }
         };
         initializeReader().catch(error => {
@@ -202,48 +351,79 @@ export function useReaderTabSelection() {
                     if (!selectedTab) return;
 
                     if (selectedTab.type === 'reader') {
-                        const newReader = Zotero.Reader.getByTabID(selectedTab.id);
-                        if (newReader && newReader.itemID !== currentReaderIdRef.current) {
-                            logger(`useReaderTabSelection: Tab changed to a different reader (itemID: ${newReader.itemID}). Cleaning up temporary annotations and setting up new reader.`);
-                            
-                            // Clean up temporary annotations from the previous reader
-                            await BeaverTemporaryAnnotations.cleanupAll(currentReaderRef.current as ZoteroReader);
-                            
+                        // Re-selecting the reader already being tracked is a
+                        // no-op — keep its listener and staged selection.
+                        const activeReader = Zotero.Reader.getByTabID(selectedTab.id);
+                        if (activeReader && activeReader.itemID === currentReaderIdRef.current) return;
+
+                        const transition = ++tabTransitionGeneration;
+
+                        // Drop the previous reader's context BEFORE any await:
+                        // resolving the new reader instance can poll for
+                        // seconds. The annotation observer keys off the refs, so
+                        // anything created meanwhile belongs to a reader the
+                        // user has left; and a leftover attachment would be
+                        // reported alongside the NEW reader's page and content
+                        // kind, which read straight from the open reader.
+                        const previousReader = detachActiveReader();
+                        clearReaderAttachment();
+
+                        await BeaverTemporaryAnnotations.cleanupAll(previousReader as ZoteroReader);
+                        if (!isMounted || transition !== tabTransitionGeneration) return;
+
+                        const newReader = await waitForReaderByTabID(selectedTab.id);
+                        if (!isMounted || transition !== tabTransitionGeneration) return;
+                        if (newReader) {
+                            logger(`useReaderTabSelection: Tab changed to a different reader (itemID: ${newReader.itemID}). Setting up new reader.`);
                             await setupReader(newReader);
-                        } else if (!newReader) {
+                        } else {
                             logger("useReaderTabSelection: Tab changed to reader, but could not get reader instance.");
-                            // If we somehow switch to a reader tab but can't get the instance, clear state
-                            if (selectionCleanupRef.current) selectionCleanupRef.current();
-                            selectionCleanupRef.current = null;
-                            currentReaderIdRef.current = null;
-                            currentReaderRef.current = null;
-                            setReaderTextSelection(null);
+                            // Nothing to report on a reader tab whose reader
+                            // cannot be resolved; the context was already
+                            // cleared above.
                         }
-                        // If newReader is the same as current, do nothing - already handled
                     } else {
                         // Tab switched to something other than a reader (e.g., library)
                         logger(`useReaderTabSelection: Tab changed to ${selectedTab.type}. Cleaning up reader state and temporary annotations.`);
-                        
-                        // Clean up temporary annotations when leaving reader tabs
-                        await BeaverTemporaryAnnotations.cleanupAll(currentReaderRef.current as ZoteroReader);
-                        
-                        if (selectionCleanupRef.current) {
-                            selectionCleanupRef.current();
-                            selectionCleanupRef.current = null;
-                        }
-                        currentReaderIdRef.current = null;
-                        currentReaderRef.current = null;
-                        setReaderTextSelection(null);
-                        await updateReaderAttachment();
+
+                        // Also takes a transition token, so a reader transition
+                        // still in flight cannot set up a reader after the user
+                        // has moved to a library or note tab.
+                        ++tabTransitionGeneration;
+                        const previousReader = detachActiveReader();
+                        clearReaderAttachment();
+
+                        await BeaverTemporaryAnnotations.cleanupAll(previousReader as ZoteroReader);
                     }
                 }
                 // Annotation events
                 if (type === 'item') {
                     // Add events
                     if (event === 'add') {
+                        // Only annotations made in the reader the user is
+                        // currently in become message context. This observer is
+                        // registered globally, so annotations arriving on a
+                        // library/note tab — or from sync, or from a background
+                        // reader tab — must not touch the draft message.
+                        const activeReaderItemID = currentReaderIdRef.current;
+                        if (activeReaderItemID === null) return;
+
+                        // Gate on the library BEFORE reading the item. Tracking
+                        // only starts for searchable libraries, but exclusions
+                        // can change between the preference write and this
+                        // observer being torn down and re-registered, so the
+                        // active-reader id alone is not proof of access.
+                        const annotationLibraryAndKey = Zotero.Items.getLibraryAndKeyFromID(Number(ids[0]));
+                        if (!annotationLibraryAndKey) return;
+                        if (!store.get(searchableLibraryIdsAtom).includes(annotationLibraryAndKey.libraryID)) {
+                            logger(`useReaderTabSelection: Ignoring annotation in excluded library ${annotationLibraryAndKey.libraryID}`, 3);
+                            return;
+                        }
+
                         try {
                             const item = Zotero.Items.get(ids[0]);
                             if(!item.isAnnotation() || !isValidAnnotationType(item.annotationType)) return;
+                            if (item.parentID !== activeReaderItemID) return;
                             if (isBeaverAuthoredAnnotation(item.annotationAuthorName)) return;
                             if (item.annotationText === BEAVER_CITATION_ANNOTATION_AUTHOR) return;
                             // Check if this annotation was created by an agent action
@@ -303,14 +483,13 @@ export function useReaderTabSelection() {
         return () => {
             isMounted = false;
             logger("useReaderTabSelection: Hook unmounting. Cleaning up listeners and observer.");
-            // Clear reader item key
-            setReaderAttachment(null);
-            // Cleanup selection event listner
-            if (selectionCleanupRef.current) {
-                logger("useReaderTabSelection: Removing selection listener.");
-                selectionCleanupRef.current();
-                selectionCleanupRef.current = null;
-            }
+
+            // Stop tracking first, then clear the attachment through the atom
+            // that also cancels an in-flight update — writing null directly
+            // would let a pending item lookup repopulate it after teardown.
+            const readerToClean = detachActiveReader();
+            clearReaderAttachment();
+
             if (moduleReaderTabNotifierId && moduleReaderTabNotifierId === myObserverId) {
                 logger("useReaderTabSelection: Unregistering tab observer.");
                 try {
@@ -320,20 +499,12 @@ export function useReaderTabSelection() {
                 }
                 moduleReaderTabNotifierId = null;
             }
-            
-            // Stash reader instance before clearing refs
-            const readerToClean = currentReaderRef.current;
 
-            currentReaderIdRef.current = null;
-            currentReaderRef.current = null;
-            // Reset atom state on unmount
-            setReaderTextSelection(null);
-            
             // Clean up any remaining temporary annotations on unmount
             BeaverTemporaryAnnotations.cleanupAll(readerToClean as ZoteroReader).catch(error => {
                 logger(`useReaderTabSelection: Error cleaning up temporary annotations on unmount: ${error}`);
             });
         };
-    }, [setupReader, setReaderTextSelection, updateReaderAttachment, setReaderAttachment, mainWindow, waitForInternalReader, isAuthenticated, isDeviceAuthorized, hasAuthorized, isLibraryAccessReady, searchableLibraryIdsKey]);
+    }, [setupReader, detachActiveReader, setReaderTextSelection, updateReaderAttachment, clearReaderAttachment, mainWindow, waitForInternalReader, isBeaverUIVisible, isAuthenticated, isDeviceAuthorized, hasAuthorized, isLibraryAccessReady, searchableLibraryIdsKey]);
 
 }

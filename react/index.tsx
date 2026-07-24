@@ -14,6 +14,7 @@ import { PreferencePageTab } from './atoms/ui';
 import type { ActionCategoryFilter } from './types/actions';
 import { useZoteroTabSelection } from './hooks/useZoteroTabSelection';
 import { useZoteroContext } from './hooks/useZoteroContext';
+import { useReaderTabSelection } from './hooks/useReaderTabSelection';
 import { useProfileSync } from './hooks/useProfileSync';
 import { useToggleSidebar } from './hooks/useToggleSidebar';
 import { store } from './store';
@@ -73,6 +74,11 @@ const GlobalContextInitializer = () => {
 
     // Track Zotero application state (selected items, collection, tags, etc.)
     useZoteroContext();
+
+    // Track the active reader tab (open attachment, text selection, new
+    // annotations). Global rather than sidebar-mounted so the separate Beaver
+    // window gets reader context while the main-window sidebar is closed.
+    useReaderTabSelection();
 
     // Realtime listener for user profile
     useProfileSync();

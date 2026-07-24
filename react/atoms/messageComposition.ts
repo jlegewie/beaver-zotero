@@ -560,14 +560,45 @@ export const updateMessageItemsFromZoteroSelectionAtom = atom(
 
 
 /**
+ * Whether a reader's attachment may become Beaver context at all.
+ *
+ * Resolves the attachment's library from its item id (cheap in-memory
+ * mapping) so an attachment in a library the user excluded from Beaver is
+ * rejected before anything is read out of that library. This is the one
+ * definition of the rule; callers that track readers use it to decide whether
+ * to track at all.
+ */
+export function isReaderLibrarySearchable(searchableLibraryIds: number[], reader: any): boolean {
+    if (!reader) return false;
+    const libraryAndKey = Zotero.Items.getLibraryAndKeyFromID(reader.itemID);
+    if (!libraryAndKey) return false;
+    return searchableLibraryIds.includes(libraryAndKey.libraryID);
+}
+
+/**
+ * Generation counter for reader-attachment updates.
+ *
+ * The update reads the item asynchronously, so a slower earlier update could
+ * otherwise land after a newer one (or after the attachment was cleared) and
+ * restore a reader the user already left. Every write bumps the counter and
+ * stale writers drop their result.
+ */
+let readerAttachmentGeneration = 0;
+
+/**
 * Update current reader attachment
+*
+* The single choke point for the reader attachment: an attachment from a
+* library the user excluded from Beaver never enters the atom, so it cannot
+* reach display, prompt variables, or any other run context.
 */
 export const updateReaderAttachmentAtom = atom(
     null,
     async (get, set, reader?: any) => {
         // also gets the current reader item (parent item)
         // Zotero.getActiveZoteroPane().getSelectedItems()
-        
+        const generation = ++readerAttachmentGeneration;
+
         // Remove popup message for current reader attachment
         const currentReaderAttachmentKey = get(currentReaderAttachmentKeyAtom);
         if (currentReaderAttachmentKey) {
@@ -581,12 +612,47 @@ export const updateReaderAttachmentAtom = atom(
             return;
         }
 
+        // Excluded libraries are never tracked
+        if (!isReaderLibrarySearchable(get(searchableLibraryIdsAtom), reader)) {
+            set(currentReaderAttachmentAtom, null);
+            return;
+        }
+
         // Get reader item
         const item = await Zotero.Items.getAsync(reader.itemID);
+        // A newer update (or a clear) ran while the item was loading
+        if (generation !== readerAttachmentGeneration) return;
+        // The user can exclude the library while the item loads. Re-check
+        // rather than trust the decision made before the await: this atom is
+        // the choke point, so nothing excluded may be stored here or handed to
+        // background validation.
+        if (!isReaderLibrarySearchable(get(searchableLibraryIdsAtom), reader)) {
+            set(currentReaderAttachmentAtom, null);
+            return;
+        }
         if (item) {
             set(currentReaderAttachmentAtom, item);
             validateItemsInBackground(get, set, [item], true);
         }
+    }
+);
+
+/**
+ * Clear the current reader attachment and cancel any in-flight update.
+ *
+ * Use this instead of writing `null` directly whenever reader tracking stops
+ * (tab left, Beaver closed): a pending `updateReaderAttachmentAtom` would
+ * otherwise repopulate the atom after the clear.
+ */
+export const clearReaderAttachmentAtom = atom(
+    null,
+    (get, set) => {
+        readerAttachmentGeneration++;
+        const currentReaderAttachmentKey = get(currentReaderAttachmentKeyAtom);
+        if (currentReaderAttachmentKey) {
+            set(removePopupMessageAtom, currentReaderAttachmentKey);
+        }
+        set(currentReaderAttachmentAtom, null);
     }
 );
 

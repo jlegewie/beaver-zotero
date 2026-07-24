@@ -154,6 +154,12 @@ import {
     handleTestApproveActionHttpRequest,
     handleTestUndoActionHttpRequest,
 } from './httpHandlers/testChatHandlers';
+import {
+    handleTestApplicationStateHttpRequest,
+    handleTestBeaverSidebarHttpRequest,
+    handleTestBeaverWindowHttpRequest,
+    handleTestSelectTabHttpRequest,
+} from './httpHandlers/testApplicationStateHandlers';
 import type {
     WSZoteroDataRequest,
     WSExternalReferenceCheckRequest,
@@ -322,6 +328,10 @@ const ENDPOINT_PATHS = [
     '/beaver/test/list-actions',
     '/beaver/test/approve-action',
     '/beaver/test/undo-action',
+    '/beaver/test/application-state',
+    '/beaver/test/beaver-window',
+    '/beaver/test/beaver-sidebar',
+    '/beaver/test/select-tab',
 ] as const;
 
 /**
@@ -1148,6 +1158,18 @@ function registerEndpoints(): boolean {
             createEndpoint(handleTestApproveActionHttpRequest);
         Zotero.Server.Endpoints['/beaver/test/undo-action'] =
             createEndpoint(handleTestUndoActionHttpRequest);
+
+        Zotero.Server.Endpoints['/beaver/test/application-state'] =
+            createEndpoint(handleTestApplicationStateHttpRequest);
+
+        Zotero.Server.Endpoints['/beaver/test/beaver-window'] =
+            createEndpoint(handleTestBeaverWindowHttpRequest);
+
+        Zotero.Server.Endpoints['/beaver/test/beaver-sidebar'] =
+            createEndpoint(handleTestBeaverSidebarHttpRequest);
+
+        Zotero.Server.Endpoints['/beaver/test/select-tab'] =
+            createEndpoint(handleTestSelectTabHttpRequest);
     }
 
     logger(`useHttpEndpoints: Registered ${ENDPOINT_PATHS.length} HTTP endpoints`, 3);

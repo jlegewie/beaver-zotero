@@ -8,7 +8,7 @@ import { SessionExpiredError } from '../../react/types/apiErrors';
 import { threadService } from '../../src/services/threadService';
 import { getZoteroUserIdentifier } from '../../src/utils/zoteroUtils';
 import { setModelsAtom } from '../atoms/models';
-import { isSidebarVisibleAtom, isPreferencePageVisibleAtom } from '../atoms/ui';
+import { isBeaverUIVisibleAtom, isPreferencePageVisibleAtom } from '../atoms/ui';
 import { serializeZoteroLibrary } from '../../src/utils/zoteroSerializers';
 import { getPref, setPref } from '../../src/utils/prefs';
 import {
@@ -123,7 +123,8 @@ export const useProfileSync = () => {
     const logout = useSetAtom(logoutAtom);
     const isAuthenticated = useAtomValue(isAuthenticatedAtom);
     const user = useAtomValue(userAtom);
-    const isSidebarVisible = useAtomValue(isSidebarVisibleAtom);
+    // True while either Beaver surface is open (sidebar or separate window)
+    const isBeaverUIVisible = useAtomValue(isBeaverUIVisibleAtom);
     const isPreferencePageVisible = useAtomValue(isPreferencePageVisibleAtom);
 
     const lastRefreshRef = useRef<Date | null>(null);
@@ -303,7 +304,7 @@ export const useProfileSync = () => {
         };
     }, [isAuthenticated, user, syncProfileData]);
 
-    // Adaptive periodic refresh based on sidebar visibility.
+    // Adaptive periodic refresh based on whether Beaver is open.
     // Critical for security: ensures plan downgrades are detected.
     useEffect(() => {
         if (!isAuthenticated || !user) {
@@ -314,15 +315,15 @@ export const useProfileSync = () => {
             return;
         }
 
-        const interval = isSidebarVisible ? ACTIVE_REFRESH_INTERVAL : BACKGROUND_REFRESH_INTERVAL;
+        const interval = isBeaverUIVisible ? ACTIVE_REFRESH_INTERVAL : BACKGROUND_REFRESH_INTERVAL;
 
-        if (isSidebarVisible && lastRefreshRef.current &&
+        if (isBeaverUIVisible && lastRefreshRef.current &&
             Date.now() - lastRefreshRef.current.getTime() >= ACTIVE_REFRESH_INTERVAL) {
             refreshProfile();
         }
 
         intervalRef.current = setInterval(() => {
-            logger(`useProfileSync: Periodic refresh triggered (sidebar ${isSidebarVisible ? 'visible' : 'hidden'})`);
+            logger(`useProfileSync: Periodic refresh triggered (Beaver ${isBeaverUIVisible ? 'visible' : 'hidden'})`);
             syncProfileData(user.id);
         }, interval);
 
@@ -332,7 +333,7 @@ export const useProfileSync = () => {
                 intervalRef.current = null;
             }
         };
-    }, [isAuthenticated, user, isSidebarVisible, refreshProfile, syncProfileData]);
+    }, [isAuthenticated, user, isBeaverUIVisible, refreshProfile, syncProfileData]);
 
     // Refresh when preference page opens
     useEffect(() => {

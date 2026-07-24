@@ -305,7 +305,19 @@ export type ReaderContext = {
     selection: string | null;
 }
 
-function addSelectionChangeListener(reader: any, callback: (selection: TextSelection | null) => void) {
+/**
+ * Report the reader's text selection to `callback` as it changes.
+ *
+ * `canRead` is consulted before every read of the reader's content. Callers use
+ * it to enforce access rules that can change while the listener is installed
+ * (e.g. the user excluding the library from Beaver), so the text is never read
+ * out of the document once access is gone — not merely dropped afterwards.
+ */
+function addSelectionChangeListener(
+    reader: any,
+    callback: (selection: TextSelection | null) => void,
+    canRead: () => boolean = () => true,
+) {
     // PDF, EPUB, and snapshot views all render content into an iframe whose
     // document fires selectionchange; other reader types are not supported.
     if (reader.type !== "pdf" && reader.type !== "epub" && reader.type !== "snapshot") {
@@ -313,11 +325,13 @@ function addSelectionChangeListener(reader: any, callback: (selection: TextSelec
     }
     try {
         // Handle initial selection
+        if (!canRead()) return null;
         const selection = getSelectedTextAsTextSelection(reader);
         if (selection) callback(selection);
-                
+
         // Define the event handler for selection changes
         const handleSelectionChange = () => {
+            if (!canRead()) return;
             const selection = getSelectedTextAsTextSelection(reader);
             if (selection) {
                 callback(selection);
