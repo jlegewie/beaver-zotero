@@ -39,15 +39,20 @@ const computeRetryDelay = (attempts: number) =>
     Math.min(RETRY_BACKOFF_BASE_MS * Math.pow(RETRY_BACKOFF_FACTOR, attempts), RETRY_BACKOFF_MAX_MS);
 
 /**
- * Automatically claims pre-sync threads: threads created while logged out of
- * a Zotero account carry only this install's localUserKey and would be hidden
- * on the user's other devices once they share an account id. Once a Zotero
+ * Automatically claims pre-sync threads: threads created before this install
+ * had a Zotero account id carry only its localUserKey and would be hidden on
+ * the user's other devices once they share an account id. Once a Zotero
  * account id is available, stamp it onto those threads — throttled to once
  * per (beaverUser, zoteroUser, install) combination via threadsClaimKey.
  *
- * Logging out of Zotero clears the throttle so a later login (same or other
- * account) can claim any threads created while logged out. Disabling sync
- * alone does not clear the Zotero user id; only account logout does.
+ * An absent account id clears the throttle so a later login can claim any
+ * threads created while it was absent. Note that neither disabling sync nor
+ * unlinking the Zotero account clears the account id: Zotero only removes the
+ * API key and keeps `settings('account','userID')`, so `getCurrentUserID()`
+ * keeps returning it. The id disappears only when the Zotero data directory is
+ * reset (unlink with "Remove my data", or an account switch) — which mints a
+ * new localUserKey too, so the install is then a fresh instance whose own
+ * pre-sync threads are the ones a later login claims.
  *
  * Exported for tests.
  */
@@ -55,8 +60,12 @@ export const claimPreSyncThreads = async (userId: string): Promise<void> => {
     try {
         const { userID: zoteroUserId, localUserKey } = getZoteroUserIdentifier();
         if (!zoteroUserId) {
-            // Logged out of Zotero: drop the throttle so the next login re-claims
-            // any local-only threads created while the account id was absent.
+            // No Zotero account id: either never synced, or the data directory
+            // was reset. Drop the throttle so the next login re-claims any
+            // local-only threads created while the account id was absent. This
+            // matters after a data-directory reset in particular: the pref lives
+            // in the Zotero profile directory and survives the reset, so a stale
+            // key from the previous install would otherwise suppress the claim.
             if (getPref('threadsClaimKey')) {
                 setPref('threadsClaimKey', '');
             }
@@ -194,7 +203,7 @@ export const useProfileSync = () => {
             }
 
             // Stamp the Zotero account id onto this install's local-only threads
-            // (created while logged out of Zotero) so they surface on other
+            // (created before it had an account id) so they surface on other
             // devices that share the account. Deliberately not awaited: a slow
             // claim request must not delay profile readiness, and the
             // function's own stale-user re-checks (plus the backend's

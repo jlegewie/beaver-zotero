@@ -94,7 +94,7 @@ describe('claimPreSyncThreads', () => {
         expect(setPrefMock).toHaveBeenCalledWith('threadsClaimKey', `${USER_ID}:123456:LOCALKEY`);
     });
 
-    it('does nothing without a Zotero account id (logged out) and clears the throttle', async () => {
+    it('does nothing without a Zotero account id (never synced / data dir reset) and clears the throttle', async () => {
         getZoteroUserIdentifierMock.mockReturnValue({ userID: undefined, localUserKey: 'LOCALKEY' });
         getPrefMock.mockReturnValue(`${USER_ID}:123456:LOCALKEY`);
 
@@ -104,7 +104,7 @@ describe('claimPreSyncThreads', () => {
         expect(setPrefMock).toHaveBeenCalledWith('threadsClaimKey', '');
     });
 
-    it('leaves an empty throttle untouched when logged out of Zotero', async () => {
+    it('leaves an empty throttle untouched when there is no Zotero account id', async () => {
         getZoteroUserIdentifierMock.mockReturnValue({ userID: undefined, localUserKey: 'LOCALKEY' });
         getPrefMock.mockReturnValue('');
 
@@ -114,9 +114,10 @@ describe('claimPreSyncThreads', () => {
         expect(setPrefMock).not.toHaveBeenCalled();
     });
 
-    it('re-claims after logout cleared the throttle for the same Zotero account', async () => {
-        // Simulates: previously claimed, user logged out (pref cleared), then
-        // logged back into the same Zotero account with new local-only threads.
+    it('claims when the throttle is unset for this combination', async () => {
+        // Simulates an install that has not yet claimed under this
+        // (beaverUser, zoteroUser, install) key — either it never has, or the
+        // pref was cleared by the no-account-id branch above.
         getPrefMock.mockReturnValue('');
 
         await claimPreSyncThreads(USER_ID);
