@@ -459,6 +459,17 @@ async function onMainWindowUnload(win: Window): Promise<void> {
             ztoolkit.log(`resumeSyncAfterRun: ${e}`);
         }
 
+        // The separate Beaver and preferences windows render with THIS window's
+        // React instance and share its Jotai store, so they cannot outlive it.
+        // Close them before React is torn down (their roots then unmount
+        // cleanly). This runs on every main-window unload, not only during
+        // global cleanup: with several main windows the owner can close while
+        // others remain, and on macOS the app keeps running after the last
+        // window closes — in both cases a surviving auxiliary window would be
+        // frozen against a dead bundle, with its state invisible to the bundle
+        // a reopened main window loads.
+        BeaverUIFactory.closeWindowsRenderedBy(win, isLastWindow);
+
         // Dev-only: visualizer highlights are temporary reader annotations
         // owned by the React bundle, so clear them before unmounting React.
         await cleanupDevTemporaryAnnotations(win);
@@ -554,7 +565,8 @@ async function onMainWindowUnload(win: Window): Promise<void> {
         ztoolkit.unregisterAll();
         addon.data.dialog?.window?.close();
 
-        // 9. Close separate Beaver and preferences windows if open
+        // 9. Close separate Beaver and preferences windows if any survived
+        //    (normally already closed above, before React was torn down)
         BeaverUIFactory.closeBeaverWindow();
         BeaverUIFactory.closePreferencesWindow();
 

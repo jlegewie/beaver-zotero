@@ -593,6 +593,30 @@ export class BeaverUIFactory {
     }
 
     /**
+     * Close the auxiliary windows (separate Beaver window, preferences) that
+     * render with `win`'s React instance.
+     *
+     * Neither window loads its own React bundle: each grabs `BeaverReact` from
+     * a main window at load time and shares that bundle's Jotai store, which it
+     * records as `__beaverOwnerWindowRef`. Once that main window unloads, the
+     * auxiliary window is frozen against a dead bundle and its state is
+     * invisible to the bundle a reopened main window loads — so it must not
+     * outlive its owner. `closeUnowned` additionally closes windows with no
+     * recorded owner, for the last-main-window case where no bundle remains.
+     */
+    static closeWindowsRenderedBy(win: Window, closeUnowned = false): void {
+        const auxiliaryWindows = [this.findBeaverWindow(), this.findPreferencesWindow()];
+        for (const auxiliaryWindow of auxiliaryWindows) {
+            if (!auxiliaryWindow || auxiliaryWindow.closed) continue;
+            const owner = auxiliaryWindow.__beaverOwnerWindowRef?.deref();
+            if (owner === win || (closeUnowned && !owner)) {
+                auxiliaryWindow.close();
+                Zotero.debug("Beaver: Closed auxiliary window whose React owner is going away");
+            }
+        }
+    }
+
+    /**
      * Find an existing Beaver preferences window
      */
     static findPreferencesWindow(): Window | undefined {
