@@ -942,7 +942,7 @@ const WindowsImeCompositionOrderPlugin: React.FC = () => {
 };
 
 /**
- * Verbose IME event tracing (pref `debugImeTrace`), for diagnosing
+ * Compact IME event tracing (pref `debugImeTrace`), for diagnosing
  * composition issues without a local reproduction.
  */
 const ImeTracePlugin: React.FC<{ ime: ImeCompositionTracker }> = ({ ime }) => {

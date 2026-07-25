@@ -5,6 +5,7 @@ import {
     type LexicalEditor,
 } from 'lexical';
 import { logger } from '../../../../src/utils/logger';
+import { isImeKeyEvent } from '../../../utils/ime';
 
 /**
  * How long after `compositionend` the IME is still treated as active.
@@ -441,18 +442,25 @@ const TRACED_EVENTS = [
     'keydown',
 ] as const;
 
+/** Caps text fields in IME trace lines so ordinary typing does not flood the log. */
+const TRACE_TEXT_MAX = 80;
+
 /**
- * Logs every composition-related DOM event on the editor root together with
- * the DOM text, the editor-state text and the live selection, so IME problems
- * can be diagnosed from debug output without a local reproduction. The
- * listeners are attached after Lexical's, so each line reflects the state
- * AFTER Lexical processed that event.
+ * Compact IME event tracing for diagnosing composition issues from debug
+ * output without a local reproduction. Pref `debugImeTrace`.
  *
- * Also reports DOM mutations from outside the editor that land mid-composition:
- * in Zotero's chrome document those reset the selection offsets, which breaks
- * the composition anchor the IME is holding.
+ * Kept quiet on purpose: ordinary keydowns and non-composition inputs are
+ * skipped, `compositionupdate` is a short line, and full DOM/model dumps only
+ * land on composition start/end (and on external mutations mid-composition).
+ * Listeners attach after Lexical's, so each line reflects state AFTER Lexical
+ * processed that event.
  */
 export function registerImeTrace(editor: LexicalEditor, ime: ImeCompositionTracker): () => void {
+    const truncate = (text: string): string =>
+        text.length <= TRACE_TEXT_MAX
+            ? text
+            : `${text.slice(0, TRACE_TEXT_MAX)}…(+${text.length - TRACE_TEXT_MAX})`;
+
     const describeSelection = (root: HTMLElement): string => {
         const sel = root.ownerDocument.defaultView?.getSelection();
         if (!sel) return 'none';
@@ -469,25 +477,51 @@ export function registerImeTrace(editor: LexicalEditor, ime: ImeCompositionTrack
             keyCode?: number;
             isComposing?: boolean;
         };
-        const root = editor.getRootElement();
-        let modelText = '';
-        editor.getEditorState().read(() => {
-            modelText = $getRoot().getTextContent();
-        });
-        const domText = root?.textContent ?? '';
-        logger(
-            `[IME] ${e.type}`
-            + ` data=${JSON.stringify(e.data ?? null)}`
-            + ` inputType=${e.inputType ?? '-'}`
-            + ` key=${e.key ?? '-'}`
-            + ` keyCode=${e.keyCode ?? '-'}`
-            + ` isComposing=${e.isComposing ?? '-'}`
-            + ` editorComposing=${editor.isComposing()}`
+
+        // Skip the high-volume noise that is not diagnostic on its own.
+        if (e.type === 'keydown') {
+            if (!isImeKeyEvent(e) && !ime.isComposing()) return;
+        } else if (e.type === 'beforeinput' || e.type === 'input') {
+            if (!e.isComposing && !ime.isImeActive()) return;
+        }
+
+        const composing =
+            ` editorComposing=${editor.isComposing()}`
             + ` imeActive=${ime.isImeActive()}`
-            + ` sel=${root ? describeSelection(root) : '-'}`
-            + ` dom=${JSON.stringify(domText)}`
-            + ` model=${JSON.stringify(modelText)}`,
-        );
+            + ` compositionId=${ime.compositionId()}`;
+
+        // Per-candidate updates fire constantly; data + flags are enough.
+        if (e.type === 'compositionupdate') {
+            logger(`[IME] ${e.type} data=${JSON.stringify(e.data ?? null)}${composing}`);
+            return;
+        }
+
+        const root = editor.getRootElement();
+        const detail =
+            ` data=${JSON.stringify(e.data ?? null)}`
+            + ` inputType=${e.inputType ?? '-'}`
+            + (e.type === 'keydown' ? ` key=${e.key ?? '-'} keyCode=${e.keyCode ?? '-'}` : '')
+            + ` isComposing=${e.isComposing ?? '-'}`
+            + composing
+            + ` sel=${root ? describeSelection(root) : '-'}`;
+
+        // Full text only at composition boundaries — the updates in between
+        // rarely need it, and dumping on every input floods the log.
+        if (e.type === 'compositionstart' || e.type === 'compositionend') {
+            let modelText = '';
+            editor.getEditorState().read(() => {
+                modelText = $getRoot().getTextContent();
+            });
+            const domText = root?.textContent ?? '';
+            logger(
+                `[IME] ${e.type}${detail}`
+                + ` dom=${JSON.stringify(truncate(domText))}`
+                + ` model=${JSON.stringify(truncate(modelText))}`,
+            );
+            return;
+        }
+
+        logger(`[IME] ${e.type}${detail}`);
     };
 
     let detach: (() => void) | null = null;
