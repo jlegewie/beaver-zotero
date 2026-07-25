@@ -35,10 +35,19 @@ vi.mock('../../../react/host', () => ({
 
 vi.mock('../../../react/atoms/messageComposition', async () => {
     const { atom } = await import('jotai');
+    const currentMessageContentAtom = atom('');
+    const currentMessagePillsAtom = atom<unknown[]>([]);
+    const composerResetTokenAtom = atom(0);
     return {
         currentMessageItemsAtom: atom<unknown[]>([]),
-        currentMessageContentAtom: atom(''),
-        currentMessagePillsAtom: atom<unknown[]>([]),
+        currentMessageContentAtom,
+        currentMessagePillsAtom,
+        composerResetTokenAtom,
+        clearComposerAtom: atom(null, (get, set) => {
+            set(currentMessageContentAtom, '');
+            set(currentMessagePillsAtom, []);
+            set(composerResetTokenAtom, get(composerResetTokenAtom) + 1);
+        }),
         currentMessageCollectionsAtom: atom<unknown[]>([]),
         currentMessageExternalFilesAtom: atom<unknown[]>([]),
         updateMessageItemsFromZoteroSelectionAtom: atom(null, () => {}),

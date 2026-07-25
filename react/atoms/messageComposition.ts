@@ -170,6 +170,35 @@ export const pendingPillInsertAtom = atom<{
 export const currentMessagePillsAtom = atom<SlashCommandDescriptor[]>([]);
 
 /**
+ * Bumped every time the composer is cleared programmatically (see
+ * `clearComposerAtom`).
+ *
+ * A clear that lands on an already-empty composer writes the values the mounted
+ * editors already hold, so nothing in their props changes and they cannot tell
+ * it happened. That matters because an editor holds its text back while an IME
+ * composes: without this signal, text composed just before the clear would be
+ * published afterwards, restoring a draft into a thread the user has left.
+ */
+export const composerResetTokenAtom = atom<number>(0);
+
+/**
+ * Clear the composer's text and pills programmatically (new thread, thread
+ * switch, after sending).
+ *
+ * Prefer this over resetting the two atoms directly so mounted editors learn
+ * the composer was reset even when the values themselves do not change (see
+ * `composerResetTokenAtom`).
+ */
+export const clearComposerAtom = atom(
+    null,
+    (get, set) => {
+        set(currentMessageContentAtom, '');
+        set(currentMessagePillsAtom, []);
+        set(composerResetTokenAtom, get(composerResetTokenAtom) + 1);
+    }
+);
+
+/**
 * Current reader attachment
 */
 export const currentReaderAttachmentAtom = atom<Zotero.Item | null>(null);

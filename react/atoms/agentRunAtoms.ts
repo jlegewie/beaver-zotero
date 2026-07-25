@@ -57,8 +57,7 @@ import {
     currentMessageExternalFilesAtom,
     currentReaderAttachmentAtom,
     currentMessageFiltersAtom,
-    currentMessageContentAtom,
-    currentMessagePillsAtom,
+    clearComposerAtom,
 } from './messageComposition';
 import { isWebSearchEnabledAtom, removePopupMessagesByTypeAtom, isWebSearchAllowedAtom } from './ui';
 import { currentNoteItemAtom } from './zoteroContext';
@@ -2095,8 +2094,7 @@ export const sendWSMessageAtom = atom(
             set(activeRunAtom, run);
 
             // Reset user message input after creating the run
-            set(currentMessageContentAtom, '');
-            set(currentMessagePillsAtom, []);
+            set(clearComposerAtom);
             set(removePopupMessagesByTypeAtom, ['items_summary']);
             set(currentMessageItemsAtom, []);
             set(currentMessageCollectionsAtom, []);

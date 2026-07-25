@@ -544,6 +544,14 @@
     -webkit-user-select: none;
 }
 
+[id^="beaver-pane-"] .beaver-lexical-placeholder::before {
+    content: attr(data-placeholder);
+}
+
+[id^="beaver-pane-"] .beaver-lexical-scroll:not([data-placeholder-visible="true"]) .beaver-lexical-placeholder {
+    display: none;
+}
+
 /* Argument-hint ghost text - rendered after a freshly inserted /command pill.
    It is positioned out of flow so long hints do not resize the composer. */
 [id^="beaver-pane-"] .beaver-lexical-content p[data-argument-hint] {

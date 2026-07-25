@@ -42,7 +42,13 @@ import {
 import { isImeKeyEvent } from '../../../utils/ime';
 import { getHost } from '../../../host';
 import { getPref } from '../../../../src/utils/prefs';
-import { registerCompositionEndDeferral, registerImeTrace } from './imeComposition';
+import {
+    createCompositionGatedEmitter,
+    createImeCompositionTracker,
+    registerCompositionEndDeferral,
+    registerImeTrace,
+    type ImeCompositionTracker,
+} from './imeComposition';
 import { collapsesToRangeEnd } from './caretNavigation';
 import { SlashCommandHoverCardPlugin } from './SlashCommandHoverCardPlugin';
 import {
@@ -53,6 +59,30 @@ import {
 } from './selectionOffsets';
 
 export type { SlashCommandDescriptor };
+
+/**
+ * How often a pending caret repair or restore re-checks whether the IME has
+ * finished. Writing the selection with an input method open discards composed
+ * text, so these paths wait for it rather than acting or dropping the work.
+ */
+const IME_REPAIR_RETRY_MS = 60;
+
+/**
+ * How many times a repair tied to one text update is postponed before giving
+ * up. Bounded because a still-composing IME produces further updates, each of
+ * which schedules a fresh repair (unlike the blur/focus restore, which has no
+ * later trigger and therefore waits for the IME itself).
+ */
+const IME_REPAIR_RETRIES = 5;
+
+/**
+ * How long a caret restore may wait for an IME to finish before being dropped.
+ * Unlike the composition state itself — which is never expired on a timer,
+ * because that risks discarding composed text — giving up on a restore only
+ * costs the caret position, so a generous bound keeps a pending timer from
+ * outliving any plausible composition.
+ */
+const IME_RESTORE_MAX_WAIT_MS = 30_000;
 
 /** Collect the /command pills in the current editor state, in document order.
  *  Must be called inside an editor read/update context. */
@@ -275,6 +305,39 @@ export type LexicalEditorInputHandle = {
     insertSlashCommand: (descriptor: SlashCommandDescriptor, queryLength: number | null) => void;
     /** Returns the command pills currently in the editor, in document order. */
     getSlashCommands: () => SlashCommandDescriptor[];
+    /**
+     * Publishes text that is still being withheld for an IME composition and
+     * returns it; returns null when nothing is withheld, i.e. the `value` the
+     * parent already holds is current.
+     *
+     * Text typed with an input method reaches the parent one composition at a
+     * time rather than one keystroke at a time (see
+     * createCompositionGatedEmitter), and the final emission follows the commit
+     * by a short poll interval. Anything that acts on the composer's text at a
+     * moment the user chose — sending, rejecting with instructions, saving an
+     * edit — must call this first, or it can act on text that is missing the
+     * candidate just committed.
+     */
+    flushPendingText: () => string | null;
+    /**
+     * Drops text still withheld for an IME composition and re-syncs the editor
+     * to the parent's current `value`, instead of publishing it.
+     *
+     * For a composer that was reset programmatically (new thread, thread
+     * switch): such a reset can write the same `value` the editor already has —
+     * clearing an already-empty composer — which is invisible to the normal
+     * value sync, so withheld text would otherwise reappear afterwards, in a
+     * context the user has left.
+     */
+    discardPendingText: () => void;
+};
+
+/** The withheld-text operations PlainTextSync exposes to the handle. */
+type PendingTextControls = {
+    /** Publishes a withheld update now; true when one was withheld. */
+    flush: () => boolean;
+    /** Drops a withheld update and re-syncs the editor to the parent's value. */
+    discard: () => void;
 };
 
 export interface LexicalEditorInputProps {
@@ -313,8 +376,9 @@ const EditorApi = forwardRef<LexicalEditorInputHandle, {
     pinnedEndCaretRef: React.MutableRefObject<boolean>;
     blurSelectionRef: React.MutableRefObject<LexicalSelectionOffsets | null>;
     selectionRepairGenerationRef: React.MutableRefObject<number>;
+    pendingTextRef: React.MutableRefObject<PendingTextControls | null>;
 }>(
-    function EditorApi({ pinnedEndCaretRef, blurSelectionRef, selectionRepairGenerationRef }, ref) {
+    function EditorApi({ pinnedEndCaretRef, blurSelectionRef, selectionRepairGenerationRef, pendingTextRef }, ref) {
         const [editor] = useLexicalComposerContext();
         const setPlainText = useCallback((text: string, selectionStart = text.length, selectionEnd = selectionStart) => {
             selectionRepairGenerationRef.current++;
@@ -504,8 +568,24 @@ const EditorApi = forwardRef<LexicalEditorInputHandle, {
                     });
                     return result;
                 },
+                flushPendingText: () => {
+                    // Only report text when something was actually withheld: the
+                    // editor is not the source of truth for the parent's value
+                    // (the parent may have just cleared it, with the clearing
+                    // update still to run), so a caller must fall back to the
+                    // value it holds whenever nothing is pending.
+                    if (!pendingTextRef.current?.flush()) return null;
+                    let text = '';
+                    editor.getEditorState().read(() => {
+                        text = $getRoot().getTextContent();
+                    });
+                    return text;
+                },
+                discardPendingText: () => {
+                    pendingTextRef.current?.discard();
+                },
             }),
-            [editor, setPlainText, pinnedEndCaretRef, blurSelectionRef, selectionRepairGenerationRef],
+            [editor, setPlainText, pinnedEndCaretRef, blurSelectionRef, selectionRepairGenerationRef, pendingTextRef],
         );
         return null;
     },
@@ -528,7 +608,9 @@ const PlainTextSync: React.FC<{
     pills?: SlashCommandDescriptor[];
     onPillsChange?: (pills: SlashCommandDescriptor[]) => void;
     blurSelectionRef: React.MutableRefObject<LexicalSelectionOffsets | null>;
-}> = ({ value, onChange, pills, onPillsChange, blurSelectionRef }) => {
+    ime: ImeCompositionTracker;
+    pendingTextRef: React.MutableRefObject<PendingTextControls | null>;
+}> = ({ value, onChange, pills, onPillsChange, blurSelectionRef, ime, pendingTextRef }) => {
     const [editor] = useLexicalComposerContext();
     // Tracks the last values we emitted upward to avoid echoes.
     const lastEmitted = useRef<string>('');
@@ -540,24 +622,39 @@ const PlainTextSync: React.FC<{
     const pillsRef = useRef<SlashCommandDescriptor[]>([]);
     pillsRef.current = pills ?? [];
 
-    // Sync external value -> editor (e.g. when parent clears after send)
-    useEffect(() => {
-        if (value === lastEmitted.current) return;
+    // Latest external value, for the reset path (below), which runs outside
+    // the sync effect and must use the value of the current commit.
+    const valueRef = useRef(value);
+    valueRef.current = value;
+
+    // Id of a composition whose text a composer reset discarded, while that
+    // composition was still open; null when nothing is suppressed. See
+    // handleChange.
+    const suppressedCompositionRef = useRef<number | null>(null);
+
+    // Rebuild the editor's content from an external value.
+    const applyExternalValue = useCallback((next: string) => {
         editor.update(() => {
             const root = $getRoot();
-            if (root.getTextContent() === value) return;
+            if (root.getTextContent() === next) return;
             root.clear();
             const p = $createParagraphNode();
-            $buildContentNodes(value, pillsRef.current).forEach(node => p.append(node));
+            $buildContentNodes(next, pillsRef.current).forEach(node => p.append(node));
             root.append(p);
         });
-        lastEmitted.current = value;
+        lastEmitted.current = next;
         // A rebuild replaces the content wholesale, superseding any blur
         // snapshot the imperative focus() would otherwise restore.
         blurSelectionRef.current = null;
-    }, [editor, value, blurSelectionRef]);
+    }, [editor, blurSelectionRef]);
 
-    const handleChange = useCallback(() => {
+    // Sync external value -> editor (e.g. when parent clears after send)
+    useEffect(() => {
+        if (value === lastEmitted.current) return;
+        applyExternalValue(value);
+    }, [value, applyExternalValue]);
+
+    const emit = useCallback(() => {
         let text = '';
         let currentPills: SlashCommandDescriptor[] = [];
         editor.getEditorState().read(() => {
@@ -578,6 +675,97 @@ const PlainTextSync: React.FC<{
         }
     }, [editor, onChange, onPillsChange]);
 
+    // Read through a ref so the emitter can be built once per editor while
+    // still calling the latest props.
+    const emitRef = useRef(emit);
+    emitRef.current = emit;
+
+    // Composition updates are held back rather than published per keystroke —
+    // publishing re-renders every consumer of the composer text, and a consumer
+    // that mounts or unmounts a node breaks the running composition (see
+    // createCompositionGatedEmitter).
+    const emitterRef = useRef<ReturnType<typeof createCompositionGatedEmitter> | null>(null);
+    useEffect(() => {
+        const emitter = createCompositionGatedEmitter({
+            isComposing: () => ime.isComposing(),
+            emit: () => emitRef.current(),
+            getWindow: () => (editor.getRootElement()?.ownerDocument.defaultView ?? null) as
+                (Window & typeof globalThis) | null,
+        });
+        emitterRef.current = emitter;
+        // Lets the imperative handle reach the withheld text (see
+        // flushPendingText / discardPendingText).
+        pendingTextRef.current = {
+            flush: () => emitter.flush(),
+            discard: () => {
+                const hadWithheld = emitter.discard();
+                // A composition that is still open belongs to the discarded
+                // draft as well: it goes on producing updates, and publishing
+                // any of them would put the abandoned text into the new
+                // context. Suppress the REST of that composition too, keyed to
+                // its id so a composition the user starts afterwards is
+                // unaffected (see handleChange).
+                //
+                // Deliberately the strict check, NOT the post-composition grace
+                // window: a composition whose text has already been published
+                // is finished business, and suppressing on the strength of the
+                // grace alone would swallow ordinary typing that follows it.
+                // The strict check still covers a commit that is in flight —
+                // Lexical stays composing until it has processed the
+                // composition's final input, which is exactly the window in
+                // which a reset can outrun the committed text.
+                const composing = ime.isComposing();
+                suppressedCompositionRef.current = composing ? ime.compositionId() : null;
+                if (!hadWithheld && !composing) return;
+                // The editor still holds text the parent never saw. After an
+                // explicit reset the parent's value is the authoritative one,
+                // so the withheld text goes rather than surfacing later.
+                applyExternalValue(valueRef.current);
+            },
+        };
+        return () => {
+            emitterRef.current = null;
+            pendingTextRef.current = null;
+            emitter.dispose();
+        };
+    }, [editor, ime, pendingTextRef, applyExternalValue]);
+
+    const handleChange = useCallback(() => {
+        const suppressed = suppressedCompositionRef.current;
+        if (suppressed !== null) {
+            if (ime.compositionId() !== suppressed) {
+                // A new composition — the user is typing into the reset
+                // composer, which publishes normally.
+                suppressedCompositionRef.current = null;
+            } else if (ime.isComposing()) {
+                // Still the composition that spanned the reset. Its text was
+                // discarded; swallow the rest of it.
+                return;
+            } else if (ime.isImeActive()) {
+                // It has just finished, so this update carries its committed
+                // text. Drop that text and put the editor back on the parent's
+                // value, which is what a reset composer holds. Disarms itself,
+                // so it can only ever consume the one update that follows the
+                // composition it was armed for.
+                suppressedCompositionRef.current = null;
+                applyExternalValue(valueRef.current);
+                return;
+            } else {
+                // The composition is long over and produced no further update:
+                // this one is unrelated (the user typing into the new thread),
+                // so it publishes normally.
+                suppressedCompositionRef.current = null;
+            }
+        }
+        // Before the effect has run (first commit) there is nothing composing
+        // yet, so publishing directly matches the gated path.
+        if (!emitterRef.current) {
+            emitRef.current();
+            return;
+        }
+        emitterRef.current.handleUpdate();
+    }, [ime, applyExternalValue]);
+
     return <OnChangePlugin onChange={handleChange} ignoreSelectionChange />;
 };
 
@@ -592,7 +780,7 @@ const PlainTextSync: React.FC<{
  * replacement is a plain TextNode and no TextNode transform is registered, there
  * is no recursion.
  */
-const SlashCommandRevertPlugin: React.FC = () => {
+const SlashCommandRevertPlugin: React.FC<{ ime: ImeCompositionTracker }> = ({ ime }) => {
     const [editor] = useLexicalComposerContext();
     useEffect(() => {
         return editor.registerNodeTransform(SlashCommandNode, (node) => {
@@ -600,7 +788,7 @@ const SlashCommandRevertPlugin: React.FC = () => {
             if (text === `/${node.getCommandName()}`) return; // unchanged - keep colored
 
             // Don't rip the node out mid-IME-composition.
-            if (editor.isComposing()) return;
+            if (ime.isComposing()) return;
 
             // LexicalNode.replace() snaps the selection to the END of the new
             // node, so capture any caret offsets pointing into this node first
@@ -626,7 +814,7 @@ const SlashCommandRevertPlugin: React.FC = () => {
                 }
             }
         });
-    }, [editor]);
+    }, [editor, ime]);
     return null;
 };
 
@@ -728,6 +916,17 @@ const SubmitOnEnterPlugin: React.FC<{ onSubmit: () => void }> = ({ onSubmit }) =
 };
 
 /**
+ * Publishes this editor's IME composition state (see ImeCompositionTracker),
+ * which every plugin that writes the selection or rewrites nodes consults
+ * before acting. Registered ahead of those plugins.
+ */
+const ImeCompositionTrackerPlugin: React.FC<{ ime: ImeCompositionTracker }> = ({ ime }) => {
+    const [editor] = useLexicalComposerContext();
+    useEffect(() => ime.register(editor), [editor, ime]);
+    return null;
+};
+
+/**
  * Applies the Windows IME composition-order workaround to this editor (see
  * registerCompositionEndDeferral). Windows-only; the `imeCompositionOrderFix`
  * pref is a kill-switch in case an IME interacts badly with the deferral.
@@ -743,15 +942,15 @@ const WindowsImeCompositionOrderPlugin: React.FC = () => {
 };
 
 /**
- * Verbose IME event tracing (pref `debugImeTrace`), for diagnosing
- * composition issues from user reports without a local reproduction.
+ * Compact IME event tracing (pref `debugImeTrace`), for diagnosing
+ * composition issues without a local reproduction.
  */
-const ImeTracePlugin: React.FC = () => {
+const ImeTracePlugin: React.FC<{ ime: ImeCompositionTracker }> = ({ ime }) => {
     const [editor] = useLexicalComposerContext();
     useEffect(() => {
         if (!getPref('debugImeTrace')) return;
-        return registerImeTrace(editor);
-    }, [editor]);
+        return registerImeTrace(editor, ime);
+    }, [editor, ime]);
     return null;
 };
 
@@ -760,7 +959,7 @@ const ImeTracePlugin: React.FC = () => {
  * controlled insertion path instead of the browser's native contenteditable
  * edit.
  */
-const TypeOverSelectionPlugin: React.FC = () => {
+const TypeOverSelectionPlugin: React.FC<{ ime: ImeCompositionTracker }> = ({ ime }) => {
     const [editor] = useLexicalComposerContext();
     useEffect(() => {
         return editor.registerCommand<InputEvent>(
@@ -770,7 +969,9 @@ const TypeOverSelectionPlugin: React.FC = () => {
                 const data = event.data;
                 // Line breaks have dedicated commands; let Lexical route them.
                 if (data == null || data === '\n' || data === '\n\n') return false;
-                if (editor.isComposing()) return false;
+                // An IME can deliver its commit as a plain insertText; taking
+                // it over here would drop the composed text.
+                if (ime.isImeActive()) return false;
                 const selection = $getSelection();
                 if (!$isRangeSelection(selection) || selection.isCollapsed()) return false;
                 event.preventDefault();
@@ -779,7 +980,7 @@ const TypeOverSelectionPlugin: React.FC = () => {
             },
             COMMAND_PRIORITY_LOW,
         );
-    }, [editor]);
+    }, [editor, ime]);
     return null;
 };
 
@@ -806,7 +1007,8 @@ const TypeOverSelectionPlugin: React.FC = () => {
 const CaretNavigationPlugin: React.FC<{
     suspendedRef: React.MutableRefObject<boolean>;
     pendingDomSelectionRef: React.MutableRefObject<DomSelectionSnapshot | null>;
-}> = ({ suspendedRef, pendingDomSelectionRef }) => {
+    ime: ImeCompositionTracker;
+}> = ({ suspendedRef, pendingDomSelectionRef, ime }) => {
     const [editor] = useLexicalComposerContext();
     useEffect(() => {
         const handler = (e: KeyboardEvent) => {
@@ -814,8 +1016,18 @@ const CaretNavigationPlugin: React.FC<{
             if (suspendedRef.current) return;
             // While an IME composition is active the IME owns the navigation
             // keys (candidate-window movement); moving the DOM selection here
-            // would force Gecko to commit the composition.
-            if (isImeKeyEvent(e) || editor.isComposing()) return;
+            // would force Gecko to commit the composition. Not every IME flags
+            // the key events it consumes, so the composition state is checked
+            // alongside the per-event flags.
+            //
+            // Deliberately the strict check, not the post-composition grace
+            // window used by the selection-repair paths: standing down here
+            // means the key is left unhandled, and an unhandled navigation key
+            // lets Zotero's focus manager pull focus out of the editor (the
+            // reason this plugin exists). A finished composition does not
+            // consume plain arrow keys, so the grace period must not suppress
+            // them — dead-key and accent input would hit that window too.
+            if (isImeKeyEvent(e) || ime.isComposing()) return;
             const key = e.key;
             const isNavKey =
                 key === 'ArrowLeft' || key === 'ArrowRight' ||
@@ -967,7 +1179,7 @@ const CaretNavigationPlugin: React.FC<{
             if (prevRootElement) prevRootElement.removeEventListener('keydown', handler, true);
             if (rootElement) rootElement.addEventListener('keydown', handler, true);
         });
-    }, [editor, suspendedRef, pendingDomSelectionRef]);
+    }, [editor, suspendedRef, pendingDomSelectionRef, ime]);
     return null;
 };
 
@@ -1005,7 +1217,8 @@ const CaretNavigationPlugin: React.FC<{
  */
 const SelectionGuardPlugin: React.FC<{
     pendingDomSelectionRef: React.MutableRefObject<DomSelectionSnapshot | null>;
-}> = ({ pendingDomSelectionRef }) => {
+    ime: ImeCompositionTracker;
+}> = ({ pendingDomSelectionRef, ime }) => {
     const [editor] = useLexicalComposerContext();
     useEffect(() => {
         let pointerDown = false;
@@ -1054,7 +1267,7 @@ const SelectionGuardPlugin: React.FC<{
                 // reconciler-placed selection compares equal and is left alone.
                 if (records.every(record => root.contains(record.target))) return;
                 if (pointerDown) return;
-                if (editor.isComposing()) return;
+                if (ime.isImeActive()) return;
                 if (doc.activeElement !== root) return;
                 const sel = win.getSelection();
                 if (!sel) return;
@@ -1136,7 +1349,7 @@ const SelectionGuardPlugin: React.FC<{
             cleanupDom?.();
             cleanupDom = null;
         };
-    }, [editor, pendingDomSelectionRef]);
+    }, [editor, pendingDomSelectionRef, ime]);
     return null;
 };
 
@@ -1152,27 +1365,107 @@ const SelectionGuardPlugin: React.FC<{
  * window instead. The snapshot/restore only runs while the editor is the
  * active element, so focus legitimately parked elsewhere (e.g. a menu's
  * search input) is never clobbered.
+ *
+ * Only the restore is held back for an active IME: writing the selection while
+ * an input method is open (some host their candidate window in a separate OS
+ * window) makes Gecko commit or discard the composed text. Taking the snapshot
+ * on blur is a read and always runs — skipping it is what loses the caret,
+ * since the fallback on the way back in can only observe the already-collapsed
+ * selection.
+ *
+ * A held restore waits for the IME to actually go inactive rather than for a
+ * fixed number of attempts: a composition can still be open when the window
+ * comes back (returning from a candidate window or alt-tab) and may stay open
+ * indefinitely. Three things end the wait instead of a short budget — the
+ * snapshot is dropped as soon as the content changes (an IME committing text at
+ * the clobbered caret makes the saved offsets describe different content), a
+ * pointer interaction or a key the IME does not own cancels it, because from
+ * then on the caret is wherever the user put it, and another window
+ * deactivation supersedes it with a fresh snapshot.
  */
-const SelectionPersistencePlugin: React.FC = () => {
+const SelectionPersistencePlugin: React.FC<{ ime: ImeCompositionTracker }> = ({ ime }) => {
     const [editor] = useLexicalComposerContext();
     useEffect(() => {
         let saved: LexicalSelectionOffsets | null = null;
+        let savedText = '';
         let rootEl: HTMLElement | null = null;
+        let restoreTimer: number | null = null;
         const isEditorActive = () =>
             !!rootEl && rootEl.ownerDocument.activeElement === rootEl;
+
+        const cancelRestore = () => {
+            if (restoreTimer === null) return;
+            rootEl?.ownerDocument.defaultView?.clearTimeout(restoreTimer);
+            restoreTimer = null;
+        };
+
+        // A pointer interaction always places the caret, so it supersedes a
+        // pending restore. Key events only do when they are the user's own:
+        // candidate navigation and confirmation keys belong to the IME and
+        // place no caret, so discarding the snapshot for them would leave the
+        // chrome-collapsed selection in place. Composed text landing instead
+        // invalidates the restore through its expected-text check.
+        const cancelRestoreOnKeyDown = (e: KeyboardEvent) => {
+            if (isImeKeyEvent(e) || ime.isComposing()) return;
+            cancelRestore();
+        };
+
+        // Applies the restore once the IME is no longer open. `expectedText`
+        // scopes it to the content the offsets were captured against, so a
+        // composition that lands text in the meantime invalidates it instead of
+        // moving the caret into unrelated text.
+        const applyRestore = (
+            offsets: LexicalSelectionOffsets,
+            expectedText: string,
+            deadline: number,
+        ) => {
+            restoreTimer = null;
+            const root = rootEl;
+            if (!root || !isEditorActive()) return;
+            let currentText = '';
+            editor.getEditorState().read(() => {
+                currentText = $getRoot().getTextContent();
+            });
+            if (currentText !== expectedText) return;
+            // Wait for the IME to finish AND for the window to actually hold
+            // focus. activeElement stays on the editor across OS window
+            // deactivation (the very reason this plugin exists), so writing on
+            // the strength of it alone could clobber the snapshot just taken on
+            // blur or disturb a still-open IME. Both conditions are waited on
+            // rather than treated as a hard bail, so a focus event that lands
+            // before the document reports focus still restores the caret.
+            if (ime.isImeActive() || !root.ownerDocument.hasFocus()) {
+                const win = root.ownerDocument.defaultView;
+                if (!win || Date.now() >= deadline) return;
+                restoreTimer = win.setTimeout(
+                    () => applyRestore(offsets, expectedText, deadline),
+                    IME_REPAIR_RETRY_MS,
+                );
+                return;
+            }
+            editor.update(
+                () => $selectFlatSelection(offsets),
+                { discrete: true },
+            );
+        };
 
         const onWindowBlur = (e: FocusEvent) => {
             // Only window deactivation - element-level blurs don't bubble to
             // the window, but be defensive about synthesized events.
             if (e.target !== e.currentTarget) return;
             if (!isEditorActive()) return;
+            // A restore still waiting for the IME belongs to the previous
+            // activation; the snapshot taken below supersedes it.
+            cancelRestore();
             editor.getEditorState().read(() => {
                 saved = $getFlatSelectionOffsets();
+                savedText = $getRoot().getTextContent();
             });
         };
         const onWindowFocus = (e: FocusEvent) => {
             if (e.target !== e.currentTarget) return;
             let restore = saved;
+            let restoreText = savedText;
             saved = null;
             if (!isEditorActive()) return;
             let isEmpty = false;
@@ -1181,7 +1474,10 @@ const SelectionPersistencePlugin: React.FC = () => {
                 // Some Gecko focus transitions change activeElement before the
                 // blur listener runs. The active editor's current model point
                 // is still a useful fallback, especially when it is empty.
-                restore ??= $getFlatSelectionOffsets();
+                if (!restore) {
+                    restore = $getFlatSelectionOffsets();
+                    restoreText = $getRoot().getTextContent();
+                }
             });
             if (!restore && isEmpty) {
                 restore = {
@@ -1190,29 +1486,36 @@ const SelectionPersistencePlugin: React.FC = () => {
                     anchorType: 'element',
                     focusType: 'element',
                 };
+                restoreText = '';
             }
             if (!restore) return;
-            const restoreSelection = restore;
-            editor.update(
-                () => $selectFlatSelection(restoreSelection),
-                { discrete: true },
-            );
+            cancelRestore();
+            applyRestore(restore, restoreText, Date.now() + IME_RESTORE_MAX_WAIT_MS);
         };
 
-        return editor.registerRootListener((rootElement, prevRootElement) => {
+        const unregisterRoot = editor.registerRootListener((rootElement, prevRootElement) => {
             const prevWin = prevRootElement?.ownerDocument.defaultView;
             if (prevWin) {
                 prevWin.removeEventListener('blur', onWindowBlur);
                 prevWin.removeEventListener('focus', onWindowFocus);
+                prevRootElement?.ownerDocument.removeEventListener('pointerdown', cancelRestore, true);
+                prevRootElement?.removeEventListener('keydown', cancelRestoreOnKeyDown, true);
             }
+            cancelRestore();
             rootEl = rootElement;
             const win = rootElement?.ownerDocument.defaultView;
-            if (win) {
+            if (rootElement && win) {
                 win.addEventListener('blur', onWindowBlur);
                 win.addEventListener('focus', onWindowFocus);
+                rootElement.ownerDocument.addEventListener('pointerdown', cancelRestore, true);
+                rootElement.addEventListener('keydown', cancelRestoreOnKeyDown, true);
             }
         });
-    }, [editor]);
+        return () => {
+            cancelRestore();
+            unregisterRoot();
+        };
+    }, [editor, ime]);
     return null;
 };
 
@@ -1224,7 +1527,7 @@ const SelectionPersistencePlugin: React.FC = () => {
  * for a first-character jump after stop, send, focus changes, and similar UI
  * transitions.
  */
-const EmptyEditorInsertionPlugin: React.FC = () => {
+const EmptyEditorInsertionPlugin: React.FC<{ ime: ImeCompositionTracker }> = ({ ime }) => {
     const [editor] = useLexicalComposerContext();
     useEffect(() => editor.registerCommand<InputEvent>(
         BEFORE_INPUT_COMMAND,
@@ -1234,7 +1537,9 @@ const EmptyEditorInsertionPlugin: React.FC = () => {
                 || event.data == null
                 || event.data === '\n'
                 || event.data === '\n\n'
-                || editor.isComposing()
+                // An IME commit can arrive as insertText; let it through
+                // natively rather than re-inserting it through Lexical.
+                || ime.isImeActive()
                 || $getRoot().getTextContentSize() !== 0
             ) {
                 return false;
@@ -1251,7 +1556,7 @@ const EmptyEditorInsertionPlugin: React.FC = () => {
             return true;
         },
         COMMAND_PRIORITY_HIGH,
-    ), [editor]);
+    ), [editor, ime]);
     return null;
 };
 
@@ -1261,13 +1566,19 @@ const EmptyEditorInsertionPlugin: React.FC = () => {
  * reset selection offsets when unrelated child nodes mount/unmount; repairing
  * in the next task covers mutations that land after MutationObserver-based
  * SelectionGuardPlugin has already run. The first insertion is always
- * re-asserted because its placeholder removal can clobber the DOM selection
- * before this listener gets a reliable snapshot. Later updates only write when
- * the live selection actually drifted. A newer edit or user action cancels it.
+ * re-asserted because the churn around the first keystroke can clobber the DOM
+ * selection before this listener gets a reliable snapshot. Later updates only
+ * write when the live selection actually drifted. A newer edit or user action
+ * cancels it.
+ *
+ * While an IME may still be composing the repair is postponed rather than
+ * dropped: writing the selection then would discard the composed text, but the
+ * text update that follows a commit still needs its caret protected.
  */
 const DeferredSelectionRepairPlugin: React.FC<{
     selectionRepairGenerationRef: React.MutableRefObject<number>;
-}> = ({ selectionRepairGenerationRef }) => {
+    ime: ImeCompositionTracker;
+}> = ({ selectionRepairGenerationRef, ime }) => {
     const [editor] = useLexicalComposerContext();
     useEffect(() => {
         let rootEl: HTMLElement | null = null;
@@ -1283,8 +1594,16 @@ const DeferredSelectionRepairPlugin: React.FC<{
             repairTimer = null;
         };
 
+        // Composition-owned updates are NOT filtered out here. With the Windows
+        // composition-order deferral the update that carries the committed text
+        // arrives while Lexical is deliberately still composing, and the
+        // composition-end update that follows it leaves the text unchanged — so
+        // skipping composing updates would drop the one update an IME commit
+        // needs repaired. Instead every text change schedules a repair that
+        // waits for the IME (see runRepair); superseded schedules are cancelled
+        // below, and a schedule whose text no longer matches is discarded.
         const unregisterUpdate = editor.registerUpdateListener(({ editorState, prevEditorState }) => {
-            if (!rootEl || !isEditorActiveInFocusedWindow(rootEl) || editor.isComposing()) return;
+            if (!rootEl || !isEditorActiveInFocusedWindow(rootEl)) return;
             let previousText = '';
             let nextText = '';
             let expectedSelection: LexicalSelectionOffsets | null = null;
@@ -1307,13 +1626,21 @@ const DeferredSelectionRepairPlugin: React.FC<{
             const isFirstInsertion = previousText.length === 0 && nextText.length > 0;
             const repairGeneration = selectionRepairGenerationRef.current;
             clearRepair();
-            repairTimer = win.setTimeout(() => {
+            // Attempts left for postponing the repair past an IME that is
+            // still open. Bounded so a wedged composition cannot keep a timer
+            // alive indefinitely.
+            let imeRetriesLeft = IME_REPAIR_RETRIES;
+            const runRepair = () => {
                 repairTimer = null;
                 if (
                     selectionRepairGenerationRef.current !== repairGeneration
                     || !isEditorActiveInFocusedWindow(root)
-                    || editor.isComposing()
                 ) return;
+                if (ime.isImeActive()) {
+                    if (imeRetriesLeft-- <= 0) return;
+                    repairTimer = win.setTimeout(runRepair, IME_REPAIR_RETRY_MS);
+                    return;
+                }
                 let currentText = '';
                 editor.getEditorState().read(() => {
                     currentText = $getRoot().getTextContent();
@@ -1335,7 +1662,8 @@ const DeferredSelectionRepairPlugin: React.FC<{
                     () => $selectFlatSelection(expectedModel),
                     { discrete: true },
                 );
-            }, 0);
+            };
+            repairTimer = win.setTimeout(runRepair, 0);
         });
 
         const unregisterRoot = editor.registerRootListener((rootElement, prevRootElement) => {
@@ -1358,7 +1686,7 @@ const DeferredSelectionRepairPlugin: React.FC<{
             unregisterUpdate();
             unregisterRoot();
         };
-    }, [editor, selectionRepairGenerationRef]);
+    }, [editor, selectionRepairGenerationRef, ime]);
     return null;
 };
 
@@ -1408,7 +1736,8 @@ const BlurSelectionSnapshotPlugin: React.FC<{
  */
 const PinnedEndCaretPlugin: React.FC<{
     pinnedRef: React.MutableRefObject<boolean>;
-}> = ({ pinnedRef }) => {
+    ime: ImeCompositionTracker;
+}> = ({ pinnedRef, ime }) => {
     const [editor] = useLexicalComposerContext();
     useEffect(() => {
         const setup = (root: HTMLElement): (() => void) => {
@@ -1422,7 +1751,11 @@ const PinnedEndCaretPlugin: React.FC<{
 
             const onSelectionChange = () => {
                 if (!pinnedRef.current) return;
-                if (editor.isComposing()) return;
+                if (ime.isImeActive()) return;
+                // Correcting the caret writes the selection, which pulls DOM
+                // focus back to the editor; never do that while focus is
+                // parked elsewhere (e.g. an open menu's search input).
+                if (doc.activeElement !== root) return;
                 const sel = win.getSelection();
                 if (!sel || !sel.anchorNode || !sel.focusNode) return;
                 // Only correct selections that landed inside the editor — a
@@ -1460,7 +1793,50 @@ const PinnedEndCaretPlugin: React.FC<{
             cleanupDom?.();
             cleanupDom = null;
         };
-    }, [editor, pinnedRef]);
+    }, [editor, pinnedRef, ime]);
+    return null;
+};
+
+/**
+ * Toggles placeholder visibility through an attribute instead of mounting and
+ * unmounting the placeholder element.
+ *
+ * Lexical's own placeholder is rendered conditionally, so it is removed from
+ * the DOM on the first keystroke — and, because a composing editor reads as
+ * non-empty, exactly when an IME composition starts. In Zotero's chrome
+ * document any childList mutation resets the contenteditable's selection
+ * offsets to 0, which destroys the composition anchor the IME is holding, and
+ * the caret repairs must stand down while composing. Attribute mutations do
+ * not have that effect, so the element stays mounted and CSS hides it.
+ *
+ * The attribute is written straight to the DOM (not via React state) so that
+ * typing never re-renders the composer subtree.
+ */
+const PlaceholderVisibilityPlugin: React.FC = () => {
+    const [editor] = useLexicalComposerContext();
+    useEffect(() => {
+        let host: HTMLElement | null = null;
+        const apply = () => {
+            if (!host) return;
+            let isEmpty = false;
+            editor.getEditorState().read(() => {
+                isEmpty = $getRoot().getTextContent() === '';
+            });
+            // A composing editor already shows the composed text in the DOM
+            // even while its model can still read as empty.
+            const visible = isEmpty && !editor.isComposing();
+            host.setAttribute('data-placeholder-visible', visible ? 'true' : 'false');
+        };
+        const unregisterUpdate = editor.registerUpdateListener(apply);
+        const unregisterRoot = editor.registerRootListener((rootElement) => {
+            host = (rootElement?.closest('.beaver-lexical-scroll') as HTMLElement | null) ?? null;
+            apply();
+        });
+        return () => {
+            unregisterUpdate();
+            unregisterRoot();
+        };
+    }, [editor]);
     return null;
 };
 
@@ -1561,6 +1937,18 @@ export const LexicalEditorInput = forwardRef<LexicalEditorInputHandle, LexicalEd
         // by an earlier text update cannot overwrite an intentional selection.
         const selectionRepairGenerationRef = useRef(0);
 
+        // This editor's IME composition state. Every plugin that writes the
+        // selection or rewrites nodes consults it, so all of them see the same
+        // view of the composition (see ImeCompositionTracker).
+        const imeRef = useRef<ImeCompositionTracker | null>(null);
+        if (imeRef.current === null) imeRef.current = createImeCompositionTracker();
+        const ime = imeRef.current;
+
+        // Set by PlainTextSync, read by the imperative handle: reaches text
+        // still withheld for a composition (see flushPendingText /
+        // discardPendingText).
+        const pendingTextRef = useRef<PendingTextControls | null>(null);
+
         // The ContentEditable ref callback MUST keep a stable identity across
         // renders. Lexical memoizes its root-element ref on this callback, so a
         // changing identity makes it re-run editor.setRootElement() on every
@@ -1604,39 +1992,43 @@ export const LexicalEditorInput = forwardRef<LexicalEditorInputHandle, LexicalEd
                                     onKeyDown={onKeyDown}
                                 />
                             }
-                            placeholder={
-                                <div
-                                    className="beaver-lexical-placeholder"
-                                    aria-hidden="true"
-                                >
-                                    {placeholder}
-                                </div>
-                            }
                             ErrorBoundary={LexicalErrorBoundary}
+                        />
+                        {/* Stays mounted for the editor's whole lifetime and is
+                            hidden with CSS - see PlaceholderVisibilityPlugin.
+                            The text lives in an attribute so the placeholder
+                            holds no text node that could change either. */}
+                        <div
+                            className="beaver-lexical-placeholder"
+                            aria-hidden="true"
+                            data-placeholder={placeholder ?? ''}
                         />
                     </div>
                     <HistoryPlugin />
-                    <PlainTextSync value={value} onChange={onChange} pills={pills} onPillsChange={onPillsChange} blurSelectionRef={blurSelectionRef} />
-                    <SlashCommandRevertPlugin />
-                    <TypeOverSelectionPlugin />
+                    <ImeCompositionTrackerPlugin ime={ime} />
+                    <PlainTextSync value={value} onChange={onChange} pills={pills} onPillsChange={onPillsChange} blurSelectionRef={blurSelectionRef} ime={ime} pendingTextRef={pendingTextRef} />
+                    <SlashCommandRevertPlugin ime={ime} />
+                    <TypeOverSelectionPlugin ime={ime} />
                     <ArgumentHintPlugin />
-                    <CaretNavigationPlugin suspendedRef={suspendNavRef} pendingDomSelectionRef={pendingDomSelectionRef} />
-                    <SelectionGuardPlugin pendingDomSelectionRef={pendingDomSelectionRef} />
-                    <SelectionPersistencePlugin />
-                    <EmptyEditorInsertionPlugin />
-                    <DeferredSelectionRepairPlugin selectionRepairGenerationRef={selectionRepairGenerationRef} />
+                    <PlaceholderVisibilityPlugin />
+                    <CaretNavigationPlugin suspendedRef={suspendNavRef} pendingDomSelectionRef={pendingDomSelectionRef} ime={ime} />
+                    <SelectionGuardPlugin pendingDomSelectionRef={pendingDomSelectionRef} ime={ime} />
+                    <SelectionPersistencePlugin ime={ime} />
+                    <EmptyEditorInsertionPlugin ime={ime} />
+                    <DeferredSelectionRepairPlugin selectionRepairGenerationRef={selectionRepairGenerationRef} ime={ime} />
                     <BlurSelectionSnapshotPlugin blurSelectionRef={blurSelectionRef} />
-                    <PinnedEndCaretPlugin pinnedRef={pinnedEndCaretRef} />
+                    <PinnedEndCaretPlugin pinnedRef={pinnedEndCaretRef} ime={ime} />
                     <SlashCommandClickPlugin />
                     <SlashCommandHoverCardPlugin />
                     <SubmitOnEnterPlugin onSubmit={onSubmit} />
                     <WindowsImeCompositionOrderPlugin />
-                    <ImeTracePlugin />
+                    <ImeTracePlugin ime={ime} />
                     <EditorApi
                         ref={ref}
                         pinnedEndCaretRef={pinnedEndCaretRef}
                         blurSelectionRef={blurSelectionRef}
                         selectionRepairGenerationRef={selectionRepairGenerationRef}
+                        pendingTextRef={pendingTextRef}
                     />
                 </div>
             </LexicalComposer>
