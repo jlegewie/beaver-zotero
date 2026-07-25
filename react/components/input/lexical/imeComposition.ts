@@ -140,8 +140,143 @@ export function createImeCompositionTracker(): ImeCompositionTracker {
 }
 
 /**
- * Works around IME text being discarded in Gecko on Windows (reported with
- * Sogou Pinyin: the selected candidate never appears in the composer).
+ * How often a withheld composition update re-checks whether the IME has
+ * finished.
+ */
+const EMIT_FLUSH_RETRY_MS = 60;
+
+/**
+ * How long a withheld composition update may wait for the IME before it is
+ * emitted regardless.
+ *
+ * Unlike the caret repairs — which can be abandoned, costing only a caret
+ * position — this emission is the only path by which the composer's text
+ * reaches the rest of the app, so a composition that never ends must not
+ * strand it: sending would then post stale text. The wait is bounded and
+ * always ends in an emission. Each further composition update restarts it, so
+ * the bound only expires for a composition that has genuinely wedged.
+ */
+const EMIT_FLUSH_MAX_WAIT_MS = 3_000;
+
+export type CompositionGatedEmitter = {
+    /**
+     * Call for every editor update that would be published upward. Emits
+     * immediately outside a composition, defers during one.
+     */
+    handleUpdate: () => void;
+    /** Flushes a withheld update and drops any pending timer. */
+    dispose: () => void;
+};
+
+/**
+ * Withholds the composer's upward text emission for the duration of an IME
+ * composition.
+ *
+ * Every emission re-renders each subscriber of the shared composer-text state,
+ * and a subscriber that mounts or unmounts a node lands a childList mutation in
+ * Zotero's chrome document — which resets the contenteditable's selection
+ * offsets and so destroys the composition anchor the IME is holding. That is
+ * the same hazard PlaceholderVisibilityPlugin avoids for the placeholder
+ * element, but the placeholder is only one of the nodes that appear or
+ * disappear the moment the composer goes from empty to non-empty: the send
+ * button swaps its icon and label, and the first-run panels auto-dismiss on the
+ * first typed character. Gating the emission covers all of them at once,
+ * including any added later, which auditing subscribers one by one does not.
+ *
+ * A destroyed composition breaks up multi-keystroke input, leaving raw
+ * keystrokes mixed into the committed text; a composition short enough to be
+ * carried by its first update — punctuation, on most input methods — is lost
+ * outright.
+ *
+ * A withheld update is never dropped: it is emitted as soon as the IME is no
+ * longer composing, when the bounded wait expires, or on dispose.
+ */
+export function createCompositionGatedEmitter(options: {
+    /** The composition check to gate on — normally the tracker's isComposing. */
+    isComposing: () => boolean;
+    /** Publishes the current editor text upward. Must be safe to call spuriously. */
+    emit: () => void;
+    /** The window to time with; null while no root is mounted. */
+    getWindow: () => (Window & typeof globalThis) | null;
+    retryMs?: number;
+    maxWaitMs?: number;
+}): CompositionGatedEmitter {
+    const {
+        isComposing,
+        emit,
+        getWindow,
+        retryMs = EMIT_FLUSH_RETRY_MS,
+        maxWaitMs = EMIT_FLUSH_MAX_WAIT_MS,
+    } = options;
+
+    let timer: number | null = null;
+    let deadline = 0;
+    let pending = false;
+    let disposed = false;
+
+    const cancel = () => {
+        if (timer === null) return;
+        getWindow()?.clearTimeout(timer);
+        timer = null;
+    };
+
+    const publish = () => {
+        pending = false;
+        cancel();
+        emit();
+    };
+
+    const onTimer = () => {
+        timer = null;
+        if (disposed) return;
+        if (isComposing() && Date.now() < deadline) {
+            schedule(false);
+            return;
+        }
+        publish();
+    };
+
+    function schedule(restartDeadline: boolean) {
+        const win = getWindow();
+        // Without a window there is nothing to time with, and holding the text
+        // back indefinitely would lose it; publishing now is the safer failure.
+        if (!win) {
+            publish();
+            return;
+        }
+        if (restartDeadline) deadline = Date.now() + maxWaitMs;
+        cancel();
+        pending = true;
+        timer = win.setTimeout(onTimer, retryMs);
+    }
+
+    return {
+        handleUpdate: () => {
+            if (disposed) return;
+            if (isComposing()) {
+                schedule(true);
+                return;
+            }
+            publish();
+        },
+        dispose: () => {
+            if (disposed) return;
+            disposed = true;
+            cancel();
+            // The editor still reads normally during teardown (this unregisters
+            // before Lexical itself does), so a withheld update is published
+            // rather than lost when the composer unmounts mid-composition.
+            if (pending) {
+                pending = false;
+                emit();
+            }
+        },
+    };
+}
+
+/**
+ * Works around IME text being discarded in Gecko on Windows, where the
+ * selected candidate never reaches the composer.
  *
  * Gecko dispatches `compositionend` BEFORE the composition's final `input`
  * event, and on Windows an application that mutates the composed text node
@@ -260,8 +395,8 @@ const TRACED_EVENTS = [
 /**
  * Logs every composition-related DOM event on the editor root together with
  * the DOM text, the editor-state text and the live selection, so IME problems
- * can be diagnosed from a user's debug output without a local reproduction.
- * The listeners are attached after Lexical's, so each line reflects the state
+ * can be diagnosed from debug output without a local reproduction. The
+ * listeners are attached after Lexical's, so each line reflects the state
  * AFTER Lexical processed that event.
  *
  * Also reports DOM mutations from outside the editor that land mid-composition:

@@ -4,6 +4,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { COMMAND_PRIORITY_EDITOR, COMPOSITION_END_COMMAND } from 'lexical';
 import type { LexicalEditor } from 'lexical';
 import {
+    createCompositionGatedEmitter,
     createImeCompositionTracker,
     registerCompositionEndDeferral,
 } from '../../../react/components/input/lexical/imeComposition';
@@ -362,5 +363,130 @@ describe('registerCompositionEndDeferral', () => {
         editor.setRootElement(null);
         editor.dispatchCommand(COMPOSITION_END_COMMAND, compositionEndEvent());
         expect(stockHandler).toHaveBeenCalledTimes(1);
+    });
+});
+
+describe('createCompositionGatedEmitter', () => {
+    const RETRY_MS = 10;
+    const MAX_WAIT_MS = 100;
+
+    let emit: ReturnType<typeof vi.fn>;
+    let composing: boolean;
+    let hasWindow: boolean;
+    let emitter: ReturnType<typeof createCompositionGatedEmitter>;
+
+    beforeEach(() => {
+        vi.useFakeTimers();
+        emit = vi.fn();
+        composing = false;
+        hasWindow = true;
+        emitter = createCompositionGatedEmitter({
+            isComposing: () => composing,
+            emit,
+            getWindow: () => (hasWindow ? (window as Window & typeof globalThis) : null),
+            retryMs: RETRY_MS,
+            maxWaitMs: MAX_WAIT_MS,
+        });
+    });
+
+    afterEach(() => {
+        emitter.dispose();
+        vi.useRealTimers();
+    });
+
+    it('emits immediately outside a composition', () => {
+        emitter.handleUpdate();
+        expect(emit).toHaveBeenCalledTimes(1);
+    });
+
+    it('withholds the update while composing and emits once it ends', () => {
+        composing = true;
+        emitter.handleUpdate();
+        vi.advanceTimersByTime(RETRY_MS * 3);
+        expect(emit).not.toHaveBeenCalled();
+
+        composing = false;
+        vi.advanceTimersByTime(RETRY_MS);
+        expect(emit).toHaveBeenCalledTimes(1);
+    });
+
+    // The point of the gate: N keystrokes of a composition must not produce N
+    // re-renders of the composer's consumers, because a consumer that mounts or
+    // unmounts a node destroys the running composition.
+    it('coalesces a whole composition into a single emission', () => {
+        composing = true;
+        for (let i = 0; i < 12; i++) {
+            emitter.handleUpdate();
+            vi.advanceTimersByTime(RETRY_MS);
+        }
+        expect(emit).not.toHaveBeenCalled();
+
+        composing = false;
+        vi.advanceTimersByTime(RETRY_MS);
+        expect(emit).toHaveBeenCalledTimes(1);
+    });
+
+    it('emits anyway once the bounded wait expires on a wedged composition', () => {
+        composing = true;
+        emitter.handleUpdate();
+        vi.advanceTimersByTime(MAX_WAIT_MS * 2);
+        expect(emit).toHaveBeenCalledTimes(1);
+    });
+
+    it('restarts the wait on each further composition update', () => {
+        composing = true;
+        emitter.handleUpdate();
+        vi.advanceTimersByTime(MAX_WAIT_MS / 2);
+        // A composition that is still producing updates has not wedged, so the
+        // bound must not expire underneath it.
+        emitter.handleUpdate();
+        vi.advanceTimersByTime(MAX_WAIT_MS * 0.7);
+        expect(emit).not.toHaveBeenCalled();
+
+        vi.advanceTimersByTime(MAX_WAIT_MS);
+        expect(emit).toHaveBeenCalledTimes(1);
+    });
+
+    it('flushes a withheld update on dispose', () => {
+        composing = true;
+        emitter.handleUpdate();
+        vi.advanceTimersByTime(RETRY_MS);
+        expect(emit).not.toHaveBeenCalled();
+
+        emitter.dispose();
+        expect(emit).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not re-emit on dispose when nothing is withheld', () => {
+        emitter.handleUpdate();
+        expect(emit).toHaveBeenCalledTimes(1);
+
+        emitter.dispose();
+        expect(emit).toHaveBeenCalledTimes(1);
+    });
+
+    it('drops the pending timer on dispose', () => {
+        composing = true;
+        emitter.handleUpdate();
+        emitter.dispose();
+        expect(emit).toHaveBeenCalledTimes(1);
+
+        vi.advanceTimersByTime(MAX_WAIT_MS * 2);
+        expect(emit).toHaveBeenCalledTimes(1);
+    });
+
+    it('ignores updates after dispose', () => {
+        emitter.dispose();
+        emitter.handleUpdate();
+        expect(emit).not.toHaveBeenCalled();
+    });
+
+    // Losing the text is worse than an ill-timed re-render, so a missing window
+    // (no mounted root to time with) falls back to emitting immediately.
+    it('emits immediately while composing when no window is available', () => {
+        composing = true;
+        hasWindow = false;
+        emitter.handleUpdate();
+        expect(emit).toHaveBeenCalledTimes(1);
     });
 });

@@ -43,6 +43,7 @@ import { isImeKeyEvent } from '../../../utils/ime';
 import { getHost } from '../../../host';
 import { getPref } from '../../../../src/utils/prefs';
 import {
+    createCompositionGatedEmitter,
     createImeCompositionTracker,
     registerCompositionEndDeferral,
     registerImeTrace,
@@ -556,7 +557,8 @@ const PlainTextSync: React.FC<{
     pills?: SlashCommandDescriptor[];
     onPillsChange?: (pills: SlashCommandDescriptor[]) => void;
     blurSelectionRef: React.MutableRefObject<LexicalSelectionOffsets | null>;
-}> = ({ value, onChange, pills, onPillsChange, blurSelectionRef }) => {
+    ime: ImeCompositionTracker;
+}> = ({ value, onChange, pills, onPillsChange, blurSelectionRef, ime }) => {
     const [editor] = useLexicalComposerContext();
     // Tracks the last values we emitted upward to avoid echoes.
     const lastEmitted = useRef<string>('');
@@ -585,7 +587,7 @@ const PlainTextSync: React.FC<{
         blurSelectionRef.current = null;
     }, [editor, value, blurSelectionRef]);
 
-    const handleChange = useCallback(() => {
+    const emit = useCallback(() => {
         let text = '';
         let currentPills: SlashCommandDescriptor[] = [];
         editor.getEditorState().read(() => {
@@ -605,6 +607,40 @@ const PlainTextSync: React.FC<{
             onPillsChange(currentPills);
         }
     }, [editor, onChange, onPillsChange]);
+
+    // Read through a ref so the emitter can be built once per editor while
+    // still calling the latest props.
+    const emitRef = useRef(emit);
+    emitRef.current = emit;
+
+    // Composition updates are held back rather than published per keystroke —
+    // publishing re-renders every consumer of the composer text, and a consumer
+    // that mounts or unmounts a node breaks the running composition (see
+    // createCompositionGatedEmitter).
+    const emitterRef = useRef<ReturnType<typeof createCompositionGatedEmitter> | null>(null);
+    useEffect(() => {
+        const emitter = createCompositionGatedEmitter({
+            isComposing: () => ime.isComposing(),
+            emit: () => emitRef.current(),
+            getWindow: () => (editor.getRootElement()?.ownerDocument.defaultView ?? null) as
+                (Window & typeof globalThis) | null,
+        });
+        emitterRef.current = emitter;
+        return () => {
+            emitterRef.current = null;
+            emitter.dispose();
+        };
+    }, [editor, ime]);
+
+    const handleChange = useCallback(() => {
+        // Before the effect has run (first commit) there is nothing composing
+        // yet, so publishing directly matches the gated path.
+        if (!emitterRef.current) {
+            emitRef.current();
+            return;
+        }
+        emitterRef.current.handleUpdate();
+    }, []);
 
     return <OnChangePlugin onChange={handleChange} ignoreSelectionChange />;
 };
@@ -783,7 +819,7 @@ const WindowsImeCompositionOrderPlugin: React.FC = () => {
 
 /**
  * Verbose IME event tracing (pref `debugImeTrace`), for diagnosing
- * composition issues from user reports without a local reproduction.
+ * composition issues without a local reproduction.
  */
 const ImeTracePlugin: React.FC<{ ime: ImeCompositionTracker }> = ({ ime }) => {
     const [editor] = useLexicalComposerContext();
@@ -1819,7 +1855,7 @@ export const LexicalEditorInput = forwardRef<LexicalEditorInputHandle, LexicalEd
                     </div>
                     <HistoryPlugin />
                     <ImeCompositionTrackerPlugin ime={ime} />
-                    <PlainTextSync value={value} onChange={onChange} pills={pills} onPillsChange={onPillsChange} blurSelectionRef={blurSelectionRef} />
+                    <PlainTextSync value={value} onChange={onChange} pills={pills} onPillsChange={onPillsChange} blurSelectionRef={blurSelectionRef} ime={ime} />
                     <SlashCommandRevertPlugin ime={ime} />
                     <TypeOverSelectionPlugin ime={ime} />
                     <ArgumentHintPlugin />
