@@ -48,6 +48,7 @@ import SplitApplyButton from '../../../components/ui/buttons/SplitApplyButton';
 import { openNoteByKey } from '../../../utils/sourceUtils';
 import {
     executeEditNoteOrBatchAction,
+    getUserFacingErrorMessage,
     undoEditNoteOrBatchAction,
 } from '../../../utils/editNoteActions';
 import { logger } from '../../../../src/utils/logger';
@@ -498,7 +499,7 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
                     undoAgentAction(action.id);
                     logger(`EditNoteGroupView: Undone ${action.action_type} action ${action.id}`, 1);
                 } catch (error: any) {
-                    const errorMessage = error?.message || 'Failed to undo edit_note';
+                    const errorMessage = getUserFacingErrorMessage(error, 'Failed to undo edit_note');
                     const stackTrace = error?.stack || '';
                     logger(`EditNoteGroupView: Failed to undo ${action.action_type} action ${action.id}: ${errorMessage}\n${stackTrace}`, 1);
                     if (action.toolcall_id) {

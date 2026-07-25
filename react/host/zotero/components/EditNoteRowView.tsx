@@ -279,8 +279,16 @@ const EditNoteRowViewComponent: React.FC<EditNoteRowViewProps> = ({
                     <div className="mt-010 flex-shrink-0">
                         <Icon icon={AlertIcon} className="font-color-secondary scale-90" />
                     </div>
+                    {/*
+                        Show the actual failure reason — an undo can fail for
+                        reasons with quite different remedies (the note drifted,
+                        the library is excluded from Beaver, the note is gone),
+                        and a single generic string sends the user to the wrong
+                        one. The manual-revert hint stays on as a remedy that
+                        applies whatever the cause.
+                    */}
                     <div className="text-sm font-color-secondary" style={{ lineHeight: '1.4' }}>
-                        Could not undo automatically. The note may have been modified since this edit was applied. You can revert manually in the note editor.
+                        {displayedUndoError} You can revert manually in the note editor.
                     </div>
                 </div>
             )}

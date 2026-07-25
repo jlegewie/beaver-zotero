@@ -715,6 +715,9 @@ export function resolveLibrariesFilterToSearchableIds(filters: Array<string | nu
 /**
  * Model-facing message for a library the user has excluded from Beaver via the
  * excluded-libraries preference.
+ *
+ * This phrasing addresses the model ("Tell the user…"), so never render it in
+ * the UI — use `excludedLibraryUserMessage` for anything a user reads.
  */
 export function excludedLibraryMessage(libraryId: number): string {
     const library = Zotero.Libraries?.get?.(libraryId);
@@ -723,6 +726,21 @@ export function excludedLibraryMessage(libraryId: number): string {
         `The library ${name} is excluded from Beaver, so Beaver cannot read or ` +
         `modify its items. Tell the user they can re-enable access by removing it ` +
         `from the excluded libraries list in Beaver Preferences.`
+    );
+}
+
+/**
+ * User-facing counterpart of `excludedLibraryMessage`, for exclusion failures
+ * surfaced directly in the UI (e.g. an undo the user clicked). Same condition,
+ * addressed to the user rather than the model.
+ */
+export function excludedLibraryUserMessage(libraryId: number): string {
+    const library = Zotero.Libraries?.get?.(libraryId);
+    const name = library ? `"${library.name}"` : 'this library';
+    return (
+        `The library ${name} is excluded from Beaver, so Beaver cannot modify ` +
+        `its items. You can re-enable access by removing it from the excluded ` +
+        `libraries list in Beaver Preferences.`
     );
 }
 

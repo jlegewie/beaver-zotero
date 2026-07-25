@@ -21,6 +21,7 @@ import {
 import { getToolCallStatus, toolResultsMapAtom, type ToolCallStatus } from '../../../agents/atoms';
 import {
     executeEditNoteOrBatchAction,
+    getUserFacingErrorMessage,
     undoEditNoteOrBatchAction,
 } from '../../../utils/editNoteActions';
 import { openNoteAndSearchEdit, openNoteByKey } from '../../../utils/sourceUtils';
@@ -385,7 +386,7 @@ export function useEditNoteActions({
             undoAgentAction(action.id);
             logger(`useEditNoteActions: Undone ${action.action_type} action ${action.id}`, 1);
         } catch (error: any) {
-            const errorMessage = error?.message || 'Failed to undo edit_note';
+            const errorMessage = getUserFacingErrorMessage(error, 'Failed to undo edit_note');
             const stackTrace = error?.stack || '';
             logger(`useEditNoteActions: Failed to undo edit_note action ${action.id}: ${errorMessage}\n${stackTrace}`, 1);
             if (onUndoErrorChange) {
