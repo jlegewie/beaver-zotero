@@ -49,6 +49,7 @@ import {
     registerImeTrace,
     type ImeCompositionTracker,
 } from './imeComposition';
+import { collapsesToRangeEnd } from './caretNavigation';
 import { SlashCommandHoverCardPlugin } from './SlashCommandHoverCardPlugin';
 import {
     $getFlatSelectionOffsets,
@@ -952,6 +953,18 @@ const CaretNavigationPlugin: React.FC<{
                     if (sel.focusNode === prevNode && sel.focusOffset === prevOffset) break;
                 }
             };
+            // Collapse a range selection to its leading (start) or trailing
+            // (end) edge in document order. Returns whether a range was
+            // actually collapsed.
+            const collapseRangeTo = (toEnd: boolean): boolean => {
+                if (sel.isCollapsed || sel.rangeCount === 0) return false;
+                const range = sel.getRangeAt(0);
+                try {
+                    if (toEnd) sel.collapse(range.endContainer, range.endOffset);
+                    else sel.collapse(range.startContainer, range.startOffset);
+                } catch { /* boundary point may be unresolvable */ }
+                return true;
+            };
             // Jump to the very start/end of the editable content - used for the
             // document-boundary moves Gecko's Selection.modify() can't perform.
             const docEdge = (forward: boolean) => {
@@ -985,13 +998,23 @@ const CaretNavigationPlugin: React.FC<{
                 }
             };
 
+            // An unmodified caret move out of a range selection starts from the
+            // selection's leading/trailing edge, as in the platform's native
+            // text fields. Selection.modify('move', ...) instead moves relative
+            // to the focus edge, so a forward selection (e.g. select-all) would
+            // land one step short of the intended edge.
+            const collapsedRange = alter === 'move' && collapseRangeTo(collapsesToRangeEnd(key));
+
             switch (key) {
                 case 'ArrowLeft':
                 case 'ArrowRight': {
                     const fwd = key === 'ArrowRight';
                     if (isMac && e.metaKey) modifySkippingPills(fwd ? 'forward' : 'backward', 'lineboundary');
                     else if ((isMac && e.altKey) || (!isMac && e.ctrlKey)) modifySkippingPills(fwd ? 'right' : 'left', 'word');
-                    else modifySkippingPills(fwd ? 'right' : 'left', 'character');
+                    // Plain left/right out of a range selection only collapses
+                    // to that edge - it does not additionally step a character.
+                    else if (!collapsedRange) modifySkippingPills(fwd ? 'right' : 'left', 'character');
+                    else if (isStrictlyInsidePill()) modifySkippingPills(fwd ? 'right' : 'left', 'character');
                     break;
                 }
                 case 'ArrowUp':
