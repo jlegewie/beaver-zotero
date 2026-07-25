@@ -6,6 +6,39 @@ export function appendRunIfMissing(runs: AgentRun[], run: AgentRun): AgentRun[] 
 }
 
 /**
+ * The run, if any, that the backend may still be finalizing after an
+ * interruption — returned as an id, or null when there is nothing to wait for.
+ *
+ * Only the newest run can qualify. Runs are ordered oldest-first, so an
+ * `in_progress` run with anything after it was abandoned: a later run could not
+ * have started while it was still going. The last one is genuinely ambiguous,
+ * because the row is created `in_progress` and stays that way for as long as
+ * the save takes.
+ */
+export function runAwaitingFinalization(runs: AgentRun[]): string | null {
+    const newest = runs[runs.length - 1];
+    return newest?.status === 'in_progress' ? newest.id : null;
+}
+
+/**
+ * Replace a run in place, matched by id.
+ *
+ * Unlike `appendRunIfMissing` this NEVER appends. A run that is no longer in
+ * the list was truncated away — by a regenerate or a resume, both of which
+ * slice the tail off `threadRunsAtom` — and putting it back would resurrect a
+ * turn the user deliberately discarded.
+ */
+export function replaceRunById(runs: AgentRun[], run: AgentRun): AgentRun[] {
+    let found = false;
+    const next = runs.map(existing => {
+        if (existing.id !== run.id) return existing;
+        found = true;
+        return run;
+    });
+    return found ? next : runs;
+}
+
+/**
  * A run that reached `completed` but never received its terminal `done`
  * event (the socket closed while run_complete post-processing was still
  * draining the message queue) lingers as the active run. Returns the run

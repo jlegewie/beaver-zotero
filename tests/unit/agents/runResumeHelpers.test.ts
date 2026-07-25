@@ -7,7 +7,9 @@ import {
     findRunForResume,
     hasOnlyThinkingParts,
     lingeringCompletedRun,
+    replaceRunById,
     resolveErrorRunId,
+    runAwaitingFinalization,
     toRunError,
 } from '../../../react/agents/runResumeHelpers';
 import type { WSErrorEvent } from '../../../src/services/agentProtocol';
@@ -259,5 +261,52 @@ describe('runResumeHelpers', () => {
             is_resumable: false,
             has_beaver_fallback: true,
         });
+    });
+});
+
+describe('runAwaitingFinalization', () => {
+    it('picks the newest run when it is still in progress', () => {
+        const runs = [makeRun('run-1', 'completed'), makeRun('run-2', 'in_progress')];
+
+        expect(runAwaitingFinalization(runs)).toBe('run-2');
+    });
+
+    it('ignores an in_progress run that something else already followed', () => {
+        // A later run could not have started while this one was still going,
+        // so it was abandoned — no save is coming for it.
+        const runs = [makeRun('run-1', 'in_progress'), makeRun('run-2', 'completed')];
+
+        expect(runAwaitingFinalization(runs)).toBeNull();
+    });
+
+    it('returns null when the newest run already finished', () => {
+        expect(runAwaitingFinalization([makeRun('run-1', 'canceled')])).toBeNull();
+    });
+
+    it('returns null for an empty thread', () => {
+        expect(runAwaitingFinalization([])).toBeNull();
+    });
+});
+
+describe('replaceRunById', () => {
+    it('replaces in place, preserving order', () => {
+        const runs = [makeRun('run-1'), makeRun('run-2'), makeRun('run-3')];
+        const settled = { ...makeRun('run-2', 'canceled'), model_name: 'replaced' };
+
+        const next = replaceRunById(runs, settled);
+
+        expect(next.map(run => run.id)).toEqual(['run-1', 'run-2', 'run-3']);
+        expect(next[1].model_name).toBe('replaced');
+        expect(next[0]).toBe(runs[0]);
+    });
+
+    it('never resurrects a run that is no longer there', () => {
+        // A regenerate or a resume truncates the tail of the thread. Putting a
+        // run back would restore a turn the user deliberately discarded.
+        const runs = [makeRun('run-1')];
+
+        const next = replaceRunById(runs, makeRun('run-2', 'canceled'));
+
+        expect(next).toBe(runs);
     });
 });

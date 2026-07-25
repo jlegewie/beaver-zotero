@@ -27,6 +27,8 @@ import {
     clearAllPendingApprovalsAtom,
 } from "../agents/agentActions";
 import { clearAllPendingQuestionsAtom } from "../agents/pendingQuestions";
+import { recoverInterruptedRunAtom, recoveringRunIdsAtom, threadLoadGenerationAtom } from "./interruptedRunRecovery";
+import { runAwaitingFinalization } from "../agents/runResumeHelpers";
 import { processToolReturnResults } from "../agents/toolResultProcessing";
 import { upgradeToolReturn } from "../compat/legacyToolResults";
 import { loadItemDataForAgentActions } from "../utils/agentActionUtils";
@@ -78,7 +80,7 @@ function normalizeToolCallId(id: string): string {
  * For newer data, the backend generates unique call_<hex> IDs that are consistent
  * between agent_actions and model messages, so no reconciliation is needed.
  */
-function reconcileToolcallIds(runs: AgentRun[], actions: AgentAction[]): void {
+export function reconcileToolcallIds(runs: AgentRun[], actions: AgentAction[]): void {
     if (actions.length === 0 || runs.length === 0) return;
 
     // Collect all tool_call_ids from model messages, indexed by normalized form
@@ -468,17 +470,28 @@ export const loadThreadAtom = atom(
             console.log("loadThreadAtom: runs", runs);
             console.log("loadThreadAtom: agent_actions", agent_actions);
             
-            // Mark any in_progress runs as canceled since they're no longer active
+            // An `in_progress` run is either one the backend is still
+            // finalizing after an interruption, or a leftover that will never
+            // finish. The newest run is the only one that can still be the
+            // former: anything before it has a later run started after it, which
+            // proves it was abandoned. So wait only on the last one, and settle
+            // the rest immediately the way we always have.
+            //
+            // Waiting matters because the row starts out `in_progress` with no
+            // messages — canceling it locally at that moment renders the
+            // interrupted answer as a blank turn that nothing ever refetches.
+            const runIdToRecover = runAwaitingFinalization(runs);
+            if (runIdToRecover) {
+                logger(`loadThreadAtom: run ${runIdToRecover} may still be finalizing; will wait for it`, 1);
+            }
             const processedRuns = runs.map(run => {
-                if (run.status === 'in_progress') {
-                    logger(`loadThreadAtom: Marking in_progress run ${run.id} as canceled`, 1);
-                    return {
-                        ...run,
-                        status: 'canceled' as const,
-                        completed_at: run.completed_at || new Date().toISOString(),
-                    };
-                }
-                return run;
+                if (run.status !== 'in_progress' || run.id === runIdToRecover) return run;
+                logger(`loadThreadAtom: Marking in_progress run ${run.id} as canceled`, 1);
+                return {
+                    ...run,
+                    status: 'canceled' as const,
+                    completed_at: run.completed_at || new Date().toISOString(),
+                };
             });
 
             // Protocol deep-links can request a run that does not exist in the target thread.
@@ -591,6 +604,30 @@ export const loadThreadAtom = atom(
 
                 // Set agent runs
                 set(threadRunsAtom, processedRuns);
+
+                // Supersede any wait still running from an earlier load. The
+                // bump stands them down — after a switch away and back their run
+                // and thread ids are identical to ours, so nothing else tells
+                // them apart — and the reset clears a marker left behind by a
+                // window torn down mid-wait.
+                //
+                // Deliberately here rather than at the top of the load: doing it
+                // before the fetch would stand the old wait down and then, if
+                // the fetch failed, leave nothing in its place — a run stuck
+                // `in_progress` with no one waiting for it.
+                set(threadLoadGenerationAtom, generation => generation + 1);
+                set(recoveringRunIdsAtom, new Set<string>());
+
+                // Wait for a run the backend may still be finalizing, and merge
+                // it in when it settles. Fire-and-forget on purpose: the thread
+                // is already usable, and blocking the load on it would leave the
+                // panel greyed out behind a spinner.
+                if (runIdToRecover) {
+                    void set(recoverInterruptedRunAtom, { runId: runIdToRecover, threadId })
+                        .catch((err: unknown) =>
+                            logger(`loadThreadAtom: interrupted-run recovery failed: ${err}`, 1)
+                        );
+                }
 
                 // Reconcile toolcall_id mismatches between REST API and model messages
                 if (agent_actions && agent_actions.length > 0) {

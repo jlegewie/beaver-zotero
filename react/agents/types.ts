@@ -254,6 +254,21 @@ export interface AgentRun {
         retry_after?: number;
         is_resumable?: boolean;
         has_beaver_fallback?: boolean;
+        /**
+         * Machine-readable cause on `canceled` runs (the backend's
+         * TerminationCause). Not rendered anywhere yet — recorded and logged so
+         * we can see which cause actually dominates before deciding what, if
+         * anything, to tell the user.
+         *
+         * Absent on runs the client canceled locally, so treat `undefined` as
+         * "unknown", never as "the user stopped it".
+         */
+        reason_code?:
+            | 'client_cancel'
+            | 'client_closed'
+            | 'connection_lost'
+            | 'server_shutdown'
+            | (string & {});
     };
 
     /** The model messages (built incrementally during streaming) */

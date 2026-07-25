@@ -3,6 +3,7 @@ import { useAtomValue } from 'jotai';
 import { Icon, Spinner, RepeatIcon } from '../icons/icons';
 import { AgentRunStatus } from '../../agents/types';
 import { wsReconnectingAtom, wsRetryAtom } from '../../atoms/agentRunAtoms';
+import { recoveringRunIdsAtom } from '../../atoms/interruptedRunRecovery';
 
 interface RunStatusIndicatorProps {
     status: AgentRunStatus;
@@ -22,13 +23,21 @@ interface RunStatusIndicatorProps {
 export const RunStatusIndicator: React.FC<RunStatusIndicatorProps> = ({ status, runId, lastMessageHasToolCall }) => {
     const retryState = useAtomValue(wsRetryAtom);
     const reconnectState = useAtomValue(wsReconnectingAtom);
+    const recoveringRunIds = useAtomValue(recoveringRunIdsAtom);
 
     // Check if retry state applies to this run
     const isRetrying = retryState && runId && retryState.runId === runId;
 
-    // Reconnect state is connection-scoped (one active connection at a time),
-    // so it applies to whichever run the indicator is spinning for.
-    const text = reconnectState
+    // This run was interrupted and the backend is still writing what it
+    // produced; we are waiting for that to land, not generating anything.
+    const isRecovering = !!runId && recoveringRunIds.has(runId);
+
+    // Recovery is checked ahead of the reconnect state because reconnect is
+    // connection-scoped: a *different* run reconnecting would otherwise label
+    // this one "Reconnecting…".
+    const text = isRecovering
+        ? 'Finishing up…'
+        : reconnectState
         ? (reconnectState.attempt > 1
             ? `Reconnecting… (${reconnectState.attempt}/${reconnectState.maxAttempts})`
             : 'Reconnecting…')
