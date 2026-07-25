@@ -160,6 +160,33 @@ describe('buildZeroMatchHint', () => {
         }
     });
 
+    it('whitespace-drift candidate resolves to a position when fed back as old_string', () => {
+        // The property that matters for the paste recovery path: the agent
+        // copies candidate [1] verbatim and the retry locates a unique target.
+        const raw = wrap(
+            '<p>First paragraph about engagement.</p>\n'
+            + '<p>Second paragraph about attrition.</p>',
+        );
+        // Same markup, re-indented across the block boundary — the shape a
+        // model produces when it rewrites a span from memory.
+        const oldString =
+            '<p>First paragraph about engagement.</p>\n'
+            + '    <p>Second paragraph about attrition.</p>';
+
+        const initial = prepare(raw, oldString);
+        expect(locateEditTarget({ ...initial, oldString }).kind).toBe('ambiguous');
+
+        const hint = buildZeroMatchHint(initial.simplified, oldString);
+        expect(hint.candidates).toHaveLength(1);
+        const candidate = hint.candidates[0];
+        expect(candidate.via).toBe('whitespace_relaxed');
+        expect(candidate.truncated).toBe(false);
+
+        const retry = prepare(raw, candidate.snippet);
+        expect(locateEditTarget({ ...retry, oldString: candidate.snippet }).kind)
+            .toBe('position');
+    });
+
     it('returns kind "structural" when old_string references a unique block tag with a hallucinated anchor', () => {
         // Model hallucinates "</h2>\n<table>" but the real <table> is not
         // preceded by </h2>. Fuzzy whitespace-exact fails (string doesn't

@@ -10,7 +10,13 @@
  * module.
  */
 
-import { normalizeCjkSpacing, normalizeCjkSpacingMapped, normalizeWS } from './noteHtmlEntities';
+import {
+    normalizeCjkSpacing,
+    normalizeCjkSpacingMapped,
+    normalizeWS,
+    normalizeWSMapped,
+    trimWSOrNbsp,
+} from './noteHtmlEntities';
 
 // =============================================================================
 // Candidate snippets
@@ -118,6 +124,60 @@ export function markTruncatedUnlessVerbatim(
 }
 
 /**
+ * Build a `whitespace_relaxed` candidate from the exact note span a relaxed
+ * match resolved to, or `null` when that span cannot be handed back as a
+ * ready-to-paste `old_string`.
+ *
+ * A relaxed hit means the note *does* contain the agent's `old_string` modulo
+ * whitespace, and `[origStart, origEnd)` is where. Returning that span beats
+ * returning a window around it: the agent can paste it straight back instead
+ * of guessing which part of the window to copy.
+ *
+ * `truncated: false` promises exactly that, so each check below falls back to
+ * the windowed snippet — which keeps surrounding context, and is marked
+ * truncated when it has to elide — rather than making a promise the retry
+ * would break:
+ *   - the span does not round-trip to the needle under the same normalizer —
+ *     never expected, but an index-map bug should degrade rather than hand
+ *     back the wrong text
+ *   - the needle is not unique in normalized space. `indexOf` above resolved
+ *     to an arbitrary occurrence, and a bare span carries no context to pin
+ *     down which one, so a confident paste would silently edit whichever came
+ *     first. This mirrors the whitespace-relaxed matcher's own uniqueness
+ *     gate, which rejects the edit for the same reason — the hint must not
+ *     hand back as certain what the matcher refused as ambiguous.
+ *   - the span occurs more than once verbatim, which normalized uniqueness
+ *     should already imply but is cheap to confirm: normalization at a span's
+ *     edges depends on its neighbours.
+ *
+ * There is no length ceiling: the windowed fallback already grows to fit the
+ * whole match, so the exact span is never the larger of the two.
+ */
+function buildExactSpanCandidate(
+    simplified: string,
+    origStart: number,
+    origEnd: number,
+    normalizedNeedle: string,
+    normalizedNote: string,
+    normalize: (s: string) => string,
+): CandidateSnippet | null {
+    if (origStart < 0 || origEnd <= origStart) return null;
+    if (normalizedNote.indexOf(normalizedNeedle)
+        !== normalizedNote.lastIndexOf(normalizedNeedle)) return null;
+    // The span can carry edge whitespace the needle doesn't: index-map ends
+    // sit at the start of a collapsed run, and a dropped CJK-boundary space
+    // pushes the end past it entirely. Trim over the normalizers' whitespace
+    // class — a literal `&nbsp;` left behind here would silently widen what
+    // the agent's retry replaces. The result is still a contiguous slice of
+    // the note, and a tighter paste target.
+    const snippet = trimWSOrNbsp(simplified.substring(origStart, origEnd));
+    if (!snippet) return null;
+    if (normalize(snippet) !== normalizedNeedle) return null;
+    if (simplified.indexOf(snippet) !== simplified.lastIndexOf(snippet)) return null;
+    return { snippet, truncated: false, via: 'whitespace_relaxed', score: 1 };
+}
+
+/**
  * Ranked candidate snippets for an `old_string` that didn't match exactly.
  *
  * Two tiers:
@@ -142,14 +202,18 @@ export function findCandidateSnippets(
     const normSearch = normalizeWS(oldString);
     if (!normSearch) return [];
 
-    // Tier 1: whitespace-relaxed exact match. Expand the snippet window so the
-    // full match is always visible even for long old_strings — truncating
-    // inside the match would yield a snippet with `…` markers the agent
-    // cannot paste verbatim. Try the CJK-aware normalizer first so a needle
-    // that differs only by Pangu spacing at CJK ↔ non-CJK prose boundaries
-    // still surfaces the matching note span; fall back to the plain
-    // ws-normalizer so non-CJK content (the bulk of the corpus) gets the
-    // same snippet shape as before.
+    // Tier 1: whitespace-relaxed exact match. The note contains `old_string`
+    // modulo whitespace, and the normalizers' index maps say exactly where —
+    // so return that span verbatim, which is what the agent needs to paste
+    // back. Only when the span can't be promised as pasteable (see
+    // `buildExactSpanCandidate`) do we fall back to a window around it, widened
+    // so the full match stays visible even for long old_strings.
+    //
+    // Try the CJK-aware normalizer first so a needle that differs only by
+    // Pangu spacing at CJK ↔ non-CJK prose boundaries still surfaces the
+    // matching note span; fall back to the plain ws-normalizer, which stays
+    // reachable when the two normalizers disagree on a boundary space (e.g.
+    // one at the needle's edge, where the CJK rule has no left/right context).
     const cjkNormSearch = normalizeCjkSpacing(oldString);
     const cjkNormHtmlMapped = normalizeCjkSpacingMapped(simplified);
     const cjkIdx = cjkNormSearch ? cjkNormHtmlMapped.text.indexOf(cjkNormSearch) : -1;
@@ -157,6 +221,11 @@ export function findCandidateSnippets(
         const matchEndNorm = cjkIdx + cjkNormSearch.length;
         const origStart = cjkNormHtmlMapped.indexMap[cjkIdx] ?? 0;
         const origEnd = cjkNormHtmlMapped.indexMap[matchEndNorm] ?? simplified.length;
+        const exact = buildExactSpanCandidate(
+            simplified, origStart, origEnd,
+            cjkNormSearch, cjkNormHtmlMapped.text, normalizeCjkSpacing,
+        );
+        if (exact) return [exact];
         const pivot = Math.floor((origStart + origEnd) / 2);
         const window = Math.max(maxSnippetLength, (origEnd - origStart) + 100);
         const { snippet, truncated } = markTruncatedUnlessVerbatim(
@@ -165,10 +234,20 @@ export function findCandidateSnippets(
         );
         return [{ snippet, truncated, via: 'whitespace_relaxed', score: 1 }];
     }
-    const normHtml = normalizeWS(simplified);
+    const normHtmlMapped = normalizeWSMapped(simplified);
+    const normHtml = normHtmlMapped.text;
     const idx = normHtml.indexOf(normSearch);
     if (idx !== -1) {
         const matchEnd = idx + normSearch.length;
+        const exact = buildExactSpanCandidate(
+            simplified,
+            normHtmlMapped.indexMap[idx] ?? -1,
+            normHtmlMapped.indexMap[matchEnd] ?? -1,
+            normSearch,
+            normHtml,
+            normalizeWS,
+        );
+        if (exact) return [exact];
         const pivot = Math.floor((idx + matchEnd) / 2);
         const window = Math.max(maxSnippetLength, normSearch.length + 100);
         // Cut from the normalized note, so the slice only matches the note
