@@ -235,6 +235,18 @@ export function hasWhitespaceOrNbsp(s: string): boolean {
     return new RegExp(WS_OR_NBSP_CLASS).test(s);
 }
 
+const WS_OR_NBSP_EDGE_RUN = new RegExp(
+    `^${WS_OR_NBSP_CLASS}+|${WS_OR_NBSP_CLASS}+$`, 'g',
+);
+
+/** Like `String.trim()` but over the same whitespace class the normalizers
+ *  use, so a literal `&nbsp;` at either edge is trimmed too. Callers slicing
+ *  a span out of note HTML need this: `trim()` alone leaves an `&nbsp;` that
+ *  normalization treats as insignificant whitespace. */
+export function trimWSOrNbsp(s: string): string {
+    return s.replace(WS_OR_NBSP_EDGE_RUN, '');
+}
+
 // Literal HTML entity for non-breaking space. The walk-and-collapse logic below
 // advances by its full length when it appears in source so positions stay
 // aligned with the original string.

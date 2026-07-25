@@ -256,6 +256,21 @@ describe('findCandidateSnippets', () => {
         expect(candidates[0].snippet).not.toContain('…');
     });
 
+    it('tier-1 does not extend the span over a literal &nbsp; past the match', () => {
+        // The note's boundary space is encoded as `&nbsp;`, and the CJK rule
+        // drops it — which puts the index-map end past the entity. Leaving it
+        // on the snippet would widen what the agent's retry replaces beyond
+        // the phrase it asked for.
+        const simplified = '<p>研究显示 A 中&nbsp;B 的差异非常显著并且稳定。</p>';
+        const oldString = '研究显示 A中';
+
+        const candidates = findCandidateSnippets(simplified, oldString);
+        expect(candidates).toHaveLength(1);
+        expect(candidates[0].truncated).toBe(false);
+        expect(candidates[0].snippet).toBe('研究显示 A 中');
+        expect(candidates[0].snippet).not.toContain('&nbsp;');
+    });
+
     it('tier-1 falls back to a window when the matched span is ambiguous', () => {
         // The same sentence twice: pasting the bare span back would only swap
         // a not-found error for an ambiguous-match one.

@@ -15,6 +15,7 @@ import {
     normalizeCjkSpacingMapped,
     normalizeWS,
     normalizeWSMapped,
+    trimWSOrNbsp,
 } from './noteHtmlEntities';
 
 // =============================================================================
@@ -151,10 +152,13 @@ function buildExactSpanCandidate(
     normalize: (s: string) => string,
 ): CandidateSnippet | null {
     if (origStart < 0 || origEnd <= origStart) return null;
-    // Index-map ends sit at the start of a collapsed whitespace run, so the
-    // span can carry edge whitespace the needle doesn't. Trimming keeps it a
-    // contiguous slice of the note and a tighter paste target.
-    const snippet = simplified.substring(origStart, origEnd).trim();
+    // The span can carry edge whitespace the needle doesn't: index-map ends
+    // sit at the start of a collapsed run, and a dropped CJK-boundary space
+    // pushes the end past it entirely. Trim over the normalizers' whitespace
+    // class — a literal `&nbsp;` left behind here would silently widen what
+    // the agent's retry replaces. The result is still a contiguous slice of
+    // the note, and a tighter paste target.
+    const snippet = trimWSOrNbsp(simplified.substring(origStart, origEnd));
     if (!snippet) return null;
     if (normalize(snippet) !== normalizedNeedle) return null;
     if (simplified.indexOf(snippet) !== simplified.lastIndexOf(snippet)) return null;

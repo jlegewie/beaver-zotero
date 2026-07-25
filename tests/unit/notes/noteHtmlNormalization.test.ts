@@ -11,7 +11,12 @@ vi.mock('../../../src/services/supabaseClient', () => ({
 }));
 
 import { normalizeNoteHtml } from '../../../src/utils/noteHtmlSimplifier';
-import { hexToRgb, normalizeWS, normalizeWSMapped } from '../../../src/utils/noteHtmlEntities';
+import {
+    hexToRgb,
+    normalizeWS,
+    normalizeWSMapped,
+    trimWSOrNbsp,
+} from '../../../src/utils/noteHtmlEntities';
 
 /** Helper: wrap inner HTML in the PM canonical wrapper */
 function pmWrap(inner: string): string {
@@ -482,5 +487,19 @@ describe('normalizeWSMapped', () => {
         expect(indexMap[text.indexOf(' ')]).toBe(5);
         // The past-the-end sentinel covers the whole string.
         expect(indexMap[text.length]).toBe(input.length);
+    });
+});
+
+describe('trimWSOrNbsp', () => {
+    it('trims whitespace and literal &nbsp; runs from both edges', () => {
+        expect(trimWSOrNbsp('&nbsp;alpha bravo&nbsp;')).toBe('alpha bravo');
+        expect(trimWSOrNbsp('\n &nbsp; \t alpha&nbsp;\n')).toBe('alpha');
+        expect(trimWSOrNbsp('alpha&nbsp;bravo')).toBe('alpha&nbsp;bravo');
+        expect(trimWSOrNbsp('&nbsp;&nbsp;')).toBe('');
+        expect(trimWSOrNbsp('alpha')).toBe('alpha');
+    });
+
+    it('leaves an incomplete entity alone', () => {
+        expect(trimWSOrNbsp('alpha&nbsp')).toBe('alpha&nbsp');
     });
 });
