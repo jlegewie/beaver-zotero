@@ -42,7 +42,8 @@ export type CandidateSource =
 export interface CandidateSnippet {
     /** Snippet to show the model. Already truncated — do not re-truncate. */
     snippet: string;
-    /** True when the snippet was shortened. */
+    /** True when the snippet is NOT a verbatim slice of the note. It was
+     *  shortened with `…` elision markers, or otherwise reshaped. */
     truncated: boolean;
     /** How this candidate was located. */
     via: CandidateSource;
@@ -61,8 +62,21 @@ export interface FindCandidateSnippetsOptions {
 }
 
 const DEFAULT_MAX_CANDIDATES = 3;
+/** Snippet budget for hints that only point at a region of the note */
 export const DEFAULT_MAX_SNIPPET_LENGTH = 200;
+/** Ceiling for candidates the agent is told to paste back as `old_string` */
+export const MAX_PASTEABLE_SNIPPET_LENGTH = 600;
 const DEFAULT_MIN_SCORE = 0.5;
+
+/** Snippet budget for a candidate the agent should paste verbatim: fit the
+ *  whole span when it is a reasonable size, fall back to a bounded window only
+ *  when it is not. */
+export function pasteableSnippetBudget(spanLength: number): number {
+    return Math.min(
+        MAX_PASTEABLE_SNIPPET_LENGTH,
+        Math.max(DEFAULT_MAX_SNIPPET_LENGTH, spanLength + 100),
+    );
+}
 
 /** Truncate `text` around `pivot` with `…` markers when trimmed. Keeps roughly
  *  `before` chars before the pivot and `after` chars after. */
@@ -89,6 +103,18 @@ export function centerTruncate(
     if (start > 0) snippet = '…' + snippet;
     if (end < text.length) snippet = snippet + '…';
     return { snippet, truncated: true };
+}
+
+/**
+ * Keep `truncated: false` honest: it promises the snippet is a verbatim slice
+ * of the note and can be pasted straight back as `old_string`.
+ */
+export function markTruncatedUnlessVerbatim(
+    result: { snippet: string; truncated: boolean },
+    note: string,
+): { snippet: string; truncated: boolean } {
+    if (result.truncated) return result;
+    return { snippet: result.snippet, truncated: !note.includes(result.snippet) };
 }
 
 /**
@@ -133,7 +159,10 @@ export function findCandidateSnippets(
         const origEnd = cjkNormHtmlMapped.indexMap[matchEndNorm] ?? simplified.length;
         const pivot = Math.floor((origStart + origEnd) / 2);
         const window = Math.max(maxSnippetLength, (origEnd - origStart) + 100);
-        const { snippet, truncated } = centerTruncate(simplified, pivot, window);
+        const { snippet, truncated } = markTruncatedUnlessVerbatim(
+            centerTruncate(simplified, pivot, window),
+            simplified,
+        );
         return [{ snippet, truncated, via: 'whitespace_relaxed', score: 1 }];
     }
     const normHtml = normalizeWS(simplified);
@@ -142,7 +171,12 @@ export function findCandidateSnippets(
         const matchEnd = idx + normSearch.length;
         const pivot = Math.floor((idx + matchEnd) / 2);
         const window = Math.max(maxSnippetLength, normSearch.length + 100);
-        const { snippet, truncated } = centerTruncate(normHtml, pivot, window);
+        // Cut from the normalized note, so the slice only matches the note
+        // verbatim when its whitespace survived normalization untouched.
+        const { snippet, truncated } = markTruncatedUnlessVerbatim(
+            centerTruncate(normHtml, pivot, window),
+            simplified,
+        );
         return [{ snippet, truncated, via: 'whitespace_relaxed', score: 1 }];
     }
 
@@ -194,10 +228,14 @@ export function findCandidateSnippets(
     const out: CandidateSnippet[] = [];
     for (const entry of scored) {
         if (out.length >= maxCandidates) break;
-        const { snippet, truncated } = centerTruncate(
-            entry.line,
-            entry.firstMatchIdx,
-            maxSnippetLength,
+        // A word-overlap snippet is a literal note line, so a high-scoring one
+        // can be pasted straight back — budget it accordingly. Clipping it
+        // wouldn't make the model's choice of line any better, it would just
+        // guarantee the paste fails. An explicit caller budget still wins.
+        const budget = opts.maxSnippetLength ?? pasteableSnippetBudget(entry.line.length);
+        const { snippet, truncated } = markTruncatedUnlessVerbatim(
+            centerTruncate(entry.line, entry.firstMatchIdx, budget),
+            simplified,
         );
         if (seen.has(snippet)) continue;
         seen.add(snippet);
@@ -316,10 +354,9 @@ export function findWindowCandidates(
     const out: CandidateSnippet[] = [];
     for (const entry of regionLines) {
         if (out.length >= maxCandidates) break;
-        const { snippet, truncated } = centerTruncate(
-            entry.line,
-            entry.pivot,
-            maxSnippetLength,
+        const { snippet, truncated } = markTruncatedUnlessVerbatim(
+            centerTruncate(entry.line, entry.pivot, maxSnippetLength),
+            simplified,
         );
         if (seen.has(snippet)) continue;
         seen.add(snippet);

@@ -1,6 +1,10 @@
 import { describe, it, expect } from 'vitest';
 
-import { findCandidateSnippets } from '../../../src/utils/editNoteHints';
+import {
+    DEFAULT_MAX_SNIPPET_LENGTH,
+    findCandidateSnippets,
+    MAX_PASTEABLE_SNIPPET_LENGTH,
+} from '../../../src/utils/editNoteHints';
 
 describe('findCandidateSnippets', () => {
     it('returns a single whitespace_relaxed candidate when old_string matches after whitespace collapse', () => {
@@ -105,6 +109,77 @@ describe('findCandidateSnippets', () => {
         expect(candidates[0].via).toBe('whitespace_relaxed');
         // The returned snippet must contain the full match verbatim.
         expect(candidates[0].snippet).toContain(longMatch);
+    });
+
+    it('returns a realistic note line whole, as a pasteable verbatim slice', () => {
+        // A representative note paragraph — long prose plus a couple of
+        // citation tags — clears the region budget but stays under the
+        // pasteable ceiling, so it must come back intact for the agent to
+        // paste straight back as old_string.
+        const line =
+            '<p>Participants reported markedly lower engagement across every '
+            + 'measured condition, and the effect persisted after controlling '
+            + 'for baseline differences in prior exposure '
+            + '<citation item="u-57MQ9WYE" loc="page5"/>, a pattern that also '
+            + 'held in the replication sample drawn from the second cohort '
+            + '<citation item="u-FEFQH9TC" loc="page12"/>, though the authors '
+            + 'caution that attrition may account for part of the gap.</p>';
+        const simplified = `<p>Introductory paragraph.</p>\n${line}\n<p>Closing paragraph.</p>`;
+        // Same words, reordered opening clause, so tier 1 cannot fire.
+        const oldString =
+            'engagement lower markedly reported participants across every '
+            + 'measured condition baseline differences prior exposure';
+
+        expect(line.length).toBeGreaterThan(DEFAULT_MAX_SNIPPET_LENGTH);
+        expect(line.length).toBeLessThan(MAX_PASTEABLE_SNIPPET_LENGTH);
+
+        const candidates = findCandidateSnippets(simplified, oldString);
+        expect(candidates.length).toBeGreaterThan(0);
+        expect(candidates[0].via).toBe('word_overlap');
+        expect(candidates[0].truncated).toBe(false);
+        expect(candidates[0].snippet).toBe(line);
+        expect(simplified).toContain(candidates[0].snippet);
+    });
+
+    it('never reports truncated: false for a snippet that is not verbatim note text', () => {
+        // `truncated: false` is a promise that the snippet can be pasted back
+        // as old_string. Every tier must keep that promise.
+        const cases: Array<[string, string]> = [
+            // tier 1, whitespace drift inside the note
+            ['<p>The quick brown fox\n  jumps over the lazy dog.</p>',
+                'quick brown fox jumps over the lazy dog'],
+            // tier 1, CJK Pangu spacing drift
+            ['<p>CSCO 指南及 2026 版共识 [14] 将激素抵抗性 CIP 定义为初始足量糖皮质激素治疗。</p>',
+                '<p>CSCO指南及2026版共识[14]将激素抵抗性CIP定义为初始足量糖皮质激素治疗。</p>'],
+            // tier 2, word overlap on an indented line
+            ['<ul>\n    <li>alpha bravo charlie delta echo foxtrot</li>\n</ul>',
+                'alpha bravo charlie delta golf'],
+            // tier 2, line longer than the snippet budget
+            [`<p>${'padding words here '.repeat(120)}alpha bravo charlie delta</p>`,
+                'delta charlie bravo alpha'],
+        ];
+
+        for (const [simplified, oldString] of cases) {
+            for (const c of findCandidateSnippets(simplified, oldString)) {
+                if (!c.truncated) {
+                    expect(simplified).toContain(c.snippet);
+                }
+            }
+        }
+    });
+
+    it('still truncates lines past the pasteable ceiling and marks them', () => {
+        const longLine = '<p>' + 'alpha '.repeat(600) + 'bravo charlie delta echo</p>';
+        const oldString = 'delta echo bravo charlie';
+
+        const candidates = findCandidateSnippets(longLine, oldString);
+        expect(candidates.length).toBeGreaterThan(0);
+        expect(candidates[0].truncated).toBe(true);
+        // Bounded by the ceiling, plus up to two … markers.
+        expect(candidates[0].snippet.length)
+            .toBeLessThanOrEqual(MAX_PASTEABLE_SNIPPET_LENGTH + 2);
+        expect(candidates[0].snippet.startsWith('…')
+            || candidates[0].snippet.endsWith('…')).toBe(true);
     });
 
     it('respects a custom minScore that rejects previously-surfaced lines', () => {

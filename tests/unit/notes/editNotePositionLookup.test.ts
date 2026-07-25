@@ -15,6 +15,10 @@ vi.mock('../../../src/utils/logger', () => ({
     logger: vi.fn(),
 }));
 
+import {
+    DEFAULT_MAX_SNIPPET_LENGTH,
+    MAX_PASTEABLE_SNIPPET_LENGTH,
+} from '../../../src/utils/editNoteHints';
 import { simplifyNoteHtml } from '../../../src/utils/noteHtmlSimplifier';
 import { expandToRawHtml } from '../../../src/utils/noteCitationExpand';
 import { stripDataCitationItems } from '../../../src/utils/noteWrapper';
@@ -177,6 +181,23 @@ describe('buildZeroMatchHint', () => {
         }
     });
 
+    it('structural variant flags an elided anchor context as truncated', () => {
+        // The anchor context is a window cut out of a longer note, so it
+        // carries `…` markers and cannot be pasted as old_string — the
+        // candidate must say so even though it fits the snippet budget whole.
+        const filler = '<p>' + 'lorem ipsum dolor sit amet consectetur. '.repeat(20) + '</p>\n';
+        const simplified = filler + '<table>\n<tbody></tbody></table>\n' + filler;
+        const oldString = '</h2>\n<table>';
+
+        const hint = buildZeroMatchHint(simplified, oldString);
+        expect(hint.kind).toBe('structural');
+        if (hint.kind === 'structural') {
+            expect(hint.candidates).toHaveLength(1);
+            expect(hint.candidates[0].snippet).toContain('…');
+            expect(hint.candidates[0].truncated).toBe(true);
+        }
+    });
+
     it('returns kind "generic" when no hint applies', () => {
         const simplified = '<p>totally unrelated content about cats</p>';
         const oldString = 'xyz123nonexistent';
@@ -197,6 +218,50 @@ describe('buildZeroMatchHint', () => {
             expect(hint.candidates).toHaveLength(1);
             expect(hint.candidates[0].via).toBe('inline_tag_drift');
             expect(hint.candidates[0].snippet).toBe(hint.noteSpan);
+        }
+    });
+
+    it('drift candidate carries the whole span when it clears the region budget', () => {
+        // The drift message tells the model to copy this span verbatim, so a
+        // span longer than the region budget must not come back clipped —
+        // pasting a clipped version cannot match.
+        const prose =
+            'ages 13 to 15 experienced sustained declines in reported wellbeing '
+            + 'across every measured condition, and the association held after '
+            + 'adjusting for baseline differences in prior exposure as well as '
+            + 'for the composition of the replication sample, ';
+        const noteSpan = `<p>${prose}<strong>substantial</strong> negative effects.</p>`;
+        const simplified = `<p>Unrelated opening line.</p>\n${noteSpan}`;
+        const oldString = `<p>${prose}substantial negative effects.</p>`;
+
+        expect(noteSpan.length).toBeGreaterThan(DEFAULT_MAX_SNIPPET_LENGTH);
+        expect(noteSpan.length).toBeLessThan(MAX_PASTEABLE_SNIPPET_LENGTH);
+
+        const hint = buildZeroMatchHint(simplified, oldString);
+        expect(hint.kind).toBe('drift');
+        if (hint.kind === 'drift') {
+            expect(hint.candidates[0].truncated).toBe(false);
+            expect(hint.candidates[0].snippet).toBe(hint.noteSpan);
+            expect(simplified).toContain(hint.candidates[0].snippet);
+        }
+    });
+
+    it('drift candidate past the pasteable ceiling stays marked truncated', () => {
+        const prose = 'sustained declines in reported wellbeing were observed. '.repeat(20);
+        const noteSpan = `<p>${prose}<strong>substantial</strong> negative effects.</p>`;
+        const simplified = `<p>Unrelated opening line.</p>\n${noteSpan}`;
+        const oldString = `<p>${prose}substantial negative effects.</p>`;
+
+        expect(noteSpan.length).toBeGreaterThan(MAX_PASTEABLE_SNIPPET_LENGTH);
+
+        const hint = buildZeroMatchHint(simplified, oldString);
+        expect(hint.kind).toBe('drift');
+        if (hint.kind === 'drift') {
+            expect(hint.candidates[0].truncated).toBe(true);
+            expect(hint.candidates[0].snippet.length)
+                .toBeLessThanOrEqual(MAX_PASTEABLE_SNIPPET_LENGTH + 2);
+            // The full span is still available to the model in the message.
+            expect(hint.message).toContain(hint.noteSpan);
         }
     });
 
