@@ -531,7 +531,7 @@
     margin: 0;
 }
 
-/* Placeholder overlay - absolutely positioned and click-through. */
+/* Placeholder overlay - absolutely positioned and click-through.*/
 [id^="beaver-pane-"] .beaver-lexical-placeholder {
     position: absolute;
     top: 1px;
@@ -542,6 +542,14 @@
     line-height: 1.25;
     user-select: none;
     -webkit-user-select: none;
+}
+
+[id^="beaver-pane-"] .beaver-lexical-placeholder::before {
+    content: attr(data-placeholder);
+}
+
+[id^="beaver-pane-"] .beaver-lexical-scroll:not([data-placeholder-visible="true"]) .beaver-lexical-placeholder {
+    display: none;
 }
 
 /* Argument-hint ghost text - rendered after a freshly inserted /command pill.

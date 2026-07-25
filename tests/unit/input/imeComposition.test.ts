@@ -3,10 +3,212 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { COMMAND_PRIORITY_EDITOR, COMPOSITION_END_COMMAND } from 'lexical';
 import type { LexicalEditor } from 'lexical';
-import { registerCompositionEndDeferral } from '../../../react/components/input/lexical/imeComposition';
+import {
+    createImeCompositionTracker,
+    registerCompositionEndDeferral,
+} from '../../../react/components/input/lexical/imeComposition';
+
+type RootListener = (root: HTMLElement | null, prev: HTMLElement | null) => void;
+
+/**
+ * Minimal stand-in for the LexicalEditor surface the tracker uses: a root
+ * listener registry (invoked immediately on registration and once more with a
+ * null root on unregistration) plus Lexical's own composing flag.
+ */
+class FakeEditor {
+    private rootListeners = new Set<RootListener>();
+    private root: HTMLElement | null = null;
+    public composing = false;
+
+    isComposing(): boolean {
+        return this.composing;
+    }
+
+    registerRootListener(listener: RootListener): () => void {
+        listener(this.root, null);
+        this.rootListeners.add(listener);
+        return () => {
+            this.rootListeners.delete(listener);
+            listener(null, this.root);
+        };
+    }
+
+    setRootElement(next: HTMLElement | null): void {
+        const prev = this.root;
+        this.root = next;
+        for (const listener of this.rootListeners) listener(next, prev);
+    }
+}
+
+describe('createImeCompositionTracker', () => {
+    let editor: FakeEditor;
+    let root: HTMLElement;
+    let ime: ReturnType<typeof createImeCompositionTracker>;
+    let dispose: (() => void) | null;
+
+    const compositionStart = () => root.dispatchEvent(new Event('compositionstart'));
+    const compositionUpdate = () => root.dispatchEvent(new Event('compositionupdate'));
+    const compositionEnd = () => root.dispatchEvent(new Event('compositionend'));
+
+    beforeEach(() => {
+        vi.useFakeTimers();
+        editor = new FakeEditor();
+        root = document.createElement('div');
+        document.body.appendChild(root);
+        editor.setRootElement(root);
+        ime = createImeCompositionTracker();
+        dispose = ime.register(editor as unknown as LexicalEditor);
+    });
+
+    afterEach(() => {
+        dispose?.();
+        dispose = null;
+        root.remove();
+        vi.useRealTimers();
+    });
+
+    it('reports no composition before any composition event', () => {
+        expect(ime.isComposing()).toBe(false);
+        expect(ime.isImeActive()).toBe(false);
+    });
+
+    it('reports a composition between compositionstart and compositionend', () => {
+        compositionStart();
+        expect(ime.isComposing()).toBe(true);
+        expect(ime.isImeActive()).toBe(true);
+
+        compositionEnd();
+        expect(ime.isComposing()).toBe(false);
+    });
+
+    it('keeps the IME active for a grace period after compositionend', () => {
+        compositionStart();
+        compositionEnd();
+        // The IME can still be open right after compositionend, so selection
+        // writes must stay suspended.
+        expect(ime.isImeActive()).toBe(true);
+
+        vi.advanceTimersByTime(50);
+        expect(ime.isImeActive()).toBe(true);
+
+        vi.advanceTimersByTime(200);
+        expect(ime.isImeActive()).toBe(false);
+        expect(ime.isComposing()).toBe(false);
+    });
+
+    it('starts composing on a compositionupdate that follows no compositionstart', () => {
+        compositionUpdate();
+        expect(ime.isComposing()).toBe(true);
+    });
+
+    it('stays composing across a long sequence of updates', () => {
+        compositionStart();
+        for (let i = 0; i < 10; i++) {
+            vi.advanceTimersByTime(20_000);
+            compositionUpdate();
+            expect(ime.isComposing()).toBe(true);
+        }
+    });
+
+    it('keeps protecting a composition that sits quiet for minutes', () => {
+        // An IME can hold its candidate window open without emitting any event.
+        // Expiring on elapsed time would let selection writes run against the
+        // live composition and discard the composed text.
+        compositionStart();
+        vi.advanceTimersByTime(10 * 60_000);
+        expect(ime.isComposing()).toBe(true);
+        expect(ime.isImeActive()).toBe(true);
+    });
+
+    it('honours Lexical\'s flag around the end of a composition', () => {
+        // The Windows composition-order deferral deliberately keeps Lexical
+        // composing until the composition's final input has been processed, and
+        // the tracker must never report less than Lexical knows there.
+        compositionStart();
+        compositionEnd();
+        editor.composing = true;
+        expect(ime.isComposing()).toBe(true);
+        expect(ime.isImeActive()).toBe(true);
+
+        // Long after the composition ended the flag is wedged, not meaningful.
+        vi.advanceTimersByTime(1_000);
+        expect(ime.isComposing()).toBe(false);
+        expect(ime.isImeActive()).toBe(false);
+    });
+
+    it('clears a wedged Lexical composition flag on focus loss', () => {
+        // Lexical clears its composition key while processing compositionend,
+        // so a missed event leaves the flag set for the editor's lifetime.
+        compositionStart();
+        editor.composing = true;
+        expect(ime.isComposing()).toBe(true);
+
+        root.dispatchEvent(new Event('focusout'));
+        vi.advanceTimersByTime(200);
+        expect(ime.isComposing()).toBe(false);
+        expect(ime.isImeActive()).toBe(false);
+    });
+
+    it('clears a wedged Lexical composition flag when the root is replaced', () => {
+        compositionStart();
+        editor.composing = true;
+        const newRoot = document.createElement('div');
+        document.body.appendChild(newRoot);
+        editor.setRootElement(newRoot);
+
+        vi.advanceTimersByTime(200);
+        expect(ime.isComposing()).toBe(false);
+        newRoot.remove();
+    });
+
+    it('trusts Lexical\'s flag again for the next composition', () => {
+        compositionStart();
+        editor.composing = true;
+        root.dispatchEvent(new Event('focusout'));
+        vi.advanceTimersByTime(200);
+        expect(ime.isComposing()).toBe(false);
+
+        // The cleared state must not latch.
+        compositionStart();
+        expect(ime.isComposing()).toBe(true);
+        expect(ime.isImeActive()).toBe(true);
+    });
+
+    it('ends the composition when the editor loses focus', () => {
+        compositionStart();
+        root.dispatchEvent(new Event('focusout'));
+        expect(ime.isComposing()).toBe(false);
+    });
+
+    it('follows the editor to a new root element', () => {
+        compositionStart();
+        const newRoot = document.createElement('div');
+        document.body.appendChild(newRoot);
+        editor.setRootElement(newRoot);
+        // A composition cannot survive its root being replaced.
+        expect(ime.isComposing()).toBe(false);
+
+        newRoot.dispatchEvent(new Event('compositionstart'));
+        expect(ime.isComposing()).toBe(true);
+
+        // The old root is no longer observed.
+        newRoot.dispatchEvent(new Event('compositionend'));
+        vi.advanceTimersByTime(1_000);
+        compositionStart();
+        expect(ime.isComposing()).toBe(false);
+        newRoot.remove();
+    });
+
+    it('stops reporting compositions after unregistering', () => {
+        dispose?.();
+        dispose = null;
+        compositionStart();
+        expect(ime.isComposing()).toBe(false);
+        expect(ime.isImeActive()).toBe(false);
+    });
+});
 
 type CommandListener = (payload: unknown) => boolean;
-type RootListener = (root: HTMLElement | null, prev: HTMLElement | null) => void;
 
 /**
  * Minimal stand-in for LexicalEditor's command bus and root-listener registry,
@@ -15,7 +217,7 @@ type RootListener = (root: HTMLElement | null, prev: HTMLElement | null) => void
  * invoked immediately on registration and once more (with a null root) on
  * unregistration.
  */
-class FakeEditor {
+class FakeCommandBusEditor {
     private commandListeners: { command: unknown; listener: CommandListener; priority: number; order: number }[] = [];
     private rootListeners = new Set<RootListener>();
     private root: HTMLElement | null = null;
@@ -57,7 +259,7 @@ class FakeEditor {
 }
 
 describe('registerCompositionEndDeferral', () => {
-    let editor: FakeEditor;
+    let editor: FakeCommandBusEditor;
     let root: HTMLElement;
     let stockHandler: ReturnType<typeof vi.fn>;
     let dispose: (() => void) | null;
@@ -67,7 +269,7 @@ describe('registerCompositionEndDeferral', () => {
 
     beforeEach(() => {
         vi.useFakeTimers();
-        editor = new FakeEditor();
+        editor = new FakeCommandBusEditor();
         root = document.createElement('div');
         document.body.appendChild(root);
         editor.setRootElement(root);

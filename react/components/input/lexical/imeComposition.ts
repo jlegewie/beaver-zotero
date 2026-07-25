@@ -7,6 +7,139 @@ import {
 import { logger } from '../../../../src/utils/logger';
 
 /**
+ * How long after `compositionend` the IME is still treated as active.
+ *
+ * Gecko can leave an IME composing after it has already fired
+ * `compositionend` (Lexical carries its own workaround for the same quirk),
+ * and a scripted selection change inside that window makes Gecko commit or
+ * discard whatever the IME still holds. Everything that repairs the caret
+ * therefore stands down for a short grace period after composition ends.
+ */
+const IME_ACTIVE_GRACE_MS = 120;
+
+/**
+ * Tracks IME composition from the editor's own DOM events.
+ *
+ * Custom caret/selection handling must yield to an active IME: acting on
+ * composition-owned key events, calling preventDefault() on them, or moving
+ * the selection while the IME composes cancels the composition or discards
+ * the text the user just committed.
+ *
+ * Two granularities are exposed because the two hazards differ:
+ *
+ * - `isComposing()` — strictly between `compositionstart` and
+ *   `compositionend`. Use it for edits that would corrupt the composed text
+ *   itself (node transforms, intercepting `beforeinput`).
+ * - `isImeActive()` — also covers the grace period after `compositionend`.
+ *   Use it for anything that writes the selection, which is unsafe for as
+ *   long as the IME may still be open.
+ *
+ * Lexical's own `editor.isComposing()` is folded in so the tracker can never
+ * report less than Lexical knows; it is not sufficient on its own, because it
+ * is false on the keydown that starts a composition and false again as soon
+ * as Lexical has processed `compositionend`.
+ *
+ * An in-progress composition is only ever cleared by positive evidence that it
+ * finished — `compositionend`, the editor losing focus, its root element being
+ * replaced, or the tracker being unregistered — never by elapsed time. An IME
+ * can sit quietly with its candidate window open for minutes without emitting a
+ * single event, and a timeout cannot tell that apart from a dropped end event;
+ * erring towards "still composing" costs a few skipped caret repairs, while
+ * erring the other way lets a scripted selection change discard the user's
+ * composed text. Lexical's flag is the one exception: it survives its own
+ * `compositionend` by design for a moment (see isEditorComposing) but is not
+ * cleared at all when the event goes missing, so it is honoured only around the
+ * end of a composition rather than indefinitely.
+ */
+export type ImeCompositionTracker = {
+    /** True while a composition is in progress. */
+    isComposing: () => boolean;
+    /** True while a composition is in progress or may still be open. */
+    isImeActive: () => boolean;
+    /** Attach to an editor's root element. Returns an unregister function. */
+    register: (editor: LexicalEditor) => () => void;
+};
+
+export function createImeCompositionTracker(): ImeCompositionTracker {
+    let editor: LexicalEditor | null = null;
+    let composing = false;
+    // Positive evidence that no composition is open. Also gates Lexical's flag,
+    // which it does not clear when it misses a `compositionend`.
+    let ended = true;
+    let lastEventAt = 0;
+
+    /**
+     * Lexical's own flag. After `compositionend` it can legitimately stay set
+     * until Lexical has processed the composition's final `input` — the Windows
+     * composition-order deferral holds it there on purpose, and mutating the
+     * composed text node inside that window is what discards IME text. That
+     * window is milliseconds wide, so it is honoured for the grace period and
+     * no longer; a flag still set after that is wedged (Lexical never clears it
+     * when it misses a `compositionend`) and must not keep suppressing caret
+     * handling for the editor's lifetime.
+     */
+    const isEditorComposing = () =>
+        (editor?.isComposing() ?? false)
+        && (!ended || Date.now() - lastEventAt < IME_ACTIVE_GRACE_MS);
+    const isComposing = () => composing || isEditorComposing();
+    const isImeActive = () =>
+        isComposing() || (lastEventAt > 0 && Date.now() - lastEventAt < IME_ACTIVE_GRACE_MS);
+
+    const onCompositionStart = () => {
+        composing = true;
+        ended = false;
+        lastEventAt = Date.now();
+    };
+    const onCompositionUpdate = onCompositionStart;
+    const onCompositionEnd = () => {
+        composing = false;
+        ended = true;
+        lastEventAt = Date.now();
+    };
+    // Gecko commits an open composition when the editor loses focus, and the
+    // resulting compositionend can be missed (e.g. the window is torn down).
+    // Losing focus is therefore treated as the composition being over — it is
+    // also what lets a lingering Lexical flag recover.
+    const onFocusOut = () => {
+        if (ended && !composing) return;
+        composing = false;
+        ended = true;
+        lastEventAt = Date.now();
+    };
+
+    const register = (nextEditor: LexicalEditor) => {
+        editor = nextEditor;
+        const attach = (root: HTMLElement) => {
+            root.addEventListener('compositionstart', onCompositionStart);
+            root.addEventListener('compositionupdate', onCompositionUpdate);
+            root.addEventListener('compositionend', onCompositionEnd);
+            root.addEventListener('focusout', onFocusOut);
+        };
+        const detach = (root: HTMLElement) => {
+            root.removeEventListener('compositionstart', onCompositionStart);
+            root.removeEventListener('compositionupdate', onCompositionUpdate);
+            root.removeEventListener('compositionend', onCompositionEnd);
+            root.removeEventListener('focusout', onFocusOut);
+        };
+        const unregisterRoot = nextEditor.registerRootListener((rootElement, prevRootElement) => {
+            if (prevRootElement) detach(prevRootElement);
+            // A composition cannot survive its root element being swapped.
+            composing = false;
+            ended = true;
+            if (rootElement) attach(rootElement);
+        });
+        return () => {
+            unregisterRoot();
+            composing = false;
+            ended = true;
+            editor = null;
+        };
+    };
+
+    return { isComposing, isImeActive, register };
+}
+
+/**
  * Works around IME text being discarded in Gecko on Windows (reported with
  * Sogou Pinyin: the selected candidate never appears in the composer).
  *
@@ -33,6 +166,16 @@ import { logger } from '../../../../src/utils/logger';
  * composition, or an IME that delivers input before compositionend), so the
  * editor can never get stuck in composing state; in that case behavior
  * degrades to the stock immediate order.
+ *
+ * Only this one ordering rule is reproduced, deliberately. Widening Lexical's
+ * detection so that it treats Zotero as Gecko everywhere was measured against
+ * simulated IME commits and made things worse: Lexical's Gecko commit path
+ * also pulls the selection anchor back by the length of the committed text
+ * (guarding against an IME that keeps composing past `compositionend`), and
+ * when the committed text differs from the last composition update that both
+ * inserted the text twice and left it selected, so the next composition
+ * replaced it. Keep any future change to this area behind the same kind of
+ * measurement.
  */
 export function registerCompositionEndDeferral(editor: LexicalEditor): () => void {
     let deferredEvent: CompositionEvent | null = null;
@@ -116,12 +259,23 @@ const TRACED_EVENTS = [
 
 /**
  * Logs every composition-related DOM event on the editor root together with
- * the DOM text and the editor-state text, so IME problems can be diagnosed
- * from a user's debug output without a local reproduction. The listeners are
- * attached after Lexical's, so each line reflects the state AFTER Lexical
- * processed that event.
+ * the DOM text, the editor-state text and the live selection, so IME problems
+ * can be diagnosed from a user's debug output without a local reproduction.
+ * The listeners are attached after Lexical's, so each line reflects the state
+ * AFTER Lexical processed that event.
+ *
+ * Also reports DOM mutations from outside the editor that land mid-composition:
+ * in Zotero's chrome document those reset the selection offsets, which breaks
+ * the composition anchor the IME is holding.
  */
-export function registerImeTrace(editor: LexicalEditor): () => void {
+export function registerImeTrace(editor: LexicalEditor, ime: ImeCompositionTracker): () => void {
+    const describeSelection = (root: HTMLElement): string => {
+        const sel = root.ownerDocument.defaultView?.getSelection();
+        if (!sel) return 'none';
+        const inRoot = !!sel.anchorNode && root.contains(sel.anchorNode);
+        return `${sel.anchorOffset}/${sel.focusOffset}${inRoot ? '' : ' (outside)'}`;
+    };
+
     const onEvent = (event: Event) => {
         const e = event as {
             type: string;
@@ -131,11 +285,12 @@ export function registerImeTrace(editor: LexicalEditor): () => void {
             keyCode?: number;
             isComposing?: boolean;
         };
+        const root = editor.getRootElement();
         let modelText = '';
         editor.getEditorState().read(() => {
             modelText = $getRoot().getTextContent();
         });
-        const domText = editor.getRootElement()?.textContent ?? '';
+        const domText = root?.textContent ?? '';
         logger(
             `[IME] ${e.type}`
             + ` data=${JSON.stringify(e.data ?? null)}`
@@ -144,6 +299,8 @@ export function registerImeTrace(editor: LexicalEditor): () => void {
             + ` keyCode=${e.keyCode ?? '-'}`
             + ` isComposing=${e.isComposing ?? '-'}`
             + ` editorComposing=${editor.isComposing()}`
+            + ` imeActive=${ime.isImeActive()}`
+            + ` sel=${root ? describeSelection(root) : '-'}`
             + ` dom=${JSON.stringify(domText)}`
             + ` model=${JSON.stringify(modelText)}`,
         );
@@ -155,10 +312,40 @@ export function registerImeTrace(editor: LexicalEditor): () => void {
         detach = null;
         if (!rootElement) return;
         for (const type of TRACED_EVENTS) rootElement.addEventListener(type, onEvent);
+
+        const doc = rootElement.ownerDocument;
+        const win = doc.defaultView;
+        let observer: MutationObserver | null = null;
+        if (win) {
+            observer = new (win as typeof globalThis & Window).MutationObserver((records) => {
+                if (!ime.isImeActive()) return;
+                const external = records.filter(record => !rootElement.contains(record.target));
+                if (external.length === 0) return;
+                const kinds = new Set(external.map(record => record.type));
+                logger(
+                    `[IME] external mutations during composition:`
+                    + ` count=${external.length}`
+                    + ` types=${[...kinds].join(',')}`
+                    + ` sel=${describeSelection(rootElement)}`,
+                );
+            });
+            observer.observe(doc.documentElement, { childList: true, subtree: true, characterData: true });
+        }
+
         detach = () => {
             for (const type of TRACED_EVENTS) rootElement.removeEventListener(type, onEvent);
+            observer?.disconnect();
         };
     });
+
+    const win = editor.getRootElement()?.ownerDocument.defaultView;
+    const ua = win?.navigator.userAgent ?? '(no window)';
+    logger(
+        `[IME] trace enabled: ua=${JSON.stringify(ua)}`
+        + ` geckoDetected=${/\bGecko\/\d+/.test(ua)}`
+        + ` firefoxToken=${/^(?!.*Seamonkey)(?=.*Firefox).*/i.test(ua)}`,
+    );
+
     return () => {
         unregisterRoot();
         detach?.();
