@@ -109,6 +109,7 @@ export function createImeCompositionTracker(): ImeCompositionTracker {
 
     const register = (nextEditor: LexicalEditor) => {
         editor = nextEditor;
+        lastEventAt = 0;
         const attach = (root: HTMLElement) => {
             root.addEventListener('compositionstart', onCompositionStart);
             root.addEventListener('compositionupdate', onCompositionUpdate);
@@ -132,6 +133,10 @@ export function createImeCompositionTracker(): ImeCompositionTracker {
             unregisterRoot();
             composing = false;
             ended = true;
+            // Also drop the grace timestamp: an unregistered tracker must report
+            // nothing, not keep a just-ended composition alive for another
+            // grace period.
+            lastEventAt = 0;
             editor = null;
         };
     };
@@ -149,14 +154,17 @@ const EMIT_FLUSH_RETRY_MS = 60;
  * How long a withheld composition update may wait for the IME before it is
  * emitted regardless.
  *
- * Unlike the caret repairs — which can be abandoned, costing only a caret
- * position — this emission is the only path by which the composer's text
- * reaches the rest of the app, so a composition that never ends must not
- * strand it: sending would then post stale text. The wait is bounded and
- * always ends in an emission. Each further composition update restarts it, so
- * the bound only expires for a composition that has genuinely wedged.
+ * This is a backstop for a composition that never reports its end (a missed
+ * `compositionend` while the editor keeps focus), not a deadline for a slow
+ * typist: emitting mid-composition is the very hazard the gate exists to
+ * prevent, so the bound must comfortably exceed how long a user may leave an
+ * input method open — reading a candidate list, paging through candidates, or
+ * simply pausing mid-phrase produces no editor update to restart it.
+ *
+ * Callers that need the text before then flush explicitly (see `flush`), so
+ * nothing user-visible depends on this firing.
  */
-const EMIT_FLUSH_MAX_WAIT_MS = 3_000;
+const EMIT_FLUSH_MAX_WAIT_MS = 60_000;
 
 export type CompositionGatedEmitter = {
     /**
@@ -164,6 +172,13 @@ export type CompositionGatedEmitter = {
      * immediately outside a composition, defers during one.
      */
     handleUpdate: () => void;
+    /**
+     * Publishes a withheld update now, without waiting for the IME. Returns
+     * true when one was actually withheld. Callers that read the published
+     * text at a point where staleness matters (submitting the composer) use
+     * this instead of racing the retry timer.
+     */
+    flush: () => boolean;
     /** Flushes a withheld update and drops any pending timer. */
     dispose: () => void;
 };
@@ -189,7 +204,8 @@ export type CompositionGatedEmitter = {
  * outright.
  *
  * A withheld update is never dropped: it is emitted as soon as the IME is no
- * longer composing, when the bounded wait expires, or on dispose.
+ * longer composing, when a caller flushes it, when the bounded wait expires, or
+ * on dispose.
  */
 export function createCompositionGatedEmitter(options: {
     /** The composition check to gate on — normally the tracker's isComposing. */
@@ -258,6 +274,11 @@ export function createCompositionGatedEmitter(options: {
                 return;
             }
             publish();
+        },
+        flush: () => {
+            if (disposed || !pending) return false;
+            publish();
+            return true;
         },
         dispose: () => {
             if (disposed) return;

@@ -207,6 +207,29 @@ describe('createImeCompositionTracker', () => {
         expect(ime.isComposing()).toBe(false);
         expect(ime.isImeActive()).toBe(false);
     });
+
+    it('reports nothing after unregistering during the post-composition grace', () => {
+        // Unregistering must not leave the grace period running: the tracker is
+        // gone, so it can no longer tell anyone when the IME actually closes.
+        compositionStart();
+        compositionEnd();
+        expect(ime.isImeActive()).toBe(true);
+
+        dispose?.();
+        dispose = null;
+        expect(ime.isComposing()).toBe(false);
+        expect(ime.isImeActive()).toBe(false);
+    });
+
+    it('reports nothing after unregistering mid-composition', () => {
+        compositionStart();
+        editor.composing = true;
+
+        dispose?.();
+        dispose = null;
+        expect(ime.isComposing()).toBe(false);
+        expect(ime.isImeActive()).toBe(false);
+    });
 });
 
 type CommandListener = (payload: unknown) => boolean;
@@ -479,6 +502,64 @@ describe('createCompositionGatedEmitter', () => {
         emitter.dispose();
         emitter.handleUpdate();
         expect(emit).not.toHaveBeenCalled();
+    });
+
+    // What submitting the composer relies on: the text of a just-committed
+    // candidate is published on demand rather than one retry interval later.
+    it('publishes a withheld update on flush, without waiting for the IME', () => {
+        composing = true;
+        emitter.handleUpdate();
+        expect(emit).not.toHaveBeenCalled();
+
+        expect(emitter.flush()).toBe(true);
+        expect(emit).toHaveBeenCalledTimes(1);
+
+        // The flushed update is not emitted a second time by the retry timer.
+        composing = false;
+        vi.advanceTimersByTime(MAX_WAIT_MS * 2);
+        expect(emit).toHaveBeenCalledTimes(1);
+    });
+
+    it('reports nothing to flush when no update is withheld', () => {
+        expect(emitter.flush()).toBe(false);
+        expect(emit).not.toHaveBeenCalled();
+
+        emitter.handleUpdate();
+        expect(emit).toHaveBeenCalledTimes(1);
+        expect(emitter.flush()).toBe(false);
+        expect(emit).toHaveBeenCalledTimes(1);
+    });
+
+    it('reports nothing to flush after dispose', () => {
+        composing = true;
+        emitter.handleUpdate();
+        emitter.dispose();
+        expect(emit).toHaveBeenCalledTimes(1);
+
+        expect(emitter.flush()).toBe(false);
+        expect(emit).toHaveBeenCalledTimes(1);
+    });
+
+    // The default bound is a backstop for a composition that never reports its
+    // end, not a deadline for a user reading a candidate list. Emitting
+    // mid-composition is the hazard the gate exists to prevent, and paging
+    // through candidates or pausing mid-phrase produces no editor update to
+    // restart the wait, so the default must stay far above a human pause.
+    it('holds a withheld update through a long pause by default', () => {
+        composing = true;
+        const defaultEmitter = createCompositionGatedEmitter({
+            isComposing: () => composing,
+            emit,
+            getWindow: () => window as Window & typeof globalThis,
+        });
+        defaultEmitter.handleUpdate();
+        vi.advanceTimersByTime(20_000);
+        expect(emit).not.toHaveBeenCalled();
+
+        composing = false;
+        vi.advanceTimersByTime(100);
+        expect(emit).toHaveBeenCalledTimes(1);
+        defaultEmitter.dispose();
     });
 
     // Losing the text is worse than an ill-timed re-render, so a missing window

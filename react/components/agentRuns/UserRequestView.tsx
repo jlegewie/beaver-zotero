@@ -227,7 +227,12 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
 
     const handleSubmit = useCallback(async (e: React.FormEvent | React.MouseEvent) => {
         e.preventDefault();
-        if (isPending || editedContent.length === 0) return;
+        // Text typed with an input method reaches `editedContent` one
+        // composition at a time, and the last one lands shortly after the user
+        // commits it. Publish anything still withheld so saving right after the
+        // commit keeps the committed text (see flushPendingText).
+        const content = editorHandleRef.current?.flushPendingText() ?? editedContent;
+        if (isPending || content.length === 0) return;
 
         // Build the edited prompt from the editor's pills: surviving pills
         // reuse their persisted wire action, new pills resolve like a fresh
@@ -243,7 +248,7 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
 
         const editedPrompt: BeaverAgentPrompt = {
             ...userPrompt,
-            content: editedContent,
+            content,
             actions: result.actions,
             attachments: result.addedAttachments.length > 0
                 ? [...(userPrompt.attachments ?? []), ...result.addedAttachments]

@@ -305,6 +305,20 @@ export type LexicalEditorInputHandle = {
     insertSlashCommand: (descriptor: SlashCommandDescriptor, queryLength: number | null) => void;
     /** Returns the command pills currently in the editor, in document order. */
     getSlashCommands: () => SlashCommandDescriptor[];
+    /**
+     * Publishes text that is still being withheld for an IME composition and
+     * returns it; returns null when nothing is withheld, i.e. the `value` the
+     * parent already holds is current.
+     *
+     * Text typed with an input method reaches the parent one composition at a
+     * time rather than one keystroke at a time (see
+     * createCompositionGatedEmitter), and the final emission follows the commit
+     * by a short poll interval. Anything that acts on the composer's text at a
+     * moment the user chose — sending, rejecting with instructions, saving an
+     * edit — must call this first, or it can act on text that is missing the
+     * candidate just committed.
+     */
+    flushPendingText: () => string | null;
 };
 
 export interface LexicalEditorInputProps {
@@ -343,8 +357,9 @@ const EditorApi = forwardRef<LexicalEditorInputHandle, {
     pinnedEndCaretRef: React.MutableRefObject<boolean>;
     blurSelectionRef: React.MutableRefObject<LexicalSelectionOffsets | null>;
     selectionRepairGenerationRef: React.MutableRefObject<number>;
+    emitFlushRef: React.MutableRefObject<(() => boolean) | null>;
 }>(
-    function EditorApi({ pinnedEndCaretRef, blurSelectionRef, selectionRepairGenerationRef }, ref) {
+    function EditorApi({ pinnedEndCaretRef, blurSelectionRef, selectionRepairGenerationRef, emitFlushRef }, ref) {
         const [editor] = useLexicalComposerContext();
         const setPlainText = useCallback((text: string, selectionStart = text.length, selectionEnd = selectionStart) => {
             selectionRepairGenerationRef.current++;
@@ -534,8 +549,21 @@ const EditorApi = forwardRef<LexicalEditorInputHandle, {
                     });
                     return result;
                 },
+                flushPendingText: () => {
+                    // Only report text when something was actually withheld: the
+                    // editor is not the source of truth for the parent's value
+                    // (the parent may have just cleared it, with the clearing
+                    // update still to run), so a caller must fall back to the
+                    // value it holds whenever nothing is pending.
+                    if (!emitFlushRef.current?.()) return null;
+                    let text = '';
+                    editor.getEditorState().read(() => {
+                        text = $getRoot().getTextContent();
+                    });
+                    return text;
+                },
             }),
-            [editor, setPlainText, pinnedEndCaretRef, blurSelectionRef, selectionRepairGenerationRef],
+            [editor, setPlainText, pinnedEndCaretRef, blurSelectionRef, selectionRepairGenerationRef, emitFlushRef],
         );
         return null;
     },
@@ -559,7 +587,8 @@ const PlainTextSync: React.FC<{
     onPillsChange?: (pills: SlashCommandDescriptor[]) => void;
     blurSelectionRef: React.MutableRefObject<LexicalSelectionOffsets | null>;
     ime: ImeCompositionTracker;
-}> = ({ value, onChange, pills, onPillsChange, blurSelectionRef, ime }) => {
+    emitFlushRef: React.MutableRefObject<(() => boolean) | null>;
+}> = ({ value, onChange, pills, onPillsChange, blurSelectionRef, ime, emitFlushRef }) => {
     const [editor] = useLexicalComposerContext();
     // Tracks the last values we emitted upward to avoid echoes.
     const lastEmitted = useRef<string>('');
@@ -627,11 +656,15 @@ const PlainTextSync: React.FC<{
                 (Window & typeof globalThis) | null,
         });
         emitterRef.current = emitter;
+        // Lets the imperative handle publish a withheld composition before the
+        // parent acts on its text (see flushPendingText).
+        emitFlushRef.current = () => emitter.flush();
         return () => {
             emitterRef.current = null;
+            emitFlushRef.current = null;
             emitter.dispose();
         };
-    }, [editor, ime]);
+    }, [editor, ime, emitFlushRef]);
 
     const handleChange = useCallback(() => {
         // Before the effect has run (first commit) there is nothing composing
@@ -1821,6 +1854,10 @@ export const LexicalEditorInput = forwardRef<LexicalEditorInputHandle, LexicalEd
         if (imeRef.current === null) imeRef.current = createImeCompositionTracker();
         const ime = imeRef.current;
 
+        // Set by PlainTextSync, read by the imperative handle: publishes text
+        // still withheld for a composition (see flushPendingText).
+        const emitFlushRef = useRef<(() => boolean) | null>(null);
+
         // The ContentEditable ref callback MUST keep a stable identity across
         // renders. Lexical memoizes its root-element ref on this callback, so a
         // changing identity makes it re-run editor.setRootElement() on every
@@ -1878,7 +1915,7 @@ export const LexicalEditorInput = forwardRef<LexicalEditorInputHandle, LexicalEd
                     </div>
                     <HistoryPlugin />
                     <ImeCompositionTrackerPlugin ime={ime} />
-                    <PlainTextSync value={value} onChange={onChange} pills={pills} onPillsChange={onPillsChange} blurSelectionRef={blurSelectionRef} ime={ime} />
+                    <PlainTextSync value={value} onChange={onChange} pills={pills} onPillsChange={onPillsChange} blurSelectionRef={blurSelectionRef} ime={ime} emitFlushRef={emitFlushRef} />
                     <SlashCommandRevertPlugin ime={ime} />
                     <TypeOverSelectionPlugin ime={ime} />
                     <ArgumentHintPlugin />
@@ -1900,6 +1937,7 @@ export const LexicalEditorInput = forwardRef<LexicalEditorInputHandle, LexicalEd
                         pinnedEndCaretRef={pinnedEndCaretRef}
                         blurSelectionRef={blurSelectionRef}
                         selectionRepairGenerationRef={selectionRepairGenerationRef}
+                        emitFlushRef={emitFlushRef}
                     />
                 </div>
             </LexicalComposer>

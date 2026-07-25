@@ -531,7 +531,7 @@
     margin: 0;
 }
 
-/* Placeholder overlay - absolutely positioned and click-through.*/
+/* Placeholder overlay - absolutely positioned and click-through. */
 [id^="beaver-pane-"] .beaver-lexical-placeholder {
     position: absolute;
     top: 1px;

@@ -337,7 +337,13 @@ const InputArea: React.FC<InputAreaProps> = ({
         sendMessage(messageContent);
     };
 
-    const sendMessage = (message: string) => {
+    const sendMessage = (composedMessage: string) => {
+        // Text typed with an input method reaches `messageContent` one
+        // composition at a time, and the last one lands shortly after the user
+        // commits it. Publish anything still withheld so a send that follows
+        // the commit immediately carries the committed text instead of the
+        // state before it (see flushPendingText).
+        const message = editorHandleRef.current?.flushPendingText() ?? composedMessage;
         if (isPending || message.length === 0) return;
         // If the message contains /command pills, resolve each back to its
         // action's prompt (and attach its items/collection) before sending.
@@ -366,7 +372,9 @@ const InputArea: React.FC<InputAreaProps> = ({
             e.stopPropagation();
         }
         if (pendingApprovalsMap.size === 0) return;
-        const instructions = messageContent.trim() || null;
+        // As in sendMessage: pick up a composition the user has just committed.
+        const content = editorHandleRef.current?.flushPendingText() ?? messageContent;
+        const instructions = content.trim() || null;
         for (const pendingApproval of pendingApprovalsMap.values()) {
             logger(`Rejecting approval ${pendingApproval.actionId} with instructions: ${instructions}`);
             sendApprovalResponse({
