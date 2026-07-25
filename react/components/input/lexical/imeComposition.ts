@@ -56,6 +56,15 @@ export type ImeCompositionTracker = {
     isComposing: () => boolean;
     /** True while a composition is in progress or may still be open. */
     isImeActive: () => boolean;
+    /**
+     * Identifies the current composition; incremented when one starts.
+     *
+     * Held after the composition ends, so the update that carries the committed
+     * text still reports the composition it came from, and only a genuinely new
+     * composition changes it. Lets a caller scope a decision it made during one
+     * composition to that composition alone.
+     */
+    compositionId: () => number;
     /** Attach to an editor's root element. Returns an unregister function. */
     register: (editor: LexicalEditor) => () => void;
 };
@@ -67,6 +76,8 @@ export function createImeCompositionTracker(): ImeCompositionTracker {
     // which it does not clear when it misses a `compositionend`.
     let ended = true;
     let lastEventAt = 0;
+    // Monotonic across registrations, so an id can never be reused.
+    let compositionId = 0;
 
     /**
      * Lexical's own flag. After `compositionend` it can legitimately stay set
@@ -86,6 +97,9 @@ export function createImeCompositionTracker(): ImeCompositionTracker {
         isComposing() || (lastEventAt > 0 && Date.now() - lastEventAt < IME_ACTIVE_GRACE_MS);
 
     const onCompositionStart = () => {
+        // Also reached by `compositionupdate` (some IMEs skip the start event),
+        // so only a transition into composing opens a new composition.
+        if (!composing) compositionId++;
         composing = true;
         ended = false;
         lastEventAt = Date.now();
@@ -141,7 +155,7 @@ export function createImeCompositionTracker(): ImeCompositionTracker {
         };
     };
 
-    return { isComposing, isImeActive, register };
+    return { isComposing, isImeActive, compositionId: () => compositionId, register };
 }
 
 /**
@@ -179,6 +193,13 @@ export type CompositionGatedEmitter = {
      * this instead of racing the retry timer.
      */
     flush: () => boolean;
+    /**
+     * Drops a withheld update WITHOUT emitting it. Returns true when one was
+     * withheld. For callers that are about to overwrite the editor's content
+     * anyway (the composer being reset), where publishing it would resurrect
+     * text the user has moved on from.
+     */
+    discard: () => boolean;
     /** Flushes a withheld update and drops any pending timer. */
     dispose: () => void;
 };
@@ -203,9 +224,10 @@ export type CompositionGatedEmitter = {
  * carried by its first update — punctuation, on most input methods — is lost
  * outright.
  *
- * A withheld update is never dropped: it is emitted as soon as the IME is no
+ * A withheld update is never lost: it is emitted as soon as the IME is no
  * longer composing, when a caller flushes it, when the bounded wait expires, or
- * on dispose.
+ * on dispose — the one exception being an explicit `discard`, for a caller that
+ * is replacing the editor's content anyway.
  */
 export function createCompositionGatedEmitter(options: {
     /** The composition check to gate on — normally the tracker's isComposing. */
@@ -278,6 +300,12 @@ export function createCompositionGatedEmitter(options: {
         flush: () => {
             if (disposed || !pending) return false;
             publish();
+            return true;
+        },
+        discard: () => {
+            if (disposed || !pending) return false;
+            pending = false;
+            cancel();
             return true;
         },
         dispose: () => {

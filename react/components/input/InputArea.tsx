@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { StopIcon, GlobalSearchIcon } from '../icons/icons';
 import { useAtom, useSetAtom, useAtomValue, useStore } from 'jotai';
 import { newThreadAtom, currentThreadIdAtom } from '../../atoms/threads';
-import { currentMessageContentAtom, currentMessagePillsAtom, pendingPillInsertAtom } from '../../atoms/messageComposition';
+import { currentMessageContentAtom, currentMessagePillsAtom, pendingPillInsertAtom, composerResetTokenAtom } from '../../atoms/messageComposition';
 import { sendWSMessageAtom, isWSChatPendingAtom, closeWSConnectionAtom, sendApprovalResponseAtom } from '../../atoms/agentRunAtoms';
 import { pendingApprovalsAtom, removePendingApprovalAtom } from '../../agents/agentActions';
 import Button from '../ui/Button';
@@ -71,6 +71,7 @@ const InputArea: React.FC<InputAreaProps> = ({
     const isWebSearchAllowed = useAtomValue(isWebSearchAllowedAtom);
     const currentNoteItem = useAtomValue(currentNoteItemAtom);
     const pendingPillInsert = useAtomValue(pendingPillInsertAtom);
+    const composerResetToken = useAtomValue(composerResetTokenAtom);
     const store = useStore();
     const webSearchDescriptionId = useId();
 
@@ -86,6 +87,14 @@ const InputArea: React.FC<InputAreaProps> = ({
     const insertSlashCommand = useCallback((descriptor: SlashCommandDescriptor, queryLength: number) => {
         editorHandleRef.current?.insertSlashCommand(descriptor, queryLength);
     }, []);
+
+    // A programmatic composer reset (new thread, thread switch, send) can write
+    // the same empty value the editor already published, which its value sync
+    // cannot see. Tell the editor explicitly, so text it is withholding for an
+    // IME composition is dropped instead of resurfacing in the new context.
+    useEffect(() => {
+        editorHandleRef.current?.discardPendingText();
+    }, [composerResetToken]);
 
     // WebSocket state
     const sendWSMessage = useSetAtom(sendWSMessageAtom);

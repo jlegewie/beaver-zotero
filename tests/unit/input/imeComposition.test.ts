@@ -200,6 +200,47 @@ describe('createImeCompositionTracker', () => {
         newRoot.remove();
     });
 
+    // A caller that discards a composition's text (a composer reset) scopes the
+    // decision to that composition by id, so a composition the user starts
+    // afterwards is unaffected.
+    it('keeps one id for the whole of a composition, including its commit', () => {
+        const before = ime.compositionId();
+        compositionStart();
+        const id = ime.compositionId();
+        expect(id).not.toBe(before);
+
+        compositionUpdate();
+        compositionUpdate();
+        expect(ime.compositionId()).toBe(id);
+
+        // Held after the end: the update carrying the committed text still
+        // reports the composition it came from.
+        compositionEnd();
+        expect(ime.compositionId()).toBe(id);
+        vi.advanceTimersByTime(1_000);
+        expect(ime.compositionId()).toBe(id);
+    });
+
+    it('gives the next composition a new id', () => {
+        compositionStart();
+        const first = ime.compositionId();
+        compositionEnd();
+
+        compositionStart();
+        expect(ime.compositionId()).not.toBe(first);
+    });
+
+    it('opens a new composition for a compositionupdate that follows no start', () => {
+        compositionUpdate();
+        const id = ime.compositionId();
+        compositionUpdate();
+        expect(ime.compositionId()).toBe(id);
+
+        compositionEnd();
+        compositionUpdate();
+        expect(ime.compositionId()).not.toBe(id);
+    });
+
     it('stops reporting compositions after unregistering', () => {
         dispose?.();
         dispose = null;
@@ -527,6 +568,46 @@ describe('createCompositionGatedEmitter', () => {
         emitter.handleUpdate();
         expect(emit).toHaveBeenCalledTimes(1);
         expect(emitter.flush()).toBe(false);
+        expect(emit).toHaveBeenCalledTimes(1);
+    });
+
+    // What a composer reset relies on: text withheld from a thread the user has
+    // left must not be published into the next one.
+    it('drops a withheld update on discard without emitting it', () => {
+        composing = true;
+        emitter.handleUpdate();
+
+        expect(emitter.discard()).toBe(true);
+        expect(emit).not.toHaveBeenCalled();
+
+        // Neither the retry timer nor dispose resurrects it.
+        composing = false;
+        vi.advanceTimersByTime(MAX_WAIT_MS * 2);
+        emitter.dispose();
+        expect(emit).not.toHaveBeenCalled();
+    });
+
+    it('reports nothing to discard when no update is withheld', () => {
+        expect(emitter.discard()).toBe(false);
+
+        emitter.handleUpdate();
+        expect(emit).toHaveBeenCalledTimes(1);
+        expect(emitter.discard()).toBe(false);
+        expect(emit).toHaveBeenCalledTimes(1);
+    });
+
+    it('keeps gating updates after a discard', () => {
+        composing = true;
+        emitter.handleUpdate();
+        emitter.discard();
+
+        // The next composition is withheld and published as usual.
+        emitter.handleUpdate();
+        vi.advanceTimersByTime(RETRY_MS * 3);
+        expect(emit).not.toHaveBeenCalled();
+
+        composing = false;
+        vi.advanceTimersByTime(RETRY_MS);
         expect(emit).toHaveBeenCalledTimes(1);
     });
 

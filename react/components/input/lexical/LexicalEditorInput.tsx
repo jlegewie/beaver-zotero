@@ -319,6 +319,25 @@ export type LexicalEditorInputHandle = {
      * candidate just committed.
      */
     flushPendingText: () => string | null;
+    /**
+     * Drops text still withheld for an IME composition and re-syncs the editor
+     * to the parent's current `value`, instead of publishing it.
+     *
+     * For a composer that was reset programmatically (new thread, thread
+     * switch): such a reset can write the same `value` the editor already has —
+     * clearing an already-empty composer — which is invisible to the normal
+     * value sync, so withheld text would otherwise reappear afterwards, in a
+     * context the user has left.
+     */
+    discardPendingText: () => void;
+};
+
+/** The withheld-text operations PlainTextSync exposes to the handle. */
+type PendingTextControls = {
+    /** Publishes a withheld update now; true when one was withheld. */
+    flush: () => boolean;
+    /** Drops a withheld update and re-syncs the editor to the parent's value. */
+    discard: () => void;
 };
 
 export interface LexicalEditorInputProps {
@@ -357,9 +376,9 @@ const EditorApi = forwardRef<LexicalEditorInputHandle, {
     pinnedEndCaretRef: React.MutableRefObject<boolean>;
     blurSelectionRef: React.MutableRefObject<LexicalSelectionOffsets | null>;
     selectionRepairGenerationRef: React.MutableRefObject<number>;
-    emitFlushRef: React.MutableRefObject<(() => boolean) | null>;
+    pendingTextRef: React.MutableRefObject<PendingTextControls | null>;
 }>(
-    function EditorApi({ pinnedEndCaretRef, blurSelectionRef, selectionRepairGenerationRef, emitFlushRef }, ref) {
+    function EditorApi({ pinnedEndCaretRef, blurSelectionRef, selectionRepairGenerationRef, pendingTextRef }, ref) {
         const [editor] = useLexicalComposerContext();
         const setPlainText = useCallback((text: string, selectionStart = text.length, selectionEnd = selectionStart) => {
             selectionRepairGenerationRef.current++;
@@ -555,15 +574,18 @@ const EditorApi = forwardRef<LexicalEditorInputHandle, {
                     // (the parent may have just cleared it, with the clearing
                     // update still to run), so a caller must fall back to the
                     // value it holds whenever nothing is pending.
-                    if (!emitFlushRef.current?.()) return null;
+                    if (!pendingTextRef.current?.flush()) return null;
                     let text = '';
                     editor.getEditorState().read(() => {
                         text = $getRoot().getTextContent();
                     });
                     return text;
                 },
+                discardPendingText: () => {
+                    pendingTextRef.current?.discard();
+                },
             }),
-            [editor, setPlainText, pinnedEndCaretRef, blurSelectionRef, selectionRepairGenerationRef, emitFlushRef],
+            [editor, setPlainText, pinnedEndCaretRef, blurSelectionRef, selectionRepairGenerationRef, pendingTextRef],
         );
         return null;
     },
@@ -587,8 +609,8 @@ const PlainTextSync: React.FC<{
     onPillsChange?: (pills: SlashCommandDescriptor[]) => void;
     blurSelectionRef: React.MutableRefObject<LexicalSelectionOffsets | null>;
     ime: ImeCompositionTracker;
-    emitFlushRef: React.MutableRefObject<(() => boolean) | null>;
-}> = ({ value, onChange, pills, onPillsChange, blurSelectionRef, ime, emitFlushRef }) => {
+    pendingTextRef: React.MutableRefObject<PendingTextControls | null>;
+}> = ({ value, onChange, pills, onPillsChange, blurSelectionRef, ime, pendingTextRef }) => {
     const [editor] = useLexicalComposerContext();
     // Tracks the last values we emitted upward to avoid echoes.
     const lastEmitted = useRef<string>('');
@@ -600,22 +622,37 @@ const PlainTextSync: React.FC<{
     const pillsRef = useRef<SlashCommandDescriptor[]>([]);
     pillsRef.current = pills ?? [];
 
-    // Sync external value -> editor (e.g. when parent clears after send)
-    useEffect(() => {
-        if (value === lastEmitted.current) return;
+    // Latest external value, for the reset path (below), which runs outside
+    // the sync effect and must use the value of the current commit.
+    const valueRef = useRef(value);
+    valueRef.current = value;
+
+    // Id of a composition whose text a composer reset discarded, while that
+    // composition was still open; null when nothing is suppressed. See
+    // handleChange.
+    const suppressedCompositionRef = useRef<number | null>(null);
+
+    // Rebuild the editor's content from an external value.
+    const applyExternalValue = useCallback((next: string) => {
         editor.update(() => {
             const root = $getRoot();
-            if (root.getTextContent() === value) return;
+            if (root.getTextContent() === next) return;
             root.clear();
             const p = $createParagraphNode();
-            $buildContentNodes(value, pillsRef.current).forEach(node => p.append(node));
+            $buildContentNodes(next, pillsRef.current).forEach(node => p.append(node));
             root.append(p);
         });
-        lastEmitted.current = value;
+        lastEmitted.current = next;
         // A rebuild replaces the content wholesale, superseding any blur
         // snapshot the imperative focus() would otherwise restore.
         blurSelectionRef.current = null;
-    }, [editor, value, blurSelectionRef]);
+    }, [editor, blurSelectionRef]);
+
+    // Sync external value -> editor (e.g. when parent clears after send)
+    useEffect(() => {
+        if (value === lastEmitted.current) return;
+        applyExternalValue(value);
+    }, [value, applyExternalValue]);
 
     const emit = useCallback(() => {
         let text = '';
@@ -656,17 +693,70 @@ const PlainTextSync: React.FC<{
                 (Window & typeof globalThis) | null,
         });
         emitterRef.current = emitter;
-        // Lets the imperative handle publish a withheld composition before the
-        // parent acts on its text (see flushPendingText).
-        emitFlushRef.current = () => emitter.flush();
+        // Lets the imperative handle reach the withheld text (see
+        // flushPendingText / discardPendingText).
+        pendingTextRef.current = {
+            flush: () => emitter.flush(),
+            discard: () => {
+                const hadWithheld = emitter.discard();
+                // A composition that is still open belongs to the discarded
+                // draft as well: it goes on producing updates, and publishing
+                // any of them would put the abandoned text into the new
+                // context. Suppress the REST of that composition too, keyed to
+                // its id so a composition the user starts afterwards is
+                // unaffected (see handleChange).
+                //
+                // Deliberately the strict check, NOT the post-composition grace
+                // window: a composition whose text has already been published
+                // is finished business, and suppressing on the strength of the
+                // grace alone would swallow ordinary typing that follows it.
+                // The strict check still covers a commit that is in flight —
+                // Lexical stays composing until it has processed the
+                // composition's final input, which is exactly the window in
+                // which a reset can outrun the committed text.
+                const composing = ime.isComposing();
+                suppressedCompositionRef.current = composing ? ime.compositionId() : null;
+                if (!hadWithheld && !composing) return;
+                // The editor still holds text the parent never saw. After an
+                // explicit reset the parent's value is the authoritative one,
+                // so the withheld text goes rather than surfacing later.
+                applyExternalValue(valueRef.current);
+            },
+        };
         return () => {
             emitterRef.current = null;
-            emitFlushRef.current = null;
+            pendingTextRef.current = null;
             emitter.dispose();
         };
-    }, [editor, ime, emitFlushRef]);
+    }, [editor, ime, pendingTextRef, applyExternalValue]);
 
     const handleChange = useCallback(() => {
+        const suppressed = suppressedCompositionRef.current;
+        if (suppressed !== null) {
+            if (ime.compositionId() !== suppressed) {
+                // A new composition — the user is typing into the reset
+                // composer, which publishes normally.
+                suppressedCompositionRef.current = null;
+            } else if (ime.isComposing()) {
+                // Still the composition that spanned the reset. Its text was
+                // discarded; swallow the rest of it.
+                return;
+            } else if (ime.isImeActive()) {
+                // It has just finished, so this update carries its committed
+                // text. Drop that text and put the editor back on the parent's
+                // value, which is what a reset composer holds. Disarms itself,
+                // so it can only ever consume the one update that follows the
+                // composition it was armed for.
+                suppressedCompositionRef.current = null;
+                applyExternalValue(valueRef.current);
+                return;
+            } else {
+                // The composition is long over and produced no further update:
+                // this one is unrelated (the user typing into the new thread),
+                // so it publishes normally.
+                suppressedCompositionRef.current = null;
+            }
+        }
         // Before the effect has run (first commit) there is nothing composing
         // yet, so publishing directly matches the gated path.
         if (!emitterRef.current) {
@@ -674,7 +764,7 @@ const PlainTextSync: React.FC<{
             return;
         }
         emitterRef.current.handleUpdate();
-    }, []);
+    }, [ime, applyExternalValue]);
 
     return <OnChangePlugin onChange={handleChange} ignoreSelectionChange />;
 };
@@ -1854,9 +1944,10 @@ export const LexicalEditorInput = forwardRef<LexicalEditorInputHandle, LexicalEd
         if (imeRef.current === null) imeRef.current = createImeCompositionTracker();
         const ime = imeRef.current;
 
-        // Set by PlainTextSync, read by the imperative handle: publishes text
-        // still withheld for a composition (see flushPendingText).
-        const emitFlushRef = useRef<(() => boolean) | null>(null);
+        // Set by PlainTextSync, read by the imperative handle: reaches text
+        // still withheld for a composition (see flushPendingText /
+        // discardPendingText).
+        const pendingTextRef = useRef<PendingTextControls | null>(null);
 
         // The ContentEditable ref callback MUST keep a stable identity across
         // renders. Lexical memoizes its root-element ref on this callback, so a
@@ -1915,7 +2006,7 @@ export const LexicalEditorInput = forwardRef<LexicalEditorInputHandle, LexicalEd
                     </div>
                     <HistoryPlugin />
                     <ImeCompositionTrackerPlugin ime={ime} />
-                    <PlainTextSync value={value} onChange={onChange} pills={pills} onPillsChange={onPillsChange} blurSelectionRef={blurSelectionRef} ime={ime} emitFlushRef={emitFlushRef} />
+                    <PlainTextSync value={value} onChange={onChange} pills={pills} onPillsChange={onPillsChange} blurSelectionRef={blurSelectionRef} ime={ime} pendingTextRef={pendingTextRef} />
                     <SlashCommandRevertPlugin ime={ime} />
                     <TypeOverSelectionPlugin ime={ime} />
                     <ArgumentHintPlugin />
@@ -1937,7 +2028,7 @@ export const LexicalEditorInput = forwardRef<LexicalEditorInputHandle, LexicalEd
                         pinnedEndCaretRef={pinnedEndCaretRef}
                         blurSelectionRef={blurSelectionRef}
                         selectionRepairGenerationRef={selectionRepairGenerationRef}
-                        emitFlushRef={emitFlushRef}
+                        pendingTextRef={pendingTextRef}
                     />
                 </div>
             </LexicalComposer>
