@@ -289,6 +289,29 @@ describe('findCandidateSnippets', () => {
         }
     });
 
+    it('tier-1 falls back when the needle repeats with different whitespace', () => {
+        // Each variant is literally unique, but they collapse to the same
+        // normalized form — so the match resolved to an arbitrary occurrence.
+        // Pasting the bare span back would confidently edit whichever came
+        // first, which is what the whitespace matcher refuses to do.
+        const simplified =
+            '<p>Effects on  engagement were small.</p>\n'
+            + '<p>Later section repeats the finding.</p>\n'
+            + '<p>Effects on\nengagement were small.</p>';
+        const oldString = 'Effects on engagement were small.';
+
+        const candidates = findCandidateSnippets(simplified, oldString);
+        expect(candidates).toHaveLength(1);
+        expect(candidates[0].via).toBe('whitespace_relaxed');
+        // Not either bare variant — the snippet must carry enough surrounding
+        // context to pin down a single target.
+        expect(candidates[0].snippet).not.toBe('Effects on  engagement were small.');
+        expect(candidates[0].snippet).not.toBe('Effects on\nengagement were small.');
+        if (!candidates[0].truncated) {
+            expect(candidates[0].snippet).toContain('Later section repeats the finding.');
+        }
+    });
+
     it('a tier-1 snippet marked pasteable is a unique verbatim slice of the note', () => {
         // The property that matters: feeding the snippet back as old_string
         // resolves to exactly one span of the note.

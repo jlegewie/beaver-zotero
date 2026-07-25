@@ -134,12 +134,21 @@ export function markTruncatedUnlessVerbatim(
  * of guessing which part of the window to copy.
  *
  * `truncated: false` promises exactly that, so each check below falls back to
- * the windowed snippet rather than making a promise the retry would break:
+ * the windowed snippet — which keeps surrounding context, and is marked
+ * truncated when it has to elide — rather than making a promise the retry
+ * would break:
  *   - the span does not round-trip to the needle under the same normalizer —
  *     never expected, but an index-map bug should degrade rather than hand
  *     back the wrong text
- *   - the span occurs more than once in the note, where pasting it would only
- *     trade a not-found error for an ambiguous-match one
+ *   - the needle is not unique in normalized space. `indexOf` above resolved
+ *     to an arbitrary occurrence, and a bare span carries no context to pin
+ *     down which one, so a confident paste would silently edit whichever came
+ *     first. This mirrors the whitespace-relaxed matcher's own uniqueness
+ *     gate, which rejects the edit for the same reason — the hint must not
+ *     hand back as certain what the matcher refused as ambiguous.
+ *   - the span occurs more than once verbatim, which normalized uniqueness
+ *     should already imply but is cheap to confirm: normalization at a span's
+ *     edges depends on its neighbours.
  *
  * There is no length ceiling: the windowed fallback already grows to fit the
  * whole match, so the exact span is never the larger of the two.
@@ -149,9 +158,12 @@ function buildExactSpanCandidate(
     origStart: number,
     origEnd: number,
     normalizedNeedle: string,
+    normalizedNote: string,
     normalize: (s: string) => string,
 ): CandidateSnippet | null {
     if (origStart < 0 || origEnd <= origStart) return null;
+    if (normalizedNote.indexOf(normalizedNeedle)
+        !== normalizedNote.lastIndexOf(normalizedNeedle)) return null;
     // The span can carry edge whitespace the needle doesn't: index-map ends
     // sit at the start of a collapsed run, and a dropped CJK-boundary space
     // pushes the end past it entirely. Trim over the normalizers' whitespace
@@ -210,7 +222,8 @@ export function findCandidateSnippets(
         const origStart = cjkNormHtmlMapped.indexMap[cjkIdx] ?? 0;
         const origEnd = cjkNormHtmlMapped.indexMap[matchEndNorm] ?? simplified.length;
         const exact = buildExactSpanCandidate(
-            simplified, origStart, origEnd, cjkNormSearch, normalizeCjkSpacing,
+            simplified, origStart, origEnd,
+            cjkNormSearch, cjkNormHtmlMapped.text, normalizeCjkSpacing,
         );
         if (exact) return [exact];
         const pivot = Math.floor((origStart + origEnd) / 2);
@@ -231,6 +244,7 @@ export function findCandidateSnippets(
             normHtmlMapped.indexMap[idx] ?? -1,
             normHtmlMapped.indexMap[matchEnd] ?? -1,
             normSearch,
+            normHtml,
             normalizeWS,
         );
         if (exact) return [exact];
