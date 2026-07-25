@@ -431,7 +431,7 @@ describe('local edit_note_batch mutation guards', () => {
         await expect(executeLocalEditNoteBatchAction(action)).rejects.toThrow(
             'Library 1 is excluded from Beaver.',
         );
-        expect(Zotero.Items.getByLibraryAndKeyAsync).not.toHaveBeenCalled();
+        expect((globalThis as any).Zotero.Items.getByLibraryAndKeyAsync).not.toHaveBeenCalled();
     });
 
     it('rejects undo before looking up an item in a newly excluded library', async () => {
@@ -458,7 +458,7 @@ describe('local edit_note_batch mutation guards', () => {
         await expect(undoLocalEditNoteBatchAction(action)).rejects.toThrow(
             'Library 1 is excluded from Beaver.',
         );
-        expect(Zotero.Items.getByLibraryAndKeyAsync).not.toHaveBeenCalled();
+        expect((globalThis as any).Zotero.Items.getByLibraryAndKeyAsync).not.toHaveBeenCalled();
     });
 
     it('replace-all undo changes only the occurrences recorded by this action', async () => {
