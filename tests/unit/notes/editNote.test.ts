@@ -160,7 +160,12 @@ vi.mock('../../../src/utils/editNoteHints', () => ({
     findInlineTagDriftMatch: vi.fn(() => null),
     findWindowCandidates: vi.fn(() => []),
     centerTruncate: vi.fn((text: string) => ({ snippet: text, truncated: false })),
+    markTruncatedUnlessVerbatim: vi.fn(
+        (result: { snippet: string; truncated: boolean }) => result,
+    ),
+    pasteableSnippetBudget: vi.fn(() => 600),
     DEFAULT_MAX_SNIPPET_LENGTH: 200,
+    MAX_PASTEABLE_SNIPPET_LENGTH: 600,
 }));
 
 vi.mock('../../../src/utils/editNoteRawPosition', async () => {
