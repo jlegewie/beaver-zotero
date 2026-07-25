@@ -5,6 +5,7 @@ import {
     findCandidateSnippets,
     MAX_PASTEABLE_SNIPPET_LENGTH,
 } from '../../../src/utils/editNoteHints';
+import { normalizeWS } from '../../../src/utils/noteHtmlEntities';
 
 describe('findCandidateSnippets', () => {
     it('returns a single whitespace_relaxed candidate when old_string matches after whitespace collapse', () => {
@@ -212,6 +213,92 @@ describe('findCandidateSnippets', () => {
             .toBeGreaterThanOrEqual(0);
         // And must contain at least one of the boundary spaces the note has.
         expect(candidates[0].snippet).toMatch(/共识 \[14\]/);
+    });
+
+    // -- tier 1 returns the exact matched span --
+
+    it('tier-1 returns the matched note span itself, not a window around it', () => {
+        const simplified =
+            '<p>Opening paragraph with unrelated prose.</p>\n'
+            + '<p>The quick brown fox\n  jumps over the lazy dog.</p>\n'
+            + '<p>Closing paragraph with unrelated prose.</p>';
+        const oldString = 'quick brown fox jumps over the lazy dog';
+
+        const candidates = findCandidateSnippets(simplified, oldString);
+        expect(candidates).toHaveLength(1);
+        expect(candidates[0].via).toBe('whitespace_relaxed');
+        expect(candidates[0].truncated).toBe(false);
+        // The note's own version of old_string: same text, note whitespace.
+        expect(candidates[0].snippet).toBe('quick brown fox\n  jumps over the lazy dog');
+        expect(normalizeWS(candidates[0].snippet)).toBe(normalizeWS(oldString));
+    });
+
+    it('tier-1 CJK path returns the exact span with the note Pangu spacing', () => {
+        const simplified = '<p>CSCO 指南及 2026 版共识 [14] 将激素抵抗性 CIP 定义为初始足量糖皮质激素治疗。</p>';
+        const oldString = 'CSCO指南及2026版共识[14]将激素抵抗性CIP定义为';
+
+        const candidates = findCandidateSnippets(simplified, oldString);
+        expect(candidates).toHaveLength(1);
+        expect(candidates[0].via).toBe('whitespace_relaxed');
+        expect(candidates[0].truncated).toBe(false);
+        expect(candidates[0].snippet)
+            .toBe('CSCO 指南及 2026 版共识 [14] 将激素抵抗性 CIP 定义为');
+    });
+
+    it('tier-1 returns a long match whole rather than clipping it', () => {
+        const longMatch = 'word '.repeat(60).trim();  // ~300 chars
+        const simplified = `<p>prefix padding here ${longMatch} trailing padding here</p>`;
+
+        const candidates = findCandidateSnippets(simplified, longMatch);
+        expect(candidates).toHaveLength(1);
+        expect(candidates[0].truncated).toBe(false);
+        expect(candidates[0].snippet).toBe(longMatch);
+        expect(candidates[0].snippet).not.toContain('…');
+    });
+
+    it('tier-1 falls back to a window when the matched span is ambiguous', () => {
+        // The same sentence twice: pasting the bare span back would only swap
+        // a not-found error for an ambiguous-match one.
+        const repeated = '<p>Participants reported markedly lower engagement.</p>';
+        const simplified = `${repeated}\n${repeated}`;
+        const oldString = 'Participants reported  markedly lower engagement.';
+
+        const candidates = findCandidateSnippets(simplified, oldString);
+        expect(candidates).toHaveLength(1);
+        expect(candidates[0].via).toBe('whitespace_relaxed');
+        // Whatever comes back, it must not be the ambiguous span on its own.
+        const snippet = candidates[0].snippet;
+        expect(snippet).not.toBe('Participants reported markedly lower engagement.');
+        if (!candidates[0].truncated) {
+            expect(simplified.indexOf(snippet)).toBe(simplified.lastIndexOf(snippet));
+        }
+    });
+
+    it('a tier-1 snippet marked pasteable is a unique verbatim slice of the note', () => {
+        // The property that matters: feeding the snippet back as old_string
+        // resolves to exactly one span of the note.
+        const cases: Array<[string, string]> = [
+            // whitespace drift inside the note
+            ['<p>The quick brown fox\n  jumps over the lazy dog.</p>',
+                'quick brown fox jumps over the lazy dog'],
+            // literal &nbsp; where the agent wrote a plain space
+            ['<p>Table&nbsp;3 reports the pooled estimate for each cohort.</p>',
+                'Table 3 reports the pooled estimate'],
+            // indentation the agent collapsed
+            ['<ul>\n    <li>alpha bravo charlie</li>\n</ul>', '<li>alpha bravo charlie</li>'],
+            // CJK Pangu spacing drift
+            ['<p>CSCO 指南及 2026 版共识 [14] 将激素抵抗性 CIP 定义为初始足量糖皮质激素治疗。</p>',
+                '<p>CSCO指南及2026版共识[14]将激素抵抗性CIP定义为初始足量糖皮质激素治疗。</p>'],
+        ];
+
+        for (const [simplified, oldString] of cases) {
+            const [candidate] = findCandidateSnippets(simplified, oldString);
+            expect(candidate.via).toBe('whitespace_relaxed');
+            expect(candidate.truncated).toBe(false);
+            expect(simplified.indexOf(candidate.snippet))
+                .toBe(simplified.lastIndexOf(candidate.snippet));
+            expect(simplified.indexOf(candidate.snippet)).toBeGreaterThanOrEqual(0);
+        }
     });
 
     it('tier-1 does not surface tag-boundary spacing drift as a Pangu match', () => {

@@ -235,6 +235,70 @@ export function hasWhitespaceOrNbsp(s: string): boolean {
     return new RegExp(WS_OR_NBSP_CLASS).test(s);
 }
 
+// Literal HTML entity for non-breaking space. The walk-and-collapse logic below
+// advances by its full length when it appears in source so positions stay
+// aligned with the original string.
+const NBSP_LITERAL = '&nbsp;';
+
+/**
+ * Version of `normalizeWS` that also returns the index map needed to recover
+ * an original-text span from a position in the normalized output.
+ * `indexMap[i]` is the index in `s` from which the i-th char of `text` was
+ * emitted; `indexMap[text.length]` is the past-the-end index (so a
+ * `[startNorm, endNorm)` range maps to
+ * `s.substring(indexMap[startNorm], indexMap[endNorm])`).
+ *
+ * `text` is always identical to `normalizeWS(s)` — this is the same collapse
+ * plus bookkeeping, not a different normalization. Used by
+ * `findCandidateSnippets` so a whitespace-relaxed hit can hand back the note's
+ * own span rather than the normalized form (which the agent could not paste
+ * back as `old_string`).
+ */
+export function normalizeWSMapped(s: string): {
+    text: string;
+    indexMap: number[];
+} {
+    // Collapse whitespace runs (incl. literal `&nbsp;`) to a single space,
+    // tracking which index of `s` each output char came from. Each run
+    // collapses to one space anchored at the run's start.
+    const collapsed: string[] = [];
+    const collapsedMap: number[] = [];
+    let i = 0;
+    while (i < s.length) {
+        const ch = s.charAt(i);
+        const nbspHere = s.substring(i, i + NBSP_LITERAL.length) === NBSP_LITERAL;
+        if (/\s/.test(ch) || nbspHere) {
+            const runStart = i;
+            while (i < s.length) {
+                if (/\s/.test(s.charAt(i))) {
+                    i += 1;
+                } else if (s.substring(i, i + NBSP_LITERAL.length) === NBSP_LITERAL) {
+                    i += NBSP_LITERAL.length;
+                } else {
+                    break;
+                }
+            }
+            collapsed.push(' ');
+            collapsedMap.push(runStart);
+            continue;
+        }
+        collapsed.push(ch);
+        collapsedMap.push(i);
+        i += 1;
+    }
+    // Trim the leading/trailing single-space entries produced by the collapse.
+    let start = 0;
+    let end = collapsed.length;
+    if (start < end && collapsed[start] === ' ') start += 1;
+    if (end > start && collapsed[end - 1] === ' ') end -= 1;
+
+    const indexMap = collapsedMap.slice(start, end);
+    // Past-the-end sentinel so callers can slice `[startNorm, endNorm)`.
+    indexMap.push(end < collapsed.length ? collapsedMap[end] : s.length);
+
+    return { text: collapsed.slice(start, end).join(''), indexMap };
+}
+
 // =============================================================================
 // CJK-aware whitespace
 // =============================================================================
@@ -290,11 +354,6 @@ function isHtmlDelimChar(ch: string): boolean {
     return HTML_DELIM_PATTERN_NORM.test(ch);
 }
 
-// Literal HTML entity for non-breaking space. Walk-and-collapse logic below
-// advances by its full length when it appears in source so positions stay
-// aligned with the original string.
-const NBSP_LITERAL = '&nbsp;';
-
 /**
  * Like `normalizeWS` but also drops whitespace runs that lie on a CJK ↔
  * non-CJK boundary in visible prose. After this, `共识 [14]` and `共识[14]`
@@ -332,50 +391,21 @@ export function normalizeCjkSpacingMapped(s: string): {
     indexMap: number[];
 } {
     // Pass 1: collapse whitespace runs (incl. literal `&nbsp;`) to a single
-    // space and trim, tracking which index of `s` each output char came
-    // from. Each run collapses to one space anchored at the run's start.
-    const collapsed: string[] = [];
-    const collapsedMap: number[] = [];
-    let i = 0;
-    while (i < s.length) {
-        const ch = s.charAt(i);
-        const nbspHere = s.substring(i, i + NBSP_LITERAL.length) === NBSP_LITERAL;
-        if (/\s/.test(ch) || nbspHere) {
-            const runStart = i;
-            while (i < s.length) {
-                if (/\s/.test(s.charAt(i))) {
-                    i += 1;
-                } else if (s.substring(i, i + NBSP_LITERAL.length) === NBSP_LITERAL) {
-                    i += NBSP_LITERAL.length;
-                } else {
-                    break;
-                }
-            }
-            collapsed.push(' ');
-            collapsedMap.push(runStart);
-            continue;
-        }
-        collapsed.push(ch);
-        collapsedMap.push(i);
-        i += 1;
-    }
-    // Trim leading/trailing single-space entries produced by the collapse.
-    let start = 0;
-    let end = collapsed.length;
-    if (start < end && collapsed[start] === ' ') start += 1;
-    if (end > start && collapsed[end - 1] === ' ') end -= 1;
+    // space and trim, tracking which index of `s` each output char came from.
+    const collapsed = normalizeWSMapped(s);
+    const len = collapsed.text.length;
 
     // Pass 2: drop CJK-prose boundary spaces. The `inTag` state is recomputed
-    // from the trimmed buffer so the gating logic stays self-contained.
+    // from the collapsed buffer so the gating logic stays self-contained.
     const outChars: string[] = [];
     const outMap: number[] = [];
     let inTag = false;
-    for (let k = start; k < end; k++) {
-        const ch = collapsed[k];
+    for (let k = 0; k < len; k++) {
+        const ch = collapsed.text.charAt(k);
         if (ch === '<') inTag = true;
         if (ch === ' ' && !inTag) {
-            const prev = k > start ? collapsed[k - 1] : '';
-            const next = k + 1 < end ? collapsed[k + 1] : '';
+            const prev = k > 0 ? collapsed.text.charAt(k - 1) : '';
+            const next = k + 1 < len ? collapsed.text.charAt(k + 1) : '';
             if (
                 prev && next
                 && !isHtmlDelimChar(prev) && !isHtmlDelimChar(next)
@@ -386,11 +416,11 @@ export function normalizeCjkSpacingMapped(s: string): {
             }
         }
         outChars.push(ch);
-        outMap.push(collapsedMap[k]);
+        outMap.push(collapsed.indexMap[k]);
         if (ch === '>') inTag = false;
     }
     // Past-the-end sentinel so callers can slice `[startNorm, endNorm)`.
-    outMap.push(end < collapsed.length ? collapsedMap[end] : s.length);
+    outMap.push(collapsed.indexMap[len]);
 
     return { text: outChars.join(''), indexMap: outMap };
 }

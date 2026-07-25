@@ -11,7 +11,7 @@ vi.mock('../../../src/services/supabaseClient', () => ({
 }));
 
 import { normalizeNoteHtml } from '../../../src/utils/noteHtmlSimplifier';
-import { hexToRgb } from '../../../src/utils/noteHtmlEntities';
+import { hexToRgb, normalizeWS, normalizeWSMapped } from '../../../src/utils/noteHtmlEntities';
 
 /** Helper: wrap inner HTML in the PM canonical wrapper */
 function pmWrap(inner: string): string {
@@ -433,5 +433,54 @@ describe('normalizeNoteHtml', () => {
             expect(result).toContain('rgb(86, 134, 191)');
             expect(result).toContain('rgb(47, 47, 79)');
         });
+    });
+});
+
+// =============================================================================
+// normalizeWSMapped
+// =============================================================================
+
+describe('normalizeWSMapped', () => {
+    const cases = [
+        '',
+        '   ',
+        'plain text',
+        '  leading and trailing  ',
+        '<p>The quick brown fox\n  jumps over the lazy dog.</p>',
+        'a&nbsp;b&nbsp;&nbsp;c',
+        '\n\t<p>mixed&nbsp; \n whitespace</p>\t\n',
+        '&&nbsp;partial &nbsp entity',
+        '<p>中文 与 latin 混排</p>',
+    ];
+
+    it('produces exactly the same text as normalizeWS', () => {
+        for (const input of cases) {
+            expect(normalizeWSMapped(input).text).toBe(normalizeWS(input));
+        }
+    });
+
+    it('maps every normalized range back to a slice of the original', () => {
+        for (const input of cases) {
+            const { text, indexMap } = normalizeWSMapped(input);
+            expect(indexMap).toHaveLength(text.length + 1);
+            for (let start = 0; start < text.length; start++) {
+                for (let end = start + 1; end <= text.length; end++) {
+                    const span = input.substring(indexMap[start], indexMap[end]);
+                    // The slice may carry whitespace the collapse folded away,
+                    // but must normalize back to the range it came from.
+                    expect(normalizeWS(span)).toBe(normalizeWS(text.substring(start, end)));
+                }
+            }
+        }
+    });
+
+    it('anchors a collapsed run at its first character', () => {
+        const input = 'alpha \n\t bravo';
+        const { text, indexMap } = normalizeWSMapped(input);
+        expect(text).toBe('alpha bravo');
+        // The single normalized space maps to the start of the run.
+        expect(indexMap[text.indexOf(' ')]).toBe(5);
+        // The past-the-end sentinel covers the whole string.
+        expect(indexMap[text.length]).toBe(input.length);
     });
 });
