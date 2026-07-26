@@ -148,8 +148,26 @@ function $findFlatPoint(
     return textCandidate ?? elementCandidate;
 }
 
-/** Restore flattened offsets while preserving direction and element points. */
-export function $selectFlatSelection(selectionOffsets: LexicalSelectionOffsets): void {
+/**
+ * Restore flattened offsets while preserving direction and element points.
+ * Returns false without changing the selection when either offset cannot be
+ * mapped to the current tree.
+ */
+export function $trySelectFlatSelection(selectionOffsets: LexicalSelectionOffsets): boolean {
+    const textSize = $getRoot().getTextContentSize();
+    if (
+        !Number.isInteger(selectionOffsets.anchor)
+        || !Number.isInteger(selectionOffsets.focus)
+        || selectionOffsets.anchor < 0
+        || selectionOffsets.focus < 0
+        || selectionOffsets.anchor > textSize
+        || selectionOffsets.focus > textSize
+    ) {
+        return false;
+    }
+    const anchor = $findFlatPoint(selectionOffsets.anchor, selectionOffsets.anchorType);
+    const focus = $findFlatPoint(selectionOffsets.focus, selectionOffsets.focusType);
+    if (!anchor || !focus) return false;
     const existingSelection = $getSelection();
     const selection = $isRangeSelection(existingSelection)
         ? existingSelection
@@ -157,16 +175,23 @@ export function $selectFlatSelection(selectionOffsets: LexicalSelectionOffsets):
     if (selection !== existingSelection) {
         $setSelection(selection);
     }
-    const anchor = $findFlatPoint(selectionOffsets.anchor, selectionOffsets.anchorType);
-    const focus = $findFlatPoint(selectionOffsets.focus, selectionOffsets.focusType);
-    if (!anchor || !focus) {
-        $getRoot().selectEnd();
-        return;
-    }
     selection.anchor.set(anchor.key, anchor.offset, anchor.type);
     selection.focus.set(focus.key, focus.offset, focus.type);
+    return true;
+}
+
+/** Restore flattened offsets, falling back to the end of the document. */
+export function $selectFlatSelection(selectionOffsets: LexicalSelectionOffsets): void {
+    if (!$trySelectFlatSelection(selectionOffsets)) {
+        $getRoot().selectEnd();
+    }
 }
 
 export function $selectFlatRange(start: number, end: number): void {
     $selectFlatSelection({ anchor: start, focus: end });
+}
+
+/** Select a flat range only when both offsets map to the current tree. */
+export function $trySelectFlatRange(start: number, end: number): boolean {
+    return $trySelectFlatSelection({ anchor: start, focus: end });
 }

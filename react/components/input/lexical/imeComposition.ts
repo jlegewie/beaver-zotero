@@ -10,7 +10,7 @@ import { logger } from '../../../../src/utils/logger';
 import { isImeKeyEvent } from '../../../utils/ime';
 import {
     $getFlatSelectionOffsets,
-    $selectFlatRange,
+    $trySelectFlatRange,
 } from './selectionOffsets';
 
 /**
@@ -42,6 +42,7 @@ export function decideCompositionPayloadRecovery(options: {
     deadlineReached: boolean;
 }):
     | { action: 'already-present' }
+    | { action: 'abort'; reason: 'invalid-baseline' | 'unrelated-change' }
     | { action: 'wait' }
     | {
         action: 'recover';
@@ -57,29 +58,60 @@ export function decideCompositionPayloadRecovery(options: {
         textSize,
         deadlineReached,
     } = options;
+    const { start, end } = replacementRange;
     if (
-        currentText.slice(
-            replacementRange.start,
-            replacementRange.start + committedText.length,
-        ) === committedText
-    ) {
-        return { action: 'already-present' };
-    }
-    const cleanupObserved =
         baselineModel === null
-        || currentText !== baselineModel;
-    if (!cleanupObserved && !deadlineReached) {
-        return { action: 'wait' };
+        || committedText.length === 0
+        || !Number.isInteger(start)
+        || !Number.isInteger(end)
+        || start < 0
+        || end < start
+        || end > baselineModel.length
+        || currentText.length !== textSize
+    ) {
+        return { action: 'abort', reason: 'invalid-baseline' };
     }
-    const start = Math.min(replacementRange.start, textSize);
-    return {
-        action: 'recover',
-        start,
-        end: cleanupObserved
-            ? start
-            : Math.min(replacementRange.end, textSize),
-        cleanupObserved,
-    };
+
+    const cleanedBaseline =
+        baselineModel.slice(0, start)
+        + baselineModel.slice(end);
+
+    // Gecko may eventually apply the native candidate at an unexpected
+    // offset. Recognize a single insertion anywhere relative to the cleaned
+    // baseline so recovery never duplicates it.
+    let candidateOffset = currentText.indexOf(committedText);
+    while (candidateOffset !== -1) {
+        if (
+            currentText.slice(0, candidateOffset)
+            + currentText.slice(candidateOffset + committedText.length)
+            === cleanedBaseline
+        ) {
+            return { action: 'already-present' };
+        }
+        candidateOffset = currentText.indexOf(
+            committedText,
+            candidateOffset + 1,
+        );
+    }
+
+    if (currentText === baselineModel) {
+        if (!deadlineReached) return { action: 'wait' };
+        return {
+            action: 'recover',
+            start,
+            end,
+            cleanupObserved: false,
+        };
+    }
+    if (currentText === cleanedBaseline) {
+        return {
+            action: 'recover',
+            start,
+            end: start,
+            cleanupObserved: true,
+        };
+    }
+    return { action: 'abort', reason: 'unrelated-change' };
 }
 
 /**
@@ -488,6 +520,13 @@ export function registerCompositionEndDeferral(
         payloadRecoveryTimer = null;
     };
 
+    const onCompositionActivity = () => {
+        // A recovery belongs exclusively to the composition that scheduled
+        // it. Never let its delayed selection write cross into a new one.
+        // compositionupdate is included for IMEs that omit compositionstart.
+        clearPayloadRecovery();
+    };
+
     const finish = (
         reason: 'final-input' | 'fallback' | 'root-change' | 'cleanup',
         finalInput?: InputEvent,
@@ -508,19 +547,28 @@ export function registerCompositionEndDeferral(
         try {
             editor.dispatchCommand(COMPOSITION_END_COMMAND, event);
             const committedText = finalInput?.data ?? event.data;
-            const replacementStart = deferredReplacementRange?.start ?? 0;
             const modelAfterCompositionEnd = getModelText() ?? '';
-            const candidateAlreadyPresent =
-                !!committedText
-                && modelAfterCompositionEnd.slice(
-                    replacementStart,
-                    replacementStart + committedText.length,
-                ) === committedText;
+            const initialDecision =
+                committedText
+                && deferredReplacementRange
+                && deferredModelText !== null
+                    ? decideCompositionPayloadRecovery({
+                        baselineModel: deferredModelText,
+                        currentText: modelAfterCompositionEnd,
+                        committedText,
+                        replacementRange: deferredReplacementRange,
+                        textSize: modelAfterCompositionEnd.length,
+                        deadlineReached: false,
+                    })
+                    : null;
             if (
                 browserDidNotMutate
                 && finalInput?.inputType === 'insertCompositionText'
                 && committedText
-                && !candidateAlreadyPresent
+                && deferredReplacementRange
+                && deferredModelText !== null
+                && initialDecision?.action !== 'already-present'
+                && initialDecision?.action !== 'abort'
             ) {
                 // Zotero's Gecko chrome document can deliver the committed
                 // candidate only in InputEvent.data without applying the
@@ -533,10 +581,7 @@ export function registerCompositionEndDeferral(
                 // Lexical's native reconciliation path.
                 if (rootEl) {
                     const recoveryRoot = rootEl;
-                    const replacementRange = deferredReplacementRange ?? {
-                        start: 0,
-                        end: 0,
-                    };
+                    const replacementRange = deferredReplacementRange;
                     const baselineModel = deferredModelText;
                     const inputForTrace = finalInput;
                     const win = recoveryRoot.ownerDocument.defaultView;
@@ -560,6 +605,13 @@ export function registerCompositionEndDeferral(
                         if (decision.action === 'already-present') {
                             return;
                         }
+                        if (decision.action === 'abort') {
+                            tracePhase(
+                                `recovery aborted: ${decision.reason}`,
+                                inputForTrace,
+                            );
+                            return;
+                        }
                         if (decision.action === 'wait') {
                             payloadRecoveryTimer = win?.setTimeout(
                                 attemptRecovery,
@@ -569,9 +621,9 @@ export function registerCompositionEndDeferral(
                         }
                         let inserted = false;
                         editor.update(() => {
-                            $selectFlatRange(decision.start, decision.end);
-                            const selection = $getSelection();
-                            if ($isRangeSelection(selection)) {
+                            if ($trySelectFlatRange(decision.start, decision.end)) {
+                                const selection = $getSelection();
+                                if (!$isRangeSelection(selection)) return;
                                 selection.insertText(committedText);
                                 inserted = true;
                             }
@@ -621,6 +673,9 @@ export function registerCompositionEndDeferral(
         COMPOSITION_END_COMMAND,
         (event) => {
             if (redispatching) return false; // our re-dispatch: let Lexical process it now
+            // Some IMEs omit compositionstart. A new composition end is still
+            // positive evidence that any older recovery is stale.
+            clearPayloadRecovery();
             const root = rootEl;
             const win = root?.ownerDocument.defaultView;
             if (!root || !win) return false; // no mounted root — keep stock behavior
@@ -647,13 +702,21 @@ export function registerCompositionEndDeferral(
     );
 
     const unregisterRoot = editor.registerRootListener((rootElement, prevRootElement) => {
-        if (prevRootElement) prevRootElement.removeEventListener('input', onRootInput);
+        if (prevRootElement) {
+            prevRootElement.removeEventListener('compositionstart', onCompositionActivity, true);
+            prevRootElement.removeEventListener('compositionupdate', onCompositionActivity, true);
+            prevRootElement.removeEventListener('input', onRootInput);
+        }
         if (prevRootElement && prevRootElement !== rootElement) clearPayloadRecovery();
         // A pending deferral belongs to the previous root; complete it before
         // switching so composing state cannot leak across roots.
         if (deferredEvent !== null) finish('root-change');
         rootEl = rootElement;
-        if (rootElement) rootElement.addEventListener('input', onRootInput);
+        if (rootElement) {
+            rootElement.addEventListener('compositionstart', onCompositionActivity, true);
+            rootElement.addEventListener('compositionupdate', onCompositionActivity, true);
+            rootElement.addEventListener('input', onRootInput);
+        }
     });
 
     return () => {

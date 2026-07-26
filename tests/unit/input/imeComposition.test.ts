@@ -1,7 +1,14 @@
 /** @vitest-environment jsdom */
 /* eslint-disable no-restricted-globals -- jsdom test: `document` is the test DOM, not a Zotero window */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { COMMAND_PRIORITY_EDITOR, COMPOSITION_END_COMMAND } from 'lexical';
+import {
+    $createParagraphNode,
+    $createTextNode,
+    $getRoot,
+    COMMAND_PRIORITY_EDITOR,
+    COMPOSITION_END_COMMAND,
+    createEditor,
+} from 'lexical';
 import type { LexicalEditor } from 'lexical';
 import {
     createCompositionGatedEmitter,
@@ -448,6 +455,54 @@ describe('registerCompositionEndDeferral', () => {
     });
 });
 
+describe('composition payload recovery lifecycle', () => {
+    it('cancels an older recovery when a new composition starts', () => {
+        vi.useFakeTimers();
+        const root = document.createElement('div');
+        document.body.appendChild(root);
+        const editor = createEditor({
+            namespace: 'ime-recovery-lifecycle-test',
+            onError: error => { throw error; },
+        });
+        editor.setRootElement(root);
+        editor.update(() => {
+            const text = $createTextNode('上市\u200b上');
+            $getRoot().append($createParagraphNode().append(text));
+            text.select(2, 3);
+        }, { discrete: true });
+        const dispose = registerCompositionEndDeferral(editor);
+
+        editor.dispatchCommand(
+            COMPOSITION_END_COMMAND,
+            new CompositionEvent('compositionend', { data: '🀄' }),
+        );
+        root.dispatchEvent(new InputEvent('input', {
+            bubbles: true,
+            data: '🀄',
+            inputType: 'insertCompositionText',
+            isComposing: false,
+        }));
+
+        // The new composition owns the selection from this point onward.
+        root.dispatchEvent(new CompositionEvent('compositionstart', {
+            bubbles: true,
+            data: '',
+        }));
+        vi.runAllTimers();
+
+        let modelText = '';
+        editor.getEditorState().read(() => {
+            modelText = $getRoot().getTextContent();
+        });
+        expect(modelText).not.toContain('🀄');
+
+        dispose();
+        editor.setRootElement(null);
+        root.remove();
+        vi.useRealTimers();
+    });
+});
+
 describe('decideCompositionPayloadRecovery', () => {
     it('waits while Gecko still holds the composition marker', () => {
         expect(decideCompositionPayloadRecovery({
@@ -501,6 +556,39 @@ describe('decideCompositionPayloadRecovery', () => {
             textSize: 5,
             deadlineReached: false,
         })).toEqual({ action: 'already-present' });
+    });
+
+    it('does nothing when Gecko applies the candidate at a different offset', () => {
+        expect(decideCompositionPayloadRecovery({
+            baselineModel: '上市\u200b上',
+            currentText: '🀄上市上',
+            committedText: '🀄',
+            replacementRange: { start: 2, end: 3 },
+            textSize: 5,
+            deadlineReached: false,
+        })).toEqual({ action: 'already-present' });
+    });
+
+    it('aborts when unrelated content changes during the cleanup poll', () => {
+        expect(decideCompositionPayloadRecovery({
+            baselineModel: '上市\u200b上',
+            currentText: '外市\u200b上',
+            committedText: '🀄',
+            replacementRange: { start: 2, end: 3 },
+            textSize: 4,
+            deadlineReached: false,
+        })).toEqual({ action: 'abort', reason: 'unrelated-change' });
+    });
+
+    it('aborts when the captured replacement range is no longer valid', () => {
+        expect(decideCompositionPayloadRecovery({
+            baselineModel: '上市\u200b上',
+            currentText: '上市\u200b上',
+            committedText: '🀄',
+            replacementRange: { start: 8, end: 9 },
+            textSize: 4,
+            deadlineReached: true,
+        })).toEqual({ action: 'abort', reason: 'invalid-baseline' });
     });
 });
 
