@@ -1008,6 +1008,97 @@ describe('whitespace_relaxed strategy', () => {
         expect(result?.expandedNew.endsWith(rawSlice)).toBe(true);
     });
 
+    // -- <pre> is whitespace-significant --
+
+    describe('<pre> whitespace is not relaxed', () => {
+        // Replacements must preserve the note's code indentation.
+
+        it('refuses a str_replace whose needle opens a <pre> with drifted indentation', () => {
+            const html = '<div data-schema-version="9"><pre>{\n    "alpha": 1,\n    "beta": 2\n}</pre></div>';
+            const result = match(makeInput({
+                // 1-space indent where the note has 4.
+                oldString: '<pre>{\n "alpha": 1,\n "beta": 2\n}</pre>',
+                newString: '<pre>{\n "alpha": 9,\n "beta": 2\n}</pre>',
+                strippedHtml: html,
+            }));
+            expect(result).toBeNull();
+        });
+
+        it('refuses a str_replace whose needle sits inside a <pre> it never opened', () => {
+            // The overlap gate catches snippets without an opening `<pre>`.
+            const html = '<div data-schema-version="9"><p>intro</p><pre>function demo() {\n        return 42;\n}</pre></div>';
+            const result = match(makeInput({
+                oldString: 'function demo() {\n    return 42;\n}',
+                newString: 'function demo() {\n    return 7;\n}',
+                strippedHtml: html,
+            }));
+            expect(result).toBeNull();
+        });
+
+        it('still matches when the needle reproduces the <pre> indentation exactly', () => {
+            // Only prose outside the code block drifted.
+            const rawSlice = '<p>Some intro text here</p><pre>if (x) {\n    doIt();\n}</pre>';
+            const html = `<div data-schema-version="9">${rawSlice}</div>`;
+            const result = match(makeInput({
+                oldString: '<p>Some intro  text here</p><pre>if (x) {\n    doIt();\n}</pre>',
+                newString: '<p>REPLACED</p>',
+                strippedHtml: html,
+            }));
+            expect(result?.strategy).toBe('whitespace_relaxed');
+            expect(result?.expandedOld).toBe(rawSlice);
+        });
+
+        it('still relaxes prose when an unrelated <pre> sits elsewhere in the note', () => {
+            const html = '<div data-schema-version="9"><pre>code block here</pre><p>hello world with more padding text here</p></div>';
+            const result = match(makeInput({
+                oldString: 'hello   world with  more padding text here',
+                newString: 'replaced',
+                strippedHtml: html,
+            }));
+            expect(result?.strategy).toBe('whitespace_relaxed');
+            expect(result?.expandedOld).toBe('hello world with more padding text here');
+        });
+
+        it('still relaxes text starting immediately after </pre> — the gate needs a real overlap', () => {
+            // The code block ends exactly where the match begins.
+            const html = '<div data-schema-version="9"><pre>x = 1</pre>hello world with more padding text here</div>';
+            const result = match(makeInput({
+                oldString: 'hello   world with  more padding text here',
+                newString: 'replaced',
+                strippedHtml: html,
+            }));
+            expect(result?.strategy).toBe('whitespace_relaxed');
+            expect(result?.expandedOld).toBe('hello world with more padding text here');
+        });
+
+        it('still relaxes inside <pre class="math"> — LaTeX spacing is not indentation', () => {
+            const rawSlice = '<pre class="math">$$x = 1 + 2 + 3 + 4$$</pre>';
+            const html = `<div data-schema-version="9">${rawSlice}</div>`;
+            const result = match(makeInput({
+                oldString: '<pre class="math">$$x  =  1 + 2 + 3 + 4$$</pre>',
+                newString: '<pre class="math">$$y = 5$$</pre>',
+                strippedHtml: html,
+            }));
+            expect(result?.strategy).toBe('whitespace_relaxed');
+            expect(result?.expandedOld).toBe(rawSlice);
+        });
+
+        it('allows insert_after anchored inside a <pre> — the note bytes are spliced back', () => {
+            // Inserts reuse the raw slice, preserving its indentation.
+            const rawSlice = 'const a = 1;\n        const b = 2;';
+            const html = `<div data-schema-version="9"><pre>${rawSlice}</pre></div>`;
+            const result = match(makeInput({
+                operation: 'insert_after' as EditNoteOperation,
+                oldString: 'const a = 1;\n    const b = 2;',
+                newString: '\n    const c = 3;',
+                strippedHtml: html,
+            }));
+            expect(result?.strategy).toBe('whitespace_relaxed');
+            expect(result?.expandedOld).toBe(rawSlice);
+            expect(result?.expandedNew).toBe(rawSlice + '\n    const c = 3;');
+        });
+    });
+
     // -- Safety gates --
 
     it('rejects when normalized needle is shorter than the minimum length', () => {
