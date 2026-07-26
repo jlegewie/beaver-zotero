@@ -10,6 +10,7 @@ import {
 import {
     $getFlatSelectionOffsets,
     $selectFlatSelection,
+    $trySelectFlatRange,
     type LexicalSelectionOffsets,
 } from '../../../react/components/input/lexical/selectionOffsets';
 
@@ -131,6 +132,25 @@ describe('Lexical selection offsets', () => {
                 offset: 0,
                 type: 'element',
             });
+        }, { discrete: true });
+    });
+
+    it('does not move the selection when a strict flat range cannot be mapped', () => {
+        const editor = createTestEditor();
+
+        editor.update(() => {
+            const root = $getRoot();
+            root.clear();
+            const text = $createTextNode('hello');
+            root.append($createParagraphNode().append(text));
+            text.select(2, 2);
+
+            expect($trySelectFlatRange(99, 99)).toBe(false);
+            const selection = $getSelection();
+            expect($isRangeSelection(selection)).toBe(true);
+            if (!$isRangeSelection(selection)) return;
+            expect(selection.anchor).toMatchObject({ offset: 2, type: 'text' });
+            expect(selection.focus).toMatchObject({ offset: 2, type: 'text' });
         }, { discrete: true });
     });
 });
