@@ -23,7 +23,6 @@ import FileStatusDisplay from "../status/FileStatusDisplay";
 import { connectionStatusAtom, fileStatusAtom } from "../../atoms/files";
 import { fetchFileStatusResult } from "../../hooks/useFileStatus";
 import ActionsPreferenceSection from "./ActionsPreferenceSection";
-import CustomInstructionsSection from "./CustomInstructionsSection";
 import BillingSection, { formatPlanName } from "./BillingSection";
 import ApiKeysSection from "./ApiKeysSection";
 import AdvancedSection from "./AdvancedSection";
