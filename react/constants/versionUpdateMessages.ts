@@ -501,6 +501,13 @@ const versionUpdateMessageList: VersionUpdateMessageConfig[] = [
         inPanel: true,
         footer: `<a href="https://github.com/jlegewie/beaver-zotero/releases/tag/v0.22.0" target='_blank'>Full changelog</a>`,
     },
+    {
+        version: "0.22.5",
+        title: "Version 0.22.5: Improved IME support",
+        text: "Fixed text entry issues with input method editors (IMEs), including candidate selection and insertion.",
+        footer: "Please report any remaining IME issues to <a href='mailto:support@beaverapp.ai'>support@beaverapp.ai</a>.",
+        inPanel: true,
+    },
 ];
 
 versionUpdateMessageList.sort((a, b) => compareVersions(a.version, b.version));
