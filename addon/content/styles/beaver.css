@@ -751,6 +751,20 @@
     box-sizing: border-box;
 }
 
+/* Zotero's Windows input theme paints a focus indicator on every input/textarea:
+   a 2px accent-blue bar drawn as a background-image plus an accent bottom border
+   and a re-asserted 1px border. These controls are borderless by design and the
+   focus affordance is the wrapper's `.action-field-box:focus-within` border, so
+   the native treatment is neutralized here. */
+[id^="beaver-pane-"] .action-field-control:active,
+[id^="beaver-pane-"] .action-field-control:focus,
+[id^="beaver-pane-"] .action-field-control:focus-visible {
+    border: 0 !important;
+    outline: none !important;
+    background-color: transparent !important;
+    background-image: none !important;
+}
+
 [id^="beaver-pane-"] .action-field-control::placeholder {
     color: var(--fill-tertiary);
 }
