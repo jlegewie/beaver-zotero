@@ -687,7 +687,11 @@ const PlainTextSync: React.FC<{
     const emitterRef = useRef<ReturnType<typeof createCompositionGatedEmitter> | null>(null);
     useEffect(() => {
         const emitter = createCompositionGatedEmitter({
-            isComposing: () => ime.isComposing(),
+            // Keep the parent value insulated through Gecko's short
+            // post-composition cleanup window. Zotero's chrome document can
+            // remove the composition DOM node just after the final input; the
+            // deferred recovery replaces it on the next task.
+            isComposing: () => ime.isImeActive(),
             emit: () => emitRef.current(),
             getWindow: () => (editor.getRootElement()?.ownerDocument.defaultView ?? null) as
                 (Window & typeof globalThis) | null,
@@ -936,7 +940,9 @@ const WindowsImeCompositionOrderPlugin: React.FC = () => {
     useEffect(() => {
         if (!Zotero.isWin) return;
         if (getPref('imeCompositionOrderFix') === false) return;
-        return registerCompositionEndDeferral(editor);
+        return registerCompositionEndDeferral(editor, {
+            trace: getPref('debugImeTrace') === true,
+        });
     }, [editor]);
     return null;
 };

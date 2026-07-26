@@ -6,6 +6,7 @@ import type { LexicalEditor } from 'lexical';
 import {
     createCompositionGatedEmitter,
     createImeCompositionTracker,
+    decideCompositionPayloadRecovery,
     registerCompositionEndDeferral,
 } from '../../../react/components/input/lexical/imeComposition';
 
@@ -80,6 +81,23 @@ describe('createImeCompositionTracker', () => {
 
         compositionEnd();
         expect(ime.isComposing()).toBe(false);
+    });
+
+    it('observes compositionstart before an existing bubble-phase root listener', () => {
+        dispose?.();
+        dispose = null;
+        ime = createImeCompositionTracker();
+        let composingSeenByEarlierListener = false;
+        const earlierBubbleListener = () => {
+            composingSeenByEarlierListener = ime.isComposing();
+        };
+        root.addEventListener('compositionstart', earlierBubbleListener);
+        dispose = ime.register(editor as unknown as LexicalEditor);
+
+        compositionStart();
+
+        expect(composingSeenByEarlierListener).toBe(true);
+        root.removeEventListener('compositionstart', earlierBubbleListener);
     });
 
     it('keeps the IME active for a grace period after compositionend', () => {
@@ -427,6 +445,62 @@ describe('registerCompositionEndDeferral', () => {
         editor.setRootElement(null);
         editor.dispatchCommand(COMPOSITION_END_COMMAND, compositionEndEvent());
         expect(stockHandler).toHaveBeenCalledTimes(1);
+    });
+});
+
+describe('decideCompositionPayloadRecovery', () => {
+    it('waits while Gecko still holds the composition marker', () => {
+        expect(decideCompositionPayloadRecovery({
+            baselineModel: '上市\u200b上',
+            currentText: '上市\u200b上',
+            committedText: '🀄',
+            replacementRange: { start: 2, end: 3 },
+            textSize: 4,
+            deadlineReached: false,
+        })).toEqual({ action: 'wait' });
+    });
+
+    it('inserts at a collapsed caret after cleanup instead of replacing right-hand text', () => {
+        expect(decideCompositionPayloadRecovery({
+            baselineModel: '上市\u200b上',
+            currentText: '上市上',
+            committedText: '🀄',
+            replacementRange: { start: 2, end: 3 },
+            textSize: 3,
+            deadlineReached: false,
+        })).toEqual({
+            action: 'recover',
+            start: 2,
+            end: 2,
+            cleanupObserved: true,
+        });
+    });
+
+    it('replaces the marker range when the cleanup wait expires', () => {
+        expect(decideCompositionPayloadRecovery({
+            baselineModel: '上市\u200b上',
+            currentText: '上市\u200b上',
+            committedText: '🀄',
+            replacementRange: { start: 2, end: 3 },
+            textSize: 4,
+            deadlineReached: true,
+        })).toEqual({
+            action: 'recover',
+            start: 2,
+            end: 3,
+            cleanupObserved: false,
+        });
+    });
+
+    it('does nothing when the committed candidate is already present', () => {
+        expect(decideCompositionPayloadRecovery({
+            baselineModel: '上市\u200b上',
+            currentText: '上市🀄上',
+            committedText: '🀄',
+            replacementRange: { start: 2, end: 3 },
+            textSize: 5,
+            deadlineReached: false,
+        })).toEqual({ action: 'already-present' });
     });
 });
 

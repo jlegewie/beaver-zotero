@@ -1,11 +1,17 @@
 import {
+    $getSelection,
     $getRoot,
+    $isRangeSelection,
     COMMAND_PRIORITY_CRITICAL,
     COMPOSITION_END_COMMAND,
     type LexicalEditor,
 } from 'lexical';
 import { logger } from '../../../../src/utils/logger';
 import { isImeKeyEvent } from '../../../utils/ime';
+import {
+    $getFlatSelectionOffsets,
+    $selectFlatRange,
+} from './selectionOffsets';
 
 /**
  * How long after `compositionend` the IME is still treated as active.
@@ -17,6 +23,64 @@ import { isImeKeyEvent } from '../../../utils/ime';
  * therefore stands down for a short grace period after composition ends.
  */
 const IME_ACTIVE_GRACE_MS = 120;
+const NATIVE_CLEANUP_POLL_MS = 10;
+const NATIVE_CLEANUP_MAX_WAIT_MS = 100;
+
+type CompositionReplacementRange = { start: number; end: number };
+
+/**
+ * Decide whether and where to recover an IME payload that Gecko supplied only
+ * through InputEvent.data. Exported for focused unit coverage of the timing and
+ * middle-of-text range behavior; it has no browser or Lexical dependencies.
+ */
+export function decideCompositionPayloadRecovery(options: {
+    baselineModel: string | null;
+    currentText: string;
+    committedText: string;
+    replacementRange: CompositionReplacementRange;
+    textSize: number;
+    deadlineReached: boolean;
+}):
+    | { action: 'already-present' }
+    | { action: 'wait' }
+    | {
+        action: 'recover';
+        start: number;
+        end: number;
+        cleanupObserved: boolean;
+    } {
+    const {
+        baselineModel,
+        currentText,
+        committedText,
+        replacementRange,
+        textSize,
+        deadlineReached,
+    } = options;
+    if (
+        currentText.slice(
+            replacementRange.start,
+            replacementRange.start + committedText.length,
+        ) === committedText
+    ) {
+        return { action: 'already-present' };
+    }
+    const cleanupObserved =
+        baselineModel === null
+        || currentText !== baselineModel;
+    if (!cleanupObserved && !deadlineReached) {
+        return { action: 'wait' };
+    }
+    const start = Math.min(replacementRange.start, textSize);
+    return {
+        action: 'recover',
+        start,
+        end: cleanupObserved
+            ? start
+            : Math.min(replacementRange.end, textSize),
+        cleanupObserved,
+    };
+}
 
 /**
  * Tracks IME composition from the editor's own DOM events.
@@ -126,16 +190,21 @@ export function createImeCompositionTracker(): ImeCompositionTracker {
         editor = nextEditor;
         lastEventAt = 0;
         const attach = (root: HTMLElement) => {
-            root.addEventListener('compositionstart', onCompositionStart);
-            root.addEventListener('compositionupdate', onCompositionUpdate);
-            root.addEventListener('compositionend', onCompositionEnd);
-            root.addEventListener('focusout', onFocusOut);
+            // Capture phase runs before Lexical's root listeners. In
+            // particular, compositionstart makes Lexical insert its temporary
+            // zero-width marker synchronously; the gated emitter must already
+            // know that update belongs to an IME or it publishes the marker as
+            // real composer text.
+            root.addEventListener('compositionstart', onCompositionStart, true);
+            root.addEventListener('compositionupdate', onCompositionUpdate, true);
+            root.addEventListener('compositionend', onCompositionEnd, true);
+            root.addEventListener('focusout', onFocusOut, true);
         };
         const detach = (root: HTMLElement) => {
-            root.removeEventListener('compositionstart', onCompositionStart);
-            root.removeEventListener('compositionupdate', onCompositionUpdate);
-            root.removeEventListener('compositionend', onCompositionEnd);
-            root.removeEventListener('focusout', onFocusOut);
+            root.removeEventListener('compositionstart', onCompositionStart, true);
+            root.removeEventListener('compositionupdate', onCompositionUpdate, true);
+            root.removeEventListener('compositionend', onCompositionEnd, true);
+            root.removeEventListener('focusout', onFocusOut, true);
         };
         const unregisterRoot = nextEditor.registerRootListener((rootElement, prevRootElement) => {
             if (prevRootElement) detach(prevRootElement);
@@ -362,11 +431,50 @@ export function createCompositionGatedEmitter(options: {
  * replaced it. Keep any future change to this area behind the same kind of
  * measurement.
  */
-export function registerCompositionEndDeferral(editor: LexicalEditor): () => void {
+export function registerCompositionEndDeferral(
+    editor: LexicalEditor,
+    options: { trace?: boolean } = {},
+): () => void {
+    const { trace = false } = options;
     let deferredEvent: CompositionEvent | null = null;
     let redispatching = false;
     let fallbackTimer: number | null = null;
+    let payloadRecoveryTimer: number | null = null;
     let rootEl: HTMLElement | null = null;
+    let deferredDomText: string | null = null;
+    let deferredModelText: string | null = null;
+    let deferredReplacementRange: CompositionReplacementRange | null = null;
+
+    const getModelText = (): string | null => {
+        // The optional guard keeps the small command-bus test double usable;
+        // a real LexicalEditor always supplies getEditorState().
+        if (typeof editor.getEditorState !== 'function') return null;
+        let text = '';
+        editor.getEditorState().read(() => {
+            text = $getRoot().getTextContent();
+        });
+        return text;
+    };
+
+    const describeState = (): string => {
+        const modelText = getModelText() ?? '(unavailable)';
+        const root = editor.getRootElement();
+        const sel = root?.ownerDocument.defaultView?.getSelection();
+        return ` editorComposing=${editor.isComposing()}`
+            + ` sel=${sel ? `${sel.anchorOffset}/${sel.focusOffset}` : 'none'}`
+            + ` dom=${JSON.stringify(root?.textContent ?? '')}`
+            + ` model=${JSON.stringify(modelText)}`;
+    };
+
+    const tracePhase = (phase: string, event?: CompositionEvent | InputEvent) => {
+        if (!trace) return;
+        logger(
+            `[IME] composition-end deferral ${phase}`
+            + (event ? ` data=${JSON.stringify(event.data ?? null)}`
+                + ` inputType=${'inputType' in event ? event.inputType : '-'}` : '')
+            + describeState(),
+        );
+    };
 
     const clearFallback = () => {
         if (fallbackTimer === null) return;
@@ -374,14 +482,117 @@ export function registerCompositionEndDeferral(editor: LexicalEditor): () => voi
         fallbackTimer = null;
     };
 
-    const finish = () => {
+    const clearPayloadRecovery = () => {
+        if (payloadRecoveryTimer === null) return;
+        rootEl?.ownerDocument.defaultView?.clearTimeout(payloadRecoveryTimer);
+        payloadRecoveryTimer = null;
+    };
+
+    const finish = (
+        reason: 'final-input' | 'fallback' | 'root-change' | 'cleanup',
+        finalInput?: InputEvent,
+    ) => {
         clearFallback();
         const event = deferredEvent;
         deferredEvent = null;
         if (!event) return;
+        const browserDidNotMutate =
+            reason === 'final-input'
+            && deferredDomText !== null
+            && rootEl?.textContent === deferredDomText
+            && (
+                deferredModelText === null
+                || getModelText() === deferredModelText
+            );
         redispatching = true;
         try {
             editor.dispatchCommand(COMPOSITION_END_COMMAND, event);
+            const committedText = finalInput?.data ?? event.data;
+            const replacementStart = deferredReplacementRange?.start ?? 0;
+            const modelAfterCompositionEnd = getModelText() ?? '';
+            const candidateAlreadyPresent =
+                !!committedText
+                && modelAfterCompositionEnd.slice(
+                    replacementStart,
+                    replacementStart + committedText.length,
+                ) === committedText;
+            if (
+                browserDidNotMutate
+                && finalInput?.inputType === 'insertCompositionText'
+                && committedText
+                && !candidateAlreadyPresent
+            ) {
+                // Zotero's Gecko chrome document can deliver the committed
+                // candidate only in InputEvent.data without applying the
+                // corresponding native contenteditable mutation. Lexical
+                // normally reads that mutation from the DOM. Gecko then
+                // removes its composition node asynchronously after `input`,
+                // sometimes several tasks later, so wait until the model
+                // reflects that cleanup before inserting the otherwise-lost
+                // payload. The unchanged DOM+model guard keeps normal IMEs on
+                // Lexical's native reconciliation path.
+                if (rootEl) {
+                    const recoveryRoot = rootEl;
+                    const replacementRange = deferredReplacementRange ?? {
+                        start: 0,
+                        end: 0,
+                    };
+                    const baselineModel = deferredModelText;
+                    const inputForTrace = finalInput;
+                    const win = recoveryRoot.ownerDocument.defaultView;
+                    const deadline = Date.now() + NATIVE_CLEANUP_MAX_WAIT_MS;
+                    clearPayloadRecovery();
+                    const attemptRecovery = () => {
+                        payloadRecoveryTimer = null;
+                        if (rootEl !== recoveryRoot) return;
+                        const currentText = getModelText() ?? '';
+                        const textSize = editor.getEditorState().read(
+                            () => $getRoot().getTextContentSize(),
+                        );
+                        const decision = decideCompositionPayloadRecovery({
+                            baselineModel,
+                            currentText,
+                            committedText,
+                            replacementRange,
+                            textSize,
+                            deadlineReached: Date.now() >= deadline,
+                        });
+                        if (decision.action === 'already-present') {
+                            return;
+                        }
+                        if (decision.action === 'wait') {
+                            payloadRecoveryTimer = win?.setTimeout(
+                                attemptRecovery,
+                                NATIVE_CLEANUP_POLL_MS,
+                            ) ?? null;
+                            return;
+                        }
+                        let inserted = false;
+                        editor.update(() => {
+                            $selectFlatRange(decision.start, decision.end);
+                            const selection = $getSelection();
+                            if ($isRangeSelection(selection)) {
+                                selection.insertText(committedText);
+                                inserted = true;
+                            }
+                        }, { discrete: true });
+                        tracePhase(
+                            inserted
+                                ? `recovered payload after ${
+                                    decision.cleanupObserved
+                                        ? 'observed native cleanup'
+                                        : 'cleanup wait timeout'
+                                }`
+                                : 'recovery skipped: no range selection',
+                            inputForTrace,
+                        );
+                    };
+                    payloadRecoveryTimer = win?.setTimeout(
+                        attemptRecovery,
+                        NATIVE_CLEANUP_POLL_MS,
+                    ) ?? null;
+                }
+            }
         } catch (error) {
             // Only reachable when the editor is torn down mid-composition
             // (e.g. its window closed); Lexical clears its composing state
@@ -389,6 +600,9 @@ export function registerCompositionEndDeferral(editor: LexicalEditor): () => voi
             logger(`registerCompositionEndDeferral: deferred composition end failed: ${error}`, 1);
         } finally {
             redispatching = false;
+            deferredDomText = null;
+            deferredModelText = null;
+            deferredReplacementRange = null;
         }
     };
 
@@ -397,19 +611,36 @@ export function registerCompositionEndDeferral(editor: LexicalEditor): () => voi
     // registration order. By this point the final composition input has been
     // adopted into the editor state, so the deferred composition end can be
     // processed safely.
-    const onRootInput = () => {
-        if (deferredEvent !== null) finish();
+    const onRootInput = (event: Event) => {
+        if (deferredEvent !== null) {
+            finish('final-input', event as InputEvent);
+        }
     };
 
     const unregisterCommand = editor.registerCommand<CompositionEvent>(
         COMPOSITION_END_COMMAND,
         (event) => {
             if (redispatching) return false; // our re-dispatch: let Lexical process it now
-            const win = rootEl?.ownerDocument.defaultView;
-            if (!win) return false; // no mounted root — keep stock behavior
+            const root = rootEl;
+            const win = root?.ownerDocument.defaultView;
+            if (!root || !win) return false; // no mounted root — keep stock behavior
             clearFallback();
             deferredEvent = event;
-            fallbackTimer = win.setTimeout(finish, 0);
+            deferredDomText = root.textContent;
+            deferredModelText = getModelText();
+            deferredReplacementRange = null;
+            if (typeof editor.getEditorState === 'function') {
+                editor.getEditorState().read(() => {
+                    const offsets = $getFlatSelectionOffsets();
+                    if (offsets) {
+                        deferredReplacementRange = {
+                            start: Math.min(offsets.anchor, offsets.focus),
+                            end: Math.max(offsets.anchor, offsets.focus),
+                        };
+                    }
+                });
+            }
+            fallbackTimer = win.setTimeout(() => finish('fallback'), 0);
             return true;
         },
         COMMAND_PRIORITY_CRITICAL,
@@ -417,18 +648,23 @@ export function registerCompositionEndDeferral(editor: LexicalEditor): () => voi
 
     const unregisterRoot = editor.registerRootListener((rootElement, prevRootElement) => {
         if (prevRootElement) prevRootElement.removeEventListener('input', onRootInput);
+        if (prevRootElement && prevRootElement !== rootElement) clearPayloadRecovery();
         // A pending deferral belongs to the previous root; complete it before
         // switching so composing state cannot leak across roots.
-        if (deferredEvent !== null) finish();
+        if (deferredEvent !== null) finish('root-change');
         rootEl = rootElement;
         if (rootElement) rootElement.addEventListener('input', onRootInput);
     });
 
     return () => {
+        clearPayloadRecovery();
         unregisterCommand();
         // Unregistering invokes the root listener once more with a null root,
         // which detaches the input listener and flushes any pending deferral
         // (straight to Lexical's handler — ours is already unregistered).
+        if (deferredEvent !== null) {
+            finish('cleanup');
+        }
         unregisterRoot();
     };
 }
@@ -505,9 +741,15 @@ export function registerImeTrace(editor: LexicalEditor, ime: ImeCompositionTrack
             + composing
             + ` sel=${root ? describeSelection(root) : '-'}`;
 
-        // Full text only at composition boundaries — the updates in between
-        // rarely need it, and dumping on every input floods the log.
-        if (e.type === 'compositionstart' || e.type === 'compositionend') {
+        // Full text at composition boundaries and after the final composition
+        // input. The latter is decisive on Gecko/Windows: its payload can name
+        // a committed candidate even when neither the DOM nor Lexical adopted
+        // it.
+        if (
+            e.type === 'compositionstart'
+            || e.type === 'compositionend'
+            || (e.type === 'input' && !e.isComposing)
+        ) {
             let modelText = '';
             editor.getEditorState().read(() => {
                 modelText = $getRoot().getTextContent();
