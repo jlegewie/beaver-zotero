@@ -1,3 +1,4 @@
+/* DEPRECATED: This component is no longer used. */
 import React from "react";
 import { useAtomValue } from "jotai";
 import { fileStatusSummaryAtom, connectionStatusAtom } from "../../atoms/files";

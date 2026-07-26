@@ -156,14 +156,7 @@ export const isBackendIndexingCompleteAtom = atom<boolean>((get) => {
     return profile?.indexing_complete || false;
 });
 
-export const processingModeAtom = atom<ProcessingMode>((get) => {
-    const isBackendIndexingComplete = get(isBackendIndexingCompleteAtom);
-    if (get(isDatabaseSyncSupportedAtom) && isBackendIndexingComplete) {
-        return ProcessingMode.BACKEND;
-    } else {
-        return ProcessingMode.FRONTEND;
-    }
-});
+export const processingModeAtom = atom<ProcessingMode>(() => ProcessingMode.FRONTEND);
 
 // Plan features
 export const planFeaturesAtom = atom<PlanFeatures>((get) => {
