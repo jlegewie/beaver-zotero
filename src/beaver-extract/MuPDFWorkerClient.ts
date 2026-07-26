@@ -16,6 +16,7 @@
 import {
     getConfig,
     isConfigured,
+    type PDFTimerFunctions,
     type PDFWorkerSlotName,
     type PDFWorkerUrls,
 } from "./config";
@@ -47,11 +48,59 @@ import type { ParagraphDetectionSettings } from "./ParagraphDetector";
 
 const DEFAULT_IDLE_TIMEOUT_MS_HOT = 5 * 60 * 1000;
 const DEFAULT_IDLE_TIMEOUT_MS_BACKGROUND = 60 * 1000;
+// Last-resort backstops: a lease must stay a few seconds ABOVE the longest
+// deadline after which callers legitimately reclaim a slot operation
+// themselves (per-request timeouts — including backend-provided
+// timeout_seconds — plus any shared-extraction grace), so the lease only
+// fires when those reclaim paths failed. A lease at or below such a deadline
+// would reap in-budget work instead. Interactive hot-slot request timeouts
+// are clamped to MAX_INTERACTIVE_PDF_TIMEOUT_SECONDS (agentDataProvider
+// timeout module) to keep the hot invariant enforced; raise the lease
+// alongside any increase to those budgets (hot:
+// MAX_INTERACTIVE_PDF_TIMEOUT_SECONDS plus the shared-extraction grace;
+// background: MAX_PDF_TIMEOUT_SECONDS).
+export const DEFAULT_BUSY_LEASE_MS_HOT = 65_000;
+export const DEFAULT_BUSY_LEASE_MS_BACKGROUND = 240_000;
+const BUSY_LEASE_WATCHDOG_SLACK_MS = 1_000;
+const DEFAULT_RECYCLE_HEAP_BYTES = 512 * 1024 * 1024;
+const DEFAULT_RECYCLE_AFTER_DATA_OPERATIONS_HOT = 32;
+const PROACTIVE_RECYCLE_FOLLOWUP_DATA_OPERATIONS = 1;
+
+export type ProactiveRecycleReason = "heap_limit" | "data_operation_limit";
 
 function defaultIdleTimeoutForSlot(name: PDFWorkerSlotName): number {
     return name === "background"
         ? DEFAULT_IDLE_TIMEOUT_MS_BACKGROUND
         : DEFAULT_IDLE_TIMEOUT_MS_HOT;
+}
+
+function defaultBusyLeaseForSlot(name: PDFWorkerSlotName): number {
+    return name === "background"
+        ? DEFAULT_BUSY_LEASE_MS_BACKGROUND
+        : DEFAULT_BUSY_LEASE_MS_HOT;
+}
+
+function defaultRecycleHeapBytesForSlot(
+    _name: PDFWorkerSlotName,
+): number | null {
+    return DEFAULT_RECYCLE_HEAP_BYTES;
+}
+
+function defaultRecycleDataOperationsForSlot(
+    name: PDFWorkerSlotName,
+): number | null {
+    return name === "hot" ? DEFAULT_RECYCLE_AFTER_DATA_OPERATIONS_HOT : null;
+}
+
+function normalizePositiveThreshold(value: number | null): number | null {
+    return value !== null && Number.isFinite(value) && value > 0
+        ? Math.floor(value)
+        : null;
+}
+
+/** Worker control/introspection operations use the `__` prefix. */
+function isDataOperation(op: string): boolean {
+    return !op.startsWith("__");
 }
 
 /**
@@ -93,9 +142,90 @@ export function __resetIdleTimeoutForTest(
     }
 }
 
+/**
+ * Test-time busy-lease overrides keyed by slot name. New `MuPDFWorkerClient`
+ * instances pick these up at construction, mirroring the idle-timeout hook.
+ */
+const testBusyLeaseOverrides: Partial<Record<PDFWorkerSlotName, number>> = {};
+
+/**
+ * Test-only override of the busy-age lease. Production leases sit ABOVE every
+ * caller-side reclaim deadline (see `DEFAULT_BUSY_LEASE_MS_HOT`), so the reap
+ * path is otherwise unreachable in a live process without wedging a worker for
+ * over a minute. Shortening the lease lets a test drive a real reap against a
+ * genuinely long operation.
+ */
+export function __setBusyLeaseForTest(
+    name: PDFWorkerSlotName,
+    ms: number,
+): void {
+    testBusyLeaseOverrides[name] = ms;
+    const slot = isConfigured() ? getConfig().workerClientSlots[name] : null;
+    const existing = slot?.get() as MuPDFWorkerClient | undefined;
+    if (existing) {
+        existing.setBusyLeaseForTest(ms);
+    }
+}
+
+/** Test-only: restore the production busy lease for a slot (default hot). */
+export function __resetBusyLeaseForTest(
+    name: PDFWorkerSlotName = "hot",
+): void {
+    delete testBusyLeaseOverrides[name];
+    const slot = isConfigured() ? getConfig().workerClientSlots[name] : null;
+    const existing = slot?.get() as MuPDFWorkerClient | undefined;
+    if (existing) {
+        existing.setBusyLeaseForTest(defaultBusyLeaseForSlot(name));
+    }
+}
+
+/**
+ * The window whose bundle loaded this module, or null outside a window
+ * realm (Node, workers). Captured so a client stored in a cross-bundle
+ * slot can detect that its creating realm is gone: the shared instance
+ * survives on a host global across a window close/reopen, but timers and
+ * closures created in the dead realm are inert.
+ */
+// eslint-disable-next-line no-restricted-globals -- deliberately this bundle's window, not the host's current main window
+let moduleWindow: Window | null = typeof window !== "undefined" ? window : null;
+const realModuleWindow = moduleWindow;
+
+/** Test-only: simulate the module having been loaded by a given window. */
+export function __setModuleWindowForTest(win: Window | null): void {
+    moduleWindow = win;
+}
+
+/** Test-only: restore the real module window. */
+export function __resetModuleWindowForTest(): void {
+    moduleWindow = realModuleWindow;
+}
+
+/**
+ * Resolve the timer functions for a new client: host-injected
+ * realm-independent timers when configured, else the module realm's
+ * globals (safe in Node/tests, where the realm cannot outlive the
+ * process). Snapshotted per instance so schedule and cancel always go
+ * through the same implementation.
+ */
+function resolveTimerFunctions(): PDFTimerFunctions {
+    const injected = isConfigured() ? getConfig().timers : undefined;
+    if (injected) return injected;
+    return {
+        setTimeout: (callback, delayMs) => {
+            const id = setTimeout(callback, delayMs);
+            // Node returns a Timeout handle that would otherwise hold the
+            // process open (CLI paths); window/system timer ids are numbers.
+            (id as any)?.unref?.();
+            return id;
+        },
+        clearTimeout: (id) => clearTimeout(id as any),
+    };
+}
+
 interface PendingEntry {
     resolve: (value: any) => void;
     reject: (reason: any) => void;
+    op: string;
     fatalCandidate?: FatalOperationCandidate;
     /** Epoch-ms when the client accepted this operation. */
     startedAt: number;
@@ -108,7 +238,7 @@ interface StartupEntry {
     resolve: () => void;
     reject: (reason: any) => void;
     configured: boolean;
-    timeoutId: ReturnType<typeof setTimeout> | undefined;
+    timeoutId: unknown | undefined;
 }
 
 interface FatalOperationCandidate {
@@ -142,12 +272,14 @@ interface WorkerSuccessReply {
     id: number;
     ok: true;
     result: any;
+    heapBytes?: number | null;
 }
 
 interface WorkerFailureReply {
     id: number;
     ok: false;
     error: WorkerErrorPayload;
+    heapBytes?: number | null;
 }
 
 interface WorkerLogMessage {
@@ -185,6 +317,34 @@ export interface MuPDFWorkerCacheStats {
     cryptoUsable: boolean | null;
 }
 
+export interface MuPDFWorkerStats {
+    hasWorker: boolean;
+    disposed: boolean;
+    spawnCount: number;
+    retryCount: number;
+    consecutiveStartFailures: number;
+    pendingCount: number;
+    nextId: number;
+    dispatchCounts: Record<string, number>;
+    lastSpawnTime: number | null;
+    idleTimerArmed: boolean;
+    workerHeapBytes: number | null;
+    peakWorkerHeapBytes: number | null;
+    completedDataOperationsSinceSpawn: number;
+    recycleHeapThresholdBytes: number | null;
+    recycleDataOperationThreshold: number | null;
+    proactiveRecyclePending: boolean;
+    proactiveRecycleCount: number;
+    lastProactiveRecycleReason: ProactiveRecycleReason | null;
+    lastProactiveRecycleTime: number | null;
+    lastProactiveRecycleHeapBytes: number | null;
+    lastProactiveRecycleDataOperations: number | null;
+    leaseReapCount: number;
+    lastLeaseReapTime: number | null;
+    lastLeaseReapOp: string | null;
+    lastLeaseReapAgeMs: number | null;
+}
+
 /**
  * Sentinel rejection thrown when the worker dies mid-flight.
  * Callers may treat this as transient and retry with a fresh worker.
@@ -218,9 +378,31 @@ export class WorkerAbortError extends Error {
     }
 }
 
+/**
+ * Sentinel rejection for worker-level policy expiration. Unlike
+ * `WorkerAbortError`, this is not caller-initiated cancellation, and unlike
+ * `StaleWorkerError`, the operation whose lease expired must not be retried.
+ */
+export class WorkerDeadlineError extends Error {
+    constructor(message = "worker busy-age lease exceeded") {
+        super(message);
+        this.name = "WorkerDeadlineError";
+    }
+}
+
+/** Cross-bundle-safe classification for worker-level deadline expiration. */
+export function isWorkerDeadlineError(error: unknown): boolean {
+    return error instanceof WorkerDeadlineError
+        || (error as { name?: unknown } | null | undefined)?.name
+            === "WorkerDeadlineError";
+}
+
 export class MuPDFWorkerClient {
     private readonly slotName: PDFWorkerSlotName;
     private idleTimeoutMs: number;
+    private busyLeaseMs: number | null;
+    private readonly recycleHeapThresholdBytes: number | null;
+    private readonly recycleDataOperationThreshold: number | null;
     private worker: Worker | null = null;
     private spawnedFromWindowInternal: Window | null = null;
     private startup: StartupEntry | null = null;
@@ -257,26 +439,141 @@ export class MuPDFWorkerClient {
     private fatalOperationKeys = new Set<string>();
     private fatalOperationEntries: Array<{ key: string; prefix: string }> = [];
     private fatalOperationPrefixCounts = new Map<string, number>();
-    private idleTimerId: ReturnType<typeof setTimeout> | undefined;
+    private idleTimerId: unknown | undefined;
+    private busyLeaseWatchdogTimerId: unknown | undefined;
+    private proactiveRecycleTimerId: unknown | undefined;
+    private proactiveRecycleReason: ProactiveRecycleReason | null = null;
+    private proactiveRecycleFollowupDataOperationsRemaining = 0;
+    private proactiveRecycleBarrierPromise: Promise<void> | null = null;
+    private resolveProactiveRecycleBarrier: (() => void) | null = null;
+    private workerHeapBytes: number | null = null;
+    private peakWorkerHeapBytes: number | null = null;
+    private completedDataOperationsSinceSpawn = 0;
+    private proactiveRecycleCount = 0;
+    private lastProactiveRecycleReason: ProactiveRecycleReason | null = null;
+    private lastProactiveRecycleTime: number | null = null;
+    private lastProactiveRecycleHeapBytes: number | null = null;
+    private lastProactiveRecycleDataOperations: number | null = null;
+    private leaseReapCount = 0;
+    private lastLeaseReapTime: number | null = null;
+    private lastLeaseReapOp: string | null = null;
+    private lastLeaseReapAgeMs: number | null = null;
     // Populated only after a fatal reply so healthy dispatch never walks a
     // whole PDF on the UI thread before posting work to the worker.
     private pdfDigestCache = new WeakMap<object, Map<string, string>>();
 
-    constructor(opts: {
-        slotName?: PDFWorkerSlotName;
-        idleTimeoutMs?: number;
-    } = {}) {
+    /**
+     * Timer implementation snapshotted at construction (host-injected
+     * realm-independent timers, or the module realm's globals). All
+     * internal watchdogs schedule and cancel through this one pair.
+     */
+    private readonly timers: PDFTimerFunctions;
+
+    /**
+     * The window whose bundle constructed this client, or null outside a
+     * window realm. Used to detect a client that outlived its creating
+     * realm (see `isCreatorRealmDead`).
+     */
+    private readonly createdFromWindowInternal: Window | null;
+
+    constructor(
+        opts: {
+            slotName?: PDFWorkerSlotName;
+            idleTimeoutMs?: number;
+            busyLeaseMs?: number | null;
+            recycleHeapBytes?: number | null;
+            recycleAfterDataOperations?: number | null;
+        } = {},
+    ) {
         this.slotName = opts.slotName ?? "hot";
+        this.timers = resolveTimerFunctions();
+        this.createdFromWindowInternal = moduleWindow;
         const override = testIdleTimeoutOverrides[this.slotName];
         this.idleTimeoutMs =
             opts.idleTimeoutMs
             ?? override
             ?? defaultIdleTimeoutForSlot(this.slotName);
+        const leaseOverride = testBusyLeaseOverrides[this.slotName];
+        this.busyLeaseMs = normalizePositiveThreshold(
+            opts.busyLeaseMs === undefined
+                ? (leaseOverride ?? defaultBusyLeaseForSlot(this.slotName))
+                : opts.busyLeaseMs,
+        );
+        this.recycleHeapThresholdBytes = normalizePositiveThreshold(
+            opts.recycleHeapBytes === undefined
+                ? defaultRecycleHeapBytesForSlot(this.slotName)
+                : opts.recycleHeapBytes,
+        );
+        this.recycleDataOperationThreshold = normalizePositiveThreshold(
+            opts.recycleAfterDataOperations === undefined
+                ? defaultRecycleDataOperationsForSlot(this.slotName)
+                : opts.recycleAfterDataOperations,
+        );
+    }
+
+    /**
+     * Schedule through the snapshotted timer implementation. Normalizes an
+     * `undefined` return to `null` (the fields reserve `undefined` as the
+     * "not armed" sentinel) and tolerates a throwing host implementation —
+     * a lost watchdog degrades the safety net but must never break
+     * dispatch or spawn.
+     */
+    private scheduleTimer(
+        callback: () => void,
+        delayMs: number,
+    ): unknown | undefined {
+        try {
+            const id = this.timers.setTimeout(callback, delayMs);
+            return id === undefined ? null : id;
+        } catch (e) {
+            if (isConfigured()) {
+                getConfig().log(
+                    `[MuPDFWorkerClient ${this.slotName}] host timer setTimeout threw: ${e instanceof Error ? e.message : String(e)}`,
+                    1,
+                );
+            }
+            return undefined;
+        }
+    }
+
+    /**
+     * Cancel through the snapshotted timer implementation. Cancellation
+     * runs inside teardown paths (markStale / dispose) that must complete
+     * even if the host canceller throws.
+     */
+    private cancelTimer(id: unknown): void {
+        try {
+            this.timers.clearTimeout(id);
+        } catch {
+            // best-effort — teardown continues regardless
+        }
     }
 
     /** The window that spawned the current worker. Used for stale detection. */
     get spawnedFromWindow(): Window | null {
         return this.spawnedFromWindowInternal;
+    }
+
+    /** The window whose bundle constructed this client, or null. */
+    get createdFromWindow(): Window | null {
+        return this.createdFromWindowInternal;
+    }
+
+    /**
+     * True when the window realm that constructed this client is gone.
+     * Such a client can still drive workers (they respawn from the current
+     * host window), but timers and closures created in the dead realm may
+     * be inert — callers should dispose it and create a fresh instance.
+     */
+    get isCreatorRealmDead(): boolean {
+        const win = this.createdFromWindowInternal;
+        if (!win) return false;
+        try {
+            return win.closed === true;
+        } catch {
+            // Accessing a nuked window proxy throws — realm is gone.
+            return true;
+        }
     }
 
     /** The logical slot name this client owns. */
@@ -292,6 +589,26 @@ export class MuPDFWorkerClient {
      */
     get inFlight(): number {
         return this.pending.size + this.startupWaiters.size;
+    }
+
+    /**
+     * Whether a live worker is currently attached to this slot. Like
+     * `inFlight`, an O(1) read for busy-context snapshots (accessed
+     * cross-bundle via the `Zotero.__beaverMuPDFWorkerClient_*` globals):
+     * distinguishes a wedged-but-live worker from a slot stuck respawning.
+     */
+    get hasWorker(): boolean {
+        return this.worker !== null;
+    }
+
+    /** Cumulative worker spawns since this client was created. O(1) read. */
+    get totalSpawnCount(): number {
+        return this.spawnCount;
+    }
+
+    /** Cumulative busy-age lease reaps since this client was created. O(1) read. */
+    get totalLeaseReapCount(): number {
+        return this.leaseReapCount;
     }
 
     /** Epoch-ms for the oldest in-flight operation, or 0 while idle. */
@@ -316,6 +633,7 @@ export class MuPDFWorkerClient {
         this.oldestStartupWaitStartedAt = this.oldestStartupWaitStartedAt === null
             ? startedAt
             : Math.min(this.oldestStartupWaitStartedAt, startedAt);
+        this.syncBusyLeaseWatchdog();
         return id;
     }
 
@@ -334,6 +652,7 @@ export class MuPDFWorkerClient {
             }
             this.oldestStartupWaitStartedAt = oldest;
         }
+        this.syncBusyLeaseWatchdog();
         return removedStartedAt;
     }
 
@@ -347,6 +666,7 @@ export class MuPDFWorkerClient {
         this.oldestPendingStartedAt = this.oldestPendingStartedAt === null
             ? startedAt
             : Math.min(this.oldestPendingStartedAt, startedAt);
+        this.syncBusyLeaseWatchdog();
     }
 
     /** Remove an operation and refresh age tracking outside the stats hot path. */
@@ -363,6 +683,7 @@ export class MuPDFWorkerClient {
             }
             this.oldestPendingStartedAt = oldest;
         }
+        this.syncBusyLeaseWatchdog();
         return true;
     }
 
@@ -374,14 +695,129 @@ export class MuPDFWorkerClient {
         return entries;
     }
 
+    private clearBusyLeaseWatchdog(): void {
+        if (this.busyLeaseWatchdogTimerId === undefined) return;
+        this.cancelTimer(this.busyLeaseWatchdogTimerId);
+        this.busyLeaseWatchdogTimerId = undefined;
+    }
+
+    /** Keep one worker-level watchdog aligned with the oldest accepted work. */
+    private syncBusyLeaseWatchdog(): void {
+        this.clearBusyLeaseWatchdog();
+        const leaseMs = this.busyLeaseMs;
+        const worker = this.worker;
+        const oldestStartedAt = this.oldestInFlightStartedAt;
+        if (
+            this.disposed
+            || leaseMs === null
+            || !worker
+            || this.inFlight === 0
+            || oldestStartedAt === 0
+        ) {
+            return;
+        }
+
+        const delayMs = Math.max(
+            0,
+            oldestStartedAt + leaseMs + BUSY_LEASE_WATCHDOG_SLACK_MS - Date.now(),
+        );
+        this.busyLeaseWatchdogTimerId = this.scheduleTimer(() => {
+            this.busyLeaseWatchdogTimerId = undefined;
+            if (
+                this.disposed
+                || this.worker !== worker
+                || this.inFlight === 0
+                || this.busyLeaseMs === null
+            ) {
+                return;
+            }
+            const ageMs = Date.now() - this.oldestInFlightStartedAt;
+            if (ageMs >= this.busyLeaseMs) {
+                this.reapOverdueWorker();
+            } else {
+                this.syncBusyLeaseWatchdog();
+            }
+        }, delayMs);
+    }
+
+    /**
+     * Reap a continuously busy worker whose oldest accepted operation has
+     * exhausted the slot lease. When the oldest in-flight item is a posted
+     * operation, it receives a non-retriable deadline error while innocent
+     * siblings retry through the normal stale-worker path. When the oldest
+     * item is a startup waiter (the worker is wedged in the configure
+     * handshake), no posted operation caused it, so no deadline error is
+     * issued: markStale rejects the startup waiters with a retriable stale
+     * error instead. Either way the reap counters record the event.
+     */
+    private reapOverdueWorker(): void {
+        const leaseMs = this.busyLeaseMs;
+        const oldestStartedAt = this.oldestInFlightStartedAt;
+        if (
+            leaseMs === null
+            || !this.worker
+            || this.inFlight === 0
+            || oldestStartedAt === 0
+        ) {
+            return;
+        }
+
+        const ageMs = Date.now() - oldestStartedAt;
+        if (ageMs < leaseMs) {
+            this.syncBusyLeaseWatchdog();
+            return;
+        }
+
+        let reapedOp = "startup";
+        let oldestPendingId: number | null = null;
+        let oldestPending: PendingEntry | null = null;
+        // pending iterates in dispatch order (monotonic ids), so the first
+        // entry matching the oldest start time is the oldest posted operation.
+        for (const [id, entry] of this.pending) {
+            if (entry.startedAt === oldestStartedAt) {
+                oldestPendingId = id;
+                oldestPending = entry;
+                break;
+            }
+        }
+
+        if (oldestPendingId !== null && oldestPending) {
+            reapedOp = oldestPending.op;
+            this.deletePending(oldestPendingId);
+            oldestPending.reject(
+                new WorkerDeadlineError(
+                    `worker busy-age lease exceeded (op=${reapedOp}, age=${ageMs}ms)`,
+                ),
+            );
+        }
+
+        this.leaseReapCount += 1;
+        this.lastLeaseReapTime = Date.now();
+        this.lastLeaseReapOp = reapedOp;
+        this.lastLeaseReapAgeMs = ageMs;
+        this.markStale(
+            `busy-age lease exceeded (op=${reapedOp}, age=${ageMs}ms)`,
+        );
+    }
+
     /** Test-only: change the idle timeout on a live instance. */
     setIdleTimeoutForTest(ms: number): void {
         this.idleTimeoutMs = ms;
     }
 
+    /**
+     * Test-only: change the busy-age lease on a live instance. Re-arms the
+     * watchdog so a lease shortened while work is already in flight still
+     * reaps against the currently oldest operation.
+     */
+    setBusyLeaseForTest(ms: number | null): void {
+        this.busyLeaseMs = normalizePositiveThreshold(ms);
+        this.syncBusyLeaseWatchdog();
+    }
+
     private clearIdleTimer(): void {
         if (this.idleTimerId === undefined) return;
-        clearTimeout(this.idleTimerId);
+        this.cancelTimer(this.idleTimerId);
         this.idleTimerId = undefined;
     }
 
@@ -389,13 +825,226 @@ export class MuPDFWorkerClient {
         this.clearIdleTimer();
         if (this.disposed || !this.worker || this.pending.size !== 0) return;
 
-        const id = setTimeout(() => {
+        this.idleTimerId = this.scheduleTimer(() => {
             this.idleTimerId = undefined;
             if (this.disposed || !this.worker || this.pending.size !== 0) return;
             this.markStale("idle timeout");
         }, this.idleTimeoutMs);
-        (id as any)?.unref?.();
-        this.idleTimerId = id;
+    }
+
+    private clearProactiveRecycleTimer(): void {
+        if (this.proactiveRecycleTimerId === undefined) return;
+        this.cancelTimer(this.proactiveRecycleTimerId);
+        this.proactiveRecycleTimerId = undefined;
+    }
+
+    private releaseProactiveRecycleBarrier(): void {
+        const resolve = this.resolveProactiveRecycleBarrier;
+        this.proactiveRecycleBarrierPromise = null;
+        this.resolveProactiveRecycleBarrier = null;
+        resolve?.();
+    }
+
+    private resetCurrentWorkerRecycleState(): void {
+        this.clearProactiveRecycleTimer();
+        this.proactiveRecycleReason = null;
+        this.proactiveRecycleFollowupDataOperationsRemaining = 0;
+        this.workerHeapBytes = null;
+        this.completedDataOperationsSinceSpawn = 0;
+        this.releaseProactiveRecycleBarrier();
+    }
+
+    /**
+     * Record a completed worker reply and decide whether this worker has
+     * crossed a proactive-retirement threshold. The completed-data-operation
+     * limit controls steady-state accumulation; heap size catches outlier ops.
+     */
+    private recordCompletedOperation(
+        worker: Worker,
+        entry: PendingEntry,
+        heapBytes: number | null | undefined,
+    ): ProactiveRecycleReason | null {
+        if (this.worker !== worker) return null;
+
+        if (
+            typeof heapBytes === "number"
+            && Number.isFinite(heapBytes)
+            && heapBytes >= 0
+        ) {
+            this.workerHeapBytes = heapBytes;
+            this.peakWorkerHeapBytes = this.peakWorkerHeapBytes === null
+                ? heapBytes
+                : Math.max(this.peakWorkerHeapBytes, heapBytes);
+        }
+
+        if (isDataOperation(entry.op)) {
+            this.completedDataOperationsSinceSpawn += 1;
+        }
+
+        if (
+            this.recycleHeapThresholdBytes !== null
+            && this.workerHeapBytes !== null
+            && this.workerHeapBytes >= this.recycleHeapThresholdBytes
+        ) {
+            return "heap_limit";
+        }
+        if (
+            this.recycleDataOperationThreshold !== null
+            && this.completedDataOperationsSinceSpawn
+                >= this.recycleDataOperationThreshold
+        ) {
+            return "data_operation_limit";
+        }
+        return null;
+    }
+
+    /**
+     * Request a recycle without interrupting accepted work. The zero-delay
+     * timer gives a promise continuation one related follow-up operation
+     * (for example getPageCount -> extract); the dispatch gate below bounds
+     * that grace and holds later calls until retirement completes.
+     */
+    private requestProactiveRecycle(
+        worker: Worker,
+        reason: ProactiveRecycleReason,
+    ): void {
+        if (this.disposed || this.worker !== worker) return;
+        // Heap pressure is the more informative reason when both thresholds
+        // are crossed by the same worker.
+        if (this.proactiveRecycleReason === null) {
+            this.proactiveRecycleReason = reason;
+            this.proactiveRecycleFollowupDataOperationsRemaining =
+                PROACTIVE_RECYCLE_FOLLOWUP_DATA_OPERATIONS;
+        } else if (reason === "heap_limit") {
+            this.proactiveRecycleReason = reason;
+        }
+        if (
+            this.pending.size !== 0
+            || this.startupWaiters.size !== 0
+        ) {
+            return;
+        }
+        if (this.proactiveRecycleBarrierPromise) {
+            this.clearProactiveRecycleTimer();
+            this.performProactiveRecycle(worker);
+            return;
+        }
+        if (this.proactiveRecycleTimerId !== undefined) return;
+
+        this.proactiveRecycleTimerId = this.scheduleTimer(() => {
+            this.proactiveRecycleTimerId = undefined;
+            if (
+                this.disposed
+                || this.worker !== worker
+                || this.proactiveRecycleReason === null
+                || this.pending.size !== 0
+                || this.startupWaiters.size !== 0
+            ) {
+                return;
+            }
+
+            this.performProactiveRecycle(worker);
+        }, 0);
+    }
+
+    /** Retire the current worker after all accepted work has drained. */
+    private performProactiveRecycle(worker: Worker): boolean {
+        if (
+            this.disposed
+            || this.worker !== worker
+            || this.proactiveRecycleReason === null
+            || this.pending.size !== 0
+            || this.startupWaiters.size !== 0
+        ) {
+            return false;
+        }
+
+        const recycleReason = this.proactiveRecycleReason;
+        const heapAtRecycle = this.workerHeapBytes;
+        const dataOpsAtRecycle = this.completedDataOperationsSinceSpawn;
+        this.proactiveRecycleCount += 1;
+        this.lastProactiveRecycleReason = recycleReason;
+        this.lastProactiveRecycleTime = Date.now();
+        this.lastProactiveRecycleHeapBytes = heapAtRecycle;
+        this.lastProactiveRecycleDataOperations = dataOpsAtRecycle;
+        getConfig().log(
+            `[MuPDFWorkerClient ${this.slotName}] proactive recycle reason=${recycleReason} heapBytes=${heapAtRecycle ?? "unknown"} completedDataOperations=${dataOpsAtRecycle}`,
+            3,
+        );
+        this.markStale(`proactive ${recycleReason}`, { proactive: true });
+        return true;
+    }
+
+    private getProactiveRecycleBarrier(): Promise<void> {
+        if (!this.proactiveRecycleBarrierPromise) {
+            this.proactiveRecycleBarrierPromise = new Promise<void>((resolve) => {
+                this.resolveProactiveRecycleBarrier = resolve;
+            });
+        }
+        return this.proactiveRecycleBarrierPromise;
+    }
+
+    private waitForProactiveRecycle(
+        barrier: Promise<void>,
+        signal?: AbortSignal,
+    ): Promise<void> {
+        if (signal?.aborted) {
+            return Promise.reject(new WorkerAbortError());
+        }
+        if (!signal) return barrier;
+
+        return new Promise<void>((resolve, reject) => {
+            let settled = false;
+            const cleanup = () => {
+                signal.removeEventListener("abort", onAbort);
+            };
+            const onAbort = () => {
+                if (settled) return;
+                settled = true;
+                cleanup();
+                reject(new WorkerAbortError());
+            };
+            signal.addEventListener("abort", onAbort, { once: true });
+            if (signal.aborted) {
+                onAbort();
+                return;
+            }
+            barrier.then(() => {
+                if (settled) return;
+                settled = true;
+                cleanup();
+                resolve();
+            });
+        });
+    }
+
+    /**
+     * Allow one related data operation after a threshold crossing, then put
+     * later data calls behind a drain barrier so a microtask chain cannot keep
+     * the retiring worker alive indefinitely.
+     */
+    private prepareForDataOperationDispatch(
+        op: string,
+        signal?: AbortSignal,
+    ): Promise<void> | null {
+        const worker = this.worker;
+        const recycleReason = this.proactiveRecycleReason;
+        if (!isDataOperation(op) || !worker || recycleReason === null) {
+            return null;
+        }
+
+        if (this.proactiveRecycleFollowupDataOperationsRemaining > 0) {
+            this.proactiveRecycleFollowupDataOperationsRemaining -= 1;
+            return null;
+        }
+
+        if (this.performProactiveRecycle(worker)) {
+            return null;
+        }
+
+        const barrier = this.getProactiveRecycleBarrier();
+        this.requestProactiveRecycle(worker, recycleReason);
+        return this.waitForProactiveRecycle(barrier, signal);
     }
 
     private ensureWorker(): Worker {
@@ -464,6 +1113,7 @@ export class MuPDFWorkerClient {
 
         this.worker = worker;
         this.spawnedFromWindowInternal = mainWindow;
+        this.resetCurrentWorkerRecycleState();
         this.startup = this.createStartupEntry(worker, cfg.worker);
         // Send one configure frame immediately for the normal fast path. The
         // worker also emits `ready` after installing its message handler; if
@@ -493,7 +1143,7 @@ export class MuPDFWorkerClient {
                 if (entry.configured) return;
                 entry.configured = true;
                 if (entry.timeoutId !== undefined) {
-                    clearTimeout(entry.timeoutId);
+                    this.cancelTimer(entry.timeoutId);
                     entry.timeoutId = undefined;
                 }
                 resolve();
@@ -501,7 +1151,7 @@ export class MuPDFWorkerClient {
             reject: (reason: any) => {
                 if (entry.configured) return;
                 if (entry.timeoutId !== undefined) {
-                    clearTimeout(entry.timeoutId);
+                    this.cancelTimer(entry.timeoutId);
                     entry.timeoutId = undefined;
                 }
                 reject(reason);
@@ -509,11 +1159,10 @@ export class MuPDFWorkerClient {
             configured: false,
             timeoutId: undefined,
         };
-        entry.timeoutId = setTimeout(() => {
+        entry.timeoutId = this.scheduleTimer(() => {
             if (this.startup !== entry || entry.configured) return;
             this.markStale("configure handshake timed out", { startError: true });
         }, 15000);
-        (entry.timeoutId as any)?.unref?.();
         return entry;
     }
 
@@ -567,6 +1216,11 @@ export class MuPDFWorkerClient {
             return;
         }
         this.deletePending(reply.id);
+        const proactiveRecycleReason = this.recordCompletedOperation(
+            worker,
+            entry,
+            reply.heapBytes,
+        );
 
         if (reply.ok) {
             entry.resolve(reply.result);
@@ -588,6 +1242,9 @@ export class MuPDFWorkerClient {
             entry.reject(error);
         }
 
+        if (proactiveRecycleReason && this.worker === worker) {
+            this.requestProactiveRecycle(worker, proactiveRecycleReason);
+        }
         this.armIdleTimer();
     }
 
@@ -634,8 +1291,13 @@ export class MuPDFWorkerClient {
      * Mark the worker as stale: terminate it, reject all pending entries,
      * clear singleton state. Idempotent.
      */
-    private markStale(reason: string, opts?: { startError?: boolean }): void {
+    private markStale(
+        reason: string,
+        opts?: { startError?: boolean; proactive?: boolean },
+    ): void {
         this.clearIdleTimer();
+        this.clearBusyLeaseWatchdog();
+        this.clearProactiveRecycleTimer();
         const w = this.worker;
         this.worker = null;
         this.spawnedFromWindowInternal = null;
@@ -658,8 +1320,9 @@ export class MuPDFWorkerClient {
         const pendingCount = this.pending.size;
         if (pendingCount > 0 || w) {
             // Log only when configured. markStale can be reached during
-            // shutdown teardown after configure has been wiped.
-            if (isConfigured()) {
+            // shutdown teardown after configure has been wiped. Proactive
+            // retirement already emitted a detailed policy log above.
+            if (isConfigured() && !opts?.proactive) {
                 getConfig().log(
                     `[MuPDFWorkerClient ${this.slotName}] markStale (${reason}); rejecting ${pendingCount} pending`,
                     2,
@@ -675,6 +1338,7 @@ export class MuPDFWorkerClient {
         for (const entry of pending) {
             entry.reject(stale);
         }
+        this.resetCurrentWorkerRecycleState();
 
         // Surface a repeated inability to start the worker to the host (e.g. to
         // prompt the user to restart). Fired after state is cleared and pending
@@ -725,6 +1389,7 @@ export class MuPDFWorkerClient {
         args: Record<string, unknown>,
         signal?: AbortSignal,
     ): Promise<T> {
+        this.reapOverdueWorker();
         if (signal?.aborted) {
             return Promise.reject(new WorkerAbortError());
         }
@@ -734,6 +1399,10 @@ export class MuPDFWorkerClient {
             : null;
         if (fatalKey && this.fatalOperationKeys.has(fatalKey)) {
             return Promise.reject(createKnownFatalWasmError());
+        }
+        const recycleBarrier = this.prepareForDataOperationDispatch(op, signal);
+        if (recycleBarrier) {
+            return recycleBarrier.then(() => this.dispatch<T>(op, args, signal));
         }
         const worker = this.ensureWorker();
         const startup = this.pendingStartupFor(worker);
@@ -869,6 +1538,7 @@ export class MuPDFWorkerClient {
                 {
                     resolve: resolveWithCleanup,
                     reject: rejectWithCleanup,
+                    op,
                     fatalCandidate: fatalCandidate ?? undefined,
                 },
                 startedAt,
@@ -1244,18 +1914,7 @@ export class MuPDFWorkerClient {
      * this through a debug endpoint so manual-test runners can verify
      * fan-out without grepping logs.
      */
-    getStats(): {
-        hasWorker: boolean;
-        disposed: boolean;
-        spawnCount: number;
-        retryCount: number;
-        consecutiveStartFailures: number;
-        pendingCount: number;
-        nextId: number;
-        dispatchCounts: Record<string, number>;
-        lastSpawnTime: number | null;
-        idleTimerArmed: boolean;
-    } {
+    getStats(): MuPDFWorkerStats {
         return {
             hasWorker: this.worker !== null,
             disposed: this.disposed,
@@ -1267,6 +1926,23 @@ export class MuPDFWorkerClient {
             dispatchCounts: { ...this.dispatchCounts },
             lastSpawnTime: this.lastSpawnTime,
             idleTimerArmed: this.idleTimerId !== undefined,
+            workerHeapBytes: this.workerHeapBytes,
+            peakWorkerHeapBytes: this.peakWorkerHeapBytes,
+            completedDataOperationsSinceSpawn:
+                this.completedDataOperationsSinceSpawn,
+            recycleHeapThresholdBytes: this.recycleHeapThresholdBytes,
+            recycleDataOperationThreshold: this.recycleDataOperationThreshold,
+            proactiveRecyclePending: this.proactiveRecycleReason !== null,
+            proactiveRecycleCount: this.proactiveRecycleCount,
+            lastProactiveRecycleReason: this.lastProactiveRecycleReason,
+            lastProactiveRecycleTime: this.lastProactiveRecycleTime,
+            lastProactiveRecycleHeapBytes: this.lastProactiveRecycleHeapBytes,
+            lastProactiveRecycleDataOperations:
+                this.lastProactiveRecycleDataOperations,
+            leaseReapCount: this.leaseReapCount,
+            lastLeaseReapTime: this.lastLeaseReapTime,
+            lastLeaseReapOp: this.lastLeaseReapOp,
+            lastLeaseReapAgeMs: this.lastLeaseReapAgeMs,
         };
     }
 
@@ -1277,6 +1953,16 @@ export class MuPDFWorkerClient {
         this.consecutiveStartFailures = 0;
         this.dispatchCounts = {};
         this.lastSpawnTime = null;
+        this.peakWorkerHeapBytes = this.workerHeapBytes;
+        this.proactiveRecycleCount = 0;
+        this.lastProactiveRecycleReason = null;
+        this.lastProactiveRecycleTime = null;
+        this.lastProactiveRecycleHeapBytes = null;
+        this.lastProactiveRecycleDataOperations = null;
+        this.leaseReapCount = 0;
+        this.lastLeaseReapTime = null;
+        this.lastLeaseReapOp = null;
+        this.lastLeaseReapAgeMs = null;
     }
 
     /**
@@ -1393,7 +2079,7 @@ export class MuPDFWorkerClient {
         }
         const id = this.nextId++;
         return new Promise<T>((resolve, reject) => {
-            this.addPending(id, { resolve, reject });
+            this.addPending(id, { resolve, reject, op });
             try {
                 this.clearIdleTimer();
                 worker.postMessage({ id, op, args });
@@ -1634,17 +2320,35 @@ export function getMuPDFWorkerClient(
 ): MuPDFWorkerClient {
     const slot = getConfig().workerClientSlots[name];
     const existing = slot.get() as MuPDFWorkerClient | undefined;
-    if (existing) return existing;
+    if (existing) {
+        // Self-heal: a client whose creating window is gone (close-then-
+        // reopen keeps the shared slot alive) still drives workers, but its
+        // dead-realm timers make every watchdog inert. Replace it. An
+        // instance from a build without creator-realm tracking cannot
+        // prove its realm is alive, so it is replaced once too; a nuked
+        // proxy (property access throws) counts as dead.
+        if (isLiveTrackedWorkerClient(existing)) return existing;
+        getConfig().log(
+            `[MuPDFWorkerClient ${name}] creating window is gone; replacing stale client`,
+            2,
+        );
+        try {
+            existing.dispose();
+        } catch {
+            // best-effort — never let a dead-realm client block replacement
+        }
+        slot.set(undefined);
+    }
     const client = new MuPDFWorkerClient({ slotName: name });
     slot.set(client);
     return client;
 }
 
 /**
- * Read the existing client in `name`'s slot without spawning. Returns
- * `null` when the slot is empty or the package isn't configured. Used by
- * introspection paths (dev stats, cooperative throttle) that must not
- * pollute the slot just to peek.
+ * Read the existing live, creator-realm-tracked client in `name`'s slot
+ * without spawning. Returns `null` when the slot is empty, stale, untracked,
+ * or the package isn't configured. Used by introspection paths (dev stats,
+ * cooperative throttle) that must not pollute the slot just to peek.
  */
 export function getExistingMuPDFWorkerClient(
     name: PDFWorkerSlotName = "hot",
@@ -1652,7 +2356,27 @@ export function getExistingMuPDFWorkerClient(
     if (!isConfigured()) return null;
     const slot = getConfig().workerClientSlots[name];
     const existing = slot.get() as MuPDFWorkerClient | undefined;
-    return existing ?? null;
+    return isLiveTrackedWorkerClient(existing) ? existing! : null;
+}
+
+/**
+ * A shared slot may outlive the window/bundle that populated it. Only expose
+ * clients that support creator-realm tracking and can prove that realm is
+ * still alive. Keep every cross-bundle property access inside the guard: a
+ * nuked wrapper can throw even for feature detection.
+ */
+function isLiveTrackedWorkerClient(
+    existing: MuPDFWorkerClient | undefined,
+): boolean {
+    if (!existing) return false;
+    try {
+        return (
+            "isCreatorRealmDead" in (existing as object)
+            && existing.isCreatorRealmDead === false
+        );
+    } catch {
+        return false;
+    }
 }
 
 /**

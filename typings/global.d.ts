@@ -28,6 +28,13 @@ declare const ZOTERO_CONFIG: {
 };
 
 interface Window {
+    /**
+     * On the separate Beaver / preferences windows: a weak reference to the
+     * main window whose `BeaverReact` bundle renders this window (set in their
+     * bootstrap scripts). They cannot outlive that window — see
+     * `BeaverUIFactory.closeWindowsRenderedBy`.
+     */
+    __beaverOwnerWindowRef?: WeakRef<Window>;
     __beaverDisposeSupabase?: () => Promise<void>;
     /** Stops the busy-context event-loop-lag heartbeat (registered by busyContext.ts) */
     __beaverStopBusyHeartbeat?: () => void;

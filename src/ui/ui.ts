@@ -340,15 +340,30 @@ export class BeaverUIFactory {
                         const view = inst._iframeWindow?.wrappedJSObject
                             ?._currentEditorInstance?._editorCore?.view;
                         if (view?.dom) view.dom.contentEditable = 'true';
-                        // Restore content from DB and re-enable saving
+                        // Restore the editor from the saved note via Zotero's
+                        // own reinit(). Do NOT re-enable saving manually: the
+                        // editor still shows the diff HTML at this point (the
+                        // restore is asynchronous and this bundle is being
+                        // torn down), and a single autosave would persist the
+                        // presentation-only markup into the note. reinit()
+                        // reloads item.note and resets _disableSaving itself;
+                        // saveSync() inside uninit() is a no-op while saving
+                        // is still disabled.
                         const itemId = inst.itemID ?? inst._item?.id;
-                        if (itemId) {
-                            const item = Zotero.Items.get(itemId);
-                            if (item) {
-                                inst.applyIncrementalUpdate({ html: item.getNote() }, false);
-                            }
+                        try {
+                            // reinit() drops the tab association; restore it
+                            // (best effort) so tab-based behavior survives.
+                            const tabID = inst.tabID;
+                            const restoreTabId = () => {
+                                try { if (tabID && !inst._tabID) inst._tabID = tabID; } catch (e) { /* ignore */ }
+                            };
+                            const p = inst.reinit?.();
+                            if (p?.then) p.then(restoreTabId, restoreTabId);
+                            else restoreTabId();
+                        } catch (e) {
+                            // Best effort — leave saving disabled rather than
+                            // risk persisting the diff markup.
                         }
-                        inst._disableSaving = false;
                         ztoolkit.log(`removeChatPanel: cleaned up diff preview for editor ${itemId}`);
                     } catch (e) {
                         // Best effort — don't let preview cleanup block React unmount
@@ -574,6 +589,30 @@ export class BeaverUIFactory {
         if (existingWindow) {
             existingWindow.close();
             Zotero.debug("Beaver: Closed separate window");
+        }
+    }
+
+    /**
+     * Close the auxiliary windows (separate Beaver window, preferences) that
+     * render with `win`'s React instance.
+     *
+     * Neither window loads its own React bundle: each grabs `BeaverReact` from
+     * a main window at load time and shares that bundle's Jotai store, which it
+     * records as `__beaverOwnerWindowRef`. Once that main window unloads, the
+     * auxiliary window is frozen against a dead bundle and its state is
+     * invisible to the bundle a reopened main window loads — so it must not
+     * outlive its owner. `closeUnowned` additionally closes windows with no
+     * recorded owner, for the last-main-window case where no bundle remains.
+     */
+    static closeWindowsRenderedBy(win: Window, closeUnowned = false): void {
+        const auxiliaryWindows = [this.findBeaverWindow(), this.findPreferencesWindow()];
+        for (const auxiliaryWindow of auxiliaryWindows) {
+            if (!auxiliaryWindow || auxiliaryWindow.closed) continue;
+            const owner = auxiliaryWindow.__beaverOwnerWindowRef?.deref();
+            if (owner === win || (closeUnowned && !owner)) {
+                auxiliaryWindow.close();
+                Zotero.debug("Beaver: Closed auxiliary window whose React owner is going away");
+            }
         }
     }
 

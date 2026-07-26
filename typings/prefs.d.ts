@@ -23,6 +23,8 @@ declare namespace _ZoteroTypes {
       "annotationToolEnabled": boolean;
       "maxAddAttachmentToMessage": number;
       "readerExplainPrompt": string;
+      "imeCompositionOrderFix": boolean;
+      "debugImeTrace": boolean;
       "accessRemoteFiles": boolean;
       "dataProviderEnabled": boolean;
       "autoApplyAnnotations": boolean;
@@ -63,6 +65,7 @@ declare namespace _ZoteroTypes {
       "onboardingWelcomeShownAt": string;
       "versionUpdatePopupShownAt": string;
       "onboardingSignInTextShown": boolean;
+      "threadsClaimKey": string;
       "mcpServerEnabled": boolean;
       "mcpCreateNoteToolEnabled": boolean;
       "backgroundExtractorEnabled": boolean;

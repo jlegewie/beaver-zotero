@@ -62,37 +62,22 @@ import {
 import { renderToHTML, type RenderContextData } from '../../../../react/utils/citationRenderers';
 import { prepareCitationRenderContext } from '../../../../react/utils/citationRenderContext';
 import { addOrUpdateEditFooter, getBeaverFooterAppendPoint } from '../../../utils/noteEditFooter';
-import { assertNoPreviewMarkers } from '../../../utils/notePreviewGuard';
+import { assertNoPreviewMarkers, containsPreviewMarkers, stripPreviewMarkers } from '../../../utils/notePreviewGuard';
+import { dismissDiffPreview, isDiffPreviewActive, isDiffPreviewPendingFor } from '../../../../react/utils/noteEditorDiffPreview';
 import {
     WSAgentActionValidateRequest,
     WSAgentActionValidateResponse,
     WSAgentActionExecuteRequest,
     WSAgentActionExecuteResponse,
-    DeferredToolPreference,
 } from '../../agentProtocol';
 import { checkLibraryExcluded, excludedLibraryMessage, getDeferredToolPreference } from '../utils';
-import { autoApproveNoteKeysAtom, makeNoteKey } from '../../../../react/atoms/editNoteAutoApprove';
 import { TimeoutContext, checkAborted } from '../timeout';
 import { TimeoutError } from '../timeout';
-
-/**
- * Merge old_string and new_string for insert_after / insert_before operations
- * so the result can be treated as a regular str_replace. Returns new_string
- * unchanged for non-insert operations.
- */
-function mergeInsertNewString(
-    operation: EditNoteOperation,
-    oldString: string,
-    newString: string,
-): string {
-    if (operation === 'insert_after') {
-        return newString.startsWith(oldString) ? newString : oldString + newString;
-    }
-    if (operation === 'insert_before') {
-        return newString.endsWith(oldString) ? newString : newString + oldString;
-    }
-    return newString;
-}
+import {
+    mergeInsertNewString,
+    buildAmbiguousMatchError,
+    buildInsertDedupWarning,
+} from '../../../utils/editNoteBatchCore';
 
 /** Combine optional warning strings into a `warnings` array, or undefined when empty. */
 function collectWarnings(...warnings: Array<string | null | undefined>): string[] | undefined {
@@ -130,7 +115,7 @@ function renderMarkdownFragment(
  * create_note, then simplify the rendered HTML into the matcher's input format.
  * The helper is only called after the normal synchronous matcher misses.
  */
-async function buildMarkdownRenderFields(
+export async function buildMarkdownRenderFields(
     oldString: string,
     newString: string,
     operation: EditNoteOperation,
@@ -191,26 +176,12 @@ async function findMarkdownRenderFallbackMatch(
 }
 
 /**
- * Get the effective preference for an edit_note action.
- * Returns 'always_apply' if the note has been auto-approved for this run,
- * otherwise falls back to the user's stored deferred-tool preference.
- */
-function getEditNotePreference(library_id: number, zotero_key: string): DeferredToolPreference {
-    const noteKey = makeNoteKey(library_id, zotero_key);
-    const autoApproveKeys = store.get(autoApproveNoteKeysAtom);
-    if (autoApproveKeys.has(noteKey)) {
-        return 'always_apply';
-    }
-    return getDeferredToolPreference('edit_note');
-}
-
-/**
  * Snapshot the thread's external-reference state from the Jotai store so
  * `expandToRawHtml('new', ...)` can resolve `<citation external_id="..."/>`
  * to either an in-library Zotero item or an inline `<a>` link, instead of
  * throwing on attributes the simplifier doesn't natively know about.
  */
-function getExternalRefContext(): ExternalRefContext {
+export function getExternalRefContext(): ExternalRefContext {
     return {
         externalRefs: store.get(externalReferenceMappingAtom),
         externalItemMapping: store.get(externalReferenceItemMappingAtom),
@@ -294,7 +265,7 @@ function buildValidateSuccess(
 ): WSAgentActionValidateResponse {
     const noteTitle = item.getNoteTitle() || '(untitled)';
     const totalLines = simplified.split('\n').length;
-    const preference = getEditNotePreference(library_id, zotero_key);
+    const preference = getDeferredToolPreference('edit_note', { library_id, zotero_key });
     return {
         type: 'agent_action_validate_response',
         request_id: requestId,
@@ -310,72 +281,16 @@ function buildValidateSuccess(
     };
 }
 
-/**
- * Head-tail truncate a snippet for inclusion in a warning string. Keeps the
- * first and last `headTail` chars when the input exceeds `2 * headTail + 5`,
- * joined by `…`. Newlines are escaped so the warning stays single-line.
- */
-function truncateForWarning(s: string, headTail = 30): string {
-    const escaped = s.replace(/\n/g, '\\n');
-    const threshold = headTail * 2 + 5;
-    if (escaped.length <= threshold) return escaped;
-    return `${escaped.slice(0, headTail)}…${escaped.slice(-headTail)}`;
-}
-
-/**
- * When the model pre-copied old_string into the relevant end of new_string
- * for an insert operation, `mergeInsertNewString` silently dedupes. Emit a
- * warning so the model learns the correct shape, including a head-tail
- * snippet of the offending old_string copy so the model can identify
- * exactly what was deduplicated.
- * Returns null if no dedup applies.
- */
-function buildInsertDedupWarning(
-    operation: EditNoteOperation,
-    oldString: string,
-    newString: string,
-): string | null {
-    if (!oldString) return null;
-    const snippet = truncateForWarning(oldString);
-    if (operation === 'insert_after' && newString.startsWith(oldString)) {
-        return (
-            'For operation="insert_after", new_string should contain ONLY the '
-            + 'content to insert — old_string is preserved automatically. '
-            + `new_string started with a copy of old_string ("${snippet}"). `
-            + 'Only the trailing content was inserted after that anchor (no '
-            + 'duplication). To duplicate content, use operation="str_replace" '
-            + 'with new_string set to old_string followed by your inserted '
-            + 'content (or the full final shape) instead.'
-        );
-    }
-    if (operation === 'insert_before' && newString.endsWith(oldString)) {
-        return (
-            'For operation="insert_before", new_string should contain ONLY the '
-            + 'content to insert — old_string is preserved automatically. '
-            + `new_string ended with a copy of old_string ("${snippet}"). `
-            + 'Only the leading content was inserted before that anchor (no '
-            + 'duplication). To duplicate content, use operation="str_replace" '
-            + 'with new_string set to your inserted content followed by '
-            + 'old_string (or the full final shape) instead.'
-        );
-    }
-    return null;
-}
-
-function buildAmbiguousMatchError(matchCount: number): string {
-    return `The string to replace was found ${matchCount} times in the note. `
-        + 'Use operation str_replace_all to replace all occurrences, or include more context to make the match unique.';
-}
-
 function buildAmbiguousMatchResponse(
     requestId: string,
     matchCount: number,
+    operation?: EditNoteOperation,
 ): WSAgentActionValidateResponse {
     return {
         type: 'agent_action_validate_response',
         request_id: requestId,
         valid: false,
-        error: buildAmbiguousMatchError(matchCount),
+        error: buildAmbiguousMatchError(matchCount, operation),
         error_code: 'ambiguous_match',
         preference: 'always_ask',
     };
@@ -516,7 +431,15 @@ async function validateEditNoteAction(
 
     // 6. Load note data
     await item.loadDataType('note');
-    const rawHtml = getLatestNoteHtml(item);
+    let rawHtml = getLatestNoteHtml(item);
+    // Recovery path: if diff-preview markup was ever accidentally persisted
+    // into this note, validate against the stripped content. Execution
+    // repairs the stored note the same way before applying, so old_string
+    // matching stays consistent across validate and execute.
+    if (containsPreviewMarkers(rawHtml)) {
+        logger(`validateEditNoteAction: note ${resolvedLibraryId}-${zotero_key} contains persisted diff-preview markup; validating against stripped content`, 1);
+        rawHtml = stripPreviewMarkers(rawHtml);
+    }
 
     // 7. Note not empty
     if (!rawHtml || rawHtml.trim() === '') {
@@ -546,7 +469,10 @@ async function validateEditNoteAction(
 
         const noteTitle = item.getNoteTitle() || '(untitled)';
         const totalLines = simplified.split('\n').length;
-        const preference = getEditNotePreference(resolvedLibraryId, zotero_key);
+        const preference = getDeferredToolPreference('edit_note', {
+            library_id: resolvedLibraryId,
+            zotero_key,
+        });
 
         return {
             type: 'agent_action_validate_response',
@@ -580,7 +506,10 @@ async function validateEditNoteAction(
 
         const noteTitle = item.getNoteTitle() || '(untitled)';
         const totalLines = simplified.split('\n').length;
-        const preference = getEditNotePreference(resolvedLibraryId, zotero_key);
+        const preference = getDeferredToolPreference('edit_note', {
+            library_id: resolvedLibraryId,
+            zotero_key,
+        });
 
         return {
             type: 'agent_action_validate_response',
@@ -768,7 +697,7 @@ async function validateEditNoteAction(
                 overrides.target_before_context = location.beforeContext;
                 overrides.target_after_context = location.afterContext;
             } else if (location.kind === 'ambiguous') {
-                return buildAmbiguousMatchResponse(request.request_id, match.matchCount);
+                return buildAmbiguousMatchResponse(request.request_id, match.matchCount, operation);
             }
             // 'position' — silent success; executor will re-locate via
             // findUniqueRawMatchPosition with no anchors needed.
@@ -876,12 +805,45 @@ async function executeEditNoteAction(
     // 2. Load note
     await item.loadDataType('note');
 
+    // 2a. If the in-editor diff preview is still showing for this note (or a
+    //     show is in flight), dismiss it and wait for the editor restore to
+    //     finish before reading or writing. Approval paths dismiss the
+    //     preview fire-and-forget, so an execute arriving over WS can
+    //     otherwise race the restore.
+    if (isDiffPreviewActive(resolvedLibraryId, zotero_key) || isDiffPreviewPendingFor(resolvedLibraryId, zotero_key)) {
+        await dismissDiffPreview();
+    }
+
     // 2b. Promote any unsaved content from the open editor into the DB so that
     //     this execute reads the same HTML validation saw. Without this, a
     //     rewrite could clobber the user's in-flight typing, and a str_replace
     //     could fail with no_match against matches that only exist in the
     //     editor's unsaved state.
     await flushLiveEditorToDB(item);
+
+    // 2c. Repair notes that contain persisted diff-preview markup. The
+    //     preview is presentation-only; if a teardown failure ever let an
+    //     editor autosave persist it, assertNoPreviewMarkers below would
+    //     refuse every subsequent save of this note with no recovery path.
+    //     Strip the markup (drop proposed-addition spans, unwrap deletion
+    //     spans back to the original text) and save the repaired note before
+    //     applying the edit. This writes even when the edit itself later
+    //     fails to match — intentional, so a failed attempt still un-bricks
+    //     the note for subsequent edits.
+    {
+        const persistedHtml: string = item.getNote();
+        if (containsPreviewMarkers(persistedHtml)) {
+            const repaired = stripPreviewMarkers(persistedHtml);
+            if (!containsPreviewMarkers(repaired)) {
+                logger(`executeEditNoteAction: repairing persisted diff-preview markup in ${resolvedLibraryId}-${zotero_key}`, 1);
+                item.setNote(repaired);
+                await item.saveTx();
+                await waitForNoteSaveStabilization(item, repaired);
+            } else {
+                logger(`executeEditNoteAction: diff-preview markup in ${resolvedLibraryId}-${zotero_key} could not be fully stripped; save will be refused by the preview guard`, 1);
+            }
+        }
+    }
 
     // 3. Pre-load page labels so new citations resolve page indices to labels.
     //    Done before reading the note to avoid async gaps between read and write.
@@ -1278,7 +1240,7 @@ async function executeEditNoteAction(
                     type: 'agent_action_execute_response',
                     request_id: request.request_id,
                     success: false,
-                    error: buildAmbiguousMatchError(matchCount),
+                    error: buildAmbiguousMatchError(matchCount, operation),
                     error_code: 'ambiguous_match',
                 };
             }

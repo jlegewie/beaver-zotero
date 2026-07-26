@@ -45,14 +45,17 @@ describe('metadata search with EPUB-only items', () => {
         const attachmentRes = await post<MetadataResponse>('/beaver/library/metadata', {
             item_ids: [`${EPUB_WITH_PARENT.library_id}-${EPUB_WITH_PARENT.zotero_key}`],
         });
-        const parentKey = attachmentRes.items?.[0]?.parentItem;
-        expect(parentKey, 'EPUB fixture must have a parent item').toBeTruthy();
+        const attachment = attachmentRes.items?.[0];
+        const parentItemId = attachment?.parent_item_id;
+        expect(parentItemId, 'EPUB fixture must have a parent item').toBeTruthy();
+        expect(attachment?.library_ref).toBe('u');
 
         const parentRes = await post<MetadataResponse>('/beaver/library/metadata', {
-            item_ids: [`${EPUB_WITH_PARENT.library_id}-${parentKey}`],
+            item_ids: [parentItemId],
         });
         const parentTitle = parentRes.items?.[0]?.title;
         expect(parentTitle, 'parent item must have a title').toBeTruthy();
+        const parentKey = parentItemId.split('-', 2)[1];
 
         const searchRes = await post<{ items?: SearchResultItem[] }>('/beaver/search/metadata', {
             title_query: parentTitle,
@@ -65,7 +68,7 @@ describe('metadata search with EPUB-only items', () => {
         expect(match, `parent item "${parentTitle}" in metadata search results`).toBeTruthy();
 
         const epubInfo = match!.attachments.find(
-            (a) => a.attachment_id === `${EPUB_WITH_PARENT.library_id}-${EPUB_WITH_PARENT.zotero_key}`,
+            (a) => a.attachment_id === `u-${EPUB_WITH_PARENT.zotero_key}`,
         );
         expect(epubInfo, 'EPUB attachment info on search result').toBeTruthy();
         expect(epubInfo).toMatchObject({

@@ -37,10 +37,14 @@ export type {
     WorkerStartFailureInfo,
 } from "./config";
 export {
+    DEFAULT_BUSY_LEASE_MS_BACKGROUND,
+    DEFAULT_BUSY_LEASE_MS_HOT,
     MuPDFWorkerClient,
     WorkerAbortError,
+    WorkerDeadlineError,
     StaleWorkerError,
     WorkerSpawnError,
+    isWorkerDeadlineError,
     isTransientWorkerError,
     getMuPDFWorkerClient,
     getExistingMuPDFWorkerClient,

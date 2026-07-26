@@ -14,6 +14,10 @@ import { ManageCollectionsPreview } from './ManageCollectionsPreview';
 import { CreateAnnotationsPreview } from './CreateAnnotationsPreview';
 import { resolveLibraryRef } from '../../../../src/utils/libraryIdentity';
 import type { ActionStatus, PreviewData } from './agentActionViewHelpers';
+import {
+    getBatchRewriteOldContent,
+    getEditNotePreviewKind,
+} from './editNoteBatchPreviewData';
 
 /**
  * Dispatches to action-specific preview components
@@ -27,6 +31,7 @@ export const ActionPreview: React.FC<{
     /** Whether tool call arguments are actively streaming */
     isStreaming?: boolean;
 }> = ({ toolName, previewData, status, actions, isStreaming }) => {
+    const editNotePreviewKind = getEditNotePreviewKind(toolName, previewData.actionType);
     if (toolName === 'edit_metadata' || previewData.actionType === 'edit_metadata') {
         const edits = previewData.actionData.edits || [];
 
@@ -230,7 +235,64 @@ export const ActionPreview: React.FC<{
         );
     }
 
-    if (toolName === 'edit_note' || previewData.actionType === 'edit_note') {
+    if (editNotePreviewKind === 'batch') {
+        const edits: any[] = Array.isArray(previewData.actionData.edits) ? previewData.actionData.edits : [];
+        const applied: any[] = Array.isArray(previewData.resultData?.applied) ? previewData.resultData!.applied : [];
+        const occurrencesByIndex = new Map<number, number>(
+            applied
+                .filter((entry) => typeof entry?.index === 'number')
+                .map((entry) => [entry.index, entry.occurrences_replaced]),
+        );
+
+        // Resolve the portable library_ref to a local id, same as the edit_note
+        // branch below — passed to every stacked EditNotePreview so each can
+        // fetch note context (page labels, surrounding text) when needed.
+        const resolvedNoteLibraryId = resolveLibraryRef({
+            library_ref: previewData.actionData.library_ref,
+            library_id: previewData.actionData.library_id,
+        });
+        const noteLibraryId = resolvedNoteLibraryId ?? undefined;
+
+        return (
+            <div className="flex flex-col gap-3">
+                {edits.map((edit, position) => {
+                    const editIndex = typeof edit?.index === 'number' ? edit.index : position;
+                    const op = (edit?.operation ?? 'str_replace') as import('../../../types/agentActions/editNote').EditNoteOperation;
+                    const isRewrite = op === 'rewrite';
+                    const oldString = isRewrite ? '' : (edit?.old_string || '');
+                    const newString = edit?.new_string || '';
+                    const oldContent = isRewrite
+                        ? getBatchRewriteOldContent(previewData, editIndex)
+                        : undefined;
+
+                    return (
+                        <div key={`edit-${editIndex}`} className="flex flex-col gap-1">
+                            {/* Row labels only separate STACKED diffs (full edits[]
+                                render). Group rows slice to one edit each and are
+                                already delimited by row borders — no label there. */}
+                            {edits.length > 1 && (
+                                <div className="text-sm font-color-secondary px-3 py-1">
+                                    {isRewrite ? 'Full rewrite' : `Edit ${position + 1}`}
+                                </div>
+                            )}
+                            <EditNotePreview
+                                oldString={oldString}
+                                newString={newString}
+                                operation={op}
+                                oldContent={oldContent}
+                                occurrencesReplaced={occurrencesByIndex.get(editIndex)}
+                                status={status}
+                                libraryId={noteLibraryId}
+                                zoteroKey={previewData.actionData.zotero_key}
+                            />
+                        </div>
+                    );
+                })}
+            </div>
+        );
+    }
+
+    if (editNotePreviewKind === 'legacy') {
         const op = (previewData.actionData.operation ?? 'str_replace') as import('../../../types/agentActions/editNote').EditNoteOperation;
         const isRewrite = op === 'rewrite';
         const oldString = isRewrite ? '' : (previewData.actionData.old_string || '');

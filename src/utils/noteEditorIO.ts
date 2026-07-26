@@ -34,12 +34,13 @@ interface LiveCandidate {
  * INCLUDED so callers can decide whether to skip them. Throws are absorbed —
  * a bad instance is just skipped.
  */
-function collectLiveCandidates(item: any): LiveCandidate[] {
+function collectLiveCandidates(item: any, excludeInstance?: any): LiveCandidate[] {
     const instances = (Zotero as any).Notes?._editorInstances;
     if (!Array.isArray(instances)) return [];
 
     const candidates: LiveCandidate[] = [];
     for (const instance of instances) {
+        if (excludeInstance && instance === excludeInstance) continue;
         if (!instance._item || instance._item.id !== item.id) continue;
         // Skip instances where saving is disabled (e.g., during diff preview)
         // — their content is not authoritative.
@@ -90,11 +91,15 @@ function orderLiveCandidates(candidates: LiveCandidate[], savedHtml: string): Li
  * Get the latest note HTML, reading from any open editor to capture
  * unsaved changes. Falls back to item.getNote() if the note is not
  * open or if reading from the editor fails.
+ *
+ * `options.excludeInstance` skips one specific editor instance regardless of
+ * its state — used by the diff preview to read "the content everyone ELSE
+ * sees" while the preview editor still counts as a live candidate.
  */
-export function getLatestNoteHtml(item: any): string {
+export function getLatestNoteHtml(item: any, options?: { excludeInstance?: any }): string {
     const savedHtml = item.getNote();
     try {
-        const candidates = collectLiveCandidates(item);
+        const candidates = collectLiveCandidates(item, options?.excludeInstance);
         if (candidates.length === 0) return savedHtml;
         if (candidates.length === 1) return candidates[0].html;
 

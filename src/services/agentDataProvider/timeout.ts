@@ -8,6 +8,17 @@ export const DEFAULT_IMAGES_TIMEOUT_SECONDS = 60;
 /** Default deadline for single image-attachment processing (decode/resize/encode). */
 export const DEFAULT_ATTACHMENT_IMAGE_TIMEOUT_SECONDS = 30;
 export const MAX_PDF_TIMEOUT_SECONDS = 180;
+/**
+ * Ceiling for interactive (hot-slot) PDF worker requests. The hot worker
+ * enforces a busy-age lease (`DEFAULT_BUSY_LEASE_MS_HOT`) as a last-resort
+ * backstop against a wedged worker; an interactive request's own timeout —
+ * plus `HOT_SHARED_EXTRACTION_GRACE_MS` for a detached shared extraction —
+ * must always reclaim the worker before that lease fires, so in-budget work
+ * is never reaped. Raise the lease alongside any increase here. Background
+ * extractions are exempt: their slot uses the full `MAX_PDF_TIMEOUT_SECONDS`
+ * ceiling under a proportionally larger lease.
+ */
+export const MAX_INTERACTIVE_PDF_TIMEOUT_SECONDS = 60;
 
 /** Timeout error for cooperative cancellation */
 export class TimeoutError extends Error {
@@ -79,6 +90,11 @@ export interface TimeoutControllerContext {
  * Invalid values fall back to the handler default; valid values are capped so a
  * bad caller cannot pin the single shared PDF worker for an unbounded period.
  *
+ * `maxSeconds` sets the cap (default `MAX_PDF_TIMEOUT_SECONDS`). Handlers
+ * whose deadline governs hot-slot PDF worker operations must pass
+ * `MAX_INTERACTIVE_PDF_TIMEOUT_SECONDS` so the request timeout stays below
+ * the hot worker's busy lease.
+ *
  * Optional `externalSignal` lets a parent (e.g. the background processor)
  * abort an in-flight extraction mid-flight. When the external signal fires,
  * `throwIfTimedOut` raises `ExternalAbortError` instead of `TimeoutError`
@@ -88,6 +104,7 @@ export function createTimeoutController(
     rawTimeoutSeconds: number | undefined,
     defaultSeconds: number,
     externalSignal?: AbortSignal,
+    maxSeconds: number = MAX_PDF_TIMEOUT_SECONDS,
 ): TimeoutControllerContext {
     const parsedTimeoutSeconds =
         typeof rawTimeoutSeconds === 'number'
@@ -95,7 +112,7 @@ export function createTimeoutController(
         && rawTimeoutSeconds > 0
             ? rawTimeoutSeconds
             : defaultSeconds;
-    const timeoutSeconds = Math.min(parsedTimeoutSeconds, MAX_PDF_TIMEOUT_SECONDS);
+    const timeoutSeconds = Math.min(parsedTimeoutSeconds, maxSeconds);
     const startTime = Date.now();
     const controller = createAbortController();
     const timer = setTimeout(() => controller.abort(), timeoutSeconds * 1000);

@@ -2,16 +2,13 @@ import React, { useCallback } from 'react';
 import { useAtomValue } from 'jotai';
 import { SearchIcon } from '../icons/icons';
 import { embeddingIndexStateAtom } from '../../atoms/embeddingIndex';
-import { isDatabaseSyncSupportedAtom } from '../../atoms/profile';
 import { openPreferencesWindow } from '../../../src/ui/openPreferencesWindow';
 
 /**
  * Persistent status bar shown below the input area while the local embedding
  * search index is being built. Clicking opens preferences on the Search tab.
- * Hidden when the user's plan supports server-side database sync.
  */
 const EmbeddingIndexBar: React.FC = () => {
-    const isDatabaseSyncSupported = useAtomValue(isDatabaseSyncSupportedAtom);
     const { status, phase, progress, totalItems, indexedItems } = useAtomValue(embeddingIndexStateAtom);
 
     const handleClick = useCallback(() => {
@@ -19,7 +16,6 @@ const EmbeddingIndexBar: React.FC = () => {
     }, []);
 
     const visible =
-        !isDatabaseSyncSupported &&
         status === 'indexing' &&
         phase === 'initial' &&
         totalItems > 0;

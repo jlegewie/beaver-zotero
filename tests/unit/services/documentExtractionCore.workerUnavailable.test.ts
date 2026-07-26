@@ -48,6 +48,8 @@ vi.mock('../../../src/beaver-extract', () => ({
     ExtractionError: MockExtractionError,
     WorkerAbortError: class MockWorkerAbortError extends Error {},
     ExtractionErrorCode: EXTRACTION_ERROR_CODES,
+    isWorkerDeadlineError: (error: unknown) =>
+        (error as { name?: unknown } | null | undefined)?.name === 'WorkerDeadlineError',
     // Faithful to the real predicate for the classes under test.
     isTransientWorkerError: (error: unknown) => {
         const name = (error as { name?: unknown } | null | undefined)?.name;

@@ -187,8 +187,9 @@ export async function handleTestMcpCreateNoteHttpRequest(request: any) {
 }
 
 /**
- * Dev-only: snapshot of MuPDFWorkerClient dispatch / spawn counters and
- * the worker-side document cache.
+ * Dev-only: snapshot of MuPDFWorkerClient dispatch / spawn / proactive
+ * recycle counters, observed WASM heap size, and the worker-side document
+ * cache.
  *
  * Lets manual-test runners (`docs-zotero/manual-tests-fused-worker-ops.md`)
  * verify "exactly one extract dispatch", "no extra spawns", etc.
@@ -244,6 +245,246 @@ export async function handleTestWorkerCacheClearHttpRequest(request: any) {
     const resetCounters = request?.resetCounters !== false;
     const cacheStats = await client.clearWorkerCacheForTest({ resetCounters });
     return { ok: true, cacheStats };
+}
+
+/**
+ * Dev-only: drive a real busy-age lease reap ("wedge") and report the outcome.
+ *
+ * Production leases sit above every caller-side reclaim deadline, so the reap
+ * path is unreachable in a live process without wedging a worker for over a
+ * minute. This endpoint shortens the lease for the duration of one probe, runs
+ * a genuinely long operation against a real PDF, and reports how each caller
+ * was settled plus the before/after stats.
+ *
+ * Body: {
+ *   library_id, zotero_key,     // the long-running document
+ *   op,                         // extractSerialized | renderPages | search |
+ *                               // getPageCount | analyzeLayout
+ *   leaseMs,                    // shortened lease (default 4000)
+ *   sibling                     // also dispatch a concurrent op (default true)
+ * }
+ *
+ * The lease is always restored, even when the probe throws.
+ */
+export async function handleTestWorkerWedgeProbeHttpRequest(request: any) {
+    const {
+        getMuPDFWorkerClient,
+        __setBusyLeaseForTest,
+        __resetBusyLeaseForTest,
+    } = await import('../../../src/beaver-extract/MuPDFWorkerClient');
+
+    const { library_id, zotero_key, op, sibling } = request || {};
+    const leaseMs = typeof request?.leaseMs === 'number' ? request.leaseMs : 4000;
+    const opName = typeof op === 'string' ? op : 'extractSerialized';
+    const withSibling = sibling !== false;
+
+    if (library_id == null || zotero_key == null) {
+        return { ok: false, error: 'Provide library_id + zotero_key' };
+    }
+    const item = await Zotero.Items.getByLibraryAndKeyAsync(library_id, zotero_key);
+    if (!item || !item.isAttachment() || !item.isPDFAttachment()) {
+        return { ok: false, error: 'Item is not a PDF attachment' };
+    }
+    const filePath = await item.getFilePathAsync();
+    if (!filePath) return { ok: false, error: 'PDF file not available locally' };
+    const pdfData: Uint8Array = await IOUtils.read(filePath);
+
+    const client = getMuPDFWorkerClient();
+
+    const dispatch = (name: string): Promise<any> => {
+        switch (name) {
+            case 'getPageCount':
+                return client.getPageCount(pdfData);
+            case 'renderPages':
+                return client.renderPages(pdfData, {
+                    pageRange: {
+                        startIndex: 0,
+                        endIndex:
+                            typeof request?.renderEndIndex === 'number'
+                                ? request.renderEndIndex
+                                : 39,
+                    },
+                });
+            case 'search':
+                return client.search(pdfData, 'the');
+            case 'analyzeLayout':
+                return client.analyzeLayout(pdfData);
+            case 'extractSerialized':
+            default:
+                return client.extractSerialized(pdfData);
+        }
+    };
+
+    const settle = async (label: string, p: Promise<any>) => {
+        const t0 = Date.now();
+        try {
+            await p;
+            return { label, status: 'fulfilled', ms: Date.now() - t0 };
+        } catch (e: any) {
+            return {
+                label,
+                status: 'rejected',
+                ms: Date.now() - t0,
+                errorName: e?.name ?? typeof e,
+                errorMessage: String(e?.message ?? e).slice(0, 200),
+            };
+        }
+    };
+
+    const before = client.getStats();
+    let results: any[];
+    try {
+        __setBusyLeaseForTest('hot', leaseMs);
+        const tasks = [settle(opName, dispatch(opName))];
+        if (withSibling) {
+            // Dispatched after the primary so the primary stays the oldest
+            // in-flight entry and is therefore the one the reap targets.
+            tasks.push(settle('sibling:getPageCount', client.getPageCount(pdfData)));
+        }
+        results = await Promise.all(tasks);
+    } finally {
+        __resetBusyLeaseForTest('hot');
+    }
+
+    return {
+        ok: true,
+        leaseMs,
+        op: opName,
+        results,
+        before: {
+            spawnCount: before.spawnCount,
+            retryCount: before.retryCount,
+            leaseReapCount: before.leaseReapCount,
+            pendingCount: before.pendingCount,
+        },
+        after: client.getStats(),
+    };
+}
+
+/**
+ * Dev-only: drive a real idle-timer reap on the hot worker slot.
+ *
+ * Ensures a live worker (ping), shortens the idle timeout via the module
+ * test hook, pings again so the idle timer re-arms with the short value,
+ * waits past it, and reports whether the worker was reaped. The idle timer
+ * shares the client's watchdog timer plumbing, so this proves the injected
+ * (realm-independent) timers actually fire in the live process. Always
+ * restores the production idle timeout.
+ */
+export async function handleTestWorkerIdleProbeHttpRequest(request: any) {
+    const { getMuPDFWorkerClient, __setIdleTimeoutForTest, __resetIdleTimeoutForTest } =
+        await import('../../../src/beaver-extract/MuPDFWorkerClient');
+
+    const idleMs = typeof request?.idleMs === 'number' ? request.idleMs : 1200;
+    const waitMs = typeof request?.waitMs === 'number' ? request.waitMs : idleMs + 2000;
+    const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+    const client = getMuPDFWorkerClient();
+    try {
+        await client.ping();
+        __setIdleTimeoutForTest('hot', idleMs);
+        await client.ping();
+        const afterPing = client.getStats();
+        await sleep(waitMs);
+        const afterWait = client.getStats();
+        return {
+            ok: true,
+            idleMs,
+            waitMs,
+            hasWorkerAfterPing: afterPing.hasWorker,
+            idleTimerArmedAfterPing: afterPing.idleTimerArmed,
+            hasWorkerAfterWait: afterWait.hasWorker,
+            idleTimerArmedAfterWait: afterWait.idleTimerArmed,
+        };
+    } finally {
+        __resetIdleTimeoutForTest('hot');
+    }
+}
+
+/**
+ * Dev-only: exercise the creator-realm tracking and slot self-heal in
+ * `getMuPDFWorkerClient` without any window lifecycle.
+ *
+ * Actions:
+ *  - `info` — realm/timer wiring of the current client (creates one if
+ *    absent): are host timers injected, does the instance carry creator
+ *    tracking, is its creating realm alive?
+ *  - `identity` — two consecutive lookups return the same healthy
+ *    instance (no replacement churn).
+ *  - `simulate-dead-realm` — construct a client whose recorded creating
+ *    window reports `closed === true` (via the module-window test hook),
+ *    then look the slot up again and report whether the dead client was
+ *    replaced by a fresh tracked one.
+ *  - `legacy-stub` — plant a minimal instance without creator tracking in
+ *    the slot and report whether lookup replaces and disposes it.
+ *
+ * Every action leaves the slot holding a healthy, current-realm client.
+ */
+export async function handleTestWorkerRealmProbeHttpRequest(request: any) {
+    const {
+        getMuPDFWorkerClient,
+        disposeMuPDFWorker,
+        __setModuleWindowForTest,
+        __resetModuleWindowForTest,
+    } = await import('../../../src/beaver-extract/MuPDFWorkerClient');
+    const { isConfigured, getConfig } = await import('../../../src/beaver-extract/config');
+
+    const action = typeof request?.action === 'string' ? request.action : 'info';
+
+    if (action === 'info') {
+        const client = getMuPDFWorkerClient();
+        return {
+            ok: true,
+            timersInjected: isConfigured() && !!getConfig().timers,
+            hasCreatorTracking: 'isCreatorRealmDead' in client,
+            isCreatorRealmDead: client.isCreatorRealmDead,
+            createdFromWindowRecorded: client.createdFromWindow !== null,
+        };
+    }
+
+    if (action === 'identity') {
+        const first = getMuPDFWorkerClient();
+        const second = getMuPDFWorkerClient();
+        return { ok: true, sameInstance: first === second };
+    }
+
+    if (action === 'simulate-dead-realm') {
+        await disposeMuPDFWorker('hot', { force: true });
+        let doomed: any = null;
+        try {
+            __setModuleWindowForTest({ closed: true } as any);
+            doomed = getMuPDFWorkerClient();
+        } finally {
+            __resetModuleWindowForTest();
+        }
+        const doomedReportedDead = doomed.isCreatorRealmDead === true;
+        const replacement = getMuPDFWorkerClient();
+        return {
+            ok: true,
+            doomedReportedDead,
+            replaced: replacement !== doomed,
+            doomedDisposed: doomed.getStats().disposed === true,
+            replacementIsCreatorRealmDead: replacement.isCreatorRealmDead,
+            replacementHasTracking: 'isCreatorRealmDead' in replacement,
+        };
+    }
+
+    if (action === 'legacy-stub') {
+        await disposeMuPDFWorker('hot', { force: true });
+        let stubDisposeCalls = 0;
+        const stub = { dispose: () => { stubDisposeCalls += 1; } };
+        (Zotero as any).__beaverMuPDFWorkerClient_hot = stub;
+        const replacement = getMuPDFWorkerClient();
+        return {
+            ok: true,
+            replaced: (replacement as any) !== stub,
+            stubDisposed: stubDisposeCalls === 1,
+            replacementHasTracking: 'isCreatorRealmDead' in replacement,
+            replacementIsCreatorRealmDead: replacement.isCreatorRealmDead,
+        };
+    }
+
+    return { ok: false, error: `Unknown action: ${action}` };
 }
 
 /**

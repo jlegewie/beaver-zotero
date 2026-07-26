@@ -54,7 +54,7 @@ import { undoOrganizeItemsAction } from '../../utils/organizeItemsActions';
 import { undoManageTagsAction } from '../../utils/manageTagsActions';
 import { undoManageCollectionsAction } from '../../utils/manageCollectionsActions';
 import { undoCreateNoteAction } from '../../utils/createNoteActions';
-import { undoEditNoteAction } from '../../utils/editNoteActions';
+import { undoEditNoteAction, undoEditNoteBatchAction } from '../../utils/editNoteActions';
 import { undoCreateAnnotationsAction } from '../../utils/createAnnotationsActions';
 import { undoCreateItemActions } from '../../utils/createItemActions';
 
@@ -213,7 +213,7 @@ export async function handleTestChatSendHttpRequest(request: any) {
             if (!userId) {
                 return { ok: false, error: 'No user_id to load requested threadId (not logged in?)' };
             }
-            await store.set(loadThreadAtom, { user_id: userId, threadId });
+            await store.set(loadThreadAtom, { user_id: userId, threadId, skipInstanceMismatchConfirm: true });
         }
     }
 
@@ -280,13 +280,16 @@ export async function handleTestLoadThreadHttpRequest(request: any) {
     if (!userId) {
         return { ok: false, error: 'No user_id (not logged in?)' };
     }
-    await store.set(loadThreadAtom, {
+    const loaded = await store.set(loadThreadAtom, {
         user_id: userId,
         threadId,
         threadName: request?.threadName,
+        // Never hang headless drivers on the native other-instance confirm.
+        skipInstanceMismatchConfirm: true,
     });
     return {
         ok: true,
+        loaded,
         ...currentIds(),
         actions: threadActions().map((a) => ({
             id: a.id,
@@ -402,6 +405,9 @@ export async function handleTestUndoActionHttpRequest(request: any) {
                 break;
             case 'edit_note':
                 await undoEditNoteAction(action);
+                break;
+            case 'edit_note_batch':
+                await undoEditNoteBatchAction(action);
                 break;
             case 'create_highlight_annotations':
             case 'create_note_annotations':

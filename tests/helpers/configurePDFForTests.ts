@@ -19,6 +19,7 @@
 import {
     configurePDF,
     type PDFConfig,
+    type PDFTimerFunctions,
     type WorkerStartFailureInfo,
 } from "../../src/beaver-extract/config";
 
@@ -39,6 +40,8 @@ interface ConfigureForTestsOptions {
     log?: (msg: string, level: number) => void;
     /** Host hook for worker start-phase failures (default: unset). */
     onWorkerStartFailure?: (info: WorkerStartFailureInfo) => void;
+    /** Injected watchdog timers (default: unset — module realm globals). */
+    timers?: PDFTimerFunctions;
 }
 
 export function configurePDFForTests(opts: ConfigureForTestsOptions = {}): {
@@ -71,6 +74,7 @@ export function configurePDFForTests(opts: ConfigureForTestsOptions = {}): {
         },
         log: opts.log ?? (() => {}),
         onWorkerStartFailure: opts.onWorkerStartFailure,
+        timers: opts.timers,
         worker: {
             mupdfWasmFactoryUrl: "test://mupdf-factory.mjs",
             mupdfWasmBinaryUrl: "test://mupdf.wasm",

@@ -8,6 +8,7 @@ export type {
     NoteWriterHost,
     ConfigHost,
     ComponentsHost,
+    DialogsHost,
     SaveNoteRequest,
     SavedNoteReference,
     NoteSaveFormat,

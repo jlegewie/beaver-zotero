@@ -7,8 +7,16 @@
 
 import { atom, Getter, Setter } from 'jotai';
 import { v4 as uuidv4 } from 'uuid';
-import { agentService } from '../../src/services/agentService';
+import { agentService, AgentConnectionError } from '../../src/services/agentService';
 import { notifyRunComplete, notifyUserQuestion } from '../../src/services/systemNotifications';
+import { reportConnectionFailure } from '../../src/services/diagnosticsService';
+import {
+    baselineConnectionEvidence,
+    ConnectionFailureEvidence,
+    connectRecoveryAuthFields,
+    isRetryablePreReadyConnectFailure,
+    presentConnectionFailure,
+} from '../../src/services/connectionFailure';
 import {
     WSCallbacks,
     AgentRunRequest,
@@ -49,8 +57,7 @@ import {
     currentMessageExternalFilesAtom,
     currentReaderAttachmentAtom,
     currentMessageFiltersAtom,
-    currentMessageContentAtom,
-    currentMessagePillsAtom,
+    clearComposerAtom,
 } from './messageComposition';
 import { isWebSearchEnabledAtom, removePopupMessagesByTypeAtom, isWebSearchAllowedAtom } from './ui';
 import { currentNoteItemAtom } from './zoteroContext';
@@ -91,6 +98,8 @@ import {
     isManageTagsAgentAction,
     isManageCollectionsAgentAction,
     isEditNoteAgentAction,
+    isEditNoteBatchAgentAction,
+    isAnyEditNoteAgentAction,
     isCreateNoteAgentAction,
     hasAppliedZoteroItem,
     hasAppliedBulkAnnotations,
@@ -98,6 +107,7 @@ import {
     AgentAction,
     addPendingApprovalAtom,
     removePendingApprovalAtom,
+    removePendingApprovalsAtom,
     pendingApprovalsAtom,
     buildPendingApprovalFromAction,
     clearAllPendingApprovalsAtom,
@@ -114,7 +124,7 @@ import { undoCreateCollectionAction } from '../utils/createCollectionActions';
 import { undoOrganizeItemsAction } from '../utils/organizeItemsActions';
 import { undoManageTagsAction } from '../utils/manageTagsActions';
 import { undoManageCollectionsAction } from '../utils/manageCollectionsActions';
-import { undoEditNoteAction } from '../utils/editNoteActions';
+import { undoEditNoteAction, undoEditNoteBatchAction } from '../utils/editNoteActions';
 import { undoCreateNoteAction } from '../utils/createNoteActions';
 import { undoCreateAnnotationsAction } from '../utils/createAnnotationsActions';
 import { processToolReturnResults } from '../agents/toolResultProcessing';
@@ -126,12 +136,13 @@ import { currentThreadNameAtom } from './threads';
 import { loadItemDataForAgentActions, autoApplyAnnotationAgentActions, autoCreateNoteAgentActions } from '../utils/agentActionUtils';
 import { extractZoteroReferencesFromToolCall } from '../agents/toolLabels';
 import {
-    autoApproveNoteKeysAtom,
-    clearAutoApproveNoteKeysAtom,
-    addAutoApprovedActionIdAtom,
-    clearAutoApprovedActionIdsAtom,
-    makeNoteKey,
-} from './editNoteAutoApprove';
+    clearRunApprovalPolicyAtom,
+    getPendingApprovalIdsForToolGroup,
+    getToolGroup,
+    grantToolGroupForRunAtom,
+    isActionApprovedForCurrentRun,
+    runApprovalPolicyAtom,
+} from './runApprovalPolicy';
 import { loadFullItemDataWithAllTypes } from '../../src/utils/zoteroUtils';
 import { buildZoteroInstanceWire } from '../../src/services/zoteroInstanceWire';
 import { dismissDiffPreview } from '../utils/noteEditorDiffPreview';
@@ -145,7 +156,7 @@ import { libraryRefForLibraryID, resolveItemReference, resolveLibraryRef } from 
 import { ZoteroItemReference, createZoteroItemReference } from '../types/zotero';
 import { markExternalReferenceImportedAtom } from './externalReferences';
 import type { CreateItemProposedData, CreateItemResultData } from '../types/agentActions/items';
-import { appendRunIfMissing, findResumeChainRoot, findRunForResume, hasOnlyThinkingParts, resolveErrorRunId, toRunError } from '../agents/runResumeHelpers';
+import { appendRunIfMissing, findResumeChainRoot, findRunForResume, hasOnlyThinkingParts, lingeringCompletedRun, resolveErrorRunId, toRunError } from '../agents/runResumeHelpers';
 import { prewarmMuPDFWorker } from '../../src/beaver-extract';
 import { BeaverTemporaryAnnotations } from '../utils/annotationUtils';
 import { isRejectedItemValidation, itemValidationResultsAtom } from './itemValidation';
@@ -618,6 +629,8 @@ async function undoAppliedActionsInReverse(actions: AgentAction[]): Promise<void
                 await undoEditMetadataAction(action, false);
             } else if (isEditNoteAgentAction(action)) {
                 await undoEditNoteAction(action);
+            } else if (isEditNoteBatchAgentAction(action)) {
+                await undoEditNoteBatchAction(action);
             } else if (isCreateItemAgentAction(action)) {
                 await undoCreateItemAction(action);
             } else if (isCreateCollectionAgentAction(action)) {
@@ -938,6 +951,17 @@ export const wsRetryAtom = atom<RetryState | null>(null);
 /** Deduplicates concurrent auto-resume/auto-retry scheduling for the same run. */
 const scheduledAutoResumeRunIdsAtom = atom<Set<string>>(new Set<string>());
 
+/**
+ * Transient reconnect state while the client automatically retries a failed
+ * connect attempt. Drives the status indicator's "Reconnecting…" copy instead
+ * of a user-visible error.
+ */
+export interface ReconnectState {
+    attempt: number;
+    maxAttempts: number;
+}
+export const wsReconnectingAtom = atom<ReconnectState | null>(null);
+
 // =============================================================================
 // Action Atoms
 // =============================================================================
@@ -954,6 +978,7 @@ export const resetWSStateAtom = atom(null, (_get, set) => {
     set(wsErrorAtom, null);
     set(wsWarningAtom, null);
     set(wsRetryAtom, null);
+    set(wsReconnectingAtom, null);
     set(streamingDoneRunIdsAtom, new Set<string>());
 });
 
@@ -967,7 +992,7 @@ export const prepareForNewRunAtom = atom(null, (_get, set) => {
     set(clearAllPendingApprovalsAtom);
     set(clearAllPendingQuestionsAtom);
     set(clearApprovalResponseIntentsAtom);
-    set(clearAutoApproveNoteKeysAtom);
+    set(clearRunApprovalPolicyAtom);
 });
 
 /**
@@ -1042,6 +1067,61 @@ function findToolCallArgs(
         }
     }
     return null;
+}
+
+function surfaceAndDiagnoseConnectionFailure(
+    set: Setter,
+    runId: string,
+    evidence: ConnectionFailureEvidence,
+    connectAttempts?: number,
+): void {
+    const applyPresentation = (
+        diagnostic?: Awaited<ReturnType<typeof reportConnectionFailure>>,
+    ) => {
+        const presentation = presentConnectionFailure(evidence, diagnostic);
+        // The diagnostic POST can take several seconds; if the user retried in
+        // the meantime, this run is no longer active and the refined
+        // presentation must not resurface its error over the new run's state.
+        const activeId = store.get(activeRunAtom)?.id ?? null;
+        if (activeId !== runId) return;
+        set(wsErrorAtom, (current) =>
+            current?.type && current.type !== 'connection_error'
+                ? current
+                : current?.run_id && current.run_id !== runId
+                  ? current
+                  : {
+                        event: 'error',
+                        type: 'connection_error',
+                        message: presentation.message,
+                        run_id: runId,
+                        is_retryable: true,
+                    },
+        );
+        set(activeRunAtom, (prev) =>
+            prev?.id === runId &&
+            (prev.status === 'in_progress' ||
+                prev.status === 'awaiting_deferred' ||
+                (prev.status === 'error' && prev.error?.type === 'connection_error'))
+                ? {
+                      ...prev,
+                      status: 'error',
+                      error: {
+                          type: 'connection_error',
+                          message: presentation.message,
+                          user_facing_details: presentation.details,
+                          is_retryable: true,
+                      },
+                  }
+                : prev,
+        );
+    };
+
+    applyPresentation();
+    void reportConnectionFailure({
+        evidence,
+        run_id: runId,
+        connect_attempts: connectAttempts ?? null,
+    }).then(applyPresentation);
 }
 
 /**
@@ -1282,8 +1362,7 @@ function createWSCallbacks(set: Setter): WSCallbacks {
             // Clear pending approvals and dismiss diff preview
             set(clearAllPendingApprovalsAtom);
             set(clearAllPendingQuestionsAtom);
-            // Clear per-run auto-approve state (keys only; IDs kept for UI labeling)
-            set(clearAutoApproveNoteKeysAtom);
+            set(clearRunApprovalPolicyAtom);
         },
 
         onError: (event: WSErrorEvent) => {
@@ -1310,8 +1389,7 @@ function createWSCallbacks(set: Setter): WSCallbacks {
             // Clear pending approvals and dismiss diff preview (run failed)
             set(clearAllPendingApprovalsAtom);
             set(clearAllPendingQuestionsAtom);
-            // Clear per-run auto-approve state
-            set(clearAutoApproveNoteKeysAtom);
+            set(clearRunApprovalPolicyAtom);
 
             if (
                 event.try_auto_resume &&
@@ -1476,19 +1554,20 @@ function createWSCallbacks(set: Setter): WSCallbacks {
                 }
             }
 
-            // edit_note: auto-approve if user opted in for this note in this run
-            if (event.action_type === 'edit_note') {
-                const { library_id, zotero_key } = event.action_data || {};
-                if (library_id != null && zotero_key) {
-                    const noteKey = makeNoteKey(library_id, zotero_key);
-                    const autoApproveKeys = store.get(autoApproveNoteKeysAtom);
-                    if (autoApproveKeys.has(noteKey)) {
-                        logger(`Auto-approving edit_note for ${noteKey}`, 1);
-                        agentService.sendApprovalResponse(event.action_id, true);
-                        set(addAutoApprovedActionIdAtom, event.action_id);
-                        return;
-                    }
-                }
+            // A grant can be selected while other validation requests are
+            // already in flight. Catch those requests here even though future
+            // validations will return always_apply directly.
+            const runPolicy = store.get(runApprovalPolicyAtom);
+            const activeRunId = store.get(activeRunAtom)?.id ?? null;
+            if (isActionApprovedForCurrentRun(
+                runPolicy,
+                activeRunId,
+                event.action_type,
+                event.action_data,
+            )) {
+                logger(`Auto-approving ${event.action_type} for the current run`, 1);
+                agentService.sendApprovalResponse(event.action_id, true);
+                return;
             }
 
             // Default: add to pending approvals map for UI rendering
@@ -1514,8 +1593,13 @@ function createWSCallbacks(set: Setter): WSCallbacks {
             set(isWSConnectedAtom, true);
         },
 
-        onClose: (code: number, reason: string, wasClean: boolean) => {
+        onClose: (code: number, reason: string, wasClean: boolean, transportEvidence) => {
             logger(`WS onClose: code=${code}, reason=${reason}, clean=${wasClean}`, 1);
+            // Whether this connection had received the `ready` event, read
+            // before the flag is cleared below. Distinguishes a connect-phase
+            // failure (reported once by executeWSRequest's catch) from a
+            // post-ready drop (handled here).
+            const hadReachedReady = store.get(isWSReadyAtom);
             // set(activeRunAtom, null);
             set(isWSConnectedAtom, false);
             set(isWSReadyAtom, false);
@@ -1525,49 +1609,67 @@ function createWSCallbacks(set: Setter): WSCallbacks {
             // Clear pending approvals and dismiss diff preview (connection lost)
             set(clearAllPendingApprovalsAtom);
             set(clearAllPendingQuestionsAtom);
-            // Clear per-run auto-approve state if the socket drops before done/error.
-            set(clearAutoApproveNoteKeysAtom);
+            set(clearRunApprovalPolicyAtom);
 
-            // If the socket dropped uncleanly while a run was still in flight, the
-            // server never delivered an error event
-            if (!wasClean) {
+            // A run that reached `completed` (run_complete processed) but whose
+            // terminal `done` never arrived — the socket closed while run_complete
+            // post-processing was still draining the message queue, so the queued
+            // `done` was skipped by the connection-generation guard — lingers in
+            // activeRunAtom. Finalize it the way onDone would, so the next send does
+            // not overwrite and drop it from local history. Idempotent: the normal
+            // path nulls activeRunAtom in onDone before close, making this a no-op.
+            set(activeRunAtom, (prev) => {
+                const finalRun = lingeringCompletedRun(prev);
+                if (finalRun) {
+                    set(threadRunsAtom, (runs) => appendRunIfMissing(runs, finalRun));
+                    return null;
+                }
+                return prev;
+            });
+
+            // A post-ready close that carries transport evidence came from the real
+            // socket (the client's own close()/cancel() paths notify without
+            // evidence). When it lands while the run is still nonterminal the server
+            // never delivered a terminal event — including a clean code-1000 close,
+            // which would otherwise leave the run spinning forever with no error and
+            // no retry. Connect-phase failures (before ready) are reported by
+            // executeWSRequest's catch, so gate on hadReachedReady to avoid
+            // double-reporting them.
+            if (hadReachedReady && transportEvidence) {
                 const activeRun = store.get(activeRunAtom);
                 if (
                     activeRun &&
                     (activeRun.status === 'in_progress' ||
                         activeRun.status === 'awaiting_deferred')
                 ) {
-                    const message =
-                        'The connection to the server was lost before the run finished. Please try again.';
-                    set(wsErrorAtom, {
-                        event: 'error',
-                        type: 'connection_error',
-                        message,
-                        is_retryable: true,
-                    });
-                    set(activeRunAtom, (prev) =>
-                        prev
-                            ? {
-                                  ...prev,
-                                  status: 'error',
-                                  error: {
-                                      type: 'connection_error',
-                                      message,
-                                      is_retryable: true,
-                                  },
-                              }
-                            : prev,
-                    );
+                    surfaceAndDiagnoseConnectionFailure(set, activeRun.id, transportEvidence);
                 }
             }
         }
     };
 }
 
+/** Total connect attempts per WS request (initial attempt + auto-retries). */
+export const CONNECT_MAX_ATTEMPTS = 4;
+/** Bounded-jitter backoff ranges before the 2nd, 3rd, and 4th attempts. */
+const CONNECT_RETRY_BACKOFF_MS = [
+    { min: 50, max: 200 },
+    { min: 200, max: 1000 },
+    { min: 500, max: 2500 },
+];
+
 /**
  * Execute a WebSocket request with the given run and request.
  * Handles connection, callbacks, and error handling.
  * Model selection options are included in the request itself.
+ *
+ * Transient pre-`ready` transport failures (1005/1006, connect timeout) are
+ * retried automatically with jittered backoff before anything is surfaced to
+ * the user: a cold-starting instance or momentary network block routinely
+ * succeeds on the next attempt. Auth and application-level failures are never
+ * retried. A recovered connect reports attempt count on the auth handshake;
+ * one error surface and one diagnostics report (carrying the attempt count)
+ * happen only after the final attempt fails.
  */
 async function executeWSRequest(
     run: AgentRun,
@@ -1576,47 +1678,95 @@ async function executeWSRequest(
     set: Setter
 ): Promise<void> {
     const callbacks = createWSCallbacks(set);
+    let lastFailure: unknown = null;
+    let attemptsMade = 0;
+    const connectStartedAtMs = Date.now();
 
-    try {
-        logger('WS Starting connection for run:', run.id);
-        const frontendVersion = Zotero.Beaver.pluginVersion || '';
-        const zoteroInstance = buildZoteroInstanceWire(get(searchableLibraryIdsAtom));
-        await agentService.connect(request, callbacks, frontendVersion, ZOTERO_PLUGIN_CLIENT_TYPE, ZOTERO_PLUGIN_FEATURES, {
-            ...zoteroInstance,
-        });
-        logger('WS Connection established and ready');
-    } catch (error: any) {
-        logger('WS connection error:', error, 1);
-        
-        // Check if an error was already set by the onError callback
-        // If so, don't overwrite it with a generic connection_error
-        const currentError = get(wsErrorAtom);
-        if (currentError && currentError.type !== 'connection_error') {
-            // An error was already set by onError callback, don't overwrite
-            logger('WS connection error: Error already set by onError callback, not overwriting', 1);
-            set(isWSChatPendingAtom, false);
+    for (let attempt = 1; attempt <= CONNECT_MAX_ATTEMPTS; attempt++) {
+        attemptsMade = attempt;
+        try {
+            logger(`WS Starting connection for run: ${run.id} (attempt ${attempt}/${CONNECT_MAX_ATTEMPTS})`);
+            // A new connection attempt starts from a clean ready state.
+            set(isWSReadyAtom, false);
+            const frontendVersion = Zotero.Beaver.pluginVersion || '';
+            const zoteroInstance = buildZoteroInstanceWire(get(searchableLibraryIdsAtom));
+            const recovery = connectRecoveryAuthFields(
+                attemptsMade,
+                lastFailure instanceof AgentConnectionError ? lastFailure.evidence : null,
+                connectStartedAtMs,
+            );
+            // connect() applies its own attempt-scoped backstop timeout, so this
+            // await cannot hang forever.
+            await agentService.connect(
+                request,
+                callbacks,
+                frontendVersion,
+                ZOTERO_PLUGIN_CLIENT_TYPE,
+                ZOTERO_PLUGIN_FEATURES,
+                { ...zoteroInstance },
+                recovery,
+            );
+            logger('WS connect settled');
+            set(wsReconnectingAtom, null);
             return;
-        }
-        
-        // No error was set yet, so set a generic connection error
-        const errorMessage = 'Could not connect to the server. Please check your internet connection and try again.';
-        set(wsErrorAtom, {
-            event: 'error',
-            type: 'connection_error',
-            message: errorMessage,
-            is_retryable: true,
-        });
-        set(activeRunAtom, (prev) => prev ? {
-            ...prev,
-            status: 'error',
-            error: {
-                type: 'connection_error',
-                message: errorMessage,
-                is_retryable: true,
+        } catch (error: any) {
+            logger(`WS connection attempt ${attempt}/${CONNECT_MAX_ATTEMPTS} failed:`, error, 1);
+            lastFailure = error;
+
+            // Check if an error was already set by the onError callback
+            // If so, don't overwrite it with a generic connection_error (and
+            // never retry it — application-level failures won't fix themselves).
+            const currentError = get(wsErrorAtom);
+            if (currentError && currentError.type !== 'connection_error') {
+                logger('WS connection error: Error already set by onError callback, not overwriting', 1);
+                set(wsReconnectingAtom, null);
+                set(isWSChatPendingAtom, false);
+                return;
             }
-        } : prev);
-        set(isWSChatPendingAtom, false);
+
+            const retryable =
+                attempt < CONNECT_MAX_ATTEMPTS &&
+                error instanceof AgentConnectionError &&
+                isRetryablePreReadyConnectFailure(error.evidence);
+            if (!retryable) break;
+
+            // Fully tear down the failed attempt so AgentService's overlap
+            // guard cannot swallow the next connect (a no-op when the failure
+            // path already reset the connection state).
+            agentService.close(1000, 'Retrying connection', { notifyClose: false });
+            // The transport close cleared the pending flag via onClose; restore
+            // it so the composer stays blocked while we quietly retry.
+            set(isWSChatPendingAtom, true);
+            set(wsReconnectingAtom, { attempt: attempt + 1, maxAttempts: CONNECT_MAX_ATTEMPTS });
+
+            const backoffRange = CONNECT_RETRY_BACKOFF_MS[
+                Math.min(attempt - 1, CONNECT_RETRY_BACKOFF_MS.length - 1)
+            ];
+            const backoffMs = backoffRange.min
+                + Math.random() * (backoffRange.max - backoffRange.min);
+            await new Promise((resolve) => setTimeout(resolve, backoffMs));
+
+            // The user may have cancelled or replaced the run during the wait.
+            const activeRun = store.get(activeRunAtom);
+            if (
+                activeRun?.id !== run.id ||
+                (activeRun.status !== 'in_progress' && activeRun.status !== 'awaiting_deferred')
+            ) {
+                logger(`WS connect retry abandoned: run ${run.id} is no longer active`, 1);
+                set(wsReconnectingAtom, null);
+                return;
+            }
+        }
     }
+
+    set(wsReconnectingAtom, null);
+    const evidence = lastFailure instanceof AgentConnectionError
+        ? lastFailure.evidence
+        : baselineConnectionEvidence('opening', {
+              errorName: lastFailure instanceof Error ? lastFailure.name : 'UnknownError',
+          });
+    surfaceAndDiagnoseConnectionFailure(set, run.id, evidence, attemptsMade);
+    set(isWSChatPendingAtom, false);
 }
 
 /**
@@ -1944,8 +2094,7 @@ export const sendWSMessageAtom = atom(
             set(activeRunAtom, run);
 
             // Reset user message input after creating the run
-            set(currentMessageContentAtom, '');
-            set(currentMessagePillsAtom, []);
+            set(clearComposerAtom);
             set(removePopupMessagesByTypeAtom, ['items_summary']);
             set(currentMessageItemsAtom, []);
             set(currentMessageCollectionsAtom, []);
@@ -2016,11 +2165,17 @@ export const regenerateFromRunAtom = atom(
                 // The run is currently active - cancel it and resubmit
                 targetRun = activeRun;
                 runIndex = threadRuns.length;
-                await agentService.cancel();
+                // Clear the active run before awaiting cancel: agentService.cancel()
+                // waits for the cancel message to flush, and if the socket closes
+                // uncleanly during that window, the onclose handler must not see this
+                // run still marked active and misattribute the close as a connection
+                // failure. The pending flag stays set until cancel resolves so the
+                // composer guard keeps blocking new sends during the flush.
                 set(activeRunAtom, null);
+                await agentService.cancel();
                 set(isWSChatPendingAtom, false);
             }
-            
+
             if (!targetRun) {
                 logger(`regenerateFromRunAtom: Run ${runId} not found`, 1);
                 return;
@@ -2082,7 +2237,7 @@ export const regenerateFromRunAtom = atom(
                 .filter(isManageCollectionsAgentAction)
                 .filter(a => a.status === 'applied');
             const noteEditsToUndo = actionsInRemovedRuns
-                .filter(isEditNoteAgentAction)
+                .filter(isAnyEditNoteAgentAction)
                 .filter(a => a.status === 'applied');
             const createNotesToUndo = actionsInRemovedRuns
                 .filter(isCreateNoteAgentAction)
@@ -2221,11 +2376,17 @@ export const regenerateWithEditedPromptAtom = atom(
                 // The run is currently active - cancel it and resubmit
                 targetRun = activeRun;
                 runIndex = threadRuns.length;
-                await agentService.cancel();
+                // Clear the active run before awaiting cancel: agentService.cancel()
+                // waits for the cancel message to flush, and if the socket closes
+                // uncleanly during that window, the onclose handler must not see this
+                // run still marked active and misattribute the close as a connection
+                // failure. The pending flag stays set until cancel resolves so the
+                // composer guard keeps blocking new sends during the flush.
                 set(activeRunAtom, null);
+                await agentService.cancel();
                 set(isWSChatPendingAtom, false);
             }
-            
+
             if (!targetRun) {
                 logger(`regenerateWithEditedPromptAtom: Run ${runId} not found`, 1);
                 return;
@@ -2269,7 +2430,7 @@ export const regenerateWithEditedPromptAtom = atom(
                 .filter(isManageCollectionsAgentAction)
                 .filter(a => a.status === 'applied');
             const noteEditsToUndo = actionsInRemovedRuns
-                .filter(isEditNoteAgentAction)
+                .filter(isAnyEditNoteAgentAction)
                 .filter(a => a.status === 'applied');
             const createNotesToUndo = actionsInRemovedRuns
                 .filter(isCreateNoteAgentAction)
@@ -2441,8 +2602,7 @@ export const closeWSConnectionAtom = atom(null, async (get, set) => {
     set(clearAllPendingApprovalsAtom);
     set(clearAllPendingQuestionsAtom);
     set(clearApprovalResponseIntentsAtom);
-    // Clear per-run auto-approve state
-    set(clearAutoApproveNoteKeysAtom);
+    set(clearRunApprovalPolicyAtom);
 
     // Mark active run as canceled if it exists
     const activeRun = get(activeRunAtom);
@@ -2482,9 +2642,7 @@ export const clearThreadAtom = atom(null, (_get, set) => {
     // Clear pending questions so a reset never leaves the composer disabled
     // behind an unanswerable card (pending approvals are left as-is here).
     set(clearAllPendingQuestionsAtom);
-    // Clear per-run auto-approve state (both keys and action IDs)
-    set(clearAutoApproveNoteKeysAtom);
-    set(clearAutoApprovedActionIdsAtom);
+    set(clearRunApprovalPolicyAtom);
 });
 
 /**
@@ -2527,6 +2685,40 @@ export const sendApprovalResponseAtom = atom(
         logger(`sendApprovalResponseAtom: Sending approval response for ${actionId}: ${approved}${userInstructions ? ' (with instructions)' : ''}`, 1);
         agentService.sendApprovalResponse(actionId, approved, userInstructions);
     }
+);
+
+/**
+ * Grant a tool group for the rest of a run and approve every request from that
+ * group that is already pending. Future validations and late-arriving approval
+ * requests read the same transient policy.
+ */
+export const approveToolGroupForRunAtom = atom(
+    null,
+    (
+        get,
+        set,
+        { runId, toolName }: { runId: string; toolName: string },
+    ): number => {
+        const group = getToolGroup(toolName);
+        if (!group) return 0;
+
+        set(grantToolGroupForRunAtom, { runId, toolName });
+
+        const matchingActionIds = getPendingApprovalIdsForToolGroup(
+            get(pendingApprovalsAtom).values(),
+            toolName,
+        );
+        for (const actionId of matchingActionIds) {
+            set(sendApprovalResponseAtom, { actionId, approved: true });
+        }
+        set(removePendingApprovalsAtom, matchingActionIds);
+
+        logger(
+            `approveToolGroupForRunAtom: Granted ${group} for run ${runId} and approved ${matchingActionIds.length} pending action(s)`,
+            1,
+        );
+        return matchingActionIds.length;
+    },
 );
 
 /**

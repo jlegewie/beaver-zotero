@@ -4,6 +4,7 @@ import {
     WSAgentActionValidateResponse,
 } from '../agentProtocol';
 import { validateEditNoteAction } from './actions/editNote';
+import { validateEditNoteBatchAction } from './actions/editNoteBatch';
 import { validateEditMetadataAction } from './actions/editMetadata';
 import { validateOrganizeItemsAction } from './actions/organizeItems';
 import { validateCreateNoteAction } from './actions/createNote';
@@ -44,6 +45,10 @@ export async function handleAgentActionValidateRequest(
 
         if (request.action_type === 'edit_note') {
             return await validateEditNoteAction(request);
+        }
+
+        if (request.action_type === 'edit_note_batch') {
+            return await validateEditNoteBatchAction(request);
         }
 
         if (request.action_type === 'create_note') {

@@ -111,6 +111,7 @@ function makePendingApproval(overrides: {
     old_string?: string;
     new_string?: string;
     operation?: string;
+    edits?: any[];
 }) {
     return {
         actionId: overrides.actionId,
@@ -122,6 +123,7 @@ function makePendingApproval(overrides: {
             old_string: overrides.old_string ?? 'old',
             new_string: overrides.new_string ?? 'new',
             operation: overrides.operation,
+            ...(overrides.edits !== undefined ? { edits: overrides.edits } : {}),
         },
     };
 }
@@ -165,6 +167,31 @@ describe('diffPreviewCoordinator — handleBannerAction', () => {
         expect(mockShowDiffPreview).toHaveBeenCalledWith(1, 'AAAA1111', [
             { oldString: '', newString: '<p>Appended</p>', operation: 'append' },
         ]);
+    });
+
+    it('preserves disambiguation anchors for automatic batch previews', async () => {
+        seedApprovals(makePendingApproval({
+            actionId: 'batch-1',
+            actionType: 'edit_note_batch',
+            edits: [{
+                index: 0,
+                old_string: 'Repeated text',
+                new_string: 'Targeted replacement',
+                target_before_context: '<p>first occurrence</p><p>',
+                target_after_context: '</p></div>',
+            }],
+        }));
+
+        updateDiffPreviewForNote(1, 'AAAA1111');
+        await Promise.resolve();
+
+        expect(mockShowDiffPreview).toHaveBeenCalledWith(1, 'AAAA1111', [{
+            oldString: 'Repeated text',
+            newString: 'Targeted replacement',
+            operation: 'str_replace',
+            targetBeforeContext: '<p>first occurrence</p><p>',
+            targetAfterContext: '</p></div>',
+        }]);
     });
 
     it('registers a banner action handler on module load', () => {

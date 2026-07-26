@@ -60,6 +60,8 @@ function queueDbRow(values: unknown[]) {
 import {
     validateManageTagsAction,
     executeManageTagsAction,
+    canonicalTagForm,
+    suggestionTagForm,
 } from '../../../src/services/agentDataProvider/actions/manageTags';
 import { validateLibraryAccess, getDeferredToolPreference } from '../../../src/services/agentDataProvider/utils';
 
@@ -204,6 +206,8 @@ describe('validateManageTagsAction', () => {
         } as any);
         expect(resp.valid).toBe(false);
         expect(resp.error_code).toBe('invalid_new_name');
+        // Unified across manage_tags and manage_collections (frontend + backend).
+        expect(resp.error).toBe('new_name must be different from the current name');
     });
 
     it('rebuilds the tag cache and retries on miss (cache desync)', async () => {
@@ -267,17 +271,20 @@ describe('validateManageTagsAction', () => {
         expect(resp.error).not.toContain('Did you mean');
     });
 
-    it('scopes the "Did you mean" suggestion query to the target library', async () => {
+    it('scopes the near-match probe to the target library', async () => {
         okLibrary();
         Zot.Tags.getID.mockImplementation(() => false);
         queryAsyncMock.mockImplementationOnce(async (sql: string, params: unknown[], opts?: { onRow?: (row: any) => void }) => {
-            // Verify SQL scopes to libraryID via itemTags join and that params are [libraryID, name].
+            // Verify SQL scopes to libraryID via itemTags join; matching is
+            // done in JS, so the only param is the library.
             expect(sql).toContain('itemTags');
             expect(sql).toContain('libraryID');
-            expect(params).toEqual([1, 'IMPORTANT']);
+            expect(params).toEqual([1]);
             opts?.onRow?.({ getResultByIndex: (i: number) => ['important'][i] });
         });
 
+        // getID stays false even for the probed name, so auto-resolution
+        // degrades to a suggestion instead of resolving.
         const resp = await validateManageTagsAction({
             event: 'agent_action_validate',
             request_id: 'r-scope',
@@ -286,6 +293,91 @@ describe('validateManageTagsAction', () => {
         } as any);
         expect(resp.valid).toBe(false);
         expect(resp.error).toContain("Did you mean: 'important'?");
+    });
+
+    it('auto-resolves a unique case-insensitive match and reports it in normalized_action_data', async () => {
+        okLibrary();
+        Zot.Tags.getID.mockImplementation((n: string) => (n === 'academic identity' ? 42 : false));
+        Zot.Tags.getTagItems.mockResolvedValue([10]);
+        queueDbRow(['academic identity']);
+        queueDbRow(['unrelated tag']);
+
+        const resp = await validateManageTagsAction({
+            event: 'agent_action_validate',
+            request_id: 'r-resolve',
+            action_type: 'manage_tags',
+            action_data: { action: 'delete', name: 'Academic identity' },
+        } as any);
+        expect(resp.valid).toBe(true);
+        expect(resp.current_value?.name).toBe('academic identity');
+        expect(resp.normalized_action_data?.name).toBe('academic identity');
+        expect(resp.current_value?.item_count).toBe(1);
+    });
+
+    it('auto-resolves apostrophe and Unicode-form variants', async () => {
+        okLibrary();
+        const stored = 'séjour d’études à l’étranger'; // curly apostrophes
+        Zot.Tags.getID.mockImplementation((n: string) => (n === stored ? 55 : false));
+        queueDbRow([stored]);
+
+        const resp = await validateManageTagsAction({
+            event: 'agent_action_validate',
+            request_id: 'r-apostrophe',
+            action_type: 'manage_tags',
+            action_data: { action: 'delete', name: "Séjour d'études à l'étranger" }, // straight
+        } as any);
+        expect(resp.valid).toBe(true);
+        expect(resp.normalized_action_data?.name).toBe(stored);
+    });
+
+    it('does not auto-resolve when multiple case variants coexist (lists them as suggestions)', async () => {
+        okLibrary();
+        Zot.Tags.getID.mockReturnValue(false);
+        queueDbRow(['Academic identity']);
+        queueDbRow(['academic identity']);
+
+        const resp = await validateManageTagsAction({
+            event: 'agent_action_validate',
+            request_id: 'r-ambiguous',
+            action_type: 'manage_tags',
+            action_data: { action: 'delete', name: 'ACADEMIC IDENTITY' },
+        } as any);
+        expect(resp.valid).toBe(false);
+        expect(resp.error_code).toBe('tag_not_found');
+        expect(resp.error).toContain("'Academic identity'");
+        expect(resp.error).toContain("'academic identity'");
+    });
+
+    it('suggests but does not auto-resolve a diacritic-only match', async () => {
+        okLibrary();
+        Zot.Tags.getID.mockImplementation((n: string) => (n === 'séance' ? 9 : false));
+        queueDbRow(['séance']);
+
+        const resp = await validateManageTagsAction({
+            event: 'agent_action_validate',
+            request_id: 'r-diacritic',
+            action_type: 'manage_tags',
+            action_data: { action: 'delete', name: 'seance' },
+        } as any);
+        expect(resp.valid).toBe(false);
+        expect(resp.error_code).toBe('tag_not_found');
+        expect(resp.error).toContain("Did you mean: 'séance'?");
+    });
+
+    it('returns rename_noop when resolution collapses name onto new_name', async () => {
+        okLibrary();
+        Zot.Tags.getID.mockImplementation((n: string) => (n === 'academic identity' ? 42 : false));
+        queueDbRow(['academic identity']);
+
+        const resp = await validateManageTagsAction({
+            event: 'agent_action_validate',
+            request_id: 'r-noop',
+            action_type: 'manage_tags',
+            action_data: { action: 'rename', name: 'Academic identity', new_name: 'academic identity' },
+        } as any);
+        expect(resp.valid).toBe(false);
+        expect(resp.error_code).toBe('rename_noop');
+        expect(resp.error).toContain("already named 'academic identity'");
     });
 
     it('returns validation_failed when the resolver throws (e.g. DB lock in init)', async () => {
@@ -443,5 +535,50 @@ describe('executeManageTagsAction', () => {
         expect(Zot.Tags.init).toHaveBeenCalledTimes(1);
         expect(Zot.Tags.rename).toHaveBeenCalledWith(1, 'Arts', 'arts');
         expect(resp.result_data?.items_affected).toBe(2);
+    });
+
+    it('renames via the auto-resolved source tag when the exact name is missing', async () => {
+        Zot.Tags.getID.mockImplementation((n: string) => (n === 'old tag' ? 7 : false));
+        Zot.Tags.getTagItems.mockResolvedValue([10]);
+        queueDbRow(['old tag']);
+
+        const resp = await executeManageTagsAction({
+            event: 'agent_action_execute',
+            request_id: 'e-resolve',
+            action_type: 'manage_tags',
+            action_data: { action: 'rename', name: 'Old Tag', new_name: 'renamed', library_id: 1 },
+        } as any, ctx);
+        expect(resp.success).toBe(true);
+        expect(Zot.Tags.rename).toHaveBeenCalledWith(1, 'old tag', 'renamed');
+        // result_data reports the tag actually operated on
+        expect(resp.result_data?.name).toBe('old tag');
+    });
+});
+
+
+describe('canonicalTagForm', () => {
+    it('folds case, trims, and collapses whitespace runs', () => {
+        expect(canonicalTagForm('  Academic   Identity ')).toBe('academic identity');
+    });
+
+    it('unifies curly and straight apostrophes and quotes', () => {
+        expect(canonicalTagForm('l’université')).toBe(canonicalTagForm("l'université"));
+        expect(canonicalTagForm('“quoted”')).toBe(canonicalTagForm('"quoted"'));
+    });
+
+    it('normalizes Unicode composition (NFC vs NFD)', () => {
+        // composed é (U+00E9) vs decomposed e + combining acute (U+0301)
+        expect(canonicalTagForm('s\u00e9ance')).toBe(canonicalTagForm('se\u0301ance'));
+    });
+
+    it('preserves diacritics (accented names stay distinct)', () => {
+        expect(canonicalTagForm('séance')).not.toBe(canonicalTagForm('seance'));
+    });
+});
+
+
+describe('suggestionTagForm', () => {
+    it('additionally strips diacritics', () => {
+        expect(suggestionTagForm('Séjour d’Études')).toBe("sejour d'etudes");
     });
 });

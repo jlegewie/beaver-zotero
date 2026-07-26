@@ -2,6 +2,7 @@ import { AuthApiError, AuthError, AuthSessionMissingError, isAuthRetryableFetchE
 import { ApiError, ServerError, SessionExpiredError, SessionRefreshError } from '../../react/types/apiErrors';
 import { logger } from '../utils/logger';
 import { supabase } from './supabaseClient';
+import { recordBackendHttpSuccess } from './backendReachability';
 
 type HttpMethod = 'GET' | 'POST' | 'PATCH' | 'DELETE';
 
@@ -154,6 +155,12 @@ export class ApiService {
         if (!response.ok) {
             await this.handleApiError(response);
         }
+
+        // Every successful REST call proves Beaver's regular HTTPS API was
+        // reachable; connection-failure diagnostics report how recent that
+        // proof is. The recorder normalizes the path so no query strings or
+        // dynamic identifiers (thread/run ids, item keys) reach telemetry.
+        recordBackendHttpSuccess(endpoint);
 
         return response;
     }
