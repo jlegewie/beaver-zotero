@@ -84,7 +84,14 @@ export interface WSToolCallArgsStreamEvent extends WSBaseEvent {
     args: Record<string, any>;
 }
 
-/** Run complete event signaling the agent run finished */
+/**
+ * Run complete event signaling the agent run finished.
+ *
+ * Since CLIENT_FEATURES.CITATIONS_EVENT, `citations` is null here and arrives
+ * on `WSRunCitationsEvent` instead — which lets the backend send this frame as
+ * soon as the run is durable rather than holding it through a Zotero lookup.
+ * The field stays on the type for historical runs and for the un-split path.
+ */
 export interface WSRunCompleteEvent extends WSBaseEvent {
     event: 'run_complete';
     run_id: string;
@@ -96,6 +103,21 @@ export interface WSRunCompleteEvent extends WSBaseEvent {
     high_token_usage?: boolean;
     /** Whether the soft cap history processor was triggered during this run. */
     soft_cap_triggered?: boolean;
+}
+
+/**
+ * A run's resolved citations, sent after `run_complete`.
+ *
+ * Resolving citations means asking this plugin what each marker points at, so
+ * it finishes well after the answer does. Always sent on the completed path —
+ * including with an empty list — because it is what ends the "linking sources"
+ * state that `streaming_done` began. On the error and cancel paths it is sent
+ * only when there is something in it; those paths clear that state themselves.
+ */
+export interface WSRunCitationsEvent extends WSBaseEvent {
+    event: 'run_citations';
+    run_id: string;
+    citations: import('../../react/types/citations').Citation[];
 }
 
 /** Done event signaling the request is fully complete (after persistence, usage logging, etc.) */
@@ -143,6 +165,17 @@ export interface WSErrorEvent extends WSBaseEvent {
     try_auto_resume?: boolean;
     /** show the beaver credits button */
     has_beaver_fallback?: boolean;
+    /**
+     * Whether the run had high input token usage (backend-assessed).
+     *
+     * On this frame rather than `run_complete` since CLIENT_FEATURES.CITATIONS_EVENT:
+     * a run that failed still has this to say about the conversation, and it is the
+     * only source for a failed run — the composer's own fallback reads
+     * `lastRun.total_usage`, which a failed run does not have.
+     */
+    high_token_usage?: boolean;
+    /** Whether the soft cap history processor was triggered during this run. */
+    soft_cap_triggered?: boolean;
 }
 
 /** Warning event for non-fatal issues */
@@ -1612,6 +1645,7 @@ export type WSEvent =
     | WSToolCallProgressEvent
     | WSToolCallArgsStreamEvent
     | WSRunCompleteEvent
+    | WSRunCitationsEvent
     | WSStreamingDoneEvent
     | WSDoneEvent
     | WSThreadEvent
@@ -1754,6 +1788,12 @@ export const CLIENT_FEATURES = {
     CREATE_NOTE_TAGS_COLLECTIONS: 'create_note_tags_collections',
     /** Batch multi-edit note editing (edit_note_batch action type). */
     EDIT_NOTE_BATCH: 'edit_note_batch',
+    /**
+     * Citations arrive on their own `run_citations` event instead of inside
+     * `run_complete`, so the run is reported finished as soon as it is durable
+     * rather than after the backend has finished asking us about its citations.
+     */
+    CITATIONS_EVENT: 'citations_event',
 } as const;
 
 /** Client type identifier for the Zotero plugin. */
@@ -1943,6 +1983,13 @@ export interface WSCallbacks {
      * @param event The run complete event with usage and cost info
      */
     onRunComplete: (event: WSRunCompleteEvent) => void | Promise<void>;
+
+    /**
+     * Called when a run's citations have been resolved, after `onRunComplete`.
+     * May be async to preload page labels for cited attachments.
+     * @param event The citations event, possibly with an empty list
+     */
+    onRunCitations?: (event: WSRunCitationsEvent) => void | Promise<void>;
 
     /**
      * Called when LLM streaming ends but post-processing (citations) is still running.

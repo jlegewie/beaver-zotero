@@ -45,6 +45,9 @@ const VERSION_GATES: { feature: string; minVersion: string; op: Op }[] = [
 // shapes a client only honors if its handlers implement them: builds that
 // predate them drop the unknown fields, so the backend degrades gracefully
 // instead of assuming support from a version.
+// citations_event is declaration-only because it gates an outbound frame the
+// client must have a handler for — a version cannot vouch for that, and the
+// backend keeps embedding citations in run_complete without it.
 const DECLARATION_ONLY_FEATURES = [
     'external_files',
     'ask_user_question',
@@ -52,6 +55,7 @@ const DECLARATION_ONLY_FEATURES = [
     'list_items_include_children',
     'create_note_tags_collections',
     'edit_note_batch',
+    'citations_event',
 ];
 
 // The full backend feature vocabulary (ALL_FEATURES in version_gates.py): every

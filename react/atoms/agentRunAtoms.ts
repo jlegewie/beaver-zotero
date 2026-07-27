@@ -25,6 +25,7 @@ import {
     WSPartEvent,
     WSToolReturnEvent,
     WSRunCompleteEvent,
+    WSRunCitationsEvent,
     WSErrorEvent,
     WSWarningEvent,
     WSRetryEvent,
@@ -81,6 +82,7 @@ import {
 } from '../agents/atoms';
 import { userIdAtom } from './auth';
 import { citationsAtom, processCitationsAtom, resetCitationMarkersAtom, mergePageLabelsByAttachmentIdAtom } from './citations';
+import type { Citation } from '../types/citations';
 import { preloadPageLabelsForCitations } from '../utils/pageLabels';
 import { sanitizeMessageFiltersForSearchableLibraries } from '../utils/messageFilters';
 import {
@@ -1125,6 +1127,41 @@ function surfaceAndDiagnoseConnectionFailure(
 }
 
 /**
+ * Apply a run's resolved citations, whichever frame carried them.
+ *
+ * Citations reach the client two ways. Current backends send them on their own
+ * `run_citations` event, so `run_complete` no longer has to wait out a Zotero
+ * lookup. Backends that predate CLIENT_FEATURES.CITATIONS_EVENT embed them in
+ * `run_complete` instead. The two frames differ in when they arrive, not in
+ * what the client does with what is inside them.
+ */
+function applyRunCitations(
+    set: Setter,
+    runId: string,
+    citations: Citation[] | null | undefined,
+): void {
+    if (!citations || citations.length === 0) return;
+
+    logger(`WS: Processing ${citations.length} citations for run ${runId}`, 1);
+    set(citationsAtom, (prev) => [
+        ...prev,
+        ...citations.map(c => ({ ...c, run_id: runId }))
+    ]);
+    set(processCitationsAtom);
+
+    // Preload PDF page labels for cited attachments so the rendering path can
+    // resolve page numbers from explicit render state. Runs after metadata is
+    // exposed to avoid blocking the UI on PDF extraction.
+    preloadPageLabelsForCitations(citations)
+        .then((labelsByAttachmentId) => {
+            set(mergePageLabelsByAttachmentIdAtom, labelsByAttachmentId);
+        })
+        .catch((err) =>
+            logger(`WS: Failed to preload page labels: ${err}`, 1)
+        );
+}
+
+/**
  * Create WebSocket callbacks for handling streaming events.
  * Shared between sendWSMessageAtom and regenerateFromRunAtom.
  */
@@ -1266,12 +1303,13 @@ function createWSCallbacks(set: Setter): WSCallbacks {
                 softCapTriggered: event.soft_cap_triggered,
             }, 1);
             set(activeRunAtom, (prev) => prev ? updateRunComplete(prev, event) : prev);
-            // Clear streaming-done state now that citations are resolved
-            set(streamingDoneRunIdsAtom, (prev) => {
-                const next = new Set(prev);
-                next.delete(event.run_id);
-                return next;
-            });
+            // Streaming-done is deliberately left set: this frame now arrives
+            // as soon as the run is durable, with the citation lookup still
+            // running, and that state is what tells the user their sources are
+            // still being linked. `onRunCitations` ends it. A backend too old
+            // to send that event embeds the citations below, and `onDone` —
+            // which follows immediately — is the backstop there.
+
             // Clear retry state when run completes
             set(wsRetryAtom, null);
 
@@ -1283,27 +1321,9 @@ function createWSCallbacks(set: Setter): WSCallbacks {
                 set(softCapTriggeredRunsAtom, (prev) => ({ ...prev, [event.run_id]: true }));
             }
 
-            // Process citations from run complete event
-            if (event.citations && event.citations.length > 0) {
-                logger(`WS onRunComplete: Processing ${event.citations.length} citations`, 1);
-                set(citationsAtom, (prev) => [
-                    ...prev,
-                    ...event.citations!.map(c => ({ ...c, run_id: event.run_id }))
-                ]);
-                set(processCitationsAtom);
-
-                // Preload PDF page labels for cited attachments so the rendering
-                // path can resolve page numbers from explicit render state.
-                // Runs after metadata is exposed to avoid blocking the UI on PDF
-                // extraction.
-                preloadPageLabelsForCitations(event.citations)
-                    .then((labelsByAttachmentId) => {
-                        set(mergePageLabelsByAttachmentIdAtom, labelsByAttachmentId);
-                    })
-                    .catch((err) =>
-                        logger(`WS onRunComplete: Failed to preload page labels: ${err}`, 1)
-                    );
-            }
+            // Citations, for a backend that still embeds them here. Current
+            // ones send `citations: null` and follow with `run_citations`.
+            applyRunCitations(set, event.run_id, event.citations);
 
             // Process agent actions from run complete event
             if (event.agent_actions && event.agent_actions.length > 0) {
@@ -1325,6 +1345,26 @@ function createWSCallbacks(set: Setter): WSCallbacks {
             // Surface an OS-native notification if the user can't currently see
             // the completed response (e.g. working in another app).
             notifyRunComplete();
+        },
+
+        onRunCitations: (event: WSRunCitationsEvent) => {
+            logger('WS onRunCitations:', {
+                runId: event.run_id,
+                citationsCount: event.citations?.length ?? 0,
+            }, 1);
+
+            applyRunCitations(set, event.run_id, event.citations);
+
+            // The lookup is over — whatever it found, including nothing. Every
+            // other way it can end (`done`, an error, a cancel, the socket
+            // closing) clears this state wholesale; only the ordinary success
+            // path needs it retired one run at a time.
+            set(streamingDoneRunIdsAtom, (prev) => {
+                if (!prev.has(event.run_id)) return prev;
+                const next = new Set(prev);
+                next.delete(event.run_id);
+                return next;
+            });
         },
 
         onThread: (newThreadId: string) => {
@@ -1390,6 +1430,19 @@ function createWSCallbacks(set: Setter): WSCallbacks {
             set(clearAllPendingApprovalsAtom);
             set(clearAllPendingQuestionsAtom);
             set(clearRunApprovalPolicyAtom);
+
+            // Run quality flags, which a current backend puts here rather than
+            // on a `run_complete` for a run that did not complete. Keyed by run
+            // id in atoms that never consult run status, so a failed run drives
+            // the same composer warnings a finished one does — and for
+            // high_token_usage this is the only source, since the composer's
+            // fallback reads `total_usage`, which a failed run has none of.
+            if (errorRunId && event.high_token_usage) {
+                set(backendHighTokenUsageRunsAtom, (prev) => ({ ...prev, [errorRunId]: true }));
+            }
+            if (errorRunId && event.soft_cap_triggered) {
+                set(softCapTriggeredRunsAtom, (prev) => ({ ...prev, [errorRunId]: true }));
+            }
 
             if (
                 event.try_auto_resume &&

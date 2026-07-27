@@ -713,6 +713,10 @@ export class AgentService {
                     await this.callbacks.onRunComplete(event);
                     break;
 
+                case 'run_citations':
+                    await this.callbacks.onRunCitations?.(event);
+                    break;
+
                 case 'streaming_done':
                     this.callbacks.onStreamingDone?.(event);
                     break;
