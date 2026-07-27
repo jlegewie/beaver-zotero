@@ -1,6 +1,7 @@
 import { extractAndCacheDocument } from '../documentExtractionCore';
 import { liveAttachmentContentKind } from '../documentExtraction/attachmentResolution';
 import type { BackgroundJobRecord } from '../database';
+import { isLibraryInScope, isLibraryScopeKnown } from '../libraryScope';
 import { logger } from '../../utils/logger';
 import { UNRESOLVED_LIBRARY_ID } from '../../utils/libraryIdentity';
 import { safeIsInTrash } from '../../utils/zoteroItemUtils';
@@ -27,11 +28,39 @@ export class DocumentExtractExecutor implements JobExecutor {
         return null;
     }
 
+    /**
+     * Outcome to return when the job may no longer touch its library, or null
+     * when it may proceed.
+     *
+     * Unknown scope and exclusion are deliberately distinct: an unknown scope is
+     * a transient startup / logout state, so the row is released to run later,
+     * while a known exclusion retires it. Collapsing the two would silently drop
+     * queued work on an account switch.
+     */
+    private checkScope(record: BackgroundJobRecord): JobOutcome | null {
+        if (!isLibraryScopeKnown()) {
+            return { kind: 'release', reason: 'library_scope_unknown' };
+        }
+        if (record.libraryId === UNRESOLVED_LIBRARY_ID) return null;
+        if (isLibraryInScope(record.libraryId)) return null;
+        logger(
+            `DocumentExtractExecutor: ${record.libraryId}-${record.zoteroKey} skipped (library_excluded)`,
+            2,
+        );
+        return { kind: 'complete', reason: 'library_excluded' };
+    }
+
     private async executeOnWorker(
         record: BackgroundJobRecord,
         ctx: JobExecutionContext,
     ): Promise<JobOutcome> {
         let item: Zotero.Item | null = null;
+        // Re-check the searchable-library boundary here, not just at claim time:
+        // this lane serializes on the MuPDF worker, so a claimed job can wait
+        // behind other work before it reads anything.
+        const preLookup = this.checkScope(record);
+        if (preLookup) return preLookup;
+
         if (record.libraryId === UNRESOLVED_LIBRARY_ID) {
             logger(
                 `DocumentExtractExecutor: library not available on this device for ${record.libraryId}-${record.zoteroKey}`,
@@ -51,6 +80,14 @@ export class DocumentExtractExecutor implements JobExecutor {
                 );
             }
         }
+
+        // Re-assert the boundary immediately after the lookup await, before the
+        // item is touched at all: the scope mirror is published in the same turn
+        // as an exclusion, so it can change across that await. Everything below
+        // this point is synchronous up to the extraction, so this is the only
+        // re-check the rest of the method needs — keep it adjacent to the await.
+        const postLookup = this.checkScope(record);
+        if (postLookup) return postLookup;
 
         if (!item || safeIsInTrash(item) === true) {
             return {
@@ -84,6 +121,7 @@ export class DocumentExtractExecutor implements JobExecutor {
         if (!payload || payload.content_kind !== 'pdf') {
             return { kind: 'complete', reason: 'missing_payload' };
         }
+
 
         let result: Awaited<ReturnType<typeof extractAndCacheDocument>>;
         try {

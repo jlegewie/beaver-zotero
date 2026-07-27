@@ -24,8 +24,10 @@ import type {
     QueueDB,
 } from './backgroundQueue/jobExecutor';
 import { MuPDFLane } from './backgroundQueue/muPDFLane';
+import { isLibraryInScope, isLibraryScopeKnown } from './libraryScope';
 import { logger } from '../utils/logger';
 import { createAbortController } from '../utils/abortController';
+import { UNRESOLVED_LIBRARY_ID } from '../utils/libraryIdentity';
 import { getPref } from '../utils/prefs';
 import { getSystemIdleTimeMs, registerIdleObserver } from '../utils/idleService';
 
@@ -51,6 +53,7 @@ export type ProcessOnceReason =
     | 'no_window'
     | 'sync_in_progress'
     | 'hot_busy'
+    | 'library_scope_unknown'
     | 'empty'
     | 'job_done';
 
@@ -66,6 +69,8 @@ export type BackgroundLaneStatus = Partial<
 type LaneEntry = {
     promise: Promise<void>;
     abort: AbortController;
+    /** Library of the running job, so a scope change can target its abort. */
+    libraryId: number;
 };
 
 type ExecutorRegistration = {
@@ -281,6 +286,36 @@ export class BackgroundExtractor {
         this.pendingWake = false;
     }
 
+    /**
+     * Abort in-flight jobs whose library is no longer searchable.
+     *
+     * Called when the searchable-library mirror changes. A single extraction
+     * can run for minutes, so revoking access has to interrupt work already
+     * underway rather than only gating the next claim. The aborted job releases
+     * its row, which the claim-time gate then retires.
+     *
+     * Nothing is in scope while the scope is unknown (logout / account switch),
+     * so this stops in-flight work there too; those rows are released and run
+     * again once a scope is published.
+     */
+    abortJobsOutsideScope(): void {
+        for (const lane of this.laneInFlight.values()) {
+            for (const [id, entry] of lane) {
+                if (entry.libraryId === UNRESOLVED_LIBRARY_ID) continue;
+                if (isLibraryInScope(entry.libraryId)) continue;
+                logger(
+                    `BackgroundExtractor: aborting in-flight job id=${id} (library_excluded)`,
+                    2,
+                );
+                try {
+                    entry.abort.abort();
+                } catch {
+                    // best-effort
+                }
+            }
+        }
+    }
+
     /** Abort every active lane and wait for all jobs to settle. */
     async abortInFlight(): Promise<void> {
         await this.abortAndAwaitInFlight();
@@ -365,6 +400,12 @@ export class BackgroundExtractor {
             }
         }
 
+        // Fail closed: without a resolved searchable-library scope the
+        // dispatcher cannot prove a queued row is allowed to run, so it claims
+        // nothing. Checked every pass because rows outlive both restarts and
+        // the exclusion state they were enqueued under.
+        if (!isLibraryScopeKnown()) return inactive('library_scope_unknown');
+
         const db = Zotero.Beaver?.db;
         if (!db || this.executors.size === 0) return inactive('empty');
 
@@ -392,7 +433,12 @@ export class BackgroundExtractor {
     }): Promise<number> {
         let launched = 0;
         const waits: Promise<void>[] = [];
+        // Set when a claim observes an unknown scope: stops further claims but
+        // still falls through to the wait below, so jobs launched earlier in
+        // this pass keep their settle-before-return contract.
+        let scopeUnknown = false;
         for (const [jobType, registration] of this.executors) {
+            if (scopeUnknown) break;
             const freeSlots = this.laneCapacityFree(jobType);
             for (let slot = 0; slot < freeSlots; slot += 1) {
                 if (this.stopRequested) return launched;
@@ -408,6 +454,33 @@ export class BackgroundExtractor {
                         await options.db.releaseBackgroundJob(record.id, Date.now());
                     }
                     return launched;
+                }
+
+                if (!isLibraryScopeKnown()) {
+                    // The scope went unknown (logout / account switch) while the
+                    // claim was in flight. Release rather than retire: the row is
+                    // not excluded, it is unverifiable right now, and completing
+                    // it here would silently drop queued work.
+                    if (!this.shouldSkipDbWrites()) {
+                        await options.db.releaseBackgroundJob(record.id, Date.now());
+                    }
+                    scopeUnknown = true;
+                    break;
+                }
+
+                if (this.isOutOfScope(record)) {
+                    launched += 1;
+                    logger(
+                        `BackgroundExtractor: job id=${record.id} type=${record.jobType} ${record.libraryId}-${record.zoteroKey} skipped (library_excluded)`,
+                        2,
+                    );
+                    await this.persistOutcome(
+                        record,
+                        registration.executor,
+                        { kind: 'complete', reason: 'library_excluded' },
+                        options.db,
+                    );
+                    continue;
                 }
 
                 logger(
@@ -457,7 +530,7 @@ export class BackgroundExtractor {
                     this.notify();
                 }
             });
-        lane.set(record.id, { promise, abort });
+        lane.set(record.id, { promise, abort, libraryId: record.libraryId });
         return promise;
     }
 
@@ -635,6 +708,17 @@ export class BackgroundExtractor {
         } finally {
             this.tickRunning = false;
         }
+    }
+
+    /**
+     * A claimed row whose library is no longer searchable must not run: the
+     * user can exclude a library after the row was enqueued, and rows survive
+     * restarts. Rows for a library that is not present on this device
+     * (`UNRESOLVED_LIBRARY_ID`) are left to the executor's own handling.
+     */
+    private isOutOfScope(record: BackgroundJobRecord): boolean {
+        return record.libraryId !== UNRESOLVED_LIBRARY_ID
+            && !isLibraryInScope(record.libraryId);
     }
 
     private laneCapacityFree(jobType: BackgroundJobType): number {

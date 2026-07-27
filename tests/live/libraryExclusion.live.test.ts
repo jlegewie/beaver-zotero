@@ -46,6 +46,13 @@ import {
     getAnnotations,
     viewAttachmentImages,
     fetchAttachmentImage,
+    backgroundClear,
+    backgroundEnqueue,
+    backgroundPeek,
+    backgroundProcessOnce,
+    backgroundStats,
+    getCacheMetadata,
+    invalidateCache,
     type ExcludedLibraryEntry,
 } from '../helpers/cacheInspector';
 import {
@@ -469,6 +476,87 @@ describe('agent actions reject excluded target libraries', () => {
             expect(res.success).toBe(false);
             expect(res.error_code).toBe('library_not_searchable');
         });
+    });
+});
+
+// -------------------------------------------------------------------------
+// Background queue honors the searchable set
+// -------------------------------------------------------------------------
+
+describe('background queue honors the searchable set', () => {
+    /** Poll the mirror until it reflects the expected exclusion, or time out. */
+    async function waitForScope(
+        predicate: (ids: number[]) => boolean,
+    ): Promise<number[]> {
+        for (let attempt = 0; attempt < 20; attempt++) {
+            const stats = await backgroundStats();
+            const ids = stats.library_scope?.searchable_library_ids;
+            if (stats.library_scope?.initialized && ids && predicate(ids)) return ids;
+            await new Promise((resolve) => setTimeout(resolve, 100));
+        }
+        throw new Error('library scope mirror did not converge');
+    }
+
+    beforeEach(async () => {
+        await backgroundClear();
+    });
+
+    afterEach(async () => {
+        await backgroundClear();
+    });
+
+    it('mirrors the searchable set for the (esbuild) dispatcher', async () => {
+        const driverState = await getExcludedLibraries();
+        const mirrored = await waitForScope(() => true);
+        expect([...mirrored].sort()).toEqual(
+            [...(driverState.searchable_library_ids ?? [])].sort(),
+        );
+
+        // The mirror tracks exclusion changes, not just the initial load.
+        await exclude([USER_LIBRARY_ID]);
+        const afterExclude = await waitForScope((ids) => !ids.includes(USER_LIBRARY_ID));
+        expect(afterExclude).not.toContain(USER_LIBRARY_ID);
+    });
+
+    it('discards a queued job whose library is excluded', async () => {
+        // Exclude before enqueueing so the row is never claimable while the
+        // library is searchable — the dispatcher's own tick can fire at any
+        // point and would otherwise race this test into extracting the file.
+        await exclude([USER_LIBRARY_ID]);
+        await waitForScope((ids) => !ids.includes(USER_LIBRARY_ID));
+        // Drop the cached document so a run of the job would be observable.
+        await invalidateCache(SMALL_PDF.library_id, SMALL_PDF.zotero_key);
+
+        // Priority 50 (what the hot-path timeout enqueues) clears the idle
+        // gate, so the row is claimable regardless of user activity.
+        const enqueued = await backgroundEnqueue({
+            library_id: SMALL_PDF.library_id,
+            zotero_key: SMALL_PDF.zotero_key,
+            content_kind: 'pdf',
+            payload_kind: 'structured',
+            job_type: 'document_extract',
+            priority: 50,
+            payload: {
+                content_kind: 'pdf',
+                maxPages: 1,
+                maxFileSizeMB: 50,
+                timeoutSeconds: 60,
+            },
+        });
+        expect(enqueued.ok).toBe(true);
+
+        const result = await backgroundProcessOnce();
+
+        // `empty` when the dispatcher's own tick retired the row first.
+        expect(['job_done', 'empty']).toContain(result.reason);
+        // The row is retired, not retried or dead-lettered...
+        const peek = await backgroundPeek();
+        expect(peek.jobs).toHaveLength(0);
+        const stats = await backgroundStats();
+        expect(stats.queue).toMatchObject({ pending: 0, dead: 0 });
+        // ...and nothing was read from the excluded library to service it.
+        const cached = await getCacheMetadata(SMALL_PDF.library_id, SMALL_PDF.zotero_key);
+        expect(cached).toBeNull();
     });
 });
 

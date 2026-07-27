@@ -30,6 +30,7 @@ import { useReaderAnnotationActionHandler } from './hooks/useReaderAnnotationAct
 import { useReaderVisualizerActionHandler } from './hooks/useReaderVisualizerActionHandler';
 import { useOnboardingPopups } from './hooks/useOnboardingPopups';
 import { useBackgroundWorkerStatus } from './hooks/useBackgroundWorkerStatus';
+import { useLibraryScopeMirror } from './hooks/useLibraryScopeMirror';
 import { useOcrLane } from './hooks/useOcrLane';
 import { useSearchIndexAccess } from './hooks/useSearchIndexAccess';
 import { useSyncSuppression } from './hooks/useSyncSuppression';
@@ -123,6 +124,10 @@ const GlobalContextInitializer = () => {
 
     // Mirror background extraction activity into the shared Jotai store
     useBackgroundWorkerStatus();
+
+    // Publish the searchable-library scope for esbuild background code. Runs
+    // before the lane hooks so the mirror is set when a lane first dispatches.
+    useLibraryScopeMirror();
 
     // Register the OCR background lane + mirror the OCR entitlement flag
     useOcrLane();

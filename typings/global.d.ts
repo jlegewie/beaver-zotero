@@ -422,6 +422,20 @@ declare namespace Zotero {
         const hasSearchIndexAccess: boolean | undefined;
 
         /**
+         * Searchable-library mirror (local libraries minus the profile's
+         * excluded libraries), synced from the webpack profile hook so esbuild
+         * background code can enforce the exclusion boundary. Read it through
+         * `src/services/libraryScope`, which fails closed while it is unset.
+         */
+        const searchableLibraryIds: number[] | undefined;
+
+        /**
+         * True once `searchableLibraryIds` reflects a loaded profile and a
+         * loaded local library list.
+         */
+        const libraryScopeInitialized: boolean | undefined;
+
+        /**
          * Citation object for CSL formatting
          */
         type Citation = {

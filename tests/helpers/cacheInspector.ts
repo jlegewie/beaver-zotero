@@ -1004,6 +1004,11 @@ export interface BackgroundStatsResponse {
         hot: WorkerStatsSnapshot | null;
         background: WorkerStatsSnapshot | null;
     };
+    /** Searchable-library mirror the dispatcher gates claims on. */
+    library_scope?: {
+        initialized: boolean | null;
+        searchable_library_ids: number[] | null;
+    };
     error?: string;
 }
 
@@ -1018,6 +1023,7 @@ export type BackgroundProcessOnceReason =
     | 'shutting_down'
     | 'no_window'
     | 'hot_busy'
+    | 'library_scope_unknown'
     | 'empty'
     | 'job_done';
 
