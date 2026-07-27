@@ -1269,7 +1269,12 @@ export interface PageImageOptions {
     format?: ImageFormat;
     /** JPEG quality (1-100), only used for format="jpeg". Default: 85 */
     jpegQuality?: number;
+    /** Upper bound on the rendered pixel count (width × height) of one page */
+    maxPixels?: number;
 }
+
+/** Cap on the pixmap a single page render may allocate, in pixels. */
+export const DEFAULT_MAX_RENDER_PIXELS = 40_000_000;
 
 /** Default page image options */
 export const DEFAULT_PAGE_IMAGE_OPTIONS: Required<PageImageOptions> = {
@@ -1279,6 +1284,7 @@ export const DEFAULT_PAGE_IMAGE_OPTIONS: Required<PageImageOptions> = {
     showExtras: true,
     format: "png",
     jpegQuality: 85,
+    maxPixels: DEFAULT_MAX_RENDER_PIXELS,
 };
 
 /** Result of rendering a page to an image */

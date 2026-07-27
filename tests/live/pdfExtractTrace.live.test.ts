@@ -30,15 +30,17 @@ interface TraceSentence {
 interface TraceResponse {
     ok: boolean;
     page_index?: number;
-    raw_lines?: Array<{ id: string; marginFilter: { finalKept: boolean } }>;
-    columns?: Array<{ idx: number; lineIds: string[] }>;
-    paragraphs?: Array<{ id: string; lineIds: string[] }>;
+    raw_lines?: Array<{ id?: string }>;
+    columns?: number[][];
+    paragraphs?: Array<{ id: string; kind: string }>;
     sentences?: TraceSentence[];
     lines_dropped_by_columns?: string[];
     sentence_stats?: {
-        sentences: number;
-        paragraphs: number;
+        count: number;
+        degraded: number;
+        fragments: number;
     };
+    page?: { counts: { items: number; sentences: number; columns?: number; lines?: number } };
     error?: { name: string; code?: string; message: string };
 }
 
@@ -89,52 +91,25 @@ describe('pdf-extract-trace ↔ pdf-sentence-bboxes parity', () => {
                 expect(traceSentences[i].bboxes).toEqual(prodSentences[i].bboxes);
             }
 
-            // Item count: trace still exposes the legacy `paragraphs` key
-            // for cross-stage line links, while production returns `items`.
+            // Trace still exposes the legacy `paragraphs` key for canonical
+            // items, including margin items just like production does.
             const tracePCount = (traceRes.paragraphs ?? []).length;
-            const prodPCount = (prodRes.result.items as Array<{ kind: string }>)
-                .filter((item) => item.kind !== "margin").length;
+            const prodPCount = (prodRes.result.items as Array<{ kind: string }>).length;
             expect(tracePCount).toBe(prodPCount);
         });
 
-        it(`cross-stage links are well-formed (${fixture.description})`, async () => {
-            const res = await pdfExtractTrace(fixture, { page_index: 0 });
+        it(`full debug projection has internally consistent counts (${fixture.description})`, async () => {
+            const res = await pdfExtractTrace(fixture, { page_index: 0, mode: 'full' });
             expect(res.ok).toBe(true);
 
-            const rawLineIds = new Set(
-                (res.raw_lines ?? []).map((r) => r.id),
-            );
-            const droppedIds = new Set(res.lines_dropped_by_columns ?? []);
-
-            // Every paragraph line ID resolves to a raw line.
-            for (const p of res.paragraphs ?? []) {
-                for (const id of p.lineIds) {
-                    expect(rawLineIds.has(id)).toBe(true);
-                }
-            }
-
-            // Every column line ID resolves to a raw line.
-            for (const c of res.columns ?? []) {
-                for (const id of c.lineIds) {
-                    expect(rawLineIds.has(id)).toBe(true);
-                }
-            }
-
-            // finalKept raw lines = (lines used by columns) ∪ (lines dropped
-            // by columns), after de-dup. If the spine were built from the
-            // wrong page (e.g. `rawDoc.pages` instead of `pagesForFilter`),
-            // bbox identity would not match and many finalKept lines would
-            // appear in neither set.
-            const usedByColumns = new Set<string>();
-            for (const c of res.columns ?? []) {
-                for (const id of c.lineIds) usedByColumns.add(id);
-            }
-            const finalKept = (res.raw_lines ?? [])
-                .filter((r) => r.marginFilter.finalKept)
-                .map((r) => r.id);
-            for (const id of finalKept) {
-                expect(usedByColumns.has(id) || droppedIds.has(id)).toBe(true);
-            }
+            const lineIds = (res.raw_lines ?? []).map((line) => line.id);
+            expect(lineIds.every((id): id is string => typeof id === 'string')).toBe(true);
+            expect(new Set(lineIds).size).toBe(lineIds.length);
+            expect(res.raw_lines).toHaveLength(res.page?.counts.lines ?? 0);
+            expect(res.columns).toHaveLength(res.page?.counts.columns ?? 0);
+            expect(res.paragraphs).toHaveLength(res.page?.counts.items ?? 0);
+            expect(res.sentences).toHaveLength(res.page?.counts.sentences ?? 0);
+            expect(res.sentence_stats?.count).toBe(res.sentences?.length ?? 0);
         });
     }
 

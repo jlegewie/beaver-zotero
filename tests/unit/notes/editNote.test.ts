@@ -160,7 +160,12 @@ vi.mock('../../../src/utils/editNoteHints', () => ({
     findInlineTagDriftMatch: vi.fn(() => null),
     findWindowCandidates: vi.fn(() => []),
     centerTruncate: vi.fn((text: string) => ({ snippet: text, truncated: false })),
+    markTruncatedUnlessVerbatim: vi.fn(
+        (result: { snippet: string; truncated: boolean }) => result,
+    ),
+    pasteableSnippetBudget: vi.fn(() => 600),
     DEFAULT_MAX_SNIPPET_LENGTH: 200,
+    MAX_PASTEABLE_SNIPPET_LENGTH: 600,
 }));
 
 vi.mock('../../../src/utils/editNoteRawPosition', async () => {
@@ -209,11 +214,6 @@ vi.mock('../../../react/atoms/profile', () => ({
 
 vi.mock('../../../react/atoms/threads', () => ({
     currentThreadIdAtom: Symbol('currentThreadIdAtom'),
-}));
-
-vi.mock('../../../react/atoms/editNoteAutoApprove', () => ({
-    autoApproveNoteKeysAtom: Symbol('autoApproveNoteKeysAtom'),
-    makeNoteKey: vi.fn((libId: number, key: string) => `${libId}-${key}`),
 }));
 
 vi.mock('../../../src/services/agentDataProvider/utils', () => ({
@@ -373,10 +373,6 @@ beforeEach(() => {
 
     // Reset store.get to return appropriate values per atom
     vi.mocked(store.get).mockImplementation((atom: any) => {
-        // autoApproveNoteKeysAtom returns a Set
-        if (typeof atom === 'symbol' && atom.description === 'autoApproveNoteKeysAtom') {
-            return new Set<string>();
-        }
         // searchableLibraryIdsAtom and others return [1, 2]
         return [1, 2];
     });
@@ -450,6 +446,10 @@ describe('validateEditNoteAction — success', () => {
         const response = await handleAgentActionValidateRequest(makeValidateRequest());
         expect(response.valid).toBe(true);
         expect(response.preference).toBe('always_apply');
+        expect(getDeferredToolPreference).toHaveBeenCalledWith('edit_note', {
+            library_id: 1,
+            zotero_key: 'NOTE0001',
+        });
     });
 
     it('validates append with match_count 1 and no old content', async () => {
@@ -945,9 +945,6 @@ describe('executeEditNoteAction — success', () => {
 
     it('append inserts before Created by Beaver footer without breaking its link', async () => {
         vi.mocked(store.get).mockImplementation((atom: any) => {
-            if (typeof atom === 'symbol' && atom.description === 'autoApproveNoteKeysAtom') {
-                return new Set<string>();
-            }
             if (typeof atom === 'symbol' && atom.description === 'currentThreadIdAtom') {
                 return null;
             }

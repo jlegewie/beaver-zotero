@@ -1,4 +1,4 @@
-import React, { useRef } from 'react';
+import React, { useMemo, useRef } from 'react';
 import { AgentRunStatus, ModelResponse, ToolCallPart } from '../../agents/types';
 import { TextPartView } from './TextPartView';
 import { ThinkingPartView } from './ThinkingPartView';
@@ -61,9 +61,19 @@ export const ModelResponseView: React.FC<ModelResponseViewProps> = React.memo(fu
     // Separate parts by type for rendering
     const thinkingParts = message.parts.filter(part => part.part_kind === 'thinking');
     const textParts = message.parts.filter(part => part.part_kind === 'text');
-    const toolCallParts = message.parts.filter(
-        (part): part is ToolCallPart =>
-            part.part_kind === 'tool-call' && part.tool_name !== 'return_suggestions',
+    // Memoized so the arrays keep their identity across unrelated re-renders
+    // (e.g. selection-menu state): they feed EditNoteGroupView's memoized
+    // per-part state and its React.memo'd rows.
+    const toolCallParts = useMemo(
+        () => message.parts.filter(
+            (part): part is ToolCallPart =>
+                part.part_kind === 'tool-call' && part.tool_name !== 'return_suggestions',
+        ),
+        [message.parts],
+    );
+    const editNoteRenderItems = useMemo(
+        () => buildEditNoteRenderItems(toolCallParts),
+        [toolCallParts],
     );
 
     // Check if we have any visible content
@@ -122,7 +132,7 @@ export const ModelResponseView: React.FC<ModelResponseViewProps> = React.memo(fu
             {/* Tool call parts */}
             {toolCallParts.length > 0 && (
                 <div className="display-flex flex-col py-2 gap-1">
-                    {buildEditNoteRenderItems(toolCallParts as ToolCallPart[]).map((item) => {
+                    {editNoteRenderItems.map((item) => {
                         if (item.kind === 'edit-note-group') {
                             // Agent-action UI is host-injected; non-Zotero clients
                             // get a request-side summary via the generic fallback.

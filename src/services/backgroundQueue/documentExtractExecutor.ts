@@ -24,11 +24,11 @@ import { OCR_PRIORITY_BACKFILL } from '../ocr/constants';
 import {
     BACKGROUND_UPSERT_PRIORITY,
 } from '../backgroundProcessing/constants';
+import { isLibraryInScope, isLibraryScopeKnown } from '../libraryScope';
 import {
     backgroundProcessingEnabled,
     buildIndexJobPayload,
     isBackgroundProcessingLibraryEnabled,
-    isLibraryExcludedFromScope,
 } from '../backgroundProcessing/utils';
 import type {
     JobExecutionContext,
@@ -52,12 +52,8 @@ export class DocumentExtractExecutor implements JobExecutor {
         record: BackgroundJobRecord,
         ctx: JobExecutionContext,
     ): Promise<JobOutcome> {
-        if (
-            record.libraryId !== UNRESOLVED_LIBRARY_ID
-            && isLibraryExcludedFromScope(record.libraryId)
-        ) {
-            return { kind: 'complete', reason: 'library_excluded' };
-        }
+        const preExecute = this.checkScope(record);
+        if (preExecute) return preExecute;
         // The durable ledger describes the structured extraction pipeline.
         // Markdown requests are hot-path cache work and must never stamp a
         // structured schema version/hash into that ledger.
@@ -73,6 +69,8 @@ export class DocumentExtractExecutor implements JobExecutor {
                 record.libraryId,
                 record.zoteroKey,
             ).catch(() => null);
+        const postCompat = this.checkScope(record);
+        if (postCompat) return postCompat;
         if (
             compatibilityItem
             && (
@@ -86,9 +84,8 @@ export class DocumentExtractExecutor implements JobExecutor {
         if ('outcome' in resolved) return resolved.outcome;
         const { item, kind } = resolved;
 
-        if (isLibraryExcludedFromScope(item.libraryID)) {
-            return { kind: 'complete', reason: 'library_excluded' };
-        }
+        const postResolve = this.checkScope(record);
+        if (postResolve) return postResolve;
         // Background producers must re-check exclusions after claim. Priority
         // <100 remains the on-demand path and was already validated upstream.
         if (record.priority >= 100 && !isBackgroundProcessingLibraryEnabled(item.libraryID)) {
@@ -206,12 +203,46 @@ export class DocumentExtractExecutor implements JobExecutor {
         return null;
     }
 
+
+    /**
+     * Outcome to return when the job may no longer touch its library, or null
+     * when it may proceed.
+     *
+     * Unknown scope and exclusion are deliberately distinct: an unknown scope is
+     * a transient startup / logout state, so the row is released to run later,
+     * while a known exclusion retires it. Collapsing the two would silently drop
+     * queued work on an account switch.
+     */
+    private checkScope(record: BackgroundJobRecord): JobOutcome | null {
+        if (!isLibraryScopeKnown()) {
+            return { kind: 'release', reason: 'library_scope_unknown' };
+        }
+        if (record.libraryId === UNRESOLVED_LIBRARY_ID) return null;
+        if (isLibraryInScope(record.libraryId)) return null;
+        logger(
+            `DocumentExtractExecutor: ${record.libraryId}-${record.zoteroKey} skipped (library_excluded)`,
+            2,
+        );
+        return { kind: 'complete', reason: 'library_excluded' };
+    }
+
     private async executeLegacy(
         record: BackgroundJobRecord,
         ctx: JobExecutionContext,
     ): Promise<JobOutcome> {
         let item: Zotero.Item | null = null;
-        if (record.libraryId !== UNRESOLVED_LIBRARY_ID) {
+        // Re-check the searchable-library boundary here, not just at claim time:
+        // this lane serializes on the MuPDF worker, so a claimed job can wait
+        // behind other work before it reads anything.
+        const preLookup = this.checkScope(record);
+        if (preLookup) return preLookup;
+
+        if (record.libraryId === UNRESOLVED_LIBRARY_ID) {
+            logger(
+                `DocumentExtractExecutor: library not available on this device for ${record.libraryId}-${record.zoteroKey}`,
+                1,
+            );
+        } else {
             try {
                 item = await Zotero.Items.getByLibraryAndKeyAsync(
                     record.libraryId,
@@ -219,6 +250,13 @@ export class DocumentExtractExecutor implements JobExecutor {
                 ) || null;
             } catch { /* missing is handled below */ }
         }
+
+        // Re-assert the boundary immediately after the lookup await, before the
+        // item is touched at all: the scope mirror is published in the same turn
+        // as an exclusion, so it can change across that await.
+        const postLookup = this.checkScope(record);
+        if (postLookup) return postLookup;
+
         if (!item || safeIsInTrash(item) === true) {
             return { kind: 'complete', reason: item ? 'in_trash' : 'item_missing' };
         }

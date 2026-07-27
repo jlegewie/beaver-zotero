@@ -5,21 +5,28 @@ import { getToolCallStatus, toolResultsMapAtom } from '../../../agents/atoms';
 import {
     AgentAction,
     PendingApproval,
-    getAgentActionsByToolcallAtom,
+    agentActionsByToolcallAtom,
     pendingApprovalsAtom,
     ackAgentActionsAtom,
     rejectAgentActionAtom,
     setAgentActionsToErrorAtom,
     undoAgentActionAtom,
 } from '../../../agents/agentActions';
-import { isWSChatPendingAtom, sendApprovalResponseAtom } from '../../../atoms/agentRunAtoms';
+import {
+    approveToolGroupForRunAtom,
+    isWSChatPendingAtom,
+    sendApprovalResponseAtom,
+} from '../../../atoms/agentRunAtoms';
 import {
     agentActionItemTitlesAtom,
     setAgentActionItemTitleAtom,
     toolExpandedAtom,
     setToolExpandedAtom,
 } from '../../../atoms/messageUIState';
-import { addAutoApproveNoteKeyAtom, makeNoteKey } from '../../../atoms/editNoteAutoApprove';
+import {
+    getToolGroupRunApprovalLabel,
+    getToolGroupRunApprovalScope,
+} from '../../../atoms/runApprovalPolicy';
 import { STATUS_CONFIGS, type ActionStatus } from './agentActionViewHelpers';
 import {
     ArrowDownIcon,
@@ -39,18 +46,25 @@ import IconButton from '../../../components/ui/IconButton';
 import Tooltip from '../../../components/ui/Tooltip';
 import SplitApplyButton from '../../../components/ui/buttons/SplitApplyButton';
 import { openNoteByKey } from '../../../utils/sourceUtils';
-import { executeEditNoteAction, undoEditNoteAction } from '../../../utils/editNoteActions';
+import {
+    executeEditNoteOrBatchAction,
+    getUserFacingErrorMessage,
+    undoEditNoteOrBatchAction,
+} from '../../../utils/editNoteActions';
 import { logger } from '../../../../src/utils/logger';
 import { UNRESOLVED_LIBRARY_ID } from '../../../../src/utils/libraryIdentity';
 import { EditNoteRowView } from './EditNoteRowView';
+import { buildUndoByIndex } from './editNoteBatchPreviewData';
 import { isDiffPreviewLive } from '../../../utils/diffPreviewCoordinator';
 import {
-    buildPreviewableEditOperations,
     dismissActiveEditNotePreview,
     showEditNotePreviewForEdits,
 } from './useEditNoteActions';
+import { buildPreviewableEditOperations } from '../../../utils/editNotePreviewOperations';
 import {
+    deriveEditNoteRows,
     type EditNoteResolvedTarget,
+    type EditNoteRowDescriptor,
     findPendingApprovalForToolcall,
     getEditNoteDisplayStatus,
     getEffectiveEditNotePendingApproval,
@@ -84,7 +98,11 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
     const [isHovered, setIsHovered] = useState(false);
 
     const resultsMap = useAtomValue(toolResultsMapAtom);
-    const getAgentActionsByToolcall = useAtomValue(getAgentActionsByToolcallAtom);
+    // Subscribe to the grouped-actions map itself (not the stable getter atom)
+    // so partStates re-derives whenever any agent action changes — the getter's
+    // identity never changes, which would leave memoized rows showing stale
+    // action state after a local apply/retry.
+    const actionsByToolcall = useAtomValue(agentActionsByToolcallAtom);
     const allPendingApprovals = useAtomValue(pendingApprovalsAtom);
     const setPendingApprovals = useSetAtom(pendingApprovalsAtom);
     const sendApprovalResponse = useSetAtom(sendApprovalResponseAtom);
@@ -93,11 +111,13 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
     const rejectAgentAction = useSetAtom(rejectAgentActionAtom);
     const setAgentActionsToError = useSetAtom(setAgentActionsToErrorAtom);
     const undoAgentAction = useSetAtom(undoAgentActionAtom);
-    const addAutoApproveNoteKey = useSetAtom(addAutoApproveNoteKeyAtom);
+    const approveToolGroupForRun = useSetAtom(approveToolGroupForRunAtom);
 
     const partStates = useMemo(() => {
         return parts.map((part) => {
-            const actions = getAgentActionsByToolcall(part.tool_call_id, (a) => a.run_id === runId);
+            const actions = (actionsByToolcall.get(part.tool_call_id) ?? []).filter((a) => a.run_id === runId);
+            // A single tool call always produces exactly one AgentAction, even for
+            // an edit_note_batch call (the whole batch is one action).
             const action = actions.length > 0 ? actions[0] : null;
             const rawPendingApproval = findPendingApprovalForToolcall(
                 part.tool_call_id,
@@ -110,6 +130,23 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
                 pendingApproval,
                 toolCallStatus,
             });
+            const actionType = action?.action_type ?? pendingApproval?.actionType;
+            const toolArgs = part.streaming_args ?? parseEditNoteToolCallArgs(part.args) ?? undefined;
+            const rows = deriveEditNoteRows({
+                toolArgs,
+                actionType,
+                actionData: action?.proposed_data ?? pendingApproval?.actionData,
+                resultData: action?.result_data,
+            });
+            const isBatch = actionType === 'edit_note_batch'
+                || (actionType == null && Array.isArray(toolArgs?.edits));
+            // Derivations identical for every sibling row of this toolcall,
+            // computed once here and passed to each EditNoteRowView so the rows
+            // skip re-deriving them. The undo index mirrors the effective
+            // resultData the row's preview uses (a pending approval carries no
+            // result_data yet).
+            const precomputed = { actions, pendingApproval, toolCallStatus };
+            const undoByIndex = buildUndoByIndex(pendingApproval ? undefined : action?.result_data);
             return {
                 part,
                 actions,
@@ -117,9 +154,13 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
                 pendingApproval,
                 toolCallStatus,
                 effectiveStatus,
+                rows,
+                isBatch,
+                precomputed,
+                undoByIndex,
             };
         });
-    }, [parts, runId, getAgentActionsByToolcall, allPendingApprovals, resultsMap, runStatus]);
+    }, [parts, runId, actionsByToolcall, allPendingApprovals, resultsMap, runStatus]);
 
     const allActions: AgentAction[] = useMemo(
         () => partStates.flatMap((state) => state.actions),
@@ -165,7 +206,12 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
     const pendingApprovalCount = pendingApprovalsForGroup.length;
     const hasPendingApprovals = pendingApprovalCount > 0;
     const appliedCount = allActions.filter((a) => a.status === 'applied').length;
-    const editCount = parts.length;
+    // Count individual edit rows rather than parts/tool-calls, so a single
+    // edit_note_batch call (one part, N edits) contributes N to the label.
+    const editCount = useMemo(
+        () => partStates.reduce((total, state) => total + Math.max(state.rows.length, 1), 0),
+        [partStates],
+    );
 
     const reapplicableActions = useMemo(
         () => allActions.filter((a) => a.status === 'pending' || a.status === 'rejected' || a.status === 'undone'),
@@ -316,16 +362,16 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
 
             for (const action of reapplicableActions) {
                 try {
-                    const result = await executeEditNoteAction(action);
+                    const result = await executeEditNoteOrBatchAction(action);
                     await ackAgentActions(runId, [{
                         action_id: action.id,
                         result_data: result,
                     }]);
-                    logger(`EditNoteGroupView: Applied edit_note action ${action.id}`, 1);
+                    logger(`EditNoteGroupView: Applied ${action.action_type} action ${action.id}`, 1);
                 } catch (error: any) {
                     const errorMessage = error?.message || 'Failed to apply edit_note';
                     const stackTrace = error?.stack || '';
-                    logger(`EditNoteGroupView: Failed to apply edit_note action ${action.id}: ${errorMessage}\n${stackTrace}`, 1);
+                    logger(`EditNoteGroupView: Failed to apply ${action.action_type} action ${action.id}: ${errorMessage}\n${stackTrace}`, 1);
                     setAgentActionsToError([action.id], errorMessage, {
                         stack_trace: stackTrace,
                         error_name: error?.name,
@@ -353,41 +399,36 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
         setAgentActionsToError,
     ]);
 
-    const handleApproveAllForNote = useCallback(() => {
-        if (!resolvedTarget) return;
-        const noteKey = makeNoteKey(resolvedTarget.libraryId, resolvedTarget.zoteroKey);
-        addAutoApproveNoteKey(noteKey);
-
-        // Batch-remove non-group approvals for this note in one update;
-        // handleApplyAll will dismiss the preview and batch-remove the
-        // group's own approvals.
-        const idsToRemove: string[] = [];
-        for (const [, pending] of allPendingApprovals) {
-            if (pending.actionType !== 'edit_note') continue;
-            const pendingTarget = resolveEditNoteTargetFromData(pending.actionData);
-            if (!pendingTarget) continue;
-            if (makeNoteKey(pendingTarget.libraryId, pendingTarget.zoteroKey) !== noteKey) continue;
-            if (pendingApprovalsForGroup.some((groupPending) => groupPending.actionId === pending.actionId)) continue;
-            sendApprovalResponse({ actionId: pending.actionId, approved: true });
-            idsToRemove.push(pending.actionId);
-        }
-        if (idsToRemove.length > 0) {
-            setPendingApprovals((prev) => {
-                const next = new Map(prev);
-                for (const id of idsToRemove) next.delete(id);
-                return next;
+    const handleApproveNoteEditsForRun = useCallback(async () => {
+        if (isProcessing) return;
+        setIsLocallyProcessing(true);
+        setClickedButton('approve');
+        const shouldWaitForExternalProcessing = hasPendingApprovals && isRunPending;
+        try {
+            await dismissActiveEditNotePreview();
+            const approvedCount = approveToolGroupForRun({
+                runId,
+                toolName: 'edit_note',
             });
+            if (shouldWaitForExternalProcessing) {
+                setIsExternallyProcessing(true);
+            }
+            logger(
+                `EditNoteGroupView: Allowed note edits for run ${runId} and approved ${approvedCount} pending action(s)`,
+                1,
+            );
+        } finally {
+            setIsLocallyProcessing(false);
+            if (!shouldWaitForExternalProcessing) {
+                setClickedButton(null);
+            }
         }
-
-        handleApplyAll();
     }, [
-        resolvedTarget,
-        addAutoApproveNoteKey,
-        allPendingApprovals,
-        pendingApprovalsForGroup,
-        sendApprovalResponse,
-        setPendingApprovals,
-        handleApplyAll,
+        isProcessing,
+        hasPendingApprovals,
+        isRunPending,
+        approveToolGroupForRun,
+        runId,
     ]);
 
     const handleRejectAll = useCallback(() => {
@@ -411,6 +452,11 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
             }
             logger(`EditNoteGroupView: Rejected ${idsToRemove.length} edit_note actions for ${noteKeyLabel}`, 1);
         } else {
+            // Dismiss (or cancel a pending re-render of) the preview before
+            // resolving, mirroring the pending-approvals branch — otherwise a
+            // deferred preview bounce could resurrect a stale preview whose
+            // Apply callback targets the now-rejected action.
+            void dismissActiveEditNotePreview();
             for (const action of reapplicableActions) {
                 rejectAgentAction(action.id);
             }
@@ -449,13 +495,13 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
 
             for (const action of [...appliedActions].reverse()) {
                 try {
-                    await undoEditNoteAction(action);
+                    await undoEditNoteOrBatchAction(action);
                     undoAgentAction(action.id);
-                    logger(`EditNoteGroupView: Undone edit_note action ${action.id}`, 1);
+                    logger(`EditNoteGroupView: Undone ${action.action_type} action ${action.id}`, 1);
                 } catch (error: any) {
-                    const errorMessage = error?.message || 'Failed to undo edit_note';
+                    const errorMessage = getUserFacingErrorMessage(error, 'Failed to undo edit_note');
                     const stackTrace = error?.stack || '';
-                    logger(`EditNoteGroupView: Failed to undo edit_note action ${action.id}: ${errorMessage}\n${stackTrace}`, 1);
+                    logger(`EditNoteGroupView: Failed to undo ${action.action_type} action ${action.id}: ${errorMessage}\n${stackTrace}`, 1);
                     if (action.toolcall_id) {
                         newFailures[action.toolcall_id] = errorMessage;
                     }
@@ -490,16 +536,16 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
 
             for (const action of errorActions) {
                 try {
-                    const result = await executeEditNoteAction(action);
+                    const result = await executeEditNoteOrBatchAction(action);
                     await ackAgentActions(runId, [{
                         action_id: action.id,
                         result_data: result,
                     }]);
-                    logger(`EditNoteGroupView: Retried + applied edit_note action ${action.id}`, 1);
+                    logger(`EditNoteGroupView: Retried + applied ${action.action_type} action ${action.id}`, 1);
                 } catch (error: any) {
                     const errorMessage = error?.message || 'Failed to retry edit_note';
                     const stackTrace = error?.stack || '';
-                    logger(`EditNoteGroupView: Retry failed for edit_note action ${action.id}: ${errorMessage}\n${stackTrace}`, 1);
+                    logger(`EditNoteGroupView: Retry failed for ${action.action_type} action ${action.id}: ${errorMessage}\n${stackTrace}`, 1);
                     setAgentActionsToError([action.id], errorMessage, {
                         stack_trace: stackTrace,
                         error_name: error?.name,
@@ -752,21 +798,33 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
             {isExpanded && (
                 <div className="display-flex flex-col">
                     <div className="display-flex flex-col">
-                        {parts.map((part, idx) => (
-                            <div
-                                key={`tool-${part.tool_call_id}`}
-                                className={idx > 0 ? 'border-top-quinary' : undefined}
-                            >
-                                <EditNoteRowView
-                                    part={part}
-                                    runId={runId}
-                                    runStatus={runStatus}
-                                    disabled={isProcessing}
-                                    externalUndoError={perEditUndoErrors[part.tool_call_id] ?? null}
-                                    onUndoErrorChange={handleChildUndoErrorChange}
-                                />
-                            </div>
-                        ))}
+                        {partStates.map((state, idx) => {
+                            const { part } = state;
+                            // A v1 part always derives exactly one row with editIndex
+                            // null; only render it as a distinct batch row when it's
+                            // genuinely part of an edit_note_batch action.
+                            const rows: (EditNoteRowDescriptor | undefined)[] = state.isBatch
+                                ? state.rows
+                                : [undefined];
+                            return rows.map((row, rowIdx) => (
+                                <div
+                                    key={`tool-${part.tool_call_id}-edit-${row?.editIndex ?? rowIdx}`}
+                                    className={(idx > 0 && rowIdx === 0) || rowIdx > 0 ? 'border-top-quinary' : undefined}
+                                >
+                                    <EditNoteRowView
+                                        part={part}
+                                        runId={runId}
+                                        runStatus={runStatus}
+                                        disabled={isProcessing}
+                                        externalUndoError={perEditUndoErrors[part.tool_call_id] ?? null}
+                                        onUndoErrorChange={handleChildUndoErrorChange}
+                                        rowDescriptor={row}
+                                        precomputed={state.precomputed}
+                                        undoByIndex={state.undoByIndex}
+                                    />
+                                </div>
+                            ));
+                        })}
                     </div>
 
                     {(showFooterApply || showFooterReject || showFooterUndo || showFooterRetry || canShowPreview) && (
@@ -823,11 +881,12 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
                                 hasPendingApprovals ? (
                                     <SplitApplyButton
                                         onApply={handleApplyAll}
-                                        onApplyAll={handleApproveAllForNote}
+                                        onApplyAll={handleApproveNoteEditsForRun}
                                         loading={isProcessing && clickedButton === 'approve'}
                                         disabled={isProcessing}
                                         primaryLabel="Apply All"
-                                        applyAllLabel="Always apply for this note"
+                                        applyAllLabel={getToolGroupRunApprovalLabel('edit_note') ?? undefined}
+                                        applyAllScope={getToolGroupRunApprovalScope('edit_note') ?? undefined}
                                     />
                                 ) : (
                                     <Button

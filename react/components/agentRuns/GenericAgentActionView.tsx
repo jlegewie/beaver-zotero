@@ -63,6 +63,18 @@ function summarizeArgs(toolName: string, args: Record<string, unknown>): string 
             return title || null;
         }
         case 'edit_note': {
+            // The batch-capable backend still calls the model-facing tool
+            // "edit_note", but request args carry an ordered edits[] array
+            // instead of flat old_string/new_string fields.
+            if (Array.isArray(args.edits)) {
+                const n = args.edits.length;
+                const first = args.edits[0] as Record<string, unknown> | undefined;
+                const firstOp = first && typeof first.operation === 'string'
+                    ? first.operation.replace(/_/g, ' ')
+                    : null;
+                const countLabel = `${n} ${n === 1 ? 'edit' : 'edits'}`;
+                return firstOp ? `${countLabel} (${firstOp})` : countLabel;
+            }
             const op = typeof args.operation === 'string' ? args.operation : null;
             return op ? op.replace(/_/g, ' ') : null;
         }

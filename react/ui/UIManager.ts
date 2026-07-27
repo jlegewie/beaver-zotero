@@ -2,8 +2,84 @@ import { DOMElements, SidebarLocation, UIState, CollapseState } from './types';
 import { applyReaderPaneVisibility, isStackedLayout } from '../utils/zoteroLayout';
 
 /**
+ * Property stashed on the Beaver-authored `Zotero.Reader.onChangeSidebarWidth`
+ * wrapper, holding whatever handler was installed before it (or null — core
+ * initializes the slot to null and nothing else assigns it).
+ */
+const ORIGINAL_HANDLER_PROP = '__beaverOriginalSidebarWidthHandler';
+
+type ReaderWidthHandler = (...args: any[]) => void;
+
+/**
+ * Wrappers installed by plugin versions that predate ORIGINAL_HANDLER_PROP
+ * carry no marker and keep their original in instance state we cannot reach.
+ * They are identified by two property accesses in their source (property
+ * names survive minification). Since Zotero core initializes the slot to
+ * null and nothing but Beaver assigns it, a legacy chain safely resolves to
+ * null — letting an update reclaim compartments pinned by older versions.
+ */
+function isLegacyBeaverWrapper(fn: unknown): boolean {
+    if (typeof fn !== 'function') {
+        return false;
+    }
+    try {
+        const src = Function.prototype.toString.call(fn);
+        return src.includes('originalOnChangeSidebarWidth')
+            && src.includes('enforceConsistentWidth');
+    } catch (e) {
+        return false;
+    }
+}
+
+/**
+ * Walk a chain of Beaver-authored wrappers down to the true original handler.
+ * Returns null when the chain bottoms out at null/non-function, at a legacy
+ * Beaver wrapper (see isLegacyBeaverWrapper), or when a wrapper from a
+ * torn-down window realm can no longer be inspected — the only handler ever
+ * underneath ours is core's initial null, so null is safe.
+ */
+export function unwrapReaderWidthHandler(handler: unknown): ReaderWidthHandler | null {
+    try {
+        let current: any = handler;
+        while (typeof current === 'function' && ORIGINAL_HANDLER_PROP in current) {
+            current = current[ORIGINAL_HANDLER_PROP];
+        }
+        if (isLegacyBeaverWrapper(current)) {
+            return null;
+        }
+        return typeof current === 'function' ? current : null;
+    } catch (e) {
+        return null;
+    }
+}
+
+/**
+ * If a Beaver wrapper (installed by any bundle copy or plugin generation) is
+ * present on `Zotero.Reader.onChangeSidebarWidth`, restore the original
+ * handler so the wrapper's closure — and the compartment it pins — can be
+ * garbage-collected. Safe to call repeatedly and from either bundle.
+ */
+export function restoreReaderSidebarWidthHandler(): void {
+    try {
+        const reader = Zotero?.Reader as any;
+        if (!reader) {
+            return;
+        }
+        const current = reader.onChangeSidebarWidth;
+        if (
+            typeof current === 'function'
+            && (ORIGINAL_HANDLER_PROP in current || isLegacyBeaverWrapper(current))
+        ) {
+            reader.onChangeSidebarWidth = unwrapReaderWidthHandler(current);
+        }
+    } catch (e) {
+        // Best-effort — never break shutdown.
+    }
+}
+
+/**
  * UIManager handles the Beaver sidebar UI state and interactions.
- * 
+ *
  * IMPORTANT: This class replaces Zotero.Reader.onChangeSidebarWidth with a custom
  * handler. The cleanup() method MUST be called during shutdown to restore the
  * original handler, otherwise a SIGSEGV crash will occur when Zotero tries to
@@ -13,8 +89,11 @@ class UIManager {
     private elements: DOMElements;
     private collapseState: CollapseState;
     private sidebarWidth: number = 350;
-    private originalOnChangeSidebarWidth: ((...args: any[]) => void) | null = null;
-    private isReaderWidthHandlerOverridden = false;
+    /** The wrapper this instance installed, or null. Compared by identity
+     * against the live slot so a wrapper displaced by another window or
+     * plugin generation is detected and re-installed instead of assuming a
+     * one-time install is permanent. */
+    private installedReaderWidthWrapper: ReaderWidthHandler | null = null;
 
     constructor() {
         this.collapseState = {
@@ -26,7 +105,18 @@ class UIManager {
 
     private initSidebarWidthTracking(): void {
         try {
-            if (this.isReaderWidthHandlerOverridden || !Zotero?.Reader) {
+            if (!Zotero?.Reader) {
+                return;
+            }
+
+            // Skip only while our own wrapper is still current. If another
+            // window or plugin generation displaced it, re-install so the
+            // stale wrapper is unwound rather than left pinned forever.
+            const installed = (Zotero.Reader as any).onChangeSidebarWidth;
+            if (
+                this.installedReaderWidthWrapper
+                && installed === this.installedReaderWidthWrapper
+            ) {
                 return;
             }
 
@@ -35,19 +125,22 @@ class UIManager {
                 this.sidebarWidth = readerSidebarWidth;
             }
 
-            const originalHandler = (Zotero.Reader as any).onChangeSidebarWidth;
-            this.originalOnChangeSidebarWidth = typeof originalHandler === "function"
-                ? originalHandler
-                : null;
+            // Chain from the true original handler, unwinding any stale
+            // Beaver wrapper left by another bundle copy or a previous plugin
+            // generation whose cleanup never ran, so the stale wrapper
+            // becomes collectable instead of growing a chain on Zotero.Reader.
+            const original = unwrapReaderWidthHandler(installed);
 
             // Override the reader's width change handler only after startup is ready.
-            Zotero.Reader.onChangeSidebarWidth = (width: number) => {
-                if (this.originalOnChangeSidebarWidth) {
-                    this.originalOnChangeSidebarWidth.call(Zotero.Reader, width);
+            const wrapper = (width: number) => {
+                if (original) {
+                    original.call(Zotero.Reader, width);
                 }
                 setTimeout(() => this.enforceConsistentWidth(), 50);
             };
-            this.isReaderWidthHandlerOverridden = true;
+            (wrapper as any)[ORIGINAL_HANDLER_PROP] = original;
+            Zotero.Reader.onChangeSidebarWidth = wrapper;
+            this.installedReaderWidthWrapper = wrapper;
         } catch (e) {
             // Silently handle initialization errors
         }
@@ -320,17 +413,12 @@ class UIManager {
      * our custom handler after this instance is destroyed.
      */
     public cleanup(): void {
-        // CRITICAL: Restore Zotero.Reader.onChangeSidebarWidth FIRST
-        try {
-            if (this.isReaderWidthHandlerOverridden && Zotero?.Reader) {
-                (Zotero.Reader as any).onChangeSidebarWidth = this.originalOnChangeSidebarWidth;
-            }
-        } catch (e) {
-            // Ignore errors during cleanup
-        } finally {
-            this.originalOnChangeSidebarWidth = null;
-            this.isReaderWidthHandlerOverridden = false;
-        }
+        // CRITICAL: Restore Zotero.Reader.onChangeSidebarWidth FIRST. The
+        // restore is marker-based rather than instance-based because the
+        // module copy running cleanup (two bundles, two singletons) may not
+        // be the copy that installed the wrapper.
+        restoreReaderSidebarWidthHandler();
+        this.installedReaderWidthWrapper = null;
 
         // Only do UI cleanup if window is still valid
         const win = Zotero.getMainWindow();

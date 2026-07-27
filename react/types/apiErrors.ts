@@ -57,16 +57,6 @@ export class SessionRefreshError extends ApiError {
 }
 
 /**
- * Error thrown when Zotero instance is not linked to the user account
- */
-export class ZoteroInstanceMismatchError extends Error {
-    constructor() {
-        super('This Zotero instance is not linked to your account');
-        this.name = 'ZoteroInstanceMismatchError';
-    }
-}
-
-/**
  * Error thrown for server-side errors
  */
 export class ServerError extends Error {

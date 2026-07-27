@@ -15,6 +15,10 @@ vi.mock('../../../src/utils/logger', () => ({
     logger: vi.fn(),
 }));
 
+import {
+    DEFAULT_MAX_SNIPPET_LENGTH,
+    MAX_PASTEABLE_SNIPPET_LENGTH,
+} from '../../../src/utils/editNoteHints';
 import { simplifyNoteHtml } from '../../../src/utils/noteHtmlSimplifier';
 import { expandToRawHtml } from '../../../src/utils/noteCitationExpand';
 import { stripDataCitationItems } from '../../../src/utils/noteWrapper';
@@ -156,6 +160,33 @@ describe('buildZeroMatchHint', () => {
         }
     });
 
+    it('whitespace-drift candidate resolves to a position when fed back as old_string', () => {
+        // The property that matters for the paste recovery path: the agent
+        // copies candidate [1] verbatim and the retry locates a unique target.
+        const raw = wrap(
+            '<p>First paragraph about engagement.</p>\n'
+            + '<p>Second paragraph about attrition.</p>',
+        );
+        // Same markup, re-indented across the block boundary — the shape a
+        // model produces when it rewrites a span from memory.
+        const oldString =
+            '<p>First paragraph about engagement.</p>\n'
+            + '    <p>Second paragraph about attrition.</p>';
+
+        const initial = prepare(raw, oldString);
+        expect(locateEditTarget({ ...initial, oldString }).kind).toBe('ambiguous');
+
+        const hint = buildZeroMatchHint(initial.simplified, oldString);
+        expect(hint.candidates).toHaveLength(1);
+        const candidate = hint.candidates[0];
+        expect(candidate.via).toBe('whitespace_relaxed');
+        expect(candidate.truncated).toBe(false);
+
+        const retry = prepare(raw, candidate.snippet);
+        expect(locateEditTarget({ ...retry, oldString: candidate.snippet }).kind)
+            .toBe('position');
+    });
+
     it('returns kind "structural" when old_string references a unique block tag with a hallucinated anchor', () => {
         // Model hallucinates "</h2>\n<table>" but the real <table> is not
         // preceded by </h2>. Fuzzy whitespace-exact fails (string doesn't
@@ -174,6 +205,23 @@ describe('buildZeroMatchHint', () => {
         if (hint.kind === 'structural') {
             expect(hint.tagName).toBe('table');
             expect(hint.message).toContain('<table>');
+        }
+    });
+
+    it('structural variant flags an elided anchor context as truncated', () => {
+        // The anchor context is a window cut out of a longer note, so it
+        // carries `…` markers and cannot be pasted as old_string — the
+        // candidate must say so even though it fits the snippet budget whole.
+        const filler = '<p>' + 'lorem ipsum dolor sit amet consectetur. '.repeat(20) + '</p>\n';
+        const simplified = filler + '<table>\n<tbody></tbody></table>\n' + filler;
+        const oldString = '</h2>\n<table>';
+
+        const hint = buildZeroMatchHint(simplified, oldString);
+        expect(hint.kind).toBe('structural');
+        if (hint.kind === 'structural') {
+            expect(hint.candidates).toHaveLength(1);
+            expect(hint.candidates[0].snippet).toContain('…');
+            expect(hint.candidates[0].truncated).toBe(true);
         }
     });
 
@@ -197,6 +245,50 @@ describe('buildZeroMatchHint', () => {
             expect(hint.candidates).toHaveLength(1);
             expect(hint.candidates[0].via).toBe('inline_tag_drift');
             expect(hint.candidates[0].snippet).toBe(hint.noteSpan);
+        }
+    });
+
+    it('drift candidate carries the whole span when it clears the region budget', () => {
+        // The drift message tells the model to copy this span verbatim, so a
+        // span longer than the region budget must not come back clipped —
+        // pasting a clipped version cannot match.
+        const prose =
+            'ages 13 to 15 experienced sustained declines in reported wellbeing '
+            + 'across every measured condition, and the association held after '
+            + 'adjusting for baseline differences in prior exposure as well as '
+            + 'for the composition of the replication sample, ';
+        const noteSpan = `<p>${prose}<strong>substantial</strong> negative effects.</p>`;
+        const simplified = `<p>Unrelated opening line.</p>\n${noteSpan}`;
+        const oldString = `<p>${prose}substantial negative effects.</p>`;
+
+        expect(noteSpan.length).toBeGreaterThan(DEFAULT_MAX_SNIPPET_LENGTH);
+        expect(noteSpan.length).toBeLessThan(MAX_PASTEABLE_SNIPPET_LENGTH);
+
+        const hint = buildZeroMatchHint(simplified, oldString);
+        expect(hint.kind).toBe('drift');
+        if (hint.kind === 'drift') {
+            expect(hint.candidates[0].truncated).toBe(false);
+            expect(hint.candidates[0].snippet).toBe(hint.noteSpan);
+            expect(simplified).toContain(hint.candidates[0].snippet);
+        }
+    });
+
+    it('drift candidate past the pasteable ceiling stays marked truncated', () => {
+        const prose = 'sustained declines in reported wellbeing were observed. '.repeat(20);
+        const noteSpan = `<p>${prose}<strong>substantial</strong> negative effects.</p>`;
+        const simplified = `<p>Unrelated opening line.</p>\n${noteSpan}`;
+        const oldString = `<p>${prose}substantial negative effects.</p>`;
+
+        expect(noteSpan.length).toBeGreaterThan(MAX_PASTEABLE_SNIPPET_LENGTH);
+
+        const hint = buildZeroMatchHint(simplified, oldString);
+        expect(hint.kind).toBe('drift');
+        if (hint.kind === 'drift') {
+            expect(hint.candidates[0].truncated).toBe(true);
+            expect(hint.candidates[0].snippet.length)
+                .toBeLessThanOrEqual(MAX_PASTEABLE_SNIPPET_LENGTH + 2);
+            // The full span is still available to the model in the message.
+            expect(hint.message).toContain(hint.noteSpan);
         }
     });
 
@@ -397,6 +489,58 @@ describe('locateEditFragment — undo-seam intent', () => {
         if (result.kind === 'seam') {
             expect(result.insertionPoint).toBe(0);
         }
+    });
+
+    it('S2 rescue: uses the before-only seam when afterCtx is absent everywhere and beforeCtx is unique', () => {
+        const html = '<p>before-text</p><p>a sibling edit replaced the tail with new content</p>';
+        const beforeCtx = '<p>before-text</p>';
+        // Not present anywhere in html — the region it used to anchor was
+        // itself edited away by a sibling change.
+        const afterCtx = '<p>after-text</p>';
+
+        const result = locateEditFragment({
+            strippedHtml: html,
+            intent: { kind: 'undo-seam', beforeContext: beforeCtx, afterContext: afterCtx },
+        });
+
+        expect(result.kind).toBe('seam');
+        if (result.kind === 'seam') {
+            expect(result.insertionPoint).toBe(beforeCtx.length);
+            expect(result.gapEnd).toBeUndefined();
+        }
+    });
+
+    it('S2 rescue does not fire when afterCtx still exists elsewhere in the note (S3 locates it instead)', () => {
+        const html = '<p>before-text</p><p>unrelated filler content pushes the after context far away</p><p>after-text</p>';
+        const beforeCtx = '<p>before-text</p>';
+        const afterCtx = '<p>after-text</p>';
+        const beforeEnd = html.indexOf(beforeCtx) + beforeCtx.length;
+
+        const result = locateEditFragment({
+            strippedHtml: html,
+            intent: { kind: 'undo-seam', beforeContext: beforeCtx, afterContext: afterCtx },
+        });
+
+        expect(result.kind).toBe('seam');
+        if (result.kind === 'seam') {
+            // S3 locates the real afterCtx position; the S2 rescue must NOT
+            // substitute the before-only seam, which would be wrong here.
+            expect(result.insertionPoint).toBe(html.indexOf(afterCtx));
+            expect(result.insertionPoint).not.toBe(beforeEnd);
+        }
+    });
+
+    it('S2 rescue does not fire when beforeCtx is non-unique', () => {
+        const html = '<p>before-text</p><p>middle</p><p>before-text</p>';
+        const beforeCtx = '<p>before-text</p>';
+        const afterCtx = '<p>totally-absent-context</p>';
+
+        const result = locateEditFragment({
+            strippedHtml: html,
+            intent: { kind: 'undo-seam', beforeContext: beforeCtx, afterContext: afterCtx },
+        });
+
+        expect(result.kind).toBe('not-found');
     });
 });
 

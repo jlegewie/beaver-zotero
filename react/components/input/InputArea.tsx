@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { StopIcon, GlobalSearchIcon } from '../icons/icons';
 import { useAtom, useSetAtom, useAtomValue, useStore } from 'jotai';
 import { newThreadAtom, currentThreadIdAtom } from '../../atoms/threads';
-import { currentMessageContentAtom, currentMessagePillsAtom, pendingPillInsertAtom } from '../../atoms/messageComposition';
+import { currentMessageContentAtom, currentMessagePillsAtom, pendingPillInsertAtom, composerResetTokenAtom } from '../../atoms/messageComposition';
 import { sendWSMessageAtom, isWSChatPendingAtom, closeWSConnectionAtom, sendApprovalResponseAtom } from '../../atoms/agentRunAtoms';
 import { pendingApprovalsAtom, removePendingApprovalAtom } from '../../agents/agentActions';
 import Button from '../ui/Button';
@@ -27,6 +27,7 @@ import { dismissHighTokenWarningForThreadAtom, dismissedHighTokenWarningByThread
 import { getLastRequestInputTokens } from '../../utils/runUsage';
 import { getPref, setPref } from '../../../src/utils/prefs';
 import { LexicalEditorInput, LexicalEditorInputHandle, SlashCommandDescriptor } from './lexical/LexicalEditorInput';
+import { isImeKeyEvent } from '../../utils/ime';
 import { useSlashMenu } from '../../hooks/useSlashMenu';
 import { sendComposedMessageAtom } from '../../atoms/actions';
 
@@ -70,6 +71,7 @@ const InputArea: React.FC<InputAreaProps> = ({
     const isWebSearchAllowed = useAtomValue(isWebSearchAllowedAtom);
     const currentNoteItem = useAtomValue(currentNoteItemAtom);
     const pendingPillInsert = useAtomValue(pendingPillInsertAtom);
+    const composerResetToken = useAtomValue(composerResetTokenAtom);
     const store = useStore();
     const webSearchDescriptionId = useId();
 
@@ -85,6 +87,14 @@ const InputArea: React.FC<InputAreaProps> = ({
     const insertSlashCommand = useCallback((descriptor: SlashCommandDescriptor, queryLength: number) => {
         editorHandleRef.current?.insertSlashCommand(descriptor, queryLength);
     }, []);
+
+    // A programmatic composer reset (new thread, thread switch, send) can write
+    // the same empty value the editor already published, which its value sync
+    // cannot see. Tell the editor explicitly, so text it is withholding for an
+    // IME composition is dropped instead of resurfacing in the new context.
+    useEffect(() => {
+        editorHandleRef.current?.discardPendingText();
+    }, [composerResetToken]);
 
     // WebSocket state
     const sendWSMessage = useSetAtom(sendWSMessageAtom);
@@ -314,6 +324,9 @@ const InputArea: React.FC<InputAreaProps> = ({
     ]);
 
     const handleEditorKeyDown = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
+        // Keys owned by an active IME composition must not drive menus or
+        // shortcuts (and must not be preventDefault'ed away from the IME).
+        if (isImeKeyEvent(e.nativeEvent)) return;
         if (handleSlashMenuKeyDown(e)) return;
         if ((e.key === 'n' || e.key === 'N') && ((Zotero.isMac && e.metaKey) || (!Zotero.isMac && e.ctrlKey))) {
             e.preventDefault();
@@ -333,7 +346,13 @@ const InputArea: React.FC<InputAreaProps> = ({
         sendMessage(messageContent);
     };
 
-    const sendMessage = (message: string) => {
+    const sendMessage = (composedMessage: string) => {
+        // Text typed with an input method reaches `messageContent` one
+        // composition at a time, and the last one lands shortly after the user
+        // commits it. Publish anything still withheld so a send that follows
+        // the commit immediately carries the committed text instead of the
+        // state before it (see flushPendingText).
+        const message = editorHandleRef.current?.flushPendingText() ?? composedMessage;
         if (isPending || message.length === 0) return;
         // If the message contains /command pills, resolve each back to its
         // action's prompt (and attach its items/collection) before sending.
@@ -362,7 +381,9 @@ const InputArea: React.FC<InputAreaProps> = ({
             e.stopPropagation();
         }
         if (pendingApprovalsMap.size === 0) return;
-        const instructions = messageContent.trim() || null;
+        // As in sendMessage: pick up a composition the user has just committed.
+        const content = editorHandleRef.current?.flushPendingText() ?? messageContent;
+        const instructions = content.trim() || null;
         for (const pendingApproval of pendingApprovalsMap.values()) {
             logger(`Rejecting approval ${pendingApproval.actionId} with instructions: ${instructions}`);
             sendApprovalResponse({

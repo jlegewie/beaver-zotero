@@ -15,8 +15,15 @@ import {
     AttachmentPageImagesErrorCode,
     WSPageImage,
 } from '../agentProtocol';
-import { BeaverExtractor, ExtractionError, ExtractionErrorCode, WorkerAbortError } from '../../beaver-extract';
+import {
+    BeaverExtractor,
+    ExtractionError,
+    ExtractionErrorCode,
+    WorkerAbortError,
+    isWorkerDeadlineError,
+} from '../../beaver-extract';
 import { makeRemoteFilePath } from '../documentFileIdentity';
+import { createWorkerDispatchFlag, withWorkerDiagnostics } from './workerDiagnostics';
 import {
     preflightZoteroAttachmentRequest,
     resolveToPdfAttachment,
@@ -29,6 +36,7 @@ import {
 import { ensurePageLabelsForResolution, resolvePageValue, InvalidPageValueError } from './pageLabelResolution';
 import {
     DEFAULT_IMAGES_TIMEOUT_SECONDS,
+    MAX_INTERACTIVE_PDF_TIMEOUT_SECONDS,
     TimeoutError,
     createTimeoutController,
 } from './timeout';
@@ -80,8 +88,15 @@ export async function handleZoteroAttachmentPageImagesRequest(
     }
     const { resolvedLibraryId } = preflight;
 
-    const timeout = createTimeoutController(timeout_seconds, DEFAULT_IMAGES_TIMEOUT_SECONDS);
+    const timeout = createTimeoutController(
+        timeout_seconds,
+        DEFAULT_IMAGES_TIMEOUT_SECONDS,
+        undefined,
+        MAX_INTERACTIVE_PDF_TIMEOUT_SECONDS,
+    );
     const { signal, timeoutSeconds, throwIfTimedOut, dispose } = timeout;
+
+    const workerDispatched = createWorkerDispatchFlag();
 
     try {
         const zoteroItem = await Zotero.Items.getByLibraryAndKeyAsync(
@@ -192,7 +207,13 @@ export async function handleZoteroAttachmentPageImagesRequest(
 
         // 5a. Load page labels for label-aware resolution. Short-circuits on cache.
         if (prefer_page_labels && filePath) {
-            const labelResult = await ensurePageLabelsForResolution(filePath, cachedMeta, extractor, signal);
+            const labelResult = await ensurePageLabelsForResolution(
+                filePath,
+                cachedMeta,
+                extractor,
+                signal,
+                workerDispatched.mark,
+            );
             throwIfTimedOut('page_label_resolution');
             pageLabels = labelResult.labels;
             if (labelResult.pageCount != null) {
@@ -239,6 +260,7 @@ export async function handleZoteroAttachmentPageImagesRequest(
                     }
                 }
             }
+            workerDispatched.mark();
             totalPages = await extractor.getPageCount(pdfData, signal);
             throwIfTimedOut('page_count_extraction');
         }
@@ -345,6 +367,7 @@ export async function handleZoteroAttachmentPageImagesRequest(
             + `pageIndices=${JSON.stringify(pageIndicesArg ?? null)} (allPages=${requestingAllPages})`,
             3,
         );
+        workerDispatched.mark();
         const renderResult = await extractor.renderPages(pdfData, {
             pageIndices: pageIndicesArg,
             options: renderOptions,
@@ -385,12 +408,20 @@ export async function handleZoteroAttachmentPageImagesRequest(
         };
 
     } catch (error) {
-        if (signal.aborted || error instanceof WorkerAbortError || error instanceof TimeoutError) {
+        if (
+            signal.aborted
+            || error instanceof WorkerAbortError
+            || error instanceof TimeoutError
+            || isWorkerDeadlineError(error)
+        ) {
             logger(`handleZoteroAttachmentPageImagesRequest: Timed out after ${timeoutSeconds}s`, 1);
-            return errorResponse(
-                `PDF page rendering timed out after ${timeoutSeconds} seconds`,
-                'timeout',
-                resolvedCachedPageCount,
+            return withWorkerDiagnostics(
+                errorResponse(
+                    `PDF page rendering timed out after ${timeoutSeconds} seconds`,
+                    'timeout',
+                    resolvedCachedPageCount,
+                ),
+                { workerDispatched: workerDispatched.value, leaseReaped: isWorkerDeadlineError(error) },
             );
         }
 

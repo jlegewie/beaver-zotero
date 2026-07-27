@@ -22,6 +22,26 @@ export const isSidebarVisibleAtom = atom(
     }
 );
 
+/**
+ * Whether the separate Beaver window is open. Maintained by the window's React
+ * root (`useBeaverWindowContext`), which mounts when the window opens and
+ * unmounts when it closes.
+ */
+export const isBeaverWindowOpenAtom = atom(false);
+
+/**
+ * Whether Beaver's chat UI is showing anywhere, either the main-window sidebar or the
+ * separate window.
+ *
+ * Context tracking that feeds the chat (current reader attachment, reader text
+ * selection) must key off this rather than `isSidebarVisibleAtom`: the separate
+ * window shares the same store but has no sidebar, so gating on the sidebar
+ * alone leaves those atoms empty for window-only users.
+ */
+export const isBeaverUIVisibleAtom = atom(
+    (get) => get(isSidebarVisibleAtom) || get(isBeaverWindowOpenAtom),
+);
+
 export const isLibraryTabAtom = atom(false);
 export const selectedZoteroTabIdAtom = atom<string | null>(null);
 export const isWebSearchEnabledAtom = atom(false);
@@ -80,6 +100,15 @@ export interface ThreadItemFilter {
  * by the chip's remove control and whenever the thread list view closes.
  */
 export const threadListFilterAtom = atom<ThreadItemFilter | null>(null);
+
+/**
+ * Whether the thread list shows chats from every Zotero account/profile
+ * instead of only those created with the current one. Deliberately global and
+ * not reset when the thread list view closes: a user who opted out of instance
+ * scoping should stay opted out for the rest of the session rather than having
+ * to re-enable it every time they reopen the list.
+ */
+export const showAllThreadInstancesAtom = atom(false);
 
 const isThreadListViewBaseAtom = atom(false);
 

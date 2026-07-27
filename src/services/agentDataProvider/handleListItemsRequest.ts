@@ -221,6 +221,36 @@ export async function handleListItemsRequest(
             }
         }
 
+        // include_children: for a 'regular' listing, also return the child notes and
+        // attachments that belong to the matched regular items. This is what the model
+        // means by "include children" (the items' own attachments/notes) — unlike
+        // item_category='all', which also surfaces standalone notes/attachments. Gated
+        // by the list_items_include_children feature: the backend only sets the flag for
+        // clients that declared support. Children are included regardless of a `tag`
+        // filter — the parents already matched it, and a paper's PDF is rarely tagged.
+        if (request.include_children === true && itemCategory === 'regular') {
+            const regularParents = validItems.filter(item => item.isRegularItem());
+            if (regularParents.length > 0) {
+                await Zotero.Items.loadDataTypes(regularParents, ['childItems']);
+            }
+
+            const childIds = new Set<number>();
+            for (const parent of regularParents) {
+                for (const id of parent.getNotes()) childIds.add(id);
+                for (const id of parent.getAttachments()) childIds.add(id);
+            }
+
+            const existingIds = new Set(validItems.map(i => i.id));
+            const newChildIds = [...childIds].filter(id => !existingIds.has(id));
+
+            if (newChildIds.length > 0) {
+                const children = (await Zotero.Items.getAsync(newChildIds))
+                    .filter((c): c is Zotero.Item => c !== null)
+                    .filter(child => !isAnnotationItem(child));
+                validItems.push(...children);
+            }
+        }
+
         // Load item data in bulk for efficiency (include childItems when filtering by attachment)
         const dataTypes = ['primaryData', 'creators', 'itemData'];
         if (request.has_attachments != null) {

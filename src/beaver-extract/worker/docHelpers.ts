@@ -18,7 +18,7 @@ import type {
     PDFPageSearchResult,
     PageImageResult,
 } from "../types";
-import { bboxFromXYWH } from "../types";
+import { bboxFromXYWH, DEFAULT_MAX_RENDER_PIXELS } from "../types";
 import type { RawPageProvider } from "../DocumentAnalyzer";
 import type {
     CollectGraphicsOptions,
@@ -28,6 +28,7 @@ import type {
     FontApi,
     GraphicsLayerPrimitives,
     MuPDFApi,
+    PageLike,
     QuadTuple,
     RectTuple,
 } from "./mupdfApi";
@@ -81,6 +82,7 @@ export interface RenderOptionsResolved {
     showExtras: boolean;
     format: "png" | "jpeg";
     jpegQuality: number;
+    maxPixels: number;
 }
 
 export const DEFAULT_PAGE_IMAGE_OPTIONS: RenderOptionsResolved = {
@@ -90,6 +92,7 @@ export const DEFAULT_PAGE_IMAGE_OPTIONS: RenderOptionsResolved = {
     showExtras: true,
     format: "png",
     jpegQuality: 85,
+    maxPixels: DEFAULT_MAX_RENDER_PIXELS,
 };
 
 /** Convert a [x0, y0, x1, y1] tuple (from walk() bboxes) to a BoundingBox. */
@@ -768,6 +771,51 @@ function extractRawPageDetailedOnce(
     }
 }
 
+/**
+ * Reduce `scale` until the page renders within `maxPixels`.
+ *
+ * Returns `scale` untouched when the page already fits, when the budget is
+ * disabled (`maxPixels <= 0`), or when the page reports degenerate bounds —
+ * MuPDF raises its own classified error for those and should keep owning that
+ * path. Otherwise both axes shrink evenly to land inside the budget.
+ */
+function clampScaleToPixelBudget(
+    page: PageLike,
+    scale: number,
+    maxPixels: number,
+): number {
+    // NaN and non-positive scales fall out here (`!(scale > 0)`); `Infinity`
+    // deliberately does not — it is over budget, not unmeasurable, so it goes
+    // through the clamp below.
+    if (!(maxPixels > 0) || !(scale > 0)) return scale;
+
+    const pb = page.getBounds("CropBox");
+    const width = pb[2] - pb[0];
+    const height = pb[3] - pb[1];
+    if (
+        !Number.isFinite(width) || !Number.isFinite(height)
+        || width <= 0 || height <= 0
+    ) {
+        return scale;
+    }
+
+    const maxScale = Math.sqrt(maxPixels / (width * height));
+    if (!Number.isFinite(maxScale) || maxScale <= 0) return scale;
+    if (scale <= maxScale) return scale;
+
+    let clamped = maxScale;
+    // MuPDF ceils each axis, which can round the product back over the cap.
+    // One trim is enough in practice; the bound just keeps this terminating.
+    for (
+        let i = 0;
+        i < 4 && Math.ceil(width * clamped) * Math.ceil(height * clamped) > maxPixels;
+        i++
+    ) {
+        clamped *= 0.999;
+    }
+    return clamped;
+}
+
 /** Render a single page to PNG/JPEG. */
 export function renderOnePage(
     api: MuPDFApi,
@@ -776,11 +824,17 @@ export function renderOnePage(
     opts: RenderOptionsResolved,
 ): PageImageResult {
     const { Matrix, ColorSpace } = api;
-    const scale = opts.dpi > 0 ? opts.dpi / 72 : opts.scale;
-    const effectiveDpi = opts.dpi > 0 ? opts.dpi : opts.scale * 72;
+    const requestedScale = opts.dpi > 0 ? opts.dpi / 72 : opts.scale;
 
     const page = doc.loadPage(pageIndex);
     try {
+        // Bound the pixmap before allocating it: page dimensions, not file
+        // size, drive the allocation, and blowing the WASM heap here kills the
+        // host process rather than throwing. The caller reads back the scale
+        // and dpi actually used.
+        const scale = clampScaleToPixelBudget(page, requestedScale, opts.maxPixels);
+        const effectiveDpi = scale * 72;
+
         const matrix = Matrix.scale(scale, scale);
         const pixmap = page.toPixmap(
             matrix,

@@ -109,6 +109,14 @@ This is only one dimension of evaluation (and not the hardest). We will share mo
 
 More details are in the [documentation](https://www.beaverapp.ai/docs/getting-started).
 
+## Connection problems (corporate networks, VPNs, IT administrators)
+
+If you see **"Connection Failed — Could not connect to the server"**, the most common cause is a corporate proxy, firewall, or TLS-inspection appliance blocking Beaver's WebSocket traffic. In short, Beaver needs outbound HTTPS **and** WebSocket Secure (`wss://`) on TCP 443 to the Beaver API host, plus HTTPS to `*.supabase.co` for sign-in.
+
+The full guide — including the quick self-diagnosis steps, what each error code means, and the exact allowlist/TLS-bypass details for your IT team — is here:
+
+**[Connection troubleshooting](https://www.beaverapp.ai/docs/connection-troubleshooting)**
+
 ## Building from source
 
 ```bash

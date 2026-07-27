@@ -154,7 +154,14 @@ describe('BackgroundExtractor', () => {
         conn = new MockDBConnection();
         db = new BeaverDB(conn);
         await db.initDatabase('0.99.0');
-        (Zotero as any).Beaver = { db };
+        // The dispatcher claims nothing until the searchable-library scope is
+        // mirrored, so every case starts with library 1 (the id all fixtures
+        // use) in scope.
+        (Zotero as any).Beaver = {
+            db,
+            libraryScopeInitialized: true,
+            searchableLibraryIds: [1],
+        };
     });
 
     afterEach(async () => {
@@ -191,6 +198,289 @@ describe('BackgroundExtractor', () => {
         expect(result.processed).toBe(false);
         expect(result.reason).toBe('hot_busy');
         expect(mockState.extractCalls).toHaveLength(0);
+    });
+
+    describe('searchable-library boundary', () => {
+        const enqueueJob = async (libraryId: number) => {
+            await db.enqueueBackgroundJob({
+                jobType: 'document_extract',
+                libraryId,
+                zoteroKey: 'AAAAAAAA',
+                contentKind: 'pdf',
+                payloadKind: 'structured',
+                payload: payload(),
+                now: 0,
+            });
+        };
+
+        it('claims nothing while the library scope is unknown', async () => {
+            (Zotero as any).Beaver.libraryScopeInitialized = false;
+            (Zotero as any).Beaver.searchableLibraryIds = undefined;
+            await enqueueJob(1);
+
+            const { BackgroundExtractor } = await loadProcessor();
+            const result = await new BackgroundExtractor().processOnce();
+
+            expect(result).toEqual({ processed: false, reason: 'library_scope_unknown' });
+            expect(mockState.extractCalls).toHaveLength(0);
+            // The row is left queued so it runs once the scope is known.
+            await expect(db.peekBackgroundJobs()).resolves.toHaveLength(1);
+        });
+
+        it('releases (not retires) a claimed row when the scope goes unknown mid-claim', async () => {
+            await enqueueJob(1);
+            const realClaim = db.claimNextBackgroundJob.bind(db);
+            vi.spyOn(db, 'claimNextBackgroundJob').mockImplementation(async (...claimArgs) => {
+                const record = await realClaim(...(claimArgs as Parameters<typeof realClaim>));
+                // Logout lands while the claim is in flight.
+                (Zotero as any).Beaver.libraryScopeInitialized = false;
+                return record;
+            });
+
+            const { BackgroundExtractor } = await loadProcessor();
+            const beforeReleaseMs = Date.now();
+            const result = await new BackgroundExtractor().processOnce();
+
+            expect(result.processed).toBe(false);
+            expect(mockState.extractCalls).toHaveLength(0);
+            // Queued work must survive an account switch rather than be dropped.
+            const rows = await db.peekBackgroundJobs();
+            expect(rows).toHaveLength(1);
+            expect(rows[0].attemptCount).toBe(0);
+            // Released now, not left invisible for the claim-visibility window.
+            expect(rows[0].availableAt).toBeGreaterThanOrEqual(beforeReleaseMs - 1_000);
+            expect(rows[0].availableAt).toBeLessThan(beforeReleaseMs + 60_000);
+        });
+
+        it('settles jobs launched earlier in the pass when a later lane loses scope', async () => {
+            // document_extract is registered first (constructor), so it launches
+            // before the OCR lane's claim observes the scope going unknown.
+            await enqueueJob(1);
+            await db.enqueueBackgroundJob({
+                jobType: 'document_ocr',
+                libraryId: 1,
+                zoteroKey: 'BBBBBBBB',
+                contentKind: 'pdf',
+                payloadKind: 'structured',
+                payload: null,
+                now: 0,
+            });
+            const realClaim = db.claimNextBackgroundJob.bind(db);
+            vi.spyOn(db, 'claimNextBackgroundJob').mockImplementation(async (...claimArgs) => {
+                const record = await realClaim(...(claimArgs as Parameters<typeof realClaim>));
+                if ((claimArgs[3] as string[] | undefined)?.includes('document_ocr')) {
+                    (Zotero as any).Beaver.libraryScopeInitialized = false;
+                }
+                return record;
+            });
+
+            // Hold the extraction open so "returned before it settled" is
+            // observable rather than hidden by an instant mock.
+            mockState.nextResult = new Promise<any>((resolve) => {
+                mockState.extractResolve = resolve;
+            });
+
+            const { BackgroundExtractor } = await loadProcessor();
+            const proc = new BackgroundExtractor();
+            proc.registerExecutor(
+                ocrExecutor(async () => ({ kind: 'complete', reason: 'ok' })),
+                { maxInFlight: 1 },
+            );
+
+            const passPromise = proc.processOnce({ awaitLaunchedJobs: true });
+            const raced = await Promise.race([
+                passPromise.then(() => 'pass-returned'),
+                new Promise((resolve) => setTimeout(() => resolve('still-awaiting'), 50)),
+            ]);
+            // Losing scope on a later lane must not abandon the launched job.
+            expect(raced).toBe('still-awaiting');
+
+            mockState.extractResolve!(okResult());
+            await passPromise;
+
+            // The extract job settled before the pass returned; only the
+            // released OCR row is left behind.
+            const rows = await db.peekBackgroundJobs();
+            expect(rows.map((row) => row.jobType)).toEqual(['document_ocr']);
+        });
+
+        it('completes a queued job whose library is no longer searchable', async () => {
+            (Zotero as any).Beaver.searchableLibraryIds = [2];
+            await enqueueJob(1);
+            const bus = new EventTarget();
+            const win: any = (Zotero as any).getMainWindow();
+            win.__beaverEventBus = bus;
+            win.CustomEvent = CustomEvent;
+            const reasons: string[] = [];
+            bus.addEventListener('background-job:done', (event) => {
+                reasons.push((event as CustomEvent<{ reason: string }>).detail.reason);
+            });
+
+            const { BackgroundExtractor } = await loadProcessor();
+            const result = await new BackgroundExtractor().processOnce();
+
+            expect(result.processed).toBe(true);
+            expect(mockState.extractCalls).toHaveLength(0);
+            expect(reasons).toEqual(['library_excluded']);
+            await expect(db.peekBackgroundJobs()).resolves.toHaveLength(0);
+        });
+
+        it('leaves a row for a library missing on this device to the executor', async () => {
+            // UNRESOLVED_LIBRARY_ID is "not present here", not "excluded": it
+            // must keep the executor's own item_missing handling.
+            await enqueueJob(0);
+
+            const { BackgroundExtractor } = await loadProcessor();
+            const result = await new BackgroundExtractor().processOnce({
+                awaitLaunchedJobs: true,
+            });
+
+            expect(result.processed).toBe(true);
+            expect(mockState.extractCalls).toHaveLength(0);
+            await expect(db.peekBackgroundJobs()).resolves.toHaveLength(0);
+        });
+
+        it('aborts an in-flight job whose library leaves the searchable set', async () => {
+            await enqueueJob(1);
+            mockState.nextResult = new Promise<any>((resolve) => {
+                mockState.extractResolve = resolve;
+            });
+
+            const { BackgroundExtractor } = await loadProcessor();
+            const proc = new BackgroundExtractor();
+            const processOncePromise = proc.processOnce();
+            await new Promise((r) => setTimeout(r, 0));
+            expect(mockState.extractCalls).toHaveLength(1);
+            const signal: AbortSignal = mockState.extractCalls[0].externalAbortSignal;
+            expect(signal.aborted).toBe(false);
+
+            // The user excludes the library mid-extraction.
+            (Zotero as any).Beaver.searchableLibraryIds = [];
+            proc.abortJobsOutsideScope();
+
+            expect(signal.aborted).toBe(true);
+            mockState.extractResolve!({
+                kind: 'external_abort',
+                phase: 'external_abort',
+                pageCount: null,
+                resolvedAttachment: { libraryId: 1, zoteroKey: 'AAAAAAAA' },
+            });
+            await processOncePromise;
+        });
+
+        it('leaves in-flight jobs alone when their library stays searchable', async () => {
+            await enqueueJob(1);
+            mockState.nextResult = new Promise<any>((resolve) => {
+                mockState.extractResolve = resolve;
+            });
+
+            const { BackgroundExtractor } = await loadProcessor();
+            const proc = new BackgroundExtractor();
+            const processOncePromise = proc.processOnce();
+            await new Promise((r) => setTimeout(r, 0));
+            const signal: AbortSignal = mockState.extractCalls[0].externalAbortSignal;
+
+            // A different library was excluded; this job must keep running.
+            (Zotero as any).Beaver.searchableLibraryIds = [1];
+            proc.abortJobsOutsideScope();
+
+            expect(signal.aborted).toBe(false);
+            mockState.extractResolve!(okResult());
+            await processOncePromise;
+        });
+
+        describe('DocumentExtractExecutor re-check', () => {
+            // The lane serializes on the MuPDF worker, so scope can change
+            // between the dispatcher's claim and the job actually running.
+            const runClaimedJob = async (
+                onWorker: () => void = () => {},
+            ): Promise<{ kind: string; reason?: string }> => {
+                await enqueueJob(1);
+                const record = await db.claimNextBackgroundJob(Date.now(), 60_000);
+                const { DocumentExtractExecutor } = await import(
+                    '../../../src/services/backgroundQueue/documentExtractExecutor'
+                );
+                return await new DocumentExtractExecutor().execute(record!, {
+                    db: db as any,
+                    runOnMuPDFWorker: async (fn) => {
+                        onWorker();
+                        return await fn();
+                    },
+                    externalAbortSignal: new AbortController().signal,
+                    shouldSkipDbWrites: () => false,
+                    enqueue: async () => {},
+                });
+            };
+
+            it('completes when the library is excluded after the claim', async () => {
+                const outcome = await runClaimedJob(() => {
+                    (Zotero as any).Beaver.searchableLibraryIds = [];
+                });
+
+                expect(outcome).toEqual({ kind: 'complete', reason: 'library_excluded' });
+                expect(mockState.extractCalls).toHaveLength(0);
+            });
+
+            it('releases when the scope becomes unknown after the claim', async () => {
+                const outcome = await runClaimedJob(() => {
+                    (Zotero as any).Beaver.libraryScopeInitialized = false;
+                });
+
+                expect(outcome).toEqual({ kind: 'release', reason: 'library_scope_unknown' });
+                expect(mockState.extractCalls).toHaveLength(0);
+            });
+
+            /** Flip the mirror while the item lookup is pending. */
+            const lookupThatChangesScope = (mutate: () => void) => {
+                (Zotero as any).Items.getByLibraryAndKeyAsync = vi.fn(async () => {
+                    mutate();
+                    return {
+                        libraryID: 1,
+                        key: 'AAAAAAAA',
+                        isAttachment: () => true,
+                        isPDFAttachment: () => true,
+                        attachmentContentType: 'application/pdf',
+                    };
+                });
+            };
+
+            it('completes when the library is excluded during the item lookup', async () => {
+                lookupThatChangesScope(() => {
+                    (Zotero as any).Beaver.searchableLibraryIds = [];
+                });
+
+                const outcome = await runClaimedJob();
+
+                expect(outcome).toEqual({ kind: 'complete', reason: 'library_excluded' });
+                expect(mockState.extractCalls).toHaveLength(0);
+            });
+
+            it('does not inspect the item once its library is excluded', async () => {
+                const { safeIsInTrash } = await import('../../../src/utils/zoteroItemUtils');
+                lookupThatChangesScope(() => {
+                    (Zotero as any).Beaver.searchableLibraryIds = [];
+                });
+
+                await runClaimedJob();
+
+                // Item metadata is off limits after revocation, so the boundary
+                // check has to land before the first read of the resolved item.
+                expect(safeIsInTrash).not.toHaveBeenCalled();
+            });
+
+            it('releases when the scope becomes unknown during the item lookup', async () => {
+                // A logout mid-lookup is transient, not an exclusion: the row
+                // must survive to run under the next session.
+                lookupThatChangesScope(() => {
+                    (Zotero as any).Beaver.libraryScopeInitialized = false;
+                });
+
+                const outcome = await runClaimedJob();
+
+                expect(outcome).toEqual({ kind: 'release', reason: 'library_scope_unknown' });
+                expect(mockState.extractCalls).toHaveLength(0);
+            });
+        });
     });
 
     it('completes the job when the item is in the trash', async () => {

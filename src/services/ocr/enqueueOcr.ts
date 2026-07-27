@@ -1,8 +1,9 @@
 /**
  * Enqueues OCR work when a PDF is detected without a text layer.
  *
- * The enqueue path is gated by the OCR entitlement mirror and terminal failure
- * table so unsupported scans do not keep requeueing work.
+ * The enqueue path is gated by the searchable-library scope, the OCR
+ * entitlement mirror, and the terminal failure table, so an excluded library is
+ * never read or processed and unsupported scans do not keep requeueing work.
  *
  * Bundle-neutral (no Supabase / React imports): reaches the queue and the
  * entitlement mirror through `Zotero.Beaver`, so it runs on both the hot
@@ -10,6 +11,7 @@
  */
 
 import { logger } from '../../utils/logger';
+import { isLibraryInScope } from '../libraryScope';
 import { OCR_ENGINE_VERSION, OCR_PRIORITY_ON_DEMAND } from './constants';
 
 /**
@@ -47,6 +49,22 @@ export function maybeEnqueueOcrJob(args: MaybeEnqueueOcrArgs): void {
 }
 
 async function enqueueOcrJob(args: MaybeEnqueueOcrArgs): Promise<void> {
+    // Library exclusion is an access boundary, so it gates the enqueue as well
+    // as the executor: an excluded scan must not be hashed or ticketed at all.
+    // Fails closed while the scope is unknown; detection re-fires on later
+    // reads, so nothing is permanently lost by skipping here.
+    //
+    // Re-asserted after every await below rather than only on entry: the
+    // searchable-library mirror is published in the same turn as the exclusion,
+    // so the scope can change under any suspension point in this function.
+    const inScope = (): boolean => {
+        if (isLibraryInScope(args.libraryId)) return true;
+        logger(`maybeEnqueueOcrJob: ${args.libraryId}-${args.zoteroKey} skipped, library is not searchable`, 4);
+        return false;
+    };
+
+    if (!inScope()) return;
+
     // Fast entitlement gate; the backend re-checks on `/ocr/request`.
     if (Zotero.Beaver?.hasOcrAccess !== true) {
         logger(`maybeEnqueueOcrJob: ${args.libraryId}-${args.zoteroKey} skipped, OCR access is disabled`, 4);
@@ -72,6 +90,9 @@ async function enqueueOcrJob(args: MaybeEnqueueOcrArgs): Promise<void> {
         'document_ocr', args.libraryId, args.zoteroKey, OCR_JOB_PAYLOAD_KIND, priority,
     );
     if (pending.exists) {
+        // An exclusion during the probe cannot un-promote the row, but it must
+        // not wake the dispatcher for it; the claim-time gate retires it.
+        if (!inScope()) return;
         if (pending.promoted) {
             logger(`maybeEnqueueOcrJob: ${args.libraryId}-${args.zoteroKey} promoted existing OCR job (priority=${priority})`, 3);
             Zotero.Beaver?.backgroundExtractor?.notify();
@@ -80,6 +101,11 @@ async function enqueueOcrJob(args: MaybeEnqueueOcrArgs): Promise<void> {
         }
         return;
     }
+
+    // Re-check before touching the file. `attachmentHash` cannot be cancelled
+    // once started, so this is the last point at which the read can be avoided;
+    // an exclusion landing mid-hash is caught by the check before the enqueue.
+    if (!inScope()) return;
 
     let fileHash: string | undefined;
     try {
@@ -92,7 +118,7 @@ async function enqueueOcrJob(args: MaybeEnqueueOcrArgs): Promise<void> {
     // the local file) is undefined. Fall back to the synced server MD5 — the same
     // content hash a local machine's attachmentHash produces — so a remote scan is
     // enqueued and its loop guard stays consistent with the OCR executor.
-    if (!fileHash) fileHash = args.item.attachmentSyncedHash || undefined;
+    if (!fileHash) fileHash = (inScope() && args.item.attachmentSyncedHash) || undefined;
     // Truly hashless (rare not-yet-synced item): the backend OCR dedup needs a
     // content hash, so there is nothing actionable to enqueue.
     if (!fileHash) return;
@@ -102,6 +128,10 @@ async function enqueueOcrJob(args: MaybeEnqueueOcrArgs): Promise<void> {
         logger(`maybeEnqueueOcrJob: ${args.libraryId}-${args.zoteroKey} skipped, terminal OCR failure already recorded`, 3);
         return;
     }
+
+    // Final assertion before the queue write: everything above yielded at least
+    // once, so this is what keeps a mid-flight exclusion from being ticketed.
+    if (!inScope()) return;
 
     logger(`maybeEnqueueOcrJob: ${args.libraryId}-${args.zoteroKey} enqueueing OCR job (pages=${args.pageCount ?? 'unknown'}, priority=${priority})`, 3);
     await db.enqueueBackgroundJob({
@@ -115,5 +145,8 @@ async function enqueueOcrJob(args: MaybeEnqueueOcrArgs): Promise<void> {
         payload: null,
         now: Date.now(),
     });
+    // An exclusion landing inside the insert leaves an inert row that the
+    // claim-time gate retires; don't wake the dispatcher for it.
+    if (!inScope()) return;
     Zotero.Beaver?.backgroundExtractor?.notify();
 }

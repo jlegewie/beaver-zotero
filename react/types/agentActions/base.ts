@@ -11,6 +11,10 @@ import type {
     EditNoteResultData
 } from './editNote';
 import type {
+    EditNoteBatchProposedData,
+    EditNoteBatchResultData
+} from './editNoteBatch';
+import type {
     CreateHighlightAnnotationsProposedData,
     CreateHighlightAnnotationsResultData,
     CreateNoteAnnotationsProposedData,
@@ -353,7 +357,7 @@ export interface ConfirmExternalSearchProposedData {
 /**
  * Types of actions that can be proposed by the AI
  */
-export type ActionType = 'highlight_annotation' | 'note_annotation' | 'create_highlight_annotations' | 'create_note_annotations' | 'zotero_note' | 'create_item' | 'edit_metadata' | 'create_collection' | 'organize_items' | 'manage_tags' | 'manage_collections' | 'confirm_extraction' | 'confirm_external_search' | 'edit_note' | 'create_note';
+export type ActionType = 'highlight_annotation' | 'note_annotation' | 'create_highlight_annotations' | 'create_note_annotations' | 'zotero_note' | 'create_item' | 'edit_metadata' | 'create_collection' | 'organize_items' | 'manage_tags' | 'manage_collections' | 'confirm_extraction' | 'confirm_external_search' | 'edit_note' | 'edit_note_batch' | 'create_note';
 
 /**
  * Union type for all proposed data types
@@ -391,6 +395,7 @@ export type ProposedData =
     ConfirmExtractionProposedData |
     ConfirmExternalSearchProposedData |
     EditNoteProposedData |
+    EditNoteBatchProposedData |
     CreateHighlightAnnotationsProposedData |
     CreateNoteAnnotationsProposedData;
 
@@ -407,6 +412,7 @@ export type ActionResultDataType =
     ManageCollectionsResultData |
     EditMetadataResultData |
     EditNoteResultData |
+    EditNoteBatchResultData |
     CreateHighlightAnnotationsResultData |
     CreateNoteAnnotationsResultData;
 

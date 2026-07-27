@@ -9,6 +9,7 @@ import { logger } from '../../utils/logger';
 import { getOrSimplify } from '../../utils/noteHtmlSimplifier';
 import { preloadNotePageLabels } from '../../utils/noteCitationExpand';
 import { getNoteHtmlForRead } from '../../utils/noteEditorIO';
+import { containsPreviewMarkers, stripPreviewMarkers } from '../../utils/notePreviewGuard';
 import {
     WSReadNoteRequest,
     WSReadNoteResponse,
@@ -277,11 +278,18 @@ export async function handleReadNoteRequest(
         //    back to item.getNote() when the live snapshot is empty. Critically
         //    NEVER calls item.setNote() — flushLiveEditorToDB would persist a
         //    transient empty PM-render snapshot and erase the note's content.
-        const rawHtml = await getNoteHtmlForRead(item);
+        let rawHtml = await getNoteHtmlForRead(item);
         if (!rawHtml || rawHtml.trim() === '') {
             return errorResponse(
                 `Note ${note_id} is empty. There is no content to read.`
             );
+        }
+        // Recovery path: if diff-preview markup was ever accidentally
+        // persisted into this note, read the stripped content so the model
+        // sees the same HTML the edit_note validate/execute paths repair to.
+        if (containsPreviewMarkers(rawHtml)) {
+            logger(`handleReadNoteRequest: note ${note_id} contains persisted diff-preview markup; reading stripped content`, 1);
+            rawHtml = stripPreviewMarkers(rawHtml);
         }
 
         // 6. Simplify (also warms cache for subsequent edit_note calls).

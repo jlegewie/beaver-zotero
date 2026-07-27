@@ -56,6 +56,12 @@ async function onLoad() {
     if (mainWindow && mainWindow.BeaverReact) {
         BeaverReact = mainWindow.BeaverReact;
 
+        // Record which main window's bundle renders this one. That bundle owns
+        // our React root and Jotai store, so the plugin closes this window when
+        // that main window unloads (a surviving window would be frozen against
+        // a dead bundle).
+        window.__beaverOwnerWindowRef = new WeakRef(mainWindow);
+
         if (typeof BeaverReact.renderPreferencesWindow === "function") {
             const container = document.getElementById("beaver-pane-preferences");
             if (container) {

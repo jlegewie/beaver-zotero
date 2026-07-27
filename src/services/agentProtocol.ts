@@ -9,6 +9,7 @@ import { AttachmentData, ItemData } from '../../react/types/zotero';
 import type { BeaverExtractResult } from '../beaver-extract/schema/schema';
 import type { ExtractContentKind } from './documentExtraction/shared/contentKinds';
 import type { DocumentExtractResult } from './documentExtraction/shared/documentExtractResult';
+import type { ConnectionFailureEvidence } from './connectionFailure';
 
 // =============================================================================
 // WebSocket Event Types (matching backend ws_events.py)
@@ -705,6 +706,39 @@ export type ZoteroDocumentErrorCode =
     | 'schema_version_mismatch'
     | 'mode_mismatch';
 
+/**
+ * Compact health snapshot of the local PDF worker slot, attached to timeout
+ * error responses so backend traces can distinguish a wedged worker (lease
+ * reap, respawn churn) from a merely slow operation. Only attached when the
+ * timed-out request actually posted work to the worker slot — never for
+ * pre-dispatch failures or non-PDF paths, whose timeouts are unrelated to
+ * worker state. Counters are cumulative for the current Zotero session.
+ */
+export interface WSWorkerDiagnostics {
+    /** Worker slot that served the request. */
+    slot: string;
+    /** True when this failure was the busy-lease watchdog reaping the operation. */
+    lease_reaped: boolean;
+    /** Lease reaps this session. */
+    lease_reap_count: number;
+    /** Op name of the most recent lease reap. */
+    last_lease_reap_op?: string | null;
+    /** Busy age (ms) of the most recent lease reap. */
+    last_lease_reap_age_ms?: number | null;
+    /** Worker spawns this session (respawn-churn signal). */
+    spawn_count: number;
+    /** Stale-worker retries this session. */
+    retry_count: number;
+    /** Consecutive worker start failures. */
+    consecutive_start_failures: number;
+    /** Whether a live worker exists right now. */
+    has_worker: boolean;
+    /** Accepted operations currently in flight on the slot. */
+    in_flight: number;
+    /** Age (ms) of the oldest in-flight operation; null when idle. */
+    oldest_in_flight_age_ms?: number | null;
+}
+
 /** Response to whole-document extraction request */
 export interface WSZoteroDocumentResponse {
     type: 'zotero_document';
@@ -729,6 +763,8 @@ export interface WSZoteroDocumentResponse {
     total_pages?: number | null;
     error?: string | null;
     error_code?: ZoteroDocumentErrorCode | null;
+    /** Worker health snapshot, attached to timeout error responses. */
+    worker_diagnostics?: WSWorkerDiagnostics | null;
 }
 
 /** Error codes for attachment page image rendering failures */
@@ -767,6 +803,8 @@ export interface WSZoteroAttachmentPageImagesResponse {
     error?: string | null;
     /** Error code for programmatic handling */
     error_code?: AttachmentPageImagesErrorCode | null;
+    /** Worker health snapshot, attached to timeout error responses. */
+    worker_diagnostics?: WSWorkerDiagnostics | null;
 }
 
 /** Error codes for attachment image failures */
@@ -878,6 +916,8 @@ export interface WSZoteroViewImagesResponse {
     error?: string | null;
     /** Error code for programmatic handling */
     error_code?: ViewImagesErrorCode | null;
+    /** Worker health snapshot, attached to timeout error responses. */
+    worker_diagnostics?: WSWorkerDiagnostics | null;
 }
 
 /** Error codes for attachment search failures */
@@ -961,6 +1001,8 @@ export interface WSZoteroAttachmentSearchResponse {
     error?: string | null;
     /** Error code for programmatic handling */
     error_code?: AttachmentSearchErrorCode | null;
+    /** Worker health snapshot, attached to timeout error responses. */
+    worker_diagnostics?: WSWorkerDiagnostics | null;
 }
 
 // =============================================================================
@@ -1175,6 +1217,7 @@ export interface WSListItemsRequest extends WSBaseEvent {
     collection_key?: string | null;
     tag?: string | null;
     item_category: ZoteroItemCategory;
+    include_children?: boolean;
     recursive: boolean;
     sort_by: string;
     sort_order: string;
@@ -1414,7 +1457,7 @@ export interface WSListLibrariesResponse {
 export type DeferredToolPreference = 'always_ask' | 'always_apply' | 'continue_without_applying';
 
 /** Agent action type for deferred tools */
-export type AgentActionType = 'highlight_annotation' | 'note_annotation' | 'create_highlight_annotations' | 'create_note_annotations' | 'zotero_note' | 'create_item' | 'edit_metadata' | 'create_collection' | 'organize_items' | 'manage_tags' | 'manage_collections' | 'confirm_extraction' | 'confirm_external_search' | 'edit_note' | 'create_note';
+export type AgentActionType = 'highlight_annotation' | 'note_annotation' | 'create_highlight_annotations' | 'create_note_annotations' | 'zotero_note' | 'create_item' | 'edit_metadata' | 'create_collection' | 'organize_items' | 'manage_tags' | 'manage_collections' | 'confirm_extraction' | 'confirm_external_search' | 'edit_note' | 'edit_note_batch' | 'create_note';
 
 /** Request from backend to validate an agent action */
 export interface WSAgentActionValidateRequest extends WSBaseEvent {
@@ -1449,6 +1492,15 @@ export interface ErrorCandidate {
     score: number;
 }
 
+/** Per-edit validation failure for batch actions (e.g. edit_note_batch). */
+export interface EditValidationError {
+    /** Position of the failing edit in the request's edits[] array */
+    index: number;
+    error: string;
+    error_code?: string | null;
+    error_candidates?: ErrorCandidate[];
+}
+
 /** Response to agent action validation request */
 export interface WSAgentActionValidateResponse {
     type: 'agent_action_validate_response';
@@ -1464,6 +1516,12 @@ export interface WSAgentActionValidateResponse {
      * truncated — do not re-truncate.
      */
     error_candidates?: ErrorCandidate[];
+    /**
+     * Per-edit validation failures for batch actions (e.g. edit_note_batch).
+     * Present only when validating a multi-edit payload and one or more edits
+     * fail; the whole batch is rejected (fail-closed).
+     */
+    edit_errors?: EditValidationError[];
     /** Current value for before/after tracking. Shape depends on action_type. */
     current_value?: any;
     /**
@@ -1682,6 +1740,22 @@ export interface WSAuthMessage {
     /** Provider-mode handshakes only: echo of the originating backend
      * `instance_id` from the wake broadcast (multi-instance routing seam). */
     wake_instance_id?: string;
+    /**
+     * Total connect attempts for this handshake including the successful one.
+     * New clients always send this, including `1` on first-try success.
+     */
+    connect_attempts: number;
+    /**
+     * Milliseconds from the start of the initial connection attempt until auth
+     * was sent on this socket. Includes failed attempts and retry backoff.
+     */
+    connect_latency_ms: number;
+    /** Compact summary of the failed attempt that triggered auto-retry. */
+    last_connect_failure?: {
+        stage: string;
+        close_code?: number | null;
+        timed_out?: boolean;
+    };
 }
 
 /**
@@ -1735,6 +1809,10 @@ export const CLIENT_FEATURES = {
     EXTERNAL_FILES: 'external_files',
     ASK_USER_QUESTION: 'ask_user_question',
     PORTABLE_IDS: 'portable_ids',
+    LIST_ITEMS_INCLUDE_CHILDREN: 'list_items_include_children',
+    CREATE_NOTE_TAGS_COLLECTIONS: 'create_note_tags_collections',
+    /** Batch multi-edit note editing (edit_note_batch action type). */
+    EDIT_NOTE_BATCH: 'edit_note_batch',
 } as const;
 
 /** Client type identifier for the Zotero plugin. */
@@ -2007,5 +2085,10 @@ export interface WSCallbacks {
      * @param reason Close reason
      * @param wasClean Whether the connection closed cleanly
      */
-    onClose?: (code: number, reason: string, wasClean: boolean) => void;
+    onClose?: (
+        code: number,
+        reason: string,
+        wasClean: boolean,
+        evidence?: ConnectionFailureEvidence,
+    ) => void;
 }

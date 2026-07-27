@@ -23,6 +23,8 @@ function setupBeaver(hasOcrAccess: boolean) {
     notify = vi.fn();
     (globalThis as any).Zotero.Beaver = {
         hasOcrAccess,
+        libraryScopeInitialized: true,
+        searchableLibraryIds: [1],
         db: {
             isDocumentProcessingPermanentlyFailed: isPermFailed,
             promotePendingBackgroundJob: promote,
@@ -95,6 +97,110 @@ describe('maybeEnqueueOcrJob', () => {
 
         expect(enqueueBackgroundJob).not.toHaveBeenCalled();
         expect(notify).not.toHaveBeenCalled();
+    });
+
+    it('does not enqueue, promote, or hash a scan in an excluded library', async () => {
+        setupBeaver(true);
+        (globalThis as any).Zotero.Beaver.searchableLibraryIds = [2];
+        const item = {
+            libraryID: 1,
+            key: 'AAAAAAAA',
+            id: 42,
+            get attachmentHash() {
+                throw new Error('excluded library must not be hashed');
+            },
+        } as any;
+
+        maybeEnqueueOcrJob({ ...args(), item });
+        await flush();
+
+        expect(promote).not.toHaveBeenCalled();
+        expect(enqueueBackgroundJob).not.toHaveBeenCalled();
+        expect(notify).not.toHaveBeenCalled();
+    });
+
+    it('does not hash or enqueue when the library is excluded during the pending probe', async () => {
+        setupBeaver(true);
+        promote.mockImplementation(async () => {
+            // The user excludes the library while this probe is pending.
+            (globalThis as any).Zotero.Beaver.searchableLibraryIds = [];
+            return { exists: false, promoted: false };
+        });
+        const item = {
+            libraryID: 1,
+            key: 'AAAAAAAA',
+            id: 42,
+            get attachmentHash() {
+                throw new Error('excluded library must not be hashed');
+            },
+        } as any;
+
+        maybeEnqueueOcrJob({ ...args(), item });
+        await flush();
+
+        expect(enqueueBackgroundJob).not.toHaveBeenCalled();
+        expect(notify).not.toHaveBeenCalled();
+    });
+
+    it('does not wake the dispatcher when the library is excluded during a promotion', async () => {
+        setupBeaver(true);
+        promote.mockImplementation(async () => {
+            (globalThis as any).Zotero.Beaver.searchableLibraryIds = [];
+            return { exists: true, promoted: true };
+        });
+
+        maybeEnqueueOcrJob(args());
+        await flush();
+
+        expect(enqueueBackgroundJob).not.toHaveBeenCalled();
+        expect(notify).not.toHaveBeenCalled();
+    });
+
+    it('does not enqueue when the library is excluded while hashing', async () => {
+        setupBeaver(true);
+        const item = {
+            libraryID: 1,
+            key: 'AAAAAAAA',
+            id: 42,
+            get attachmentHash() {
+                return Promise.resolve('hash123').then((hash) => {
+                    (globalThis as any).Zotero.Beaver.searchableLibraryIds = [];
+                    return hash;
+                });
+            },
+        } as any;
+
+        maybeEnqueueOcrJob({ ...args(), item });
+        await flush();
+
+        expect(enqueueBackgroundJob).not.toHaveBeenCalled();
+        expect(notify).not.toHaveBeenCalled();
+    });
+
+    it('does not wake the dispatcher when the library is excluded during the insert', async () => {
+        setupBeaver(true);
+        enqueueBackgroundJob.mockImplementation(async () => {
+            (globalThis as any).Zotero.Beaver.searchableLibraryIds = [];
+            return { enqueued: true, id: 1 };
+        });
+
+        maybeEnqueueOcrJob(args());
+        await flush();
+
+        // The row lands (the insert was already in flight) but stays inert:
+        // the dispatcher is not woken and its claim-time gate retires it.
+        expect(enqueueBackgroundJob).toHaveBeenCalledOnce();
+        expect(notify).not.toHaveBeenCalled();
+    });
+
+    it('does not enqueue while the library scope is unknown', async () => {
+        setupBeaver(true);
+        (globalThis as any).Zotero.Beaver.libraryScopeInitialized = false;
+
+        maybeEnqueueOcrJob(args());
+        await flush();
+
+        expect(enqueueBackgroundJob).not.toHaveBeenCalled();
     });
 
     it('does not enqueue a loop-guarded (hopeless) scan', async () => {

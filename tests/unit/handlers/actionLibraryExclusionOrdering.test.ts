@@ -98,6 +98,10 @@ import {
   executeEditNoteAction,
   validateEditNoteAction,
 } from "../../../src/services/agentDataProvider/actions/editNote";
+import {
+  executeEditNoteBatchAction,
+  validateEditNoteBatchAction,
+} from "../../../src/services/agentDataProvider/actions/editNoteBatch";
 
 const reference = {
   library_id: 1,
@@ -117,6 +121,12 @@ const editNoteData = {
   new_string: "after",
 };
 
+// Non-empty edits[]: the batch shape guard runs before the exclusion gate.
+const editNoteBatchData = {
+  ...reference,
+  edits: [{ index: 0, old_string: "before", new_string: "after" }],
+};
+
 const validationCases = [
   [
     "create_highlight_annotations",
@@ -134,6 +144,7 @@ const validationCases = [
     { ...reference, edits: [{ field: "title", value: "New" }] },
   ],
   ["edit_note", validateEditNoteAction, editNoteData],
+  ["edit_note_batch", validateEditNoteBatchAction, editNoteBatchData],
 ] as const;
 
 const executionCases = [
@@ -153,6 +164,7 @@ const executionCases = [
     { ...reference, edits: [{ field: "title", value: "New" }] },
   ],
   ["edit_note", executeEditNoteAction, editNoteData],
+  ["edit_note_batch", executeEditNoteBatchAction, editNoteBatchData],
 ] as const;
 
 describe("agent action library-exclusion ordering", () => {

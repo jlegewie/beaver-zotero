@@ -2,7 +2,6 @@ import { ApiService } from './apiService';
 import API_BASE_URL from '../utils/getAPIBaseURL';
 import { ExcludedLibrary, SafeProfileWithPlan } from '../../react/types/profile';
 import { getZoteroUserIdentifier } from '../utils/zoteroUtils';
-import { ApiError, ZoteroInstanceMismatchError } from '../../react/types/apiErrors';
 import { ModelConfig } from '../../react/atoms/models';
 import { ZoteroLibrary } from '../../react/types/zotero';
 import { OverallSyncStatus } from '../../react/atoms/sync';
@@ -161,11 +160,6 @@ export class AccountService extends ApiService {
             logger(`accountService.getProfileWithPlan: success, plan=${result.profile?.plan?.name}, has_authorized_access=${result.profile?.has_authorized_access}, has_authorized_free_access=${result.profile?.has_authorized_free_access}`);
             return result;
         } catch (error) {
-            // Handle profile-specific 403 errors as Zotero instance mismatch
-            if (error instanceof ApiError && error.status === 403) {
-                logger(`accountService.getProfileWithPlan: 403 Zotero instance mismatch (zotero_local_id=${localUserKey}, zotero_user_id=${userID})`, 2);
-                throw new ZoteroInstanceMismatchError();
-            }
             logger(`accountService.getProfileWithPlan: error=${error instanceof Error ? error.message : error}`, 2);
             throw error;
         }
@@ -255,17 +249,6 @@ export class AccountService extends ApiService {
             consent_to_share: consentToShare,
             email_notifications: emailNotifications
         } as FreeAuthorizationRequest);
-    }
-
-    /**
-     * Authorizes a device to access the user's account
-     * @returns Promise with the response message
-     */
-    async authorizeDevice(userID: string, localUserKey: string): Promise<{ message: string }> {
-        return this.post<{ message: string }>('/api/v1/account/authorize-device', {
-            zotero_local_id: localUserKey,
-            zotero_user_id: userID
-        } as AuthorizationRequest);
     }
 
     /**

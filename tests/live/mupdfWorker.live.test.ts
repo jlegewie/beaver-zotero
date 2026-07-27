@@ -13,7 +13,8 @@
  *   - Dev build of Beaver loaded in a running Zotero (NODE_ENV=development).
  *   - User authenticated so the test endpoints are registered.
  *   - Fixture attachments seeded (SMALL_PDF, NORMAL_PDF, ENCRYPTED_PDF,
- *     NO_TEXT_PDF, INVALID_PDF_FIXTURE).
+ *     NO_TEXT_PDF). Set ZOTERO_INVALID_PDF_REF to exercise the corrupt
+ *     attachment path.
  *
  * Run with: `npm run test:live -- mupdfWorker`
  */
@@ -77,11 +78,17 @@ describe('MuPDF worker smoke — PR #1 ops', () => {
         expect(res.error?.code).toBe('INVALID_PDF');
     });
 
-    it('returns INVALID_PDF for a corrupt attachment fixture', async () => {
+    it('returns INVALID_PDF for an explicitly configured corrupt attachment', async (ctx) => {
+        // The repository fallback key currently identifies a parseable empty
+        // PDF, not a page-count-level corrupt file. Require an explicit live
+        // fixture so the prerequisite is independent of the result under test.
+        if (!process.env.ZOTERO_INVALID_PDF_REF?.trim()) ctx.skip();
+
         const res = await pdfPageCount(INVALID_PDF_FIXTURE);
         expect(res.ok).toBe(false);
         expect(res.error?.code).toBe('INVALID_PDF');
     });
+
 });
 
 // ---------------------------------------------------------------------------
@@ -178,18 +185,16 @@ describe('MuPDF worker smoke — orchestration ops', () => {
             expect(res.ok).toBe(true);
 
             const result = res.result;
-            expect(result.pages.length).toBe(SMALL_PDF_PAGE_COUNT);
-            for (const page of result.pages) {
+            expect(result.mode).toBe('markdown');
+            expect(result.schemaVersion).toBe('4');
+            expect(result.document.pageCount).toBe(SMALL_PDF_PAGE_COUNT);
+            expect(result.document.pages).toHaveLength(SMALL_PDF_PAGE_COUNT);
+            for (const page of result.document.pages) {
                 expect(typeof page.index).toBe('number');
                 expect(page.width).toBeGreaterThan(0);
                 expect(page.height).toBeGreaterThan(0);
-                expect(typeof page.content).toBe('string');
+                expect(typeof page.markdown).toBe('string');
             }
-            expect(typeof result.fullText).toBe('string');
-            expect(result.fullText.length).toBeGreaterThan(0);
-            expect(result.analysis.pageCount).toBe(SMALL_PDF_PAGE_COUNT);
-            expect(result.analysis.styleProfile).toBeDefined();
-            expect(result.metadata.version).toBeDefined();
         });
 
         it('returns NO_TEXT_LAYER with full payload', async () => {
@@ -287,6 +292,21 @@ describe('MuPDF worker smoke — orchestration ops', () => {
             const res = await pdfSentenceBBoxes(SMALL_PDF, { page_index: 99999 });
             expect(res.ok).toBe(false);
             expect(res.error?.code).toBe('PAGE_OUT_OF_RANGE');
+        });
+
+        it.each([
+            ['missing', {}],
+            ['non-numeric', { page_index: 'not-a-page' }],
+            ['fractional', { page_index: 0.5 }],
+            ['negative', { page_index: -1 }],
+        ])('rejects a %s page index as malformed', async (_label, body) => {
+            const res = await pdfSentenceBBoxes(SMALL_PDF, body as any);
+            expect(res.ok).toBe(false);
+            expect(res.error).toMatchObject({
+                name: 'Error',
+                message: 'page_index (non-negative integer) is required',
+            });
+            expect(res.error?.code).toBeUndefined();
         });
     });
 

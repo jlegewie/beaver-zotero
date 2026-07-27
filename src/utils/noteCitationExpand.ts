@@ -911,34 +911,84 @@ export function expandToRawHtml(
         preserveMathWrapper
     );
 
+    // Shield code from the dollar-math passes below. A literal `$` inside a
+    // <pre>/<code> element (e.g. "$schema" in a JSON block, or shell like
+    // $HOME:$PATH) is not math and must stay literal: a normalized Zotero note
+    // cannot represent math inside code (codeBlock content is plain text and the
+    // `code` mark excludes every other mark), so wrapping such a dollar in a math
+    // span makes ProseMirror normalization split the code block and permanently
+    // corrupt the note. Shielding code is therefore lossless. Choose a placeholder
+    // prefix that does not already occur in the string so a literal copy of the
+    // token text in the note can never collide with a real placeholder.
+    let codePlaceholderPrefix = '__BEAVER_RAW_CODE_';
+    for (let n = 1; str.includes(codePlaceholderPrefix); n++) {
+        codePlaceholderPrefix = `__BEAVER_RAW_CODE${n}_`;
+    }
+    const escapedCodePrefix = codePlaceholderPrefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const preservedCodeBlocks: string[] = [];
+    const preserveCodeBlock = (block: string): string => {
+        const idx = preservedCodeBlocks.push(block) - 1;
+        return `${codePlaceholderPrefix}${idx}__`;
+    };
+    // <pre> first so a <code> nested inside an already-masked <pre> isn't masked
+    // twice. The class="math" wrappers were masked just above, so these regexes
+    // only ever match real code elements. Case-insensitive because HTML tag
+    // names are case-insensitive and a model may emit <PRE>/<Code>.
+    str = str.replace(/<pre\b[^>]*>[\s\S]*?<\/pre>/gi, preserveCodeBlock);
+    str = str.replace(/<code\b[^>]*>[\s\S]*?<\/code>/gi, preserveCodeBlock);
+
     // Expand math: dollar notation → Zotero HTML wrappers
     //
     // Pre-processing: when the agent places a standalone equation in its own <p>,
     // it should render as display math (block-level <pre class="math">). Without
     // this, ProseMirror converts the paragraph-wrapped inline math to display math
     // itself, causing empty <p> wrappers and undo data mismatches.
-    // <p ...>$$...$$</p> → $$...$$ (unwrap paragraph around display math)
-    str = str.replace(
-        /<p(?:\s[^>]*)?>(\$\$[^<]+?\$\$)<\/p>/g,
-        (_match, content) => content
-    );
-    // <p ...>$...$</p> → $$...$$ (standalone single-dollar math = display intent)
-    str = str.replace(
-        /<p(?:\s[^>]*)?>(\s*)\$(?!\$)((?:[^$\\<]|\\.)+?)\$(?!\$)(\s*)<\/p>/g,
-        (_match, _ws1, content) => `$$${content}$$`
-    );
+    const expandDollarMath = (segment: string): string => {
+        // <p ...>$$...$$</p> → $$...$$ (unwrap paragraph around display math)
+        segment = segment.replace(
+            /<p(?:\s[^>]*)?>(\$\$[^<]+?\$\$)<\/p>/g,
+            (_match, content) => content
+        );
+        // <p ...>$...$</p> → $$...$$ (standalone single-dollar math = display intent)
+        segment = segment.replace(
+            /<p(?:\s[^>]*)?>(\s*)\$(?!\$)((?:[^$\\<]|\\.)+?)\$(?!\$)(\s*)<\/p>/g,
+            (_match, _ws1, content) => `$$${content}$$`
+        );
 
-    // Display math: $$...$$ → <pre class="math">$$...$$</pre>
+        // Display math: $$...$$ → <pre class="math">$$...$$</pre>
+        segment = segment.replace(
+            /\$\$([\s\S]+?)\$\$/g,
+            (match) => `<pre class="math">${match}</pre>`
+        );
+        // Inline math: $...$ → <span class="math">$...$</span>
+        // Rules: not adjacent to another $, content starts/ends with non-whitespace,
+        // allows backslash-escaped chars (e.g. \$ for literal dollar in LaTeX)
+        segment = segment.replace(
+            /(?<!\$)\$(?!\$)(?=\S)((?:[^$\\]|\\.)+?)(?<=\S)\$(?!\$)/g,
+            (match) => `<span class="math">${match}</span>`
+        );
+        return segment;
+    };
+    // Run the dollar passes only on the segments between code placeholders. Split
+    // with a capturing group so placeholder tokens survive as their own array
+    // elements and are left untouched; without this per-segment isolation the
+    // inline `[^$\\]` / display `[\s\S]` classes could match a `$...$` or `$$...$$`
+    // pair that straddles a masked code block.
+    const codeTokenSplit = new RegExp('(' + escapedCodePrefix + '\\d+__)');
+    const codeTokenExact = new RegExp('^' + escapedCodePrefix + '\\d+__$');
+    str = str
+        .split(codeTokenSplit)
+        .map((segment) => (codeTokenExact.test(segment) ? segment : expandDollarMath(segment)))
+        .join('');
+
+    // Restore masked code elements before the math/link restores below. A masked
+    // code block can internally hold __BEAVER_RAW_MATH_n__ or __BEAVER_RAW_LINK_n__
+    // placeholders (a plain <pre> may nest a class="math" wrapper or a <link/>
+    // token masked in an earlier step), so code must be restored first for those
+    // later restores to resolve the now-visible nested placeholders.
     str = str.replace(
-        /\$\$([\s\S]+?)\$\$/g,
-        (match) => `<pre class="math">${match}</pre>`
-    );
-    // Inline math: $...$ → <span class="math">$...$</span>
-    // Rules: not adjacent to another $, content starts/ends with non-whitespace,
-    // allows backslash-escaped chars (e.g. \$ for literal dollar in LaTeX)
-    str = str.replace(
-        /(?<!\$)\$(?!\$)(?=\S)((?:[^$\\]|\\.)+?)(?<=\S)\$(?!\$)/g,
-        (match) => `<span class="math">${match}</span>`
+        new RegExp(escapedCodePrefix + '(\\d+)__', 'g'),
+        (match, idx) => preservedCodeBlocks[Number(idx)] ?? match
     );
 
     str = str.replace(

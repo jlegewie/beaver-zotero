@@ -544,6 +544,14 @@
     -webkit-user-select: none;
 }
 
+[id^="beaver-pane-"] .beaver-lexical-placeholder::before {
+    content: attr(data-placeholder);
+}
+
+[id^="beaver-pane-"] .beaver-lexical-scroll:not([data-placeholder-visible="true"]) .beaver-lexical-placeholder {
+    display: none;
+}
+
 /* Argument-hint ghost text - rendered after a freshly inserted /command pill.
    It is positioned out of flow so long hints do not resize the composer. */
 [id^="beaver-pane-"] .beaver-lexical-content p[data-argument-hint] {
@@ -741,6 +749,20 @@
     padding: 0;
     line-height: 1.35;
     box-sizing: border-box;
+}
+
+/* Zotero's Windows input theme paints a focus indicator on every input/textarea:
+   a 2px accent-blue bar drawn as a background-image plus an accent bottom border
+   and a re-asserted 1px border. These controls are borderless by design and the
+   focus affordance is the wrapper's `.action-field-box:focus-within` border, so
+   the native treatment is neutralized here. */
+[id^="beaver-pane-"] .action-field-control:active,
+[id^="beaver-pane-"] .action-field-control:focus,
+[id^="beaver-pane-"] .action-field-control:focus-visible {
+    border: 0 !important;
+    outline: none !important;
+    background-color: transparent !important;
+    background-image: none !important;
 }
 
 [id^="beaver-pane-"] .action-field-control::placeholder {
@@ -2814,6 +2836,15 @@
     max-width: 180px;
 }
 
+/* Pushes a trailing control (e.g. the active-scope chip) to the right edge of
+   the filter row, regardless of what precedes it. Never shrinks — the item
+   filter chip beside it truncates instead, since it has a title to fall back
+   on while this chip's short label does not. */
+[id^="beaver-pane-"] .thread-filter-row-end {
+    margin-left: auto;
+    flex-shrink: 0;
+}
+
 [id^="beaver-pane-"] .thread-filter-chip-remove {
     display: flex;
     align-items: center;
@@ -2828,9 +2859,12 @@
 }
 
 [id^="beaver-pane-"] .thread-filter-footer-note {
-    padding: 4px 12px;
+    flex-shrink: 0;
+    padding: 6px 12px;
+    border-top: 1px solid var(--fill-quinary);
     font-size: 0.85rem;
-    color: var(--fill-tertiary);
+    line-height: 1.35;
+    color: var(--fill-secondary);
     text-align: center;
 }
 
@@ -2864,10 +2898,32 @@
     line-height: 1.3;
 }
 
+/* Flex so the trailing badge sits on the same baseline row as the timestamp
+   and can shrink instead of widening the item past the sidebar. */
 [id^="beaver-pane-"] .thread-list-item-time {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
     font-size: 0.9rem;
     color: var(--fill-tertiary);
     margin-top: 1px;
+}
+
+/* Marks a chat created in a different Zotero profile. Only visible while the
+   list is showing all instances. */
+[id^="beaver-pane-"] .thread-list-item-badge {
+    flex-shrink: 1;
+    min-width: 0;
+    padding: 0 4px;
+    border: 1px solid var(--fill-quarternary);
+    border-radius: 4px;
+    font-size: 0.8rem;
+    line-height: 1.5;
+    color: var(--fill-secondary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 [id^="beaver-pane-"] .thread-list-item-actions {

@@ -1,11 +1,18 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { atom, createStore } from 'jotai';
+
+const mocks = vi.hoisted(() => ({
+    validateItem: vi.fn(),
+    validateRegularItem: vi.fn(),
+}));
 
 vi.mock('../../../react/atoms/profile', () => ({
-    searchableLibraryIdsAtom: Symbol('searchableLibraryIdsAtom'),
+    searchableLibraryIdsAtom: atom<number[]>([]),
+    isLibraryAccessReadyAtom: atom<boolean>(false),
 }));
 
 vi.mock('../../../react/atoms/models', () => ({
-    selectedModelAtom: Symbol('selectedModelAtom'),
+    selectedModelAtom: atom(null),
 }));
 
 vi.mock('../../../src/utils/prefs', () => ({
@@ -14,16 +21,23 @@ vi.mock('../../../src/utils/prefs', () => ({
 
 vi.mock('../../../src/services/itemValidationManager', () => ({
     itemValidationManager: {
-        validateItem: vi.fn(),
-        validateRegularItem: vi.fn(),
+        validateItem: mocks.validateItem,
+        validateRegularItem: mocks.validateRegularItem,
     },
 }));
 
 import {
+    itemValidationResultsAtom,
     isHardBlockedValidation,
     isRejectedItemValidation,
     type ItemValidationState,
+    validateItemAtom,
+    validateRegularItemAtom,
 } from '../../../react/atoms/itemValidation';
+import {
+    isLibraryAccessReadyAtom,
+    searchableLibraryIdsAtom,
+} from '../../../react/atoms/profile';
 
 function item(kind: 'attachment' | 'regular'): Zotero.Item {
     return {
@@ -40,6 +54,60 @@ function validation(overrides: Partial<ItemValidationState>): ItemValidationStat
 }
 
 describe('item validation gates', () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+    });
+
+    it('defers validation while library access is still hydrating', async () => {
+        const store = createStore();
+        const attachment = {
+            key: 'ATTACH01',
+            libraryID: 1,
+            isAttachment: () => true,
+        } as unknown as Zotero.Item;
+
+        await store.set(validateItemAtom, { item: attachment });
+
+        expect(mocks.validateItem).not.toHaveBeenCalled();
+        expect(store.get(itemValidationResultsAtom).has('1-ATTACH01')).toBe(false);
+    });
+
+    it('defers regular-item batch validation while library access is still hydrating', async () => {
+        const store = createStore();
+        const regularItem = {
+            key: 'REGULAR1',
+            libraryID: 1,
+            isRegularItem: () => true,
+        } as unknown as Zotero.Item;
+
+        await store.set(validateRegularItemAtom, regularItem);
+
+        expect(mocks.validateRegularItem).not.toHaveBeenCalled();
+        expect(store.get(itemValidationResultsAtom).has('1-REGULAR1')).toBe(false);
+    });
+
+    it('validates normally once library access is ready', async () => {
+        const store = createStore();
+        const attachment = {
+            key: 'ATTACH02',
+            libraryID: 1,
+            isAttachment: () => true,
+        } as unknown as Zotero.Item;
+        mocks.validateItem.mockResolvedValueOnce({ state: 'readable' });
+        store.set(searchableLibraryIdsAtom, [1]);
+        store.set(isLibraryAccessReadyAtom, true);
+
+        await store.set(validateItemAtom, { item: attachment });
+
+        expect(mocks.validateItem).toHaveBeenCalledWith(attachment, expect.objectContaining({
+            searchableLibraryIds: [1],
+        }));
+        expect(store.get(itemValidationResultsAtom).get('1-ATTACH02')).toMatchObject({
+            state: 'readable',
+            isValidating: false,
+        });
+    });
+
     it('treats completed blocked validation as a hard block', () => {
         expect(isHardBlockedValidation(validation({ state: 'blocked' }))).toBe(true);
         expect(isHardBlockedValidation(validation({ state: 'blocked', isValidating: true }))).toBe(false);

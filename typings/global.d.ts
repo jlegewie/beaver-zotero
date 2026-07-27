@@ -28,6 +28,13 @@ declare const ZOTERO_CONFIG: {
 };
 
 interface Window {
+    /**
+     * On the separate Beaver / preferences windows: a weak reference to the
+     * main window whose `BeaverReact` bundle renders this window (set in their
+     * bootstrap scripts). They cannot outlive that window — see
+     * `BeaverUIFactory.closeWindowsRenderedBy`.
+     */
+    __beaverOwnerWindowRef?: WeakRef<Window>;
     __beaverDisposeSupabase?: () => Promise<void>;
     /** Stops the busy-context event-loop-lag heartbeat (registered by busyContext.ts) */
     __beaverStopBusyHeartbeat?: () => void;
@@ -486,6 +493,20 @@ declare namespace Zotero {
          * hook so the esbuild `fulltext_upsert` enqueue gate can read it.
          */
         const hasSearchIndexAccess: boolean | undefined;
+
+        /**
+         * Searchable-library mirror (local libraries minus the profile's
+         * excluded libraries), synced from the webpack profile hook so esbuild
+         * background code can enforce the exclusion boundary. Read it through
+         * `src/services/libraryScope`, which fails closed while it is unset.
+         */
+        const searchableLibraryIds: number[] | undefined;
+
+        /**
+         * True once `searchableLibraryIds` reflects a loaded profile and a
+         * loaded local library list.
+         */
+        const libraryScopeInitialized: boolean | undefined;
 
         /**
          * Citation object for CSL formatting

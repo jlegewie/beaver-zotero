@@ -32,6 +32,7 @@ vi.mock('../../../src/beaver-extract', () => ({
         HEAP_EXHAUSTION: 'heap_exhaustion',
     },
     isTransientWorkerError: () => false,
+    isWorkerDeadlineError: () => false,
     getMuPDFWorkerClient: vi.fn(() => ({
         getPageCount: getPageCountMock,
         extract: extractMock,
@@ -57,7 +58,14 @@ import {
     HOT_SHARED_EXTRACTION_GRACE_MS,
     type ExtractAndCacheResolvedPdfArgs,
 } from '../../../src/services/documentExtractionCore';
-import { MAX_PDF_TIMEOUT_SECONDS } from '../../../src/services/agentDataProvider/timeout';
+import {
+    MAX_INTERACTIVE_PDF_TIMEOUT_SECONDS,
+    MAX_PDF_TIMEOUT_SECONDS,
+    TimeoutError,
+} from '../../../src/services/agentDataProvider/timeout';
+// Deep import: the '../../../src/beaver-extract' barrel is mocked above, but
+// the lease constant must be the real value for the invariant check.
+import { DEFAULT_BUSY_LEASE_MS_HOT } from '../../../src/beaver-extract/MuPDFWorkerClient';
 
 const extractedResult = (pageCount: number) => ({
     mode: 'structured',
@@ -130,6 +138,38 @@ describe('extractAndCacheResolvedPdfDocument shared-extraction budget', () => {
                 sharedTimeoutMs: MAX_PDF_TIMEOUT_SECONDS * 1000,
             }),
         );
+    });
+
+    it('clamps a hot-slot request timeout to the interactive ceiling', async () => {
+        const result = await runPdf({ timeoutSeconds: MAX_PDF_TIMEOUT_SECONDS });
+
+        expect(result).toMatchObject({ kind: 'ok', totalPages: 3 });
+        expect(documentCacheMock.getOrCreateResult).toHaveBeenCalledWith(
+            expect.objectContaining({
+                lockScope: 'hot',
+                sharedTimeoutMs:
+                    MAX_INTERACTIVE_PDF_TIMEOUT_SECONDS * 1000
+                    + HOT_SHARED_EXTRACTION_GRACE_MS,
+            }),
+        );
+    });
+
+    it('does not clamp a background-slot request timeout to the interactive ceiling', async () => {
+        documentCacheMock.getOrCreateResult.mockRejectedValue(
+            new TimeoutError(170, 170_000, 'pdf_extract'),
+        );
+
+        const result = await runPdf({ workerName: 'background', timeoutSeconds: 170 });
+
+        expect(result).toMatchObject({ kind: 'timeout', timeoutSeconds: 170 });
+    });
+});
+
+describe('hot busy-lease budget invariant', () => {
+    it('keeps the interactive ceiling plus shared grace below the hot busy lease', () => {
+        expect(
+            MAX_INTERACTIVE_PDF_TIMEOUT_SECONDS * 1000 + HOT_SHARED_EXTRACTION_GRACE_MS,
+        ).toBeLessThan(DEFAULT_BUSY_LEASE_MS_HOT);
     });
 });
 

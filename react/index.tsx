@@ -14,6 +14,7 @@ import { PreferencePageTab } from './atoms/ui';
 import type { ActionCategoryFilter } from './types/actions';
 import { useZoteroTabSelection } from './hooks/useZoteroTabSelection';
 import { useZoteroContext } from './hooks/useZoteroContext';
+import { useReaderTabSelection } from './hooks/useReaderTabSelection';
 import { useProfileSync } from './hooks/useProfileSync';
 import { useToggleSidebar } from './hooks/useToggleSidebar';
 import { store } from './store';
@@ -29,6 +30,7 @@ import { useReaderAnnotationActionHandler } from './hooks/useReaderAnnotationAct
 import { useReaderVisualizerActionHandler } from './hooks/useReaderVisualizerActionHandler';
 import { useOnboardingPopups } from './hooks/useOnboardingPopups';
 import { useBackgroundWorkerStatus } from './hooks/useBackgroundWorkerStatus';
+import { useLibraryScopeMirror } from './hooks/useLibraryScopeMirror';
 import { useOcrLane } from './hooks/useOcrLane';
 import { useSearchIndexAccess } from './hooks/useSearchIndexAccess';
 import { useFulltextUpsertLane } from './hooks/useFulltextUpsertLane';
@@ -80,6 +82,11 @@ const GlobalContextInitializer = () => {
     // Track Zotero application state (selected items, collection, tags, etc.)
     useZoteroContext();
 
+    // Track the active reader tab (open attachment, text selection, new
+    // annotations). Global rather than sidebar-mounted so the separate Beaver
+    // window gets reader context while the main-window sidebar is closed.
+    useReaderTabSelection();
+
     // Realtime listener for user profile
     useProfileSync();
 
@@ -121,6 +128,10 @@ const GlobalContextInitializer = () => {
 
     // Mirror background extraction activity into the shared Jotai store
     useBackgroundWorkerStatus();
+
+    // Publish the searchable-library scope for esbuild background code. Runs
+    // before the lane hooks so the mirror is set when a lane first dispatches.
+    useLibraryScopeMirror();
 
     // Register the OCR background lane + mirror the OCR entitlement flag
     useOcrLane();

@@ -1,14 +1,12 @@
 import { atom } from "jotai";
 import { selectAtom } from 'jotai/utils';
 import { ExcludedLibrary, SafeProfileWithPlan, PlanFeatures, ProfileBalance, ProcessingMode, CreditPlanStatus, CreditBreakdown, CreditPlan } from "../types/profile";
-import { getZoteroUserIdentifier } from "../../src/utils/zoteroUtils";
 import { ZoteroLibrary } from "../types/zotero";
 import { fileStatusAtom } from "./files";
 import { compareVersions } from "../utils/compareVersions";
 import { effectiveMaxFileSizeMB, effectiveMaxPageCount } from "../../src/services/attachmentLimits";
 
 // Profile and plan state
-export const isProfileInvalidAtom = atom<boolean>(false);
 export const isProfileLoadedAtom = atom<boolean>(false);
 export const profileWithPlanAtom = atom<SafeProfileWithPlan | null>(null);
 
@@ -44,14 +42,12 @@ export const updateRequiredAtom = atom<boolean>((get) => {
 });
 
 // Device authorization state
-// A device is authorized if the user has completed authorization (pro or free) AND the device is in the list
-const { localUserKey } = getZoteroUserIdentifier();
+// True once the user has completed authorization (pro or free). Any Zotero
+// instance may use the account; threads are scoped per instance instead.
 export const isDeviceAuthorizedAtom = selectAtom(
     profileWithPlanAtom,
-    (profile: SafeProfileWithPlan | null) => {
-        const hasAnyAuthorization = profile?.has_authorized_access || profile?.has_authorized_free_access;
-        return hasAnyAuthorization && profile?.zotero_local_ids?.includes(localUserKey) || false;
-    }
+    (profile: SafeProfileWithPlan | null) =>
+        Boolean(profile?.has_authorized_access || profile?.has_authorized_free_access)
 );
 
 // --- Library atoms ---
@@ -114,8 +110,22 @@ export const searchableLibraryIdsAtom = atom<number[]>((get) => {
         .map(lib => lib.library_id);
 });
 
+/**
+ * Whether the library-access snapshot is ready to make allow/deny decisions.
+ *
+ * `searchableLibraryIdsAtom` intentionally remains fail-closed while the
+ * profile is loading, so its initial value is `[]`. Consumers that need to
+ * explain an access decision must distinguish that loading state from the
+ * genuine "all libraries excluded" state.
+ */
+export const isLibraryAccessReadyAtom = atom<boolean>((get) => {
+    return get(isProfileLoadedAtom)
+        && get(profileWithPlanAtom) !== null
+        && get(localZoteroLibrariesAtom).length > 0;
+});
+
 export const allLibrariesExcludedAtom = atom<boolean>((get) => {
-    return get(localZoteroLibrariesAtom).length > 0 && get(searchableLibraryIdsAtom).length === 0;
+    return get(isLibraryAccessReadyAtom) && get(searchableLibraryIdsAtom).length === 0;
 });
 
 // Plan data
@@ -177,14 +187,7 @@ export const indexingPlanLabelAtom = selectAtom(
     (profile: SafeProfileWithPlan | null) => profile?.indexing_plan_label ?? null,
 );
 
-export const processingModeAtom = atom<ProcessingMode>((get) => {
-    const isBackendIndexingComplete = get(isBackendIndexingCompleteAtom);
-    if (get(isDatabaseSyncSupportedAtom) && isBackendIndexingComplete) {
-        return ProcessingMode.BACKEND;
-    } else {
-        return ProcessingMode.FRONTEND;
-    }
-});
+export const processingModeAtom = atom<ProcessingMode>(() => ProcessingMode.FRONTEND);
 
 // Plan features
 export const planFeaturesAtom = atom<PlanFeatures>((get) => {

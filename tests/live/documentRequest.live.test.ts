@@ -256,7 +256,7 @@ describe('document request — non-PDF attachments', () => {
         const result = expectResult(res) as any;
         expect(res.content_kind).toBe('epub');
         expect(result.content_kind).toBe('epub');
-        expect(result.schemaVersion).toBe('1');
+        expect(result.schemaVersion).toBe('2');
         expect(result.sectionCount).toBeGreaterThan(0);
         expect(Array.isArray(result.sections)).toBe(true);
         expect(result.sections.length).toBe(result.sectionCount);

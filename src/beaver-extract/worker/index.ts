@@ -30,6 +30,7 @@ import {
 } from "./docCache";
 import { enqueue } from "./opQueue";
 import { ensureApi } from "./wasmInit";
+import { getCachedLibMuPdf } from "./apiCache";
 import { isWorkerConfigured, setWorkerUrls, type WorkerUrls } from "./config";
 import { setPDFLogger } from "../logging";
 import { ERROR_CODES, postLog } from "./errors";
@@ -132,6 +133,15 @@ interface IncomingConfigureMessage {
 
 type IncomingMessage = IncomingOpMessage | IncomingConfigureMessage;
 
+/**
+ * Current MuPDF linear-memory size after an operation. This is the WASM
+ * high-water allocation (free-list capacity included), not live document
+ * bytes. Reading the typed-array length is O(1) and does not initialize WASM.
+ */
+function currentHeapBytes(): number | null {
+    return getCachedLibMuPdf()?.HEAPU8.byteLength ?? null;
+}
+
 interface ExtractionErrorLike {
     name?: string;
     code?: string;
@@ -179,7 +189,10 @@ workerSelf.onmessage = (event: MessageEvent) => {
     enqueue(async () => {
         try {
             const { result, transfer } = await dispatch(op, args);
-            workerSelf.postMessage({ id, ok: true, result }, transfer || []);
+            workerSelf.postMessage(
+                { id, ok: true, result, heapBytes: currentHeapBytes() },
+                transfer || [],
+            );
         } catch (e: unknown) {
             let error;
             const err = e as ExtractionErrorLike;
@@ -211,7 +224,12 @@ workerSelf.onmessage = (event: MessageEvent) => {
                         "MuPDF exhausted its WASM heap while processing this PDF. The worker will be restarted before the next operation.",
                 };
             }
-            workerSelf.postMessage({ id, ok: false, error });
+            workerSelf.postMessage({
+                id,
+                ok: false,
+                error,
+                heapBytes: currentHeapBytes(),
+            });
         }
     });
 };

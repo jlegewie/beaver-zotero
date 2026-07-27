@@ -752,6 +752,21 @@ export interface WorkerStatsSnapshot {
     dispatchCounts: Record<string, number>;
     lastSpawnTime: number | null;
     idleTimerArmed: boolean;
+    workerHeapBytes: number | null;
+    peakWorkerHeapBytes: number | null;
+    completedDataOperationsSinceSpawn: number;
+    recycleHeapThresholdBytes: number | null;
+    recycleDataOperationThreshold: number | null;
+    proactiveRecyclePending: boolean;
+    proactiveRecycleCount: number;
+    lastProactiveRecycleReason: "heap_limit" | "data_operation_limit" | null;
+    lastProactiveRecycleTime: number | null;
+    lastProactiveRecycleHeapBytes: number | null;
+    lastProactiveRecycleDataOperations: number | null;
+    leaseReapCount: number;
+    lastLeaseReapTime: number | null;
+    lastLeaseReapOp: string | null;
+    lastLeaseReapAgeMs: number | null;
 }
 
 export interface WorkerStatsResponse {
@@ -776,6 +791,87 @@ export async function workerMarkStale(
     body: { reason?: string } = {},
 ): Promise<{ ok: boolean; before: WorkerStatsSnapshot; after: WorkerStatsSnapshot }> {
     return post('/beaver/test/worker-mark-stale', body);
+}
+
+/** One task outcome from the wedge-probe endpoint. */
+export interface WedgeProbeTaskResult {
+    label: string;
+    status: 'fulfilled' | 'rejected';
+    ms: number;
+    errorName?: string;
+    errorMessage?: string;
+}
+
+/**
+ * Drive a real busy-lease reap: shortens the hot slot's lease, dispatches a
+ * long worker op (plus an innocent sibling), and reports per-task outcomes
+ * and before/after stats. The lease is always restored server-side.
+ */
+export async function workerWedgeProbe(
+    fixture: { library_id: number; zotero_key: string },
+    body: {
+        leaseMs?: number;
+        op?: 'extractSerialized' | 'renderPages' | 'getPageCount' | 'search' | 'analyzeLayout';
+        sibling?: boolean;
+        renderEndIndex?: number;
+    } = {},
+): Promise<{
+    ok: boolean;
+    error?: string;
+    leaseMs?: number;
+    op?: string;
+    results?: WedgeProbeTaskResult[];
+    before?: Pick<
+        WorkerStatsSnapshot,
+        'spawnCount' | 'retryCount' | 'pendingCount' | 'leaseReapCount'
+    >;
+    after?: WorkerStatsSnapshot;
+}> {
+    return post('/beaver/test/worker-wedge-probe', { ...fixture, ...body });
+}
+
+/**
+ * Drive a real idle-timer reap on the hot slot (proves the injected
+ * realm-independent timers fire). Restores the production idle timeout
+ * server-side.
+ */
+export async function workerIdleProbe(
+    body: { idleMs?: number; waitMs?: number } = {},
+): Promise<{
+    ok: boolean;
+    idleMs: number;
+    waitMs: number;
+    hasWorkerAfterPing: boolean;
+    idleTimerArmedAfterPing: boolean;
+    hasWorkerAfterWait: boolean;
+    idleTimerArmedAfterWait: boolean;
+}> {
+    return post('/beaver/test/worker-idle-probe', body);
+}
+
+/** Realm/timer wiring info and self-heal probes for the hot worker slot. */
+export async function workerRealmProbe(
+    action: 'info' | 'identity' | 'simulate-dead-realm' | 'legacy-stub',
+): Promise<{
+    ok: boolean;
+    error?: string;
+    // info
+    timersInjected?: boolean;
+    hasCreatorTracking?: boolean;
+    isCreatorRealmDead?: boolean;
+    createdFromWindowRecorded?: boolean;
+    // identity
+    sameInstance?: boolean;
+    // simulate-dead-realm
+    doomedReportedDead?: boolean;
+    replaced?: boolean;
+    doomedDisposed?: boolean;
+    replacementIsCreatorRealmDead?: boolean;
+    replacementHasTracking?: boolean;
+    // legacy-stub
+    stubDisposed?: boolean;
+}> {
+    return post('/beaver/test/worker-realm-probe', { action });
 }
 
 // ---------------------------------------------------------------------------
@@ -908,6 +1004,11 @@ export interface BackgroundStatsResponse {
         hot: WorkerStatsSnapshot | null;
         background: WorkerStatsSnapshot | null;
     };
+    /** Searchable-library mirror the dispatcher gates claims on. */
+    library_scope?: {
+        initialized: boolean | null;
+        searchable_library_ids: number[] | null;
+    };
     error?: string;
 }
 
@@ -922,6 +1023,7 @@ export type BackgroundProcessOnceReason =
     | 'shutting_down'
     | 'no_window'
     | 'hot_busy'
+    | 'library_scope_unknown'
     | 'empty'
     | 'job_done';
 
@@ -1162,4 +1264,37 @@ export async function resolveItemReferenceViaHttp(
     ref: { library_ref?: string | null; library_id?: number; zotero_key?: string },
 ): Promise<ResolveItemReferenceResponse> {
     return post('/beaver/test/library-identity', { op: 'resolve_item', ...ref });
+}
+
+// ---------------------------------------------------------------------------
+// Reader sidebar-width wrapper lifecycle (dev-only)
+//
+// Talks to `/beaver/test/sidebar-width-handler` (see
+// `react/hooks/httpHandlers/testUiHandlers.ts`), which drives the real
+// UIManager install/unwrap/restore path against the live `Zotero.Reader`.
+// Every mutating scenario restores the slot before returning.
+// ---------------------------------------------------------------------------
+
+export type SidebarWidthScenario =
+    | 'inspect'
+    | 'install-over-plain-original'
+    | 'replace-stale-tagged'
+    | 'replace-legacy'
+    | 'restore-unwinds-own'
+    | 'restore-clears-bare-legacy'
+    | 'restore-leaves-foreign'
+    | 'own-wrapper-skip'
+    | 'reinstall-after-displacement'
+    | 'unwrap-direct';
+
+export interface SidebarWidthScenarioResponse {
+    ok?: boolean;
+    error?: string;
+    [key: string]: unknown;
+}
+
+export async function sidebarWidthScenario(
+    scenario: SidebarWidthScenario,
+): Promise<SidebarWidthScenarioResponse> {
+    return post('/beaver/test/sidebar-width-handler', { scenario });
 }

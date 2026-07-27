@@ -9,7 +9,7 @@ import { DocumentCache } from "./services/documentCache";
 import { BackgroundExtractor } from "./services/backgroundExtractor";
 import { ReconcilerService } from "./services/backgroundProcessing/reconciler";
 import { NewItemWatcher } from "./services/backgroundProcessing/newItemWatcher";
-import { uiManager } from "../react/ui/UIManager";
+import { uiManager, restoreReaderSidebarWidthHandler } from "../react/ui/UIManager";
 import { getPref, setPref } from "./utils/prefs";
 import { addPendingVersionNotification } from "./utils/versionNotificationPrefs";
 import { compareVersions } from "./utils/compareVersions";
@@ -387,25 +387,27 @@ async function onMainWindowUnload(win: Window): Promise<void> {
     ztoolkit.log("onMainWindowUnload: Starting cleanup");
 
     try {
-        // Worker-window hygiene: the MuPDF workers are owned by the realm
-        // that spawned them. If the closing window is that realm for either
-        // slot, terminate the corresponding worker now — even on early-return
-        // paths — otherwise the singleton on Zotero outlives its parent
-        // window and the next postMessage throws. The next caller will
-        // lazily respawn the slot against the new window.
+        // Worker-window hygiene: dispose a slot's client when the closing
+        // window is either the realm that spawned its worker (the next
+        // postMessage would throw) or the realm whose bundle constructed
+        // the client itself.
         try {
             const hotClient = (Zotero as any).__beaverMuPDFWorkerClient_hot as
-                | { spawnedFromWindow: Window | null }
+                | { spawnedFromWindow: Window | null; createdFromWindow?: Window | null }
                 | undefined;
             const backgroundClient = (Zotero as any).__beaverMuPDFWorkerClient_background as
-                | { spawnedFromWindow: Window | null }
+                | { spawnedFromWindow: Window | null; createdFromWindow?: Window | null }
                 | undefined;
             const slots: Array<["hot" | "background", typeof hotClient]> = [
                 ["hot", hotClient],
                 ["background", backgroundClient],
             ];
             for (const [name, client] of slots) {
-                if (client?.spawnedFromWindow === win) {
+                if (
+                    client
+                    && (client.spawnedFromWindow === win
+                        || client.createdFromWindow === win)
+                ) {
                     // For the background slot, abort the processor's
                     // in-flight job FIRST.
                     if (name === "background" && addon.backgroundExtractor) {
@@ -473,6 +475,17 @@ async function onMainWindowUnload(win: Window): Promise<void> {
             ztoolkit.log(`resumeSyncAfterRun: ${e}`);
         }
 
+        // The separate Beaver and preferences windows render with THIS window's
+        // React instance and share its Jotai store, so they cannot outlive it.
+        // Close them before React is torn down (their roots then unmount
+        // cleanly). This runs on every main-window unload, not only during
+        // global cleanup: with several main windows the owner can close while
+        // others remain, and on macOS the app keeps running after the last
+        // window closes — in both cases a surviving auxiliary window would be
+        // frozen against a dead bundle, with its state invisible to the bundle
+        // a reopened main window loads.
+        BeaverUIFactory.closeWindowsRenderedBy(win, isLastWindow);
+
         // Dev-only: visualizer highlights are temporary reader annotations
         // owned by the React bundle, so clear them before unmounting React.
         await cleanupDevTemporaryAnnotations(win);
@@ -492,7 +505,14 @@ async function onMainWindowUnload(win: Window): Promise<void> {
             ztoolkit.log("onMainWindowUnload: Other windows remain, skipping global cleanup");
             return;
         }
-        
+
+        // Restore Zotero.Reader.onChangeSidebarWidth even when the app keeps
+        // running (macOS last-window close): the wrapper was installed by this
+        // window's React bundle and would otherwise outlive the window on the
+        // app-lifetime Zotero.Reader singleton, pinning the closed window's
+        // compartment. It is re-installed on the next sidebar open.
+        restoreReaderSidebarWidthHandler();
+
         if (!shouldRunGlobalCleanup) {
             ztoolkit.log("onMainWindowUnload: Last window closed but app still running, skipping global cleanup");
             return;
@@ -566,7 +586,8 @@ async function onMainWindowUnload(win: Window): Promise<void> {
         ztoolkit.unregisterAll();
         addon.data.dialog?.window?.close();
 
-        // 9. Close separate Beaver and preferences windows if open
+        // 9. Close separate Beaver and preferences windows if any survived
+        //    (normally already closed above, before React was torn down)
         BeaverUIFactory.closeBeaverWindow();
         BeaverUIFactory.closePreferencesWindow();
 

@@ -35,10 +35,18 @@ import {
     getResolvedAttachmentParentStub,
     buildServedAttachmentStub,
 } from './handleZoteroDocumentRequest';
-import { BeaverExtractor, ExtractionError, ExtractionErrorCode, WorkerAbortError } from '../../beaver-extract';
+import {
+    BeaverExtractor,
+    ExtractionError,
+    ExtractionErrorCode,
+    WorkerAbortError,
+    isWorkerDeadlineError,
+} from '../../beaver-extract';
 import { effectiveMaxFileSizeMB, effectiveMaxPageCount } from '../attachmentLimits';
+import { createWorkerDispatchFlag, withWorkerDiagnostics } from './workerDiagnostics';
 import {
     DEFAULT_IMAGES_TIMEOUT_SECONDS,
+    MAX_INTERACTIVE_PDF_TIMEOUT_SECONDS,
     TimeoutError,
     createTimeoutController,
 } from './timeout';
@@ -335,11 +343,16 @@ export async function handleZoteroViewImagesRequest(
             });
 
             if (pdfResponse.error) {
-                return errorResponse(
-                    pdfResponse.error,
-                    pdfResponse.error_code ?? 'render_failed',
-                    pdfResponse.total_pages,
-                );
+                return {
+                    ...errorResponse(
+                        pdfResponse.error,
+                        pdfResponse.error_code ?? 'render_failed',
+                        pdfResponse.total_pages,
+                    ),
+                    ...(pdfResponse.worker_diagnostics
+                        ? { worker_diagnostics: pdfResponse.worker_diagnostics }
+                        : {}),
+                };
             }
 
             const images: WSViewImage[] = pdfResponse.pages.map((page) => ({
@@ -501,8 +514,15 @@ async function handleExternalFileViewRequest(
         );
     }
 
-    const timeout = createTimeoutController(timeout_seconds, DEFAULT_IMAGES_TIMEOUT_SECONDS);
+    const timeout = createTimeoutController(
+        timeout_seconds,
+        DEFAULT_IMAGES_TIMEOUT_SECONDS,
+        undefined,
+        MAX_INTERACTIVE_PDF_TIMEOUT_SECONDS,
+    );
     const { signal, timeoutSeconds, throwIfTimedOut, dispose } = timeout;
+
+    const workerDispatched = createWorkerDispatchFlag();
 
     try {
         // Size check against the hard cap (the copy is always local).
@@ -571,6 +591,7 @@ async function handleExternalFileViewRequest(
         // PDF: render the requested contiguous range via the MuPDF worker.
         resolvedKind = 'pdf';
         const extractor = new BeaverExtractor();
+        workerDispatched.mark();
         const totalPages = await extractor.getPageCount(fileBytes, signal);
         throwIfTimedOut('page_count_extraction');
         if (totalPages === 0) {
@@ -630,8 +651,16 @@ async function handleExternalFileViewRequest(
             served_attachment: servedExternal,
         };
     } catch (error) {
-        if (signal.aborted || error instanceof WorkerAbortError || error instanceof TimeoutError) {
-            return errorResponse(`Rendering timed out after ${timeoutSeconds} seconds`, 'timeout');
+        if (
+            signal.aborted
+            || error instanceof WorkerAbortError
+            || error instanceof TimeoutError
+            || isWorkerDeadlineError(error)
+        ) {
+            return withWorkerDiagnostics(
+                errorResponse(`Rendering timed out after ${timeoutSeconds} seconds`, 'timeout'),
+                { workerDispatched: workerDispatched.value, leaseReaped: isWorkerDeadlineError(error) },
+            );
         }
         if (error instanceof ExtractionError) {
             switch (error.code) {

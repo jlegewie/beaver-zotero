@@ -422,7 +422,7 @@ describe('background queue — content_kind dispatch in processOnce', () => {
         // and extracts the single child PDF.
         const resolved = await resolveItem(PARENT_ITEM.library_id, PARENT_ITEM.zotero_key);
         expect(resolved.is_attachment).toBe(false);
-        expect(resolved.resolved_pdf_key).toBe(`${SMALL_PDF.library_id}-${SMALL_PDF.zotero_key}`);
+        expect(resolved.resolved_pdf_key).toBe(`u-${SMALL_PDF.zotero_key}`);
 
         // Start the resolved child cold so a populated cache proves extraction ran.
         await invalidateCache(SMALL_PDF.library_id, SMALL_PDF.zotero_key);

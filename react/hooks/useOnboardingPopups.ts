@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { getPref, setPref } from '../../src/utils/prefs';
-import { isSidebarVisibleAtom, isLibraryTabAtom } from '../atoms/ui';
+import { isBeaverUIVisibleAtom, isLibraryTabAtom } from '../atoms/ui';
 import { addFloatingPopupMessageAtom, floatingPopupMessagesAtom } from '../atoms/floatingPopup';
 import { currentNoteItemAtom } from '../atoms/zoteroContext';
 import { getCurrentReader } from '../utils/readerUtils';
@@ -22,7 +22,8 @@ const NOTE_TIP_DELAY_MS = 500;
  * 3. Note tip popup on first note tab open (shown to all users once)
  */
 export function useOnboardingPopups() {
-    const isSidebarVisible = useAtomValue(isSidebarVisibleAtom);
+    // Covers both surfaces: no tip when the sidebar OR the separate window is open
+    const isBeaverUIVisible = useAtomValue(isBeaverUIVisibleAtom);
     const isLibraryTab = useAtomValue(isLibraryTabAtom);
     const noteItem = useAtomValue(currentNoteItemAtom);
     const floatingPopupMessages = useAtomValue(floatingPopupMessagesAtom);
@@ -38,8 +39,8 @@ export function useOnboardingPopups() {
         const alreadyShown = getPref('onboardingWelcomeShown');
         if (alreadyShown) return;
 
-        // Don't show if sidebar is already open
-        if (isSidebarVisible) return;
+        // Don't show if Beaver is already open
+        if (isBeaverUIVisible) return;
 
         welcomeShownThisSessionRef.current = true;
         setPref('onboardingWelcomeShown', true);
@@ -52,7 +53,7 @@ export function useOnboardingPopups() {
             expire: false,
             cancelable: false,
         });
-    }, [isSidebarVisible, addFloatingPopupMessage]);
+    }, [isBeaverUIVisible, addFloatingPopupMessage]);
 
     // === Popup 2: Reader tip on first PDF reader tab ===
     useEffect(() => {
@@ -66,8 +67,8 @@ export function useOnboardingPopups() {
         const alreadyShown = getPref('onboardingReaderTipShownV2');
         if (alreadyShown) return;
 
-        // Don't show if Beaver sidebar is already open
-        if (isSidebarVisible) return;
+        // Don't show if Beaver is already open
+        if (isBeaverUIVisible) return;
 
         // Don't compete with the version-update popup: skip while one is showing, and
         // enforce a gap after it was last shown so the tip doesn't appear right after it.
@@ -118,7 +119,7 @@ export function useOnboardingPopups() {
         }, READER_TIP_DELAY_MS);
 
         return () => clearTimeout(timerId);
-    }, [isLibraryTab, isSidebarVisible, floatingPopupMessages, addFloatingPopupMessage]);
+    }, [isLibraryTab, isBeaverUIVisible, floatingPopupMessages, addFloatingPopupMessage]);
 
     // === Popup 3: Note tip on first note tab ===
     useEffect(() => {
@@ -130,8 +131,8 @@ export function useOnboardingPopups() {
         const alreadyShown = getPref('onboardingNoteTipShown');
         if (alreadyShown) return;
 
-        // Don't show if Beaver sidebar is already open
-        if (isSidebarVisible) return;
+        // Don't show if Beaver is already open
+        if (isBeaverUIVisible) return;
 
         // Enforce 1-hour gap from welcome popup
         const welcomeShownAt = getPref('onboardingWelcomeShownAt');
@@ -157,5 +158,5 @@ export function useOnboardingPopups() {
         }, NOTE_TIP_DELAY_MS);
 
         return () => clearTimeout(timerId);
-    }, [noteItem, isSidebarVisible, addFloatingPopupMessage]);
+    }, [noteItem, isBeaverUIVisible, addFloatingPopupMessage]);
 }

@@ -3,6 +3,7 @@ import type {
     BackgroundJobInput,
     BackgroundJobPayload,
 } from '../database';
+import { isLibraryInScope } from '../libraryScope';
 import { getPref } from '../../utils/prefs';
 import { BACKGROUND_UNTAG_PRIORITY } from './constants';
 
@@ -38,17 +39,12 @@ export function backgroundProcessingLibraryToken(libraryId: number): string | nu
 }
 
 /**
- * Library-exclusion boundary for background work. True only once the scope is
- * known, so unresolved startup states never read as excluded.
+ * True when background producers may touch this library: searchable-library
+ * scope is known and includes it, and the per-library skip pref does not.
+ * Fail-closed while the mirror is unpublished.
  */
-export function isLibraryExcludedFromScope(libraryId: number): boolean {
-    return Zotero.Beaver?.libraryScopeInitialized === true
-        && !(Zotero.Beaver.searchableLibraryIds ?? []).includes(libraryId);
-}
-
 export function isBackgroundProcessingLibraryEnabled(libraryId: number): boolean {
-    if (Zotero.Beaver?.libraryScopeInitialized !== true) return false;
-    if (!(Zotero.Beaver?.searchableLibraryIds ?? []).includes(libraryId)) return false;
+    if (!isLibraryInScope(libraryId)) return false;
     const token = backgroundProcessingLibraryToken(libraryId);
     return token !== null && !getBackgroundProcessingSkipTokens().has(token);
 }

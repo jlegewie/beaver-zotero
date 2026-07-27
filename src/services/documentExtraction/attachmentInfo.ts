@@ -11,6 +11,8 @@ import { isReadableContentKind, type AttachmentInfo, type ContentKind } from './
 import { getPDFPageCountFromFulltext, getPDFPageCountFromWorker } from './shared/pageCount';
 import type { TimingAccumulator } from '../../utils/timing';
 import { libraryRefForLibraryID, modelObjectId } from '../../utils/libraryIdentity';
+import { createAbortController } from '../../utils/abortController';
+import { MAX_INTERACTIVE_PDF_TIMEOUT_SECONDS } from '../agentDataProvider/timeout';
 
 export interface AttachmentInfoOptions {
     parentItemId?: string | null;
@@ -25,6 +27,13 @@ export interface AttachmentInfoOptions {
     pdfAnalysis?: 'full' | 'lightweight';
     /** Queue background OCR when a PDF is determined to need it (no text layer) */
     enqueueOcrIfNeeded?: boolean;
+    /**
+     * Optional caller cancellation for the full PDF analysis path. When
+     * provided, its abort cancels the in-flight worker calls. The path also
+     * always applies its own internal deadline, so callers that cannot supply
+     * a signal are still bounded (see PDF_ANALYSIS_WORKER_DEADLINE_MS).
+     */
+    signal?: AbortSignal;
     timing?: TimingAccumulator;
 }
 
@@ -170,6 +179,48 @@ const PDF_HEAP_EXHAUSTION_MAX_ATTEMPTS = 2;
 const PDF_ANALYSIS_RETRY_BACKOFF_MS = [400, 1200];
 const PDF_ANALYSIS_TOTAL_BUDGET_MS = 8000;
 
+/**
+ * Internal deadline applied to each PDF analysis worker call. This path is
+ * reached from callers that cannot supply a deadline of their own, so no single
+ * worker operation may age past the shared hot MuPDF worker's busy-age lease.
+ * The deadline equals the interactive hot-slot ceiling
+ * (MAX_INTERACTIVE_PDF_TIMEOUT_SECONDS), which is kept at or below that lease;
+ * on expiry the worker call aborts and is classified as a non-transient
+ * analysis failure (pdf_analysis_error).
+ *
+ * The budget is per operation because the lease it protects is also measured
+ * per operation: a document whose metadata and OCR probes are each individually
+ * within budget must still analyze successfully.
+ */
+const PDF_ANALYSIS_WORKER_DEADLINE_MS = MAX_INTERACTIVE_PDF_TIMEOUT_SECONDS * 1000;
+
+/**
+ * Run one PDF worker call under a fresh deadline, aborting it if the deadline
+ * expires or the caller cancels. Returns whatever the call returns; an expiry
+ * surfaces as the worker's own abort rejection.
+ */
+async function withWorkerDeadline<T>(
+    callerSignal: AbortSignal | undefined,
+    run: (signal: AbortSignal) => Promise<T>,
+): Promise<T> {
+    const controller = createAbortController();
+    const timer = setTimeout(() => controller.abort(), PDF_ANALYSIS_WORKER_DEADLINE_MS);
+    const onCallerAbort = () => controller.abort();
+    if (callerSignal) {
+        if (callerSignal.aborted) {
+            controller.abort();
+        } else {
+            callerSignal.addEventListener('abort', onCallerAbort, { once: true });
+        }
+    }
+    try {
+        return await run(controller.signal);
+    } finally {
+        clearTimeout(timer);
+        callerSignal?.removeEventListener('abort', onCallerAbort);
+    }
+}
+
 function delay(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -254,16 +305,30 @@ async function resolvePdfInfo(
         return { page_count: null, status: 'unreadable', status_reason: 'Failed to load attachment file.' };
     }
 
+    // Each worker call below runs under its own deadline so it can never hold
+    // the shared hot MuPDF worker past its busy-age lease, and so an optional
+    // caller cancellation is honored. When a deadline (or the caller signal)
+    // fires, the in-flight worker op rejects with a WorkerAbortError, which the
+    // retry loop classifies as a non-transient failure (pdf_analysis_error) and
+    // does not retry.
+    const callerSignal = options.signal;
+
     // One worker analysis attempt. The retry loop classifies any thrown error.
     const runAnalysis = async (): Promise<Pick<AttachmentInfo, 'status' | 'status_code' | 'status_reason' | 'page_count'>> => {
         const extractor = new BeaverExtractor();
-        const metadata = await extractor.getMetadata(pdfData);
+        const metadata = await withWorkerDeadline(
+            callerSignal,
+            (signal) => extractor.getMetadata(pdfData, signal),
+        );
         const { pageCount, pageLabels, pages } = metadata;
         if (pageCount === 0) {
             return { page_count: 0, status: 'unreadable', status_code: 'pdf_invalid' };
         }
 
-        const ocrAnalysis = await extractor.analyzeOCRNeeds(pdfData);
+        const ocrAnalysis = await withWorkerDeadline(
+            callerSignal,
+            (signal) => extractor.analyzeOCRNeeds(pdfData, {}, signal),
+        );
         if (ocrAnalysis.needsOCR) {
             await cache?.putErrorMetadata({ item: attachment, filePath: availability.filePath, sourceSizeBytes, contentType: availability.contentType, errorCode: 'no_text_layer', pageCount, pageLabels, pages: pages ?? null });
             // Kick off a background OCR job (entitlement- and loop-guard-gated).
@@ -343,7 +408,7 @@ async function resolvePdfInfo(
                 return { page_count: null, status: 'readable' };
             }
 
-            // Unknown, non-transient failure.
+            // Unknown, non-transient failure (includes a caller/deadline abort).
             logger(`getAttachmentInfo: Error analyzing PDF: ${error}`, 1);
             return { page_count: null, status: 'unreadable', status_code: 'pdf_analysis_error' };
         }

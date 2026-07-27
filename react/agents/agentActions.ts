@@ -3,7 +3,6 @@ import { logger } from '../../src/utils/logger';
 import { isLibraryReferencePortable, resolveItemReference } from '../../src/utils/libraryIdentity';
 import { dismissDiffPreview } from '../utils/noteEditorDiffPreview';
 import { updateDiffPreviewForNote, diffPreviewNoteKeyAtom } from '../utils/diffPreviewCoordinator';
-import { makeNoteKey } from '../atoms/editNoteAutoApprove';
 import { agentActionsService, AckActionLink } from '../../src/services/agentActionsService';
 import { notifyApprovalRequest } from '../../src/services/systemNotifications';
 import { ZoteroItemReference } from '../types/zotero';
@@ -160,6 +159,17 @@ export const isManageCollectionsAgentAction = (action: AgentAction): action is M
 export const isEditNoteAgentAction = (action: AgentAction): boolean => {
     return action.action_type === 'edit_note';
 };
+
+/**
+ * Type guard for batch edit note actions
+ */
+export const isEditNoteBatchAgentAction = (action: AgentAction): boolean => {
+    return action.action_type === 'edit_note_batch';
+};
+
+/** edit_note OR edit_note_batch — any note-edit action against a single note. */
+export const isAnyEditNoteAgentAction = (action: AgentAction): boolean =>
+    isEditNoteAgentAction(action) || isEditNoteBatchAgentAction(action);
 
 /**
  * Type guard for confirm extraction actions
@@ -1021,8 +1031,8 @@ export const addPendingApprovalAtom = atom(
             return next;
         });
 
-        // Trigger in-editor diff preview for edit_note approvals
-        if (event.action_type === 'edit_note') {
+        // Trigger in-editor diff preview for edit_note / edit_note_batch approvals
+        if (event.action_type === 'edit_note' || event.action_type === 'edit_note_batch') {
             const { library_id, zotero_key } = event.action_data || {};
             if (library_id != null && zotero_key) {
                 updateDiffPreviewForNote(library_id, zotero_key);
@@ -1036,30 +1046,45 @@ export const addPendingApprovalAtom = atom(
 );
 
 /**
- * Remove a specific pending approval by actionId (after user responds).
+ * Remove pending approvals in one map update, then refresh any affected note
+ * previews from the final state. This avoids briefly re-showing a preview while
+ * a same-group approval batch is being removed.
  */
-export const removePendingApprovalAtom = atom(
+export const removePendingApprovalsAtom = atom(
     null,
-    (get, set, actionId: string) => {
-        // Read the approval before removing so we know which note to update
+    (get, set, actionIds: Iterable<string>) => {
+        const ids = new Set(actionIds);
+        if (ids.size === 0) return;
+
         const prev = get(pendingApprovalsAtom);
-        const removed = prev.get(actionId);
+        const affectedNotes = new Map<string, { libraryId: number; zoteroKey: string }>();
+        for (const actionId of ids) {
+            const removed = prev.get(actionId);
+            if (removed?.actionType !== 'edit_note' && removed?.actionType !== 'edit_note_batch') continue;
+            const libraryId = removed.actionData?.library_id;
+            const zoteroKey = removed.actionData?.zotero_key;
+            if (libraryId == null || !zoteroKey) continue;
+            affectedNotes.set(`${libraryId}-${zoteroKey}`, { libraryId, zoteroKey });
+        }
 
         set(pendingApprovalsAtom, (p) => {
             const next = new Map(p);
-            next.delete(actionId);
+            for (const actionId of ids) next.delete(actionId);
             return next;
         });
 
-        // If the removed approval was edit_note, update/dismiss the preview
-        if (removed?.actionType === 'edit_note') {
-            const libId = removed.actionData?.library_id;
-            const zKey = removed.actionData?.zotero_key;
-            if (libId != null && zKey) {
-                updateDiffPreviewForNote(libId, zKey);
-            }
+        for (const { libraryId, zoteroKey } of affectedNotes.values()) {
+            updateDiffPreviewForNote(libraryId, zoteroKey);
         }
     }
+);
+
+/** Remove a specific pending approval by actionId (after user responds). */
+export const removePendingApprovalAtom = atom(
+    null,
+    (_get, set, actionId: string) => {
+        set(removePendingApprovalsAtom, [actionId]);
+    },
 );
 
 /**
@@ -1168,7 +1193,7 @@ export async function buildPendingApprovalFromAction(action: AgentAction): Promi
     } else if (actionType === 'confirm_external_search') {
         // No Zotero data fetching needed — cost info is entirely in proposed_data
         currentValue = undefined;
-    } else if (actionType === 'edit_note') {
+    } else if (actionType === 'edit_note' || actionType === 'edit_note_batch') {
         // No extra Zotero data fetching needed — old_string/new_string are in proposed_data
         currentValue = undefined;
     }

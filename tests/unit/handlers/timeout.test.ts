@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
     ExternalAbortError,
+    MAX_INTERACTIVE_PDF_TIMEOUT_SECONDS,
     MAX_PDF_TIMEOUT_SECONDS,
     TimeoutError,
     createTimeoutController,
@@ -35,6 +36,40 @@ describe('createTimeoutController', () => {
         const timeout = createTimeoutController(999, 30);
 
         expect(timeout.timeoutSeconds).toBe(MAX_PDF_TIMEOUT_SECONDS);
+
+        timeout.dispose();
+    });
+
+    it('clamps to a caller-provided ceiling and leaves in-budget values alone', () => {
+        const clamped = createTimeoutController(
+            MAX_PDF_TIMEOUT_SECONDS,
+            30,
+            undefined,
+            MAX_INTERACTIVE_PDF_TIMEOUT_SECONDS,
+        );
+        const within = createTimeoutController(
+            45,
+            30,
+            undefined,
+            MAX_INTERACTIVE_PDF_TIMEOUT_SECONDS,
+        );
+
+        expect(clamped.timeoutSeconds).toBe(MAX_INTERACTIVE_PDF_TIMEOUT_SECONDS);
+        expect(within.timeoutSeconds).toBe(45);
+
+        clamped.dispose();
+        within.dispose();
+    });
+
+    it('clamps an oversized default with a caller-provided ceiling', () => {
+        const timeout = createTimeoutController(
+            undefined,
+            MAX_PDF_TIMEOUT_SECONDS,
+            undefined,
+            MAX_INTERACTIVE_PDF_TIMEOUT_SECONDS,
+        );
+
+        expect(timeout.timeoutSeconds).toBe(MAX_INTERACTIVE_PDF_TIMEOUT_SECONDS);
 
         timeout.dispose();
     });

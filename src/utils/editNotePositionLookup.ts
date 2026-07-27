@@ -27,11 +27,12 @@ import { stripDataCitationItems } from './noteWrapper';
 import {
     type CandidateSnippet,
     centerTruncate,
-    DEFAULT_MAX_SNIPPET_LENGTH,
     findCandidateSnippets,
     findInlineTagDriftMatch,
     findStructuralAnchorHint,
     findWindowCandidates,
+    markTruncatedUnlessVerbatim,
+    pasteableSnippetBudget,
 } from './editNoteHints';
 import {
     captureValidatedEditTargetContext,
@@ -172,10 +173,16 @@ export function buildZeroMatchHint(
             + 'new_string based on intent — keep the same tags around the '
             + 'same words to preserve the formatting, or omit them to remove '
             + 'the formatting.';
-        const driftTrimmed = centerTruncate(
-            drift.noteSpan,
-            Math.floor(drift.noteSpan.length / 2),
-            DEFAULT_MAX_SNIPPET_LENGTH,
+        // The message above tells the model to copy this exact span, and the
+        // span is a verbatim slice of the note — so let the whole thing through
+        // rather than handing back a clipped version it cannot paste.
+        const driftTrimmed = markTruncatedUnlessVerbatim(
+            centerTruncate(
+                drift.noteSpan,
+                Math.floor(drift.noteSpan.length / 2),
+                pasteableSnippetBudget(drift.noteSpan.length),
+            ),
+            simplified,
         );
         return {
             kind: 'drift',
@@ -215,10 +222,16 @@ export function buildZeroMatchHint(
             + ' but its actual context in the note is:\n'
             + `\`\`\`\n${structural.context}\n\`\`\`\n`
             + 'Rewrite old_string to match the surrounding content shown above.';
-        const structuralTrimmed = centerTruncate(
-            structural.context,
-            Math.floor(structural.context.length / 2),
-            DEFAULT_MAX_SNIPPET_LENGTH,
+        // `structural.context` already carries its own `…` markers when the
+        // anchor window was cut out of a longer note, so it stays flagged as
+        // truncated even when it fits the snippet budget whole.
+        const structuralTrimmed = markTruncatedUnlessVerbatim(
+            centerTruncate(
+                structural.context,
+                Math.floor(structural.context.length / 2),
+                pasteableSnippetBudget(structural.context.length),
+            ),
+            simplified,
         );
         return {
             kind: 'structural',
@@ -592,6 +605,17 @@ function locateUndoSeam(
                     // Editor may have inserted whitespace between contexts;
                     // span the gap so the undo replaces it.
                     return { kind: 'seam', insertionPoint: beforeEnd, gapEnd: afterIdx };
+                }
+                // afterCtx was stored but isn't near beforeCtx anymore. Only
+                // fall back to the before-only seam when afterCtx has
+                // drifted out of the ENTIRE document (not merely moved
+                // elsewhere, which would leave its true seam ambiguous) and
+                // beforeCtx pins down exactly one position in the note.
+                if (
+                    strippedHtml.indexOf(afterCtx) === -1
+                    && strippedHtml.indexOf(beforeCtx, beforeIdx + 1) === -1
+                ) {
+                    return { kind: 'seam', insertionPoint: beforeEnd };
                 }
             } else {
                 return { kind: 'seam', insertionPoint: beforeEnd };

@@ -448,6 +448,34 @@ describe('simplification roundtrip invariant', () => {
         const expanded = expandToRawHtml(simplified, metadata, 'old');
         expect(expanded).toBe(roundtripExpected(html));
     });
+
+    it('note with two $schema code blocks: dollars stay literal through roundtrip', () => {
+        const html = wrap(
+            '<pre>{ "$schema": "https://a" }</pre>'
+            + '<p>text</p>'
+            + '<pre>{ "$schema": "https://b" }</pre>'
+        );
+        const { simplified, metadata } = simplifyNoteHtml(html, 1);
+        const expanded = expandToRawHtml(simplified, metadata, 'old');
+        expect(expanded).toBe(roundtripExpected(html));
+        expect(expanded).not.toContain('class="math"');
+    });
+
+    it('note with a shell code block: $HOME:$PATH stays literal through roundtrip', () => {
+        const html = wrap('<pre><code>export PATH=$HOME/bin:$PATH</code></pre>');
+        const { simplified, metadata } = simplifyNoteHtml(html, 1);
+        const expanded = expandToRawHtml(simplified, metadata, 'old');
+        expect(expanded).toBe(roundtripExpected(html));
+        expect(expanded).not.toContain('class="math"');
+    });
+
+    it('note with inline code containing dollars stays literal through roundtrip', () => {
+        const html = wrap('<p>Use <code>df$a + df$b</code> in analysis.</p>');
+        const { simplified, metadata } = simplifyNoteHtml(html, 1);
+        const expanded = expandToRawHtml(simplified, metadata, 'old');
+        expect(expanded).toBe(roundtripExpected(html));
+        expect(expanded).not.toContain('class="math"');
+    });
 });
 
 
@@ -1658,6 +1686,61 @@ describe('executeEditNoteAction + undoEditNoteAction', () => {
         };
         expect(toSimplifiedNoLabels(restoredHtml)).toBe(toSimplifiedNoLabels(noteHtml));
         expect(undoItem.saveTx).toHaveBeenCalled();
+    });
+
+    it('str_replace on a code block with dollars applies on the first try and undo restores it', async () => {
+        // PM-normalize so item.getNote() matches the expanded old_string.
+        const noteHtml = normalizeNoteHtml(wrap(
+            '<p>Setup:</p><pre>export PATH=$HOME/bin:$PATH</pre><p>Run it.</p>'
+        ));
+        const item = makeMockItem(noteHtml);
+        (globalThis as any).Zotero.Items.getByLibraryAndKeyAsync = vi.fn().mockResolvedValue(item);
+        (globalThis as any).Zotero.Notes._editorInstances = [];
+
+        const { executeEditNoteAction, undoEditNoteAction } = await importEditNoteActions();
+        const action = makeAction({
+            proposed_data: {
+                library_id: 1,
+                zotero_key: 'NOTE0001',
+                old_string: '<pre>export PATH=$HOME/bin:$PATH</pre>',
+                new_string: '<pre>export PATH=$HOME/local/bin:$PATH</pre>',
+            },
+        });
+
+        const result = await executeEditNoteAction(action);
+        expect(result.occurrences_replaced).toBe(1);
+
+        const editedHtml = item.getNote();
+        expect(editedHtml).toContain('<pre>export PATH=$HOME/local/bin:$PATH</pre>');
+        expect(editedHtml).not.toContain('class="math"');
+
+        await undoEditNoteAction({ ...action, result_data: result });
+        expect(stripDataCitationItems(item.getNote())).toBe(stripDataCitationItems(noteHtml));
+    });
+
+    it('rewrite whose new body has a $schema code block keeps it literal with no math spans', async () => {
+        const noteHtml = normalizeNoteHtml(wrap('<p>Old body.</p>'));
+        const item = makeMockItem(noteHtml);
+        (globalThis as any).Zotero.Items.getByLibraryAndKeyAsync = vi.fn().mockResolvedValue(item);
+        (globalThis as any).Zotero.Notes._editorInstances = [];
+
+        const { executeEditNoteAction } = await importEditNoteActions();
+        const action = makeAction({
+            proposed_data: {
+                library_id: 1,
+                zotero_key: 'NOTE0001',
+                operation: 'rewrite',
+                // Two dollars so an unshielded math pass would pair them.
+                new_string: '<p>New config:</p><pre>{ "$schema": "https://x", "$id": "cfg" }</pre>',
+            },
+        });
+
+        const result = await executeEditNoteAction(action);
+        expect(result.occurrences_replaced).toBe(1);
+
+        const storedHtml = item.getNote();
+        expect(storedHtml).toContain('<pre>{ "$schema": "https://x", "$id": "cfg" }</pre>');
+        expect(storedHtml).not.toContain('class="math"');
     });
 });
 

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import { supabase } from '../../../src/services/supabaseClient'
 import { useAtom, useAtomValue, useSetAtom } from 'jotai'
-import { isProfileLoadedAtom, isProfileInvalidAtom } from '../../atoms/profile'
+import { isProfileLoadedAtom } from '../../atoms/profile'
 import {
   authMethodAtom,
   loginStepAtom,
@@ -42,7 +42,6 @@ export default function SignInForm({ setErrorMsg, emailInputRef }: SignInFormPro
   // Store the associated email at mount time for error messages
   const [associatedEmail] = useState<string | undefined>(() => getPref("userEmail"))
   const isProfileLoaded = useAtomValue(isProfileLoadedAtom)
-  const [isProfileInvalid, setIsProfileInvalid] = useAtom(isProfileInvalidAtom)
 
   const PROFILE_LOAD_TIMEOUT = 10000; // 10 second timeout
 
@@ -81,27 +80,6 @@ export default function SignInForm({ setErrorMsg, emailInputRef }: SignInFormPro
       setIsLoading(false);
     }
   }, [isWaitingForProfile, isProfileLoaded]);
-
-  // Handle profile invalid state (Zotero instance mismatch).
-  // Consume the signal (set false) after handling so the effect doesn't re-fire
-  // when `step` changes — isProfileInvalidAtom acts as a one-shot signal.
-  useEffect(() => {
-    if (isProfileInvalid) {
-      logger(`SignInForm: isProfileInvalid=true detected (step=${step}), showing mismatch error`, 2);
-      const errorMessage = 'This Zotero instance is not linked to your account. Please try signing in from the correct Zotero instance.';
-      setError(errorMessage);
-      setErrorMsg(errorMessage);
-      setIsWaitingForProfile(false);
-      setIsLoading(false);
-      // Return to email page if on OTP page
-      if (step === 'otp') {
-        setAuthMethod('initial');
-        setStep('method-selection');
-      }
-      // Consume: clear the flag so the effect doesn't re-fire on step changes
-      setIsProfileInvalid(false);
-    }
-  }, [isProfileInvalid, setErrorMsg, step]);
 
   // Countdown timer for resend OTP
   useEffect(() => {
@@ -176,10 +154,8 @@ export default function SignInForm({ setErrorMsg, emailInputRef }: SignInFormPro
     try {
       await verifyOTP(email, otpCode, 'email')
       logger('SignInForm: OTP verification succeeded, waiting for profile');
-      // Wait for useProfileSync to fetch the profile. The userEmail sentinel
-      // is persisted there once the backend confirms this Zotero install is
-      // valid for the account — writing it here would stick the rejected
-      // email if the profile fetch later 403s on ZoteroInstanceMismatchError.
+      // Wait for useProfileSync to fetch the profile; the userEmail sentinel
+      // is persisted there once the profile fetch succeeds.
       setIsWaitingForProfile(true);
       // isLoading will be set to false when profile loads or timeout occurs
     } catch (error) {
@@ -218,10 +194,8 @@ export default function SignInForm({ setErrorMsg, emailInputRef }: SignInFormPro
 
       if (data.user) {
         logger('SignInForm: password sign-in succeeded, waiting for profile');
-        // Wait for useProfileSync to fetch the profile. The userEmail sentinel
-        // is persisted there once the backend confirms this Zotero install is
-        // valid for the account — writing it here would stick the rejected
-        // email if the profile fetch later 403s on ZoteroInstanceMismatchError.
+        // Wait for useProfileSync to fetch the profile; the userEmail sentinel
+        // is persisted there once the profile fetch succeeds.
         setIsWaitingForProfile(true);
         // isLoading will be set to false when profile loads or timeout occurs
       }
@@ -319,8 +293,6 @@ export default function SignInForm({ setErrorMsg, emailInputRef }: SignInFormPro
               <p className='text-xs font-color-red mt-2'>
                 {error == 'Signups not allowed for otp'
                   ? <span>Invalid email address. Signup <span className="text-link-red cursor-pointer" onClick={() => Zotero.launchURL(process.env.WEBAPP_BASE_URL + '/join')}>here</span>.</span>
-                  : error.includes('not linked to your account')
-                  ? <span>This Zotero instance is not linked to your Beaver account. <span className="text-link-red cursor-pointer" onClick={() => Zotero.launchURL(process.env.WEBAPP_BASE_URL + '/docs/multiple-devices#this-zotero-instance-is-not-linked-to-your-account')}>Learn more</span>.</span>
                   : error}
               </p>
             )}
@@ -375,9 +347,7 @@ export default function SignInForm({ setErrorMsg, emailInputRef }: SignInFormPro
             />
             {error && (
               <p className='text-xs font-color-red mt-2'>
-                {error.includes('not linked to your account')
-                  ? <span>This Zotero instance is not linked to your account. <span className="text-link-red cursor-pointer" onClick={() => Zotero.launchURL(process.env.WEBAPP_BASE_URL + '/docs/multiple-devices#this-zotero-instance-is-not-linked-to-your-account')}>Learn more</span>.</span>
-                  : error}
+                {error}
               </p>
             )}
           </div>

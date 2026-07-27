@@ -16,8 +16,15 @@ import {
     WSPageSearchResult,
     WSSearchHit,
 } from '../agentProtocol';
-import { BeaverExtractor, ExtractionError, ExtractionErrorCode, WorkerAbortError } from '../../beaver-extract';
+import {
+    BeaverExtractor,
+    ExtractionError,
+    ExtractionErrorCode,
+    WorkerAbortError,
+    isWorkerDeadlineError,
+} from '../../beaver-extract';
 import { makeRemoteFilePath } from '../documentFileIdentity';
+import { createWorkerDispatchFlag, withWorkerDiagnostics } from './workerDiagnostics';
 import {
     preflightZoteroAttachmentRequest,
     validateZoteroItemReference,
@@ -28,6 +35,7 @@ import {
 } from './utils';
 import {
     DEFAULT_SEARCH_TIMEOUT_SECONDS,
+    MAX_INTERACTIVE_PDF_TIMEOUT_SECONDS,
     TimeoutError,
     createTimeoutController,
 } from './timeout';
@@ -75,8 +83,15 @@ export async function handleZoteroAttachmentSearchRequest(
     }
     const { resolvedLibraryId } = preflight;
 
-    const timeout = createTimeoutController(timeout_seconds, DEFAULT_SEARCH_TIMEOUT_SECONDS);
+    const timeout = createTimeoutController(
+        timeout_seconds,
+        DEFAULT_SEARCH_TIMEOUT_SECONDS,
+        undefined,
+        MAX_INTERACTIVE_PDF_TIMEOUT_SECONDS,
+    );
     const { signal, timeoutSeconds, throwIfTimedOut, dispose } = timeout;
+
+    const workerDispatched = createWorkerDispatchFlag();
 
     try {
         const zoteroItem = await Zotero.Items.getByLibraryAndKeyAsync(
@@ -232,6 +247,7 @@ export async function handleZoteroAttachmentSearchRequest(
         // `cachedMeta.page_count > maxPageCount` case before any worker call.
         const extractor = new BeaverExtractor();
         const maxPageCount = effectiveMaxPageCount();
+        workerDispatched.mark();
         const searchResult = await extractor.search(
             pdfData,
             query,
@@ -283,12 +299,20 @@ export async function handleZoteroAttachmentSearchRequest(
         };
 
     } catch (error) {
-        if (signal.aborted || error instanceof WorkerAbortError || error instanceof TimeoutError) {
+        if (
+            signal.aborted
+            || error instanceof WorkerAbortError
+            || error instanceof TimeoutError
+            || isWorkerDeadlineError(error)
+        ) {
             logger(`handleZoteroAttachmentSearchRequest: Timed out after ${timeoutSeconds}s`, 1);
-            return errorResponse(
-                `PDF search timed out after ${timeoutSeconds} seconds`,
-                'timeout',
-                totalPages,
+            return withWorkerDiagnostics(
+                errorResponse(
+                    `PDF search timed out after ${timeoutSeconds} seconds`,
+                    'timeout',
+                    totalPages,
+                ),
+                { workerDispatched: workerDispatched.value, leaseReaped: isWorkerDeadlineError(error) },
             );
         }
 

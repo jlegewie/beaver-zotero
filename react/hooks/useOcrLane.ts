@@ -6,6 +6,10 @@
  * Supabase-authenticated backend client. The dispatcher itself stays generic
  * and only knows the `JobExecutor` interface; this hook injects the OCR lane at
  * runtime via `registerExecutor`.
+ *
+ * Searchable-library scope is published separately by `useLibraryScopeMirror`
+ * (store subscription, same turn as the Jotai write). This hook only reacts to
+ * that scope to decide when the OCR lane may be registered.
  */
 
 import { useEffect } from 'react';
@@ -30,20 +34,6 @@ export function useOcrLane(): void {
     const libraryScopeKey = libraryScopeInitialized
         ? [...searchableLibraryIds].sort((a, b) => a - b).join(',')
         : null;
-
-    // Mirror the access-control boundary for esbuild-side producers. They
-    // cannot import the webpack Jotai store, so this is their only source of
-    // searchable library scope.
-    useEffect(() => {
-        if (!Zotero.Beaver) return;
-        (Zotero.Beaver as {
-            searchableLibraryIds?: number[];
-            libraryScopeInitialized?: boolean;
-        }).searchableLibraryIds = [...searchableLibraryIds];
-        (Zotero.Beaver as { libraryScopeInitialized?: boolean })
-            .libraryScopeInitialized = libraryScopeInitialized;
-        Zotero.Beaver.processingReconciler?.notify();
-    }, [libraryScopeInitialized, libraryScopeKey]);
 
     // Register the OCR executor on the dispatcher. The background extractor is
     // created during esbuild startup, but the exact ordering vs the webpack
@@ -90,7 +80,7 @@ export function useOcrLane(): void {
     }, [libraryScopeKey]);
 
     // Mirror the entitlement into the esbuild-readable global used by the
-    // enqueue gate.
+    // enqueue gate, and wake the reconciler when OCR access flips.
     useEffect(() => {
         if (Zotero.Beaver) {
             (Zotero.Beaver as { hasOcrAccess?: boolean }).hasOcrAccess = hasOcrAccess;
