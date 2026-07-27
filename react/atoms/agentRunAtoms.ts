@@ -444,6 +444,11 @@ async function startResumeRun(
         prewarmMuPDFWorker();
         set(isWSChatPendingAtom, true);
 
+        // A resume is the case that depends on this most literally: it exists to
+        // continue from the failed run's partial output, which it can only see
+        // if that run's messages are already in the thread.
+        await awaitRunPersisted(options.logPrefix);
+
         const modelOptions = buildModelSelectionOptions(model);
         const customInstructions = getPref('customInstructions') || undefined;
 
@@ -1384,12 +1389,19 @@ function createWSCallbacks(set: Setter): WSCallbacks {
             // Clear any remaining streaming-done state (safety net)
             set(streamingDoneRunIdsAtom, new Set<string>());
 
+            // Whether this request ended in a failure, whatever `onError` was
+            // able to do about it. `done` now follows the terminal frame on
+            // every path.
+            const requestFailed = store.get(wsErrorAtom) !== null;
+
             // Move active run to completed runs
             set(activeRunAtom, (prev) => {
                 if (prev) {
                     const finalRun: AgentRun = {
                         ...prev,
-                        status: prev.status === 'in_progress' ? 'completed' : prev.status,
+                        status: prev.status === 'in_progress'
+                            ? (requestFailed ? 'error' : 'completed')
+                            : prev.status,
                         completed_at: prev.completed_at || new Date().toISOString(),
                     };
                     set(threadRunsAtom, (runs) => [...runs, finalRun]);
@@ -1411,6 +1423,43 @@ function createWSCallbacks(set: Setter): WSCallbacks {
 
             // Clear streaming-done state
             set(streamingDoneRunIdsAtom, new Set<string>());
+
+            // A `canceled` frame shares the error envelope but is not a failure:
+            // it is the backend confirming the stopped run's content was
+            // written. Showing it as an error would put a red banner on the
+            // user's own stop, and letting it fall through to the auto-resume
+            // branch below would restart a run they deliberately ended. The
+            // socket stays open on purpose — the citations for the partial
+            // answer are still being resolved over it, and `done` will close it.
+            if (event.type === 'canceled') {
+                set(activeRunAtom, (prev) => {
+                    if (!prev) return prev;
+                    if (errorRunId && prev.id !== errorRunId) return prev;
+                    // Only a run the user stopped from elsewhere (a shutdown, a
+                    // lost connection) is still sitting here; a stop from the
+                    // composer already moved it into threadRuns.
+                    if (prev.status !== 'in_progress' && prev.status !== 'awaiting_deferred') {
+                        return prev;
+                    }
+                    return {
+                        ...prev,
+                        status: 'canceled',
+                        completed_at: prev.completed_at || new Date().toISOString(),
+                    };
+                });
+                set(isWSChatPendingAtom, false);
+                set(wsRetryAtom, null);
+                set(clearAllPendingApprovalsAtom);
+                set(clearAllPendingQuestionsAtom);
+                set(clearRunApprovalPolicyAtom);
+                if (errorRunId && event.high_token_usage) {
+                    set(backendHighTokenUsageRunsAtom, (prev) => ({ ...prev, [errorRunId]: true }));
+                }
+                if (errorRunId && event.soft_cap_triggered) {
+                    set(softCapTriggeredRunsAtom, (prev) => ({ ...prev, [errorRunId]: true }));
+                }
+                return;
+            }
 
             // Normal error handling
             set(wsErrorAtom, event);
@@ -1868,6 +1917,13 @@ export const sendWSMessageAtom = atom(
         prewarmMuPDFWorker();
         set(isWSChatPendingAtom, true);
 
+        // The backend loads this thread's history from the database, so a run
+        // the user just stopped must be written before we connect. Set the
+        // pending flag first, so the wait cannot let a second send slip past the
+        // guard above. Usually resolves instantly — it only waits at all when
+        // the previous action was a stop, and then only for one row write.
+        await awaitRunPersisted('sendWSMessageAtom');
+
         try {
             // Get current model and build model selection options for the request
             const model = get(selectedModelAtom);
@@ -2219,11 +2275,18 @@ export const regenerateFromRunAtom = atom(
                 targetRun = activeRun;
                 runIndex = threadRuns.length;
                 // Clear the active run before awaiting cancel: agentService.cancel()
-                // waits for the cancel message to flush, and if the socket closes
-                // uncleanly during that window, the onclose handler must not see this
-                // run still marked active and misattribute the close as a connection
-                // failure. The pending flag stays set until cancel resolves so the
-                // composer guard keeps blocking new sends during the flush.
+                // waits for the backend to confirm the stopped run was written,
+                // and if the socket closes uncleanly during that window, the
+                // onclose handler must not see this run still marked active and
+                // misattribute the close as a connection failure. The pending flag
+                // stays set until cancel resolves so the composer guard keeps
+                // blocking new sends while we wait.
+                //
+                // Waiting matters here for a second reason: this retry is about
+                // to ask the backend to *delete* the run. Deleting it before its
+                // terminal write lands makes that write hit a row that no longer
+                // exists, which is logged as an error and loses the partial
+                // answer the retry might still have wanted to walk back to.
                 set(activeRunAtom, null);
                 await agentService.cancel();
                 set(isWSChatPendingAtom, false);
@@ -2233,6 +2296,13 @@ export const regenerateFromRunAtom = atom(
                 logger(`regenerateFromRunAtom: Run ${runId} not found`, 1);
                 return;
             }
+
+            // Covers the branch above that did *not* cancel — retrying an older
+            // run while a stop is still settling. The backend reloads this
+            // thread's history after deleting from the target run forward, so
+            // an unwritten run must land first or it contributes nothing to the
+            // history the replacement run is given.
+            await awaitRunPersisted('regenerateFromRunAtom');
 
             // If the target is a resume run, walk the resume chain back to the
             // root so we regenerate from the original user message, not from an
@@ -2430,11 +2500,18 @@ export const regenerateWithEditedPromptAtom = atom(
                 targetRun = activeRun;
                 runIndex = threadRuns.length;
                 // Clear the active run before awaiting cancel: agentService.cancel()
-                // waits for the cancel message to flush, and if the socket closes
-                // uncleanly during that window, the onclose handler must not see this
-                // run still marked active and misattribute the close as a connection
-                // failure. The pending flag stays set until cancel resolves so the
-                // composer guard keeps blocking new sends during the flush.
+                // waits for the backend to confirm the stopped run was written,
+                // and if the socket closes uncleanly during that window, the
+                // onclose handler must not see this run still marked active and
+                // misattribute the close as a connection failure. The pending flag
+                // stays set until cancel resolves so the composer guard keeps
+                // blocking new sends while we wait.
+                //
+                // Waiting matters here for a second reason: this retry is about
+                // to ask the backend to *delete* the run. Deleting it before its
+                // terminal write lands makes that write hit a row that no longer
+                // exists, which is logged as an error and loses the partial
+                // answer the retry might still have wanted to walk back to.
                 set(activeRunAtom, null);
                 await agentService.cancel();
                 set(isWSChatPendingAtom, false);
@@ -2444,6 +2521,10 @@ export const regenerateWithEditedPromptAtom = atom(
                 logger(`regenerateWithEditedPromptAtom: Run ${runId} not found`, 1);
                 return;
             }
+
+            // See regenerateFromRunAtom: the history this run is rebuilt against
+            // must already contain any run the user just stopped.
+            await awaitRunPersisted('regenerateWithEditedPromptAtom');
 
             // Get thread ID from the target run
             const threadId = get(currentThreadIdAtom) || targetRun.thread_id;
@@ -2644,8 +2725,21 @@ export const resumeFromRunAtom = atom(
 );
 
 /**
- * Close the WebSocket connection with proper cancellation.
- * Sends a cancel message to the backend before closing to ensure proper cleanup.
+ * Stop the current run.
+ *
+ * Two clocks, deliberately separated. What the user sees flips immediately —
+ * the run is marked canceled and the composer unblocks — because the partial
+ * answer is already on screen and nothing about showing it as stopped depends
+ * on the backend. What the *next question* depends on is the backend having
+ * written this turn, and that is what `agentService.cancel()` now waits for:
+ * anything about to read the thread's history awaits `whenCancelSettled()`
+ * first, so a follow-up can never be sent against a row still reading
+ * `in_progress` with no messages.
+ *
+ * The socket is left open on purpose. The backend resolves the stopped run's
+ * citations over it after acknowledging the write, and `done` closes it.
+ * Closing here — as this used to, 250ms after sending — was both too early to
+ * prove the write had landed and fatal to that lookup.
  */
 export const closeWSConnectionAtom = atom(null, async (get, set) => {
     // Set pending to false immediately for better UI responsiveness
@@ -2673,11 +2767,34 @@ export const closeWSConnectionAtom = atom(null, async (get, set) => {
     // Clear streaming-done state (user canceled during post-processing)
     set(streamingDoneRunIdsAtom, new Set<string>());
 
-    // Send cancel message and close connection
-    await agentService.cancel();
-    set(isWSConnectedAtom, false);
-    set(isWSReadyAtom, false);
+    // Not awaited: nothing here needs the acknowledgement, and blocking the
+    // Stop handler on it would only delay the UI it has already updated.
+    // Whoever reads the thread next awaits it — see `awaitRunPersisted`.
+    // The connection flags are left alone; `onClose` owns them, and the socket
+    // is still open resolving this run's citations.
+    void agentService.cancel();
 });
+
+/**
+ * Wait until a stopped run's content has been written, if one is in flight.
+ *
+ * The one thing that must not race the backend: reading a thread's history.
+ * `get_message_history_with_actions` skips any run whose `model_messages` is
+ * still null, so a question sent inside that window reaches the model with the
+ * previous turn missing entirely — while the user can still see it on screen.
+ * Resolves immediately when no cancel is pending, and is bounded, so a backend
+ * that never answers degrades to the behaviour that preceded it rather than
+ * hanging the composer.
+ */
+async function awaitRunPersisted(logPrefix: string): Promise<void> {
+    const settled = agentService.whenCancelSettled();
+    const startedAt = Date.now();
+    await settled;
+    const waitedMs = Date.now() - startedAt;
+    if (waitedMs > 0) {
+        logger(`${logPrefix}: waited ${waitedMs}ms for the stopped run to be persisted`, 1);
+    }
+}
 
 /**
  * Clear the current thread and start fresh

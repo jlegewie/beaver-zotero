@@ -91,6 +91,29 @@ export async function getWSAuthToken(): Promise<string> {
 /** Backstop timeout for a full connect attempt (auth token + handshake + ready). */
 export const CONNECT_TIMEOUT_MS = 20_000;
 
+/**
+ * How long to wait for `done` after a terminal frame before closing anyway.
+ *
+ * The backend sends the frame that says how a run ended as soon as the run's
+ * content is durable, then resolves its citations and sends those, then `done`.
+ * So the client cannot close on the terminal frame without cutting the lookup
+ * off — but it also cannot wait forever on a backend that has stopped talking.
+ * Sized off the citation phase's own ceiling (`interrupt_enrich_timeout`, 3s)
+ * with room for the write and the round trip.
+ */
+export const TERMINAL_SETTLE_TIMEOUT_MS = 8_000;
+
+/**
+ * How long `cancel()` waits for the backend to confirm the stopped run was
+ * written before letting the caller proceed regardless.
+ *
+ * Only the terminal write is being waited on here — a dehydrate and one row
+ * update, not the citation lookup — so this is generous rather than tuned.
+ * Expiring it is a degradation, not a failure: it puts the caller back exactly
+ * where it was before this handshake existed.
+ */
+export const CANCEL_SETTLE_TIMEOUT_MS = 5_000;
+
 interface ConnectionAttemptState {
     stage: ConnectionFailureStage;
     socketOpened: boolean;
@@ -168,6 +191,30 @@ export class AgentService {
     /** Whether the connected backend understands `request_received` acks (from the ready event) */
     private serverSupportsRequestAcks: boolean = false;
     /**
+     * Whether this connection got past the handshake. Before `ready` the
+     * backend has not accepted a run on this socket, so a cancel has nothing to
+     * wait for and closes instead — see `cancel()`.
+     */
+    private readyReceived: boolean = false;
+    /**
+     * Backstop for a run whose terminal frame arrived but whose `done` never
+     * did. `done` is the only thing that closes the socket, because closing on
+     * the terminal frame is what used to cut off the citations the backend
+     * sends after it. A backend that stops talking must not leave the socket
+     * open forever, so the terminal frame arms this.
+     */
+    private terminalSettleTimer: ReturnType<typeof setTimeout> | null = null;
+    /**
+     * Settles the promise returned by `cancel()`. Resolved by the backend's
+     * `canceled` frame, which it sends once the stopped run's content is
+     * durable — the only thing a follow-up question actually has to wait for.
+     */
+    private cancelSettle: {
+        promise: Promise<void>;
+        resolve: () => void;
+        timer: ReturnType<typeof setTimeout>;
+    } | null = null;
+    /**
      * Map of backend data-request event -> handler. Injectable so a non-Zotero
      * host can serve the same requests its own way. Defaults to the Zotero
      * plugin's handlers.
@@ -191,6 +238,64 @@ export class AgentService {
         this.messageQueue = Promise.resolve();
         this.actionExecutionQueue = Promise.resolve();
         this.serverSupportsRequestAcks = false;
+        this.readyReceived = false;
+        this.clearTerminalSettleTimeout();
+        // A socket that is gone will never acknowledge anything. Settling here
+        // rather than leaving it to the timeout is what keeps a caller waiting
+        // on cancel() from stalling for the whole backstop after the user has
+        // already moved on (a retry, a new thread) and torn the connection down.
+        this.settleCancel('connection closed');
+    }
+
+    /**
+     * Arm the backstop that closes a socket whose `done` never arrived.
+     *
+     * Scoped to the connection generation and the socket instance, so a timer
+     * that outlives its run — the user retried, a new connection took over —
+     * cannot tear down its successor.
+     */
+    private armTerminalSettleTimeout(reason: string): void {
+        this.clearTerminalSettleTimeout();
+        const settleSocket = this.ws;
+        const settleConnectionId = this.connectionId;
+        this.terminalSettleTimer = setTimeout(() => {
+            this.terminalSettleTimer = null;
+            if (this.connectionId !== settleConnectionId || this.ws !== settleSocket) return;
+            if (!this.ws || this.ws.readyState === WebSocket.CLOSED) return;
+            logger(`AgentService: no 'done' after ${reason}; closing`, 1);
+            // Firefox/Zotero only allows code 1000 or 3000-4999 for close()
+            this.close(1000, `Client closing after ${reason} (no done)`);
+        }, TERMINAL_SETTLE_TIMEOUT_MS);
+    }
+
+    private clearTerminalSettleTimeout(): void {
+        if (this.terminalSettleTimer === null) return;
+        clearTimeout(this.terminalSettleTimer);
+        this.terminalSettleTimer = null;
+    }
+
+    /** Resolve a pending cancel() wait, whatever ended it. */
+    private settleCancel(reason: string): void {
+        const settle = this.cancelSettle;
+        if (!settle) return;
+        this.cancelSettle = null;
+        clearTimeout(settle.timer);
+        logger(`AgentService: cancel settled (${reason})`, 1);
+        settle.resolve();
+    }
+
+    /**
+     * Resolves once a cancel in flight has been acknowledged, immediately if
+     * none is.
+     *
+     * The acknowledgement means the stopped run's content has been written, so
+     * anything that is about to read the thread's history — a new message, a
+     * retry — should await this first. Without it the read can land while the
+     * row is still `in_progress` with no messages, and the turn the user can
+     * see on screen is missing from what the model is sent.
+     */
+    whenCancelSettled(): Promise<void> {
+        return this.cancelSettle?.promise ?? Promise.resolve();
     }
 
     /**
@@ -671,6 +776,7 @@ export class AgentService {
             switch (event.event) {
                 case 'ready': {
                     this.serverSupportsRequestAcks = event.supports_request_acks === true;
+                    this.readyReceived = true;
                     // Convert snake_case backend response to camelCase frontend data
                     const readyData: WSReadyData = {
                         subscriptionStatus: event.subscription_status,
@@ -710,6 +816,13 @@ export class AgentService {
                     break;
 
                 case 'run_complete':
+                    // Also a durability signal: the backend sends this once the
+                    // finished run's content is written, before resolving its
+                    // citations. A stop that lands during that lookup gets no
+                    // `canceled` frame — the run had already finished — so
+                    // without this the waiter would sit out its whole timeout
+                    // for a row that was durable before it even pressed stop.
+                    this.settleCancel('run_complete');
                     await this.callbacks.onRunComplete(event);
                     break;
 
@@ -722,6 +835,12 @@ export class AgentService {
                     break;
 
                 case 'done':
+                    this.clearTerminalSettleTimeout();
+                    // A backend that ends the request without ever sending the
+                    // terminal frame (or whose frame we could not match) still
+                    // settles anyone waiting on cancel: `done` follows the
+                    // terminal write on every path.
+                    this.settleCancel('done');
                     this.callbacks.onDone();
                     break;
 
@@ -734,26 +853,25 @@ export class AgentService {
                     break;
 
                 case 'error': {
-                    // Call onError callback
+                    // Every terminal frame now follows the terminal write, so
+                    // any of them releases cancel(): `canceled` is the direct
+                    // acknowledgement, and an ordinary failure landing instead
+                    // means the run ended some other way — either is proof the
+                    // row is no longer `in_progress` with nothing in it, which
+                    // is the only thing the waiter cares about. Settled before
+                    // the callback, so a handler that starts the next run (an
+                    // auto-resume) does not wait on a promise it just satisfied.
+                    this.settleCancel(`terminal frame: ${event.type}`);
+
                     this.callbacks.onError(event);
-                    // Backend behavior: some errors close connection (auth, internal), 
-                    // others keep it open (LLM errors, rate limits, invalid_request).
-                    // Since each connect() is for a single run (for now), close on any error.
-                    // Use a small delay to avoid race with server-initiated close.
-                    const errorSocket = this.ws;
-                    const errorConnectionId = this.connectionId;
-                    setTimeout(() => {
-                        if (
-                            this.connectionId === errorConnectionId &&
-                            this.ws === errorSocket &&
-                            this.ws &&
-                            this.ws.readyState !== WebSocket.CLOSED
-                        ) {
-                            // Firefox/Zotero only allows code 1000 or 3000-4999 for close()
-                            // 1011 causes InvalidAccessError, so we use 1000 (Normal Closure)
-                            this.close(1000, `Client closing after error: ${event.type}`);
-                        }
-                    }, 100);
+
+                    // Deliberately does NOT close. The backend now sends this
+                    // frame as soon as the run is durable and follows it with
+                    // the resolved citations, so closing here — as this used to,
+                    // 100ms later — cut off the lookup every time and left the
+                    // run's citations unresolvable. `done` closes; this only
+                    // arms the backstop for a backend that never sends one.
+                    this.armTerminalSettleTimeout(`error: ${event.type}`);
                     break;
                 }
 
@@ -910,30 +1028,60 @@ export class AgentService {
     }
 
     /**
-     * Cancel the current run and close the connection.
-     * Sends a cancel message to the backend before closing to ensure proper cleanup.
-     * @param waitMs Time to wait after sending cancel before closing (default: 250ms)
+     * Cancel the current run and wait until the backend says it is safe to move on.
+     *
+     * Resolves on the backend's `canceled` frame, which it sends once the
+     * stopped run's messages have been written to the thread. Until then a new
+     * message would read a history with this turn missing from it — the row is
+     * still `in_progress` — while the user can see that turn on screen.
+     *
+     * Deliberately does **not** close the socket. It used to close 250ms after
+     * sending, which was both too early to guarantee the write had landed and
+     * fatal to the citation lookup that follows it: that lookup asks the plugin
+     * over this very socket. The connection is closed by `done`, by the
+     * terminal backstop, or by whatever supersedes it — a retry's `connect()`,
+     * a thread switch — all of which settle this wait on the way past.
+     *
+     * @param timeoutMs How long to wait for the acknowledgement (default 5s).
      */
-    async cancel(waitMs: number = 250): Promise<void> {
+    async cancel(timeoutMs: number = CANCEL_SETTLE_TIMEOUT_MS): Promise<void> {
         if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
             logger('AgentService: Cannot cancel - WebSocket not connected', 1);
             this.close();
             return;
         }
 
-        // Capture the generation being cancelled: if a new run connects
-        // during the flush wait below, the deferred close must not tear it down.
-        const connectionIdToCancel = this.connectionId;
+        // Before `ready` there is no run on this socket to wait for: the run
+        // request is only sent after the handshake, so nothing has been written
+        // and nothing will be. Closing is also the only thing that settles the
+        // pending connect() — leaving the socket open would strand the caller
+        // until the connect backstop fired, seconds after the user stopped.
+        if (!this.readyReceived) {
+            logger('AgentService: Cancel before ready - closing instead of waiting', 1);
+            this.close(1000, 'User cancelled before ready');
+            return;
+        }
 
         // Send cancel message to backend
         logger('AgentService: Sending cancel message', 1);
         this.ws.send(JSON.stringify({ type: 'cancel' }));
 
-        // Wait briefly to allow the message to be flushed
-        await new Promise(resolve => setTimeout(resolve, waitMs));
+        // A second cancel joins the first rather than replacing it, so two
+        // stops in quick succession cannot orphan a caller on the older promise.
+        if (this.cancelSettle) return this.cancelSettle.promise;
 
-        // Close the connection (no-op if a newer connection superseded it)
-        this.close(1000, 'User cancelled', { onlyIfConnectionId: connectionIdToCancel });
+        let resolve!: () => void;
+        const promise = new Promise<void>((r) => { resolve = r; });
+        const timer = setTimeout(() => {
+            // Expiring leaves the caller where it was before this handshake
+            // existed: proceeding without proof. Logged, because a backend that
+            // routinely fails to acknowledge is worth knowing about.
+            logger(`AgentService: cancel not acknowledged within ${timeoutMs}ms; proceeding`, 1);
+            this.settleCancel('timeout');
+        }, timeoutMs);
+        this.cancelSettle = { promise, resolve, timer };
+
+        return promise;
     }
 
     /**

@@ -226,11 +226,20 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
     };
 
     const regenerateFromRun = useSetAtom(regenerateFromRunAtom);
+    const [isRegenerating, setIsRegenerating] = useState(false);
 
     const handleRegenerate = async () => {
-        // regenerateFromRunAtom walks the resume chain back to the root
-        // internally, so we can pass the clicked run's id directly.
-        await regenerateFromRun(run.id);
+        if (isRegenerating) return;
+        setIsRegenerating(true);
+        try {
+            // regenerateFromRunAtom walks the resume chain back to the root
+            // internally, so we can pass the clicked run's id directly.
+            // Can wait on a just-stopped run's persist ack before delete/reconnect.
+            await regenerateFromRun(run.id);
+        } finally {
+            // No-op if this footer unmounted after the run was truncated.
+            setIsRegenerating(false);
+        }
     };
 
     // Hide during streaming (but show during post-processing when citations are resolving)
@@ -285,14 +294,15 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
                         tooltipContent="More options"
                     />
                     <Tooltip
-                        content="Retry"
+                        content={isRegenerating ? 'Retrying...' : 'Retry'}
                         showArrow
                     >
                         <IconButton
                             icon={RepeatIcon}
                             onClick={handleRegenerate}
                             className="scale-11"
-                            ariaLabel="Retry"
+                            ariaLabel={isRegenerating ? 'Retrying' : 'Retry'}
+                            loading={isRegenerating}
                         />
                     </Tooltip>
                     <Tooltip

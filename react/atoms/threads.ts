@@ -254,9 +254,17 @@ async function cancelActiveRunIfNeeded(get: (atom: any) => any, set: (atom: any,
             set(threadRunsAtom, (runs: AgentRun[]) => [...runs, canceledRun]);
         }
         set(activeRunAtom, null);
-        
-        // Cancel the WebSocket connection
+
+        // Awaited: the thread being left is reloaded from the database on the
+        // way back to it, and a run still mid-write would come back missing
+        // from a thread the user watched it happen in. Bounded inside cancel().
         await agentService.cancel();
+
+        // Unlike the composer's stop, this one is finished with the connection:
+        // the user is leaving, so the citations still resolving on it have
+        // nobody to arrive for, and closing now also releases the terminal
+        // backstop that would otherwise hold the socket open behind them.
+        agentService.close(1000, 'Switching threads');
         set(isWSConnectedAtom, false);
         set(isWSReadyAtom, false);
     }

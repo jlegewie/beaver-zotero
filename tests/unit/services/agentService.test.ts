@@ -44,7 +44,12 @@ vi.mock('../../../react/agents/agentActions', () => ({
     toAgentAction: vi.fn((action) => action),
 }));
 
-import { AgentConnectionError, AgentService, ConnectTimeoutError } from '../../../src/services/agentService';
+import {
+    AgentConnectionError,
+    AgentService,
+    ConnectTimeoutError,
+    TERMINAL_SETTLE_TIMEOUT_MS,
+} from '../../../src/services/agentService';
 import type { AgentRunRequest, WSCallbacks } from '../../../src/services/agentProtocol';
 
 class MockWebSocket {
@@ -104,6 +109,7 @@ function createCallbacks(): WSCallbacks {
         onToolCallProgress: vi.fn(),
         onToolCallArgsStream: vi.fn(),
         onRunComplete: vi.fn().mockResolvedValue(undefined),
+        onRunCitations: vi.fn(),
         onStreamingDone: vi.fn(),
         onDone: vi.fn(),
         onThread: vi.fn(),
@@ -389,32 +395,135 @@ describe('AgentService reconnect handling', () => {
         expect(secondCallbacks.onReady).toHaveBeenCalledTimes(1);
     });
 
-    it('ignores a deferred cancel close when a newer connection has taken over', async () => {
+    it('releases cancel() on the backend acknowledgement, not on a timer', async () => {
+        const service = new AgentService('https://api.example.com');
+        const callbacks = createCallbacks();
+        const socket = await completeConnect(service, callbacks, {
+            type: 'cancel-ack',
+        } as AgentRunRequest);
+
+        let settled = false;
+        const cancelPromise = service.cancel().then(() => { settled = true; });
+
+        // The cancel message goes out immediately...
+        expect(socket.send).toHaveBeenCalledWith(JSON.stringify({ type: 'cancel' }));
+
+        // ...but the caller stays blocked. This is exactly the window in which
+        // a new message would read a thread whose stopped run has no messages.
+        await vi.advanceTimersByTimeAsync(1_000);
+        await flushMicrotasks();
+        expect(settled).toBe(false);
+        expect(socket.close).not.toHaveBeenCalled();
+
+        // The backend answers once the run's content is durable.
+        socket.emitMessage({
+            event: 'error',
+            type: 'canceled',
+            message: 'Canceled by client',
+            run_id: 'run-1',
+        });
+        await flushMicrotasks();
+        await cancelPromise;
+        expect(settled).toBe(true);
+
+        // And the socket is still open: the partial answer's citations are
+        // resolved over it, and `done` is what closes it.
+        expect(socket.close).not.toHaveBeenCalled();
+    });
+
+    it('lets cancel() proceed when the backend never acknowledges', async () => {
+        const service = new AgentService('https://api.example.com');
+        const callbacks = createCallbacks();
+        const socket = await completeConnect(service, callbacks, {
+            type: 'cancel-timeout',
+        } as AgentRunRequest);
+
+        let settled = false;
+        const cancelPromise = service.cancel(500).then(() => { settled = true; });
+
+        await vi.advanceTimersByTimeAsync(499);
+        await flushMicrotasks();
+        expect(settled).toBe(false);
+
+        // Expiring degrades to the behaviour that preceded the handshake —
+        // proceeding without proof — rather than hanging the composer.
+        await vi.advanceTimersByTimeAsync(2);
+        await cancelPromise;
+        expect(settled).toBe(true);
+        expect(socket.close).not.toHaveBeenCalled();
+    });
+
+    it('does not close on a terminal frame, so the citations after it arrive', async () => {
+        const service = new AgentService('https://api.example.com');
+        const callbacks = createCallbacks();
+        const socket = await completeConnect(service, callbacks, {
+            type: 'error-then-citations',
+        } as AgentRunRequest);
+
+        socket.emitMessage({
+            event: 'error',
+            type: 'llm_timeout',
+            message: 'Provider timed out',
+            run_id: 'run-1',
+        });
+        await flushMicrotasks();
+
+        // This used to close 100ms after the error frame, which cut off the
+        // lookup the backend now runs after it.
+        await vi.advanceTimersByTimeAsync(1_000);
+        expect(socket.close).not.toHaveBeenCalled();
+
+        socket.emitMessage({ event: 'run_citations', run_id: 'run-1', citations: [] });
+        await flushMicrotasks();
+        expect(callbacks.onRunCitations).toHaveBeenCalledTimes(1);
+    });
+
+    it('closes a socket whose done never arrives', async () => {
+        const service = new AgentService('https://api.example.com');
+        const callbacks = createCallbacks();
+        const socket = await completeConnect(service, callbacks, {
+            type: 'no-done',
+        } as AgentRunRequest);
+
+        socket.emitMessage({
+            event: 'error',
+            type: 'llm_timeout',
+            message: 'Provider timed out',
+            run_id: 'run-1',
+        });
+        await flushMicrotasks();
+
+        await vi.advanceTimersByTimeAsync(TERMINAL_SETTLE_TIMEOUT_MS + 100);
+        expect(socket.close).toHaveBeenCalled();
+    });
+
+    it('does not let a stale terminal backstop tear down a newer connection', async () => {
         const service = new AgentService('https://api.example.com');
         const firstCallbacks = createCallbacks();
-        const firstRequest = { type: 'first' } as AgentRunRequest;
+        const firstSocket = await completeConnect(service, firstCallbacks, {
+            type: 'first',
+        } as AgentRunRequest);
 
-        const firstSocket = await completeConnect(service, firstCallbacks, firstRequest);
+        firstSocket.emitMessage({
+            event: 'error',
+            type: 'llm_timeout',
+            message: 'Provider timed out',
+            run_id: 'run-1',
+        });
+        await flushMicrotasks();
 
-        // cancel() sends the cancel message, then waits before closing.
-        const cancelPromise = service.cancel(250);
-
-        // A new run connects during that wait and supersedes the first
-        // connection (bumping the connection generation).
+        // A retry connects while the first connection's backstop is still armed.
         const secondCallbacks = createCallbacks();
-        const secondRequest = { type: 'second' } as AgentRunRequest;
-        const secondSocket = await completeConnect(service, secondCallbacks, secondRequest);
+        const secondSocket = await completeConnect(service, secondCallbacks, {
+            type: 'second',
+        } as AgentRunRequest);
         expect(secondSocket).not.toBe(firstSocket);
 
-        // When the deferred close finally fires, it must not tear down the
-        // newer connection.
-        await vi.advanceTimersByTimeAsync(300);
-        await cancelPromise;
+        await vi.advanceTimersByTimeAsync(TERMINAL_SETTLE_TIMEOUT_MS + 100);
 
         expect(secondSocket.close).not.toHaveBeenCalled();
         expect(secondCallbacks.onClose).not.toHaveBeenCalled();
 
-        // The newer connection is still fully functional.
         secondSocket.emitMessage({
             event: 'part',
             run_id: 'run-2',
