@@ -215,6 +215,12 @@ export class AgentService {
         timer: ReturnType<typeof setTimeout>;
     } | null = null;
     /**
+     * Latches terminal-frame durability so cancel() also handles the ordering
+     * where the acknowledgement arrives before a waiter exists.
+     * Reset for every run and connection.
+     */
+    private runIsDurable: boolean = false;
+    /**
      * Map of backend data-request event -> handler. Injectable so a non-Zotero
      * host can serve the same requests its own way. Defaults to the Zotero
      * plugin's handlers.
@@ -240,6 +246,12 @@ export class AgentService {
         this.serverSupportsRequestAcks = false;
         this.readyReceived = false;
         this.clearTerminalSettleTimeout();
+        // Cleared, not set: a socket going away says nothing about whether the
+        // run on it was written, and the next connection's run certainly has
+        // not been. Settling the waiter below is a different statement — that
+        // nobody is coming to answer it — and must not be read as an
+        // acknowledgement by whatever asks next.
+        this.runIsDurable = false;
         // A socket that is gone will never acknowledge anything. Settling here
         // rather than leaving it to the timeout is what keeps a caller waiting
         // on cancel() from stalling for the whole backstop after the user has
@@ -282,6 +294,19 @@ export class AgentService {
         clearTimeout(settle.timer);
         logger(`AgentService: cancel settled (${reason})`, 1);
         settle.resolve();
+    }
+
+    /**
+     * Record that this socket's run has been written, and release any waiter.
+     *
+     * The two halves of one fact, which is why they belong in one call: whoever
+     * is already waiting is resolved now, and whoever asks later reads it off
+     * the latch. Splitting them is what left `cancel()` blind to a frame that
+     * arrived a moment before it.
+     */
+    private markRunDurable(reason: string): void {
+        this.runIsDurable = true;
+        this.settleCancel(reason);
     }
 
     /**
@@ -510,6 +535,12 @@ export class AgentService {
                     logger('AgentService: Server ready, sending agent run request', 1);
                     // Call the original onReady callback first
                     callbacks.onReady(data);
+                    // A fresh run has certainly not been written yet. Cleared
+                    // here as well as in resetConnectionState because this is
+                    // the moment the claim stops being true — every run request
+                    // goes out from here, so nothing can start a run without
+                    // passing it.
+                    this.runIsDurable = false;
                     // Send the chat request now that server is ready
                     this.send(request);
                     // Resolve the connect promise
@@ -818,11 +849,15 @@ export class AgentService {
                 case 'run_complete':
                     // Also a durability signal: the backend sends this once the
                     // finished run's content is written, before resolving its
-                    // citations. A stop that lands during that lookup gets no
-                    // `canceled` frame — the run had already finished — so
-                    // without this the waiter would sit out its whole timeout
-                    // for a row that was durable before it even pressed stop.
-                    this.settleCancel('run_complete');
+                    // citations. Both orderings matter and they need different
+                    // machinery. A stop already in flight when the run finished
+                    // naturally is released now; a stop or retry pressed during
+                    // the citation lookup that follows — the common one, since
+                    // the footer is live and its Retry button is enabled
+                    // throughout — arrives after this and reads the latch
+                    // instead. Neither gets a `canceled` frame: the run had
+                    // already completed.
+                    this.markRunDurable('run_complete');
                     await this.callbacks.onRunComplete(event);
                     break;
 
@@ -840,7 +875,7 @@ export class AgentService {
                     // terminal frame (or whose frame we could not match) still
                     // settles anyone waiting on cancel: `done` follows the
                     // terminal write on every path.
-                    this.settleCancel('done');
+                    this.markRunDurable('done');
                     this.callbacks.onDone();
                     break;
 
@@ -858,10 +893,13 @@ export class AgentService {
                     // acknowledgement, and an ordinary failure landing instead
                     // means the run ended some other way — either is proof the
                     // row is no longer `in_progress` with nothing in it, which
-                    // is the only thing the waiter cares about. Settled before
+                    // is the only thing the waiter cares about. Recorded before
                     // the callback, so a handler that starts the next run (an
-                    // auto-resume) does not wait on a promise it just satisfied.
-                    this.settleCancel(`terminal frame: ${event.type}`);
+                    // auto-resume) does not wait on a promise it just satisfied
+                    // — and latched, so one that gets there a moment later, once
+                    // the user has read the error and pressed Retry, does not
+                    // wait on a promise nothing will ever satisfy.
+                    this.markRunDurable(`terminal frame: ${event.type}`);
 
                     this.callbacks.onError(event);
 
@@ -1035,6 +1073,11 @@ export class AgentService {
      * message would read a history with this turn missing from it — the row is
      * still `in_progress` — while the user can see that turn on screen.
      *
+     * Resolves *immediately* when the run has already been acknowledged, which
+     * is a large share of the calls: a run that finished, failed or was stopped
+     * before the user reached for Stop or Retry is already written, and there is
+     * no second acknowledgement coming for it. See `runIsDurable`.
+     *
      * Deliberately does **not** close the socket. It used to close 250ms after
      * sending, which was both too early to guarantee the write had landed and
      * fatal to the citation lookup that follows it: that lookup asks the plugin
@@ -1059,6 +1102,23 @@ export class AgentService {
         if (!this.readyReceived) {
             logger('AgentService: Cancel before ready - closing instead of waiting', 1);
             this.close(1000, 'User cancelled before ready');
+            return;
+        }
+
+        // The run already reached a terminal frame, so it is already written —
+        // there is nothing to ask for and nothing to wait on. Returning here is
+        // what makes "retry while sources are still linking" instant instead of
+        // a dead click: the backend will never send a `canceled` frame for a run
+        // that had finished before the user pressed anything, so the wait below
+        // could only ever end at `done` (after the whole citation lookup) or at
+        // the timeout.
+        //
+        // The cancel frame is deliberately not sent either. Asking the backend
+        // to stop a run that already finished records a CLIENT_CANCEL cause on
+        // it, which is simply untrue — harmless today only because the socket is
+        // usually replaced moments later.
+        if (this.runIsDurable) {
+            logger('AgentService: Cancel after the run was already written - nothing to wait for', 1);
             return;
         }
 

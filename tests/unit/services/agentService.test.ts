@@ -453,6 +453,112 @@ describe('AgentService reconnect handling', () => {
         expect(socket.close).not.toHaveBeenCalled();
     });
 
+    it('resolves cancel() immediately once run_complete has already arrived', async () => {
+        const service = new AgentService('https://api.example.com');
+        const callbacks = createCallbacks();
+        const socket = await completeConnect(service, callbacks, {
+            type: 'cancel-after-complete',
+        } as AgentRunRequest);
+
+        // The run finishes. The backend writes it, sends this, and only then
+        // goes off to resolve the citations — which can run for seconds, with
+        // the footer (and its Retry button) live the whole time.
+        socket.emitMessage({
+            event: 'run_complete',
+            run_id: 'run-1',
+            usage: null,
+            cost: null,
+            citations: null,
+        });
+        await flushMicrotasks();
+
+        const sendCallsBefore = socket.send.mock.calls.length;
+
+        // Retry pressed during the lookup. No `canceled` frame is coming for a
+        // run that already finished, so waiting could only end at `done` or at
+        // the 5s cap — the dead click this latch exists to remove.
+        let settled = false;
+        const cancelPromise = service.cancel().then(() => { settled = true; });
+        await flushMicrotasks();
+        expect(settled).toBe(true);
+        await cancelPromise;
+
+        // Nothing was asked of the backend: cancelling a finished run would
+        // record a CLIENT_CANCEL cause on it that is simply untrue.
+        expect(socket.send.mock.calls.length).toBe(sendCallsBefore);
+        expect(socket.close).not.toHaveBeenCalled();
+    });
+
+    it('resolves cancel() immediately once an error frame has already arrived', async () => {
+        const service = new AgentService('https://api.example.com');
+        const callbacks = createCallbacks();
+        const socket = await completeConnect(service, callbacks, {
+            type: 'cancel-after-error',
+        } as AgentRunRequest);
+
+        socket.emitMessage({
+            event: 'error',
+            type: 'llm_timeout',
+            message: 'The model timed out',
+            run_id: 'run-1',
+        });
+        await flushMicrotasks();
+
+        const sendCallsBefore = socket.send.mock.calls.length;
+
+        // This is Retry in RunErrorDisplay: the user reads the error, then
+        // clicks. The run was durable before the banner rendered.
+        let settled = false;
+        const cancelPromise = service.cancel().then(() => { settled = true; });
+        await flushMicrotasks();
+        expect(settled).toBe(true);
+        await cancelPromise;
+
+        expect(socket.send.mock.calls.length).toBe(sendCallsBefore);
+    });
+
+    it('re-arms the wait for the next run on a fresh connection', async () => {
+        const service = new AgentService('https://api.example.com');
+        const callbacks = createCallbacks();
+        const firstSocket = await completeConnect(service, callbacks, {
+            type: 'durable-run',
+        } as AgentRunRequest);
+
+        firstSocket.emitMessage({
+            event: 'run_complete',
+            run_id: 'run-1',
+            usage: null,
+            cost: null,
+            citations: null,
+        });
+        await flushMicrotasks();
+
+        // The retry opens a new connection, which supersedes the old socket.
+        const secondSocket = await completeConnect(service, callbacks, {
+            type: 'next-run',
+        } as AgentRunRequest);
+
+        // The new run has not been written, so a stop on it must wait for the
+        // acknowledgement exactly as before — the latch describes one run, not
+        // the service.
+        let settled = false;
+        const cancelPromise = service.cancel().then(() => { settled = true; });
+        await flushMicrotasks();
+
+        expect(secondSocket.send).toHaveBeenCalledWith(JSON.stringify({ type: 'cancel' }));
+        expect(settled).toBe(false);
+
+        secondSocket.emitMessage({
+            event: 'error',
+            type: 'canceled',
+            message: 'Canceled by client',
+            run_id: 'run-2',
+        });
+        await flushMicrotasks();
+        await cancelPromise;
+        expect(settled).toBe(true);
+    });
+
     it('does not close on a terminal frame, so the citations after it arrive', async () => {
         const service = new AgentService('https://api.example.com');
         const callbacks = createCallbacks();
