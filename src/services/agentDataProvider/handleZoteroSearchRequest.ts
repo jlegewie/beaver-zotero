@@ -22,28 +22,63 @@ import { libraryRefForLibraryID, modelObjectId } from '../../utils/libraryIdenti
 import { validateLibraryAccess, extractYear, formatCreatorsString, getAttachmentInfoForItem } from './utils';
 
 
-async function filterOutAnnotationItemIds(itemIds: number[]): Promise<number[]> {
-    if (itemIds.length === 0) return itemIds;
+/**
+ * How each `item_category` maps onto a set of Zotero item types.
+ *
+ * A Map, not an object literal: `item_category` arrives over the wire, and a
+ * plain-object lookup would resolve inherited keys ("constructor", "toString")
+ * to truthy non-filters. Unrecognized categories must degrade to "no filter".
+ */
+const ITEM_CATEGORY_TYPE_FILTERS = new Map<string, { itemTypes: string[]; mode: 'include' | 'exclude' }>([
+    ['regular', { itemTypes: ['attachment', 'note', 'annotation'], mode: 'exclude' }],
+    ['attachment', { itemTypes: ['attachment'], mode: 'include' }],
+    ['note', { itemTypes: ['note'], mode: 'include' }],
+    // 'all' is absent because it filters nothing; 'annotation' is absent because
+    // it returns early (zotero_search cannot return annotations at all).
+]);
 
-    const annotationItemTypeID = Zotero.ItemTypes.getID('annotation');
-    const returnableItemIds = new Set<number>();
+/**
+ * Keep (`include`) or drop (`exclude`) the given itemIDs by item type,
+ * preserving the incoming order. Chunked to stay under SQLite's bound-variable
+ * limit.
+ */
+async function filterItemIdsByItemType(
+    itemIds: number[],
+    itemTypes: string[],
+    mode: 'include' | 'exclude',
+): Promise<number[]> {
+    if (itemIds.length === 0 || itemTypes.length === 0) return itemIds;
+
+    const itemTypeIDs = itemTypes
+        .map(itemType => Zotero.ItemTypes.getID(itemType))
+        .filter((id): id is number => typeof id === 'number');
+    if (itemTypeIDs.length === 0) return itemIds;
+
+    const comparison = mode === 'include' ? 'IN' : 'NOT IN';
+    const typePlaceholders = itemTypeIDs.map(() => '?').join(', ');
+    const matchingItemIds = new Set<number>();
     const chunkSize = 500;
 
     for (let i = 0; i < itemIds.length; i += chunkSize) {
         const chunk = itemIds.slice(i, i + chunkSize);
-        const placeholders = chunk.map(() => '?').join(', ');
+        const idPlaceholders = chunk.map(() => '?').join(', ');
         await Zotero.DB.queryAsync(
-            `SELECT itemID FROM items WHERE itemID IN (${placeholders}) AND itemTypeID != ?`,
-            [...chunk, annotationItemTypeID],
+            `SELECT itemID FROM items WHERE itemID IN (${idPlaceholders}) `
+                + `AND itemTypeID ${comparison} (${typePlaceholders})`,
+            [...chunk, ...itemTypeIDs],
             {
                 onRow: (row: any) => {
-                    returnableItemIds.add(row.getResultByIndex(0));
+                    matchingItemIds.add(row.getResultByIndex(0));
                 },
             },
         );
     }
 
-    return itemIds.filter(id => returnableItemIds.has(id));
+    return itemIds.filter(id => matchingItemIds.has(id));
+}
+
+function filterOutAnnotationItemIds(itemIds: number[]): Promise<number[]> {
+    return filterItemIdsByItemType(itemIds, ['annotation'], 'exclude');
 }
 
 
@@ -71,6 +106,26 @@ export async function handleZoteroSearchRequest(
             };
         }
         const library = validation.library!;
+
+        const anyItemTypeCondition = request.conditions.some((condition) => condition.field === 'itemType');
+        const itemCategory = request.item_category ?? 'regular';
+
+        // zotero_search has no annotation result shape, so annotations are always
+        // dropped from the result set. An annotation-only search can therefore
+        // never return a row: settle it here rather than running the search and
+        // handing back an empty page the model would read as "no matches".
+        if (!anyItemTypeCondition && itemCategory === 'annotation') {
+            return {
+                type: 'zotero_search',
+                request_id: request.request_id,
+                items: [],
+                total_count: 0,
+                warnings: [
+                    "item_category='annotation' returns no results because zotero_search cannot return annotations. "
+                        + 'Use find_annotations to search annotation text and comments.',
+                ],
+            };
+        }
 
         // Create search object
         const search = new Zotero.Search() as unknown as ZoteroSearchWritable;
@@ -129,24 +184,27 @@ export async function handleZoteroSearchRequest(
             }
         }
 
-        // Item category filter
-        const anyItemTypeCondition = request.conditions.some((condition) => condition.field === 'itemType');
-        if (!anyItemTypeCondition) {
-            const itemCategory = request.item_category ?? 'regular';
-            if (itemCategory === 'regular') {
-                search.addCondition('itemType', 'isNot', 'attachment');
-                search.addCondition('itemType', 'isNot', 'note');
-                search.addCondition('itemType', 'isNot', 'annotation');
-            } else if (itemCategory === 'attachment') {
-                search.addCondition('itemType', 'is', 'attachment');
-            } else if (itemCategory === 'note') {
-                search.addCondition('itemType', 'is', 'note');
-            } else if (itemCategory === 'annotation') {
-                search.addCondition('itemType', 'is', 'annotation');
+        // Item category filter.
+        //
+        // Zotero ORs together every non-special condition when joinMode is 'any';
+        // only the special conditions (joinMode/noChildren/recursive/…) and the
+        // search's libraryID *property* — set above, not added as a condition —
+        // are ANDed outside the join. Adding itemType conditions there would make
+        // the category an always-true disjunct — e.g. "isNot attachment OR isNot
+        // note" holds for every item — so an 'any' search would silently match
+        // the whole library. For 'any' the category is therefore applied as a
+        // post-filter on the matched itemIDs instead; 'all' keeps the
+        // condition-based filter so Zotero's SQL does the work.
+        const categoryFilter = anyItemTypeCondition ? undefined : ITEM_CATEGORY_TYPE_FILTERS.get(itemCategory);
+        const categoryNeedsPostFilter = request.join_mode === 'any';
+
+        if (categoryFilter && !categoryNeedsPostFilter) {
+            const operator = categoryFilter.mode === 'include' ? 'is' : 'isNot';
+            for (const itemType of categoryFilter.itemTypes) {
+                search.addCondition('itemType', operator, itemType);
             }
-            // 'all' = no filter, do nothing
         }
-        
+
         // Search recursively within collections (only affects collectionID conditions)
         if (request.recursive) {
             search.addCondition('recursive', 'true', '');
@@ -159,6 +217,13 @@ export async function handleZoteroSearchRequest(
         
         // Execute search
         let itemIds = await search.search();
+
+        // Apply the item category as a post-filter for 'any' searches (see above).
+        // Runs before every other filter so the cheap itemType query shrinks the
+        // set before items get loaded, and before total_count/pagination.
+        if (categoryFilter && categoryNeedsPostFilter) {
+            itemIds = await filterItemIdsByItemType(itemIds, categoryFilter.itemTypes, categoryFilter.mode);
+        }
 
         // Post-filter by attachment status if requested
         if (request.has_attachments != null) {
@@ -185,12 +250,10 @@ export async function handleZoteroSearchRequest(
         // zotero_search has no annotation result shape. When annotations can
         // reach the result set, drop them BEFORE counting and paginating, so
         // total_count and page boundaries reflect only returnable items.
-        const itemCategory = request.item_category ?? 'regular';
-        const mayContainAnnotations =
-            request.join_mode === 'any'
-            || anyItemTypeCondition
-            || itemCategory === 'all'
-            || itemCategory === 'annotation';
+        // A category filter has already excluded them (as conditions or as the
+        // post-filter above); the remaining cases — an explicit itemType
+        // condition, 'all', or an unrecognized category — still need this pass.
+        const mayContainAnnotations = !categoryFilter;
         if (mayContainAnnotations) {
             itemIds = await filterOutAnnotationItemIds(itemIds);
         }

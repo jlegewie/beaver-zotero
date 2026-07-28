@@ -26,7 +26,11 @@ export interface SearchItemsByMetadataOptions {
     collection_key?: string;
     /** If true, search recursively in subcollections */
     recursive?: boolean;
-    /** "all" for AND logic, "any" for OR logic */
+    /**
+     * "all" for AND logic, "any" for OR logic.
+     *
+     * Use "any" only when every condition below is genuinely optional.
+     */
     join_mode?: 'all' | 'any';
     /** Maximum results to return */
     limit?: number;
