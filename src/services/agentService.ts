@@ -104,6 +104,11 @@ export const CONNECT_TIMEOUT_MS = 20_000;
 export const TERMINAL_SETTLE_TIMEOUT_MS = 8_000;
 
 /**
+ * The same backstop for a run that finished normally.
+ */
+export const COMPLETE_SETTLE_TIMEOUT_MS = 70_000;
+
+/**
  * How long `cancel()` waits for the backend to confirm the stopped run was
  * written before letting the caller proceed regardless.
  *
@@ -260,24 +265,55 @@ export class AgentService {
     }
 
     /**
+     * The connection a terminal backstop belongs to.
+     *
+     * A caller that arms across an await has to say which connection it meant,
+     * because by then `this.ws` may be a successor's — see `connectionScope()`.
+     */
+    private connectionScope(): { socket: WebSocket | null; connectionId: number } {
+        return { socket: this.ws, connectionId: this.connectionId };
+    }
+
+    /** Whether the connection a caller captured is still the current one. */
+    private ownsConnection(scope: { socket: WebSocket | null; connectionId: number }): boolean {
+        return this.connectionId === scope.connectionId && this.ws === scope.socket;
+    }
+
+    /**
      * Arm the backstop that closes a socket whose `done` never arrived.
      *
      * Scoped to the connection generation and the socket instance, so a timer
      * that outlives its run — the user retried, a new connection took over —
      * cannot tear down its successor.
+     *
+     * `timeoutMs` because how long the tail may legitimately run depends on how
+     * the run ended: the backend bounds the citation lookup differently for a
+     * run that finished than for one that did not.
+     *
+     * `scope` for a caller that captured its connection before an await. The
+     * ownership check runs here as well as at fire time, and it has to: without
+     * it a stale caller would fall through to `clearTerminalSettleTimeout()` and
+     * cancel the *successor's* backstop on its way to arming a timer that can
+     * only ever no-op — taking the new run's protection with it.
      */
-    private armTerminalSettleTimeout(reason: string): void {
+    private armTerminalSettleTimeout(
+        reason: string,
+        timeoutMs: number = TERMINAL_SETTLE_TIMEOUT_MS,
+        scope: { socket: WebSocket | null; connectionId: number } = this.connectionScope(),
+    ): void {
+        if (!this.ownsConnection(scope)) {
+            logger(`AgentService: skipping ${reason} backstop for superseded connection`, 1);
+            return;
+        }
         this.clearTerminalSettleTimeout();
-        const settleSocket = this.ws;
-        const settleConnectionId = this.connectionId;
         this.terminalSettleTimer = setTimeout(() => {
             this.terminalSettleTimer = null;
-            if (this.connectionId !== settleConnectionId || this.ws !== settleSocket) return;
+            if (!this.ownsConnection(scope)) return;
             if (!this.ws || this.ws.readyState === WebSocket.CLOSED) return;
             logger(`AgentService: no 'done' after ${reason}; closing`, 1);
             // Firefox/Zotero only allows code 1000 or 3000-4999 for close()
             this.close(1000, `Client closing after ${reason} (no done)`);
-        }, TERMINAL_SETTLE_TIMEOUT_MS);
+        }, timeoutMs);
     }
 
     private clearTerminalSettleTimeout(): void {
@@ -846,7 +882,7 @@ export class AgentService {
                     this.callbacks.onToolCallArgsStream(event);
                     break;
 
-                case 'run_complete':
+                case 'run_complete': {
                     // Also a durability signal: the backend sends this once the
                     // finished run's content is written, before resolving its
                     // citations. Both orderings matter and they need different
@@ -858,8 +894,19 @@ export class AgentService {
                     // instead. Neither gets a `canceled` frame: the run had
                     // already completed.
                     this.markRunDurable('run_complete');
+                    // Which connection the backstop below belongs to, captured
+                    // before the await rather than after.
+                    const completeScope = this.connectionScope();
                     await this.callbacks.onRunComplete(event);
+                    // Armed for the same reason the error frame arms it, and
+                    // this is the frame that needs it most.
+                    this.armTerminalSettleTimeout(
+                        'run_complete',
+                        COMPLETE_SETTLE_TIMEOUT_MS,
+                        completeScope,
+                    );
                     break;
+                }
 
                 case 'run_citations':
                     await this.callbacks.onRunCitations?.(event);

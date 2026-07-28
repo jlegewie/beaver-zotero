@@ -47,6 +47,7 @@ vi.mock('../../../react/agents/agentActions', () => ({
 import {
     AgentConnectionError,
     AgentService,
+    COMPLETE_SETTLE_TIMEOUT_MS,
     ConnectTimeoutError,
     TERMINAL_SETTLE_TIMEOUT_MS,
 } from '../../../src/services/agentService';
@@ -601,6 +602,152 @@ describe('AgentService reconnect handling', () => {
 
         await vi.advanceTimersByTimeAsync(TERMINAL_SETTLE_TIMEOUT_MS + 100);
         expect(socket.close).toHaveBeenCalled();
+    });
+
+    it('closes a socket whose done never arrives after run_complete', async () => {
+        const service = new AgentService('https://api.example.com');
+        const callbacks = createCallbacks();
+        const socket = await completeConnect(service, callbacks, {
+            type: 'complete-no-done',
+        } as AgentRunRequest);
+
+        socket.emitMessage({
+            event: 'run_complete',
+            run_id: 'run-1',
+            usage: null,
+            cost: null,
+            citations: null,
+        });
+        await flushMicrotasks();
+
+        // The lookup that follows this frame is given a long budget on purpose,
+        // so the backstop has to clear it: closing inside the budget would
+        // throw away the citations the wait is for.
+        await vi.advanceTimersByTimeAsync(TERMINAL_SETTLE_TIMEOUT_MS + 100);
+        expect(socket.close).not.toHaveBeenCalled();
+
+        socket.emitMessage({ event: 'run_citations', run_id: 'run-1', citations: [] });
+        await flushMicrotasks();
+        expect(callbacks.onRunCitations).toHaveBeenCalledTimes(1);
+        expect(socket.close).not.toHaveBeenCalled();
+
+        // But a backend that goes quiet after it must not leave the composer —
+        // which only `done` (or the close it forces) unblocks — waiting forever.
+        await vi.advanceTimersByTimeAsync(COMPLETE_SETTLE_TIMEOUT_MS + 100);
+        expect(socket.close).toHaveBeenCalled();
+    });
+
+    it('does not close after a run_complete whose done arrives', async () => {
+        const service = new AgentService('https://api.example.com');
+        const callbacks = createCallbacks();
+        const socket = await completeConnect(service, callbacks, {
+            type: 'complete-with-done',
+        } as AgentRunRequest);
+
+        socket.emitMessage({
+            event: 'run_complete',
+            run_id: 'run-1',
+            usage: null,
+            cost: null,
+            citations: null,
+        });
+        socket.emitMessage({ event: 'done' });
+        await flushMicrotasks();
+
+        await vi.advanceTimersByTimeAsync(COMPLETE_SETTLE_TIMEOUT_MS + 100);
+        expect(socket.close).not.toHaveBeenCalled();
+    });
+
+    it('scopes the run_complete backstop to the connection that delivered it', async () => {
+        const service = new AgentService('https://api.example.com');
+        const firstCallbacks = createCallbacks();
+        // onRunComplete is awaited and does real work — loading item data,
+        // auto-creating notes — so it can still be running when the user
+        // retries. Hold it open across the retry to reproduce that.
+        let releaseRunComplete: (() => void) | null = null;
+        firstCallbacks.onRunComplete = vi.fn(
+            () => new Promise<void>((resolve) => { releaseRunComplete = resolve; }),
+        );
+        const firstSocket = await completeConnect(service, firstCallbacks, {
+            type: 'first',
+        } as AgentRunRequest);
+
+        firstSocket.emitMessage({
+            event: 'run_complete',
+            run_id: 'run-1',
+            usage: null,
+            cost: null,
+            citations: null,
+        });
+        await flushMicrotasks();
+
+        // A retry stands up a new connection while that callback is still
+        // awaiting.
+        const secondCallbacks = createCallbacks();
+        const secondSocket = await completeConnect(service, secondCallbacks, {
+            type: 'second',
+        } as AgentRunRequest);
+        expect(secondSocket).not.toBe(firstSocket);
+
+        // The old callback now resumes, after its connection is gone.
+        releaseRunComplete?.();
+        await flushMicrotasks();
+
+        // Its backstop belongs to the run that finished, not to the one now
+        // streaming — which may legitimately run far longer than this.
+        await vi.advanceTimersByTimeAsync(COMPLETE_SETTLE_TIMEOUT_MS + 100);
+        expect(secondSocket.close).not.toHaveBeenCalled();
+
+        secondSocket.emitMessage({
+            event: 'part',
+            run_id: 'run-2',
+            message_index: 0,
+            part_index: 0,
+            part: { type: 'text', text: 'still streaming' },
+        });
+        await flushMicrotasks();
+        expect(secondCallbacks.onPart).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not time out frames already queued behind a slow onRunComplete', async () => {
+        const service = new AgentService('https://api.example.com');
+        const callbacks = createCallbacks();
+        let releaseRunComplete: (() => void) | null = null;
+        callbacks.onRunComplete = vi.fn(
+            () => new Promise<void>((resolve) => { releaseRunComplete = resolve; }),
+        );
+        const socket = await completeConnect(service, callbacks, {
+            type: 'slow-complete',
+        } as AgentRunRequest);
+
+        socket.emitMessage({
+            event: 'run_complete',
+            run_id: 'run-1',
+            usage: null,
+            cost: null,
+            citations: null,
+        });
+        await flushMicrotasks();
+
+        // The backend answered promptly. Both frames are in hand — received,
+        // parsed, queued — but undeliverable while onRunComplete runs, because
+        // messages are dispatched one at a time.
+        socket.emitMessage({ event: 'run_citations', run_id: 'run-1', citations: [] });
+        socket.emitMessage({ event: 'done' });
+        await flushMicrotasks();
+        expect(callbacks.onRunCitations).not.toHaveBeenCalled();
+
+        // Local post-processing outlasts the whole backstop window.
+        await vi.advanceTimersByTimeAsync(COMPLETE_SETTLE_TIMEOUT_MS + 100);
+        expect(socket.close).not.toHaveBeenCalled();
+
+        releaseRunComplete?.();
+        await flushMicrotasks();
+
+        // The clock bounds the backend's silence, not this client's own work,
+        // so nothing that had already arrived is discarded.
+        expect(callbacks.onRunCitations).toHaveBeenCalledTimes(1);
+        expect(callbacks.onDone).toHaveBeenCalledTimes(1);
     });
 
     it('does not let a stale terminal backstop tear down a newer connection', async () => {
