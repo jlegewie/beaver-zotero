@@ -374,13 +374,18 @@ export async function validateOrganizeItemsAction(
         // bucket when mixed with unrelated problems, so any code that keys
         // off this specific code (now or later) still sees it.
         const exclusionCode = codes.find((c) => c === 'library_not_searchable' || c === 'library_excluded');
+        // Not every message ends in terminal punctuation (e.g. "Item not
+        // found: <id>"), so joining with a bare space can run two messages
+        // together illegibly. Normalize each to end with a period and list
+        // them as a numbered list instead.
+        const normalized = parts.map((p) => (/[.!?]$/.test(p) ? p : `${p}.`));
         return {
             type: 'agent_action_validate_response',
             request_id: request.request_id,
             valid: false,
-            error: parts.length === 1
-                ? parts[0]
-                : `${parts.length} problems found: ${parts.join(' ')}`,
+            error: normalized.length === 1
+                ? normalized[0]
+                : `${normalized.length} problems found:\n` + normalized.map((p, i) => `${i + 1}. ${p}`).join('\n'),
             error_code: uniqueCodes.size === 1 ? [...uniqueCodes][0] : (exclusionCode ?? 'multiple_item_errors'),
             preference: 'always_ask',
         };
