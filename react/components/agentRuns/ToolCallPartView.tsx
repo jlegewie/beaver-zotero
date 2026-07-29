@@ -36,6 +36,7 @@ import {
     PropertyEditIcon,
     HighlighterIcon,
     ChattingIcon,
+    LayersIcon,
 } from '../icons/icons';
 import { toolExpandedAtom, toggleToolExpandedAtom, setToolExpandedAtom } from '../../atoms/messageUIState';
 import { parseLibraryRef, resolveLibraryRef } from '../../../src/utils/libraryIdentity';
@@ -104,7 +105,7 @@ const TOOL_ICONS: Record<string, IconComponent> = {
 
     // Read tool result
     read_file: TextAlignLeftIcon,
-    load_tool_results: PuzzleIcon,
+    load_tool_results: LayersIcon,
     
     // Progressive disclosure tools
     load_capability: PuzzleIcon,
