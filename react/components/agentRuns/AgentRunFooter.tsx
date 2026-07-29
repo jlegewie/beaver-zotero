@@ -270,7 +270,9 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
                 {/* Action buttons */}
                 <div className="display-flex gap-4">
                     {/* Usage display */}
-                    {(getHost().config?.isDevelopment() ?? false) && run.status === 'completed' && run.total_usage && run.total_cost && (
+                    {/* Compare cost against null explicitly: a falsy `0` cost (free models) would
+                        otherwise short-circuit the && chain and render a literal "0". */}
+                    {(getHost().config?.isDevelopment() ?? false) && run.status === 'completed' && run.total_usage != null && run.total_cost != null && (
                         <TokenUsageDisplay usage={run.total_usage} cost={run.total_cost} />
                     )}
                     {/* Share button */}
