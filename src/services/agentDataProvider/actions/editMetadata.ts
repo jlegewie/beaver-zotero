@@ -2,7 +2,7 @@ import { logger } from '../../../utils/logger';
 import { searchableLibraryIdsAtom } from '../../../../react/atoms/profile';
 import { store } from '../../../../react/store';
 import { MetadataEdit } from '../../../../react/types/agentActions/base';
-import { canSetField, resolveFieldForItemType, SETTABLE_PRIMARY_FIELDS, sanitizeCreators } from '../../../utils/zoteroUtils';
+import { canSetField, getCreatorTypeInfo, resolveFieldForItemType, SETTABLE_PRIMARY_FIELDS, sanitizeCreators } from '../../../utils/zoteroUtils';
 import {
     WSAgentActionValidateRequest,
     WSAgentActionValidateResponse,
@@ -252,12 +252,17 @@ export function validateCreators(item: Zotero.Item, creators: CreatorJSON[]): Cr
 
         // Check creatorType is valid for the item's type
         if (!Zotero.CreatorTypes.isValidForItemType(creatorTypeID, itemTypeID)) {
-            const validTypes = Zotero.CreatorTypes.getTypesForItemType(itemTypeID);
-            const validTypeNames = validTypes.map((t: { id: number; name: string }) => t.name);
+            const info = getCreatorTypeInfo(itemTypeID);
             const itemType = Zotero.ItemTypes.getName(itemTypeID);
+            // Name the primary creator type explicitly. It is the type that
+            // fills the `author` role for this item type, so it is the
+            // intended target in the common case of a generic 'author'.
+            const primaryHint = info?.primary
+                ? ` Use '${info.primary}' for the item's main creator.`
+                : '';
             errors.push({
                 index: i,
-                error: `Creator type '${creator.creatorType}' is not valid for item type '${itemType}'. Valid creator types: ${validTypeNames.join(', ')}`,
+                error: `Creator type '${creator.creatorType}' is not valid for item type '${itemType}'. Valid creator types: ${(info?.valid ?? []).join(', ')}.${primaryHint}`,
                 error_code: 'invalid_creator_type',
             });
         }

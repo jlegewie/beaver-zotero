@@ -16,6 +16,7 @@ import { ItemStub } from '../../../react/types/zotero';
 import { serializeNote, serializeAnnotation, serializeItemStub } from '../../utils/zoteroSerializers';
 import { libraryRefForLibraryID, modelObjectId, resolveItemReference, resolveObjectId, UNRESOLVED_LIBRARY_ID } from '../../utils/libraryIdentity';
 import { checkLibraryExcluded, getAttachmentInfoForItem, formatCreatorsString, extractYear } from './utils';
+import { getCreatorTypeInfo } from '../../utils/zoteroUtils';
 
 
 /**
@@ -216,7 +217,19 @@ export async function handleGetMetadataRequest(
                     }
                 });
             }
-            
+
+            // Surface the item type's creator vocabulary alongside its fields.
+            // toJSON() reports the item's current creators but not which types
+            // its schema permits, and `author` is invalid for many types
+            // (patent -> inventor, film -> director, presentation -> presenter,
+            // ...). Without this the agent has to guess a creator type and
+            // learn the right one from a rejected edit.
+            const creatorTypes = getCreatorTypeInfo(item.itemTypeID);
+            if (creatorTypes) {
+                result.valid_creator_types = creatorTypes.valid;
+                result.primary_creator_type = creatorTypes.primary;
+            }
+
             // Handle attachments if requested
             if (request.include_attachments && item.isRegularItem()) {
                 const attachmentIds = item.getAttachments();

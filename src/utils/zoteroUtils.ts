@@ -1181,6 +1181,50 @@ export function resolveFieldForItemType(itemTypeID: number, field: string): stri
     return Zotero.ItemFields.getName(equivID);
 }
 
+/** The creator vocabulary Zotero's schema defines for one item type. */
+export interface CreatorTypeInfo {
+    /** Every creator type valid for the item type, in Zotero's schema order. */
+    valid: string[];
+    /**
+     * The item type's primary creator type — the one that fills the `author`
+     * role for that type. `null` when the schema defines no primary.
+     */
+    primary: string | null;
+}
+
+/**
+ * Resolve the creator types Zotero's schema allows for an item type.
+ *
+ * Creator vocabularies are per item type, and `author` is *not* universal: a
+ * patent takes `inventor`, a film `director`, a presentation `presenter`, a
+ * map `cartographer`, and so on. `item.toJSON()` exposes an item's current
+ * creators but never the set of types its schema permits, so any consumer
+ * that has to choose a creator type needs this.
+ *
+ * Returns `null` for item types that take no creators at all (attachment,
+ * note, annotation).
+ */
+export function getCreatorTypeInfo(itemTypeID: number): CreatorTypeInfo | null {
+    let types: { id: number; name: string }[];
+    try {
+        types = Zotero.CreatorTypes.getTypesForItemType(itemTypeID);
+    } catch {
+        return null;
+    }
+    if (!types || types.length === 0) return null;
+
+    let primary: string | null = null;
+    try {
+        // getPrimaryIDForType() returns false when the type has no primary.
+        const primaryID = Zotero.CreatorTypes.getPrimaryIDForType(itemTypeID);
+        primary = primaryID ? Zotero.CreatorTypes.getName(primaryID) : null;
+    } catch {
+        // A missing primary is not fatal — the valid list still stands alone.
+    }
+
+    return { valid: types.map(t => t.name), primary };
+}
+
 /**
  * Get the `language` field for a Zotero item by library ID + key.
  *
