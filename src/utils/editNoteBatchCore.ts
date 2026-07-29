@@ -48,6 +48,7 @@ import {
 import {
     detectPartialSimplifiedTag,
     buildPartialSimplifiedTagMessage,
+    buildExpansionErrorMessage,
 } from './editNoteValidation';
 import { logger } from './logger';
 
@@ -323,7 +324,11 @@ function matchEdit(
         // need the base, so try it before surfacing expansion_failed.
         match = findMarkdownRenderMatch(matchInput);
         if (!match) {
-            return failure(spec.index, e?.message || String(e), 'expansion_failed');
+            return failure(
+                spec.index,
+                buildExpansionErrorMessage(e, ctx.simplified, spec.oldString),
+                'expansion_failed',
+            );
         }
     }
 

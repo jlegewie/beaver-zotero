@@ -43,6 +43,8 @@ vi.mock('../../../src/utils/editNoteValidation', async () => {
         }),
         detectPartialSimplifiedTag: actual.detectPartialSimplifiedTag,
         buildPartialSimplifiedTagMessage: actual.buildPartialSimplifiedTagMessage,
+        buildCitationRefHint: actual.buildCitationRefHint,
+        buildExpansionErrorMessage: actual.buildExpansionErrorMessage,
     };
 });
 
@@ -135,6 +137,7 @@ vi.mock('../../../src/utils/noteCitationExpand', () => ({
     preloadNotePageLabels: vi.fn().mockResolvedValue({}),
     preloadStructuralLocatorPages: vi.fn().mockResolvedValue({ pages: {}, unresolved: [] }),
     buildUnresolvedLocatorWarning: vi.fn(() => null),
+    isCitationRefNotFoundError: vi.fn(() => false),
 }));
 
 vi.mock('../../../src/utils/editNoteStrippers', () => ({

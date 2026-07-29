@@ -659,6 +659,27 @@ function buildExternalRefLinkHTML(ref: ExternalReference, page?: string): string
 // =============================================================================
 
 /**
+ * `code` set on expansion throws whose recovery is to copy a real
+ * `<citation .../>` tag out of the note. Callers detect it to append the
+ * note's actual tags to the error (see `buildCitationRefHint`) instead of
+ * telling the model to go find them itself.
+ */
+export const CITATION_REF_NOT_FOUND_CODE = 'citation_ref_not_found';
+
+/** Build an expansion error tagged with `CITATION_REF_NOT_FOUND_CODE`. */
+function citationRefNotFoundError(message: string): Error {
+    const error = new Error(message);
+    (error as Error & { code?: string }).code = CITATION_REF_NOT_FOUND_CODE;
+    return error;
+}
+
+/** True when `error` was thrown for an old_string citation ref that the note
+ *  does not contain. */
+export function isCitationRefNotFoundError(error: unknown): boolean {
+    return (error as { code?: string } | null)?.code === CITATION_REF_NOT_FOUND_CODE;
+}
+
+/**
  * Expand simplified tags in a string back to their raw HTML equivalents.
  * Handles citations, annotations, images, and math dollar notation.
  *
@@ -728,7 +749,7 @@ export function expandToRawHtml(
                 // incrementing from an existing one (e.g. c_KEY_4 → c_KEY_5).
                 // Fall through to new-citation handling below.
                 if (context === 'old') {
-                    throw new Error(
+                    throw citationRefNotFoundError(
                         `Citation ref="${ref}" referenced in old_string was not found `
                         + 'in the note\'s existing citations. To reference an existing '
                         + 'citation, copy its full <citation .../> tag (including `ref`) '
@@ -760,7 +781,7 @@ export function expandToRawHtml(
                 const locAttr = extractAttr(attrStr, 'loc');
                 const pageAttr = extractAttr(attrStr, 'page');
                 const locatorStr = locAttr ? ` loc="${locAttr}"` : pageAttr ? ` page="${pageAttr}"` : '';
-                throw new Error(
+                throw citationRefNotFoundError(
                     `Citation \`<citation ${ident}${locatorStr}/>\` referenced in old_string `
                     + 'was not found in the note. To reference an existing citation, copy '
                     + 'its full <citation .../> tag (including `ref`) verbatim from '
