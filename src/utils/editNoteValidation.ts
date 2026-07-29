@@ -510,23 +510,83 @@ function collectCitationTags(simplified: string): NoteCitationTag[] {
     return tags;
 }
 
-/** Content words used to score a citation's surroundings against old_string. */
-function contentWords(text: string): Set<string> {
-    return new Set(
-        text
-            .replace(/<[^>]+>/g, ' ')
-            .toLowerCase()
-            .split(/\s+/)
-            .filter((w) => w.length > 2),
-    );
+interface ContentWord {
+    word: string;
+    /** Offset of the word in the text it was tokenized from. */
+    index: number;
 }
 
 /**
- * Offset of the note line that best overlaps `oldString`'s content words, or
+ * Content words of `text`, in order, each with its offset.
+ *
+ * Markup is masked with an equal-length run of spaces rather than deleted, so
+ * tag names and attribute values stay out of the token stream while every
+ * returned offset remains valid in `text`'s own coordinates.
+ */
+function contentWordPositions(text: string): ContentWord[] {
+    const masked = text.replace(/<[^>]+>/g, (tag) => ' '.repeat(tag.length));
+    const words: ContentWord[] = [];
+    const wordRe = /\S+/g;
+    let m: RegExpExecArray | null;
+    while ((m = wordRe.exec(masked)) !== null) {
+        if (m[0].length > 2) words.push({ word: m[0].toLowerCase(), index: m.index });
+    }
+    return words;
+}
+
+/** Content words used to score a citation's surroundings against old_string. */
+function contentWords(text: string): Set<string> {
+    return new Set(contentWordPositions(text).map((w) => w.word));
+}
+
+/**
+ * Bounds on the half-width, in characters, of the window that locates the
+ * densest cluster of matched words inside a line. The window tracks
+ * `old_string`'s own length, since that approximates the span being targeted;
+ * the bounds stop a one-word `old_string` from collapsing it to a point and a
+ * paragraph-sized one from widening it to the whole line.
+ */
+const ANCHOR_WINDOW_MIN_HALF_WIDTH = 40;
+const ANCHOR_WINDOW_MAX_HALF_WIDTH = 400;
+
+/**
+ * Offset of the densest cluster of `matches` within its line.
+ */
+function findClusterOffset(matches: ContentWord[], halfWidth: number): number {
+    const counts = new Map<string, number>();
+    for (const { word } of matches) counts.set(word, (counts.get(word) ?? 0) + 1);
+
+    // prefix[i] = summed weight of matches[0..i-1], so a window's weight is one
+    // subtraction.
+    const prefix = [0];
+    for (const { word } of matches) {
+        prefix.push(prefix[prefix.length - 1] + 1 / counts.get(word)!);
+    }
+
+    let bestOffset = matches[0].index;
+    let bestWeight = 0;
+    // Both window edges only ever advance, since `matches` is sorted.
+    let lo = 0;
+    let hi = 0;
+    for (const match of matches) {
+        while (matches[lo].index < match.index - halfWidth) lo++;
+        while (hi < matches.length && matches[hi].index <= match.index + halfWidth) hi++;
+        const weight = prefix[hi] - prefix[lo];
+        // Strictly greater keeps the EARLIEST of equally dense clusters.
+        if (weight > bestWeight) {
+            bestWeight = weight;
+            bestOffset = match.index;
+        }
+    }
+    return bestOffset;
+}
+
+/**
+ * Offset in `simplified` that best overlaps `oldString`'s content words, or
  * `null` when nothing scores.
  *
  * `old_string` did not resolve, so there is no matched position to measure
- * from; the best-scoring line is the available stand-in for where the model
+ * from; the best-scoring region is the available stand-in for where the model
  * was aiming. Scoring one anchor and measuring distance from it beats scoring
  * each citation's own neighbourhood, which saturates on short notes — every
  * window then covers every word, all scores tie, and the tie-break rather than
@@ -536,20 +596,25 @@ function findAnchorIndex(simplified: string, oldString: string): number | null {
     const searchWords = contentWords(oldString);
     if (searchWords.size === 0) return null;
 
+    const halfWidth = Math.min(
+        Math.max(oldString.length, ANCHOR_WINDOW_MIN_HALF_WIDTH),
+        ANCHOR_WINDOW_MAX_HALF_WIDTH,
+    );
+
     let bestIndex: number | null = null;
     let bestScore = 0;
-    let offset = 0;
+    let lineStart = 0;
     for (const line of simplified.split('\n')) {
-        let matches = 0;
-        for (const w of contentWords(line)) {
-            if (searchWords.has(w)) matches += 1;
-        }
+        const matches = contentWordPositions(line).filter((w) => searchWords.has(w.word));
+        // Score the line on distinct words so one word repeated down it cannot
+        // outscore a line matching many different ones.
+        const distinct = new Set(matches.map((m) => m.word));
         // Strictly greater keeps the FIRST best line on a tie.
-        if (matches > bestScore) {
-            bestScore = matches;
-            bestIndex = offset;
+        if (distinct.size > bestScore) {
+            bestScore = distinct.size;
+            bestIndex = lineStart + findClusterOffset(matches, halfWidth);
         }
-        offset += line.length + 1; // +1 for the split '\n'
+        lineStart += line.length + 1; // +1 for the split '\n'
     }
     return bestIndex;
 }

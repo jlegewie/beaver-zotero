@@ -833,6 +833,109 @@ describe('buildCitationRefHint', () => {
         expect(hint.indexOf('c_ABCD1234_4')).toBeLessThan(hint.indexOf('c_ABCD1234_5'));
     });
 
+    /**
+     * One paragraph carrying six citations, so the whole note is a single line.
+     * Canonical note HTML only breaks lines at block boundaries, so a note like
+     * this gives the anchor no line to choose — it has to resolve an offset
+     * inside the line.
+     */
+    const oneLineNote = '<p>'
+        + [
+            'Alpha discussion of migration patterns',
+            'Beta discussion of trade balances',
+            'Gamma discussion of urban housing',
+            'Delta discussion of labor unions',
+            'Epsilon discussion of tax policy',
+            'Zeta discussion of school choice',
+        ]
+            .map((text, i) => `${text} <citation id="u-ABCD1234" ref="c_ABCD1234_${i}"/>`)
+            .join('. ')
+        + '</p>';
+
+    it('anchors inside the line for a newline-free note targeting a later section', () => {
+        expect(oneLineNote).not.toContain('\n');
+
+        const hint = buildCitationRefHint(oneLineNote, 'Zeta discussion of school choice', 2) ?? '';
+
+        expect(hint).toContain('The 2 citation tags in the note closest to your old_string (of 6 total):');
+        expect(hint).toContain('ref="c_ABCD1234_5"');
+        expect(hint).toContain('ref="c_ABCD1234_4"');
+        expect(hint).not.toContain('ref="c_ABCD1234_0"');
+    });
+
+    it('anchors mid-line for a newline-free note targeting a middle section', () => {
+        const hint = buildCitationRefHint(oneLineNote, 'Gamma discussion of urban housing', 3) ?? '';
+
+        expect(hint).toContain('ref="c_ABCD1234_1"');
+        expect(hint).toContain('ref="c_ABCD1234_2"');
+        expect(hint).toContain('ref="c_ABCD1234_3"');
+        expect(hint).not.toContain('ref="c_ABCD1234_0"');
+        expect(hint).not.toContain('ref="c_ABCD1234_5"');
+    });
+
+    /**
+     * One paragraph whose sections share most of their wording, so the words
+     * that identify the target section are a minority of the phrase's words.
+     */
+    const repeatedPhraseNote = '<p>'
+        + ['migration', 'trade balances', 'urban housing', 'labor unions', 'tax policy', 'school choice']
+            .map((topic, i) => `Discussion of ${topic} and evidence <citation id="u-ABCD1234" ref="c_ABCD1234_${i}"/>`)
+            .join('. ')
+        + '</p>';
+
+    it('anchors on the identifying words, not on shared phrase words repeated earlier', () => {
+        // 'discussion', 'and' and 'evidence' occur in every section; only
+        // 'school' and 'choice' identify the target one.
+        const hint = buildCitationRefHint(repeatedPhraseNote, 'Discussion of school choice and evidence', 2) ?? '';
+
+        expect(hint).toContain('ref="c_ABCD1234_5"');
+        expect(hint).not.toContain('ref="c_ABCD1234_0"');
+        expect(hint).not.toContain('ref="c_ABCD1234_1"');
+    });
+
+    it('anchors on a middle section whose identifying words repeat elsewhere', () => {
+        const hint = buildCitationRefHint(repeatedPhraseNote, 'Discussion of urban housing and evidence', 3) ?? '';
+
+        expect(hint).toContain('ref="c_ABCD1234_2"');
+        expect(hint).not.toContain('ref="c_ABCD1234_0"');
+        expect(hint).not.toContain('ref="c_ABCD1234_5"');
+    });
+
+    it('anchors on a single identifying word among otherwise identical sections', () => {
+        // Every word but the topic is shared by all six sections, so one word
+        // carries the entire signal.
+        const sections = ['migration', 'trade', 'housing', 'labor', 'taxes', 'schooling'].map(
+            (topic) => `The results of the study on ${topic} were consistent with the theory`,
+        );
+        const note = '<p>'
+            + sections.map((s, i) => `${s} <citation id="u-ABCD1234" ref="c_ABCD1234_${i}"/>`).join('. ')
+            + '</p>';
+
+        const hint = buildCitationRefHint(note, sections[5], 2) ?? '';
+
+        expect(hint).toContain('ref="c_ABCD1234_5"');
+        expect(hint).not.toContain('ref="c_ABCD1234_0"');
+    });
+
+    it('does not let a word repeated across a line outscore the line that matches most', () => {
+        // 'discussion' recurs in every paragraph, so scoring occurrences rather
+        // than distinct words would let any paragraph beat the real target.
+        const hint = buildCitationRefHint(sixParaNote, 'discussion discussion discussion school choice', 2) ?? '';
+
+        expect(hint).toContain('ref="c_ABCD1234_5"');
+        expect(hint).not.toContain('ref="c_ABCD1234_0"');
+    });
+
+    it('scores prose only, never tag names or attribute values', () => {
+        // old_string is entirely markup vocabulary present in every tag; none of
+        // it may score, so this has to fall back to the head of the note.
+        const hint = buildCitationRefHint(sixParaNote, 'citation ref ABCD1234', 2) ?? '';
+
+        expect(hint).toContain('ref="c_ABCD1234_0"');
+        expect(hint).toContain('ref="c_ABCD1234_1"');
+        expect(hint).not.toContain('ref="c_ABCD1234_5"');
+    });
+
     it('does not run past a tag whose attribute value contains escaped angle brackets', () => {
         const note = `<p>Text <citation id="u-ABCD1234" label="a &gt; b" ref="c_ABCD1234_0"/> more</p>`;
 
