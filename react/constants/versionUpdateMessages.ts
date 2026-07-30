@@ -511,7 +511,8 @@ const versionUpdateMessageList: VersionUpdateMessageConfig[] = [
     {
         version: "0.22.6",
         title: "Version 0.22.6: Improved Zotero 10 support",
-        text: "Supported multi-collection selection in Actions and addressed remaining compatibility issues.",
+        text: "Actions now support selecting multiple collections at once, and all remaining compatibility issues with Zotero 10 have been resolved.",
+   
         inPanel: true,
     },
 
