@@ -11,11 +11,15 @@
  *                                  add the `ref` attribute to no-ref citations
  *                                  in old_string so existing citations are
  *                                  identified unambiguously
+ *   - `buildCitationRefHint` / `buildExpansionErrorMessage`
+ *                                  attach the note's real `<citation .../>`
+ *                                  tags to an unresolvable-ref error
  */
 
 import type { SimplificationMetadata } from './noteHtmlSimplifier';
 import {
     extractAttr,
+    isCitationRefNotFoundError,
     normalizePageLocator,
     translatePageNumberToLabel,
 } from './noteCitationExpand';
@@ -27,6 +31,7 @@ import {
 import type { PageLabelsByAttachmentId } from '../../react/atoms/citations';
 import { modelObjectId, modelObjectIdFromReference, resolveObjectId, UNRESOLVED_LIBRARY_ID } from './libraryIdentity';
 import { checkLibraryExcluded } from '../services/agentDataProvider/utils';
+import { logger } from './logger';
 
 // =============================================================================
 // New-string validation
@@ -475,4 +480,234 @@ export function buildPartialSimplifiedTagMessage(partial: PartialSimplifiedTag):
         + 'and write a new `<citation id="..." loc="page..."/>` (without `ref`) as '
         + 'new_string. The `ref` attribute is read-only.'
     );
+}
+
+// =============================================================================
+// Citation-ref recovery hint
+// =============================================================================
+
+/** How many citation tags the recovery hint lists at most. */
+const MAX_CITATION_REF_HINT_TAGS = 5;
+
+/** Simplified citation tags are self-closing and `escapeAttr` escapes `>`
+ *  inside attribute values, so `[^>]` cannot run past the tag. */
+const SIMPLIFIED_CITATION_TAG_RE = /<citation\s[^>]*\/>/g;
+
+interface NoteCitationTag {
+    tag: string;
+    /** Offset of the tag in the simplified note. */
+    index: number;
+}
+
+/** Every `<citation .../>` tag in the simplified note, in document order. */
+function collectCitationTags(simplified: string): NoteCitationTag[] {
+    const tags: NoteCitationTag[] = [];
+    SIMPLIFIED_CITATION_TAG_RE.lastIndex = 0;
+    let m: RegExpExecArray | null;
+    while ((m = SIMPLIFIED_CITATION_TAG_RE.exec(simplified)) !== null) {
+        tags.push({ tag: m[0], index: m.index });
+    }
+    return tags;
+}
+
+interface ContentWord {
+    word: string;
+    /** Offset of the word in the text it was tokenized from. */
+    index: number;
+}
+
+/**
+ * Content words of `text`, in order, each with its offset.
+ *
+ * Markup is masked with an equal-length run of spaces rather than deleted, so
+ * tag names and attribute values stay out of the token stream while every
+ * returned offset remains valid in `text`'s own coordinates.
+ */
+function contentWordPositions(text: string): ContentWord[] {
+    const masked = text.replace(/<[^>]+>/g, (tag) => ' '.repeat(tag.length));
+    const words: ContentWord[] = [];
+    const wordRe = /\S+/g;
+    let m: RegExpExecArray | null;
+    while ((m = wordRe.exec(masked)) !== null) {
+        if (m[0].length > 2) words.push({ word: m[0].toLowerCase(), index: m.index });
+    }
+    return words;
+}
+
+/** Content words used to score a citation's surroundings against old_string. */
+function contentWords(text: string): Set<string> {
+    return new Set(contentWordPositions(text).map((w) => w.word));
+}
+
+/**
+ * Bounds on the half-width, in characters, of the window that locates the
+ * densest cluster of matched words inside a line. The window tracks
+ * `old_string`'s own length, since that approximates the span being targeted;
+ * the bounds stop a one-word `old_string` from collapsing it to a point and a
+ * paragraph-sized one from widening it to the whole line.
+ */
+const ANCHOR_WINDOW_MIN_HALF_WIDTH = 40;
+const ANCHOR_WINDOW_MAX_HALF_WIDTH = 400;
+
+/**
+ * Offset of the densest cluster of `matches` within its line.
+ */
+function findClusterOffset(matches: ContentWord[], halfWidth: number): number {
+    const counts = new Map<string, number>();
+    for (const { word } of matches) counts.set(word, (counts.get(word) ?? 0) + 1);
+
+    // prefix[i] = summed weight of matches[0..i-1], so a window's weight is one
+    // subtraction.
+    const prefix = [0];
+    for (const { word } of matches) {
+        prefix.push(prefix[prefix.length - 1] + 1 / counts.get(word)!);
+    }
+
+    let bestOffset = matches[0].index;
+    let bestWeight = 0;
+    // Both window edges only ever advance, since `matches` is sorted.
+    let lo = 0;
+    let hi = 0;
+    for (const match of matches) {
+        while (matches[lo].index < match.index - halfWidth) lo++;
+        while (hi < matches.length && matches[hi].index <= match.index + halfWidth) hi++;
+        const weight = prefix[hi] - prefix[lo];
+        // Strictly greater keeps the EARLIEST of equally dense clusters.
+        if (weight > bestWeight) {
+            bestWeight = weight;
+            bestOffset = match.index;
+        }
+    }
+    return bestOffset;
+}
+
+/**
+ * Offset in `simplified` that best overlaps `oldString`'s content words, or
+ * `null` when nothing scores.
+ *
+ * `old_string` did not resolve, so there is no matched position to measure
+ * from; the best-scoring region is the available stand-in for where the model
+ * was aiming. Scoring one anchor and measuring distance from it beats scoring
+ * each citation's own neighbourhood, which saturates on short notes — every
+ * window then covers every word, all scores tie, and the tie-break rather than
+ * the evidence decides.
+ */
+function findAnchorIndex(simplified: string, oldString: string): number | null {
+    const searchWords = contentWords(oldString);
+    if (searchWords.size === 0) return null;
+
+    const halfWidth = Math.min(
+        Math.max(oldString.length, ANCHOR_WINDOW_MIN_HALF_WIDTH),
+        ANCHOR_WINDOW_MAX_HALF_WIDTH,
+    );
+
+    let bestIndex: number | null = null;
+    let bestScore = 0;
+    let lineStart = 0;
+    for (const line of simplified.split('\n')) {
+        const matches = contentWordPositions(line).filter((w) => searchWords.has(w.word));
+        // Score the line on distinct words so one word repeated down it cannot
+        // outscore a line matching many different ones.
+        const distinct = new Set(matches.map((m) => m.word));
+        // Strictly greater keeps the FIRST best line on a tie.
+        if (distinct.size > bestScore) {
+            bestScore = distinct.size;
+            bestIndex = lineStart + findClusterOffset(matches, halfWidth);
+        }
+        lineStart += line.length + 1; // +1 for the split '\n'
+    }
+    return bestIndex;
+}
+
+/**
+ * Pick the `max` citations nearest to where `oldString` seems to target,
+ * returned in document order.
+ *
+ * With no anchor (old_string is pure markup, or shares no words with the note)
+ * the head of the note wins, which is no worse than an arbitrary pick.
+ */
+function selectNearestCitations(
+    simplified: string,
+    tags: NoteCitationTag[],
+    oldString: string,
+    max: number,
+): NoteCitationTag[] {
+    if (tags.length <= max) return tags;
+
+    const anchor = findAnchorIndex(simplified, oldString);
+    if (anchor === null) return tags.slice(0, max);
+
+    return tags
+        .map((t, order) => ({ t, order, distance: Math.abs(t.index - anchor) }))
+        .sort((a, b) => a.distance - b.distance || a.order - b.order)
+        .slice(0, max)
+        .sort((a, b) => a.order - b.order)
+        .map((s) => s.t);
+}
+
+/**
+ * Build the block appended to an old_string citation-ref error: the note's
+ * actual `<citation .../>` tags, ready to paste.
+ *
+ * The bare error tells the model to copy a tag verbatim from `read_note` but
+ * hands it nothing to copy, so recovery costs a round trip — and a model that
+ * guesses instead tends to walk the ref grammar (`c_KEY_1`, `_2`, …) and fail
+ * repeatedly. Listing the real tags makes recovery copy-paste.
+ *
+ * Returns `null` when the note has no citations at all; the unmodified error
+ * already says what to do in that case.
+ */
+export function buildCitationRefHint(
+    simplified: string,
+    oldString: string,
+    max: number = MAX_CITATION_REF_HINT_TAGS,
+): string | null {
+    const tags = collectCitationTags(simplified);
+    if (tags.length === 0) return null;
+
+    const picked = selectNearestCitations(simplified, tags, oldString, max);
+    const header = picked.length < tags.length
+        ? `The ${picked.length} citation tags in the note closest to your old_string `
+            + `(of ${tags.length} total):`
+        : tags.length === 1
+            ? 'The note\'s only citation tag:'
+            : `All ${tags.length} citation tags in the note:`;
+
+    return (
+        `${header}\n\`\`\`\n${picked.map((t) => t.tag).join('\n')}\n\`\`\`\n`
+        + 'Copy one of these verbatim (including its `ref`). `ref` values are '
+        + 'positional: they shift whenever citations are added or removed, so '
+        + 're-read the note after an applied edit before reusing them.'
+    );
+}
+
+/**
+ * Error message for a failed old_string/new_string expansion, with the note's
+ * real citation tags appended when the failure was an unresolvable old_string
+ * citation ref. Any other expansion failure passes through unchanged.
+ *
+ * The `old_string` mention in the base message is load-bearing — the backend
+ * branches on it to decide whether a retry should be preceded by `read_note` —
+ * so keep it in the message text, not only in the appended block.
+ *
+ * Enriching an error must never be able to make it worse: this runs on a path
+ * whose caller has already decided to report `expansion_failed`, so a throw in
+ * here would escape into the handler's outer catch and downgrade a precise,
+ * actionable error into an opaque one. Any failure falls back to the plain
+ * message.
+ */
+export function buildExpansionErrorMessage(
+    error: unknown,
+    simplified: string,
+    oldString: string | undefined,
+): string {
+    const message = (error as { message?: string } | null)?.message || String(error);
+    try {
+        if (!isCitationRefNotFoundError(error)) return message;
+        const hint = buildCitationRefHint(simplified, oldString ?? '');
+        return hint ? `${message}\n\n${hint}` : message;
+    } catch (e) {
+        logger(`buildExpansionErrorMessage: failed to build the citation-ref hint: ${e}`, 1);
+        return message;
+    }
 }

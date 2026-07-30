@@ -16,6 +16,7 @@ import {
     applyOldStringEnrichment,
     detectPartialSimplifiedTag,
     buildPartialSimplifiedTagMessage,
+    buildExpansionErrorMessage,
 } from '../../../utils/editNoteValidation';
 import {
     expandToRawHtml,
@@ -612,7 +613,7 @@ async function validateEditNoteAction(
                 type: 'agent_action_validate_response',
                 request_id: request.request_id,
                 valid: false,
-                error: e.message || String(e),
+                error: buildExpansionErrorMessage(e, simplified, old_string),
                 error_code: 'expansion_failed',
                 preference: 'always_ask',
             };
@@ -1127,7 +1128,7 @@ async function executeEditNoteAction(
                 type: 'agent_action_execute_response',
                 request_id: request.request_id,
                 success: false,
-                error: e.message || String(e),
+                error: buildExpansionErrorMessage(e, simplified, old_string),
                 error_code: 'expansion_failed',
             };
         }
