@@ -13,6 +13,16 @@ export type LibraryTreeRowType =
     | 'unfiled' | 'trash' | 'publications' | 'retracted'
     | 'feeds' | 'feed' | null;
 
+/** A collection row within the collections-tree selection. */
+export interface SelectedCollectionInfo {
+    collectionId: number;
+    collectionName: string;
+    libraryId: number;
+}
+
+/**
+ * The collections-tree selection.
+ */
 export interface LibraryViewInfo {
     treeRowType: LibraryTreeRowType;
     libraryId: number;
@@ -20,6 +30,13 @@ export interface LibraryViewInfo {
     collectionId: number | null;
     collectionName: string | null;
     searchName: string | null;
+    // --- whole selection ---
+    /** Number of selected rows of any kind (>= 1 whenever a view is reported). */
+    selectedRowCount: number;
+    /** Every selected collection row, in collections-list order. */
+    selectedCollections: SelectedCollectionInfo[];
+    /** Distinct library IDs spanned by the selection, in collections-list order. */
+    selectedLibraryIds: number[];
 }
 
 const defaultLibraryView: LibraryViewInfo = {
@@ -29,6 +46,9 @@ const defaultLibraryView: LibraryViewInfo = {
     collectionId: null,
     collectionName: null,
     searchName: null,
+    selectedRowCount: 1,
+    selectedCollections: [],
+    selectedLibraryIds: [1],
 };
 
 export const libraryViewAtom = atom<LibraryViewInfo>(defaultLibraryView);

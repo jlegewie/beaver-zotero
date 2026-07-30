@@ -86,3 +86,32 @@ export function getSelectedCollections(zp: any): Zotero.Collection[] {
 export function getSelectedCollection(zp: any): Zotero.Collection | null {
     return getSelectedCollections(zp)[0] ?? null;
 }
+
+/**
+ * Every selected collections-tree row, in collections-list order (not click
+ * order), or `[]` when nothing is selected.
+ *
+ * Rows are the tree's own row objects, carrying `type`, `ref`, and predicates
+ * like `isCollection()`. Unlike {@link getSelectedCollections} this keeps
+ * non-collection rows (libraries, saved searches, trash, …), so it is the right
+ * read when the caller cares about what kind of view is selected.
+ */
+export function getCollectionTreeRows(zp: any): any[] {
+    if (!zp) return [];
+    try {
+        if (typeof zp.getCollectionTreeRows === 'function') {
+            const rows = zp.getCollectionTreeRows();
+            return Array.isArray(rows) ? rows : [];
+        }
+        // Older Zotero: only one row can ever be selected, so the focused row
+        // is the whole selection. Read it off the tree rather than through the
+        // singular pane getter, which is the form that throws on newer Zotero.
+        const cv = zp.collectionsView;
+        if (!cv?.selection || cv.selection.focused < 0) return [];
+        const row = cv.getRow(cv.selection.focused);
+        return row ? [row] : [];
+    } catch (e) {
+        logReadFailure('the selected collection tree rows', e);
+        return [];
+    }
+}
