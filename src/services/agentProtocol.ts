@@ -1839,6 +1839,22 @@ export interface CurrentCollection {
 }
 
 /**
+ * A saved search selected in the collections pane. Saved searches can be
+ * selected alongside collections, so they are reported as their own list
+ * rather than folded into `current_collections`.
+ */
+export interface CurrentSavedSearch {
+    /** Saved search key */
+    search_key: string;
+    /** Saved search name */
+    name: string;
+    /** Library ID this saved search belongs to */
+    library_id: number;
+    /** Device-portable library identity ("u" | "g<groupID>"). See `src/utils/libraryIdentity.ts`. */
+    library_ref?: string;
+}
+
+/**
  * Application state sent with messages.
  * Contains current view state and reader state if in reader view.
  */
@@ -1851,8 +1867,27 @@ export interface ApplicationStateInput {
     note_state?: NoteState;
     /** Current library context */
     current_library?: CurrentLibrary;
-    /** Current collection context */
+    /**
+     * First selected collection.
+     *
+     * Superseded by `current_collections`, which carries the whole selection.
+     * Still emitted alongside it so a client reporting a multi-row selection
+     * stays understandable to a server that only reads the single-collection
+     * field. Prefer `current_collections` when consuming.
+     */
     current_collection?: CurrentCollection;
+    /**
+     * Every selected collection, in selection order. The collections pane
+     * supports selecting several rows at once, and a selection can span
+     * libraries — each entry carries its own `library_id`/`library_ref`.
+     */
+    current_collections?: CurrentCollection[];
+    /**
+     * Saved searches in the current selection, in selection order. A selection
+     * can mix collections and saved searches, so this list is independent of
+     * `current_collections`.
+     */
+    current_searches?: CurrentSavedSearch[];
     /** Currently selected library items (optional) */
     library_selection?: ZoteroItemReference[];
     /** Frontend embedding index status */

@@ -15,13 +15,18 @@ import {
     ApplicationStateInput,
     CurrentCollection,
     CurrentLibrary,
+    CurrentSavedSearch,
     IndexingStatus,
 } from '../../src/services/agentProtocol';
 import { currentReaderAttachmentAtom, readerTextSelectionAtom } from './messageComposition';
 import { currentNoteItemAtom } from './zoteroContext';
 import { getCurrentPage, getCurrentReader, getEpubReaderPage } from '../utils/readerUtils';
 import { libraryRefForLibraryID } from '../../src/utils/libraryIdentity';
-import { getSelectedLibraryId, getSelectedCollection } from '../../src/utils/zoteroSelection';
+import {
+    getSelectedLibraryId,
+    getSelectedCollections,
+    getSelectedSavedSearches,
+} from '../../src/utils/zoteroSelection';
 import { searchableLibraryIdsAtom, processingModeAtom } from './profile';
 import { ProcessingMode } from '../types/profile';
 import { isLibraryTabAtom } from './ui';
@@ -112,7 +117,8 @@ export async function buildZoteroApplicationState(get: Getter): Promise<Applicat
 
     // Get current library and collection context
     let currentLibrary: CurrentLibrary | undefined = undefined;
-    let currentCollection: CurrentCollection | undefined = undefined;
+    let currentCollections: CurrentCollection[] = [];
+    let currentSearches: CurrentSavedSearch[] = [];
     let librarySelection: ZoteroItemReference[] | undefined = undefined;
 
     // Detect the note-editor view from the raw tab context, NOT from the
@@ -150,6 +156,11 @@ export async function buildZoteroApplicationState(get: Getter): Promise<Applicat
         // In library view, get from ZoteroPane
         const zp = Zotero.getActiveZoteroPane();
         if (zp) {
+            // The primary (first) selected library. A selection can span
+            // libraries, so this is deliberately not "the only library in
+            // play" — it answers "where is the user working", while each
+            // entry in current_collections carries its own library identity
+            // for anything that needs to be addressed precisely.
             const libraryId = getSelectedLibraryId(zp);
             const library = libraryId !== null ? Zotero.Libraries.get(libraryId) : null;
             // Omit the current library entirely when it is excluded, rather than
@@ -166,16 +177,28 @@ export async function buildZoteroApplicationState(get: Getter): Promise<Applicat
                 };
             }
 
-            const collection = getSelectedCollection(zp);
-            if (collection && searchableLibrarySet.has(collection.libraryID)) {
-                currentCollection = {
+            // The collections pane allows several rows to be selected at once,
+            // and a selection can mix collections with saved searches and span
+            // libraries. Report each kind as its own list, dropping rows in
+            // excluded libraries.
+            currentCollections = getSelectedCollections(zp)
+                .filter((collection: Zotero.Collection) => searchableLibrarySet.has(collection.libraryID))
+                .map((collection: Zotero.Collection) => ({
                     collection_key: collection.key,
                     name: collection.name,
                     library_id: collection.libraryID,
                     library_ref: libraryRefForLibraryID(collection.libraryID) ?? undefined,
                     parent_key: collection.parentKey || null,
-                };
-            }
+                }));
+
+            currentSearches = getSelectedSavedSearches(zp)
+                .filter((search: Zotero.Search) => searchableLibrarySet.has(search.libraryID))
+                .map((search: Zotero.Search) => ({
+                    search_key: search.key,
+                    name: search.name,
+                    library_id: search.libraryID,
+                    library_ref: libraryRefForLibraryID(search.libraryID) ?? undefined,
+                }));
 
             // Drop any selected items that belong to an excluded library.
             const selectedItems = zp.getSelectedItems()
@@ -253,7 +276,13 @@ export async function buildZoteroApplicationState(get: Getter): Promise<Applicat
         ...(readerState ? { reader_state: readerState } : {}),
         ...(noteState ? { note_state: noteState } : {}),
         ...(currentLibrary ? { current_library: currentLibrary } : {}),
-        ...(currentCollection ? { current_collection: currentCollection } : {}),
+        // `current_collection` (first selected) is emitted alongside the full
+        // list so a server that only reads the single-collection field still
+        // understands a multi-row selection.
+        ...(currentCollections.length > 0
+            ? { current_collection: currentCollections[0], current_collections: currentCollections }
+            : {}),
+        ...(currentSearches.length > 0 ? { current_searches: currentSearches } : {}),
         ...(librarySelection ? { library_selection: librarySelection } : {}),
         ...(indexingStatus ? { indexing_status: indexingStatus } : {}),
         ...(libraries ? { libraries } : {}),

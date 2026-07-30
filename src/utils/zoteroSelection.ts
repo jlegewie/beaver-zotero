@@ -1,34 +1,19 @@
 /**
  * Compat layer for reading the collections-tree selection off `ZoteroPane`.
  *
- * Zotero's collections tree supports multi-row selection, and `ZoteroPane`
- * exposes both a singular getter (`getSelectedLibraryID`,
- * `getSelectedCollection`) and a plural one (`getSelectedLibraryIDs`,
- * `getSelectedCollections`). Depending on the Zotero version, EITHER form may
- * be the one that actually works — on older versions the singular getter is
- * the real implementation and the plural one does not exist; on newer
- * versions the singular getter is a stub that unconditionally throws,
- * naming the plural getter as its replacement.
- *
- * The trap: the throwing singular getter still exists as a function, so
- * `typeof zp.getSelectedLibraryID === 'function'` and
- * `zp?.getSelectedLibraryID?.()` both look safe and then throw at call time.
- * The only reliable signal is whether the PLURAL getter exists — feature-
- * detect on that name, not on the singular one, and still wrap the call in
- * try/catch as a last resort.
+ * The collections tree supports selecting several rows at once, and the API for
+ * reading that selection has been introduced in stages across Zotero versions.
  *
  * Callers that only need a single selected value (the common case) take the
- * first element, matching Zotero's own internal usage of these plural
- * getters.
+ * first element, matching Zotero's own internal usage of these plural getters.
  */
 
 import { logger } from "./logger";
 
-// A selection read failing means neither the plural nor the singular getter
-// worked, i.e. the pane API changed shape again. Callers degrade to "nothing
-// selected", so log each kind of failure once per session — enough to
-// diagnose, without spamming from the paths that read the selection
-// repeatedly.
+// A selection read failing means none of the accessors worked, i.e. the pane
+// API changed shape again. Callers degrade to "nothing selected", so log each
+// kind of failure once per session — enough to diagnose, without spamming from
+// the paths that read the selection repeatedly.
 const loggedReadFailures = new Set<string>();
 
 function logReadFailure(which: string, e: unknown): void {
@@ -41,22 +26,77 @@ function logReadFailure(which: string, e: unknown): void {
     }
 }
 
+/** Method names for one kind of selectable row, in the order they are tried. */
+interface SelectionAccessors {
+    /** Plural getter on `ZoteroPane`. */
+    panePlural: string;
+    /** Plural getter on `ZoteroPane.collectionsView`. */
+    treePlural: string;
+    /** Singular getter on `ZoteroPane`, used only when no plural one exists. */
+    paneSingular: string;
+}
+
+/**
+ * Read one kind of selected row, preferring the accessor that can report the
+ * whole selection. `fromSingular` adapts the singular getter's return value,
+ * which reports "nothing selected" as a falsy value rather than an empty list.
+ */
+function readSelection<T>(
+    zp: any,
+    which: string,
+    accessors: SelectionAccessors,
+    fromSingular: (value: any) => T[],
+): T[] {
+    if (!zp) return [];
+
+    // Remembered so that a read where every rung failed can be reported once;
+    // a rung that throws is silent as long as a later one succeeds.
+    let failure: unknown;
+
+    /** Returns the rung's result, or `null` when it is unavailable or throws. */
+    const attempt = (owner: any, name: string, adapt: (value: any) => T[]): T[] | null => {
+        try {
+            const accessor = owner ? owner[name] : undefined;
+            if (typeof accessor !== 'function') return null;
+            return adapt(accessor.call(owner));
+        } catch (e) {
+            failure = e;
+            return null;
+        }
+    };
+
+    const asList = (values: any): T[] => (Array.isArray(values) ? values : []);
+
+    let tree: any;
+    try {
+        tree = zp.collectionsView;
+    } catch (e) {
+        failure = e;
+    }
+
+    // An empty array is a successful "nothing selected" read, so only `null`
+    // (unavailable or threw) falls through to the next rung.
+    const result = attempt(zp, accessors.panePlural, asList)
+        ?? attempt(tree, accessors.treePlural, asList)
+        ?? attempt(zp, accessors.paneSingular, fromSingular);
+    if (result) return result;
+
+    if (failure !== undefined) logReadFailure(which, failure);
+    return [];
+}
+
 /** All selected library IDs, or `[]` if none are selected or the pane is unavailable. */
 export function getSelectedLibraryIds(zp: any): number[] {
-    if (!zp) return [];
-    try {
-        if (typeof zp.getSelectedLibraryIDs === 'function') {
-            const ids = zp.getSelectedLibraryIDs();
-            return Array.isArray(ids) ? ids : [];
-        }
-        // Older Zotero: only the singular getter exists. It returns `false`
-        // when nothing is selected, so normalize that away.
-        const id = zp.getSelectedLibraryID();
-        return typeof id === 'number' ? [id] : [];
-    } catch (e) {
-        logReadFailure('the selected library IDs', e);
-        return [];
-    }
+    return readSelection<number>(
+        zp,
+        'the selected library IDs',
+        {
+            panePlural: 'getSelectedLibraryIDs',
+            treePlural: 'getSelectedLibraryIDs',
+            paneSingular: 'getSelectedLibraryID',
+        },
+        (id) => (typeof id === 'number' ? [id] : []),
+    );
 }
 
 /** The first selected library ID, or `null` if none is selected. */
@@ -66,20 +106,16 @@ export function getSelectedLibraryId(zp: any): number | null {
 
 /** All selected collections, or `[]` if none are selected or the pane is unavailable. */
 export function getSelectedCollections(zp: any): Zotero.Collection[] {
-    if (!zp) return [];
-    try {
-        if (typeof zp.getSelectedCollections === 'function') {
-            const collections = zp.getSelectedCollections();
-            return Array.isArray(collections) ? collections : [];
-        }
-        // Older Zotero: only the singular getter exists. It returns `false`
-        // when nothing is selected, so normalize that away.
-        const collection = zp.getSelectedCollection();
-        return collection ? [collection] : [];
-    } catch (e) {
-        logReadFailure('the selected collections', e);
-        return [];
-    }
+    return readSelection<Zotero.Collection>(
+        zp,
+        'the selected collections',
+        {
+            panePlural: 'getSelectedCollections',
+            treePlural: 'getSelectedCollections',
+            paneSingular: 'getSelectedCollection',
+        },
+        (collection) => (collection ? [collection] : []),
+    );
 }
 
 /** The first selected collection, or `null` if none is selected. */
@@ -114,4 +150,23 @@ export function getCollectionTreeRows(zp: any): any[] {
         logReadFailure('the selected collection tree rows', e);
         return [];
     }
+}
+
+/**
+ * All selected saved searches, or `[]` if none are selected or the pane is
+ * unavailable. Collections and saved searches can be selected together, so a
+ * non-empty result here does not imply the collection list is empty.
+ */
+export function getSelectedSavedSearches(zp: any): Zotero.Search[] {
+    return readSelection<Zotero.Search>(
+        zp,
+        'the selected saved searches',
+        {
+            panePlural: 'getSelectedSavedSearches',
+            // The collections tree drops the "saved" prefix.
+            treePlural: 'getSelectedSearches',
+            paneSingular: 'getSelectedSavedSearch',
+        },
+        (search) => (search ? [search] : []),
+    );
 }
