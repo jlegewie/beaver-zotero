@@ -12,7 +12,9 @@
  */
 
 import { Action, ActionCategory, ActionTargetType } from '../types/actions';
-import { ZoteroContext } from '../atoms/zoteroContext';
+// Type-only: this module must not pull the Jotai atom graph (and the Supabase
+// client behind it) into consumers that only need the visibility rules.
+import type { ZoteroContext, LibraryViewInfo, SelectedCollectionInfo } from '../atoms/zoteroContext';
 import { agentItemFilter } from '../../src/utils/agentItemSupport';
 import { getDisplayNameFromItem } from './sourceUtils';
 import { truncateText } from './stringUtils';
@@ -44,6 +46,31 @@ const MAX_LABEL_ITEMS = 1;
  */
 export function isActionableItem(item: Zotero.Item): boolean {
     return agentItemFilter(item);
+}
+
+// ---------------------------------------------------------------------------
+// Collection selection rule
+// ---------------------------------------------------------------------------
+
+/**
+ * The collections a collection-targeted action should act on.
+ *
+ * Returns every selected collection, but only when the selection is nothing
+ * but collections. A selection mixing collections with a library root, a saved
+ * search, or a special view has no single collection meaning, so callers treat
+ * it as "no collection target" and fall back to their other behavior — the
+ * same reason the plural selection getters replaced the singular ones.
+ *
+ * This is the shared rule behind every in-app action surface (slash menu, home
+ * launcher, prompt-variable resolution); the context menu mirrors it over its
+ * own menu-context rows. On Zotero versions without multi-row selection the
+ * selection is always a single row, so this collapses to "the selected
+ * collection, if one is selected".
+ */
+export function pureCollectionSelection(libraryView: LibraryViewInfo): SelectedCollectionInfo[] {
+    const { selectedCollections, selectedRowCount } = libraryView;
+    if (selectedCollections.length === 0) return [];
+    return selectedCollections.length === selectedRowCount ? selectedCollections : [];
 }
 
 // ---------------------------------------------------------------------------
@@ -87,7 +114,7 @@ function isTargetSatisfied(target: ActionTargetType, ctx: ActionContext): boolea
             }
             return false;
         case 'collection':
-            return ctx.zotero.libraryView.treeRowType === 'collection';
+            return pureCollectionSelection(ctx.zotero.libraryView).length > 0;
         case 'global':
             return true;
     }
@@ -259,13 +286,13 @@ export function computeActionGroups(allActions: Action[], ctx: ActionContext): A
     }
 
     // --- 5. Collection group ---
-    if (ctx.zotero.libraryView.treeRowType === 'collection') {
+    const selectedCollections = pureCollectionSelection(ctx.zotero.libraryView);
+    if (selectedCollections.length > 0) {
         const collectionActions = allActions.filter(a => a.targets.includes('collection'));
         if (collectionActions.length > 0) {
-            const name = ctx.zotero.libraryView.collectionName ?? 'Collection';
             groups.push({
                 id: 'collection',
-                label: name,
+                label: getCollectionLabel(selectedCollections),
                 actions: collectionActions,
                 targetType: 'collection',
                 iconInfo: { type: 'css-icon', name: 'collection' },
@@ -362,10 +389,11 @@ export function getActiveTarget(ctx: ActionContext): ActiveTarget | null {
     }
 
     // 5. Collection
-    if (zotero.libraryView.treeRowType === 'collection') {
+    const selectedCollections = pureCollectionSelection(zotero.libraryView);
+    if (selectedCollections.length > 0) {
         return {
             targetType: 'collection',
-            label: zotero.libraryView.collectionName ?? null,
+            label: getCollectionLabel(selectedCollections),
             iconInfo: { type: 'css-icon', name: 'collection' },
         };
     }
@@ -422,6 +450,18 @@ function getManualLabel(items: Zotero.Item[]): string {
     if (items.every(i => i.isRegularItem())) return `${items.length} attached items`;
     if (items.every(i => i.isNote())) return `${items.length} attached notes`;
     return `${items.length} attached items and attachments`;
+}
+
+/**
+ * Label for a collection selection: the collection's name when one is
+ * selected, otherwise a count — listing several names is unreadable in the
+ * narrow launcher and slash-menu headers.
+ */
+function getCollectionLabel(collections: SelectedCollectionInfo[]): string {
+    if (collections.length === 1) {
+        return truncateText(collections[0].collectionName || 'Collection', MAX_LABEL_ITEM_LENGTH);
+    }
+    return `${collections.length} collections selected`;
 }
 
 function getSelectedLabel(items: Zotero.Item[]): string {

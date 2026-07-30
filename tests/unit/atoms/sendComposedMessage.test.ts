@@ -55,7 +55,7 @@ vi.mock('../../../react/utils/promptVariables', () => ({
     resolvePromptVariables: vi.fn(async (text: string) => ({
         text: `resolved:${text}`,
         items: [],
-        collection: null,
+        collections: [],
         emptyItemVariables: [],
     })),
 }));
@@ -96,11 +96,13 @@ vi.mock('../../../react/atoms/profile', async () => {
 
 import {
     actionsAtom,
+    buildEditedPromptActionsAtom,
     resolvePillsToPromptActionsAtom,
     sendComposedMessageAtom,
     stageActionPillAtom,
 } from '../../../react/atoms/actions';
 import {
+    currentMessageCollectionsAtom,
     currentMessageItemsAtom,
     pendingPillInsertAtom,
 } from '../../../react/atoms/messageComposition';
@@ -194,7 +196,7 @@ describe('sendComposedMessageAtom', () => {
         vi.mocked(resolvePromptVariables).mockResolvedValueOnce({
             text: 'x',
             items: [],
-            collection: null,
+            collections: [],
             emptyItemVariables: ['selected_items'],
         } as any);
         const store = makeStore();
@@ -212,7 +214,7 @@ describe('sendComposedMessageAtom', () => {
         vi.mocked(resolvePromptVariables).mockResolvedValueOnce({
             text: 'x',
             items: [item],
-            collection: null,
+            collections: [],
             emptyItemVariables: [],
         } as any);
         vi.mocked(isRejectedItemValidation).mockReturnValueOnce(true);
@@ -234,7 +236,7 @@ describe('sendComposedMessageAtom', () => {
         vi.mocked(resolvePromptVariables).mockResolvedValueOnce({
             text: 'x',
             items: [item],
-            collection: null,
+            collections: [],
             emptyItemVariables: [],
         } as any);
         vi.mocked(isRejectedItemValidation).mockReturnValue(false);
@@ -253,7 +255,7 @@ describe('sendComposedMessageAtom', () => {
         vi.mocked(resolvePromptVariables).mockResolvedValueOnce({
             text: 'x',
             items: [item],
-            collection: null,
+            collections: [],
             emptyItemVariables: [],
         } as any);
         const store = makeStore();
@@ -263,6 +265,108 @@ describe('sendComposedMessageAtom', () => {
         });
         expect(store.get(currentMessageItemsAtom)).toEqual([item]);
         expect(sendWSMessageMock).toHaveBeenCalled();
+    });
+
+    it('merges newly resolved collections with the ones already on the message', async () => {
+        const a = { library_id: 1, zotero_key: 'COLLA', name: 'A', parent_key: null };
+        const b = { library_id: 1, zotero_key: 'COLLB', name: 'B', parent_key: null };
+        vi.mocked(resolvePromptVariables).mockResolvedValueOnce({
+            text: 'x',
+            items: [],
+            collections: [a, b],
+            emptyItemVariables: [],
+        } as any);
+        const store = makeStore();
+        store.set(currentMessageCollectionsAtom, [a]);
+        await store.set(sendComposedMessageAtom, {
+            baseText: '/summarize',
+            pills: [{ commandName: 'summarize', actionId: 'custom-1' }],
+        });
+        // A was already attached; B must still reach the model.
+        expect(store.get(currentMessageCollectionsAtom)).toEqual([a, b]);
+    });
+
+    it('does not duplicate a collection already on the message', async () => {
+        const a = { library_id: 1, zotero_key: 'COLLA', name: 'A', parent_key: null };
+        vi.mocked(resolvePromptVariables).mockResolvedValueOnce({
+            text: 'x',
+            items: [],
+            collections: [a],
+            emptyItemVariables: [],
+        } as any);
+        const store = makeStore();
+        store.set(currentMessageCollectionsAtom, [a]);
+        await store.set(sendComposedMessageAtom, {
+            baseText: '/summarize',
+            pills: [{ commandName: 'summarize', actionId: 'custom-1' }],
+        });
+        expect(store.get(currentMessageCollectionsAtom)).toEqual([a]);
+    });
+});
+
+describe('buildEditedPromptActionsAtom (collection attachments)', () => {
+    const collectionAction: Action = {
+        id: 'custom-1',
+        title: 'Summarize',
+        text: 'Summarize the collection.',
+        targets: ['collection'],
+        category: 'research',
+    };
+
+    it('adds only the collections the edited message is missing', async () => {
+        const a = { library_id: 1, zotero_key: 'COLLA', name: 'A', parent_key: null };
+        const b = { library_id: 1, zotero_key: 'COLLB', name: 'B', parent_key: null };
+        vi.mocked(resolvePromptVariables).mockResolvedValueOnce({
+            text: 'x',
+            items: [],
+            collections: [a, b],
+            emptyItemVariables: [],
+        } as any);
+        const store = makeStore([collectionAction]);
+        const result = await store.set(buildEditedPromptActionsAtom, {
+            pills: [{ commandName: 'summarize', actionId: 'custom-1' }],
+            existingAttachments: [{ type: 'collection', ...a }],
+        });
+        // A is already attached to the message; only B is newly added.
+        expect(result?.addedAttachments).toEqual([{ type: 'collection', ...b }]);
+    });
+
+    it('adds every resolved collection when the message carries none', async () => {
+        const a = { library_id: 1, zotero_key: 'COLLA', name: 'A', parent_key: null };
+        const b = { library_id: 1, zotero_key: 'COLLB', name: 'B', parent_key: null };
+        vi.mocked(resolvePromptVariables).mockResolvedValueOnce({
+            text: 'x',
+            items: [],
+            collections: [a, b],
+            emptyItemVariables: [],
+        } as any);
+        const store = makeStore([collectionAction]);
+        const result = await store.set(buildEditedPromptActionsAtom, {
+            pills: [{ commandName: 'summarize', actionId: 'custom-1' }],
+            existingAttachments: [],
+        });
+        expect(result?.addedAttachments).toEqual([
+            { type: 'collection', ...a },
+            { type: 'collection', ...b },
+        ]);
+    });
+
+    it('does not let an item attachment sharing a key mask a collection', async () => {
+        // Collection and item keys are separate Zotero namespaces, so an item
+        // attachment with the same key must not dedup the collection away.
+        const a = { library_id: 1, zotero_key: 'SAMEKEY', name: 'A', parent_key: null };
+        vi.mocked(resolvePromptVariables).mockResolvedValueOnce({
+            text: 'x',
+            items: [],
+            collections: [a],
+            emptyItemVariables: [],
+        } as any);
+        const store = makeStore([collectionAction]);
+        const result = await store.set(buildEditedPromptActionsAtom, {
+            pills: [{ commandName: 'summarize', actionId: 'custom-1' }],
+            existingAttachments: [{ type: 'source', library_id: 1, zotero_key: 'SAMEKEY' }],
+        });
+        expect(result?.addedAttachments).toEqual([{ type: 'collection', ...a }]);
     });
 });
 

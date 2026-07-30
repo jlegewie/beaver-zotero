@@ -71,23 +71,20 @@ function readCollectionTreeRows(context: any): any[] {
 }
 
 /**
- * The selected collection row, or null unless the selection is exactly one
- * collection.
- *
- * Beaver's collection actions bind to a single collection, so a multi-row
- * selection (which can also mix collections with saved searches) resolves to
- * null rather than acting on an arbitrary row. The isCollection() test is
- * load-bearing beyond that: library, group, and saved-search rows also expose a
- * numeric `ref.id` drawn from a different ID space, so reading `ref.id` off an
- * unchecked row can yield a valid-looking ID that resolves to an unrelated
- * collection. Every caller must go through here rather than indexing
- * readCollectionTreeRows() directly.
+ * The collection rows a collection action should act on: every selected row,
+ * but only when they are all collections.
  */
-function getSelectedCollectionRow(context: any): any | null {
+function pureCollectionRows(context: any): any[] {
     const rows = readCollectionTreeRows(context);
-    if (rows.length !== 1) return null;
-    const row = rows[0];
-    return row?.isCollection?.() === true ? row : null;
+    if (rows.length === 0) return [];
+    const allCollections = rows.every((row) => {
+        try {
+            return row?.isCollection?.() === true;
+        } catch {
+            return false;
+        }
+    });
+    return allCollections ? rows : [];
 }
 
 // ---------------------------------------------------------------------------
@@ -344,7 +341,7 @@ function registerMenus(): void {
             l10nID: 'beaver-context-menu-submenu',
             onShowing: safeOnShowing('collection-submenu', (_event: any, context: any) => {
                 const { setVisible } = context;
-                setVisible(getSelectedCollectionRow(context) !== null);
+                setVisible(pureCollectionRows(context).length > 0);
             }),
             menus: buildCollectionMenuItems(collectionActions),
         }],
@@ -455,7 +452,7 @@ function filterItemAction(action: Action, context: any): void {
 
 function filterCollectionAction(_action: Action, context: any): void {
     const { setVisible } = context;
-    setVisible(getSelectedCollectionRow(context) !== null);
+    setVisible(pureCollectionRows(context).length > 0);
 }
 
 // ---------------------------------------------------------------------------
@@ -478,24 +475,28 @@ function dispatchAction(action: Action, context: any): void {
         return false;
     };
     // (Collection-menu dispatches have no selected items; filtering the empty
-    // list is a no-op and the collection rides on `collectionId`.)
+    // list is a no-op and the collections ride on `collections`.)
     const filteredItems = allItems.filter(isKindEligible);
 
     const itemIds: number[] = filteredItems.map((i: any) => i.id);
 
-    const collectionId: number | null = getSelectedCollectionRow(context)?.ref?.id ?? null;
+    // Carry each collection's library alongside its ID: the receiver gates on
+    // library exclusion, and both are already in hand here.
+    const collections = pureCollectionRows(context)
+        .map((row: any) => ({ libraryId: row?.ref?.libraryID, collectionId: row?.ref?.id }))
+        .filter((c: any) => typeof c.libraryId === 'number' && typeof c.collectionId === 'number');
 
     // Resolve the single wire target type. An action binds to the collection
-    // whenever it accepts a 'collection' target and one collection is
-    // selected; otherwise it binds to the first item-menu kind the action
+    // whenever it accepts a 'collection' target and the selection is
+    // collections; otherwise it binds to the first item-menu kind the action
     // accepts that is actually present in what we attach.
     //
     // Note that the item menu context also carries the collection selection,
-    // so collectionId can be non-null for an item-menu dispatch. That stays
+    // so collections can be non-empty for an item-menu dispatch. That stays
     // unambiguous because no target preset pairs 'collection' with an item
     // kind (see TARGET_PRESETS) — an action reaching both menus would need an
     // explicit menu-origin signal to route correctly.
-    const resolvedTarget = (collectionId !== null && action.targets.includes('collection'))
+    const resolvedTarget = (collections.length > 0 && action.targets.includes('collection'))
         ? 'collection'
         : ITEM_MENU_KINDS.find(t =>
             action.targets.includes(t) && filteredItems.some((i: any) =>
@@ -509,7 +510,7 @@ function dispatchAction(action: Action, context: any): void {
             actionTitle: action.title,
             targetType: resolvedTarget,
             itemIds,
-            collectionId,
+            collections,
         },
     }));
 }

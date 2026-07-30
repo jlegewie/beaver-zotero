@@ -20,7 +20,7 @@ import { isActionVisible, ActionContext } from '../utils/actionVisibility';
 import { resolvePromptVariables, EMPTY_VARIABLE_HINTS } from '../utils/promptVariables';
 import { sendWSMessageAtom } from './agentRunAtoms';
 import { currentMessageItemsAtom, currentMessageCollectionsAtom, pendingPillInsertAtom } from './messageComposition';
-import { CollectionReference } from '../types/zotero';
+import { CollectionReference, collectionReferenceKey } from '../types/zotero';
 import { addPopupMessageAtom } from '../utils/popupMessageUtils';
 import { isRejectedItemValidation, itemValidationResultsAtom } from './itemValidation';
 import { searchableLibraryIdsAtom } from './profile';
@@ -315,7 +315,7 @@ export const stageActionPillAtom = atom(
 interface ResolvedPillActions {
     actions: PromptAction[];
     items: Zotero.Item[];
-    collection: CollectionReference | null;
+    collections: CollectionReference[];
 }
 
 export const resolvePillsToPromptActionsAtom = atom(
@@ -334,7 +334,8 @@ export const resolvePillsToPromptActionsAtom = atom(
         const searchableLibraryIds = get(searchableLibraryIdsAtom);
 
         const accumulatedItems: Zotero.Item[] = [];
-        let accumulatedCollection: CollectionReference | null = null;
+        const accumulatedCollections: CollectionReference[] = [];
+        const seenCollectionKeys = new Set<string>();
         // One entry per distinct command. Insertion-time collision handling
         // keeps tokens unique per distinct action, so first-wins dedup here
         // only collapses repeated pills of the same action.
@@ -368,7 +369,7 @@ export const resolvePillsToPromptActionsAtom = atom(
                 continue;
             }
 
-            const { text: resolvedText, items, collection, emptyItemVariables } =
+            const { text: resolvedText, items, collections, emptyItemVariables } =
                 await resolvePromptVariables(action.text, pill.targetType);
 
             if (emptyItemVariables.length > 0) {
@@ -415,9 +416,9 @@ export const resolvePillsToPromptActionsAtom = atom(
                     accumulatedItems.push(item);
                 }
             }
-            if (collection && !accumulatedCollection) {
+            for (const collection of collections) {
                 // A collection-bound action carries no items, so the per-item
-                // check above never sees it — gate the collection's library here.
+                // check above never sees it — gate each collection's library here.
                 if (!searchableLibraryIds.includes(collection.library_id)) {
                     set(addPopupMessageAtom, {
                         type: 'error',
@@ -428,7 +429,11 @@ export const resolvePillsToPromptActionsAtom = atom(
                     });
                     return null;
                 }
-                accumulatedCollection = collection;
+                const key = collectionReferenceKey(collection);
+                if (!seenCollectionKeys.has(key)) {
+                    seenCollectionKeys.add(key);
+                    accumulatedCollections.push(collection);
+                }
             }
 
             promptActions.push({
@@ -445,7 +450,7 @@ export const resolvePillsToPromptActionsAtom = atom(
             });
         }
 
-        return { actions: promptActions, items: accumulatedItems, collection: accumulatedCollection };
+        return { actions: promptActions, items: accumulatedItems, collections: accumulatedCollections };
     },
 );
 
@@ -472,7 +477,7 @@ export const sendComposedMessageAtom = atom(
 
         const resolved = await set(resolvePillsToPromptActionsAtom, { pills });
         if (!resolved) return false;
-        const { actions: promptActions, items: accumulatedItems, collection: accumulatedCollection } = resolved;
+        const { actions: promptActions, items: accumulatedItems, collections: accumulatedCollections } = resolved;
 
         if (accumulatedItems.length > 0) {
             const currentItems = get(currentMessageItemsAtom);
@@ -483,8 +488,18 @@ export const sendComposedMessageAtom = atom(
             }
         }
 
-        if (accumulatedCollection && (get(currentMessageCollectionsAtom) as CollectionReference[]).length === 0) {
-            set(currentMessageCollectionsAtom, [accumulatedCollection]);
+        // Merge rather than replace: the composer may already carry collections
+        // the user attached, and the action's own targets must still reach the
+        // model alongside them. Mirrors the item merge above.
+        if (accumulatedCollections.length > 0) {
+            const currentCollections = get(currentMessageCollectionsAtom) as CollectionReference[];
+            const existingCollectionKeys = new Set(currentCollections.map(collectionReferenceKey));
+            const newCollections = accumulatedCollections.filter(
+                c => !existingCollectionKeys.has(collectionReferenceKey(c)),
+            );
+            if (newCollections.length > 0) {
+                set(currentMessageCollectionsAtom, [...currentCollections, ...newCollections]);
+            }
         }
 
         await set(sendWSMessageAtom, baseText.trim(), { actions: promptActions });
@@ -555,16 +570,29 @@ export const buildEditedPromptActionsAtom = atom(
             }
         }
 
-        const hasCollection = (existingAttachments ?? []).some(a => a.type === 'collection');
-        if (resolved.collection && !hasCollection) {
-            addedAttachments.push({
+        // Add each resolved collection the message doesn't already carry, so
+        // widening the selection still reaches the regenerated action. Keyed
+        // against the existing *collection* attachments only: collection and
+        // item keys are separate Zotero namespaces, so the shared item key set
+        // above could otherwise mask a collection that merely shares a key.
+        const existingCollectionKeys = new Set(
+            (existingAttachments ?? [])
+                .filter(a => a.type === 'collection')
+                .flatMap(a => messageAttachmentLookupKeys(a)),
+        );
+        for (const collection of resolved.collections) {
+            const attachment: MessageAttachment = {
                 type: 'collection',
-                library_id: resolved.collection.library_id,
-                zotero_key: resolved.collection.zotero_key,
-                library_ref: resolved.collection.library_ref,
-                name: resolved.collection.name,
-                parent_key: resolved.collection.parent_key,
-            });
+                library_id: collection.library_id,
+                zotero_key: collection.zotero_key,
+                library_ref: collection.library_ref,
+                name: collection.name,
+                parent_key: collection.parent_key,
+            };
+            const aliases = messageAttachmentLookupKeys(attachment);
+            if (aliases.some(key => existingCollectionKeys.has(key))) continue;
+            aliases.forEach(key => existingCollectionKeys.add(key));
+            addedAttachments.push(attachment);
         }
 
         return {
