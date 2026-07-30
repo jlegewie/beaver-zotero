@@ -1836,6 +1836,20 @@ export interface CurrentCollection {
     library_ref?: string;
     /** Parent collection key, if this is a subcollection */
     parent_key?: string | null;
+    /**
+     * Top-level regular items directly in this collection, excluding
+     * attachments, notes, annotations and anything trashed. Counts are for
+     * direct membership only — a subcollection's contents are not included.
+     */
+    item_count?: number;
+    /**
+     * Notes sitting directly in this collection. Notes attached to an item are
+     * reached through that item and are not collection members themselves, so
+     * they are not counted here.
+     */
+    note_count?: number;
+    /** Direct, non-trashed subcollections of this collection. */
+    subcollection_count?: number;
 }
 
 /**

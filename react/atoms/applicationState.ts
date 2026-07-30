@@ -27,6 +27,11 @@ import {
     getSelectedCollections,
     getSelectedSavedSearches,
 } from '../../src/utils/zoteroSelection';
+import {
+    countsFor,
+    getCollectionItemCounts,
+    getSubcollectionCounts,
+} from '../../src/services/agentDataProvider/collectionCounts';
 import { searchableLibraryIdsAtom, processingModeAtom } from './profile';
 import { ProcessingMode } from '../types/profile';
 import { isLibraryTabAtom } from './ui';
@@ -181,15 +186,32 @@ export async function buildZoteroApplicationState(get: Getter): Promise<Applicat
             // and a selection can mix collections with saved searches and span
             // libraries. Report each kind as its own list, dropping rows in
             // excluded libraries.
-            currentCollections = getSelectedCollections(zp)
-                .filter((collection: Zotero.Collection) => searchableLibrarySet.has(collection.libraryID))
-                .map((collection: Zotero.Collection) => ({
+            const selectedCollections = getSelectedCollections(zp)
+                .filter((collection: Zotero.Collection) => searchableLibrarySet.has(collection.libraryID));
+
+            // Counts come from the same queries the list_collections tool uses,
+            // so the model sees consistent numbers for a given collection. Both
+            // are batched, so this is a fixed cost regardless of how many rows
+            // are selected.
+            const collectionIds = selectedCollections.map((collection: Zotero.Collection) => collection.id);
+            const [itemCounts, subcollectionCounts] = await Promise.all([
+                getCollectionItemCounts(collectionIds),
+                getSubcollectionCounts(collectionIds),
+            ]);
+
+            currentCollections = selectedCollections.map((collection: Zotero.Collection) => {
+                const counts = countsFor(itemCounts, collection.id);
+                return {
                     collection_key: collection.key,
                     name: collection.name,
                     library_id: collection.libraryID,
                     library_ref: libraryRefForLibraryID(collection.libraryID) ?? undefined,
                     parent_key: collection.parentKey || null,
-                }));
+                    item_count: counts.itemCount,
+                    note_count: counts.standaloneNoteCount,
+                    subcollection_count: subcollectionCounts.get(collection.id) ?? 0,
+                };
+            });
 
             currentSearches = getSelectedSavedSearches(zp)
                 .filter((search: Zotero.Search) => searchableLibrarySet.has(search.libraryID))
