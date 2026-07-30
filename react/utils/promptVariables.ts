@@ -21,6 +21,7 @@
 
 import { logger } from '../../src/utils/logger';
 import { agentItemFilter } from '../../src/utils/agentItemSupport';
+import { getSelectedCollection } from '../../src/utils/zoteroSelection';
 import { getCurrentReader } from './readerUtils';
 import { store } from '../store';
 import { searchableLibraryIdsAtom } from '../atoms/profile';
@@ -184,7 +185,7 @@ function resolveTargetTypeContext(targetType: ActionTargetType): TargetTypeConte
         }
         case 'collection': {
             const zp = Zotero.getActiveZoteroPane?.();
-            const col = zp?.getSelectedCollection?.();
+            const col = getSelectedCollection(zp);
             const collection = col ? collectionToReference(col) : null;
             return { items: [], collection };
         }
@@ -326,7 +327,7 @@ async function resolveCurrentCollection(): Promise<ResolvedVariable> {
     try {
         const zp = Zotero.getActiveZoteroPane?.();
         if (!zp) return { text: 'None selected', items: [] };
-        const collection = zp.getSelectedCollection?.();
+        const collection = getSelectedCollection(zp);
         return { text: collection?.name ? `"${collection?.name}"` : 'None selected', items: [] };
     } catch (e) {
         logger(`promptVariables: resolveCurrentCollection error: ${e}`, 1);

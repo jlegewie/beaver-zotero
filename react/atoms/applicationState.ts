@@ -21,6 +21,7 @@ import { currentReaderAttachmentAtom, readerTextSelectionAtom } from './messageC
 import { currentNoteItemAtom } from './zoteroContext';
 import { getCurrentPage, getCurrentReader, getEpubReaderPage } from '../utils/readerUtils';
 import { libraryRefForLibraryID } from '../../src/utils/libraryIdentity';
+import { getSelectedLibraryId, getSelectedCollection } from '../../src/utils/zoteroSelection';
 import { searchableLibraryIdsAtom, processingModeAtom } from './profile';
 import { ProcessingMode } from '../types/profile';
 import { isLibraryTabAtom } from './ui';
@@ -149,8 +150,8 @@ export async function buildZoteroApplicationState(get: Getter): Promise<Applicat
         // In library view, get from ZoteroPane
         const zp = Zotero.getActiveZoteroPane();
         if (zp) {
-            const libraryId = zp.getSelectedLibraryID();
-            const library = Zotero.Libraries.get(libraryId);
+            const libraryId = getSelectedLibraryId(zp);
+            const library = libraryId !== null ? Zotero.Libraries.get(libraryId) : null;
             // Omit the current library entirely when it is excluded, rather than
             // reporting it with is_synced=false — excluded libraries are not
             // shared at all.
@@ -165,7 +166,7 @@ export async function buildZoteroApplicationState(get: Getter): Promise<Applicat
                 };
             }
 
-            const collection = zp.getSelectedCollection();
+            const collection = getSelectedCollection(zp);
             if (collection && searchableLibrarySet.has(collection.libraryID)) {
                 currentCollection = {
                     collection_key: collection.key,

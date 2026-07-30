@@ -46,6 +46,51 @@ function isActionableContextItem(item: any): boolean {
 }
 
 // ---------------------------------------------------------------------------
+// Zotero 10 collection-selection compat.
+//
+// Collection menu contexts (`main/library/collection`) used to expose a
+// singular `collectionTreeRow`. Zotero 10 replaces it with a getter that
+// throws when read and adds `collectionTreeRows`, an array of the full
+// selection in selection order. Zotero 8/9 contexts only have the singular
+// property. Always probe the plural array first: on Zotero 10 the throw
+// fires on the property read itself, so touching `collectionTreeRow` first
+// (even via optional chaining or destructuring) throws before the plural
+// fallback can run.
+// ---------------------------------------------------------------------------
+
+function readCollectionTreeRows(context: any): any[] {
+    try {
+        if (Array.isArray(context?.collectionTreeRows)) return context.collectionTreeRows;
+    } catch { /* ignore */ }
+    try {
+        const row = context?.collectionTreeRow;
+        return row ? [row] : [];
+    } catch {
+        return [];
+    }
+}
+
+/**
+ * The selected collection row, or null unless the selection is exactly one
+ * collection.
+ *
+ * Beaver's collection actions bind to a single collection, so a multi-row
+ * selection (which can also mix collections with saved searches) resolves to
+ * null rather than acting on an arbitrary row. The isCollection() test is
+ * load-bearing beyond that: library, group, and saved-search rows also expose a
+ * numeric `ref.id` drawn from a different ID space, so reading `ref.id` off an
+ * unchecked row can yield a valid-looking ID that resolves to an unrelated
+ * collection. Every caller must go through here rather than indexing
+ * readCollectionTreeRows() directly.
+ */
+function getSelectedCollectionRow(context: any): any | null {
+    const rows = readCollectionTreeRows(context);
+    if (rows.length !== 1) return null;
+    const row = rows[0];
+    return row?.isCollection?.() === true ? row : null;
+}
+
+// ---------------------------------------------------------------------------
 // Selection composition — determined per popup-show by submenu onShowing,
 // consumed by filterItemAction. Safe because submenu onShowing always fires
 // before inner menu items' onShowing (parent popup → submenu popup order).
@@ -298,8 +343,8 @@ function registerMenus(): void {
             menuType: 'submenu' as const,
             l10nID: 'beaver-context-menu-submenu',
             onShowing: safeOnShowing('collection-submenu', (_event: any, context: any) => {
-                const { collectionTreeRow, setVisible } = context;
-                setVisible(collectionTreeRow?.isCollection?.() === true);
+                const { setVisible } = context;
+                setVisible(getSelectedCollectionRow(context) !== null);
             }),
             menus: buildCollectionMenuItems(collectionActions),
         }],
@@ -409,8 +454,8 @@ function filterItemAction(action: Action, context: any): void {
 }
 
 function filterCollectionAction(_action: Action, context: any): void {
-    const { collectionTreeRow, setVisible } = context;
-    setVisible(collectionTreeRow?.isCollection?.() === true);
+    const { setVisible } = context;
+    setVisible(getSelectedCollectionRow(context) !== null);
 }
 
 // ---------------------------------------------------------------------------
@@ -437,13 +482,19 @@ function dispatchAction(action: Action, context: any): void {
     const filteredItems = allItems.filter(isKindEligible);
 
     const itemIds: number[] = filteredItems.map((i: any) => i.id);
-    const collectionId: number | null = context.collectionTreeRow?.ref?.id ?? null;
 
-    // Resolve the single wire target type. Collection-menu dispatches (the
-    // only ones carrying a collectionTreeRow) bind to the collection whenever
-    // the action accepts it — the handler only attaches collectionId for a
-    // 'collection' target. Item-menu dispatches bind to the first item-menu
-    // kind the action accepts that is actually present in what we attach.
+    const collectionId: number | null = getSelectedCollectionRow(context)?.ref?.id ?? null;
+
+    // Resolve the single wire target type. An action binds to the collection
+    // whenever it accepts a 'collection' target and one collection is
+    // selected; otherwise it binds to the first item-menu kind the action
+    // accepts that is actually present in what we attach.
+    //
+    // Note that the item menu context also carries the collection selection,
+    // so collectionId can be non-null for an item-menu dispatch. That stays
+    // unambiguous because no target preset pairs 'collection' with an item
+    // kind (see TARGET_PRESETS) — an action reaching both menus would need an
+    // explicit menu-origin signal to route correctly.
     const resolvedTarget = (collectionId !== null && action.targets.includes('collection'))
         ? 'collection'
         : ITEM_MENU_KINDS.find(t =>

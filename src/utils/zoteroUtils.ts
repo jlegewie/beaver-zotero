@@ -4,6 +4,7 @@ import type { CreatorJSON } from "../../react/types/agentActions/base";
 import { logger } from "./logger";
 import { libraryRefForLibraryID, UNRESOLVED_LIBRARY_ID } from "./libraryIdentity";
 import type { ZoteroInstanceRef } from "../services/threadService";
+import { getSelectedLibraryId, getSelectedCollection } from "./zoteroSelection";
 
 function makeZoteroItemReference(libraryID: number, zoteroKey: string): ZoteroItemReference {
     return {
@@ -70,8 +71,8 @@ export async function getZoteroTargetContext(): Promise<ZoteroTargetContext> {
         }
     // No selection - add to current library/collection
     } else {
-        targetLibraryId = zp.getSelectedLibraryID();
-        const collection = zp.getSelectedCollection();
+        targetLibraryId = getSelectedLibraryId(zp) ?? undefined;
+        const collection = getSelectedCollection(zp);
         if (collection) {
             collectionToAddTo = collection;
         }
@@ -129,8 +130,8 @@ export function getZoteroTargetContextSync(): ZoteroTargetContext {
         }
     // No selection - add to current library/collection
     } else {
-        targetLibraryId = zp.getSelectedLibraryID();
-        const collection = zp.getSelectedCollection();
+        targetLibraryId = getSelectedLibraryId(zp) ?? undefined;
+        const collection = getSelectedCollection(zp);
         if (collection) {
             collectionToAddTo = collection;
         }
@@ -770,18 +771,14 @@ export function getActiveZoteroLibraryId(): number | null {
     const zoteroPane = Zotero.getActiveZoteroPane?.() as any;
     if (!zoteroPane) return null;
 
-    if (typeof zoteroPane.getSelectedLibraryID === 'function') {
-        const libraryID = zoteroPane.getSelectedLibraryID();
-        if (typeof libraryID === 'number') {
-            return libraryID;
-        }
+    const libraryID = getSelectedLibraryId(zoteroPane);
+    if (typeof libraryID === 'number') {
+        return libraryID;
     }
 
-    if (typeof zoteroPane.getSelectedCollection === 'function') {
-        const collection = zoteroPane.getSelectedCollection();
-        if (collection && typeof collection.libraryID === 'number') {
-            return collection.libraryID;
-        }
+    const collection = getSelectedCollection(zoteroPane);
+    if (collection && typeof collection.libraryID === 'number') {
+        return collection.libraryID;
     }
 
     const selectedItems = zoteroPane.getSelectedItems?.();
@@ -829,7 +826,7 @@ export function getCurrentLibrary(): _ZoteroTypes.Library.LibraryLike | null {
 	// Otherwise, get library from library view
 	const zp = win.ZoteroPane;
 	if (zp && zp.collectionsView) {
-		const libraryID = zp.getSelectedLibraryID();
+		const libraryID = getSelectedLibraryId(zp);
 		if (libraryID) {
 			return Zotero.Libraries.get(libraryID) || null;
 		}
