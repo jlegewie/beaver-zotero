@@ -66,6 +66,11 @@ export interface PromptResolution {
     collections: CollectionReference[];
     /** Item variable names that were present but resolved to zero items */
     emptyItemVariables: string[];
+    /**
+     * True when the action's bound target resolved to items but every one of
+     * them belonged to an excluded library.
+     */
+    targetContextExcluded: boolean;
 }
 
 /**
@@ -76,6 +81,15 @@ export interface PromptResolution {
  * (e.g., selected items for "items", reader attachment for "attachment").
  * These are merged with any variable-resolved items, deduplicated by libraryID-key.
  */
+/**
+ * Drop items belonging to libraries the user excluded from Beaver.
+ */
+function keepSearchable(items: Zotero.Item[]): Zotero.Item[] {
+    if (items.length === 0) return items;
+    const searchableLibraryIds = store.get(searchableLibraryIdsAtom);
+    return items.filter((item: Zotero.Item) => searchableLibraryIds.includes(item.libraryID));
+}
+
 export async function resolvePromptVariables(
     text: string,
     targetType?: ActionTargetType,
@@ -85,7 +99,7 @@ export async function resolvePromptVariables(
 
     // Fast path: no variables and no targetType context
     if (matches.length === 0 && !targetType) {
-        return { text, items: [], collections: [], emptyItemVariables: [] };
+        return { text, items: [], collections: [], emptyItemVariables: [], targetContextExcluded: false };
     }
 
     // Resolve all unique variables in parallel
@@ -111,9 +125,12 @@ export async function resolvePromptVariables(
     let result = text.replace(pattern, (fullMatch, varName) => {
         const resolution = resolutionMap.get(varName);
         if (!resolution) return fullMatch; // Unknown variable — keep placeholder
-        allItems.push(...resolution.items);
-        // Track item variables (text === '') that resolved to zero items
-        if (resolution.text === '' && resolution.items.length === 0) {
+        const items = keepSearchable(resolution.items);
+        allItems.push(...items);
+        // Track item variables (text === '') that resolved to zero items. This
+        // counts items dropped by library exclusion, so a variable left empty
+        // by filtering reports the same "no items" hint as an empty selection.
+        if (resolution.text === '' && items.length === 0) {
             emptyItemVariables.push(varName);
         }
         return resolution.text;
@@ -121,11 +138,16 @@ export async function resolvePromptVariables(
 
     // Auto-attach context based on targetType (dedup items with variable-resolved ones)
     let collections: CollectionReference[] = [];
+    let targetContextExcluded = false;
     if (targetType) {
         const context = resolveTargetTypeContext(targetType);
-        if (context.items.length > 0) {
+        const contextItems = keepSearchable(context.items);
+        // The target resolved, but exclusion removed all of it. Report that
+        // instead of continuing with an unbound target.
+        targetContextExcluded = context.items.length > 0 && contextItems.length === 0;
+        if (contextItems.length > 0) {
             const existingKeys = new Set(allItems.map(i => `${i.libraryID}-${i.key}`));
-            for (const item of context.items) {
+            for (const item of contextItems) {
                 if (!existingKeys.has(`${item.libraryID}-${item.key}`)) {
                     allItems.push(item);
                     existingKeys.add(`${item.libraryID}-${item.key}`);
@@ -143,7 +165,7 @@ export async function resolvePromptVariables(
             .trim();
     }
 
-    return { text: result, items: allItems, collections, emptyItemVariables };
+    return { text: result, items: allItems, collections, emptyItemVariables, targetContextExcluded };
 }
 
 // ---------------------------------------------------------------------------
@@ -302,33 +324,42 @@ async function resolveOpenNote(): Promise<ResolvedVariable> {
  */
 async function resolveActiveItem(): Promise<ResolvedVariable> {
     try {
+        // Each candidate is filtered before it is accepted, so a candidate in
+        // an excluded library falls through to the next step instead of
+        // resolving the variable to nothing.
+
         // 1. Reader: parent item (with attachment) or attachment itself
         const attachment = await getOpenReaderAttachment();
         if (attachment) {
             const parent = attachment.parentItem;
-            if (parent) {
-                return { text: '', items: [parent, attachment] };
+            const items = keepSearchable(parent ? [parent, attachment] : [attachment]);
+            if (items.length > 0) {
+                return { text: '', items };
             }
-            return { text: '', items: [attachment] };
         }
 
         // 2. Note open in a tab
         const noteItem = store.get(currentNoteItemAtom);
         if (noteItem) {
-            return { text: '', items: [noteItem] };
+            const items = keepSearchable([noteItem]);
+            if (items.length > 0) {
+                return { text: '', items };
+            }
         }
 
         // 3. Selected items in library view
         const zp = Zotero.getActiveZoteroPane?.();
         if (zp) {
             const selectedItems: Zotero.Item[] = zp.getSelectedItems?.() || [];
-            const regularItems = selectedItems.filter((item: Zotero.Item) => item.isRegularItem() && isActionableItem(item));
+            const regularItems = keepSearchable(
+                selectedItems.filter((item: Zotero.Item) => item.isRegularItem() && isActionableItem(item)),
+            );
             if (regularItems.length > 0) {
                 return { text: '', items: regularItems.slice(0, 10) };
             }
         }
 
-        // 3. Most recently added item
+        // 4. Most recently added item (already scoped to a searchable library)
         const recentItems = await fetchRecentItems(1);
         return { text: '', items: recentItems };
     } catch (e) {

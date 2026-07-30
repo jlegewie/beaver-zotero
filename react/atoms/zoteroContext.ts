@@ -8,10 +8,22 @@ export const selectedZoteroItemsAtom = atom<Zotero.Item[]>([]);
 export const selectedZoteroItemCountAtom = atom<number>(0);
 
 // --- Library View State (collection tree row) ---
+/**
+ * Row types the collections tree can report. Mirrors Zotero's own row types, so
+ * it includes kinds Beaver has no dedicated handling for yet ('recentlyRead',
+ * 'bucket').
+ *
+ * Note that a group library's root row reports 'group', not 'library'.
+ */
 export type LibraryTreeRowType =
-    | 'library' | 'collection' | 'search' | 'duplicates'
+    | 'library' | 'group' | 'collection' | 'search' | 'duplicates'
     | 'unfiled' | 'trash' | 'publications' | 'retracted'
-    | 'feeds' | 'feed' | null;
+    | 'feeds' | 'feed' | 'recentlyRead' | 'bucket' | null;
+
+/** Row types that behave as a library root, whether personal or group. */
+export const LIBRARY_ROOT_TYPES: Set<LibraryTreeRowType> = new Set([
+    'library', 'group',
+]);
 
 /** A collection row within the collections-tree selection. */
 export interface SelectedCollectionInfo {
@@ -127,7 +139,7 @@ export const zoteroContextAtom = atom<ZoteroContext>((get) => {
             type = 'collection';
         } else if (SPECIAL_VIEW_TYPES.has(libraryView.treeRowType)) {
             type = 'special_view';
-        } else if (libraryView.treeRowType === 'library') {
+        } else if (LIBRARY_ROOT_TYPES.has(libraryView.treeRowType)) {
             type = 'library';
         }
     }

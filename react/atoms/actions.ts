@@ -244,10 +244,51 @@ export const markActionUsedAtom = atom(
 // Derived: action context (Zotero state + manually attached items)
 // ---------------------------------------------------------------------------
 
-export const actionContextAtom = atom<ActionContext>((get) => ({
-    zotero: get(zoteroContextAtom),
-    manualItems: get(currentMessageItemsAtom),
-}));
+export const actionContextAtom = atom<ActionContext>((get) => {
+    const zotero = get(zoteroContextAtom);
+    const searchableLibraryIds = get(searchableLibraryIdsAtom);
+
+    // Actions stage their target for a run, so the context an action is chosen
+    // from must contain only items Beaver can actually use.
+    const selectedItems = zotero.selectedItems.filter(
+        (item: Zotero.Item) => searchableLibraryIds.includes(item.libraryID),
+    );
+
+    // Collection targets are filtered on the same principle, so a label never
+    // promises collections the run will not touch.
+    const { libraryView } = zotero;
+    const selectedCollections = libraryView.selectedCollections.filter(
+        (collection) => searchableLibraryIds.includes(collection.libraryId),
+    );
+    const droppedCollections = libraryView.selectedCollections.length - selectedCollections.length;
+    const selectedLibraryIds = libraryView.selectedLibraryIds.filter(
+        (libraryId) => searchableLibraryIds.includes(libraryId),
+    );
+
+    const itemsChanged = selectedItems.length !== zotero.selectedItems.length;
+    const libraryViewChanged = droppedCollections > 0
+        || selectedLibraryIds.length !== libraryView.selectedLibraryIds.length;
+
+    if (!itemsChanged && !libraryViewChanged) {
+        return { zotero, manualItems: get(currentMessageItemsAtom) };
+    }
+
+    return {
+        zotero: {
+            ...zotero,
+            selectedItems,
+            libraryView: libraryViewChanged
+                ? {
+                    ...libraryView,
+                    selectedCollections,
+                    selectedLibraryIds,
+                    selectedRowCount: libraryView.selectedRowCount - droppedCollections,
+                }
+                : libraryView,
+        },
+        manualItems: get(currentMessageItemsAtom),
+    };
+});
 
 // ---------------------------------------------------------------------------
 // Derived: context-filtered actions
@@ -369,8 +410,23 @@ export const resolvePillsToPromptActionsAtom = atom(
                 continue;
             }
 
-            const { text: resolvedText, items, collections, emptyItemVariables } =
+            const { text: resolvedText, items, collections, emptyItemVariables, targetContextExcluded } =
                 await resolvePromptVariables(action.text, pill.targetType);
+
+            // The action is bound to a target that exists but sits entirely in
+            // an excluded library. Sending it would give the model a target
+            // type with nothing attached, so fail the same way an explicitly
+            // referenced excluded item does.
+            if (targetContextExcluded) {
+                set(addPopupMessageAtom, {
+                    type: 'error',
+                    title: 'Action skipped',
+                    text: 'This action targets an item in a library you excluded from Beaver. You can change excluded libraries in Beaver Preferences.',
+                    expire: true,
+                    duration: 5000,
+                });
+                return null;
+            }
 
             if (emptyItemVariables.length > 0) {
                 const hint = EMPTY_VARIABLE_HINTS[emptyItemVariables[0]] ?? 'No items found for this prompt.';

@@ -135,3 +135,94 @@ describe('collection target context — library exclusion', () => {
         expect(result.text).not.toContain('Secret');
     });
 });
+
+// ---------------------------------------------------------------------------
+// Bound (auto-attached) targets — the target an action binds to is attached by
+// target type rather than named by a {{variable}}, so exclusion emptying it has
+// to be reported explicitly or the action would be sent with a target type and
+// nothing attached.
+// ---------------------------------------------------------------------------
+
+function itemIn(libraryId: number, key: string, kind: 'regular' | 'note' = 'regular') {
+    return {
+        libraryID: libraryId,
+        key,
+        isRegularItem: () => kind === 'regular',
+        isNote: () => kind === 'note',
+        isAttachment: () => false,
+    };
+}
+
+describe('bound target context — library exclusion', () => {
+    it('flags an items target whose every item is excluded', async () => {
+        state.set(SELECTED_ITEMS_ATOM, [itemIn(EXCLUDED_LIBRARY, 'AAAAAAAA')]);
+        const result = await resolvePromptVariables('Summarize.', 'items');
+        expect(result.items).toEqual([]);
+        expect(result.targetContextExcluded).toBe(true);
+    });
+
+    it('flags a note target open in an excluded library', async () => {
+        state.set(NOTE_ITEM_ATOM, itemIn(EXCLUDED_LIBRARY, 'BBBBBBBB', 'note'));
+        const result = await resolvePromptVariables('Rewrite.', 'note');
+        expect(result.items).toEqual([]);
+        expect(result.targetContextExcluded).toBe(true);
+    });
+
+    it('does not flag when a searchable item survives filtering', async () => {
+        state.set(SELECTED_ITEMS_ATOM, [
+            itemIn(ALLOWED_LIBRARY, 'CCCCCCCC'),
+            itemIn(EXCLUDED_LIBRARY, 'DDDDDDDD'),
+        ]);
+        const result = await resolvePromptVariables('Summarize.', 'items');
+        expect(result.items.map((i: any) => i.key)).toEqual(['CCCCCCCC']);
+        expect(result.targetContextExcluded).toBe(false);
+    });
+
+    it('does not flag when the target resolved to nothing in the first place', async () => {
+        // Genuinely empty is not the same as emptied by exclusion; only the
+        // latter should abort the action.
+        state.set(SELECTED_ITEMS_ATOM, []);
+        const result = await resolvePromptVariables('Summarize.', 'items');
+        expect(result.targetContextExcluded).toBe(false);
+    });
+});
+
+/** {{active_item}}'s library-view step reads the pane, not the selection atom. */
+function mockPaneSelection(items: unknown[]) {
+    (globalThis as any).Zotero = {
+        ...(globalThis as any).Zotero,
+        getActiveZoteroPane: () => ({ getSelectedItems: () => items }),
+    };
+}
+
+describe('{{active_item}} fallback — library exclusion', () => {
+    it('falls through an excluded note to a searchable selected item', async () => {
+        state.set(NOTE_ITEM_ATOM, itemIn(EXCLUDED_LIBRARY, 'BBBBBBBB', 'note'));
+        mockPaneSelection([itemIn(ALLOWED_LIBRARY, 'CCCCCCCC')]);
+
+        const result = await resolvePromptVariables('Use {{active_item}}.');
+
+        expect(result.items.map((i: any) => i.key)).toEqual(['CCCCCCCC']);
+        expect(result.emptyItemVariables).toEqual([]);
+    });
+
+    it('does not resolve the variable to the excluded candidate itself', async () => {
+        state.set(NOTE_ITEM_ATOM, itemIn(EXCLUDED_LIBRARY, 'BBBBBBBB', 'note'));
+        mockPaneSelection([itemIn(ALLOWED_LIBRARY, 'CCCCCCCC')]);
+
+        const result = await resolvePromptVariables('Use {{active_item}}.');
+
+        expect(result.items.some((i: any) => i.libraryID === EXCLUDED_LIBRARY)).toBe(false);
+    });
+
+    it('drops an excluded selected item so the chain continues past it', async () => {
+        state.set(NOTE_ITEM_ATOM, itemIn(EXCLUDED_LIBRARY, 'BBBBBBBB', 'note'));
+        mockPaneSelection([itemIn(EXCLUDED_LIBRARY, 'EEEEEEEE')]);
+
+        const result = await resolvePromptVariables('Use {{active_item}}.');
+
+        // Nothing searchable in any step here, but the excluded candidates
+        // must not be what the variable resolves to.
+        expect(result.items).toEqual([]);
+    });
+});
