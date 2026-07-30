@@ -508,6 +508,13 @@ const versionUpdateMessageList: VersionUpdateMessageConfig[] = [
         footer: "Please report any remaining IME issues to <a href='mailto:support@beaverapp.ai'>support@beaverapp.ai</a>.",
         inPanel: true,
     },
+    {
+        version: "0.22.6",
+        title: "Version 0.22.6: Improved Zotero 10 support",
+        text: "Supported multi-collection selection in Actions and addressed remaining compatibility issues.",
+        inPanel: true,
+    },
+
 ];
 
 versionUpdateMessageList.sort((a, b) => compareVersions(a.version, b.version));
