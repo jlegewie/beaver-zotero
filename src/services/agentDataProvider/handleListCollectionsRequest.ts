@@ -8,6 +8,7 @@
  */
 
 import { logger } from '../../utils/logger';
+import { getCollectionItemCounts } from './collectionCounts';
 import {
     WSListCollectionsRequest,
     WSListCollectionsResponse,
@@ -113,74 +114,15 @@ export async function handleListCollectionsRequest(
         const noteCountById: Map<number, number> = new Map();
         
         if (request.include_item_counts) {
-            try {
-                const collectionIds = filteredCollections.map((c: any) => c.id);
-                if (collectionIds.length > 0) {
-                    const placeholders = collectionIds.map(() => '?').join(',');
-                    
-                    // Count top-level regular items (same as library count for consistency)
-                    const itemSql = `
-                        SELECT CI.collectionID, COUNT(*) as itemCount
-                        FROM collectionItems CI
-                        JOIN items I ON CI.itemID = I.itemID
-                        LEFT JOIN itemAttachments IA ON I.itemID = IA.itemID
-                        LEFT JOIN itemNotes INo ON I.itemID = INo.itemID
-                        LEFT JOIN itemAnnotations IAn ON I.itemID = IAn.itemID
-                        WHERE CI.collectionID IN (${placeholders})
-                        AND I.itemID NOT IN (SELECT itemID FROM deletedItems)
-                        AND IA.itemID IS NULL
-                        AND INo.itemID IS NULL
-                        AND IAn.itemID IS NULL
-                        GROUP BY CI.collectionID
-                    `;
-                    await Zotero.DB.queryAsync(itemSql, collectionIds, {
-                        onRow: (row: any) => {
-                            const collectionID = row.getResultByIndex(0);
-                            const count = row.getResultByIndex(1);
-                            itemCountById.set(collectionID, count);
-                        }
-                    });
-                    
-                    // Count standalone attachments (no parent)
-                    const attachmentSql = `
-                        SELECT CI.collectionID, COUNT(*) as attachmentCount
-                        FROM collectionItems CI
-                        JOIN items I ON CI.itemID = I.itemID
-                        JOIN itemAttachments IA ON I.itemID = IA.itemID
-                        WHERE CI.collectionID IN (${placeholders})
-                        AND I.itemID NOT IN (SELECT itemID FROM deletedItems)
-                        AND IA.parentItemID IS NULL
-                        GROUP BY CI.collectionID
-                    `;
-                    await Zotero.DB.queryAsync(attachmentSql, collectionIds, {
-                        onRow: (row: any) => {
-                            const collectionID = row.getResultByIndex(0);
-                            const count = row.getResultByIndex(1);
-                            attachmentCountById.set(collectionID, count);
-                        }
-                    });
-                    
-                    // Count standalone notes (no parent)
-                    const noteSql = `
-                        SELECT CI.collectionID, COUNT(*) as noteCount
-                        FROM collectionItems CI
-                        JOIN items I ON CI.itemID = I.itemID
-                        JOIN itemNotes INo ON I.itemID = INo.itemID
-                        WHERE CI.collectionID IN (${placeholders})
-                        AND I.itemID NOT IN (SELECT itemID FROM deletedItems)
-                        AND INo.parentItemID IS NULL
-                        GROUP BY CI.collectionID
-                    `;
-                    await Zotero.DB.queryAsync(noteSql, collectionIds, {
-                        onRow: (row: any) => {
-                            const collectionID = row.getResultByIndex(0);
-                            const count = row.getResultByIndex(1);
-                            noteCountById.set(collectionID, count);
-                        }
-                    });
-                }
-            } catch (error) {
-                logger(`handleListCollectionsRequest: Error fetching item counts: ${error}`, 2);
+            // Shared with the application-state snapshot so both report the
+            // same numbers for the same collection.
+            const counts = await getCollectionItemCounts(
+                filteredCollections.map((c: any) => c.id)
+            );
+            for (const [collectionId, collectionCounts] of counts) {
+                itemCountById.set(collectionId, collectionCounts.itemCount);
+                attachmentCountById.set(collectionId, collectionCounts.standaloneAttachmentCount);
+                noteCountById.set(collectionId, collectionCounts.standaloneNoteCount);
             }
         }
         
@@ -196,8 +138,10 @@ export async function handleListCollectionsRequest(
             parent_key: collection.parentKey || null,
             parent_name: collection.parentID ? collectionIdToName.get(collection.parentID) || null : null,
             item_count: request.include_item_counts ? (itemCountById.get(collection.id) || 0) : 0,
-            standalone_attachment_count: request.include_item_counts ? (attachmentCountById.get(collection.id) || 0) : 0,
-            standalone_note_count: request.include_item_counts ? (noteCountById.get(collection.id) || 0) : 0,
+            // Left off entirely when counts were not requested: absent means
+            // "not reported", which a zero would misrepresent as "none here".
+            standalone_attachment_count: request.include_item_counts ? (attachmentCountById.get(collection.id) || 0) : undefined,
+            standalone_note_count: request.include_item_counts ? (noteCountById.get(collection.id) || 0) : undefined,
             subcollection_count: subcollectionCountById.get(collection.id) || 0,
         }));
         

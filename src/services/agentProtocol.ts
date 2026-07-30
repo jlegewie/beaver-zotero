@@ -1325,7 +1325,21 @@ export interface CollectionInfo {
     name: string;
     parent_key?: string | null;
     parent_name?: string | null;
+    /**
+     * Top-level regular items directly in this collection, excluding
+     * attachments, notes and annotations.
+     */
     item_count: number;
+    /**
+     * Attachments sitting directly in this collection rather than under a
+     * parent item.
+     */
+    standalone_attachment_count?: number;
+    /**
+     * Notes sitting directly in this collection rather than under a parent
+     * item.
+     */
+    standalone_note_count?: number;
     subcollection_count: number;
 }
 
@@ -1408,7 +1422,18 @@ export interface LibrarySummary {
     name: string;
     is_group: boolean;
     read_only: boolean;
+    /** Regular items, excluding attachments, notes and annotations. */
     item_count: number;
+    /**
+     * Attachments that sit at the top level of the library rather than under a
+     * parent item.
+     */
+    standalone_attachment_count?: number;
+    /**
+     * All notes in the library, both standalone and attached to an item. This
+     * is a library-wide total, unlike the per-collection note count, which
+     * covers only notes that are collection members in their own right.
+     */
     note_count: number;
     collection_count: number;
     tag_count: number;
@@ -1836,6 +1861,41 @@ export interface CurrentCollection {
     library_ref?: string;
     /** Parent collection key, if this is a subcollection */
     parent_key?: string | null;
+    /**
+     * Top-level regular items directly in this collection, excluding
+     * attachments, notes, annotations and anything trashed. Counts are for
+     * direct membership only — a subcollection's contents are not included.
+     */
+    item_count?: number;
+    /**
+     * Attachments sitting directly in this collection. Counted separately from
+     * `item_count` so a collection of loose files is not reported as empty.
+     */
+    standalone_attachment_count?: number;
+    /**
+     * Notes sitting directly in this collection. Notes attached to an item are
+     * reached through that item and are not collection members themselves, so
+     * they are not counted here.
+     */
+    note_count?: number;
+    /** Direct, non-trashed subcollections of this collection. */
+    subcollection_count?: number;
+}
+
+/**
+ * A saved search selected in the collections pane. Saved searches can be
+ * selected alongside collections, so they are reported as their own list
+ * rather than folded into `current_collections`.
+ */
+export interface CurrentSavedSearch {
+    /** Saved search key */
+    search_key: string;
+    /** Saved search name */
+    name: string;
+    /** Library ID this saved search belongs to */
+    library_id: number;
+    /** Device-portable library identity ("u" | "g<groupID>"). See `src/utils/libraryIdentity.ts`. */
+    library_ref?: string;
 }
 
 /**
@@ -1851,8 +1911,27 @@ export interface ApplicationStateInput {
     note_state?: NoteState;
     /** Current library context */
     current_library?: CurrentLibrary;
-    /** Current collection context */
+    /**
+     * First selected collection.
+     *
+     * Superseded by `current_collections`, which carries the whole selection.
+     * Still emitted alongside it so a client reporting a multi-row selection
+     * stays understandable to a server that only reads the single-collection
+     * field. Prefer `current_collections` when consuming.
+     */
     current_collection?: CurrentCollection;
+    /**
+     * Every selected collection, in selection order. The collections pane
+     * supports selecting several rows at once, and a selection can span
+     * libraries — each entry carries its own `library_id`/`library_ref`.
+     */
+    current_collections?: CurrentCollection[];
+    /**
+     * Saved searches in the current selection, in selection order. A selection
+     * can mix collections and saved searches, so this list is independent of
+     * `current_collections`.
+     */
+    current_searches?: CurrentSavedSearch[];
     /** Currently selected library items (optional) */
     library_selection?: ZoteroItemReference[];
     /** Frontend embedding index status */

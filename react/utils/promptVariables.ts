@@ -25,7 +25,8 @@ import { getCurrentReader } from './readerUtils';
 import { store } from '../store';
 import { searchableLibraryIdsAtom } from '../atoms/profile';
 import { currentReaderAttachmentAtom } from '../atoms/messageComposition';
-import { selectedZoteroItemsAtom, currentNoteItemAtom } from '../atoms/zoteroContext';
+import { selectedZoteroItemsAtom, currentNoteItemAtom, libraryViewAtom } from '../atoms/zoteroContext';
+import { pureCollectionSelection } from './actionVisibility';
 import { ActionTargetType } from '../types/actions';
 import { CollectionReference, collectionToReference } from '../types/zotero';
 
@@ -60,10 +61,16 @@ export interface PromptResolution {
     text: string;
     /** Zotero items to add as message attachments */
     items: Zotero.Item[];
-    /** Collection context when targetType is 'collection' */
-    collection: CollectionReference | null;
+    /** Collection context when targetType is 'collection' — every selected
+     *  collection, or empty when the selection is not purely collections. */
+    collections: CollectionReference[];
     /** Item variable names that were present but resolved to zero items */
     emptyItemVariables: string[];
+    /**
+     * True when the action's bound target resolved to items but every one of
+     * them belonged to an excluded library.
+     */
+    targetContextExcluded: boolean;
 }
 
 /**
@@ -74,6 +81,15 @@ export interface PromptResolution {
  * (e.g., selected items for "items", reader attachment for "attachment").
  * These are merged with any variable-resolved items, deduplicated by libraryID-key.
  */
+/**
+ * Drop items belonging to libraries the user excluded from Beaver.
+ */
+function keepSearchable(items: Zotero.Item[]): Zotero.Item[] {
+    if (items.length === 0) return items;
+    const searchableLibraryIds = store.get(searchableLibraryIdsAtom);
+    return items.filter((item: Zotero.Item) => searchableLibraryIds.includes(item.libraryID));
+}
+
 export async function resolvePromptVariables(
     text: string,
     targetType?: ActionTargetType,
@@ -83,7 +99,7 @@ export async function resolvePromptVariables(
 
     // Fast path: no variables and no targetType context
     if (matches.length === 0 && !targetType) {
-        return { text, items: [], collection: null, emptyItemVariables: [] };
+        return { text, items: [], collections: [], emptyItemVariables: [], targetContextExcluded: false };
     }
 
     // Resolve all unique variables in parallel
@@ -109,28 +125,36 @@ export async function resolvePromptVariables(
     let result = text.replace(pattern, (fullMatch, varName) => {
         const resolution = resolutionMap.get(varName);
         if (!resolution) return fullMatch; // Unknown variable — keep placeholder
-        allItems.push(...resolution.items);
-        // Track item variables (text === '') that resolved to zero items
-        if (resolution.text === '' && resolution.items.length === 0) {
+        const items = keepSearchable(resolution.items);
+        allItems.push(...items);
+        // Track item variables (text === '') that resolved to zero items. This
+        // counts items dropped by library exclusion, so a variable left empty
+        // by filtering reports the same "no items" hint as an empty selection.
+        if (resolution.text === '' && items.length === 0) {
             emptyItemVariables.push(varName);
         }
         return resolution.text;
     });
 
     // Auto-attach context based on targetType (dedup items with variable-resolved ones)
-    let collection: CollectionReference | null = null;
+    let collections: CollectionReference[] = [];
+    let targetContextExcluded = false;
     if (targetType) {
         const context = resolveTargetTypeContext(targetType);
-        if (context.items.length > 0) {
+        const contextItems = keepSearchable(context.items);
+        // The target resolved, but exclusion removed all of it. Report that
+        // instead of continuing with an unbound target.
+        targetContextExcluded = context.items.length > 0 && contextItems.length === 0;
+        if (contextItems.length > 0) {
             const existingKeys = new Set(allItems.map(i => `${i.libraryID}-${i.key}`));
-            for (const item of context.items) {
+            for (const item of contextItems) {
                 if (!existingKeys.has(`${item.libraryID}-${item.key}`)) {
                     allItems.push(item);
                     existingKeys.add(`${item.libraryID}-${item.key}`);
                 }
             }
         }
-        collection = context.collection;
+        collections = context.collections;
     }
 
     // Clean up formatting artifacts from empty resolutions
@@ -141,7 +165,7 @@ export async function resolvePromptVariables(
             .trim();
     }
 
-    return { text: result, items: allItems, collection, emptyItemVariables };
+    return { text: result, items: allItems, collections, emptyItemVariables, targetContextExcluded };
 }
 
 // ---------------------------------------------------------------------------
@@ -150,11 +174,29 @@ export async function resolvePromptVariables(
 
 interface TargetTypeContext {
     items: Zotero.Item[];
-    collection: CollectionReference | null;
+    collections: CollectionReference[];
 }
 
 function isActionableItem(item: Zotero.Item): boolean {
     return agentItemFilter(item);
+}
+
+/**
+ * The selected collections as wire references, following the shared
+ * {@link pureCollectionSelection} rule: empty unless the collections-tree
+ * selection is nothing but collections. Collections that no longer resolve
+ * (deleted between selection and send) are dropped.
+ */
+function selectedCollectionReferences(): CollectionReference[] {
+    const searchableLibraryIds = store.get(searchableLibraryIdsAtom);
+    const selected = pureCollectionSelection(store.get(libraryViewAtom))
+        .filter(info => searchableLibraryIds.includes(info.libraryId));
+    const references: CollectionReference[] = [];
+    for (const info of selected) {
+        const collection = Zotero.Collections.get(info.collectionId) as Zotero.Collection | undefined;
+        if (collection) references.push(collectionToReference(collection));
+    }
+    return references;
 }
 
 function resolveTargetTypeContext(targetType: ActionTargetType): TargetTypeContext {
@@ -164,40 +206,39 @@ function resolveTargetTypeContext(targetType: ActionTargetType): TargetTypeConte
             const readerAttachment = store.get(currentReaderAttachmentAtom);
             if (readerAttachment && isActionableItem(readerAttachment)) {
                 const parent = readerAttachment.parentItem;
-                return { items: parent ? [parent, readerAttachment] : [readerAttachment], collection: null };
+                return { items: parent ? [parent, readerAttachment] : [readerAttachment], collections: [] };
             }
             // Library context: selected actionable regular items
             const selected = store.get(selectedZoteroItemsAtom);
             const regular = selected.filter((i: Zotero.Item) => i.isRegularItem() && isActionableItem(i));
-            return { items: regular.slice(0, 10), collection: null };
+            return { items: regular.slice(0, 10), collections: [] };
         }
         case 'attachment': {
             // Reader context: attachment open in reader (only if supported)
             const readerAttachment = store.get(currentReaderAttachmentAtom);
             if (readerAttachment && isActionableItem(readerAttachment)) {
-                return { items: [readerAttachment], collection: null };
+                return { items: [readerAttachment], collections: [] };
             }
             // Library context: selected actionable attachments
             const selected = store.get(selectedZoteroItemsAtom);
             const attachments = selected.filter((i: Zotero.Item) => i.isAttachment() && isActionableItem(i));
-            return { items: attachments.slice(0, 10), collection: null };
+            return { items: attachments.slice(0, 10), collections: [] };
         }
         case 'collection': {
-            const zp = Zotero.getActiveZoteroPane?.();
-            const col = zp?.getSelectedCollection?.();
-            const collection = col ? collectionToReference(col) : null;
-            return { items: [], collection };
+            // Attach every selected collection, so an action launched over a
+            // multi-collection selection reaches the model with all of them.
+            return { items: [], collections: selectedCollectionReferences() };
         }
         case 'note': {
             const noteItem = store.get(currentNoteItemAtom);
-            if (noteItem) return { items: [noteItem], collection: null };
+            if (noteItem) return { items: [noteItem], collections: [] };
             // Fallback: selected notes in library view
             const selectedItems = store.get(selectedZoteroItemsAtom);
             const notes = selectedItems.filter((i: Zotero.Item) => i.isNote());
-            return { items: notes.slice(0, 10), collection: null };
+            return { items: notes.slice(0, 10), collections: [] };
         }
         case 'global':
-            return { items: [], collection: null };
+            return { items: [], collections: [] };
     }
 }
 
@@ -283,33 +324,42 @@ async function resolveOpenNote(): Promise<ResolvedVariable> {
  */
 async function resolveActiveItem(): Promise<ResolvedVariable> {
     try {
+        // Each candidate is filtered before it is accepted, so a candidate in
+        // an excluded library falls through to the next step instead of
+        // resolving the variable to nothing.
+
         // 1. Reader: parent item (with attachment) or attachment itself
         const attachment = await getOpenReaderAttachment();
         if (attachment) {
             const parent = attachment.parentItem;
-            if (parent) {
-                return { text: '', items: [parent, attachment] };
+            const items = keepSearchable(parent ? [parent, attachment] : [attachment]);
+            if (items.length > 0) {
+                return { text: '', items };
             }
-            return { text: '', items: [attachment] };
         }
 
         // 2. Note open in a tab
         const noteItem = store.get(currentNoteItemAtom);
         if (noteItem) {
-            return { text: '', items: [noteItem] };
+            const items = keepSearchable([noteItem]);
+            if (items.length > 0) {
+                return { text: '', items };
+            }
         }
 
         // 3. Selected items in library view
         const zp = Zotero.getActiveZoteroPane?.();
         if (zp) {
             const selectedItems: Zotero.Item[] = zp.getSelectedItems?.() || [];
-            const regularItems = selectedItems.filter((item: Zotero.Item) => item.isRegularItem() && isActionableItem(item));
+            const regularItems = keepSearchable(
+                selectedItems.filter((item: Zotero.Item) => item.isRegularItem() && isActionableItem(item)),
+            );
             if (regularItems.length > 0) {
                 return { text: '', items: regularItems.slice(0, 10) };
             }
         }
 
-        // 3. Most recently added item
+        // 4. Most recently added item (already scoped to a searchable library)
         const recentItems = await fetchRecentItems(1);
         return { text: '', items: recentItems };
     } catch (e) {
@@ -324,10 +374,11 @@ async function resolveActiveItem(): Promise<ResolvedVariable> {
 
 async function resolveCurrentCollection(): Promise<ResolvedVariable> {
     try {
-        const zp = Zotero.getActiveZoteroPane?.();
-        if (!zp) return { text: 'None selected', items: [] };
-        const collection = zp.getSelectedCollection?.();
-        return { text: collection?.name ? `"${collection?.name}"` : 'None selected', items: [] };
+        const names = selectedCollectionReferences()
+            .map(ref => ref.name)
+            .filter(name => !!name);
+        if (names.length === 0) return { text: 'None selected', items: [] };
+        return { text: names.map(name => `"${name}"`).join(', '), items: [] };
     } catch (e) {
         logger(`promptVariables: resolveCurrentCollection error: ${e}`, 1);
         return { text: '', items: [] };

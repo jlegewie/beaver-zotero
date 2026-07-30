@@ -10,6 +10,7 @@ import { store } from '../store';
 import { userIdAtom } from '../atoms/auth';
 import { isAttachmentOnServer } from '../../src/utils/webAPI';
 import { safeFileExists } from '../../src/utils/zoteroUtils';
+import { getSelectedCollection } from '../../src/utils/zoteroSelection';
 import { getNoteContentPreviewText } from './noteText';
 import type { EditNoteOperation } from '../types/agentActions/editNote';
 import { getBeaverFooterAppendPoint } from '../../src/utils/noteEditFooter';
@@ -258,7 +259,7 @@ export async function getCurrentCollectionKeyForItem(
 ): Promise<string | undefined> {
     if (libraryId === UNRESOLVED_LIBRARY_ID) return undefined;
     try {
-        const selectedCollection = Zotero.getActiveZoteroPane()?.getSelectedCollection?.();
+        const selectedCollection = getSelectedCollection(Zotero.getActiveZoteroPane());
         if (!selectedCollection || selectedCollection.libraryID !== libraryId) return undefined;
 
         const item = await Zotero.Items.getByLibraryAndKeyAsync(libraryId, zoteroKey);

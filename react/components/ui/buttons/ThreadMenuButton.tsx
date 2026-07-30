@@ -12,6 +12,7 @@ import { currentThreadIdAtom, currentThreadNameAtom, newThreadAtom, recentThread
 import { citationMapAtom } from '../../../atoms/citations';
 import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '../../../atoms/externalReferences';
 import { getZoteroTargetContextSync } from '../../../../src/utils/zoteroUtils';
+import { getSelectedCollection } from '../../../../src/utils/zoteroSelection';
 import { selectItem, selectItemById } from '../../../../src/utils/selectItem';
 import { store } from '../../../store';
 import { prepareCitationRenderContext } from '../../../utils/citationRenderContext';
@@ -96,7 +97,7 @@ const ThreadMenuButton: React.FC<ThreadMenuButtonProps> = ({
 
         // Always add to the current collection (even when items are selected)
         const zp = Zotero.getActiveZoteroPane();
-        const selectedCollection = zp?.getSelectedCollection() || null;
+        const selectedCollection = getSelectedCollection(zp);
         if (selectedCollection) {
             await Zotero.DB.executeTransaction(async () => {
                 selectedCollection.addItem(newNote.id);

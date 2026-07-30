@@ -43,6 +43,11 @@ const SUPPORTED_UI_VIEW_TYPES: ReadonlyArray<UiViewType> = [
 function mapTreeRowType(t: LibraryTreeRowType): UiViewType | null {
     if (!t) return null;
     if (t === "feeds") return "feed";
+    // A group library's root row reports 'group', but it is a library view as
+    // far as the suggestions API is concerned.
+    if (t === "group") return "library";
+    // Row types with no matching UiViewType are reported as "no view hint"
+    // rather than guessed at.
     return SUPPORTED_UI_VIEW_TYPES.includes(t as UiViewType)
         ? (t as UiViewType) : null;
 }
