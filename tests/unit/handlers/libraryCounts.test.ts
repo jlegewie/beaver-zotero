@@ -29,6 +29,7 @@ describe('getLibrarySummaries', () => {
 
     it('returns sorted count summaries for requested libraries', async () => {
         const noteCountSql: string[] = [];
+        const attachmentCountSql: string[] = [];
         getAllLibraries.mockReturnValue([
             {
                 libraryID: 2,
@@ -62,6 +63,9 @@ describe('getLibrarySummaries', () => {
                 let count = 0;
                 if (sql.includes('LEFT JOIN itemNotes')) {
                     count = libraryId === 1 ? 12 : 4;
+                } else if (sql.includes('JOIN itemAttachments IA')) {
+                    attachmentCountSql.push(sql);
+                    count = libraryId === 1 ? 8 : 0;
                 } else if (sql.includes('JOIN itemNotes N')) {
                     noteCountSql.push(sql);
                     count = libraryId === 1 ? 5 : 1;
@@ -82,6 +86,7 @@ describe('getLibrarySummaries', () => {
                 is_group: false,
                 read_only: false,
                 item_count: 12,
+                standalone_attachment_count: 8,
                 note_count: 5,
                 collection_count: 3,
                 tag_count: 2,
@@ -92,6 +97,7 @@ describe('getLibrarySummaries', () => {
                 is_group: true,
                 read_only: true,
                 item_count: 4,
+                standalone_attachment_count: 0,
                 note_count: 1,
                 collection_count: 2,
                 tag_count: 1,
@@ -104,6 +110,42 @@ describe('getLibrarySummaries', () => {
                 'N.parentItemID NOT IN (SELECT itemID FROM deletedItems)'
             );
         }
+        // Only top-level files count: an attachment under an item is reached
+        // through that item, and is already covered by its parent's row.
+        expect(attachmentCountSql).toHaveLength(2);
+        for (const sql of attachmentCountSql) {
+            expect(sql).toContain('IA.parentItemID IS NULL');
+            expect(sql).toContain('NOT IN (SELECT itemID FROM deletedItems)');
+        }
+    });
+
+    it('reports a library holding only loose files as non-empty', async () => {
+        getAllLibraries.mockReturnValue([
+            {
+                libraryID: 1,
+                name: 'Unfiled PDFs',
+                isGroup: false,
+                editable: true,
+                filesEditable: true,
+            },
+        ]);
+        queryAsync.mockImplementation(
+            async (
+                sql: string,
+                _params: number[],
+                options?: { onRow?: (row: any) => void }
+            ) => {
+                options?.onRow?.(
+                    rowWithCount(sql.includes('JOIN itemAttachments IA') ? 40 : 0)
+                );
+            }
+        );
+        getAllTags.mockResolvedValue([]);
+
+        const [summary] = await getLibrarySummaries([1]);
+
+        expect(summary.item_count).toBe(0);
+        expect(summary.standalone_attachment_count).toBe(40);
     });
 
     it('isolates count failures to the failed count', async () => {
@@ -125,6 +167,9 @@ describe('getLibrarySummaries', () => {
                 if (sql.includes('JOIN itemNotes N')) {
                     throw new Error('notes failed');
                 }
+                if (sql.includes('JOIN itemAttachments IA')) {
+                    throw new Error('attachments failed');
+                }
                 if (sql.includes('LEFT JOIN itemNotes')) {
                     options?.onRow?.(rowWithCount(12));
                     return;
@@ -141,6 +186,7 @@ describe('getLibrarySummaries', () => {
                 is_group: false,
                 read_only: false,
                 item_count: 12,
+                standalone_attachment_count: 0,
                 note_count: 0,
                 collection_count: 3,
                 tag_count: 0,
@@ -148,6 +194,10 @@ describe('getLibrarySummaries', () => {
         ]);
         expect(logger).toHaveBeenCalledWith(
             expect.stringContaining('Error counting notes'),
+            2
+        );
+        expect(logger).toHaveBeenCalledWith(
+            expect.stringContaining('Error counting standalone attachments'),
             2
         );
         expect(logger).toHaveBeenCalledWith(

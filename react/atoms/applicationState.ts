@@ -208,6 +208,7 @@ export async function buildZoteroApplicationState(get: Getter): Promise<Applicat
                     library_ref: libraryRefForLibraryID(collection.libraryID) ?? undefined,
                     parent_key: collection.parentKey || null,
                     item_count: counts.itemCount,
+                    standalone_attachment_count: counts.standaloneAttachmentCount,
                     note_count: counts.standaloneNoteCount,
                     subcollection_count: subcollectionCounts.get(collection.id) ?? 0,
                 };

@@ -138,8 +138,10 @@ export async function handleListCollectionsRequest(
             parent_key: collection.parentKey || null,
             parent_name: collection.parentID ? collectionIdToName.get(collection.parentID) || null : null,
             item_count: request.include_item_counts ? (itemCountById.get(collection.id) || 0) : 0,
-            standalone_attachment_count: request.include_item_counts ? (attachmentCountById.get(collection.id) || 0) : 0,
-            standalone_note_count: request.include_item_counts ? (noteCountById.get(collection.id) || 0) : 0,
+            // Left off entirely when counts were not requested: absent means
+            // "not reported", which a zero would misrepresent as "none here".
+            standalone_attachment_count: request.include_item_counts ? (attachmentCountById.get(collection.id) || 0) : undefined,
+            standalone_note_count: request.include_item_counts ? (noteCountById.get(collection.id) || 0) : undefined,
             subcollection_count: subcollectionCountById.get(collection.id) || 0,
         }));
         

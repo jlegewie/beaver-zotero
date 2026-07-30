@@ -468,6 +468,8 @@ const LIST_COLLECTIONS_TOOL = {
     description:
         "List collections (folders) in the user's Zotero library to understand how their references are organized. " +
         'Returns collection names, keys, item counts, and subcollection counts. ' +
+        'item_count covers regular items only; files and notes stored without a parent item ' +
+        'are reported separately as standalone_attachment_count and standalone_note_count. ' +
         'Use the collection keys or names as filters in search tools (`collections_filter`), ' +
         'or set `parent_collection` to explore nested subcollections. ' +
         'Useful for understanding the scope and organization of the library before searching.',
@@ -1279,6 +1281,8 @@ async function handleListCollections(args: any): Promise<any> {
             collection_key: c.collection_key,
             name: c.name,
             item_count: c.item_count,
+            standalone_attachment_count: c.standalone_attachment_count,
+            standalone_note_count: c.standalone_note_count,
             subcollection_count: c.subcollection_count,
         })),
     };

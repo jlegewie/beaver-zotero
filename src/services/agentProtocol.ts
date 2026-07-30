@@ -1325,7 +1325,21 @@ export interface CollectionInfo {
     name: string;
     parent_key?: string | null;
     parent_name?: string | null;
+    /**
+     * Top-level regular items directly in this collection, excluding
+     * attachments, notes and annotations.
+     */
     item_count: number;
+    /**
+     * Attachments sitting directly in this collection rather than under a
+     * parent item.
+     */
+    standalone_attachment_count?: number;
+    /**
+     * Notes sitting directly in this collection rather than under a parent
+     * item.
+     */
+    standalone_note_count?: number;
     subcollection_count: number;
 }
 
@@ -1408,7 +1422,18 @@ export interface LibrarySummary {
     name: string;
     is_group: boolean;
     read_only: boolean;
+    /** Regular items, excluding attachments, notes and annotations. */
     item_count: number;
+    /**
+     * Attachments that sit at the top level of the library rather than under a
+     * parent item.
+     */
+    standalone_attachment_count?: number;
+    /**
+     * All notes in the library, both standalone and attached to an item. This
+     * is a library-wide total, unlike the per-collection note count, which
+     * covers only notes that are collection members in their own right.
+     */
     note_count: number;
     collection_count: number;
     tag_count: number;
@@ -1842,6 +1867,11 @@ export interface CurrentCollection {
      * direct membership only — a subcollection's contents are not included.
      */
     item_count?: number;
+    /**
+     * Attachments sitting directly in this collection. Counted separately from
+     * `item_count` so a collection of loose files is not reported as empty.
+     */
+    standalone_attachment_count?: number;
     /**
      * Notes sitting directly in this collection. Notes attached to an item are
      * reached through that item and are not collection members themselves, so
