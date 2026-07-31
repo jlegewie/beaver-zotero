@@ -75,6 +75,15 @@ export interface UnconfirmedRetry {
     anchor: RetryAnchor;
     /** Null once restored, or when the retry removed nothing locally. */
     removed: RemovedThreadTail | null;
+    /**
+     * Whether the server acknowledged the request.
+     *
+     * The only sound evidence the client has about the truncation. The server
+     * acknowledges before it loads the thread, so an unacknowledged request
+     * cannot have truncated anything; once acknowledged, the client can no
+     * longer tell. See `planRetryRollback`.
+     */
+    acknowledged: boolean;
 }
 
 /** Runs the retry keeps, given the index it truncates the thread from. */
@@ -153,12 +162,21 @@ export type RetryRollbackPlan =
 /**
  * Decide whether a run's local truncation has to be put back.
  *
- * The server deletes runs while loading the thread, so a run that ends before
- * the `thread` event left those runs in place. Leaving them removed locally is
- * what strands them: gone from the UI, alive server-side, and replayed into the
- * history of every later run.
+ * Restoring is gated on positive proof that the server never truncated, which
+ * is the absence of an acknowledgment: the server acknowledges a request before
+ * it loads the thread, and the truncation happens during that load. A run that
+ * ends unacknowledged therefore left its runs in place, and leaving them
+ * removed locally is what strands them — gone from the UI, alive server-side,
+ * and replayed into the history of every later run.
  *
- * A thread switch during the failed request discards the snapshot instead —
+ * Past the acknowledgment the client cannot tell whether the truncation ran,
+ * because the `thread` event that would report it can be lost with the
+ * connection. That case is deliberately resolved as `discard`: re-creating runs
+ * the server has already deleted would show content no later run can see, and
+ * nothing would correct it. Under-restoring is recoverable instead — the keep
+ * set on the next retry reconciles the thread either way.
+ *
+ * A thread switch during the failed request also discards the snapshot, since
  * restoring it would inject another thread's runs into the current one.
  */
 export function planRetryRollback(
@@ -169,7 +187,7 @@ export function planRetryRollback(
     if (!unconfirmed || unconfirmed.runId !== runId || !unconfirmed.removed) {
         return { action: 'none' };
     }
-    if (unconfirmed.removed.threadId !== currentThreadId) {
+    if (unconfirmed.acknowledged || unconfirmed.removed.threadId !== currentThreadId) {
         return { action: 'discard' };
     }
     return { action: 'restore', removed: unconfirmed.removed };

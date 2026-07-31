@@ -340,14 +340,24 @@ async function cleanupTemporaryAnnotationsForRunReplacement(logPrefix: string): 
 const unconfirmedRetryAtom = atom<UnconfirmedRetry | null>(null);
 
 /**
+ * Record that the server acknowledged the retry's request.
+ *
+ * Past this point the client can no longer prove the thread was not truncated,
+ * so the removed tail stops being restorable. See `planRetryRollback`.
+ */
+const markRetryAcknowledgedAtom = atom(null, (get, set, runId: string) => {
+    const unconfirmed = get(unconfirmedRetryAtom);
+    if (unconfirmed?.runId === runId && !unconfirmed.acknowledged) {
+        set(unconfirmedRetryAtom, { ...unconfirmed, acknowledged: true });
+    }
+});
+
+/**
  * Drop the pending truncation once the server has truncated the thread itself.
  *
- * Gated on the `thread` event rather than the earlier `request_ack`: the server
- * acknowledges a request before it loads the thread, and the retry truncation
- * happens during that load. A setup failure in between leaves the runs in place,
- * so the client has to stay able to restore them until the thread event proves
- * otherwise. From here the truncation is the server's, and the run is a valid
- * retry target in its own right.
+ * The `thread` event is sent only after the thread has been loaded and any
+ * retry truncation applied, so from here the truncation is the server's and the
+ * run is a valid retry target in its own right.
  */
 const confirmRetryTruncatedAtom = atom(null, (get, set) => {
     const activeRunId = get(activeRunAtom)?.id;
@@ -682,7 +692,7 @@ async function startAutoRetryRun(
         );
 
         newRunId = newRun.id;
-        set(unconfirmedRetryAtom, { runId: newRunId, anchor, removed: removedTail });
+        set(unconfirmedRetryAtom, { runId: newRunId, anchor, removed: removedTail, acknowledged: false });
         set(activeRunAtom, newRun);
 
         await executeWSRequest(newRun, request, get, set);
@@ -1326,6 +1336,9 @@ function createWSCallbacks(set: Setter): WSCallbacks {
         onRequestAck: (data: WSRequestAckData) => {
             logger('WS onRequestAck:', data, 1);
             set(wsRequestAckDataAtom, data);
+            // The server truncates after acknowledging, so from here the client
+            // can no longer prove the removed runs are still in the thread.
+            set(markRetryAcknowledgedAtom, data.runId);
         },
 
         onPart: async (event: WSPartEvent) => {
@@ -2534,7 +2547,7 @@ export const regenerateFromRunAtom = atom(
 
             // Set active run - UI now shows user message + spinner
             newRunId = newRun.id;
-            set(unconfirmedRetryAtom, { runId: newRunId, anchor: retryAnchor, removed: removedTail });
+            set(unconfirmedRetryAtom, { runId: newRunId, anchor: retryAnchor, removed: removedTail, acknowledged: false });
             set(activeRunAtom, newRun);
 
             // Execute the WebSocket request
@@ -2755,7 +2768,7 @@ export const regenerateWithEditedPromptAtom = atom(
 
             // Set active run - UI now shows user message + spinner
             newRunId = newRun.id;
-            set(unconfirmedRetryAtom, { runId: newRunId, anchor: retryAnchor, removed: removedTail });
+            set(unconfirmedRetryAtom, { runId: newRunId, anchor: retryAnchor, removed: removedTail, acknowledged: false });
             set(activeRunAtom, newRun);
 
             // Execute the WebSocket request
@@ -2857,12 +2870,23 @@ export const closeWSConnectionAtom = atom(null, async (get, set) => {
     // Mark active run as canceled if it exists
     const activeRun = get(activeRunAtom);
     if (activeRun && activeRun.status === 'in_progress') {
-        // A retry still tracked as unconfirmed was cancelled before the server
-        // truncated the thread, so the runs it removed locally are all still
-        // there and the run itself was never persisted. Put the tail back and
-        // drop the shell: the thread returns to exactly what the server holds,
-        // which is what cancelling a regeneration should leave behind.
-        if (get(unconfirmedRetryAtom)?.runId === activeRun.id) {
+        // A retry cancelled before its request ever reached the server left the
+        // runs it removed locally untouched in the thread, and was never
+        // persisted itself. Put the tail back and drop the shell: the thread
+        // returns to exactly what the server holds, which is what cancelling a
+        // regeneration should leave behind.
+        //
+        // Unlike a server-reported failure, a cancel does not prove the server
+        // stopped — it may be acknowledging and truncating as the cancel flushes
+        // — so an unacknowledged request is not enough. The run request is only
+        // sent once the connection is ready, so gating on that is what makes
+        // this sound.
+        const unconfirmedRetry = get(unconfirmedRetryAtom);
+        if (
+            unconfirmedRetry?.runId === activeRun.id &&
+            !unconfirmedRetry.acknowledged &&
+            !get(isWSReadyAtom)
+        ) {
             set(rollbackUnconfirmedRetryAtom, activeRun.id);
             set(activeRunAtom, null);
         } else {

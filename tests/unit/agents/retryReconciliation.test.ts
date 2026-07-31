@@ -30,7 +30,7 @@ function makeUnconfirmed(
     retryRunId: string,
     keepRunIds: string[] = [],
 ): UnconfirmedRetry {
-    return { runId, anchor: { retryRunId, keepRunIds }, removed: null };
+    return { runId, anchor: { retryRunId, keepRunIds }, removed: null, acknowledged: false };
 }
 
 describe('buildRetryAnchor', () => {
@@ -154,7 +154,7 @@ describe('resolveRetryTarget', () => {
         );
         const secondPhantom = makeRun('phantom-2');
         const second = resolveRetryTarget(
-            { runId: 'phantom-2', anchor: first.anchor, removed: null },
+            { runId: 'phantom-2', anchor: first.anchor, removed: null, acknowledged: false },
             runs,
             secondPhantom,
             runs.length,
@@ -169,8 +169,12 @@ describe('planRetryRollback', () => {
         return { threadId, runs: [makeRun('b')], actions: [], citations: [], undoneActionIds: [] };
     }
 
-    function makePending(runId: string, removed: RemovedThreadTail | null): UnconfirmedRetry {
-        return { runId, anchor: { retryRunId: 'b', keepRunIds: ['a'] }, removed };
+    function makePending(
+        runId: string,
+        removed: RemovedThreadTail | null,
+        acknowledged = false,
+    ): UnconfirmedRetry {
+        return { runId, anchor: { retryRunId: 'b', keepRunIds: ['a'] }, removed, acknowledged };
     }
 
     it('restores the tail when the run failed before the acknowledgment', () => {
@@ -180,6 +184,16 @@ describe('planRetryRollback', () => {
             action: 'restore',
             removed: pending.removed,
         });
+    });
+
+    it('discards the snapshot once the request was acknowledged', () => {
+        // The server truncates after acknowledging, and the event reporting it
+        // can be lost with the connection. Restoring here could re-create runs
+        // the server has already deleted, which nothing would correct; leaving
+        // them removed is reconciled by the keep set on the next retry.
+        const pending = makePending('phantom', makeRemoved('thread-1'), true);
+
+        expect(planRetryRollback(pending, 'phantom', 'thread-1')).toEqual({ action: 'discard' });
     });
 
     it('does nothing when there is no unconfirmed retry', () => {
