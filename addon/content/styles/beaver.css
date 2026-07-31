@@ -1495,8 +1495,8 @@
 
 [id^="beaver-pane-"] .markdown :not(pre)>code {
     font-size: 85%;
-    padding-top: 0.15em;
-    padding-bottom: 0.15em;
+    /* padding-top: 0.15em; */
+    /* padding-bottom: 0.15em; */
     padding-left: 0.2em;
     padding-right: 0.2em;
     border-radius: 4px;
