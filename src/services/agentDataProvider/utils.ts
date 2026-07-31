@@ -639,6 +639,90 @@ export function extractYear(dateStr: string | undefined): number | null {
 }
 
 /**
+ * Names that read like item fields but are not stored as itemData.
+ * `readItemField()` resolves each of these directly.
+ */
+const NON_FIELD_ALIASES = new Set(['itemType', 'creator', 'creators', 'year']);
+
+/**
+ * Primary data that may be read by name.
+ *
+ * An allowlist, not a filter over `Zotero.Items.primaryFields`: most primary
+ * fields are device-local or internal (`id`, `itemID`, `libraryID`,
+ * `itemTypeID`, `parentID`, `version`, `synced`, the `attachment*` columns …),
+ * and none of them is stable across installs. Item identity on the wire is the
+ * portable `item_id` / `library_ref` pair, so anything not listed here stays
+ * unreadable.
+ */
+const READABLE_PRIMARY_FIELDS = new Set(['dateAdded', 'dateModified', 'key', 'firstCreator']);
+
+/**
+ * Whether a caller-supplied name can be read off an item at all.
+ *
+ * Readability does not depend on the item: a valid field that the item's type
+ * does not use just reads as empty. Callers with a fixed field list should
+ * therefore validate once, up front, rather than per item.
+ */
+export function isReadableItemField(field: string): boolean {
+    if (!field) return false;
+    if (NON_FIELD_ALIASES.has(field)) return true;
+    if (READABLE_PRIMARY_FIELDS.has(field)) return true;
+    // Primary data outside the allowlist is rejected here rather than falling
+    // through to the itemData lookup, which would never have matched anyway.
+    if (Zotero.Items.isPrimaryField(field)) return false;
+
+    // `field` arrives over the wire, so it can be an inherited Object key
+    // ("constructor", "toString", …). Zotero looks fields up in a plain object,
+    // so require a real field ID rather than trusting truthiness.
+    const fieldID = Zotero.ItemFields.getID(field);
+    return typeof fieldID === 'number' && fieldID > 0;
+}
+
+/**
+ * Read an arbitrary, caller-supplied field name off an item without letting
+ * Zotero throw.
+ *
+ * `Zotero.Item.getField(name, false, true)` resolves `name` through
+ * `ItemFields.getFieldIDFromTypeAndBase()`, which throws
+ * `Invalid field '<name>' for base field` for anything that is not an itemData
+ * field. `itemType` and `creator` are among the names most often asked for and
+ * neither is one: they are the item type and the creators.
+ *
+ * Catching the throw is not enough. Plugins patch
+ * `Zotero.Item.prototype.getField` (zotero-plugin-toolkit's field-hook manager
+ * does this on construction), and each patch layer logs the error it catches
+ * and then retries the call, so the work and the error-console output grow
+ * exponentially with the number of installed layers. Resolve the aliases
+ * directly and reject unknown names before calling `getField()`.
+ *
+ * Returns `undefined` for anything `isReadableItemField()` rejects.
+ */
+export function readItemField(item: Zotero.Item, field: string): string | number | null | undefined {
+    if (!isReadableItemField(field)) return undefined;
+
+    switch (field) {
+        case 'itemType':
+            return item.itemType;
+        case 'creator':
+        case 'creators':
+            return formatCreatorsString(item.getCreators());
+        case 'year': {
+            const date = readItemField(item, 'date');
+            return extractYear(typeof date === 'string' ? date : undefined);
+        }
+    }
+
+    // Primary data is returned as-is by getField() and must not go through
+    // base-field mapping.
+    if (READABLE_PRIMARY_FIELDS.has(field)) {
+        return item.getField(field as _ZoteroTypes.Item.ItemField) as string;
+    }
+
+    // includeBaseMapped=true so base fields resolve to type-specific fields
+    return item.getField(field as _ZoteroTypes.Item.ItemField, false, true) as string;
+}
+
+/**
  * Brief library info for error responses.
  */
 export interface AvailableLibraryInfo {
