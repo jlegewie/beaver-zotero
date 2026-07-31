@@ -106,6 +106,7 @@ import {
     hasAppliedZoteroItem,
     hasAppliedBulkAnnotations,
     isCreateAnnotationsAgentAction,
+    undoAgentActionAtom,
     AgentAction,
     addPendingApprovalAtom,
     removePendingApprovalAtom,
@@ -339,28 +340,31 @@ async function cleanupTemporaryAnnotationsForRunReplacement(logPrefix: string): 
 const unconfirmedRetryAtom = atom<UnconfirmedRetry | null>(null);
 
 /**
- * Drop the pending truncation once the server acknowledges the run: from the
- * ack onward the server owns the truncation, so there is nothing to restore and
- * the run is a valid retry target in its own right.
+ * Drop the pending truncation once the server has truncated the thread itself.
+ *
+ * Gated on the `thread` event rather than the earlier `request_ack`: the server
+ * acknowledges a request before it loads the thread, and the retry truncation
+ * happens during that load. A setup failure in between leaves the runs in place,
+ * so the client has to stay able to restore them until the thread event proves
+ * otherwise. From here the truncation is the server's, and the run is a valid
+ * retry target in its own right.
  */
-const confirmRetryAcknowledgedAtom = atom(null, (get, set, runId: string) => {
-    if (get(unconfirmedRetryAtom)?.runId === runId) {
+const confirmRetryTruncatedAtom = atom(null, (get, set) => {
+    const activeRunId = get(activeRunAtom)?.id;
+    if (activeRunId && get(unconfirmedRetryAtom)?.runId === activeRunId) {
         set(unconfirmedRetryAtom, null);
     }
 });
 
 /**
- * Put back the thread tail a retry removed, when its run failed before the
- * server acknowledged the request.
+ * Put back the thread tail a retry removed, when its run ended before the
+ * server truncated the thread itself.
  *
- * The server deletes runs only after that acknowledgment, so those runs are
- * still in the thread. Leaving them removed locally is what strands them: gone
- * from the UI, alive server-side, and replayed into the history of every later
- * run in the thread.
+ * The server deletes runs while loading the thread, so those runs are still
+ * there. Leaving them removed locally is what strands them: gone from the UI,
+ * alive server-side, and replayed into the history of every later run.
  *
  * The anchor is deliberately kept — the next retry targeting this run needs it.
- * Restored runs may carry agent actions whose Zotero changes were already
- * undone; loading the thread revalidates those statuses.
  */
 const rollbackUnconfirmedRetryAtom = atom(null, (get, set, runId: string) => {
     const unconfirmed = get(unconfirmedRetryAtom);
@@ -380,8 +384,16 @@ const rollbackUnconfirmedRetryAtom = atom(null, (get, set, runId: string) => {
         restoreRemoved(citations, removed.citations, (citation) => citation.citation_id));
     set(processCitationsAtom);
 
+    // The snapshot predates the revert these actions already went through, so
+    // they come back reading as applied. Re-apply the undo transition now that
+    // they are restored, which also clears the stale result_data their cards
+    // would otherwise offer operations on.
+    for (const actionId of removed.undoneActionIds) {
+        set(undoAgentActionAtom, actionId);
+    }
+
     logger(
-        `rollbackUnconfirmedRetry: restored ${removed.runs.length} run(s) after run ${runId} failed before the server acknowledged it`,
+        `rollbackUnconfirmedRetry: restored ${removed.runs.length} run(s) after run ${runId} ended before the server truncated the thread`,
         1,
     );
 });
@@ -641,6 +653,8 @@ async function startAutoRetryRun(
                 runs: removedRuns,
                 actions: get(threadAgentActionsAtom).filter(a => runIdsToRemove.includes(a.run_id)),
                 citations: get(citationsAtom).filter(c => runIdsToRemove.includes(c.run_id ?? '')),
+                // Auto-retry never reverts applied actions, so none come back undone.
+                undoneActionIds: [],
             };
             set(threadRunsAtom, threadRuns.slice(0, truncateFromIndex));
             set(threadAgentActionsAtom, prev => prev.filter(a => !runIdsToRemove.includes(a.run_id)));
@@ -693,8 +707,12 @@ async function startAutoRetryRun(
  * Undoing in reverse chronological order restores the original state.
  *
  * Per-action failures are logged and do not stop the loop.
+ *
+ * Returns the ids of the actions actually reverted, so a retry that has to put
+ * its removed runs back can restore those actions as undone rather than as
+ * still applied.
  */
-async function undoAppliedActionsInReverse(actions: AgentAction[]): Promise<void> {
+async function undoAppliedActionsInReverse(actions: AgentAction[]): Promise<string[]> {
     // Filter applied actions, keeping their original array position as the
     // tiebreaker for chronological ordering.
     const indexed = actions
@@ -717,6 +735,8 @@ async function undoAppliedActionsInReverse(actions: AgentAction[]): Promise<void
         if (!Number.isNaN(ta) && !Number.isNaN(tb) && ta !== tb) return tb - ta;
         return b.index - a.index;
     });
+
+    const undoneActionIds: string[] = [];
 
     for (const { action } of indexed) {
         try {
@@ -747,10 +767,13 @@ async function undoAppliedActionsInReverse(actions: AgentAction[]): Promise<void
             } else if (isCreateNoteAgentAction(action)) {
                 await undoCreateNoteAction(action);
             }
+            undoneActionIds.push(action.id);
         } catch (error) {
             logger(`undoAppliedActionsInReverse: Failed to undo action ${action.id} (${action.action_type}): ${error}`, 1);
         }
     }
+
+    return undoneActionIds;
 }
 
 /**
@@ -1303,9 +1326,6 @@ function createWSCallbacks(set: Setter): WSCallbacks {
         onRequestAck: (data: WSRequestAckData) => {
             logger('WS onRequestAck:', data, 1);
             set(wsRequestAckDataAtom, data);
-            // The server truncates the thread after this point, so the local
-            // truncation is no longer the client's to undo.
-            set(confirmRetryAcknowledgedAtom, data.runId);
         },
 
         onPart: async (event: WSPartEvent) => {
@@ -1479,6 +1499,9 @@ function createWSCallbacks(set: Setter): WSCallbacks {
             logger('WS onThread:', { threadId: newThreadId }, 1);
             set(currentThreadIdAtom, newThreadId);
             set(activeRunAtom, (prev) => prev ? { ...prev, thread_id: newThreadId } : prev);
+            // Sent only after the server has loaded the thread and applied any
+            // retry truncation, so the local truncation is no longer ours to undo.
+            set(confirmRetryTruncatedAtom);
         },
 
         onThreadName: (event: WSThreadNameEvent) => {
@@ -2305,6 +2328,9 @@ export const regenerateFromRunAtom = atom(
         dismissDiffPreview();
 
         let newRunId: string | null = null;
+        // Actions the confirm-and-undo path reverted, so a rollback can restore
+        // them as undone instead of as still applied.
+        let undoneActionIds: string[] = [];
 
         try {
             // Get current model
@@ -2449,7 +2475,7 @@ export const regenerateFromRunAtom = atom(
                     // create_collection undo cascades to descendants, so any
                     // later manage_collections moves into it must be undone
                     // first. See undoAppliedActionsInReverse for details.
-                    await undoAppliedActionsInReverse(actionsInRemovedRuns);
+                    undoneActionIds = await undoAppliedActionsInReverse(actionsInRemovedRuns);
                 }
             }
 
@@ -2465,6 +2491,7 @@ export const regenerateFromRunAtom = atom(
                       runs: removedRuns,
                       actions: get(threadAgentActionsAtom).filter(a => runIdsToRemove.includes(a.run_id)),
                       citations: get(citationsAtom).filter(c => runIdsToRemove.includes(c.run_id ?? '')),
+                      undoneActionIds,
                   }
                 : null;
 
@@ -2542,6 +2569,9 @@ export const regenerateWithEditedPromptAtom = atom(
         dismissDiffPreview();
 
         let newRunId: string | null = null;
+        // Actions the confirm-and-undo path reverted, so a rollback can restore
+        // them as undone instead of as still applied.
+        let undoneActionIds: string[] = [];
 
         try {
             // Get current model
@@ -2666,7 +2696,7 @@ export const regenerateWithEditedPromptAtom = atom(
                     // Single reverse-chronological pass — see
                     // undoAppliedActionsInReverse for why cross-type ordering
                     // matters (e.g. create_collection cascades on erase).
-                    await undoAppliedActionsInReverse(actionsInRemovedRuns);
+                    undoneActionIds = await undoAppliedActionsInReverse(actionsInRemovedRuns);
                 }
             }
 
@@ -2682,6 +2712,7 @@ export const regenerateWithEditedPromptAtom = atom(
                       runs: removedRuns,
                       actions: get(threadAgentActionsAtom).filter(a => runIdsToRemove.includes(a.run_id)),
                       citations: get(citationsAtom).filter(c => runIdsToRemove.includes(c.run_id ?? '')),
+                      undoneActionIds,
                   }
                 : null;
 
@@ -2826,14 +2857,24 @@ export const closeWSConnectionAtom = atom(null, async (get, set) => {
     // Mark active run as canceled if it exists
     const activeRun = get(activeRunAtom);
     if (activeRun && activeRun.status === 'in_progress') {
-        const canceledRun: AgentRun = {
-            ...activeRun,
-            status: 'canceled',
-            completed_at: new Date().toISOString(),
-        };
-        // Move canceled run to completed runs
-        set(threadRunsAtom, (runs) => [...runs, canceledRun]);
-        set(activeRunAtom, null);
+        // A retry still tracked as unconfirmed was cancelled before the server
+        // truncated the thread, so the runs it removed locally are all still
+        // there and the run itself was never persisted. Put the tail back and
+        // drop the shell: the thread returns to exactly what the server holds,
+        // which is what cancelling a regeneration should leave behind.
+        if (get(unconfirmedRetryAtom)?.runId === activeRun.id) {
+            set(rollbackUnconfirmedRetryAtom, activeRun.id);
+            set(activeRunAtom, null);
+        } else {
+            const canceledRun: AgentRun = {
+                ...activeRun,
+                status: 'canceled',
+                completed_at: new Date().toISOString(),
+            };
+            // Move canceled run to completed runs
+            set(threadRunsAtom, (runs) => [...runs, canceledRun]);
+            set(activeRunAtom, null);
+        }
     }
 
     // Clear streaming-done state (user canceled during post-processing)

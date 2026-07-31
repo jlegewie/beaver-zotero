@@ -166,7 +166,7 @@ describe('resolveRetryTarget', () => {
 
 describe('planRetryRollback', () => {
     function makeRemoved(threadId: string | null): RemovedThreadTail {
-        return { threadId, runs: [makeRun('b')], actions: [], citations: [] };
+        return { threadId, runs: [makeRun('b')], actions: [], citations: [], undoneActionIds: [] };
     }
 
     function makePending(runId: string, removed: RemovedThreadTail | null): UnconfirmedRetry {

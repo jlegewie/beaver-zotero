@@ -45,17 +45,26 @@ export interface RemovedThreadTail {
     runs: AgentRun[];
     actions: AgentAction[];
     citations: Citation[];
+    /**
+     * Actions whose Zotero changes the retry reverted on the way out.
+     *
+     * The snapshot is taken before the revert is reflected anywhere, so these
+     * come back reading as applied. Restoring them as undone keeps the cards
+     * from offering operations on items and edits that no longer exist.
+     */
+    undoneActionIds: string[];
 }
 
 /**
- * A retry the client applied locally but the server has not acknowledged.
+ * A retry the client applied locally but the server has not confirmed.
  *
- * The server truncates a thread only after acknowledging the request, so an
- * unacknowledged retry means the runs the client removed are still there. Two
- * things depend on knowing that:
+ * The server truncates a thread while loading it, which happens after the
+ * request is acknowledged and is reported by the `thread` event. Until that
+ * event arrives the runs the client removed are still in the thread. Two things
+ * depend on knowing that:
  *
- * - `removed` restores the local view when the run dies before the ack, so the
- *   thread stops serving runs the user believes are gone.
+ * - `removed` restores the local view when the run dies first, so the thread
+ *   stops serving runs the user believes are gone.
  * - `anchor` is inherited by the next retry that targets this run. The run was
  *   never persisted, so naming it as the retry target matches nothing; what the
  *   user wants replaced is what *this* retry was replacing.
@@ -102,7 +111,7 @@ export function resolveRetryTarget(
     // A run that never reached the server only ever occupies the active slot,
     // so a target that is part of thread history is real and anchors on itself.
     // Checked here rather than relying on the entry having been cleared, which
-    // happens on an acknowledgment the client cannot guarantee it will see.
+    // happens on an event the client cannot guarantee it will see.
     const isThreadHistory = threadRuns.some((run) => run.id === targetRun.id);
     if (!isThreadHistory && unconfirmed?.runId === targetRun.id) {
         const replacedIndex = threadRuns.findIndex(
@@ -130,8 +139,8 @@ export function resolveRetryTarget(
  * failure.
  *
  * - `none` — this run has no pending truncation; leave the entry alone. Covers
- *   an acknowledged run (the server owns the truncation from the ack onward)
- *   and any failure belonging to a different run.
+ *   a run whose truncation the server has confirmed, and any failure belonging
+ *   to a different run.
  * - `restore` — put the tail back, then mark the entry restored.
  * - `discard` — the snapshot no longer describes what is on screen; drop it
  *   without restoring.
@@ -142,12 +151,12 @@ export type RetryRollbackPlan =
     | { action: 'restore'; removed: RemovedThreadTail };
 
 /**
- * Decide whether a failed run's local truncation has to be put back.
+ * Decide whether a run's local truncation has to be put back.
  *
- * The server deletes runs only after acknowledging the request, so a run that
- * fails while its truncation is still unacknowledged left those runs in the
- * thread. Leaving them removed locally is what strands them: gone from the UI,
- * alive server-side, and replayed into the history of every later run.
+ * The server deletes runs while loading the thread, so a run that ends before
+ * the `thread` event left those runs in place. Leaving them removed locally is
+ * what strands them: gone from the UI, alive server-side, and replayed into the
+ * history of every later run.
  *
  * A thread switch during the failed request discards the snapshot instead —
  * restoring it would inject another thread's runs into the current one.
