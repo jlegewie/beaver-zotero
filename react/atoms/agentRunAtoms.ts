@@ -50,8 +50,15 @@ import type { ZoteroCollection } from '../types/zotero';
 import { toMessageAttachment } from '../types/attachments/converters';
 import { safeStub, serializeAttachmentStub, serializeCollection, serializeItemStub, serializeZoteroLibrary } from '../../src/utils/zoteroSerializers';
 import { SubscriptionStatus, ProcessingMode } from '../types/profile';
-import { isDatabaseSyncSupportedAtom } from './profile';
-import { addPopupMessageAtom } from '../utils/popupMessageUtils';
+import {
+    isDatabaseSyncSupportedAtom,
+    profileSyncStatusAtom,
+    remainingBeaverCreditsAtom,
+    searchableLibraryIdsAtom,
+    syncWithZoteroAtom,
+} from './profile';
+import { addPopupMessageAtom, updatePopupMessageAtom } from '../utils/popupMessageUtils';
+import { openPreferencesWindow } from '../../src/ui/openPreferencesWindow';
 import {
     currentMessageItemsAtom,
     currentMessageCollectionsAtom,
@@ -150,7 +157,6 @@ import { loadFullItemDataWithAllTypes } from '../../src/utils/zoteroUtils';
 import { buildZoteroInstanceWire } from '../../src/services/zoteroInstanceWire';
 import { dismissDiffPreview } from '../utils/noteEditorDiffPreview';
 import { store } from '../store';
-import { profileSyncStatusAtom, searchableLibraryIdsAtom, syncWithZoteroAtom } from './profile';
 import { triggerProfileRefresh } from '../hooks/useProfileSync';
 import { agentItemFilterAsync, isAgentSupportedItem } from '../../src/utils/agentItemSupport';
 import { safeIsInTrash } from '../../src/utils/zoteroUtils';
@@ -171,6 +177,7 @@ import {
 import { prewarmMuPDFWorker } from '../../src/beaver-extract';
 import { BeaverTemporaryAnnotations } from '../utils/annotationUtils';
 import { isRejectedItemValidation, itemValidationResultsAtom } from './itemValidation';
+import { formatRetryRestorePopupText } from '../utils/runErrorCopy';
 
 // =============================================================================
 // Helper Functions
@@ -366,6 +373,34 @@ const confirmRetryTruncatedAtom = atom(null, (get, set) => {
     }
 });
 
+type RollbackUnconfirmedRetryArgs =
+    | string
+    | {
+          runId: string;
+          notify?: boolean;
+          /** Error type used for the typed popup title (e.g. usage_limit_exceeded). */
+          type?: string;
+          /** Primary user-facing error message. */
+          message?: string;
+          /** Longer user-facing details (e.g. connection troubleshooting). */
+          details?: string;
+          /** From the WS error — offers Beaver credits when the model key ran out. */
+          hasBeaverFallback?: boolean;
+          /** Stable popup id so callers can refine the copy after async diagnosis. */
+          popupId?: string;
+      };
+
+type RollbackUnconfirmedRetryResult = {
+    restored: boolean;
+    popupId: string | null;
+};
+
+/**
+ * How long the retry-restore popup stays up, and the window in which a freshly
+ * fetched credit balance can still change the action it offers.
+ */
+const RETRY_RESTORE_POPUP_DURATION_MS = 10000;
+
 /**
  * Put back the thread tail a retry removed, when its run ended before the
  * server truncated the thread itself.
@@ -374,39 +409,124 @@ const confirmRetryTruncatedAtom = atom(null, (get, set) => {
  * there. Leaving them removed locally is what strands them: gone from the UI,
  * alive server-side, and replayed into the history of every later run.
  *
+ * On restore the failed retry shell is dropped too — keeping it would repeat
+ * the user prompt under the restored turns and pin an error card there. Pass
+ * `notify: true` on failure paths to tell the user via popup; cancel omits it.
+ *
  * The anchor is deliberately kept — the next retry targeting this run needs it.
  */
-const rollbackUnconfirmedRetryAtom = atom(null, (get, set, runId: string) => {
-    const unconfirmed = get(unconfirmedRetryAtom);
-    const plan = planRetryRollback(unconfirmed, runId, get(currentThreadIdAtom));
-    if (plan.action === 'none') return;
+const rollbackUnconfirmedRetryAtom = atom(
+    null,
+    (get, set, args: RollbackUnconfirmedRetryArgs): RollbackUnconfirmedRetryResult => {
+        const runId = typeof args === 'string' ? args : args.runId;
+        const notify = typeof args === 'string' ? false : !!args.notify;
+        const errorType = typeof args === 'string' ? undefined : args.type;
+        const message = typeof args === 'string' ? undefined : args.message;
+        const details = typeof args === 'string' ? undefined : args.details;
+        const hasBeaverFallback = typeof args === 'string' ? false : !!args.hasBeaverFallback;
+        const popupId = typeof args === 'string' ? undefined : args.popupId;
+        const unconfirmed = get(unconfirmedRetryAtom);
+        const plan = planRetryRollback(unconfirmed, runId, get(currentThreadIdAtom));
+        if (plan.action === 'none') return { restored: false, popupId: null };
 
-    // Marked restored either way, so a second terminal event for the same run
-    // cannot restore the tail twice.
-    set(unconfirmedRetryAtom, unconfirmed ? { ...unconfirmed, removed: null } : null);
-    if (plan.action === 'discard') return;
+        // Marked restored either way, so a second terminal event for the same run
+        // cannot restore the tail twice.
+        set(unconfirmedRetryAtom, unconfirmed ? { ...unconfirmed, removed: null } : null);
+        if (plan.action === 'discard') return { restored: false, popupId: null };
 
-    const removed = plan.removed;
-    set(threadRunsAtom, (runs) => restoreRemoved(runs, removed.runs, (run) => run.id));
-    set(threadAgentActionsAtom, (actions) =>
-        restoreRemoved(actions, removed.actions, (action) => action.id));
-    set(citationsAtom, (citations) =>
-        restoreRemoved(citations, removed.citations, (citation) => citation.citation_id));
-    set(processCitationsAtom);
+        const removed = plan.removed;
+        set(threadRunsAtom, (runs) => restoreRemoved(runs, removed.runs, (run) => run.id));
+        set(threadAgentActionsAtom, (actions) =>
+            restoreRemoved(actions, removed.actions, (action) => action.id));
+        set(citationsAtom, (citations) =>
+            restoreRemoved(citations, removed.citations, (citation) => citation.citation_id));
+        set(processCitationsAtom);
 
-    // The snapshot predates the revert these actions already went through, so
-    // they come back reading as applied. Re-apply the undo transition now that
-    // they are restored, which also clears the stale result_data their cards
-    // would otherwise offer operations on.
-    for (const actionId of removed.undoneActionIds) {
-        set(undoAgentActionAtom, actionId);
-    }
+        // The snapshot predates the revert these actions already went through, so
+        // they come back reading as applied. Re-apply the undo transition now that
+        // they are restored, which also clears the stale result_data their cards
+        // would otherwise offer operations on.
+        for (const actionId of removed.undoneActionIds) {
+            set(undoAgentActionAtom, actionId);
+        }
 
-    logger(
-        `rollbackUnconfirmedRetry: restored ${removed.runs.length} run(s) after run ${runId} ended before the server truncated the thread`,
-        1,
-    );
-});
+        // Drop the failed retry shell so the chat matches the restored thread
+        // instead of appending a repeated prompt + error underneath it.
+        if (get(activeRunAtom)?.id === runId) {
+            set(activeRunAtom, null);
+        }
+
+        let shownPopupId: string | null = null;
+        if (notify) {
+            const messageId = popupId ?? uuidv4();
+            shownPopupId = messageId;
+            // Same gate as RunErrorDisplay: limit-reached / key-fallback with no
+            // Beaver credits left. Other error actions (Retry, Resume, Try with
+            // Beaver) need a live error shell to target — skip them here.
+            const offersBeaverCredits = hasBeaverFallback || errorType === 'usage_limit_exceeded';
+            const getBeaverCreditsButton = {
+                text: 'Get Beaver Credits',
+                onClick: () => openPreferencesWindow('billing'),
+            };
+            const showGetBeaverCredits = offersBeaverCredits && get(remainingBeaverCreditsAtom) <= 0;
+            set(addPopupMessageAtom, {
+                id: messageId,
+                type: 'error',
+                title: 'Retry failed — Your previous messages were restored',
+                text: formatRetryRestorePopupText({ type: errorType, message, details }),
+                expire: true,
+                duration: RETRY_RESTORE_POPUP_DURATION_MS,
+                ...(showGetBeaverCredits ? { button: getBeaverCreditsButton } : {}),
+            });
+            if (offersBeaverCredits) {
+                // The cached balance can predate the exhaustion that caused this
+                // error, so ask for a fresh profile (as the in-chat error card
+                // does) and correct the button when a new balance arrives — the
+                // popup is static, unlike the card, which re-renders on its own.
+                //
+                // Watch the balance rather than await the refresh: a refresh
+                // requested while one is already running is queued behind it and
+                // reports back before the new profile lands, and the balance can
+                // just as well arrive from the periodic sync.
+                const watchBalance = () => {
+                    let unsubscribe: (() => void) | null = null;
+                    const stopWatching = () => {
+                        unsubscribe?.();
+                        unsubscribe = null;
+                    };
+                    unsubscribe = store.sub(remainingBeaverCreditsAtom, () => {
+                        const showNow = store.get(remainingBeaverCreditsAtom) <= 0;
+                        if (showNow === showGetBeaverCredits) return;
+                        stopWatching();
+                        store.set(updatePopupMessageAtom, {
+                            messageId,
+                            updates: { button: showNow ? getBeaverCreditsButton : undefined },
+                        });
+                    });
+                    // Bounded: a balance arriving after the popup is gone cannot
+                    // change anything, so never keep the listener past its life.
+                    setTimeout(stopWatching, RETRY_RESTORE_POPUP_DURATION_MS);
+                    void triggerProfileRefresh()?.catch(() => {
+                        // The watcher still corrects the button if another sync
+                        // updates the balance.
+                    });
+                };
+                // Deferred deliberately: subscribing mounts an atom and flushes
+                // the store's pending queue, which drops the notifications this
+                // write already queued for the restored runs — the thread would
+                // keep rendering the failed retry even though the state is
+                // correct. Never move this back inside the write.
+                void Promise.resolve().then(watchBalance).catch(() => {});
+            }
+        }
+
+        logger(
+            `rollbackUnconfirmedRetry: restored ${removed.runs.length} run(s) after run ${runId} ended before the server truncated the thread`,
+            1,
+        );
+        return { restored: true, popupId: shownPopupId };
+    },
+);
 
 /**
  * Create the initial AgentRun shell when user presses send.
@@ -698,13 +818,23 @@ async function startAutoRetryRun(
         await executeWSRequest(newRun, request, get, set);
     } catch (error) {
         logger(`${logPrefix}: Unexpected error:`, error, 1);
-        if (newRunId) set(rollbackUnconfirmedRetryAtom, newRunId);
-        set(wsErrorAtom, {
-            event: 'error',
-            type: 'auto_retry_error',
-            message: error instanceof Error ? error.message : 'Failed to automatically retry run',
-            is_retryable: true,
-        });
+        const failureMessage = error instanceof Error ? error.message : 'Failed to automatically retry run';
+        const { restored } = newRunId
+            ? set(rollbackUnconfirmedRetryAtom, {
+                  runId: newRunId,
+                  notify: true,
+                  type: 'auto_retry_error',
+                  message: failureMessage,
+              })
+            : { restored: false };
+        if (!restored) {
+            set(wsErrorAtom, {
+                event: 'error',
+                type: 'auto_retry_error',
+                message: failureMessage,
+                is_retryable: true,
+            });
+        }
         set(activeRunAtom, prev => (newRunId && prev?.id === newRunId ? null : prev));
         set(isWSChatPendingAtom, false);
     }
@@ -1253,15 +1383,46 @@ function surfaceAndDiagnoseConnectionFailure(
     };
 
     // A connect-phase failure never reached the server's truncation step, so a
-    // retry that removed runs locally has to put them back.
-    set(rollbackUnconfirmedRetryAtom, runId);
+    // retry that removed runs locally has to put them back. When it does, the
+    // failed shell is dropped and a popup carries the error — do not re-attach
+    // the error to activeRun (that would repeat the user prompt under the
+    // restored turns).
+    const initialPresentation = presentConnectionFailure(evidence);
+    const popupId = uuidv4();
+    const { restored } = set(rollbackUnconfirmedRetryAtom, {
+        runId,
+        notify: true,
+        type: 'connection_error',
+        message: initialPresentation.message,
+        details: initialPresentation.details,
+        popupId,
+    });
 
-    applyPresentation();
+    if (!restored) {
+        applyPresentation();
+    }
     void reportConnectionFailure({
         evidence,
         run_id: runId,
         connect_attempts: connectAttempts ?? null,
-    }).then(applyPresentation);
+    }).then((diagnostic) => {
+        if (!restored) {
+            applyPresentation(diagnostic);
+            return;
+        }
+        // Refine the restore popup once the reachability check finishes.
+        const refined = presentConnectionFailure(evidence, diagnostic);
+        set(updatePopupMessageAtom, {
+            messageId: popupId,
+            updates: {
+                text: formatRetryRestorePopupText({
+                    type: 'connection_error',
+                    message: refined.message,
+                    details: refined.details,
+                }),
+            },
+        });
+    });
 }
 
 /**
@@ -1560,19 +1721,37 @@ function createWSCallbacks(set: Setter): WSCallbacks {
             // model) never reached the server's truncation step, so a retry
             // that removed runs locally has to put them back. Done before the
             // auto-resume/auto-retry decision below, which reads thread state.
-            if (errorRunId) set(rollbackUnconfirmedRetryAtom, errorRunId);
+            // When restored, the failed shell is dropped and a popup carries
+            // the error — do not re-attach it to activeRun or auto-retry the
+            // phantom run.
+            const { restored } = errorRunId
+                ? set(rollbackUnconfirmedRetryAtom, {
+                      runId: errorRunId,
+                      notify: true,
+                      type: event.type,
+                      message: event.message,
+                      hasBeaverFallback: event.has_beaver_fallback,
+                  })
+                : { restored: false };
 
-            // Normal error handling
+            // Recorded even when restored: the connect loop in executeWSRequest
+            // reads this atom to tell a server application error from a
+            // transport failure. Leaving it null there makes the connect
+            // rejection that follows a pre-ready error look like a connection
+            // failure, which files a false connection diagnostic. Nothing
+            // renders this atom, so the restore popup stays the only surface.
             set(wsErrorAtom, event);
-            set(activeRunAtom, (prev) => {
-                if (!prev) return prev;
-                if (errorRunId && prev.id !== errorRunId) return prev;
-                return {
-                    ...prev,
-                    status: 'error',
-                    error: toRunError(event),
-                };
-            });
+            if (!restored) {
+                set(activeRunAtom, (prev) => {
+                    if (!prev) return prev;
+                    if (errorRunId && prev.id !== errorRunId) return prev;
+                    return {
+                        ...prev,
+                        status: 'error',
+                        error: toRunError(event),
+                    };
+                });
+            }
             set(isWSChatPendingAtom, false);
             // Clear retry state on error
             set(wsRetryAtom, null);
@@ -1595,6 +1774,7 @@ function createWSCallbacks(set: Setter): WSCallbacks {
             }
 
             if (
+                !restored &&
                 event.try_auto_resume &&
                 errorRunId &&
                 !store.get(scheduledAutoResumeRunIdsAtom).has(errorRunId)
@@ -1922,6 +2102,19 @@ async function executeWSRequest(
             const currentError = get(wsErrorAtom);
             if (currentError && currentError.type !== 'connection_error') {
                 logger('WS connection error: Error already set by onError callback, not overwriting', 1);
+                // The rejection landed before the server truncated the thread, so
+                // a retry that removed runs locally has to put them back. onError
+                // rolls back too, but only for the run id on the event — which is
+                // absent on a pre-`ready` rejection and stale once the shell is
+                // gone. Keyed on this request's run, it covers what onError could
+                // not; a tail onError already restored makes this a no-op.
+                set(rollbackUnconfirmedRetryAtom, {
+                    runId: run.id,
+                    notify: true,
+                    type: currentError.type,
+                    message: currentError.message,
+                    hasBeaverFallback: currentError.has_beaver_fallback,
+                });
                 set(wsReconnectingAtom, null);
                 set(isWSChatPendingAtom, false);
                 return;
@@ -1949,7 +2142,8 @@ async function executeWSRequest(
                 + Math.random() * (backoffRange.max - backoffRange.min);
             await new Promise((resolve) => setTimeout(resolve, backoffMs));
 
-            // The user may have cancelled or replaced the run during the wait.
+            // The run may have been cancelled, replaced, or rolled back during
+            // the wait — a retry whose tail was restored drops its shell here.
             const activeRun = store.get(activeRunAtom);
             if (
                 activeRun?.id !== run.id ||
@@ -1957,6 +2151,10 @@ async function executeWSRequest(
             ) {
                 logger(`WS connect retry abandoned: run ${run.id} is no longer active`, 1);
                 set(wsReconnectingAtom, null);
+                // Release the flag this loop raised for the quiet retry. Nothing
+                // downstream clears it on this path, and a stuck flag leaves the
+                // composer blocked with no run to finish and no error to show.
+                set(isWSChatPendingAtom, false);
                 return;
             }
         }
@@ -2555,13 +2753,23 @@ export const regenerateFromRunAtom = atom(
         } catch (error) {
             // Catch any unexpected errors during regeneration
             logger('regenerateFromRunAtom: Unexpected error:', error, 1);
-            if (newRunId) set(rollbackUnconfirmedRetryAtom, newRunId);
-            set(wsErrorAtom, {
-                event: 'error',
-                type: 'regeneration_error',
-                message: error instanceof Error ? error.message : 'Failed to regenerate response',
-                is_retryable: true,
-            });
+            const failureMessage = error instanceof Error ? error.message : 'Failed to regenerate response';
+            const { restored } = newRunId
+                ? set(rollbackUnconfirmedRetryAtom, {
+                      runId: newRunId,
+                      notify: true,
+                      type: 'regeneration_error',
+                      message: failureMessage,
+                  })
+                : { restored: false };
+            if (!restored) {
+                set(wsErrorAtom, {
+                    event: 'error',
+                    type: 'regeneration_error',
+                    message: failureMessage,
+                    is_retryable: true,
+                });
+            }
             set(activeRunAtom, null);
             set(isWSChatPendingAtom, false);
         }
@@ -2775,13 +2983,24 @@ export const regenerateWithEditedPromptAtom = atom(
             await executeWSRequest(newRun, request, get, set);
         } catch (error) {
             logger('regenerateWithEditedPromptAtom: Unexpected error:', error, 1);
-            if (newRunId) set(rollbackUnconfirmedRetryAtom, newRunId);
-            set(wsErrorAtom, {
-                event: 'error',
-                type: 'regeneration_error',
-                message: error instanceof Error ? error.message : 'Failed to regenerate with edited prompt',
-                is_retryable: true,
-            });
+            const failureMessage =
+                error instanceof Error ? error.message : 'Failed to regenerate with edited prompt';
+            const { restored } = newRunId
+                ? set(rollbackUnconfirmedRetryAtom, {
+                      runId: newRunId,
+                      notify: true,
+                      type: 'regeneration_error',
+                      message: failureMessage,
+                  })
+                : { restored: false };
+            if (!restored) {
+                set(wsErrorAtom, {
+                    event: 'error',
+                    type: 'regeneration_error',
+                    message: failureMessage,
+                    is_retryable: true,
+                });
+            }
             set(activeRunAtom, null);
             set(isWSChatPendingAtom, false);
         }
@@ -2887,6 +3106,7 @@ export const closeWSConnectionAtom = atom(null, async (get, set) => {
             !unconfirmedRetry.acknowledged &&
             !get(isWSReadyAtom)
         ) {
+            // No notify: cancel is intentional. Rollback drops the shell itself.
             set(rollbackUnconfirmedRetryAtom, activeRun.id);
             set(activeRunAtom, null);
         } else {
