@@ -13,6 +13,7 @@ import {
     createPreprocessState 
 } from '../../utils/citationPreprocessing';
 import { processPartialContent } from '../../utils/markdownPartialContent';
+import { getHost } from '../../host';
 
 const citationDataAttributes = [
     'data-library-id', 'dataLibraryId',
@@ -120,6 +121,31 @@ function transformMathNodes(node: any) {
 function urlTransform(url: string): string {
     if (url.startsWith('zotero://')) return url;
     return defaultUrlTransform(url);
+}
+
+/**
+ * Anchor rendered inside the chat.
+ *
+ * The UI is hosted in a chrome document, where a bare `<a href>` has no
+ * navigation behavior — clicking one only selects its text. Links must be
+ * opened explicitly through the host, so the default click is always
+ * suppressed. Fragment-only links have no target to open and stay inert.
+ */
+function MarkdownLink({ href, children, title, ...props }: any) {
+    const isExternal = Boolean(href) && !href.startsWith('#');
+    return (
+        <a
+            {...props}
+            href={href}
+            title={title ?? (isExternal ? href : undefined)}
+            onClick={(event) => {
+                event.preventDefault();
+                if (isExternal) getHost().navigation?.openExternalUrl(href);
+            }}
+        >
+            {children}
+        </a>
+    );
 }
 
 type Segment =
@@ -307,7 +333,12 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = React.memo(function Ma
                                 // @ts-expect-error - Custom component not in ReactMarkdown types
                                 citation: ({node, ...props}: any) => {
                                     return <Citation {...props} exportRendering={exportRendering} />;
-                                }
+                                },
+                                // Exported notes keep a plain anchor: the note editor
+                                // handles link clicks itself.
+                                ...(exportRendering ? {} : {
+                                    a: ({node, ...props}: any) => <MarkdownLink {...props} />
+                                })
                             }}
                         >
                             {segment.content}
