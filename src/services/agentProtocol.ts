@@ -1991,6 +1991,20 @@ export interface AgentRunRequest {
     custom_model?: CustomChatModel;
     /** If set, instructs the server to retry from this run ID, deleting it and all subsequent runs */
     retry_run_id?: string;
+    /**
+     * Retry only. The run IDs the client still holds for this thread after
+     * dropping the ones it is regenerating.
+     *
+     * Run IDs are client-generated, so `retry_run_id` can name a run the server
+     * never persisted — a retry whose request died before the setup phase
+     * finished leaves the client holding an ID that does not exist server-side,
+     * and every later retry anchored on it matches nothing. This set gives the
+     * server a second anchor: it deletes the trailing block of runs that are not
+     * in the set, reconciling a thread whose client-side and server-side views
+     * have drifted apart. A set matching no run in the thread is ignored, so
+     * `retry_run_id` must always be sent alongside it as the fallback.
+     */
+    retry_keep_run_ids?: string[];
     /** Pre-generated assistant message ID (optional) */
     assistant_message_id?: string;
 }
