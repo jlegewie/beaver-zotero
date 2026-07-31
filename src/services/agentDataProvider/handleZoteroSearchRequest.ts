@@ -19,7 +19,7 @@ import {
 import { ItemStub } from '../../../react/types/zotero';
 import { serializeNote, serializeItemStub } from '../../utils/zoteroSerializers';
 import { libraryRefForLibraryID, modelObjectId } from '../../utils/libraryIdentity';
-import { validateLibraryAccess, extractYear, formatCreatorsString, getAttachmentInfoForItem } from './utils';
+import { validateLibraryAccess, extractYear, formatCreatorsString, getAttachmentInfoForItem, isReadableItemField, readItemField } from './utils';
 
 
 /**
@@ -377,6 +377,24 @@ export async function handleZoteroSearchRequest(
             }
         }
 
+        // Validate the requested extra fields once. Readability does not depend
+        // on the item, so this must not be folded into the result loop: a search
+        // that returns no regular rows would otherwise skip the check entirely.
+        //
+        // Unreadable names are logged, not returned in `warnings`: the backend
+        // treats any warning as "conditions were dropped" and retries the whole
+        // call, and an unusable name in `fields` costs nothing but the extra
+        // column — it must not invalidate an otherwise correct result set.
+        const readableFields: string[] = [];
+        const unreadableFields: string[] = [];
+        for (const field of request.fields ?? []) {
+            if (typeof field !== 'string' || field.length === 0) continue;
+            (isReadableItemField(field) ? readableFields : unreadableFields).push(field);
+        }
+        if (unreadableFields.length > 0) {
+            logger(`handleZoteroSearchRequest: Ignored unreadable field(s): ${unreadableFields.join(', ')}`, 1);
+        }
+
         // Build results
         const items: ZoteroSearchResultItem[] = [];
 
@@ -435,17 +453,12 @@ export async function handleZoteroSearchRequest(
                 };
 
                 // Include extra fields if requested
-                if (request.fields && request.fields.length > 0) {
+                if (readableFields.length > 0) {
                     const extraFields: Record<string, any> = {};
-                    for (const field of request.fields) {
-                        try {
-                            // includeBaseMapped=true so base fields resolve to type-specific fields
-                            const value = item.getField(field, false, true);
-                            if (value !== undefined && value !== '') {
-                                extraFields[field] = value;
-                            }
-                        } catch {
-                            // Field not valid for this item type - skip silently
+                    for (const field of readableFields) {
+                        const value = readItemField(item, field);
+                        if (value !== undefined && value !== null && value !== '') {
+                            extraFields[field] = value;
                         }
                     }
                     if (Object.keys(extraFields).length > 0) {

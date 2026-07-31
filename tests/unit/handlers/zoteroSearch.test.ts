@@ -29,6 +29,10 @@ vi.mock('../../../src/services/agentDataProvider/utils', () => ({
     extractYear: vi.fn(() => null),
     formatCreatorsString: vi.fn(() => ''),
     getAttachmentInfoForItem: vi.fn(),
+    // These cases never request extra fields; the projection helpers are
+    // stubbed pass-through so the module mock stays complete.
+    isReadableItemField: vi.fn(() => true),
+    readItemField: vi.fn((item: any, field: string) => item.getField?.(field, false, true)),
 }));
 
 // Keep the real serializeNote; stub serializeItemStub so parent serialization
@@ -49,7 +53,7 @@ vi.mock('../../../src/utils/zoteroSerializers', async (importOriginal) => {
 
 import type { WSZoteroSearchResponse } from '../../../src/services/agentProtocol';
 import { handleZoteroSearchRequest } from '../../../src/services/agentDataProvider/handleZoteroSearchRequest';
-import { getAttachmentInfoForItem, validateLibraryAccess } from '../../../src/services/agentDataProvider/utils';
+import { getAttachmentInfoForItem, isReadableItemField, validateLibraryAccess } from '../../../src/services/agentDataProvider/utils';
 
 type MockItem = {
     id: number;
@@ -580,5 +584,45 @@ describe('handleZoteroSearchRequest', () => {
                 skipWorkerFallback: true,
             }),
         );
+    });
+
+    describe('requested extra fields', () => {
+        const searchWithFields = (fields: string[]) => handleZoteroSearchRequest({
+            event: 'zotero_search_request',
+            request_id: 'req-fields',
+            conditions: [],
+            join_mode: 'all',
+            item_category: 'all',
+            include_children: true,
+            recursive: false,
+            limit: 10,
+            offset: 0,
+            fields,
+        });
+
+        // Readability does not depend on the item, so classification must not be
+        // folded into the result loop: a search with no rows would skip it.
+        it('classifies requested fields even when the search returns nothing', async () => {
+            searchResultIds = [];
+
+            const response = await searchWithFields(['bogusField']);
+
+            expect(response.error).toBeUndefined();
+            expect(response.total_count).toBe(0);
+            expect(isReadableItemField).toHaveBeenCalledWith('bogusField');
+        });
+
+        it('classifies each requested field once, not once per item', async () => {
+            itemsById.set(1, makeItem({ id: 1, key: 'FIRST' }));
+            itemsById.set(2, makeItem({ id: 2, key: 'SECOND' }));
+            itemsById.set(3, makeItem({ id: 3, key: 'THIRD' }));
+            itemsById.set(4, makeItem({ id: 4, key: 'FOURTH' }));
+
+            await searchWithFields(['title']);
+
+            const titleChecks = vi.mocked(isReadableItemField).mock.calls
+                .filter(([field]) => field === 'title');
+            expect(titleChecks).toHaveLength(1);
+        });
     });
 });
