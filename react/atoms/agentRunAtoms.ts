@@ -39,8 +39,6 @@ import {
     WSStreamingDoneEvent,
     WSThreadNameEvent,
     ChargingPermissions,
-    ZOTERO_PLUGIN_CLIENT_TYPE,
-    ZOTERO_PLUGIN_FEATURES,
 } from '../../src/services/agentProtocol';
 import { logger } from '../../src/utils/logger';
 import { selectedModelAtom, ModelConfig } from './models';
@@ -154,7 +152,7 @@ import {
     runApprovalPolicyAtom,
 } from './runApprovalPolicy';
 import { loadFullItemDataWithAllTypes } from '../../src/utils/zoteroUtils';
-import { buildZoteroInstanceWire } from '../../src/services/zoteroInstanceWire';
+import { resolveClientIdentity } from '../../src/services/clientIdentity';
 import { dismissDiffPreview } from '../utils/noteEditorDiffPreview';
 import { store } from '../store';
 import { triggerProfileRefresh } from '../hooks/useProfileSync';
@@ -2072,8 +2070,9 @@ async function executeWSRequest(
             logger(`WS Starting connection for run: ${run.id} (attempt ${attempt}/${CONNECT_MAX_ATTEMPTS})`);
             // A new connection attempt starts from a clean ready state.
             set(isWSReadyAtom, false);
-            const frontendVersion = Zotero.Beaver.pluginVersion || '';
-            const zoteroInstance = buildZoteroInstanceWire(get(searchableLibraryIdsAtom));
+            // Resolved fresh for this attempt (not cached) — the searchable
+            // library set can change between reconnects.
+            const identity = resolveClientIdentity();
             const recovery = connectRecoveryAuthFields(
                 attemptsMade,
                 lastFailure instanceof AgentConnectionError ? lastFailure.evidence : null,
@@ -2084,10 +2083,10 @@ async function executeWSRequest(
             await agentService.connect(
                 request,
                 callbacks,
-                frontendVersion,
-                ZOTERO_PLUGIN_CLIENT_TYPE,
-                ZOTERO_PLUGIN_FEATURES,
-                { ...zoteroInstance },
+                identity.frontendVersion,
+                identity.clientType,
+                identity.clientFeatures,
+                identity.zoteroInstance,
                 recovery,
             );
             logger('WS connect settled');
