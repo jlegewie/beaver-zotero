@@ -1,27 +1,21 @@
 /**
  * Reading attachable content out of the system clipboard.
  *
- * Pasting into the composer has to cover two clipboard shapes, and Gecko
- * surfaces them very differently:
+ * The two clipboard shapes reach the composer differently:
  *
- * - **Image bytes** (a screenshot, "Copy Image" in Zotero's PDF reader, an
- *   image copied from a browser). The editor treats these as pasteable, so a
- *   normal `paste` event fires and `clipboardData.files` holds an
- *   `image/png` File. Nothing here is needed for the common path; the
- *   `readClipboardImage` fallback exists for platforms where that File is
- *   missing.
- * - **A file copied in Finder/Explorer.** The clipboard carries only
- *   `application/x-moz-file`, which the editor does NOT consider pasteable —
- *   **no `paste` event is dispatched at all**. The only way to see it is to
- *   read the clipboard directly, which is why `clipboardHasFile` /
- *   `readClipboardFilePath` exist and why the composer also watches for
- *   Cmd/Ctrl+V on keydown.
+ * - **Image bytes** (screenshot, "Copy Image" in the PDF reader, an image
+ *   copied from a browser) are pasteable, so a `paste` event fires and usually
+ *   carries the image in `clipboardData.files`. Some platforms fire the paste
+ *   without it; `clipboardHasImage` / `readClipboardImageToTemp` cover those.
+ * - **A file copied in a file manager** carries only `application/x-moz-file`,
+ *   which the editor does not consider pasteable, so **no `paste` event is
+ *   dispatched at all**. It can only be seen by reading the clipboard directly.
  *
  * `nsIClipboard` holds a single transferable, so at most one file is
  * retrievable even when several were copied.
  *
- * This module must stay esbuild-safe (no `react/*` value imports); it is also
- * called from webpack-bundled code.
+ * Must stay esbuild-safe (no `react/*` value imports); also called from
+ * webpack-bundled code.
  */
 
 import { logger } from '../utils/logger';
@@ -29,10 +23,9 @@ import { logger } from '../utils/logger';
 const FILE_FLAVOR = 'application/x-moz-file';
 
 /**
- * Clipboard image flavors, in preference order. Gecko synthesizes the
- * `image/*` flavors from whatever the OS pasteboard holds (including the
- * `application/x-moz-nativeimage` that Zotero's reader writes for "Copy
- * Image"), so reading `image/png` covers every image source.
+ * Clipboard image flavors, in preference order. These are synthesized from
+ * whatever the OS pasteboard holds (including the `x-moz-nativeimage` the PDF
+ * reader writes), so they cover every image source.
  */
 const IMAGE_FLAVORS = ['image/png', 'image/jpeg', 'image/gif'] as const;
 
@@ -96,20 +89,16 @@ function hasAnyFlavor(flavors: readonly string[]): boolean {
 }
 
 /**
- * Whether the clipboard holds a file copied in Finder/Explorer.
- *
- * Synchronous and cheap on purpose: the composer calls it on every Cmd/Ctrl+V
- * to decide whether to take the key over, and it must not delay an ordinary
- * text paste (for which it is always false).
+ * Whether the clipboard holds a file copied in a file manager. Called on every
+ * paste keystroke, so it stays synchronous and cheap.
  */
 export function clipboardHasFile(): boolean {
     return hasAnyFlavor([FILE_FLAVOR]);
 }
 
 /**
- * Path of the file on the clipboard, or null when there is none (or it cannot
- * be resolved). The path is handed straight to `attachExternalFile`, so the
- * attached copy keeps the file's real name.
+ * Path of the file on the clipboard, or null when there is none. Handed
+ * straight to `attachExternalFile`, so the copy keeps the file's real name.
  */
 export function readClipboardFilePath(): string | null {
     const clipboard = getClipboardService();
@@ -134,28 +123,24 @@ function nextPastedImageName(extension: string): string {
 }
 
 /**
- * Name for the temp copy of a pasted File.
- *
- * Clipboard images reach us under a synthesized placeholder name, which would
- * become the chip label and the name the model sees, so those get a generated
- * one instead. Any other pasted file keeps its own (sanitized) name.
+ * Name for the temp copy of a pasted File. Clipboard images arrive under a
+ * synthesized placeholder name, which would become the chip label and the name
+ * the model sees, so those get a generated one; other files keep their own.
  */
 function tempNameForPastedFile(file: File): string {
     const extension = extensionForMime(file.type);
     if (!file.name || (file.type || '').startsWith('image/')) {
         return nextPastedImageName(extension);
     }
-    // `File.name` is a bare name, so the separators are stripped by hand —
-    // PathUtils.filename only accepts absolute paths and throws on anything else.
+    // `File.name` is a bare name; PathUtils.filename requires an absolute path.
     const base = file.name.split(/[/\\]/).pop() ?? '';
     const safe = Zotero.File.getValidFileName(base);
     return safe || nextPastedImageName(extension);
 }
 
 /**
- * Extension for a pasted image's temp file. `attachExternalFile` sniffs the
- * real MIME type from the content, so this only has to be plausible — it
- * decides the name the user and the model see.
+ * Extension for a pasted image's temp file. Only has to be plausible —
+ * `attachExternalFile` sniffs the real MIME type from the content.
  */
 function extensionForMime(mimeType: string | null | undefined): string {
     const mime = (mimeType || '').toLowerCase().split(';')[0].trim();
@@ -163,12 +148,9 @@ function extensionForMime(mimeType: string | null | undefined): string {
 }
 
 /**
- * Write bytes to a temp file and return its path. The caller attaches it (which
- * copies it into the Beaver-managed folder) and then discards it via
- * `removeTempFile`.
- *
- * Each write gets its own scratch folder so a filename the user controls can
- * never collide with, or overwrite, another paste still being attached.
+ * Write bytes to a temp file and return its path; the caller attaches it and
+ * then discards it via `removeTempFile`. Each write gets its own scratch folder
+ * so a user-controlled filename cannot collide with another paste in flight.
  */
 async function writeTempFile(bytes: Uint8Array, filename: string): Promise<string> {
     tempFolderCounter += 1;
@@ -183,8 +165,8 @@ async function writeTempFile(bytes: Uint8Array, filename: string): Promise<strin
 }
 
 /**
- * Spill a pasted File to a temp file so it can go through the normal
- * external-file attach path (which needs a path). Returns null on failure.
+ * Spill a pasted File to disk so it can go through the attach path, which
+ * needs a path. Returns null on failure.
  */
 export async function writePastedFileToTemp(file: File): Promise<string | null> {
     try {
@@ -197,12 +179,8 @@ export async function writePastedFileToTemp(file: File): Promise<string | null> 
 }
 
 /**
- * Read an image straight off the clipboard and spill it to a temp file.
- *
- * Fallback for platforms where a pasted image does not reach
- * `clipboardData.files`; also the only route when the paste is triggered from
- * the Cmd/Ctrl+V keydown handler, which has no clipboard event to read.
- * Returns null when the clipboard holds no image.
+ * Read an image off the clipboard and spill it to disk, for a paste event that
+ * arrives without the image in its payload. Null when there is no image.
  */
 export async function readClipboardImageToTemp(): Promise<string | null> {
     const clipboard = getClipboardService();
@@ -235,16 +213,15 @@ export function clipboardHasImage(): boolean {
     return hasAnyFlavor(IMAGE_FLAVORS);
 }
 
-/**
- * Discard a temp copy — and the scratch folder created for it — once it has
- * been attached. Never throws.
- */
+/** Discard a temp copy and its scratch folder once attached. Never throws. */
 export async function removeTempFile(path: string): Promise<void> {
-    const folder = PathUtils.parent(path);
-    const target = folder && PathUtils.filename(folder).startsWith(TEMP_FOLDER_PREFIX)
-        ? folder
-        : path;
-    await IOUtils.remove(target, { ignoreAbsent: true, recursive: true }).catch((error: unknown) => {
+    try {
+        const folder = PathUtils.parent(path);
+        const target = folder && PathUtils.filename(folder).startsWith(TEMP_FOLDER_PREFIX)
+            ? folder
+            : path;
+        await IOUtils.remove(target, { ignoreAbsent: true, recursive: true });
+    } catch (error) {
         logger(`clipboardFiles: removing the temp copy failed: ${error}`, 3);
-    });
+    }
 }

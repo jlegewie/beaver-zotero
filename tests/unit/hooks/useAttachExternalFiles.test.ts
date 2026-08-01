@@ -24,21 +24,23 @@ const addedRecords: unknown[][] = [];
 vi.mock('../../../react/atoms/messageComposition', async () => {
     const { atom } = await import('jotai');
     atoms.composerResetToken = atom(0);
+    atoms.pendingAttachmentCount = atom(0);
     return {
         addExternalFilesToCurrentMessageAtom: atom(null, (_get, _set, records: unknown[]) => {
             addedRecords.push(records);
         }),
         composerResetTokenAtom: atoms.composerResetToken,
+        pendingAttachmentCountAtom: atoms.pendingAttachmentCount,
     };
 });
 
-// Writable stand-ins for the model-capability atoms, so a test can change
-// them; the holder exposes the atom identity the test needs to write. Hoisted
-// because the mock factories below populate it before this file's body runs.
+// Atom identities the tests write to. Hoisted because the mock factories
+// populate it before this file's body runs.
 const atoms = vi.hoisted(() => ({} as {
     selectedModel: any;
     requestPlusTools: any;
     composerResetToken: any;
+    pendingAttachmentCount: any;
 }));
 
 vi.mock('../../../react/atoms/models', async () => {
@@ -69,7 +71,7 @@ import { useAttachExternalFiles } from '../../../react/hooks/useAttachExternalFi
 type Attach = ReturnType<typeof useAttachExternalFiles>;
 
 /** Mounted harnesses, torn down after each test so a still-subscribed one
- *  cannot re-render when the next test writes the capability atoms. */
+ *  cannot re-render when the next test writes the atoms. */
 const mounted: { root: ReturnType<typeof createRoot>; container: HTMLDivElement }[] = [];
 
 /** Mount the hook and return its callback. */
@@ -99,6 +101,7 @@ describe('useAttachExternalFiles', () => {
         getDefaultStore().set(atoms.selectedModel, { supports_vision: true });
         getDefaultStore().set(atoms.requestPlusTools, false);
         getDefaultStore().set(atoms.composerResetToken, 0);
+        getDefaultStore().set(atoms.pendingAttachmentCount, 0);
         getPrefMock.mockReturnValue(10);
     });
 
@@ -175,6 +178,30 @@ describe('useAttachExternalFiles', () => {
             // Plus tools can OCR a scanned PDF even without model vision.
             canHandleOCRLocally: true,
         });
+    });
+
+    it('reports work in flight so the composer can hold sending', async () => {
+        const pendingDuringAttach: number[] = [];
+        attachExternalFileMock.mockImplementationOnce(async () => {
+            pendingDuringAttach.push(getDefaultStore().get(atoms.pendingAttachmentCount));
+            return attached('AAA');
+        });
+        const attach = await mountHook();
+
+        await act(async () => attach(['/a.pdf']));
+
+        expect(pendingDuringAttach).toEqual([1]);
+        expect(getDefaultStore().get(atoms.pendingAttachmentCount)).toBe(0);
+    });
+
+    it('stops reporting work in flight when an attach throws', async () => {
+        attachExternalFileMock.mockRejectedValueOnce(new Error('disk full'));
+        const attach = await mountHook();
+
+        await act(async () => expect(attach(['/a.pdf'])).rejects.toThrow('disk full'));
+
+        // A stuck count would leave the composer unable to send.
+        expect(getDefaultStore().get(atoms.pendingAttachmentCount)).toBe(0);
     });
 
     it('drops the files when the composer is reset mid-attach', async () => {

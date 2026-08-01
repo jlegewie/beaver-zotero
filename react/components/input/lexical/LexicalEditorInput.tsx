@@ -366,23 +366,19 @@ type PendingTextControls = {
 /**
  * Host-supplied handling for a paste that carries files rather than text (see
  * ClipboardAttachmentPlugin). Optional throughout: a host that cannot attach
- * files simply omits it and paste keeps its default text behavior.
+ * files omits it and paste keeps its default text behavior.
  */
 export interface ComposerPasteHandlers {
     /** Attach the files carried by a paste event. */
     onPasteFiles?: (files: File[]) => void;
     /**
-     * Whether the system clipboard holds a file that produces no paste event.
-     * Called synchronously on every paste keystroke, so it must stay cheap.
+     * Whether the clipboard holds a file that produces no paste event. Called
+     * synchronously on every paste keystroke, so it must stay cheap.
      */
     hasClipboardFile?: () => boolean;
-    /**
-     * Whether the system clipboard holds an image. Consulted only when a paste
-     * event arrives without files, which is how some platforms deliver a
-     * clipboard image.
-     */
+    /** Whether the clipboard holds an image, when a paste arrived without one. */
     hasClipboardImage?: () => boolean;
-    /** Attach whatever attachable content the clipboard currently holds. */
+    /** Attach whatever attachable content the clipboard holds. */
     onPasteFromClipboard?: () => void;
 }
 
@@ -955,23 +951,21 @@ const SubmitOnEnterPlugin: React.FC<{ onSubmit: () => void }> = ({ onSubmit }) =
 /**
  * Turns pasted files and images into message attachments.
  *
- * The two clipboard shapes reach us through different mechanisms, which is why
- * this plugin hooks both a command and a raw key:
+ * The two clipboard shapes arrive differently, so this plugin hooks both a
+ * command and a raw key:
  *
- * - **Images** (screenshots, "Copy Image" in the PDF reader, images copied from
- *   a browser) arrive as a normal paste, with the bytes exposed as a File on
- *   `clipboardData`. The clipboard carries no text in this case, so without
- *   this handler the plain-text paste inserts nothing at all and the paste
- *   looks like it was ignored. PASTE_COMMAND is registered above the plain-text
- *   handler's priority so an attachment paste can consume the event.
+ * - **Images** arrive as a normal paste with the bytes on `clipboardData`. Such
+ *   a clipboard carries no text, so without this handler the plain-text paste
+ *   inserts nothing and the paste looks ignored. PASTE_COMMAND is registered
+ *   above the plain-text handler so an attachment paste can consume the event.
  * - **Files copied in a file manager** carry only the platform's file flavor,
  *   which editors do not consider pasteable — *no paste event is dispatched*.
- *   The only way to see them is to inspect the clipboard when the paste key is
- *   pressed, so Cmd/Ctrl+V is also watched on keydown. The clipboard check runs
- *   first and is false for any text clipboard, leaving ordinary paste untouched.
+ *   They are only visible by inspecting the clipboard when the paste key is
+ *   pressed, so Cmd/Ctrl+V is watched on keydown too. That check is false for
+ *   any text clipboard, leaving ordinary paste untouched.
  *
- * Both routes are supplied by the host (`pasteHandlers`); with none registered
- * the plugin stands down and paste behaves as it did before.
+ * Both routes come from the host (`pasteHandlers`); with none registered the
+ * plugin stands down.
  */
 const ClipboardAttachmentPlugin: React.FC<{
     handlers?: ComposerPasteHandlers;
@@ -979,8 +973,8 @@ const ClipboardAttachmentPlugin: React.FC<{
 }> = ({ handlers, ime }) => {
     const [editor] = useLexicalComposerContext();
 
-    // Read the latest handlers through a ref so the listeners below register
-    // once per editor instead of re-registering whenever the host re-renders.
+    // Read through a ref so the listeners register once per editor rather than
+    // re-registering on every host re-render.
     const handlersRef = useRef<ComposerPasteHandlers | undefined>(handlers);
     handlersRef.current = handlers;
 
@@ -997,8 +991,7 @@ const ClipboardAttachmentPlugin: React.FC<{
                     return true;
                 }
                 // Some platforms dispatch the paste for a clipboard image but
-                // leave the image out of the event's payload; read it off the
-                // clipboard instead of letting the paste do nothing.
+                // leave the image out of the payload.
                 if (onPasteFromClipboard && hasClipboardImage?.()) {
                     event.preventDefault();
                     onPasteFromClipboard();
@@ -1015,11 +1008,10 @@ const ClipboardAttachmentPlugin: React.FC<{
             if (e.key !== 'v' && e.key !== 'V') return;
             const accel = Zotero.isMac ? e.metaKey : e.ctrlKey;
             if (!accel || e.altKey || e.shiftKey) return;
-            // An input method may use the same chord; never take it over while
-            // a composition is running.
+            // An input method may use the same chord.
             if (isImeKeyEvent(e) || ime.isComposing()) return;
-            // Only the no-paste-event case is claimed here. A clipboard image
-            // does fire a paste, so it is left to the command handler above.
+            // Only the no-paste-event case is claimed here; a clipboard image
+            // does fire a paste and is left to the command handler above.
             const { hasClipboardFile, onPasteFromClipboard } = handlersRef.current ?? {};
             if (!hasClipboardFile || !onPasteFromClipboard) return;
             if (!hasClipboardFile()) return;

@@ -131,6 +131,13 @@ export const addExternalFilesToCurrentMessageAtom = atom(
 );
 
 /**
+ * How many external files are currently being attached. Copying and hashing a
+ * large file takes long enough for the user to press Enter first, so the
+ * composer holds sending while this is non-zero.
+ */
+export const pendingAttachmentCountAtom = atom<number>(0);
+
+/**
  * Remove one external file from the current message.
  */
 export const removeExternalFileFromMessageAtom = atom(

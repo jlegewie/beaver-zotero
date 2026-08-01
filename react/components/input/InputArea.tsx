@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { StopIcon, GlobalSearchIcon } from '../icons/icons';
 import { useAtom, useSetAtom, useAtomValue, useStore } from 'jotai';
 import { newThreadAtom, currentThreadIdAtom } from '../../atoms/threads';
-import { currentMessageContentAtom, currentMessagePillsAtom, pendingPillInsertsAtom, composerResetTokenAtom } from '../../atoms/messageComposition';
+import { currentMessageContentAtom, currentMessagePillsAtom, pendingPillInsertsAtom, composerResetTokenAtom, pendingAttachmentCountAtom } from '../../atoms/messageComposition';
 import { sendWSMessageAtom, isWSChatPendingAtom, closeWSConnectionAtom, sendApprovalResponseAtom } from '../../atoms/agentRunAtoms';
 import { pendingApprovalsAtom, removePendingApprovalAtom } from '../../agents/agentActions';
 import Button from '../ui/Button';
@@ -107,6 +107,10 @@ const InputArea: React.FC<InputAreaProps> = ({
     const sendComposedMessage = useSetAtom(sendComposedMessageAtom);
     const closeWSConnection = useSetAtom(closeWSConnectionAtom);
     const isPending = useAtomValue(isWSChatPendingAtom);
+
+    // A pasted or dropped file is still being attached, so sending is held
+    // until it lands. Excludes the pending case, where the button is "Stop".
+    const isAttachingFiles = useAtomValue(pendingAttachmentCountAtom) > 0 && !isPending;
 
     // Pending approval state (for deferred tools)
     // With parallel tool calls, there can be multiple pending approvals
@@ -355,6 +359,7 @@ const InputArea: React.FC<InputAreaProps> = ({
             logger('handleSubmit: Blocked - request already in progress');
             return;
         }
+        if (isAttachingFiles) return;
         sendMessage(messageContent);
     };
 
@@ -432,8 +437,9 @@ const InputArea: React.FC<InputAreaProps> = ({
             return;
         }
         if (isSlashMenuOpen) return;
+        if (isAttachingFiles) return;
         sendMessage(messageContent);
-    }, [isPending, isAwaitingApproval, isSlashMenuOpen, messageContent]);
+    }, [isPending, isAwaitingApproval, isSlashMenuOpen, isAttachingFiles, messageContent]);
 
     const handleDismissHighTokenWarning = (e: React.MouseEvent) => {
         e.preventDefault();
@@ -666,7 +672,7 @@ const InputArea: React.FC<InputAreaProps> = ({
                                 // Otherwise, disable if no content and not pending, or no model selected
                                 isAwaitingApproval
                                     ? false
-                                    : ((messageContent.length === 0 && !isPending) || !selectedModel || isSlashMenuOpen)
+                                    : ((messageContent.length === 0 && !isPending) || !selectedModel || isSlashMenuOpen || isAttachingFiles)
                             }
                         >
                             {isAwaitingApproval && messageContent.trim().length > 0

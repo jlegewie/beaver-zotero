@@ -29,10 +29,8 @@ class TestClipboardEvent extends Event {
 Object.defineProperty(TestClipboardEvent, 'name', { value: 'ClipboardEvent' });
 
 /**
- * Paste handling in the composer, covering both routes an attachable paste can
- * take: a paste event carrying files, and the paste key itself for a clipboard
- * the editor does not consider pasteable (a file copied in a file manager,
- * which fires no paste event at all).
+ * Both routes an attachable paste can take: a paste event carrying files, and
+ * the paste key for a clipboard that fires no paste event.
  */
 describe('composer paste handling', () => {
     let container: HTMLDivElement | null = null;

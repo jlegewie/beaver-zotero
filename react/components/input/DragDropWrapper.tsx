@@ -490,8 +490,7 @@ const DragDropWrapper: React.FC<DragDropWrapperProps> = ({
                 return;
             }
 
-            // Rejections go to the drag overlay rather than a popup: the user is
-            // still looking at the drop target.
+            // Rejections go to the drag overlay rather than a popup.
             await attachExternalFiles(otherFiles, { onReject: showErrorMessage });
             return;
         }
