@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { capturedLocks, mockCreateClient, mockEncryptedStorageConstructed, mockLogger } = vi.hoisted(() => ({
+const { capturedLocks, mockCreateClient, mockLogger } = vi.hoisted(() => ({
     capturedLocks: [] as Array<(name: string, acquireTimeout: number, fn: () => Promise<unknown>) => Promise<unknown>>,
     mockCreateClient: vi.fn((_url: string, _key: string, options: {
         auth: {
@@ -17,7 +17,6 @@ const { capturedLocks, mockCreateClient, mockEncryptedStorageConstructed, mockLo
             },
         };
     }),
-    mockEncryptedStorageConstructed: vi.fn(),
     mockLogger: vi.fn(),
 }));
 
@@ -30,29 +29,17 @@ vi.mock('@supabase/supabase-js', () => {
     };
 });
 
-vi.mock('../../../src/services/EncryptedStorage', () => ({
-    EncryptedStorage: class MockEncryptedStorage {
-        constructor() {
-            mockEncryptedStorageConstructed();
-        }
-
-        async getItem(): Promise<null> {
-            return null;
-        }
-
-        async setItem(): Promise<void> {
-            return undefined;
-        }
-
-        async removeItem(): Promise<void> {
-            return undefined;
-        }
-    },
-}));
-
 vi.mock('../../../src/utils/logger', () => ({
     logger: mockLogger,
 }));
+
+function createMockStorageAdapter() {
+    return {
+        getItem: vi.fn(),
+        setItem: vi.fn(),
+        removeItem: vi.fn(),
+    };
+}
 
 function createDeferred<T>(): {
     promise: Promise<T>;
@@ -69,7 +56,6 @@ describe('supabaseClient auth lock reload handling', () => {
     beforeEach(() => {
         capturedLocks.length = 0;
         mockCreateClient.mockClear();
-        mockEncryptedStorageConstructed.mockClear();
         mockLogger.mockClear();
         vi.resetModules();
 
@@ -81,46 +67,48 @@ describe('supabaseClient auth lock reload handling', () => {
 
     it('does not create the client until the exported client is first used', async () => {
         const module = await import('../../../src/services/supabaseClient');
+        module.setSupabaseStorageAdapter(createMockStorageAdapter());
 
         expect(mockCreateClient).not.toHaveBeenCalled();
-        expect(mockEncryptedStorageConstructed).not.toHaveBeenCalled();
 
         module.supabase.auth;
 
         expect(mockCreateClient).toHaveBeenCalledTimes(1);
-        expect(mockEncryptedStorageConstructed).toHaveBeenCalledTimes(1);
     });
 
-    it('uses an injected storage adapter when set before the exported client is used', async () => {
-        const injectedStorage = {
-            getItem: vi.fn(),
-            setItem: vi.fn(),
-            removeItem: vi.fn(),
-        };
+    it('uses the registered storage adapter when the exported client is first used', async () => {
+        const registeredStorage = createMockStorageAdapter();
         const module = await import('../../../src/services/supabaseClient');
 
-        module.setSupabaseStorageAdapter(injectedStorage);
+        module.setSupabaseStorageAdapter(registeredStorage);
         module.supabase.auth;
 
         expect(mockCreateClient).toHaveBeenCalledTimes(1);
-        expect(mockCreateClient.mock.calls[0][2].auth.storage).toBe(injectedStorage);
-        expect(mockEncryptedStorageConstructed).not.toHaveBeenCalled();
+        expect(mockCreateClient.mock.calls[0][2].auth.storage).toBe(registeredStorage);
     });
 
-    it('rejects storage injection after the exported client has been used', async () => {
+    it('throws when the exported client is used without a registered storage adapter', async () => {
         const module = await import('../../../src/services/supabaseClient');
+
+        expect(() => module.supabase.auth).toThrow(
+            'No Supabase storage adapter registered.'
+        );
+        expect(mockCreateClient).not.toHaveBeenCalled();
+    });
+
+    it('rejects storage registration after the exported client has been used', async () => {
+        const module = await import('../../../src/services/supabaseClient');
+        module.setSupabaseStorageAdapter(createMockStorageAdapter());
 
         module.supabase.auth;
 
-        expect(() => module.setSupabaseStorageAdapter({
-            getItem: vi.fn(),
-            setItem: vi.fn(),
-            removeItem: vi.fn(),
-        })).toThrow('Supabase storage adapter must be set before the Supabase client is first used');
+        expect(() => module.setSupabaseStorageAdapter(createMockStorageAdapter()))
+            .toThrow('Supabase storage adapter must be set before the Supabase client is first used');
     });
 
     it('keeps inherited waiters queued across module reloads', async () => {
         const firstModule = await import('../../../src/services/supabaseClient');
+        firstModule.setSupabaseStorageAdapter(createMockStorageAdapter());
         firstModule.supabase.auth;
         const firstGenerationLock = capturedLocks.at(-1)!;
         const initialWindowLock = (window as any).__beaverAuthLock;
@@ -147,6 +135,7 @@ describe('supabaseClient auth lock reload handling', () => {
 
         vi.resetModules();
         const secondModule = await import('../../../src/services/supabaseClient');
+        secondModule.setSupabaseStorageAdapter(createMockStorageAdapter());
         secondModule.supabase.auth;
         const reloadedLock = capturedLocks.at(-1)!;
         expect((window as any).__beaverAuthLock).toBe(initialWindowLock);
@@ -174,6 +163,7 @@ describe('supabaseClient auth lock reload handling', () => {
 
     it('starts with a fresh auth lock after shutdown cleanup removes the persisted state', async () => {
         const firstModule = await import('../../../src/services/supabaseClient');
+        firstModule.setSupabaseStorageAdapter(createMockStorageAdapter());
         firstModule.supabase.auth;
         const firstWindowLock = (window as any).__beaverAuthLock;
 
@@ -181,6 +171,7 @@ describe('supabaseClient auth lock reload handling', () => {
 
         vi.resetModules();
         const secondModule = await import('../../../src/services/supabaseClient');
+        secondModule.setSupabaseStorageAdapter(createMockStorageAdapter());
         secondModule.supabase.auth;
 
         expect((window as any).__beaverAuthLock).toBeDefined();

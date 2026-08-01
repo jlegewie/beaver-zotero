@@ -35,6 +35,7 @@ import { BeaverTemporaryAnnotations } from './utils/annotationUtils';
 import { registerZoteroHost } from './host/zotero';
 import { registerZoteroDataProvider } from '../src/services/zoteroDataProvider';
 import { registerZoteroClientIdentity } from '../src/services/zoteroClientIdentity';
+import { registerZoteroSupabaseStorage } from '../src/services/zoteroSupabaseStorage';
 import { notifyWorkerStartFailure } from './utils/workerUnavailableNotice';
 
 // Configure the PDF package (webpack bundle copy). The esbuild bundle
@@ -61,6 +62,11 @@ registerZoteroDataProvider();
 // handshake's frontend_version/client_type/client_features/zotero_instance
 // fields. Must run before ProviderConnection opens its first connection.
 registerZoteroClientIdentity();
+
+// Register the Zotero encrypted-storage adapter the Supabase auth session
+// persists into. Must run before the exported `supabase` client is first
+// used (the client is created lazily on first property access).
+registerZoteroSupabaseStorage();
 
 /**
  * Component to initialize global hooks that should only run once.

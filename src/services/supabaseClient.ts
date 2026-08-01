@@ -1,5 +1,4 @@
 import { createClient, AuthApiError, type SupabaseClient } from '@supabase/supabase-js';
-import { EncryptedStorage } from './EncryptedStorage';
 import { logger } from '../utils/logger';
 
 // Stop any previous Supabase client's auto-refresh timer that may have survived
@@ -17,9 +16,10 @@ if (currentWindow?.__beaverDisposeSupabase) {
  * Storage backend Supabase persists the auth session into. Matches the subset of
  * the Web Storage / Supabase storage interface the auth client uses.
  *
- * Injectable so a non-Zotero host can supply its own
- * implementation (web `localStorage`, Office settings, …) via
- * `setSupabaseStorageAdapter` instead of the Zotero EncryptedStorage default.
+ * Every host must register an implementation via `setSupabaseStorageAdapter`
+ * before the Supabase client is first used — e.g. `registerZoteroSupabaseStorage()`
+ * for the Zotero plugin, or a non-Zotero host's own implementation (web
+ * `localStorage`, Office settings, …).
  */
 export interface SupabaseStorageAdapter {
     getItem: (key: string) => Promise<string | null> | string | null;
@@ -27,80 +27,22 @@ export interface SupabaseStorageAdapter {
     removeItem: (key: string) => Promise<void> | void;
 }
 
-// Optional host-supplied storage adapter. The Supabase client is created lazily,
-// so non-Zotero hosts can import this module, set the adapter, and then use the
-// exported client without instantiating the Zotero-specific encrypted storage.
+// Host-supplied storage adapter. The Supabase client is created lazily on the
+// first property access of the exported `supabase` proxy, so a host has until
+// that point to register — but registration is required before it, and
+// `createSupabaseClient` throws otherwise.
 let injectedStorageAdapter: SupabaseStorageAdapter | null = null;
 
-/** Inject a storage adapter for the Supabase auth session (non-Zotero hosts). */
+/**
+ * Register the storage adapter for the Supabase auth session. Must be called
+ * before the Supabase client is first used (see `createSupabaseClient`) — the
+ * client is created lazily, so registering at host bundle init is sufficient.
+ */
 export function setSupabaseStorageAdapter(adapter: SupabaseStorageAdapter): void {
     if (supabaseInstance) {
         throw new Error('Supabase storage adapter must be set before the Supabase client is first used');
     }
     injectedStorageAdapter = adapter;
-}
-
-/**
- * The Zotero plugin's storage adapter: an AES-encrypted, profile-bound store
- * (see EncryptedStorage). Constructed lazily so non-Zotero hosts that inject
- * their own adapter never instantiate the Zotero-specific store.
- */
-function createEncryptedStorageAdapter(): SupabaseStorageAdapter {
-    // Create encrypted storage instance
-    const encryptedStorage = new EncryptedStorage();
-
-    // Adapter to make EncryptedStorage compatible with Supabase's expected storage interface
-    return {
-    getItem: async (key: string) => {
-        try {
-            const data = await encryptedStorage.getItem(key);
-            if (!data) {
-                logger(`zoteroStorage: getItem("${key}") returned null (no stored session)`);
-                return null;
-            }
-
-            // Migrate double-encoded tokens from old format
-            // Old format: JSON.stringify('{"access_token":"..."}') → "\"{\\"access_token\\"...\""
-            // New format: '{"access_token":"..."}'
-            if (data.startsWith('"') && data.endsWith('"')) {
-                try {
-                    const migrated = JSON.parse(data);
-                    await encryptedStorage.setItem(key, migrated);
-                    return migrated;
-                } catch {
-                    // If parse fails, it's not double-encoded, return as-is
-                }
-            }
-
-            return data;
-        } catch (error) {
-            logger(`zoteroStorage: Error getting auth from encrypted storage: ${error}`, 2);
-            return null;
-        }
-    },
-    setItem: async (key: string, value: string) => {
-        // Retry once on failure — if the new token isn't persisted, the old
-        // (now server-invalidated) refresh token will cause a logout on restart.
-        for (let attempt = 0; attempt < 2; attempt++) {
-            try {
-                await encryptedStorage.setItem(key, value);
-                return;
-            } catch (error) {
-                logger(`zoteroStorage: Failed to persist auth token (attempt ${attempt + 1}/2): ${error}`, 2);
-            }
-        }
-        logger('zoteroStorage: Auth token could NOT be persisted after 2 attempts. '
-            + 'Session will work in memory but a restart will require re-login.', 2);
-    },
-    removeItem: async (key: string) => {
-        logger(`zoteroStorage: removeItem("${key}") called — session being cleared`, new Error().stack);
-        try {
-            await encryptedStorage.removeItem(key);
-        } catch (error) {
-            logger(`zoteroStorage: Error removing auth from encrypted storage: ${error}`, 2);
-        }
-    }
-    };
 }
 
 const supabaseUrl = process.env.SUPABASE_URL;
@@ -323,9 +265,17 @@ async function stopDisposedSupabaseClient(client: SupabaseClientInstance): Promi
 }
 
 function createSupabaseClient(): SupabaseClientInstance {
-    // Storage the auth client persists into: a host-injected adapter if provided,
-    // otherwise the Zotero EncryptedStorage default.
-    const sessionStorage: SupabaseStorageAdapter = injectedStorageAdapter ?? createEncryptedStorageAdapter();
+    // Storage the auth client persists into: the host-registered adapter.
+    // Falling back to an unpersisted in-memory store here would silently log
+    // every user out on the next restart with no signal until they notice —
+    // treat a missing registration as a wiring bug and fail loudly instead.
+    if (!injectedStorageAdapter) {
+        throw new Error(
+            'No Supabase storage adapter registered. Call setSupabaseStorageAdapter() ' +
+            '(e.g. registerZoteroSupabaseStorage() in react/index.tsx) before the Supabase client is first used.'
+        );
+    }
+    const sessionStorage: SupabaseStorageAdapter = injectedStorageAdapter;
 
     const client = createClient(requiredSupabaseUrl, requiredSupabaseAnonKey, {
         auth: {
