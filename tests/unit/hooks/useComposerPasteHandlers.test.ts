@@ -35,7 +35,7 @@ vi.mock('../../../src/utils/prefs', () => ({
 
 const atoms = vi.hoisted(() => ({} as {
     composerResetToken: any;
-    pendingAttachmentCount: any;
+    pendingAttachmentTokens: any;
     selectedModel: any;
     requestPlusTools: any;
 }));
@@ -43,11 +43,11 @@ const atoms = vi.hoisted(() => ({} as {
 vi.mock('../../../react/atoms/messageComposition', async () => {
     const { atom } = await import('jotai');
     atoms.composerResetToken = atom(0);
-    atoms.pendingAttachmentCount = atom(0);
+    atoms.pendingAttachmentTokens = atom([]);
     return {
         addExternalFilesToCurrentMessageAtom: atom(null, () => {}),
         composerResetTokenAtom: atoms.composerResetToken,
-        pendingAttachmentCountAtom: atoms.pendingAttachmentCount,
+        pendingAttachmentTokensAtom: atoms.pendingAttachmentTokens,
     };
 });
 
@@ -94,14 +94,14 @@ async function mountHook(): Promise<ComposerPasteHandlers> {
     return handlers!;
 }
 
-const pendingCount = () => getDefaultStore().get(atoms.pendingAttachmentCount);
+const pendingCount = () => getDefaultStore().get(atoms.pendingAttachmentTokens).length;
 const fakeFile = (name = 'image.png') => ({ name, type: 'image/png' }) as unknown as File;
 
 describe('useComposerPasteHandlers', () => {
     beforeEach(() => {
         vi.clearAllMocks();
         popupMessages.length = 0;
-        getDefaultStore().set(atoms.pendingAttachmentCount, 0);
+        getDefaultStore().set(atoms.pendingAttachmentTokens, []);
         getDefaultStore().set(atoms.composerResetToken, 0);
         clipboard.removeTempFile.mockResolvedValue(undefined);
         attachExternalFileMock.mockResolvedValue({ status: 'attached', record: { extKey: 'AAA' } });

@@ -5,7 +5,7 @@ import type { ExternalFileRecord } from '../../src/services/database';
 import {
     addExternalFilesToCurrentMessageAtom,
     composerResetTokenAtom,
-    pendingAttachmentCountAtom,
+    pendingAttachmentTokensAtom,
 } from '../atoms/messageComposition';
 import { selectedModelAtom } from '../atoms/models';
 import { requestPlusToolsAtom } from '../atoms/ui';
@@ -37,21 +37,32 @@ function defaultMaxFiles(): number {
 }
 
 /**
- * Runs `work` while the composer counts an attachment as in flight, holding
- * sending until it finishes (see `pendingAttachmentCountAtom`). Callers that
- * prepare a file before attaching it wrap the whole operation, so the hold
- * spans that too.
+ * Runs `work` while the composer holds sending for it (see
+ * `pendingAttachmentTokensAtom`). The hold is tagged with the composition the
+ * work belongs to, so a new or switched thread can send immediately while work
+ * for the composition it replaced runs itself out.
+ *
+ * Callers that prepare a file before attaching it wrap the whole operation, so
+ * the hold spans that too.
  */
 export function useHoldSendForAttachment() {
-    const setPendingAttachmentCount = useSetAtom(pendingAttachmentCountAtom);
+    const setPendingTokens = useSetAtom(pendingAttachmentTokensAtom);
+    const store = useStore();
     return useCallback(async <T>(work: () => Promise<T>): Promise<T> => {
-        setPendingAttachmentCount((count) => count + 1);
+        const token = store.get(composerResetTokenAtom);
+        setPendingTokens((tokens) => [...tokens, token]);
         try {
             return await work();
         } finally {
-            setPendingAttachmentCount((count) => count - 1);
+            setPendingTokens((tokens) => {
+                // Drop one entry: concurrent attaches can share a token.
+                const index = tokens.indexOf(token);
+                return index === -1
+                    ? tokens
+                    : [...tokens.slice(0, index), ...tokens.slice(index + 1)];
+            });
         }
-    }, [setPendingAttachmentCount]);
+    }, [setPendingTokens, store]);
 }
 
 /**

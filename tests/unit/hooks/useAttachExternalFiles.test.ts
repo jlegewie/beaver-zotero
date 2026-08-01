@@ -24,13 +24,13 @@ const addedRecords: unknown[][] = [];
 vi.mock('../../../react/atoms/messageComposition', async () => {
     const { atom } = await import('jotai');
     atoms.composerResetToken = atom(0);
-    atoms.pendingAttachmentCount = atom(0);
+    atoms.pendingAttachmentTokens = atom([]);
     return {
         addExternalFilesToCurrentMessageAtom: atom(null, (_get, _set, records: unknown[]) => {
             addedRecords.push(records);
         }),
         composerResetTokenAtom: atoms.composerResetToken,
-        pendingAttachmentCountAtom: atoms.pendingAttachmentCount,
+        pendingAttachmentTokensAtom: atoms.pendingAttachmentTokens,
     };
 });
 
@@ -40,7 +40,7 @@ const atoms = vi.hoisted(() => ({} as {
     selectedModel: any;
     requestPlusTools: any;
     composerResetToken: any;
-    pendingAttachmentCount: any;
+    pendingAttachmentTokens: any;
 }));
 
 vi.mock('../../../react/atoms/models', async () => {
@@ -101,7 +101,7 @@ describe('useAttachExternalFiles', () => {
         getDefaultStore().set(atoms.selectedModel, { supports_vision: true });
         getDefaultStore().set(atoms.requestPlusTools, false);
         getDefaultStore().set(atoms.composerResetToken, 0);
-        getDefaultStore().set(atoms.pendingAttachmentCount, 0);
+        getDefaultStore().set(atoms.pendingAttachmentTokens, []);
         getPrefMock.mockReturnValue(10);
     });
 
@@ -180,28 +180,51 @@ describe('useAttachExternalFiles', () => {
         });
     });
 
-    it('reports work in flight so the composer can hold sending', async () => {
-        const pendingDuringAttach: number[] = [];
+    it('holds sending under the token of the composition being attached to', async () => {
+        const heldDuringAttach: number[][] = [];
         attachExternalFileMock.mockImplementationOnce(async () => {
-            pendingDuringAttach.push(getDefaultStore().get(atoms.pendingAttachmentCount));
+            heldDuringAttach.push([...getDefaultStore().get(atoms.pendingAttachmentTokens)]);
             return attached('AAA');
         });
         const attach = await mountHook();
 
         await act(async () => attach(['/a.pdf']));
 
-        expect(pendingDuringAttach).toEqual([1]);
-        expect(getDefaultStore().get(atoms.pendingAttachmentCount)).toBe(0);
+        expect(heldDuringAttach).toEqual([[0]]);
+        expect(getDefaultStore().get(atoms.pendingAttachmentTokens)).toEqual([]);
     });
 
-    it('stops reporting work in flight when an attach throws', async () => {
+    it('releases the hold when an attach throws', async () => {
         attachExternalFileMock.mockRejectedValueOnce(new Error('disk full'));
         const attach = await mountHook();
 
         await act(async () => expect(attach(['/a.pdf'])).rejects.toThrow('disk full'));
 
-        // A stuck count would leave the composer unable to send.
-        expect(getDefaultStore().get(atoms.pendingAttachmentCount)).toBe(0);
+        // A stuck hold would leave the composer unable to send.
+        expect(getDefaultStore().get(atoms.pendingAttachmentTokens)).toEqual([]);
+    });
+
+    it('stops holding the new composition when the composer is reset mid-attach', async () => {
+        // The leftover work still runs, but it belongs to the old composition,
+        // so the new draft must be free to send while it finishes.
+        let release: (result: unknown) => void = () => {};
+        attachExternalFileMock.mockImplementationOnce(
+            () => new Promise((resolve) => { release = resolve; }),
+        );
+        const attach = await mountHook();
+
+        let done: Promise<unknown>;
+        await act(async () => { done = attach(['/big.pdf']); });
+        expect(getDefaultStore().get(atoms.pendingAttachmentTokens)).toEqual([0]);
+
+        await act(async () => { getDefaultStore().set(atoms.composerResetToken, 1); });
+        // Still in flight, but tagged to the composition the user left.
+        expect(getDefaultStore().get(atoms.pendingAttachmentTokens)).toEqual([0]);
+        expect(getDefaultStore().get(atoms.pendingAttachmentTokens))
+            .not.toContain(getDefaultStore().get(atoms.composerResetToken));
+
+        await act(async () => { release(attached('AAA')); await done; });
+        expect(getDefaultStore().get(atoms.pendingAttachmentTokens)).toEqual([]);
     });
 
     it('drops the files when the composer is reset mid-attach', async () => {

@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { StopIcon, GlobalSearchIcon } from '../icons/icons';
 import { useAtom, useSetAtom, useAtomValue, useStore } from 'jotai';
 import { newThreadAtom, currentThreadIdAtom } from '../../atoms/threads';
-import { currentMessageContentAtom, currentMessagePillsAtom, pendingPillInsertsAtom, composerResetTokenAtom, pendingAttachmentCountAtom } from '../../atoms/messageComposition';
+import { currentMessageContentAtom, currentMessagePillsAtom, pendingPillInsertsAtom, composerResetTokenAtom, pendingAttachmentTokensAtom } from '../../atoms/messageComposition';
 import { sendWSMessageAtom, isWSChatPendingAtom, closeWSConnectionAtom, sendApprovalResponseAtom } from '../../atoms/agentRunAtoms';
 import { pendingApprovalsAtom, removePendingApprovalAtom } from '../../agents/agentActions';
 import Button from '../ui/Button';
@@ -108,9 +108,12 @@ const InputArea: React.FC<InputAreaProps> = ({
     const closeWSConnection = useSetAtom(closeWSConnectionAtom);
     const isPending = useAtomValue(isWSChatPendingAtom);
 
-    // A pasted or dropped file is still being attached, so sending is held
-    // until it lands. Excludes the pending case, where the button is "Stop".
-    const isAttachingFiles = useAtomValue(pendingAttachmentCountAtom) > 0 && !isPending;
+    // A file staged for THIS composition is still being attached, so sending is
+    // held until it lands. Work left over from a composition the user has since
+    // replaced does not hold. Excludes the pending case, where the button is
+    // "Stop" and must stay live.
+    const pendingAttachmentTokens = useAtomValue(pendingAttachmentTokensAtom);
+    const isAttachingFiles = pendingAttachmentTokens.includes(composerResetToken) && !isPending;
 
     // Pending approval state (for deferred tools)
     // With parallel tool calls, there can be multiple pending approvals
