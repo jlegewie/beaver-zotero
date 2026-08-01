@@ -22,6 +22,12 @@ export interface AttachExternalFilesOptions {
      * the per-message limit). Defaults to a popup message.
      */
     onReject?: (message: string) => void;
+    /**
+     * Composition these files were staged for. Callers that do asynchronous
+     * work first pass the token from when the user acted; otherwise the
+     * composition current at the start of the attach is used.
+     */
+    composerToken?: number;
 }
 
 export interface AttachExternalFilesResult {
@@ -38,21 +44,26 @@ function defaultMaxFiles(): number {
 
 /**
  * Runs `work` while the composer holds sending for it (see
- * `pendingAttachmentTokensAtom`). The hold is tagged with the composition the
- * work belongs to, so a new or switched thread can send immediately while work
- * for the composition it replaced runs itself out.
+ * `pendingAttachmentTokensAtom`), passing it the composition the work belongs
+ * to. A new or switched thread can send immediately while work for the
+ * composition it replaced runs itself out.
  *
  * Callers that prepare a file before attaching it wrap the whole operation, so
- * the hold spans that too.
+ * the hold spans that too, and pass `composerToken` on to any nested call —
+ * the composition is the one the user started from, not the one current when
+ * the attach finally begins.
  */
 export function useHoldSendForAttachment() {
     const setPendingTokens = useSetAtom(pendingAttachmentTokensAtom);
     const store = useStore();
-    return useCallback(async <T>(work: () => Promise<T>): Promise<T> => {
-        const token = store.get(composerResetTokenAtom);
+    return useCallback(async <T>(
+        work: (composerToken: number) => Promise<T>,
+        composerToken?: number,
+    ): Promise<T> => {
+        const token = composerToken ?? store.get(composerResetTokenAtom);
         setPendingTokens((tokens) => [...tokens, token]);
         try {
-            return await work();
+            return await work(token);
         } finally {
             setPendingTokens((tokens) => {
                 // Drop one entry: concurrent attaches can share a token.
@@ -111,11 +122,9 @@ export function useAttachExternalFiles() {
             };
 
             // Attaching is asynchronous, so the composition these files belong
-            // to can be replaced mid-flight. Remember which one they were
-            // staged for and check again before adding them.
-            const composerToken = store.get(composerResetTokenAtom);
-
-            return holdSendForAttachment(async () => {
+            // to can be replaced mid-flight. The hold resolves which one they
+            // were staged for; check it again before adding them.
+            return holdSendForAttachment(async (composerToken) => {
                 const attached: ExternalFileRecord[] = [];
                 let rejectedCount = 0;
                 for (const source of sources) {
@@ -141,7 +150,7 @@ export function useAttachExternalFiles() {
                     addExternalFilesToCurrentMessage(attached);
                 }
                 return { attached, rejectedCount };
-            });
+            }, options.composerToken);
         },
         [
             addExternalFilesToCurrentMessage,

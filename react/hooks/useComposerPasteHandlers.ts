@@ -32,38 +32,41 @@ export function useComposerPasteHandlers(): ComposerPasteHandlers {
             expire: true,
         });
 
-        const attachTempPaths = async (paths: string[]) => {
+        const attachTempPaths = async (paths: string[], composerToken: number) => {
             try {
-                await attachExternalFiles(paths);
+                await attachExternalFiles(paths, { composerToken });
             } finally {
                 await Promise.all(paths.map((path) => removeTempFile(path)));
             }
         };
 
         // Runs inside the hold so sending stays blocked for the whole paste,
-        // including the copy to disk that precedes the attach.
-        const runPaste = (label: string, work: () => Promise<void>) => {
+        // including the copy to disk that precedes the attach. `composerToken`
+        // is the composition the user pasted into; it is passed down so a
+        // thread switch during the copy discards the files rather than moving
+        // them onto the new draft.
+        const runPaste = (label: string, work: (composerToken: number) => Promise<void>) => {
             holdSendForAttachment(work).catch((error) => {
                 logger(`useComposerPasteHandlers.${label}: ${error}`, 1);
                 reportFailure();
             });
         };
 
-        const onPasteFiles = (files: File[]) => runPaste('onPasteFiles', async () => {
+        const onPasteFiles = (files: File[]) => runPaste('onPasteFiles', async (composerToken) => {
             const written = await Promise.all(files.map((file) => writePastedFileToTemp(file)));
             const paths = written.filter((path): path is string => path !== null);
             // Reported rather than dropped, so a paste never looks ignored.
             if (paths.length < files.length) reportFailure();
             if (paths.length === 0) return;
-            await attachTempPaths(paths);
+            await attachTempPaths(paths, composerToken);
         });
 
-        const onPasteFromClipboard = () => runPaste('onPasteFromClipboard', async () => {
+        const onPasteFromClipboard = () => runPaste('onPasteFromClipboard', async (composerToken) => {
             // A file copied in a file manager already lives on disk, so it is
             // attached from its own path and keeps its real name.
             const path = readClipboardFilePath();
             if (path) {
-                await attachExternalFiles([path]);
+                await attachExternalFiles([path], { composerToken });
                 return;
             }
             const tempPath = await readClipboardImageToTemp();
@@ -71,7 +74,7 @@ export function useComposerPasteHandlers(): ComposerPasteHandlers {
                 reportFailure();
                 return;
             }
-            await attachTempPaths([tempPath]);
+            await attachTempPaths([tempPath], composerToken);
         });
 
         return {

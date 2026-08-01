@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 // Module mocks — the paste path reaches the clipboard and Zotero services.
 // =============================================================================
 
+const addedToDraft = vi.hoisted(() => [] as unknown[][]);
 const clipboard = vi.hoisted(() => ({
     writePastedFileToTemp: vi.fn(),
     readClipboardFilePath: vi.fn(),
@@ -45,7 +46,9 @@ vi.mock('../../../react/atoms/messageComposition', async () => {
     atoms.composerResetToken = atom(0);
     atoms.pendingAttachmentTokens = atom([]);
     return {
-        addExternalFilesToCurrentMessageAtom: atom(null, () => {}),
+        addExternalFilesToCurrentMessageAtom: atom(null, (_get, _set, records: unknown[]) => {
+            addedToDraft.push(records);
+        }),
         composerResetTokenAtom: atoms.composerResetToken,
         pendingAttachmentTokensAtom: atoms.pendingAttachmentTokens,
     };
@@ -101,6 +104,7 @@ describe('useComposerPasteHandlers', () => {
     beforeEach(() => {
         vi.clearAllMocks();
         popupMessages.length = 0;
+        addedToDraft.length = 0;
         getDefaultStore().set(atoms.pendingAttachmentTokens, []);
         getDefaultStore().set(atoms.composerResetToken, 0);
         clipboard.removeTempFile.mockResolvedValue(undefined);
@@ -131,6 +135,52 @@ describe('useComposerPasteHandlers', () => {
 
         expect(pendingDuringCopy).toBe(1);
         await act(async () => vi.waitFor(() => expect(pendingCount()).toBe(0)));
+    });
+
+    it('discards the paste when the composer is replaced while copying', async () => {
+        // The paste belongs to the composition the user pasted into, not the
+        // one current once the copy finishes.
+        clipboard.writePastedFileToTemp.mockImplementation(async () => {
+            getDefaultStore().set(atoms.composerResetToken, 1);
+            return '/tmp/beaver-paste-1/pasted-image-1.png';
+        });
+        const handlers = await mountHook();
+
+        await act(async () => {
+            handlers.onPasteFiles!([fakeFile()]);
+            await vi.waitFor(() => expect(clipboard.removeTempFile).toHaveBeenCalled());
+        });
+
+        expect(addedToDraft).toHaveLength(0);
+    });
+
+    it('does not hold the new composition after being replaced while copying', async () => {
+        // The composer is replaced during the copy, then the attach itself runs
+        // on: that leftover work must hold the composition it came from, not
+        // the one the user has moved to.
+        clipboard.writePastedFileToTemp.mockImplementation(async () => {
+            getDefaultStore().set(atoms.composerResetToken, 1);
+            return '/tmp/beaver-paste-1/pasted-image-1.png';
+        });
+        let release: (result: unknown) => void = () => {};
+        attachExternalFileMock.mockImplementation(
+            () => new Promise((resolve) => { release = resolve; }),
+        );
+        const handlers = await mountHook();
+
+        await act(async () => {
+            handlers.onPasteFiles!([fakeFile()]);
+            await vi.waitFor(() => expect(attachExternalFileMock).toHaveBeenCalled());
+        });
+
+        expect(getDefaultStore().get(atoms.pendingAttachmentTokens))
+            .not.toContain(getDefaultStore().get(atoms.composerResetToken));
+
+        await act(async () => {
+            release({ status: 'attached', record: { extKey: 'AAA' } });
+            await vi.waitFor(() =>
+                expect(getDefaultStore().get(atoms.pendingAttachmentTokens)).toEqual([]));
+        });
     });
 
     it('releases the hold when the paste fails', async () => {
