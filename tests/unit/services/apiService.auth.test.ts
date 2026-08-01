@@ -330,6 +330,33 @@ describe('ApiService version headers', () => {
         expect(fetchMock.mock.calls[0][1].signal).toBeUndefined();
     });
 
+    // getAuthHeaders() awaits supabase.auth.getSession() before any fetch
+    // exists, so a stalled auth lookup never observes the abort signal —
+    // only the deadline race can stop the caller from waiting on it.
+    it('rejects with SessionRefreshError when the auth lookup stalls', async () => {
+        mockSupabase.auth.getSession.mockReturnValue(new Promise(() => {}));
+
+        await expect(service.get('/api/v1/status', { timeoutMs: 20 }))
+            .rejects.toBeInstanceOf(SessionRefreshError);
+        expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    // Same gap on the 401 retry path: refreshAccessToken() awaits
+    // supabase.auth.refreshSession(), which also never sees the signal.
+    it('rejects with SessionRefreshError when the 401 refresh stalls', async () => {
+        fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+            detail: 'token has expired',
+        }), {
+            status: 401,
+            statusText: 'Unauthorized',
+        }));
+        mockSupabase.auth.refreshSession.mockReturnValue(new Promise(() => {}));
+
+        await expect(service.get('/api/v1/status', { timeoutMs: 20 }))
+            .rejects.toBeInstanceOf(SessionRefreshError);
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
     it('omits both headers when the adapter does not implement getVersionHeaders', async () => {
         const { getVersionHeaders, ...rest } = originalAdapter;
         setRuntimeAdapter(rest);

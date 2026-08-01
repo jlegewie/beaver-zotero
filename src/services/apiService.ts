@@ -18,6 +18,12 @@ export interface RequestOptions {
      * lookup, the connection, a 401 refresh-and-retry, and reading the response
      * body. Exceeding it always surfaces as `SessionRefreshError`, which callers
      * treat as retryable.
+     *
+     * The deadline races the call rather than cancelling it, so it only stops
+     * the caller from waiting — it does not stop work already in flight. Parts
+     * of the call that don't observe the abort signal (a stalled Supabase auth
+     * lookup or token refresh) keep running in the background until they
+     * settle on their own.
      */
     timeoutMs?: number;
 }
@@ -32,8 +38,14 @@ interface RequestDeadline {
  * Runs `call` under a deadline when one is requested.
  *
  * `fetch` resolves as soon as response headers arrive, so a timer cleared at
- * that point leaves a stalled body read unbounded. The timer is held until
- * `call` — which includes parsing the body — has settled.
+ * that point leaves a stalled body read unbounded. The timer stays armed until
+ * the race below settles, which covers `call` through parsing the body.
+ *
+ * Not every step inside `call` observes the abort signal (a stalled Supabase
+ * auth lookup or token refresh never sees it — only `fetch` does). Racing
+ * `call` against a promise that rejects on abort lets this function settle
+ * even when `call` itself never will; `call`'s own work is left running in
+ * the background rather than cancelled.
  */
 async function withDeadline<T>(
     options: RequestOptions | undefined,
@@ -43,20 +55,33 @@ async function withDeadline<T>(
     if (!timeoutMs) return call();
 
     const deadline: RequestDeadline = { controller: new AbortController(), timeoutMs };
+    // Built once so both the timeout race and the abort-reclassification
+    // below throw the exact same error.
+    const timeoutError = new SessionRefreshError(`Request timed out after ${timeoutMs}ms`, 0, 'Network Error');
+
+    let onAbort: () => void = () => {};
+    const timedOut = new Promise<never>((_, reject) => {
+        onAbort = () => reject(timeoutError);
+        deadline.controller.signal.addEventListener('abort', onAbort);
+    });
+
     const timer = setTimeout(() => deadline.controller.abort(), timeoutMs);
     try {
-        return await call(deadline);
+        return await Promise.race([call(deadline), timedOut]);
     } catch (error) {
         // Classify here rather than at the fetch: an expired deadline can also
-        // surface while reading the body, where the abort would otherwise escape
-        // raw or be mistaken for the HTTP status that came with it. Callers
-        // treat `SessionRefreshError` as retryable, which a timeout is.
+        // surface while reading the body, or while `call` is stuck somewhere
+        // that ignores the signal entirely — either way the abort would
+        // otherwise escape raw or be mistaken for a status that arrived with
+        // it. Callers treat `SessionRefreshError` as retryable, which a
+        // timeout is.
         if (deadline.controller.signal.aborted) {
-            throw new SessionRefreshError(`Request timed out after ${timeoutMs}ms`, 0, 'Network Error');
+            throw timeoutError;
         }
         throw error;
     } finally {
         clearTimeout(timer);
+        deadline.controller.signal.removeEventListener('abort', onAbort);
     }
 }
 
