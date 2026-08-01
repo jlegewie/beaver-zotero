@@ -142,22 +142,26 @@ export const removeExternalFileFromMessageAtom = atom(
     }
 );
 
-/**
- * A /command pill waiting to be inserted into the chat input. Set by
- * `stageActionPillAtom` (home launcher, context menu, reader toolbar) and
- * consumed by InputArea, which owns the editor handle: it inserts the pill,
- * focuses the editor, and clears this atom. The `nonce` distinguishes
- * consecutive requests for the same action.
- *
- * `targetWindow` names the surface where the user triggered the action, so
- * that when several InputAreas are mounted (main-window sidebar + separate
- * Beaver window) the pill deterministically lands in the right editor.
- */
-export const pendingPillInsertAtom = atom<{
+export interface PendingPillInsert {
     descriptor: SlashCommandDescriptor;
+    /** The surface where the user triggered the action, so that when several
+     *  InputAreas are mounted (main-window sidebar + separate Beaver window)
+     *  the pill deterministically lands in the right editor. */
     targetWindow?: Window;
-    nonce: number;
-} | null>(null);
+}
+
+/**
+ * /command pills waiting to be inserted into the chat input, in the order the
+ * user launched them. Written by `stageActionPillAtom` (home launcher, context
+ * menu, reader toolbar) and consumed by InputArea, which owns the editor
+ * handle: it inserts the head of the queue, focuses the editor, and drops that
+ * entry.
+ *
+ * A queue rather than a single slot because an editor claims a pill on a timer:
+ * a second action launched before that timer fires must not displace the first,
+ * which the user has already seen take effect on their attachments.
+ */
+export const pendingPillInsertsAtom = atom<PendingPillInsert[]>([]);
 
 /**
  * The /command pills currently in the message, in document order — the shared
@@ -185,8 +189,8 @@ export const composerResetTokenAtom = atom<number>(0);
  * Clear the composer's text and pills programmatically (new thread, thread
  * switch, after sending).
  *
- * Prefer this over resetting the two atoms directly so mounted editors learn
- * the composer was reset even when the values themselves do not change (see
+ * Prefer this over resetting the atoms directly so mounted editors learn the
+ * composer was reset even when the values themselves do not change (see
  * `composerResetTokenAtom`).
  */
 export const clearComposerAtom = atom(
@@ -194,6 +198,14 @@ export const clearComposerAtom = atom(
     (get, set) => {
         set(currentMessageContentAtom, '');
         set(currentMessagePillsAtom, []);
+        // Pills staged but not yet inserted belong to the draft being
+        // discarded — their targets were attached to it and have just been
+        // cleared, so letting an insert land would leave a /command in the next
+        // draft with nothing behind it. Editors re-read this atom when their
+        // claim timer fires, so emptying it cancels a claim already in flight.
+        if (get(pendingPillInsertsAtom).length > 0) {
+            set(pendingPillInsertsAtom, []);
+        }
         set(composerResetTokenAtom, get(composerResetTokenAtom) + 1);
     }
 );
@@ -280,14 +292,19 @@ export const removeTagIdAtom = atom(
     }
 );
 
+/** Identity of an attached item. A Zotero key is only unique within its
+ *  library, so the library has to be part of it. */
+const messageItemKey = (item: Zotero.Item): string => `${item.libraryID}-${item.key}`;
+
 /**
 * Remove item from currentMessageItemsAtom
 */
 export const removeItemFromMessageAtom = atom(
     null,
     (_, set, item: Zotero.Item) => {
+        const key = messageItemKey(item);
         set(currentMessageItemsAtom, (prevItems) =>
-            prevItems.filter((i) => i.key !== item.key)
+            prevItems.filter((i) => messageItemKey(i) !== key)
         );
         set(removePopupMessageAtom, item.key);
     }
@@ -326,7 +343,7 @@ export const addItemToCurrentMessageItemsAtom = atom(
     null,
     async (get, set, item: Zotero.Item) => {
         const currentItems = get(currentMessageItemsAtom);
-        if(currentItems.some((i) => i.key === item.key)) return;
+        if(currentItems.some((i) => messageItemKey(i) === messageItemKey(item))) return;
         
         // Add immediately (optimistic)
         set(currentMessageItemsAtom, [...currentItems, item]);
@@ -345,9 +362,8 @@ export const addItemsToCurrentMessageItemsAtom = atom(
     async (get, set, items: Zotero.Item[]) => {
         // Filter out already added items
         const currentItems = get(currentMessageItemsAtom);
-        const newItems = items.filter((i) => 
-            !currentItems.some((ci) => ci.key === i.key)
-        );
+        const currentKeys = new Set(currentItems.map(messageItemKey));
+        const newItems = items.filter((i) => !currentKeys.has(messageItemKey(i)));
         
         if (newItems.length === 0) return;
 

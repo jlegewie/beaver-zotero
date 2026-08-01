@@ -140,14 +140,11 @@ export async function resolvePromptVariables(
     let collections: CollectionReference[] = [];
     let targetContextExcluded = false;
     if (targetType) {
-        const context = resolveTargetTypeContext(targetType);
-        const contextItems = keepSearchable(context.items);
-        // The target resolved, but exclusion removed all of it. Report that
-        // instead of continuing with an unbound target.
-        targetContextExcluded = context.items.length > 0 && contextItems.length === 0;
-        if (contextItems.length > 0) {
+        const context = resolveTargetContext(targetType);
+        targetContextExcluded = context.itemsExcluded;
+        if (context.items.length > 0) {
             const existingKeys = new Set(allItems.map(i => `${i.libraryID}-${i.key}`));
-            for (const item of contextItems) {
+            for (const item of context.items) {
                 if (!existingKeys.has(`${item.libraryID}-${item.key}`)) {
                     allItems.push(item);
                     existingKeys.add(`${item.libraryID}-${item.key}`);
@@ -172,9 +169,50 @@ export async function resolvePromptVariables(
 // Target-type context resolution (synchronous — reads from Jotai store)
 // ---------------------------------------------------------------------------
 
-interface TargetTypeContext {
+export interface TargetTypeContext {
     items: Zotero.Item[];
     collections: CollectionReference[];
+}
+
+/** What an action's target type binds to, with excluded libraries removed. */
+export interface ResolvedTargetContext extends TargetTypeContext {
+    /** The target resolved to items, but every one of them was dropped as
+     *  belonging to an excluded library. */
+    itemsExcluded: boolean;
+    /** Same for collections. */
+    collectionsExcluded: boolean;
+}
+
+/**
+ * Resolve what an action's target type binds to right now, dropping libraries
+ * the user excluded from Beaver.
+ *
+ * Synchronous on purpose: actions resolve their targets the moment the user
+ * picks them, so the items land in the composer within the same click.
+ *
+ * `override` supplies the context instead of the live Zotero state — the
+ * library context menu binds the rows the user right-clicked, which are not
+ * always what the current selection resolves to.
+ */
+export function resolveTargetContext(
+    targetType?: ActionTargetType,
+    override?: TargetTypeContext,
+): ResolvedTargetContext {
+    if (!targetType) {
+        return { items: [], collections: [], itemsExcluded: false, collectionsExcluded: false };
+    }
+    const searchableLibraryIds = store.get(searchableLibraryIdsAtom);
+    const context = override ?? resolveTargetTypeContext(targetType);
+    const items = keepSearchable(context.items);
+    const collections = context.collections.filter(
+        (collection) => searchableLibraryIds.includes(collection.library_id),
+    );
+    return {
+        items,
+        collections,
+        itemsExcluded: context.items.length > 0 && items.length === 0,
+        collectionsExcluded: context.collections.length > 0 && collections.length === 0,
+    };
 }
 
 function isActionableItem(item: Zotero.Item): boolean {

@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { StopIcon, GlobalSearchIcon } from '../icons/icons';
 import { useAtom, useSetAtom, useAtomValue, useStore } from 'jotai';
 import { newThreadAtom, currentThreadIdAtom } from '../../atoms/threads';
-import { currentMessageContentAtom, currentMessagePillsAtom, pendingPillInsertAtom, composerResetTokenAtom } from '../../atoms/messageComposition';
+import { currentMessageContentAtom, currentMessagePillsAtom, pendingPillInsertsAtom, composerResetTokenAtom } from '../../atoms/messageComposition';
 import { sendWSMessageAtom, isWSChatPendingAtom, closeWSConnectionAtom, sendApprovalResponseAtom } from '../../atoms/agentRunAtoms';
 import { pendingApprovalsAtom, removePendingApprovalAtom } from '../../agents/agentActions';
 import Button from '../ui/Button';
@@ -70,7 +70,9 @@ const InputArea: React.FC<InputAreaProps> = ({
     const softCapTriggeredRuns = useAtomValue(softCapTriggeredRunsAtom);
     const isWebSearchAllowed = useAtomValue(isWebSearchAllowedAtom);
     const currentNoteItem = useAtomValue(currentNoteItemAtom);
-    const pendingPillInsert = useAtomValue(pendingPillInsertAtom);
+    // Only the oldest staged pill is claimable; the rest follow as it is
+    // dequeued (see the claim effect below).
+    const pendingPillInsert = useAtomValue(pendingPillInsertsAtom)[0] ?? null;
     const composerResetToken = useAtomValue(composerResetTokenAtom);
     const store = useStore();
     const webSearchDescriptionId = useId();
@@ -84,7 +86,7 @@ const InputArea: React.FC<InputAreaProps> = ({
     }, []);
     // Stable forwarder so the slash menu can insert a command pill into the
     // Lexical editor (the editor handle isn't available until after mount).
-    const insertSlashCommand = useCallback((descriptor: SlashCommandDescriptor, queryLength: number) => {
+    const insertSlashCommand = useCallback((descriptor: SlashCommandDescriptor, queryLength: number | null) => {
         editorHandleRef.current?.insertSlashCommand(descriptor, queryLength);
     }, []);
 
@@ -212,15 +214,21 @@ const InputArea: React.FC<InputAreaProps> = ({
     // therefore a CLAIM: the editor in the payload's `targetWindow` (where the
     // user triggered the action) claims immediately; other editors act only as
     // a delayed fallback in case the target never consumes (e.g. its editor is
-    // not mounted). The synchronous re-check + clear of the live atom value
+    // not mounted). The synchronous re-check + dequeue of the live atom value
     // guarantees exactly one editor inserts the pill.
+    //
+    // Only the head of the queue is claimed; dequeuing it re-runs this effect
+    // for the next entry, so pills staged in quick succession are all inserted,
+    // in the order they were staged.
     useEffect(() => {
-        if (!pendingPillInsert) return;
+        const descriptor = pendingPillInsert?.descriptor;
+        if (!descriptor) return;
         const claim = () => {
+            const queue = store.get(pendingPillInsertsAtom);
             // Another editor may have claimed this pill already.
-            if (store.get(pendingPillInsertAtom) !== pendingPillInsert) return;
-            store.set(pendingPillInsertAtom, null);
-            editorHandleRef.current?.insertSlashCommand(pendingPillInsert.descriptor, null);
+            if (queue[0] !== pendingPillInsert) return;
+            store.set(pendingPillInsertsAtom, queue.slice(1));
+            editorHandleRef.current?.insertSlashCommand(descriptor, null);
             focusEditor();
         };
         const ownWindow = inputRef.current?.ownerDocument.defaultView ?? null;

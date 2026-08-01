@@ -107,6 +107,28 @@ function $collectSlashCommandDescriptors(): SlashCommandDescriptor[] {
     return result;
 }
 
+/** Remove the trailing `/query` the user typed (the `/` trigger plus the typed
+ *  query) by character count from the end of the document. The slash menu
+ *  closes on whitespace, so the query never spans nodes and always lives in the
+ *  final plain-text node(s) — never inside an existing pill. Must be called
+ *  inside an update context, while that text is still the tail of the document. */
+function $deleteTrailingSlashQuery(queryLength: number): void {
+    let remaining = queryLength + 1; // +1 for the leading '/'
+    const textNodes = $getRoot().getAllTextNodes();
+    for (let i = textNodes.length - 1; i >= 0 && remaining > 0; i--) {
+        const node = textNodes[i];
+        if ($isSlashCommandNode(node)) break;
+        const text = node.getTextContent();
+        if (text.length <= remaining) {
+            remaining -= text.length;
+            node.remove();
+        } else {
+            node.setTextContent(text.slice(0, text.length - remaining));
+            remaining = 0;
+        }
+    }
+}
+
 /** Build editor nodes for `text`, materializing known `/command` tokens as
  *  pill nodes (used when syncing the shared content string into this editor —
  *  the pill identity travels via the shared pill descriptors, so pills stay
@@ -480,25 +502,7 @@ const EditorApi = forwardRef<LexicalEditorInputHandle, {
                     editor.update(() => {
                         const root = $getRoot();
                         if (queryLength !== null) {
-                            // Remove the trailing "/query" the user typed (the `/`
-                            // trigger plus the typed query). The slash menu closes on
-                            // whitespace, so the query never spans nodes and always
-                            // lives in the final plain-text node(s) - never inside an
-                            // existing pill.
-                            let remaining = queryLength + 1; // +1 for the leading '/'
-                            const textNodes = root.getAllTextNodes();
-                            for (let i = textNodes.length - 1; i >= 0 && remaining > 0; i--) {
-                                const node = textNodes[i];
-                                if ($isSlashCommandNode(node)) break;
-                                const text = node.getTextContent();
-                                if (text.length <= remaining) {
-                                    remaining -= text.length;
-                                    node.remove();
-                                } else {
-                                    node.setTextContent(text.slice(0, text.length - remaining));
-                                    remaining = 0;
-                                }
-                            }
+                            $deleteTrailingSlashQuery(queryLength);
                         }
 
                         // Resolve token collisions against pills already in the

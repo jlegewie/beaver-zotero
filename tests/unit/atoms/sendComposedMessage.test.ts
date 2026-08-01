@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { atom, createStore } from 'jotai';
+import { createStore } from 'jotai';
 
 // =============================================================================
 // Module Mocks (must be before imports of the module under test)
@@ -18,13 +18,20 @@ vi.mock('../../../react/atoms/agentRunAtoms', async () => {
 });
 
 // messageComposition transitively imports reader utils / popup UI; provide the
-// three atoms actions.ts uses.
+// atoms actions.ts uses. The add-items atom mirrors the real one closely enough
+// for the staging assertions (append, dedupe by key).
 vi.mock('../../../react/atoms/messageComposition', async () => {
     const { atom } = await import('jotai');
+    const currentMessageItemsAtom = atom<any[]>([]);
     return {
-        currentMessageItemsAtom: atom<unknown[]>([]),
+        currentMessageItemsAtom,
         currentMessageCollectionsAtom: atom<unknown[]>([]),
-        pendingPillInsertAtom: atom<unknown | null>(null),
+        pendingPillInsertsAtom: atom<unknown[]>([]),
+        addItemsToCurrentMessageItemsAtom: atom(null, (get, set, items: any[]) => {
+            const current = get(currentMessageItemsAtom);
+            const added = items.filter((i) => !current.some((c: any) => c.key === i.key));
+            if (added.length > 0) set(currentMessageItemsAtom, [...current, ...added]);
+        }),
     };
 });
 
@@ -50,8 +57,16 @@ vi.mock('../../../react/atoms/itemValidation', async () => {
     };
 });
 
+// Target binding is synchronous (staging) and prompt-variable resolution is
+// not (send); both are stubbed so tests drive them independently.
 vi.mock('../../../react/utils/promptVariables', () => ({
     EMPTY_VARIABLE_HINTS: {},
+    resolveTargetContext: vi.fn(() => ({
+        items: [],
+        collections: [],
+        itemsExcluded: false,
+        collectionsExcluded: false,
+    })),
     resolvePromptVariables: vi.fn(async (text: string) => ({
         text: `resolved:${text}`,
         items: [],
@@ -97,6 +112,7 @@ vi.mock('../../../react/atoms/profile', async () => {
 import {
     actionsAtom,
     buildEditedPromptActionsAtom,
+    resolveActionForStagingAtom,
     resolvePillsToPromptActionsAtom,
     sendComposedMessageAtom,
     stageActionPillAtom,
@@ -104,9 +120,9 @@ import {
 import {
     currentMessageCollectionsAtom,
     currentMessageItemsAtom,
-    pendingPillInsertAtom,
+    pendingPillInsertsAtom,
 } from '../../../react/atoms/messageComposition';
-import { resolvePromptVariables } from '../../../react/utils/promptVariables';
+import { resolvePromptVariables, resolveTargetContext } from '../../../react/utils/promptVariables';
 import type { Action } from '../../../react/types/actions';
 
 const sendWSMessageMock = (await import('../../../react/atoms/agentRunAtoms') as any).__sendWSMessageMock as ReturnType<typeof vi.fn>;
@@ -116,7 +132,15 @@ const { isRejectedItemValidation } = await import('../../../react/atoms/itemVali
 const summarizeAction: Action = {
     id: 'custom-1',
     title: 'Summarize',
-    text: 'Summarize the {{selected_items}}.',
+    text: 'Summarize the selected papers.',
+    targets: ['items'],
+    category: 'research',
+};
+
+const critiqueAction: Action = {
+    id: 'custom-2',
+    title: 'Critique',
+    text: 'Critique it.',
     targets: ['items'],
     category: 'research',
 };
@@ -127,29 +151,199 @@ function makeStore(actions: Action[] = [summarizeAction]) {
     return store;
 }
 
+/** Stage an action the way a launcher surface does, returning its pill. */
+function stage(
+    store: ReturnType<typeof createStore>,
+    payload: Parameters<typeof resolveActionForStagingAtom['write']>[2],
+) {
+    return store.set(resolveActionForStagingAtom, payload);
+}
+
+/** What the next staging call binds its target type to. */
+function nextTargets(context: Partial<{
+    items: any[];
+    collections: any[];
+    itemsExcluded: boolean;
+    collectionsExcluded: boolean;
+}>) {
+    vi.mocked(resolveTargetContext).mockReturnValueOnce({
+        items: [],
+        collections: [],
+        itemsExcluded: false,
+        collectionsExcluded: false,
+        ...context,
+    } as any);
+}
+
 beforeEach(() => {
     vi.clearAllMocks();
+});
+
+describe('resolveActionForStagingAtom', () => {
+    it('returns a pill for the action', () => {
+        const store = makeStore();
+        expect(stage(store, { actionId: 'custom-1', targetType: 'items' })).toMatchObject({
+            commandName: 'summarize',
+            actionId: 'custom-1',
+            targetType: 'items',
+            title: 'Summarize',
+        });
+    });
+
+    it('attaches the targets the action binds to', () => {
+        const item = { libraryID: 1, key: 'ABC' };
+        nextTargets({ items: [item] });
+        const store = makeStore();
+        stage(store, { actionId: 'custom-1', targetType: 'items' });
+        expect(store.get(currentMessageItemsAtom)).toEqual([item]);
+    });
+
+    it('leaves the action prompt alone until the message is sent', () => {
+        const store = makeStore();
+        stage(store, { actionId: 'custom-1', targetType: 'items' });
+        expect(resolvePromptVariables).not.toHaveBeenCalled();
+    });
+
+    it('merges bound collections with the ones already on the message', () => {
+        const a = { library_id: 1, zotero_key: 'COLLA', name: 'A', parent_key: null };
+        const b = { library_id: 1, zotero_key: 'COLLB', name: 'B', parent_key: null };
+        nextTargets({ collections: [a, b] });
+        const store = makeStore();
+        store.set(currentMessageCollectionsAtom, [a]);
+        stage(store, { actionId: 'custom-1', targetType: 'collection' });
+        // A was already attached; B must still reach the model.
+        expect(store.get(currentMessageCollectionsAtom)).toEqual([a, b]);
+    });
+
+    it('leaves the composer alone when the caller keeps its own attachments', () => {
+        const item = { libraryID: 1, key: 'ABC' };
+        const collection = { library_id: 1, zotero_key: 'COLLA', name: 'A', parent_key: null };
+        nextTargets({ items: [item], collections: [collection] });
+        const store = makeStore();
+        expect(stage(store, {
+            actionId: 'custom-1', targetType: 'items', attachToComposer: false,
+        })).toBeTruthy();
+        expect(store.get(currentMessageItemsAtom)).toEqual([]);
+        expect(store.get(currentMessageCollectionsAtom)).toEqual([]);
+    });
+
+    it('binds the context override instead of the live Zotero state', () => {
+        const store = makeStore();
+        const override = { items: [{ libraryID: 1, key: 'ABC' } as any], collections: [] };
+        stage(store, { actionId: 'custom-1', targetType: 'items', contextOverride: override });
+        expect(resolveTargetContext).toHaveBeenCalledWith('items', override);
+    });
+
+    it('stages nothing when the bound items are all in an excluded library', () => {
+        nextTargets({ itemsExcluded: true });
+        const store = makeStore();
+        expect(stage(store, { actionId: 'custom-1', targetType: 'items' })).toBeNull();
+        expect(store.get(currentMessageItemsAtom)).toEqual([]);
+        expect(addPopupMessageMock).toHaveBeenCalledWith(expect.objectContaining({ type: 'error' }));
+    });
+
+    it('stages nothing when the bound collections are all in an excluded library', () => {
+        nextTargets({ collectionsExcluded: true });
+        const store = makeStore();
+        expect(stage(store, { actionId: 'custom-1', targetType: 'collection' })).toBeNull();
+        expect(store.get(currentMessageCollectionsAtom)).toEqual([]);
+        expect(addPopupMessageMock).toHaveBeenCalledWith(expect.objectContaining({ type: 'error' }));
+    });
+
+    it('stages nothing when a bound item is rejected by validation', () => {
+        nextTargets({ items: [{ libraryID: 1, key: 'ABC' }] });
+        vi.mocked(isRejectedItemValidation).mockReturnValueOnce(true);
+        const store = makeStore();
+        expect(stage(store, { actionId: 'custom-1', targetType: 'items' })).toBeNull();
+        expect(store.get(currentMessageItemsAtom)).toEqual([]);
+        expect(addPopupMessageMock).toHaveBeenCalledWith(expect.objectContaining({ type: 'error' }));
+    });
+
+    it('uses the fallback title when the action definition is unavailable', () => {
+        const store = makeStore([]);
+        expect(stage(store, { actionId: 'missing', fallbackTitle: 'My Skill' }))
+            .toMatchObject({ commandName: 'my-skill', title: 'My Skill' });
+    });
 });
 
 describe('sendComposedMessageAtom', () => {
     it('keeps pill tokens verbatim in content and sends structured actions', async () => {
         const store = makeStore();
+        const pill = stage(store, { actionId: 'custom-1', targetType: 'items' })!;
         const ok = await store.set(sendComposedMessageAtom, {
             baseText: '/summarize and focus on methods ',
-            pills: [{ commandName: 'summarize', actionId: 'custom-1', targetType: 'items', title: 'Summarize' }],
+            pills: [pill],
         });
         expect(ok).toBe(true);
-        expect(sendWSMessageMock).toHaveBeenCalledTimes(1);
         const [message, options] = sendWSMessageMock.mock.calls[0];
         expect(message).toBe('/summarize and focus on methods');
         expect(options.actions).toEqual([{
             command: 'summarize',
             action_id: 'custom-1',
             title: 'Summarize',
-            prompt: 'resolved:Summarize the {{selected_items}}.',
+            prompt: 'resolved:Summarize the selected papers.',
             target_type: 'items',
             category: 'research',
         }]);
+    });
+
+    it('does not re-bind the action targets at send', async () => {
+        const store = makeStore();
+        const pill = stage(store, { actionId: 'custom-1', targetType: 'items' })!;
+        await store.set(sendComposedMessageAtom, { baseText: '/summarize', pills: [pill] });
+        // Passing no target type is what keeps the send from re-reading the
+        // Zotero selection; only the prompt text is resolved.
+        expect(resolvePromptVariables).toHaveBeenCalledWith('Summarize the selected papers.', undefined);
+    });
+
+    it('sends the attachments the user is left with', async () => {
+        const kept = { libraryID: 1, key: 'KEEP' };
+        const removed = { libraryID: 1, key: 'DROP' };
+        nextTargets({ items: [kept, removed] });
+        const store = makeStore();
+        const pill = stage(store, { actionId: 'custom-1', targetType: 'items' })!;
+        // The user removes one of the bound targets before sending.
+        store.set(currentMessageItemsAtom, [kept]);
+        await store.set(sendComposedMessageAtom, { baseText: '/summarize', pills: [pill] });
+        expect(store.get(currentMessageItemsAtom)).toEqual([kept]);
+    });
+
+    it('attaches the items a {{variable}} prompt resolves to', async () => {
+        // Prompt variables still resolve on the way out, and the items they
+        // name are merged in as they always have been.
+        const item = { libraryID: 1, key: 'ABC' };
+        vi.mocked(resolvePromptVariables).mockResolvedValueOnce({
+            text: 'x', items: [item], collections: [], emptyItemVariables: [],
+        } as any);
+        const store = makeStore();
+        const pill = stage(store, { actionId: 'custom-1', targetType: 'items' })!;
+        await store.set(sendComposedMessageAtom, { baseText: '/summarize', pills: [pill] });
+        expect(store.get(currentMessageItemsAtom)).toEqual([item]);
+    });
+
+    it('aborts without sending when a variable resolves to no items', async () => {
+        vi.mocked(resolvePromptVariables).mockResolvedValueOnce({
+            text: 'x', items: [], collections: [], emptyItemVariables: ['selected_items'],
+        } as any);
+        const store = makeStore();
+        const pill = stage(store, { actionId: 'custom-1', targetType: 'items' })!;
+        const ok = await store.set(sendComposedMessageAtom, { baseText: '/summarize', pills: [pill] });
+        expect(ok).toBe(false);
+        expect(sendWSMessageMock).not.toHaveBeenCalled();
+        expect(addPopupMessageMock).toHaveBeenCalledWith(expect.objectContaining({ type: 'warning' }));
+    });
+
+    it('aborts without sending when a variable resolves to an excluded item', async () => {
+        // Library 2 is not in the searchable set ([1]).
+        vi.mocked(resolvePromptVariables).mockResolvedValueOnce({
+            text: 'x', items: [{ libraryID: 2, key: 'XYZ' }], collections: [], emptyItemVariables: [],
+        } as any);
+        const store = makeStore();
+        const pill = stage(store, { actionId: 'custom-1', targetType: 'items' })!;
+        const ok = await store.set(sendComposedMessageAtom, { baseText: '/summarize', pills: [pill] });
+        expect(ok).toBe(false);
+        expect(sendWSMessageMock).not.toHaveBeenCalled();
+        expect(addPopupMessageMock).toHaveBeenCalledWith(expect.objectContaining({ type: 'error' }));
     });
 
     it('prefers the pill title snapshot over the current action title', async () => {
@@ -181,130 +375,17 @@ describe('sendComposedMessageAtom', () => {
 
     it('dedupes repeated pills of the same command', async () => {
         const store = makeStore();
+        const pill = stage(store, { actionId: 'custom-1', targetType: 'items' })!;
         await store.set(sendComposedMessageAtom, {
             baseText: '/summarize then /summarize',
-            pills: [
-                { commandName: 'summarize', actionId: 'custom-1', title: 'Summarize' },
-                { commandName: 'summarize', actionId: 'custom-1', title: 'Summarize' },
-            ],
+            pills: [pill, pill],
         });
         expect(sendWSMessageMock.mock.calls[0][1].actions).toHaveLength(1);
         expect(resolvePromptVariables).toHaveBeenCalledTimes(1);
     });
-
-    it('aborts without sending when a variable resolves to no items', async () => {
-        vi.mocked(resolvePromptVariables).mockResolvedValueOnce({
-            text: 'x',
-            items: [],
-            collections: [],
-            emptyItemVariables: ['selected_items'],
-        } as any);
-        const store = makeStore();
-        const ok = await store.set(sendComposedMessageAtom, {
-            baseText: '/summarize',
-            pills: [{ commandName: 'summarize', actionId: 'custom-1' }],
-        });
-        expect(ok).toBe(false);
-        expect(sendWSMessageMock).not.toHaveBeenCalled();
-        expect(addPopupMessageMock).toHaveBeenCalledWith(expect.objectContaining({ type: 'warning' }));
-    });
-
-    it('aborts without sending when a resolved item is rejected by validation', async () => {
-        const item = { libraryID: 1, key: 'ABC' };
-        vi.mocked(resolvePromptVariables).mockResolvedValueOnce({
-            text: 'x',
-            items: [item],
-            collections: [],
-            emptyItemVariables: [],
-        } as any);
-        vi.mocked(isRejectedItemValidation).mockReturnValueOnce(true);
-        const store = makeStore();
-        const ok = await store.set(sendComposedMessageAtom, {
-            baseText: '/summarize',
-            pills: [{ commandName: 'summarize', actionId: 'custom-1' }],
-        });
-        expect(ok).toBe(false);
-        expect(sendWSMessageMock).not.toHaveBeenCalled();
-        expect(addPopupMessageMock).toHaveBeenCalledWith(expect.objectContaining({ type: 'error' }));
-    });
-
-    it('aborts without sending when a resolved item is in an excluded library', async () => {
-        // Library 2 is not in the searchable set ([1]); the item is freshly
-        // resolved with no cached validation, so the direct exclusion gate must
-        // catch it even though isRejectedItemValidation would not.
-        const item = { libraryID: 2, key: 'XYZ' };
-        vi.mocked(resolvePromptVariables).mockResolvedValueOnce({
-            text: 'x',
-            items: [item],
-            collections: [],
-            emptyItemVariables: [],
-        } as any);
-        vi.mocked(isRejectedItemValidation).mockReturnValue(false);
-        const store = makeStore();
-        const ok = await store.set(sendComposedMessageAtom, {
-            baseText: '/summarize',
-            pills: [{ commandName: 'summarize', actionId: 'custom-1' }],
-        });
-        expect(ok).toBe(false);
-        expect(sendWSMessageMock).not.toHaveBeenCalled();
-        expect(addPopupMessageMock).toHaveBeenCalledWith(expect.objectContaining({ type: 'error' }));
-    });
-
-    it('attaches resolved items to the current message', async () => {
-        const item = { libraryID: 1, key: 'ABC' };
-        vi.mocked(resolvePromptVariables).mockResolvedValueOnce({
-            text: 'x',
-            items: [item],
-            collections: [],
-            emptyItemVariables: [],
-        } as any);
-        const store = makeStore();
-        await store.set(sendComposedMessageAtom, {
-            baseText: '/summarize',
-            pills: [{ commandName: 'summarize', actionId: 'custom-1' }],
-        });
-        expect(store.get(currentMessageItemsAtom)).toEqual([item]);
-        expect(sendWSMessageMock).toHaveBeenCalled();
-    });
-
-    it('merges newly resolved collections with the ones already on the message', async () => {
-        const a = { library_id: 1, zotero_key: 'COLLA', name: 'A', parent_key: null };
-        const b = { library_id: 1, zotero_key: 'COLLB', name: 'B', parent_key: null };
-        vi.mocked(resolvePromptVariables).mockResolvedValueOnce({
-            text: 'x',
-            items: [],
-            collections: [a, b],
-            emptyItemVariables: [],
-        } as any);
-        const store = makeStore();
-        store.set(currentMessageCollectionsAtom, [a]);
-        await store.set(sendComposedMessageAtom, {
-            baseText: '/summarize',
-            pills: [{ commandName: 'summarize', actionId: 'custom-1' }],
-        });
-        // A was already attached; B must still reach the model.
-        expect(store.get(currentMessageCollectionsAtom)).toEqual([a, b]);
-    });
-
-    it('does not duplicate a collection already on the message', async () => {
-        const a = { library_id: 1, zotero_key: 'COLLA', name: 'A', parent_key: null };
-        vi.mocked(resolvePromptVariables).mockResolvedValueOnce({
-            text: 'x',
-            items: [],
-            collections: [a],
-            emptyItemVariables: [],
-        } as any);
-        const store = makeStore();
-        store.set(currentMessageCollectionsAtom, [a]);
-        await store.set(sendComposedMessageAtom, {
-            baseText: '/summarize',
-            pills: [{ commandName: 'summarize', actionId: 'custom-1' }],
-        });
-        expect(store.get(currentMessageCollectionsAtom)).toEqual([a]);
-    });
 });
 
-describe('buildEditedPromptActionsAtom (collection attachments)', () => {
+describe('buildEditedPromptActionsAtom', () => {
     const collectionAction: Action = {
         id: 'custom-1',
         title: 'Summarize',
@@ -313,15 +394,28 @@ describe('buildEditedPromptActionsAtom (collection attachments)', () => {
         category: 'research',
     };
 
+    /** Collections a pill added during the edit resolves to on submit. */
+    function nextEditTargets(collections: any[]) {
+        vi.mocked(resolvePromptVariables).mockResolvedValueOnce({
+            text: 'x', items: [], collections, emptyItemVariables: [],
+        } as any);
+    }
+
+    it('binds the targets of a pill added during the edit', async () => {
+        // The overlay has no composer to attach to, so unlike a compose pill
+        // its targets are resolved when the edit is submitted.
+        const store = makeStore([collectionAction]);
+        await store.set(buildEditedPromptActionsAtom, {
+            pills: [{ commandName: 'summarize', actionId: 'custom-1', targetType: 'collection' }],
+            existingAttachments: [],
+        });
+        expect(resolvePromptVariables).toHaveBeenCalledWith('Summarize the collection.', 'collection');
+    });
+
     it('adds only the collections the edited message is missing', async () => {
         const a = { library_id: 1, zotero_key: 'COLLA', name: 'A', parent_key: null };
         const b = { library_id: 1, zotero_key: 'COLLB', name: 'B', parent_key: null };
-        vi.mocked(resolvePromptVariables).mockResolvedValueOnce({
-            text: 'x',
-            items: [],
-            collections: [a, b],
-            emptyItemVariables: [],
-        } as any);
+        nextEditTargets([a, b]);
         const store = makeStore([collectionAction]);
         const result = await store.set(buildEditedPromptActionsAtom, {
             pills: [{ commandName: 'summarize', actionId: 'custom-1' }],
@@ -334,12 +428,7 @@ describe('buildEditedPromptActionsAtom (collection attachments)', () => {
     it('adds every resolved collection when the message carries none', async () => {
         const a = { library_id: 1, zotero_key: 'COLLA', name: 'A', parent_key: null };
         const b = { library_id: 1, zotero_key: 'COLLB', name: 'B', parent_key: null };
-        vi.mocked(resolvePromptVariables).mockResolvedValueOnce({
-            text: 'x',
-            items: [],
-            collections: [a, b],
-            emptyItemVariables: [],
-        } as any);
+        nextEditTargets([a, b]);
         const store = makeStore([collectionAction]);
         const result = await store.set(buildEditedPromptActionsAtom, {
             pills: [{ commandName: 'summarize', actionId: 'custom-1' }],
@@ -355,12 +444,7 @@ describe('buildEditedPromptActionsAtom (collection attachments)', () => {
         // Collection and item keys are separate Zotero namespaces, so an item
         // attachment with the same key must not dedup the collection away.
         const a = { library_id: 1, zotero_key: 'SAMEKEY', name: 'A', parent_key: null };
-        vi.mocked(resolvePromptVariables).mockResolvedValueOnce({
-            text: 'x',
-            items: [],
-            collections: [a],
-            emptyItemVariables: [],
-        } as any);
+        nextEditTargets([a]);
         const store = makeStore([collectionAction]);
         const result = await store.set(buildEditedPromptActionsAtom, {
             pills: [{ commandName: 'summarize', actionId: 'custom-1' }],
@@ -396,7 +480,7 @@ describe('resolvePillsToPromptActionsAtom (edited-message reuse)', () => {
             persistedActions: [persistedAction],
         });
         expect(resolvePromptVariables).toHaveBeenCalledTimes(1);
-        expect(resolved?.actions[0].prompt).toBe('resolved:Summarize the {{selected_items}}.');
+        expect(resolved?.actions[0].prompt).toBe('resolved:Summarize the selected papers.');
     });
 
     it('reuses the persisted entry for surviving pills of deleted actions', async () => {
@@ -410,11 +494,12 @@ describe('resolvePillsToPromptActionsAtom (edited-message reuse)', () => {
 });
 
 describe('stageActionPillAtom', () => {
-    it('stages a pill descriptor derived from the action title', () => {
+    it('hands the resolved pill to the input', () => {
         const store = makeStore();
-        store.set(stageActionPillAtom, { actionId: 'custom-1', targetType: 'items' });
-        const pending = store.get(pendingPillInsertAtom) as any;
-        expect(pending.descriptor).toMatchObject({
+        expect(store.set(stageActionPillAtom, { actionId: 'custom-1', targetType: 'items' })).toBe(true);
+        const pending = store.get(pendingPillInsertsAtom) as any[];
+        expect(pending).toHaveLength(1);
+        expect(pending[0].descriptor).toMatchObject({
             commandName: 'summarize',
             actionId: 'custom-1',
             targetType: 'items',
@@ -422,11 +507,20 @@ describe('stageActionPillAtom', () => {
         });
     });
 
-    it('uses the fallback title when the action is unknown', () => {
-        const store = makeStore([]);
-        store.set(stageActionPillAtom, { actionId: 'missing', fallbackTitle: 'My Skill' });
-        const pending = store.get(pendingPillInsertAtom) as any;
-        expect(pending.descriptor.commandName).toBe('my-skill');
-        expect(pending.descriptor.title).toBe('My Skill');
+    it('queues a second pill instead of displacing an unclaimed one', () => {
+        // An editor claims a pill on a timer, so one staged moments ago may
+        // still be waiting; both actions were launched and both are inserted.
+        const store = makeStore([summarizeAction, critiqueAction]);
+        store.set(stageActionPillAtom, { actionId: 'custom-1', targetType: 'items' });
+        store.set(stageActionPillAtom, { actionId: 'custom-2', targetType: 'items' });
+        const pending = store.get(pendingPillInsertsAtom) as any[];
+        expect(pending.map(p => p.descriptor.commandName)).toEqual(['summarize', 'critique']);
+    });
+
+    it('stages no pill when the action cannot run', () => {
+        nextTargets({ itemsExcluded: true });
+        const store = makeStore();
+        expect(store.set(stageActionPillAtom, { actionId: 'custom-1', targetType: 'items' })).toBe(false);
+        expect(store.get(pendingPillInsertsAtom)).toEqual([]);
     });
 });
