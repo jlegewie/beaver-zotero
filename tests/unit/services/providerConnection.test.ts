@@ -5,16 +5,19 @@ vi.mock('../../../src/utils/logger', () => ({ logger: vi.fn() }));
 vi.mock('../../../src/services/agentService', () => ({
     getWSAuthToken: vi.fn().mockResolvedValue('token'),
 }));
-vi.mock('../../../src/services/busyContext', () => ({
-    getBusyContext: vi.fn(() => ({ busy: false })),
-}));
-vi.mock('../../../src/services/syncPause', () => ({
-    PROVIDER_MUTATING_RUN_SYNC_PAUSE_OWNER: 'provider-mutating-run',
-    scheduleResumeAfterRun: vi.fn(),
-}));
+// Busy context resolves to `{}` by default (no provider registered in this
+// test environment), so it needs no mock. The sync-pause resume seam does
+// need a mock, since asserting on it is the point of the tests below.
+vi.mock('../../../src/services/agentDataDispatch', async (importOriginal) => {
+    const actual = await importOriginal<typeof import('../../../src/services/agentDataDispatch')>();
+    return {
+        ...actual,
+        notifySyncPauseOwnerSettled: vi.fn(),
+    };
+});
 
 import { ProviderConnection } from '../../../src/services/providerConnection';
-import { scheduleResumeAfterRun } from '../../../src/services/syncPause';
+import { notifySyncPauseOwnerSettled } from '../../../src/services/agentDataDispatch';
 import { setClientIdentityProvider } from '../../../src/services/clientIdentity';
 import type { ClientIdentity } from '../../../src/services/clientIdentity';
 
@@ -116,7 +119,7 @@ describe('ProviderConnection', () => {
         });
 
         expect(dataProvider.agent_action_execute.handle).toHaveBeenCalledTimes(1);
-        expect(scheduleResumeAfterRun).toHaveBeenCalledWith('custom-owner');
+        expect(notifySyncPauseOwnerSettled).toHaveBeenCalledWith('custom-owner');
         expect(JSON.parse(sent[0])).toMatchObject({
             type: 'agent_action_execute_response',
             request_id: 'req-1',
@@ -146,7 +149,7 @@ describe('ProviderConnection', () => {
         await Promise.resolve();
 
         expect(dataProvider.list_items_request.handle).toHaveBeenCalledTimes(1);
-        expect(scheduleResumeAfterRun).not.toHaveBeenCalled();
+        expect(notifySyncPauseOwnerSettled).not.toHaveBeenCalled();
         expect(JSON.parse(sent[0])).toMatchObject({
             type: 'list_items',
             request_id: 'req-1',

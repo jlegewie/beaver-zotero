@@ -27,6 +27,8 @@ const REQUIRED_REGISTRATIONS = [
     'registerZoteroDataProvider',
     'registerZoteroClientIdentity',
     'registerZoteroSupabaseStorage',
+    'registerZoteroBusyContext',
+    'registerZoteroSyncPause',
 ];
 
 /** Source lines with no leading whitespace, i.e. statements that run on import. */

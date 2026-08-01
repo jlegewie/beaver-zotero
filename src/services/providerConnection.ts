@@ -23,10 +23,12 @@ import { resolveClientIdentity } from './clientIdentity';
 import {
     AgentDataProviderMap,
     resolveDefaultAgentDataProvider,
+    PROVIDER_MUTATING_RUN_SYNC_PAUSE_OWNER,
+    notifySyncPauseOwnerSettled,
 } from './agentDataDispatch';
 import { getWSAuthToken } from './agentService';
 import { WSAuthMessage, WSRequestReceivedAck } from './agentProtocol';
-import { getBusyContext } from './busyContext';
+import { resolveBusyContext } from './busyContextProvider';
 import {
     isPreparedJsonMessage,
     materializePreparedJsonMessage,
@@ -34,10 +36,6 @@ import {
     withPreparedJsonEnvelope,
     type PreparedJsonMessage,
 } from './preparedJsonMessage';
-import {
-    PROVIDER_MUTATING_RUN_SYNC_PAUSE_OWNER,
-    scheduleResumeAfterRun,
-} from './syncPause';
 
 /** Options for opening a provider connection. */
 export interface ProviderConnectOptions {
@@ -325,7 +323,7 @@ export class ProviderConnection {
                 try {
                     data = withPreparedJsonEnvelope(data, (current) => ({
                         ...current,
-                        timing: { ...current.timing, ...getBusyContext() },
+                        timing: { ...current.timing, ...resolveBusyContext() },
                     }));
                 } catch (error) {
                     logger(`ProviderConnection: Failed to attach busy context: ${error}`, 1);
@@ -333,7 +331,7 @@ export class ProviderConnection {
             }
         } else if ('request_id' in data && 'type' in data && data.type !== 'request_received') {
             try {
-                data = { ...data, timing: { ...(data as any).timing, ...getBusyContext() } };
+                data = { ...data, timing: { ...(data as any).timing, ...resolveBusyContext() } };
             } catch (error) {
                 logger(`ProviderConnection: Failed to attach busy context: ${error}`, 1);
             }
@@ -371,7 +369,7 @@ export class ProviderConnection {
                 type: 'request_received',
                 request_id: requestId,
                 busy: {
-                    ...getBusyContext(),
+                    ...resolveBusyContext(),
                     dispatch_lag_ms: Math.max(0, Date.now() - receivedAt),
                 },
             };
@@ -431,7 +429,7 @@ export class ProviderConnection {
                         })
                         .finally(() => {
                             if (entry.syncPauseOwner) {
-                                scheduleResumeAfterRun(entry.syncPauseOwner);
+                                notifySyncPauseOwnerSettled(entry.syncPauseOwner);
                             }
                         });
                 if (entry.serialize) {

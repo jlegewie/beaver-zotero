@@ -21,12 +21,14 @@ const restrictedGlobals = [
  * Modules that must not reach for Zotero or the app graph themselves. Adding a
  * file here asserts that of the file, not of everything it imports: a listed
  * module may still call a helper that reads `Zotero` internally
- * (`busyContext.ts`, `syncPause.ts`, `libraryIdentity.ts` all do today). Those
- * belong behind an adapter, and until they are, the guard catches the direct
- * regression rather than the transitive one.
+ * (`libraryIdentity.ts` does today). Those belong behind an adapter, and until
+ * they are, the guard catches the direct regression rather than the
+ * transitive one.
  *
- * `busyContext.ts` is absent because it reads Zotero's live sync, DB
- * transaction, lock, and full-text-index state directly.
+ * `busyContext.ts` and `syncPause.ts` are absent because they read Zotero's
+ * live sync, DB transaction, lock, and full-text-index state directly — guarded
+ * files reach their snapshots/hooks through the `busyContextProvider.ts` /
+ * `agentDataDispatch.ts` seams instead, enforced by the import ban below.
  */
 const l1CoreSrcFiles = [
     "src/services/agentProtocol.ts",
@@ -36,6 +38,7 @@ const l1CoreSrcFiles = [
     "src/services/supabaseClient.ts",
     "src/services/agentDataDispatch.ts",
     "src/services/clientIdentity.ts",
+    "src/services/busyContextProvider.ts",
     "src/services/threadService.ts",
     "src/services/accountService.ts",
     "src/services/chatService.ts",
@@ -78,6 +81,8 @@ const l1CoreImportBans = (reactPrefix) => [
             "**/EncryptedStorage",
             "**/zoteroUtils",
             "**/zoteroInstanceWire",
+            "**/busyContext",
+            "**/syncPause",
         ],
         message:
             "L1 core must not import Zotero adapter modules directly — these exist to keep this layer client-agnostic.",

@@ -38,3 +38,25 @@ describe('default agent data-provider registry', () => {
         expect(factory).toHaveBeenCalledWith({ syncPauseOwner: 'provider-mutating-run' });
     });
 });
+
+describe('sync-pause resume seam', () => {
+    afterEach(() => {
+        vi.resetModules();
+    });
+
+    it('is a no-op when nothing has been registered', async () => {
+        const { notifySyncPauseOwnerSettled } = await import('../../../src/services/agentDataDispatch');
+        expect(() => notifySyncPauseOwnerSettled('local-mutating-run')).not.toThrow();
+    });
+
+    it('forwards the settled owner to the registered handler', async () => {
+        const { setSyncPauseResumeHandler, notifySyncPauseOwnerSettled } =
+            await import('../../../src/services/agentDataDispatch');
+        const handler = vi.fn();
+
+        setSyncPauseResumeHandler(handler);
+        notifySyncPauseOwnerSettled('provider-mutating-run');
+
+        expect(handler).toHaveBeenCalledWith('provider-mutating-run');
+    });
+});

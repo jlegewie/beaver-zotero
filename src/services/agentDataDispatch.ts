@@ -17,6 +17,11 @@
  *
  * Behavior note: entries marked `serialize` are chained onto the action
  * execution queue so concurrent mutating actions don't race.
+ *
+ * This module also owns the sync-pause owner tokens and resume seam
+ * (`notifySyncPauseOwnerSettled`) that `providerConnection.ts` calls when a
+ * mutating request settles — kept here rather than in the Zotero-only
+ * `syncPause.ts` so the transport layer never has to import that module.
  */
 
 import type { PreparedJsonMessage } from './preparedJsonMessage';
@@ -34,10 +39,55 @@ export interface AgentDataRequestEntry {
     serialize?: boolean;
     /**
      * Sync pause owner to release when this mutating request settles. An
-     * opaque string token (see `syncPause.ts`) — typed as `string` here so
-     * this module doesn't need to import the Zotero-only sync-pause module.
+     * opaque string token — typed as `string` here so this module doesn't need
+     * to import the Zotero-only sync-pause implementation. See
+     * `notifySyncPauseOwnerSettled` below for how a settled request reaches it.
      */
     syncPauseOwner?: string;
+}
+
+// =============================================================================
+// Sync-pause owner tokens
+// =============================================================================
+
+/** Owner token used when a mutating run is dispatched by this client's own AgentService connection. */
+export const LOCAL_MUTATING_RUN_SYNC_PAUSE_OWNER = 'local-mutating-run';
+/** Owner token used when a mutating run is dispatched over a ProviderConnection (another client's run). */
+export const PROVIDER_MUTATING_RUN_SYNC_PAUSE_OWNER = 'provider-mutating-run';
+
+// =============================================================================
+// Sync-pause resume seam
+// =============================================================================
+
+/**
+ * Notified when a mutating data request settles, so a host can resume
+ * whatever it paused (e.g. Zotero auto-sync) around the run.
+ */
+export type SyncPauseResumeHandler = (owner: string) => void;
+
+let syncPauseResumeHandler: SyncPauseResumeHandler | null = null;
+
+/**
+ * Register the handler invoked when a mutating request's `syncPauseOwner`
+ * settles. Call once at bundle init (e.g. `registerZoteroSyncPause()` from
+ * `react/index.tsx`).
+ *
+ * Unlike `setDefaultAgentDataProvider`, leaving this unregistered is not a
+ * wiring bug: sync suppression is a Zotero-only nicety, not something a
+ * correct agent run depends on. A non-Zotero host that never registers one
+ * simply has nothing to resume — `notifySyncPauseOwnerSettled` is then a
+ * no-op instead of throwing.
+ */
+export function setSyncPauseResumeHandler(handler: SyncPauseResumeHandler): void {
+    syncPauseResumeHandler = handler;
+}
+
+/**
+ * Notify the registered handler that the mutating request owning `owner` has
+ * settled. No-op when nothing is registered.
+ */
+export function notifySyncPauseOwnerSettled(owner: string): void {
+    syncPauseResumeHandler?.(owner);
 }
 
 /** Map from backend request event name to its handler entry. */

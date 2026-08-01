@@ -11,13 +11,24 @@
  * every backend request. Anything that needs watching over time (full-text
  * indexing) is tracked out-of-band via a Notifier observer that only stamps a
  * timestamp; the hot path just compares it.
+ *
+ * Registers itself as the default snapshot provider via
+ * `registerZoteroBusyContext()` (see `busyContextProvider.ts`), so the
+ * transport layer (`agentService.ts`, `providerConnection.ts`) never imports
+ * this module directly.
  */
+
+import { setBusyContextProvider } from './busyContextProvider';
 
 /**
  * Numeric-only snapshot (booleans encoded as 0/1) so the fields can be merged
  * into `FrontendTimingMetadata`, whose index signature is `number | undefined`.
+ *
+ * A type alias rather than an interface: only an alias picks up an implicit
+ * index signature, which is what lets this satisfy the provider seam's
+ * `Record<string, number>` without a cast.
  */
-export interface BusyContext {
+export type BusyContext = {
     /** 1 if a Zotero sync is currently running (Zotero's own sync, not Beaver's) */
     busy_sync: number;
     /** 1 if a Zotero DB transaction is open right now (queries queue behind it) */
@@ -228,4 +239,13 @@ export function getBusyContext(): BusyContext {
         window_hidden: windowHidden,
         event_loop_lag_ms: Math.max(0, now - lastTick - HEARTBEAT_INTERVAL_MS),
     };
+}
+
+/**
+ * Register this module's snapshot as the default busy-context provider. Call
+ * once at webpack bundle init (from `react/index.tsx`), alongside the other
+ * `register*` calls.
+ */
+export function registerZoteroBusyContext(): void {
+    setBusyContextProvider(getBusyContext);
 }

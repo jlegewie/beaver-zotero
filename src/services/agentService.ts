@@ -29,7 +29,7 @@ import {
     WSRequestReceivedAck,
     AskUserQuestionAnswer,
 } from './agentProtocol';
-import { getBusyContext } from './busyContext';
+import { resolveBusyContext } from './busyContextProvider';
 import {
     isPreparedJsonMessage,
     materializePreparedJsonMessage,
@@ -558,7 +558,7 @@ export class AgentService {
                 try {
                     data = withPreparedJsonEnvelope(data, (current) => ({
                         ...current,
-                        timing: { ...current.timing, ...getBusyContext() },
+                        timing: { ...current.timing, ...resolveBusyContext() },
                     }));
                 } catch (error) {
                     logger(`AgentService: Failed to attach busy context: ${error}`, 1);
@@ -572,7 +572,7 @@ export class AgentService {
             try {
                 data = {
                     ...data,
-                    timing: { ...(data as any).timing, ...getBusyContext() },
+                    timing: { ...(data as any).timing, ...resolveBusyContext() },
                 };
             } catch (error) {
                 logger(`AgentService: Failed to attach busy context: ${error}`, 1);
@@ -634,7 +634,7 @@ export class AgentService {
                 type: 'request_received',
                 request_id: requestId,
                 busy: {
-                    ...getBusyContext(),
+                    ...resolveBusyContext(),
                     dispatch_lag_ms: Math.max(0, Date.now() - receivedAt),
                 },
             };

@@ -36,6 +36,8 @@ import { registerZoteroHost } from './host/zotero';
 import { registerZoteroDataProvider } from '../src/services/zoteroDataProvider';
 import { registerZoteroClientIdentity } from '../src/services/zoteroClientIdentity';
 import { registerZoteroSupabaseStorage } from '../src/services/zoteroSupabaseStorage';
+import { registerZoteroBusyContext } from '../src/services/busyContext';
+import { registerZoteroSyncPause } from '../src/services/syncPause';
 import { notifyWorkerStartFailure } from './utils/workerUnavailableNotice';
 
 // Configure the PDF package (webpack bundle copy). The esbuild bundle
@@ -67,6 +69,14 @@ registerZoteroClientIdentity();
 // persists into. Must run before the exported `supabase` client is first
 // used (the client is created lazily on first property access).
 registerZoteroSupabaseStorage();
+
+// Register the Zotero busy-context snapshot attached to outgoing WS
+// diagnostics, and the sync-pause resume handler released when a mutating
+// data request settles. Both are optional niceties (diagnostics, and
+// suppressing Zotero's own sync) rather than requirements for a correct
+// agent run, but the Zotero plugin always provides them.
+registerZoteroBusyContext();
+registerZoteroSyncPause();
 
 /**
  * Component to initialize global hooks that should only run once.
