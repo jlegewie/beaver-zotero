@@ -172,6 +172,18 @@ describe('clipboardFiles', () => {
             expect(PathUtils.parent(first!)).not.toBe(PathUtils.parent(second!));
         });
 
+        it('removes the scratch folder when the write fails', async () => {
+            vi.mocked(IOUtils.write).mockRejectedValueOnce(new Error('disk full'));
+            const { writePastedFileToTemp } = await loadModule();
+
+            expect(await writePastedFileToTemp(fakeFile('paper.pdf', 'application/pdf'))).toBeNull();
+
+            expect(IOUtils.remove).toHaveBeenCalledWith(
+                expect.stringContaining('beaver-paste-'),
+                { recursive: true, ignoreAbsent: true },
+            );
+        });
+
         it('returns null when the bytes cannot be read', async () => {
             const { writePastedFileToTemp } = await loadModule();
             const broken = {

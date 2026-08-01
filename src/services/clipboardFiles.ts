@@ -160,7 +160,13 @@ async function writeTempFile(bytes: Uint8Array, filename: string): Promise<strin
     );
     await IOUtils.makeDirectory(folder, { createAncestors: true, ignoreExisting: true });
     const path = PathUtils.join(folder, filename);
-    await IOUtils.write(path, bytes);
+    try {
+        await IOUtils.write(path, bytes);
+    } catch (error) {
+        // Leave no scratch folder behind for a write that never landed.
+        await IOUtils.remove(folder, { recursive: true, ignoreAbsent: true }).catch(() => undefined);
+        throw error;
+    }
     return path;
 }
 
