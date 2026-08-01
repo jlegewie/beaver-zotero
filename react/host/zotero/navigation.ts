@@ -61,7 +61,20 @@ export const zoteroNavigation: NavigationHost = {
         Zotero.launchFile(filePath);
     },
     openExternalUrl(url: string): void {
-        Zotero.getMainWindow().location.href = url;
+        // Route through ZoteroPane.loadURI: it dispatches `zotero://` URLs to
+        // their registered protocol extension in-process (including Beaver's
+        // own thread links) and hands everything else to the OS browser.
+        // Never navigate the window itself — the UI lives in a chrome document.
+        const pane = Zotero.getMainWindow()?.ZoteroPane;
+        if (pane) {
+            pane.loadURI(url);
+            return;
+        }
+        try {
+            Zotero.launchURL(url);
+        } catch (error) {
+            Zotero.logError(error as Error);
+        }
     },
     activateCitation,
     openSource(ref: ZoteroItemReference): Promise<void> {

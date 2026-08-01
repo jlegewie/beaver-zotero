@@ -16,7 +16,7 @@ vi.mock('../../../react/atoms/messageComposition', async () => {
     return {
         currentMessageItemsAtom: atom<unknown[]>([]),
         currentMessageCollectionsAtom: atom<unknown[]>([]),
-        pendingPillInsertAtom: atom<unknown | null>(null),
+        pendingPillInsertsAtom: atom<unknown[]>([]),
     };
 });
 

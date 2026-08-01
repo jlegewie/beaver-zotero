@@ -89,7 +89,7 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
     }, []);
     // Stable forwarder so the slash menu can insert a command pill into the
     // Lexical editor (the editor handle isn't available until after mount).
-    const insertSlashCommand = useCallback((descriptor: SlashCommandDescriptor, queryLength: number) => {
+    const insertSlashCommand = useCallback((descriptor: SlashCommandDescriptor, queryLength: number | null) => {
         editorHandleRef.current?.insertSlashCommand(descriptor, queryLength);
     }, []);
 
@@ -103,7 +103,12 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
         handleSlashMenuChange,
         handleSlashTrigger,
         handleSlashMenuKeyDown,
-    } = useSlashMenu(editInputRef, 'below', focusEditor, insertSlashCommand, setEditedContent);
+    } = useSlashMenu(editInputRef, 'below', focusEditor, insertSlashCommand, {
+        setContent: setEditedContent,
+        // The overlay edits a sent message's own attachment list; targets an
+        // action pulls in are added to it on submit, not to the composer.
+        attachTargets: false,
+    });
 
     // Check if content needs fade effect
     useEffect(() => {

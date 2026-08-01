@@ -10,7 +10,7 @@ import { searchableLibraryIdsAtom } from '../atoms/profile';
 import { addPopupMessageAtom } from '../utils/popupMessageUtils';
 import { newThreadAtom } from '../atoms/threads';
 import { currentMessageItemsAtom, currentMessageCollectionsAtom } from '../atoms/messageComposition';
-import { collectionToReference } from '../types/zotero';
+import { collectionToReference, CollectionReference } from '../types/zotero';
 import { stageActionPillAtom } from '../atoms/actions';
 import { eventManager } from '../events/eventManager';
 import { useEventSubscription } from './useEventSubscription';
@@ -57,6 +57,10 @@ export function useContextMenuActionHandler() {
         //    (toggleChat's synchronous clear of items runs in the same tick)
         setTimeout(async () => {
             try {
+                // Target context for the action's prompt: the rows the user
+                // right-clicked, which are not always what the live Zotero
+                // selection resolves to (e.g. with a reader tab open).
+                let contextItems: Zotero.Item[] = [];
                 if (itemIds.length > 0) {
                     const items = await Zotero.Items.getAsync(itemIds);
                     if (items.length > 0) {
@@ -67,6 +71,7 @@ export function useContextMenuActionHandler() {
                             : ['itemData'];
                         await Zotero.Items.loadDataTypes(items, dataTypes);
                         setCurrentMessageItems(items);
+                        contextItems = items;
                     }
                 } else {
                     // Collection/global actions: clear any items auto-populated
@@ -77,23 +82,27 @@ export function useContextMenuActionHandler() {
                 // For collection actions: explicitly attach every right-clicked
                 // collection the user can use, so the model receives the whole
                 // allowed selection.
+                let contextCollections: CollectionReference[] = [];
                 if (targetType === 'collection' && allowedCollections.length > 0) {
                     const cols = allowedCollections
                         .map(c => Zotero.Collections.get(c.collectionId) as Zotero.Collection | undefined)
                         .filter((col): col is Zotero.Collection => !!col);
                     if (cols.length > 0) {
-                        setCurrentMessageCollections(cols.map(collectionToReference));
+                        contextCollections = cols.map(collectionToReference);
+                        setCurrentMessageCollections(contextCollections);
                     }
                 }
 
-                // 4. Stage the action as a /command pill in the input. The
-                //    context menu / reader toolbar live in the main window and
-                //    step 1 force-opened its sidebar, so target that editor
-                //    (not the separate Beaver window, if one is open).
+                // 4. Stage the action as a /command pill in the input, bound to
+                //    the right-clicked rows. The context menu / reader toolbar
+                //    live in the main window and step 1 force-opened its
+                //    sidebar, so target that editor (not the separate Beaver
+                //    window, if one is open).
                 stageActionPill({
                     actionId,
                     targetType,
                     fallbackTitle: actionTitle,
+                    contextOverride: { items: contextItems, collections: contextCollections },
                     targetWindow: Zotero.getMainWindow(),
                 });
             } catch (error) {
