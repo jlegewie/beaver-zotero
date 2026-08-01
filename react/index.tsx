@@ -34,6 +34,7 @@ import { useSyncSuppression } from './hooks/useSyncSuppression';
 import { BeaverTemporaryAnnotations } from './utils/annotationUtils';
 import { registerZoteroHost } from './host/zotero';
 import { registerZoteroDataProvider } from '../src/services/zoteroDataProvider';
+import { registerZoteroClientIdentity } from '../src/services/zoteroClientIdentity';
 import { notifyWorkerStartFailure } from './utils/workerUnavailableNotice';
 
 // Configure the PDF package (webpack bundle copy). The esbuild bundle
@@ -55,6 +56,11 @@ registerZoteroHost();
 // WebSocket data request (both resolve their provider lazily on first use, so
 // this only needs to land before that point, not before module load).
 registerZoteroDataProvider();
+
+// Register the Zotero client identity provider used to build the auth
+// handshake's frontend_version/client_type/client_features/zotero_instance
+// fields. Must run before ProviderConnection opens its first connection.
+registerZoteroClientIdentity();
 
 /**
  * Component to initialize global hooks that should only run once.

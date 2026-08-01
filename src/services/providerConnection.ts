@@ -19,21 +19,13 @@
 
 import API_BASE_URL from '../utils/getAPIBaseURL';
 import { logger } from '../utils/logger';
-import { buildZoteroInstanceWire } from './zoteroInstanceWire';
-import { store } from '../../react/store';
-import { searchableLibraryIdsAtom } from '../../react/atoms/profile';
+import { resolveClientIdentity } from './clientIdentity';
 import {
     AgentDataProviderMap,
     resolveDefaultAgentDataProvider,
 } from './agentDataDispatch';
 import { getWSAuthToken } from './agentService';
-import {
-    WSAuthMessage,
-    WSRequestReceivedAck,
-    ZOTERO_PLUGIN_CLIENT_TYPE,
-    ZOTERO_PLUGIN_FEATURES,
-    ZoteroInstanceWire,
-} from './agentProtocol';
+import { WSAuthMessage, WSRequestReceivedAck } from './agentProtocol';
 import { getBusyContext } from './busyContext';
 import {
     isPreparedJsonMessage,
@@ -65,10 +57,6 @@ export interface ProviderConnectionStatus {
     lastCloseCode: number | null;
     lastCloseReason: string | null;
     reconnectAttempts: number;
-}
-
-function getZoteroInstanceWire(): ZoteroInstanceWire {
-    return buildZoteroInstanceWire(store.get(searchableLibraryIdsAtom));
 }
 
 export class ProviderConnection {
@@ -173,13 +161,16 @@ export class ProviderConnection {
                 throw new Error('Provider connection closed during setup');
             }
 
+            // Resolved fresh for this attempt (not cached) — the searchable
+            // library set can change between reconnects.
+            const identity = resolveClientIdentity();
             const authMessageBase: Omit<WSAuthMessage, 'connect_latency_ms'> = {
                 type: 'auth',
                 token,
-                frontend_version: Zotero.Beaver?.pluginVersion || '',
-                client_type: ZOTERO_PLUGIN_CLIENT_TYPE,
-                client_features: ZOTERO_PLUGIN_FEATURES,
-                zotero_instance: getZoteroInstanceWire(),
+                frontend_version: identity.frontendVersion,
+                client_type: identity.clientType,
+                client_features: identity.clientFeatures,
+                zotero_instance: identity.zoteroInstance,
                 connect_attempts: 1,
                 ...(options.wakeId ? { wake_id: options.wakeId } : {}),
                 ...(options.wakeInstanceId ? { wake_instance_id: options.wakeInstanceId } : {}),
