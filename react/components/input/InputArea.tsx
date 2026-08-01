@@ -29,6 +29,7 @@ import { getPref, setPref } from '../../../src/utils/prefs';
 import { LexicalEditorInput, LexicalEditorInputHandle, SlashCommandDescriptor } from './lexical/LexicalEditorInput';
 import { isImeKeyEvent } from '../../utils/ime';
 import { useSlashMenu } from '../../hooks/useSlashMenu';
+import { useComposerPasteHandlers } from '../../hooks/useComposerPasteHandlers';
 import { sendComposedMessageAtom } from '../../atoms/actions';
 
 const HIGH_INPUT_TOKEN_WARNING_THRESHOLD = 100_000;
@@ -76,6 +77,9 @@ const InputArea: React.FC<InputAreaProps> = ({
     const composerResetToken = useAtomValue(composerResetTokenAtom);
     const store = useStore();
     const webSearchDescriptionId = useId();
+
+    // Turns a paste carrying files or image bytes into message attachments.
+    const pasteHandlers = useComposerPasteHandlers();
 
     // Imperative handle exposed by the Lexical editor (focus / clear).
     const editorHandleRef = useRef<LexicalEditorInputHandle | null>(null);
@@ -571,6 +575,7 @@ const InputArea: React.FC<InputAreaProps> = ({
                         pills={messagePills}
                         onPillsChange={setMessagePills}
                         onSubmit={handleEditorSubmit}
+                        pasteHandlers={pasteHandlers}
                         placeholder={getPlaceholderText()}
                         ariaLabel="Message Beaver"
                         disabled={isAwaitingApproval}

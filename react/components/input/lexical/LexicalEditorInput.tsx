@@ -26,6 +26,7 @@ import {
     CONTROLLED_TEXT_INSERTION_COMMAND,
     KEY_ENTER_COMMAND,
     LexicalNode,
+    PASTE_COMMAND,
     SKIP_SELECTION_FOCUS_TAG,
 } from 'lexical';
 import {
@@ -362,6 +363,29 @@ type PendingTextControls = {
     discard: () => void;
 };
 
+/**
+ * Host-supplied handling for a paste that carries files rather than text (see
+ * ClipboardAttachmentPlugin). Optional throughout: a host that cannot attach
+ * files simply omits it and paste keeps its default text behavior.
+ */
+export interface ComposerPasteHandlers {
+    /** Attach the files carried by a paste event. */
+    onPasteFiles?: (files: File[]) => void;
+    /**
+     * Whether the system clipboard holds a file that produces no paste event.
+     * Called synchronously on every paste keystroke, so it must stay cheap.
+     */
+    hasClipboardFile?: () => boolean;
+    /**
+     * Whether the system clipboard holds an image. Consulted only when a paste
+     * event arrives without files, which is how some platforms deliver a
+     * clipboard image.
+     */
+    hasClipboardImage?: () => boolean;
+    /** Attach whatever attachable content the clipboard currently holds. */
+    onPasteFromClipboard?: () => void;
+}
+
 export interface LexicalEditorInputProps {
     value: string;
     onChange: (text: string) => void;
@@ -390,6 +414,11 @@ export interface LexicalEditorInputProps {
      * to call `.focus()` imperatively from elsewhere).
      */
     onContentEditableRef?: (el: HTMLElement | null) => void;
+    /**
+     * Turns a paste that carries files into message attachments. Omit to leave
+     * paste as plain text only.
+     */
+    pasteHandlers?: ComposerPasteHandlers;
 }
 
 // Exposes a textarea-like focus()/clear() API to the parent via ref so the
@@ -920,6 +949,90 @@ const SubmitOnEnterPlugin: React.FC<{ onSubmit: () => void }> = ({ onSubmit }) =
             COMMAND_PRIORITY_HIGH,
         );
     }, [editor, onSubmit]);
+    return null;
+};
+
+/**
+ * Turns pasted files and images into message attachments.
+ *
+ * The two clipboard shapes reach us through different mechanisms, which is why
+ * this plugin hooks both a command and a raw key:
+ *
+ * - **Images** (screenshots, "Copy Image" in the PDF reader, images copied from
+ *   a browser) arrive as a normal paste, with the bytes exposed as a File on
+ *   `clipboardData`. The clipboard carries no text in this case, so without
+ *   this handler the plain-text paste inserts nothing at all and the paste
+ *   looks like it was ignored. PASTE_COMMAND is registered above the plain-text
+ *   handler's priority so an attachment paste can consume the event.
+ * - **Files copied in a file manager** carry only the platform's file flavor,
+ *   which editors do not consider pasteable — *no paste event is dispatched*.
+ *   The only way to see them is to inspect the clipboard when the paste key is
+ *   pressed, so Cmd/Ctrl+V is also watched on keydown. The clipboard check runs
+ *   first and is false for any text clipboard, leaving ordinary paste untouched.
+ *
+ * Both routes are supplied by the host (`pasteHandlers`); with none registered
+ * the plugin stands down and paste behaves as it did before.
+ */
+const ClipboardAttachmentPlugin: React.FC<{
+    handlers?: ComposerPasteHandlers;
+    ime: ImeCompositionTracker;
+}> = ({ handlers, ime }) => {
+    const [editor] = useLexicalComposerContext();
+
+    // Read the latest handlers through a ref so the listeners below register
+    // once per editor instead of re-registering whenever the host re-renders.
+    const handlersRef = useRef<ComposerPasteHandlers | undefined>(handlers);
+    handlersRef.current = handlers;
+
+    useEffect(() => {
+        return editor.registerCommand<ClipboardEvent>(
+            PASTE_COMMAND,
+            (event) => {
+                const { onPasteFiles, hasClipboardImage, onPasteFromClipboard } = handlersRef.current ?? {};
+                const files = event?.clipboardData?.files;
+                if (files && files.length > 0) {
+                    if (!onPasteFiles) return false;
+                    event.preventDefault();
+                    onPasteFiles(Array.from(files));
+                    return true;
+                }
+                // Some platforms dispatch the paste for a clipboard image but
+                // leave the image out of the event's payload; read it off the
+                // clipboard instead of letting the paste do nothing.
+                if (onPasteFromClipboard && hasClipboardImage?.()) {
+                    event.preventDefault();
+                    onPasteFromClipboard();
+                    return true;
+                }
+                return false;
+            },
+            COMMAND_PRIORITY_HIGH,
+        );
+    }, [editor]);
+
+    useEffect(() => {
+        const handler = (e: KeyboardEvent) => {
+            if (e.key !== 'v' && e.key !== 'V') return;
+            const accel = Zotero.isMac ? e.metaKey : e.ctrlKey;
+            if (!accel || e.altKey || e.shiftKey) return;
+            // An input method may use the same chord; never take it over while
+            // a composition is running.
+            if (isImeKeyEvent(e) || ime.isComposing()) return;
+            // Only the no-paste-event case is claimed here. A clipboard image
+            // does fire a paste, so it is left to the command handler above.
+            const { hasClipboardFile, onPasteFromClipboard } = handlersRef.current ?? {};
+            if (!hasClipboardFile || !onPasteFromClipboard) return;
+            if (!hasClipboardFile()) return;
+            e.preventDefault();
+            onPasteFromClipboard();
+        };
+
+        return editor.registerRootListener((rootElement, prevRootElement) => {
+            if (prevRootElement) prevRootElement.removeEventListener('keydown', handler, true);
+            if (rootElement) rootElement.addEventListener('keydown', handler, true);
+        });
+    }, [editor, ime]);
+
     return null;
 };
 
@@ -1913,7 +2026,7 @@ const editorConfig = {
 
 export const LexicalEditorInput = forwardRef<LexicalEditorInputHandle, LexicalEditorInputProps>(
     function LexicalEditorInput(
-        { value, onChange, pills, onPillsChange, onSubmit, placeholder, ariaLabel, disabled = false, onKeyDown, suspendKeyboardNavigation = false, onContentEditableRef },
+        { value, onChange, pills, onPillsChange, onSubmit, placeholder, ariaLabel, disabled = false, onKeyDown, suspendKeyboardNavigation = false, onContentEditableRef, pasteHandlers },
         ref,
     ) {
         const contentEditableRef = useRef<HTMLDivElement | null>(null);
@@ -2031,6 +2144,7 @@ export const LexicalEditorInput = forwardRef<LexicalEditorInputHandle, LexicalEd
                     <SlashCommandClickPlugin />
                     <SlashCommandHoverCardPlugin />
                     <SubmitOnEnterPlugin onSubmit={onSubmit} />
+                    <ClipboardAttachmentPlugin handlers={pasteHandlers} ime={ime} />
                     <WindowsImeCompositionOrderPlugin />
                     <ImeTracePlugin ime={ime} />
                     <EditorApi

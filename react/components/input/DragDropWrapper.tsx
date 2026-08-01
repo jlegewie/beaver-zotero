@@ -3,13 +3,10 @@ import { getPref } from '../../../src/utils/prefs';
 import { ZoteroIcon, ZOTERO_ICONS } from '../icons/ZoteroIcon';
 import { CSSItemTypeIcon, CSSIcon } from '../icons/zotero';
 import { isValidAnnotationType } from '../../types/attachments/apiTypes';
-import { addItemToCurrentMessageItemsAtom, addItemsToCurrentMessageItemsAtom, addExternalFilesToCurrentMessageAtom, currentMessageFiltersAtom } from '../../atoms/messageComposition';
+import { addItemToCurrentMessageItemsAtom, addItemsToCurrentMessageItemsAtom, currentMessageFiltersAtom } from '../../atoms/messageComposition';
 import { useSetAtom, useAtomValue } from 'jotai';
 import { searchableLibraryIdsAtom } from '../../atoms/profile';
-import { attachExternalFile } from '../../../src/services/externalFiles';
-import type { ExternalFileRecord } from '../../../src/services/database';
-import { selectedModelAtom } from '../../atoms/models';
-import { requestPlusToolsAtom } from '../../atoms/ui';
+import { useAttachExternalFiles } from '../../hooks/useAttachExternalFiles';
 import { importActionAtom, stageActionPillAtom } from '../../atoms/actions';
 import { readActionFile, isActionFilePath } from '../../utils/actionShareFile';
 import { addPopupMessageAtom } from '../../utils/popupMessageUtils';
@@ -57,13 +54,11 @@ const DragDropWrapper: React.FC<DragDropWrapperProps> = ({
     const dragErrorTimeoutRef = useRef<NodeJS.Timeout | null>(null);
     const addItemsToCurrentMessageItems = useSetAtom(addItemsToCurrentMessageItemsAtom);
     const addItemToCurrentMessageItems = useSetAtom(addItemToCurrentMessageItemsAtom);
-    const addExternalFilesToCurrentMessage = useSetAtom(addExternalFilesToCurrentMessageAtom);
+    const attachExternalFiles = useAttachExternalFiles();
     const importAction = useSetAtom(importActionAtom);
     const stageActionPill = useSetAtom(stageActionPillAtom);
     const addPopupMessage = useSetAtom(addPopupMessageAtom);
     const searchableLibraryIds = useAtomValue(searchableLibraryIdsAtom);
-    const selectedModel = useAtomValue(selectedModelAtom);
-    const requestPlusTools = useAtomValue(requestPlusToolsAtom);
     const setCurrentMessageFilters = useSetAtom(currentMessageFiltersAtom);
 
     const maxAddAttachmentToMessage = getPref('maxAddAttachmentToMessage') as number || 10;
@@ -495,26 +490,9 @@ const DragDropWrapper: React.FC<DragDropWrapperProps> = ({
                 return;
             }
 
-            if (otherFiles.length > maxAddAttachmentToMessage) {
-                showErrorMessage(`You can add up to ${maxAddAttachmentToMessage} files at a time.`);
-                return;
-            }
-            const attached: ExternalFileRecord[] = [];
-            const supportsVision = selectedModel?.supports_vision === true;
-            for (const file of otherFiles) {
-                const result = await attachExternalFile(file, {
-                    supportsVision,
-                    canHandleOCRLocally: supportsVision || Boolean(requestPlusTools),
-                });
-                if (result.status === 'attached') {
-                    attached.push(result.record);
-                } else {
-                    showErrorMessage(result.message);
-                }
-            }
-            if (attached.length > 0) {
-                addExternalFilesToCurrentMessage(attached);
-            }
+            // Rejections go to the drag overlay rather than a popup: the user is
+            // still looking at the drop target.
+            await attachExternalFiles(otherFiles, { onReject: showErrorMessage });
             return;
         }
     };
