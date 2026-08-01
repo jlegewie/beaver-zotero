@@ -1,5 +1,3 @@
-import { libraryRefForLibraryID, resolveObjectId } from "../../src/utils/libraryIdentity";
-
 /**
  * ZoteroLibrary is a reference to a Zotero library.
  */
@@ -54,35 +52,15 @@ export interface FailedFileReference extends FileHashReference {
 }
 
 /**
- * Parses a model-facing item id: either a portable `<library_ref>-<zotero_key>`
- * (`u-KEY`, `g<groupID>-KEY`) or a legacy `<libraryID>-zoteroKey`. Returns
- * `null` for `ext-<KEY>` external-file ids and other malformed input.
- */
-export function createZoteroItemReference(id: string): ZoteroItemReference | null {
-    return resolveObjectId(id);
-}
-
-/**
  * CollectionReference is a reference to a Zotero collection.
  *
  * Canonical collection type used across message composition, prompt-variable
  * resolution, and tool-result display. Build one from a live Zotero collection
- * with `collectionToReference()`.
+ * with `collectionToReference()` in `react/utils/zoteroReferences.ts`.
  */
 export interface CollectionReference extends ZoteroItemReference {
     name: string;
     parent_key: string | null;
-}
-
-/** Build a CollectionReference from a live Zotero collection. */
-export function collectionToReference(collection: Zotero.Collection): CollectionReference {
-    return {
-        library_id: collection.libraryID,
-        zotero_key: collection.key,
-        library_ref: libraryRefForLibraryID(collection.libraryID) ?? undefined,
-        name: collection.name,
-        parent_key: collection.parentKey || null,
-    };
 }
 
 /**

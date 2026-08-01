@@ -1,3 +1,4 @@
+import { v4 as uuidv4 } from 'uuid';
 import { calculateObjectHash } from '../utils/hash';
 import { logger } from './logger';
 import { libraryRefForLibraryID, modelObjectId } from './libraryIdentity';
@@ -9,6 +10,7 @@ import { skippedItemsManager } from '../services/skippedItemsManager';
 import { AnnotationResultItem, NoteResultItem } from '../services/agentProtocol';
 import { getContentKind } from '../services/documentExtraction/attachmentResolution';
 import type { ContentKind } from '../services/documentExtraction/shared/contentKinds';
+import type { ItemSearchResult } from '../services/searchService';
 
 export interface FileData {
     // filename: string;
@@ -389,6 +391,28 @@ export async function serializeItemSummary(item: Zotero.Item): Promise<ItemSumma
         collections: getCollectionSummariesFromItem(item),
         citation_key: await getCitationKeyFromItem(item),
     };
+}
+
+/**
+ * Serializes a Zotero item into an `ItemSearchResult`, the shape used by the
+ * local quick-search UI (client-side scoring, no backend round trip).
+ * @param item Zotero item
+ * @returns ItemSearchResult
+ */
+export function itemSearchResultFromZoteroItem(item: Zotero.Item): ItemSearchResult {
+    return {
+        id: uuidv4(),
+        library_id: item.libraryID,
+        zotero_key: item.key,
+        library_ref: libraryRefForLibraryID(item.libraryID) ?? undefined,
+        item_type: item.itemType,
+        // @ts-ignore - Add proper types later
+        deleted: typeof item.isInTrash === 'function' ? item.isInTrash() : (item.deleted ?? false),
+        title: item.getField('title', false, true),
+        year: getYearFromItem(item),
+        rank: 0,
+        similarity: 0,
+    } as ItemSearchResult;
 }
 
 /**

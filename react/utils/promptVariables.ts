@@ -28,7 +28,8 @@ import { currentReaderAttachmentAtom } from '../atoms/messageComposition';
 import { selectedZoteroItemsAtom, currentNoteItemAtom, libraryViewAtom } from '../atoms/zoteroContext';
 import { pureCollectionSelection } from './actionVisibility';
 import { ActionTargetType } from '../types/actions';
-import { CollectionReference, collectionToReference } from '../types/zotero';
+import { CollectionReference } from '../types/zotero';
+import { collectionToReference } from './zoteroReferences';
 
 // ---------------------------------------------------------------------------
 // Public API

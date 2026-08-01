@@ -46,7 +46,8 @@ import {
     currentMessageCollectionsAtom,
 } from '../../atoms/messageComposition';
 import { userIdAtom, isAuthenticatedAtom } from '../../atoms/auth';
-import { collectionToReference, type CollectionReference } from '../../types/zotero';
+import { type CollectionReference } from '../../types/zotero';
+import { collectionToReference } from '../../utils/zoteroReferences';
 import { resolveItemReference } from '../../../src/utils/libraryIdentity';
 import { undoEditMetadataAction } from '../../utils/editMetadataActions';
 import { undoCreateCollectionAction } from '../../utils/createCollectionActions';

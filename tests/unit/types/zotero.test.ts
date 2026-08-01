@@ -2,9 +2,9 @@ import { describe, expect, it } from 'vitest';
 
 import {
     collectionReferenceKey,
-    collectionToReference,
     type CollectionReference,
 } from '../../../react/types/zotero';
+import { collectionToReference } from '../../../react/utils/zoteroReferences';
 
 describe('collectionReferenceKey', () => {
     it('combines library_id and zotero_key into a composite key', () => {

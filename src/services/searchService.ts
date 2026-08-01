@@ -1,8 +1,5 @@
-import { v4 as uuidv4 } from 'uuid';
 import { ApiService } from './apiService';
 import API_BASE_URL from '../utils/getAPIBaseURL';
-import { getYearFromItem } from '../utils/zoteroSerializers'
-import { libraryRefForLibraryID } from '../utils/libraryIdentity';
 
 // Type for metadata search results that matches the ItemSearchResult from backend
 export interface ItemSearchResult {
@@ -18,23 +15,6 @@ export interface ItemSearchResult {
     rank?: number;
     similarity?: number;
 }
-
-export function itemSearchResultFromZoteroItem(item: Zotero.Item): ItemSearchResult {
-    return {
-        id: uuidv4(),
-        library_id: item.libraryID,
-        zotero_key: item.key,
-        library_ref: libraryRefForLibraryID(item.libraryID) ?? undefined,
-        item_type: item.itemType,
-        // @ts-ignore - Add proper types later
-        deleted: typeof item.isInTrash === 'function' ? item.isInTrash() : (item.deleted ?? false),
-        title: item.getField('title', false, true),
-        year: getYearFromItem(item),
-        rank: 0,
-        similarity: 0,
-    } as ItemSearchResult;
-}
-
 
 // Type for search params to keep track of the various query parameters
 export interface SearchParams {

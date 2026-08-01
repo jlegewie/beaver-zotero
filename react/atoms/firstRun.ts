@@ -13,7 +13,8 @@ import {
     currentMessageItemsAtom,
     currentMessageCollectionsAtom,
 } from './messageComposition';
-import { CollectionReference, collectionToReference } from '../types/zotero';
+import { CollectionReference } from '../types/zotero';
+import { collectionToReference } from '../utils/zoteroReferences';
 import { sendWSMessageAtom } from './agentRunAtoms';
 import { newThreadAtom } from './threads';
 import { profileWithPlanAtom, isDeviceAuthorizedAtom, isDatabaseSyncSupportedAtom } from './profile';

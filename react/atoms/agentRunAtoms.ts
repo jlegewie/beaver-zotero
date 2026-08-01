@@ -162,7 +162,8 @@ import { agentItemFilterAsync, isAgentSupportedItem } from '../../src/utils/agen
 import { safeIsInTrash } from '../../src/utils/zoteroUtils';
 import { wasItemAddedBeforeLastSync } from '../utils/sourceUtils';
 import { libraryRefForLibraryID, resolveItemReference, resolveLibraryRef } from '../../src/utils/libraryIdentity';
-import { ZoteroItemReference, createZoteroItemReference } from '../types/zotero';
+import { ZoteroItemReference } from '../types/zotero';
+import { createZoteroItemReference } from '../utils/zoteroReferences';
 import { markExternalReferenceImportedAtom } from './externalReferences';
 import type { CreateItemProposedData, CreateItemResultData } from '../types/agentActions/items';
 import { appendRunIfMissing, findResumeChainRoot, findRunForResume, hasOnlyThinkingParts, lingeringCompletedRun, resolveErrorRunId, toRunError } from '../agents/runResumeHelpers';

@@ -1,7 +1,8 @@
 import React from 'react';
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { PlusSignIcon, Icon } from '../../icons/icons';
-import { ItemSearchResult, itemSearchResultFromZoteroItem } from '../../../../src/services/searchService';
+import { ItemSearchResult } from '../../../../src/services/searchService';
+import { itemSearchResultFromZoteroItem } from '../../../../src/utils/zoteroSerializers';
 import SearchMenu, { MenuPosition } from './SearchMenu';
 import { currentMessageFiltersAtom, removeItemFromMessageAtom, addItemToCurrentMessageItemsAtom, currentMessageItemsAtom } from '../../../atoms/messageComposition';
 import { EXTERNAL_FILE_PICKER_EXTENSIONS } from '../../../../src/services/externalFiles';
