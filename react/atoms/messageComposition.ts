@@ -131,6 +131,15 @@ export const addExternalFilesToCurrentMessageAtom = atom(
 );
 
 /**
+ * Composer tokens of the attachments currently in flight, one entry per
+ * operation (see `composerResetTokenAtom`). Copying and hashing a large file
+ * takes long enough for the user to press Enter first, so the composer holds
+ * sending while an entry matches its own token; work left over from a replaced
+ * composition is discarded on completion and holds nothing meanwhile.
+ */
+export const pendingAttachmentTokensAtom = atom<number[]>([]);
+
+/**
  * Remove one external file from the current message.
  */
 export const removeExternalFileFromMessageAtom = atom(

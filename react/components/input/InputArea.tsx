@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { StopIcon, GlobalSearchIcon } from '../icons/icons';
 import { useAtom, useSetAtom, useAtomValue, useStore } from 'jotai';
 import { newThreadAtom, currentThreadIdAtom } from '../../atoms/threads';
-import { currentMessageContentAtom, currentMessagePillsAtom, pendingPillInsertsAtom, composerResetTokenAtom } from '../../atoms/messageComposition';
+import { currentMessageContentAtom, currentMessagePillsAtom, pendingPillInsertsAtom, composerResetTokenAtom, pendingAttachmentTokensAtom } from '../../atoms/messageComposition';
 import { sendWSMessageAtom, isWSChatPendingAtom, closeWSConnectionAtom, sendApprovalResponseAtom } from '../../atoms/agentRunAtoms';
 import { pendingApprovalsAtom, removePendingApprovalAtom } from '../../agents/agentActions';
 import Button from '../ui/Button';
@@ -29,6 +29,7 @@ import { getPref, setPref } from '../../../src/utils/prefs';
 import { LexicalEditorInput, LexicalEditorInputHandle, SlashCommandDescriptor } from './lexical/LexicalEditorInput';
 import { isImeKeyEvent } from '../../utils/ime';
 import { useSlashMenu } from '../../hooks/useSlashMenu';
+import { useComposerPasteHandlers } from '../../hooks/useComposerPasteHandlers';
 import { sendComposedMessageAtom } from '../../atoms/actions';
 
 const HIGH_INPUT_TOKEN_WARNING_THRESHOLD = 100_000;
@@ -77,6 +78,9 @@ const InputArea: React.FC<InputAreaProps> = ({
     const store = useStore();
     const webSearchDescriptionId = useId();
 
+    // Turns a paste carrying files or image bytes into message attachments.
+    const pasteHandlers = useComposerPasteHandlers();
+
     // Imperative handle exposed by the Lexical editor (focus / clear).
     const editorHandleRef = useRef<LexicalEditorInputHandle | null>(null);
     const pendingSelectionRestoreRef = useRef<{ offset: number; skipFocus: boolean } | null>(null);
@@ -103,6 +107,13 @@ const InputArea: React.FC<InputAreaProps> = ({
     const sendComposedMessage = useSetAtom(sendComposedMessageAtom);
     const closeWSConnection = useSetAtom(closeWSConnectionAtom);
     const isPending = useAtomValue(isWSChatPendingAtom);
+
+    // A file staged for THIS composition is still being attached, so sending is
+    // held until it lands. Work left over from a composition the user has since
+    // replaced does not hold. Excludes the pending case, where the button is
+    // "Stop" and must stay live.
+    const pendingAttachmentTokens = useAtomValue(pendingAttachmentTokensAtom);
+    const isAttachingFiles = pendingAttachmentTokens.includes(composerResetToken) && !isPending;
 
     // Pending approval state (for deferred tools)
     // With parallel tool calls, there can be multiple pending approvals
@@ -351,6 +362,7 @@ const InputArea: React.FC<InputAreaProps> = ({
             logger('handleSubmit: Blocked - request already in progress');
             return;
         }
+        if (isAttachingFiles) return;
         sendMessage(messageContent);
     };
 
@@ -428,8 +440,9 @@ const InputArea: React.FC<InputAreaProps> = ({
             return;
         }
         if (isSlashMenuOpen) return;
+        if (isAttachingFiles) return;
         sendMessage(messageContent);
-    }, [isPending, isAwaitingApproval, isSlashMenuOpen, messageContent]);
+    }, [isPending, isAwaitingApproval, isSlashMenuOpen, isAttachingFiles, messageContent]);
 
     const handleDismissHighTokenWarning = (e: React.MouseEvent) => {
         e.preventDefault();
@@ -571,6 +584,7 @@ const InputArea: React.FC<InputAreaProps> = ({
                         pills={messagePills}
                         onPillsChange={setMessagePills}
                         onSubmit={handleEditorSubmit}
+                        pasteHandlers={pasteHandlers}
                         placeholder={getPlaceholderText()}
                         ariaLabel="Message Beaver"
                         disabled={isAwaitingApproval}
@@ -661,7 +675,7 @@ const InputArea: React.FC<InputAreaProps> = ({
                                 // Otherwise, disable if no content and not pending, or no model selected
                                 isAwaitingApproval
                                     ? false
-                                    : ((messageContent.length === 0 && !isPending) || !selectedModel || isSlashMenuOpen)
+                                    : ((messageContent.length === 0 && !isPending) || !selectedModel || isSlashMenuOpen || isAttachingFiles)
                             }
                         >
                             {isAwaitingApproval && messageContent.trim().length > 0
