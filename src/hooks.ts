@@ -86,12 +86,14 @@ const quitObserver = {
             Zotero.__beaverShuttingDown = true;
         }
         // Close beaver.sqlite on quit-application, BEFORE the
-        // profile-before-change barrier where Sqlite.sys.mjs waits for
-        // all connections
+        // profile-before-change barrier where Sqlite.sys.mjs waits for all
+        // connections.
         if (topic === "quit-application") {
             try {
                 if (addon?.db) {
-                    addon.db.closeDatabase().catch(() => {});
+                    addon.db.closeDatabase().catch((error: unknown) => {
+                        Zotero.logError(error as Error);
+                    });
                     addon.db = undefined;
                 }
             } catch (_) {
