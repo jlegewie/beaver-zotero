@@ -17,6 +17,7 @@ import {
     LIBRARY_REF_PATTERN,
     parseItemReference,
     parseLibraryRef,
+    setObjectIdResolver,
     UNRESOLVED_LIBRARY_ID,
 } from './libraryRef';
 import type { ObjectIdReference, WriteTargetLibraryResolution } from './libraryRef';
@@ -27,12 +28,15 @@ export {
     UNRESOLVED_LIBRARY_ID,
     parseItemReference,
     modelObjectIdFromReference,
+    resolveObjectIdReference,
+    setObjectIdResolver,
     writeTargetLibraryError,
 } from './libraryRef';
 export type {
     ParsedLibraryRef,
     ParsedItemReference,
     ObjectIdReference,
+    ObjectIdResolver,
     WriteTargetLibraryResolution,
 } from './libraryRef';
 
@@ -272,4 +276,15 @@ export async function resolveItemReference(
         return { status: 'not_found' };
     }
     return { status: 'found', item };
+}
+
+/**
+ * Register this module's `resolveObjectId` with `resolveObjectIdReference`
+ * (see `libraryRef.ts`), which citation parsing in `citationGrammar.ts` goes
+ * through. Without it that falls back to a pure parse, leaving every portable
+ * ref unresolved. Call once at webpack bundle init (from `react/index.tsx`),
+ * alongside the other `register*` calls, before any note or citation is read.
+ */
+export function registerZoteroObjectIdResolver(): void {
+    setObjectIdResolver(resolveObjectId);
 }

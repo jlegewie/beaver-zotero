@@ -7,6 +7,7 @@
  */
 
 import { vi } from 'vitest';
+import { registerZoteroObjectIdResolver } from '../src/utils/libraryIdentity';
 
 // ---------------------------------------------------------------------------
 // Worker-scope `self` — code inside src/beaver-extract/worker/ references
@@ -204,6 +205,19 @@ function testRemoveDiacritics(s: string): string {
 // Expose the test field/type IDs so tests can reuse them when seeding rows.
 (globalThis as any).__TEST_FIELD_IDS = TEST_FIELD_IDS;
 (globalThis as any).__TEST_TYPE_IDS = TEST_TYPE_IDS;
+
+// ---------------------------------------------------------------------------
+// Object-id resolver — mirrors react/index.tsx's registration so citation and
+// note-reference parsing (citationGrammar.ts) resolves against the Zotero
+// stub above, the same as it does in the running plugin. Individual test
+// files that need the unregistered default (a pure parse) get a fresh,
+// unregistered module instance via `vi.resetModules()` + a dynamic import.
+//
+// Because the reference is captured here, `vi.mock` of `libraryIdentity` in a
+// test file does not reach citation parsing. A test that needs to control how
+// refs resolve should register its own resolver rather than mock the module.
+// ---------------------------------------------------------------------------
+registerZoteroObjectIdResolver();
 
 // ---------------------------------------------------------------------------
 // ztoolkit global (used in hooks.ts, but not in our test targets)

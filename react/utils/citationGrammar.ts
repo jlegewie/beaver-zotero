@@ -1,5 +1,5 @@
 import { ID_PREFIXES } from '../../src/beaver-extract/schema/schema';
-import { resolveObjectId } from '../../src/utils/libraryIdentity';
+import { resolveObjectIdReference } from '../../src/utils/libraryRef';
 import type { ZoteroItemReference } from '../types/zotero';
 
 export type LocatorKind =
@@ -199,13 +199,13 @@ export function locatorFromLegacyPage(page: string | undefined): Locator | undef
 /**
  * Parse a Zotero object identity: either a portable `<library_ref>-<zotero_key>`
  * (`u-KEY`, `g<groupID>-KEY`) or a legacy `<libraryID>-zoteroKey`. Delegates to
- * `resolveObjectId` after stripping the clobber prefix; returns `null` for
- * `ext-<KEY>` external-file ids and other malformed input.
+ * `resolveObjectIdReference` after stripping the clobber prefix; returns `null`
+ * for `ext-<KEY>` external-file ids and other malformed input.
  */
 export function parseZoteroId(raw: string | undefined): ZoteroItemReference | null {
     if (!raw) return null;
     const clean = stripClobberPrefix(raw);
-    return resolveObjectId(clean);
+    return resolveObjectIdReference(clean);
 }
 
 function getLocator(rawAttrs: Record<string, string>): Locator | undefined {

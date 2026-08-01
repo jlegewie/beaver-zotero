@@ -56,7 +56,19 @@ const l1CoreSrcFiles = [
     "src/utils/getAPIBaseURL.ts",
 ];
 
-const l1CoreReactTypeFiles = ["react/types/customChatModel.ts", "react/types/models.ts"];
+/** L1-core files under react/types. Siblings there are type modules, so `./x` is allowed. */
+const l1CoreReactTypeFiles = [
+    "react/types/customChatModel.ts",
+    "react/types/models.ts",
+];
+
+/**
+ * L1-core files under react/utils. Siblings there are app-graph modules that
+ * reach Zotero, and a sibling import reads `./x` rather than `../utils/x`, so
+ * these also ban `./x` — otherwise the `react/utils` ban below cannot fire for
+ * the very directory the file lives in.
+ */
+const l1CoreReactUtilFiles = ["react/utils/citationGrammar.ts"];
 
 const l1CoreGlobals = [
     ...restrictedGlobals,
@@ -266,9 +278,10 @@ export default tseslint.config(
     // docs-zotero/client-decoupling-plan.md.
     //
     // Two blocks, because the react/* bans depend on how deep the guarded file
-    // sits: from src/** the specifier carries a `react/` segment, while from
-    // react/types a sibling is just `../utils/*` — and that shorter form would
-    // otherwise also match the src/utils helpers src/services legitimately uses.
+    // sits: from src/** the specifier carries a `react/` segment, while from a
+    // file one level under react/ (react/types, react/utils) a sibling is just
+    // `../utils/*` — and that shorter form would otherwise also match the
+    // src/utils helpers src/services legitimately uses.
     {
         files: l1CoreSrcFiles,
         rules: {
@@ -286,6 +299,25 @@ export default tseslint.config(
             "no-restricted-imports": [
                 "error",
                 { patterns: l1CoreImportBans("..") },
+            ],
+        },
+    },
+    {
+        files: l1CoreReactUtilFiles,
+        rules: {
+            "no-restricted-globals": ["error", ...l1CoreGlobals],
+            "no-restricted-imports": [
+                "error",
+                {
+                    patterns: [
+                        ...l1CoreImportBans(".."),
+                        {
+                            group: ["./*", "./**"],
+                            message:
+                                "L1 core must not import its react/utils siblings — that pulls in the app graph.",
+                        },
+                    ],
+                },
             ],
         },
     },

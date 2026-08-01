@@ -17,7 +17,10 @@
  * This module only parses and formats strings — it has no Zotero dependency.
  * Resolving a `library_ref` against this device's local libraries (and
  * everything else that touches `Zotero.*`) lives in `libraryIdentity.ts`,
- * which also re-exports everything here.
+ * which also re-exports everything here. `resolveObjectIdReference` exposes
+ * that resolution through an injectable seam (`setObjectIdResolver`) so
+ * callers that must stay Zotero-free, like `citationGrammar.ts`, can still
+ * reach it.
  *
  * This module is esbuild-safe (no `react/*` imports, no Jotai, no
  * supabase) so it can be used from both the esbuild and webpack bundles.
@@ -75,6 +78,47 @@ export function parseItemReference(itemId: string): ParsedItemReference | null {
 
 /** A fully resolved item reference: local `library_id` (or `UNRESOLVED_LIBRARY_ID`), portable `library_ref` when known, and the item key. */
 export type ObjectIdReference = { library_id: number; library_ref?: string; zotero_key: string };
+
+/**
+ * Resolves a model-facing object id (`u-KEY`, `g<groupID>-KEY`, or legacy
+ * `<libraryID>-KEY`) to a device-local reference. Registered by a host that
+ * can resolve `library_ref` against local Zotero libraries — see
+ * `registerZoteroObjectIdResolver()` in `libraryIdentity.ts`.
+ */
+export type ObjectIdResolver = (objectId: string) => ObjectIdReference | null;
+
+let objectIdResolver: ObjectIdResolver | null = null;
+
+/**
+ * Register the resolver used by `resolveObjectIdReference`. Call once at
+ * bundle init (e.g. `registerZoteroObjectIdResolver()` from `react/index.tsx`),
+ * before any citation or note reference is parsed. Unregistered — or on a
+ * non-Zotero host that never registers one — `resolveObjectIdReference` falls
+ * back to a pure parse rather than throwing, since citation parsing runs on
+ * hot render/read paths that must degrade gracefully.
+ */
+export function setObjectIdResolver(resolver: ObjectIdResolver): void {
+    objectIdResolver = resolver;
+}
+
+/**
+ * Resolves a model-facing object id via the registered resolver, or a pure
+ * parse when none is registered: a portable prefix keeps `library_id` as
+ * `UNRESOLVED_LIBRARY_ID` (no local library to resolve against), and a legacy
+ * numeric prefix is kept verbatim with no `library_ref` stamped (stamping
+ * requires resolving against local Zotero libraries). Returns `null` on
+ * malformed input, same as `parseItemReference`.
+ */
+export function resolveObjectIdReference(objectId: string): ObjectIdReference | null {
+    if (objectIdResolver) return objectIdResolver(objectId);
+
+    const parsed = parseItemReference(objectId);
+    if (!parsed) return null;
+    if (parsed.library_ref) {
+        return { library_id: UNRESOLVED_LIBRARY_ID, library_ref: parsed.library_ref, zotero_key: parsed.zotero_key };
+    }
+    return { library_id: parsed.library_id!, zotero_key: parsed.zotero_key };
+}
 
 /**
  * Builds the model-facing object id from an already-structured reference,

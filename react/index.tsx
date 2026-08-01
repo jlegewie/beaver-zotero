@@ -34,6 +34,7 @@ import { useSyncSuppression } from './hooks/useSyncSuppression';
 import { BeaverTemporaryAnnotations } from './utils/annotationUtils';
 import { registerZoteroHost } from './host/zotero';
 import { registerZoteroDataProvider } from '../src/services/zoteroDataProvider';
+import { registerZoteroObjectIdResolver } from '../src/utils/libraryIdentity';
 import { registerZoteroClientIdentity } from '../src/services/zoteroClientIdentity';
 import { registerZoteroSupabaseStorage } from '../src/services/zoteroSupabaseStorage';
 import { registerZoteroBusyContext } from '../src/services/busyContext';
@@ -59,6 +60,11 @@ registerZoteroHost();
 // WebSocket data request (both resolve their provider lazily on first use, so
 // this only needs to land before that point, not before module load).
 registerZoteroDataProvider();
+
+// Register the Zotero object-id resolver used by citation and note-reference
+// parsing (citationGrammar.ts) to resolve a portable library_ref to this
+// device's local library_id. Must run before any note or citation is read.
+registerZoteroObjectIdResolver();
 
 // Register the Zotero client identity provider used to build the auth
 // handshake's frontend_version/client_type/client_features/zotero_instance

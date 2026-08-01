@@ -25,6 +25,7 @@ const ENTRY = resolve(__dirname, '../../../react/index.tsx');
 const REQUIRED_REGISTRATIONS = [
     'registerZoteroHost',
     'registerZoteroDataProvider',
+    'registerZoteroObjectIdResolver',
     'registerZoteroClientIdentity',
     'registerZoteroSupabaseStorage',
     'registerZoteroBusyContext',
