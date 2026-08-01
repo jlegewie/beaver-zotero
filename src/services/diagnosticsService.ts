@@ -18,7 +18,8 @@
 import API_BASE_URL from '../utils/getAPIBaseURL';
 import { logger } from '../utils/logger';
 import { supabase } from './supabaseClient';
-import { getZoteroUserIdentifier } from '../utils/zoteroUtils';
+import { resolveClientIdentity } from './clientIdentity';
+import { getRuntimeAdapter } from '../platform/runtime';
 import { getLastBackendHttpSuccess, recordBackendHttpSuccess } from './backendReachability';
 import {
     ConnectionDiagnosticResult,
@@ -79,25 +80,30 @@ async function executeReport(
 ): Promise<ConnectionDiagnosticResult> {
     const startedAt = Date.now();
     const nav = typeof navigator !== 'undefined' ? navigator : undefined;
-    const pluginVersion =
-        (typeof Zotero !== 'undefined' && Zotero.Beaver?.pluginVersion) || '';
-    const zoteroVersion =
-        (typeof Zotero !== 'undefined' && typeof Zotero.version === 'string' && Zotero.version) ||
-        '';
     const priorSuccess = getLastBackendHttpSuccess();
     const { evidence } = report;
 
-    // Zotero instance identity (per-install local key, plus the Zotero account
-    // id when sync is enabled) so repeated failures from the same install can
-    // be grouped even when the report arrives anonymously.
+    // Client version plus the Zotero instance identity (per-install local key,
+    // and the Zotero account id when sync is enabled) so repeated failures from
+    // the same install and build can be grouped even when the report arrives
+    // anonymously.
+    let pluginVersion = '';
     let zoteroLocalId: string | null = null;
     let zoteroUserId: string | null = null;
     try {
-        const identity = getZoteroUserIdentifier();
-        zoteroLocalId = identity.localUserKey || null;
-        zoteroUserId = identity.userID != null ? String(identity.userID) : null;
+        const { frontendVersion, zoteroInstance } = resolveClientIdentity();
+        pluginVersion = frontendVersion;
+        zoteroLocalId = zoteroInstance?.local_user_key || null;
+        zoteroUserId = zoteroInstance?.user_id ?? null;
     } catch {
         // Identity lookup must never block a failure report.
+    }
+
+    let zoteroVersion = '';
+    try {
+        zoteroVersion = getRuntimeAdapter().hostVersion?.() ?? '';
+    } catch {
+        // Nor may the host version lookup.
     }
 
     // What the user was shown when the failure surfaced. This is the initial

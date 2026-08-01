@@ -1,4 +1,5 @@
 import { atom } from 'jotai';
+import type { OverallSyncStatus } from '../types/profile';
 
 // File uploader status to track running, failed and backoff states
 export const isFileUploaderRunningAtom = atom<boolean>(false);
@@ -7,7 +8,6 @@ export const fileUploaderBackoffUntilAtom = atom<number | null>(null);
 
 export type SyncType = 'initial' | 'incremental' | 'consistency' | 'verification';
 export type SyncStatus = 'idle' | 'in_progress' | 'completed' | 'failed';
-export type OverallSyncStatus = 'in_progress' | 'completed' | 'partially_completed' | 'failed';
 export type SyncMethod = 'version' | 'date_modified';
 
 // Library sync tracking

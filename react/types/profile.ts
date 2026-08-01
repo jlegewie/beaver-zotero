@@ -96,6 +96,9 @@ export interface CreditPlan {
     pendingDowngrade: boolean; // whether a downgrade is pending at period end
 }
 
+/** Aggregate sync outcome reported to the backend when onboarding completes. */
+export type OverallSyncStatus = 'in_progress' | 'completed' | 'partially_completed' | 'failed';
+
 /**
  * Processing mode determines where document processing happens
  * - FRONTEND: Documents processed client-side (free users, paid users before indexing)

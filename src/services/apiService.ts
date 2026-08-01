@@ -7,6 +7,59 @@ import { getRuntimeAdapter } from '../platform/runtime';
 
 type HttpMethod = 'GET' | 'POST' | 'PATCH' | 'DELETE';
 
+/** Per-request overrides. */
+export interface RequestOptions {
+    /**
+     * Give up this many milliseconds after the call starts. Off by default, so
+     * a request runs until the connection settles. Set it when a caller blocks
+     * UI on the result and a stalled backend would leave it stuck.
+     *
+     * This is a deadline for the whole call, not per attempt: it spans the auth
+     * lookup, the connection, a 401 refresh-and-retry, and reading the response
+     * body. Exceeding it always surfaces as `SessionRefreshError`, which callers
+     * treat as retryable.
+     */
+    timeoutMs?: number;
+}
+
+/** An in-flight call's abort controller plus the deadline that armed it. */
+interface RequestDeadline {
+    controller: AbortController;
+    timeoutMs: number;
+}
+
+/**
+ * Runs `call` under a deadline when one is requested.
+ *
+ * `fetch` resolves as soon as response headers arrive, so a timer cleared at
+ * that point leaves a stalled body read unbounded. The timer is held until
+ * `call` — which includes parsing the body — has settled.
+ */
+async function withDeadline<T>(
+    options: RequestOptions | undefined,
+    call: (deadline?: RequestDeadline) => Promise<T>,
+): Promise<T> {
+    const timeoutMs = options?.timeoutMs;
+    if (!timeoutMs) return call();
+
+    const deadline: RequestDeadline = { controller: new AbortController(), timeoutMs };
+    const timer = setTimeout(() => deadline.controller.abort(), timeoutMs);
+    try {
+        return await call(deadline);
+    } catch (error) {
+        // Classify here rather than at the fetch: an expired deadline can also
+        // surface while reading the body, where the abort would otherwise escape
+        // raw or be mistaken for the HTTP status that came with it. Callers
+        // treat `SessionRefreshError` as retryable, which a timeout is.
+        if (deadline.controller.signal.aborted) {
+            throw new SessionRefreshError(`Request timed out after ${timeoutMs}ms`, 0, 'Network Error');
+        }
+        throw error;
+    } finally {
+        clearTimeout(timer);
+    }
+}
+
 /**
 * Base API service that handles authentication and common HTTP methods
 */
@@ -110,7 +163,12 @@ export class ApiService {
         }
     }
 
-    private async request(endpoint: string, method: HttpMethod, body?: unknown): Promise<Response> {
+    private async request(
+        endpoint: string,
+        method: HttpMethod,
+        body?: unknown,
+        deadline?: RequestDeadline,
+    ): Promise<Response> {
         const bodyText = body === undefined ? undefined : JSON.stringify(body);
         const logMessage = method === 'PATCH' && bodyText
             ? `${method}: ${endpoint} ${bodyText}`
@@ -121,9 +179,13 @@ export class ApiService {
                 return await fetch(`${this.baseUrl}${endpoint}`, {
                     method,
                     headers,
-                    body: bodyText
+                    body: bodyText,
+                    ...(deadline ? { signal: deadline.controller.signal } : {}),
                 });
             } catch (e) {
+                // An expired deadline aborts the fetch; `withDeadline` owns that
+                // classification, so leave it alone here.
+                if (deadline?.controller.signal.aborted) throw e;
                 // fetch throws TypeError on network failure (offline, DNS, TLS, aborted).
                 // We reuse SessionRefreshError as the typed transient signal even though
                 // this isn't actually a session-refresh path — callers (useProfileSync,
@@ -263,17 +325,21 @@ export class ApiService {
     /**
     * Performs a GET request
     */
-    async get<T>(endpoint: string): Promise<T> {
-        const response = await this.request(endpoint, 'GET');
-        return await this.parseJsonResponse<T>(response, 'GET');
+    async get<T>(endpoint: string, options?: RequestOptions): Promise<T> {
+        return withDeadline(options, async (deadline) => {
+            const response = await this.request(endpoint, 'GET', undefined, deadline);
+            return await this.parseJsonResponse<T>(response, 'GET');
+        });
     }
-    
+
     /**
     * Performs a POST request
     */
-    async post<T>(endpoint: string, body: any): Promise<T> {
-        const response = await this.request(endpoint, 'POST', body);
-        return await this.parseJsonResponse<T>(response, 'POST');
+    async post<T>(endpoint: string, body: any, options?: RequestOptions): Promise<T> {
+        return withDeadline(options, async (deadline) => {
+            const response = await this.request(endpoint, 'POST', body, deadline);
+            return await this.parseJsonResponse<T>(response, 'POST');
+        });
     }
     
     /**

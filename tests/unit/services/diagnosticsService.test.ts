@@ -16,8 +16,8 @@ vi.mock('../../../src/services/supabaseClient', () => ({
     },
 }));
 
-vi.mock('../../../src/utils/zoteroUtils', () => ({
-    getZoteroUserIdentifier: vi.fn(),
+vi.mock('../../../src/services/clientIdentity', () => ({
+    resolveClientIdentity: vi.fn(),
 }));
 
 import {
@@ -29,11 +29,11 @@ import {
     reportConnectionFailure,
 } from '../../../src/services/diagnosticsService';
 import { supabase } from '../../../src/services/supabaseClient';
-import { getZoteroUserIdentifier } from '../../../src/utils/zoteroUtils';
+import { resolveClientIdentity } from '../../../src/services/clientIdentity';
 import type { ConnectionFailureEvidence } from '../../../src/services/connectionFailure';
 
 const getSessionMock = vi.mocked(supabase.auth.getSession);
-const getIdentifierMock = vi.mocked(getZoteroUserIdentifier);
+const resolveClientIdentityMock = vi.mocked(resolveClientIdentity);
 
 const evidence: ConnectionFailureEvidence = {
     stage: 'opening',
@@ -59,11 +59,14 @@ describe('reportConnectionFailure', () => {
             data: { session: null },
             error: null,
         } as any);
-        getIdentifierMock.mockReturnValue({
-            userID: '5551234',
-            localUserKey: 'aBcD1234',
-            accountName: undefined,
-            deviceName: undefined,
+        resolveClientIdentityMock.mockReturnValue({
+            frontendVersion: '',
+            clientType: 'zotero-plugin',
+            clientFeatures: [],
+            zoteroInstance: {
+                local_user_key: 'aBcD1234',
+                user_id: '5551234',
+            },
         } as any);
     });
 
@@ -182,7 +185,7 @@ describe('reportConnectionFailure', () => {
     });
 
     it('still reports when the Zotero identity lookup throws', async () => {
-        getIdentifierMock.mockImplementation(() => {
+        resolveClientIdentityMock.mockImplementation(() => {
             throw new Error('Zotero not available');
         });
         const fetchMock = vi

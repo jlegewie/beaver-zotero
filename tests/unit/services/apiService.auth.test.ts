@@ -283,6 +283,53 @@ describe('ApiService version headers', () => {
         expect(headers['X-Beaver-Version']).toBeUndefined();
     });
 
+    // `fetch` resolves once response headers arrive, with the body still
+    // streaming, so a deadline released at that point leaves a stalled body
+    // read unbounded. Mirrors how a real `fetch` errors the body stream when
+    // its signal aborts.
+    /** Responds with the given status, then stalls the body until aborted. */
+    function respondWithStalledBody(status: number, statusText: string) {
+        let sawSignal: AbortSignal | undefined;
+        fetchMock.mockImplementation((_url: string, init: RequestInit) => {
+            sawSignal = init.signal ?? undefined;
+            return Promise.resolve(
+                new Response(
+                    new ReadableStream({
+                        start(controller) {
+                            sawSignal?.addEventListener('abort', () =>
+                                controller.error(new DOMException('Aborted', 'AbortError')),
+                            );
+                        },
+                    }),
+                    { status, statusText },
+                ),
+            );
+        });
+        return () => sawSignal;
+    }
+
+    it('keeps the deadline armed while the response body is read', async () => {
+        const signal = respondWithStalledBody(200, 'OK');
+
+        await expect(service.get('/api/v1/status', { timeoutMs: 20 }))
+            .rejects.toBeInstanceOf(SessionRefreshError);
+        expect(signal()?.aborted).toBe(true);
+    });
+
+    // The status arrives before the deadline expires, so without classifying at
+    // the deadline this would surface as that status rather than as a timeout.
+    it('reports a timeout, not the HTTP status, when an error body stalls', async () => {
+        respondWithStalledBody(400, 'Bad Request');
+
+        await expect(service.get('/api/v1/status', { timeoutMs: 20 }))
+            .rejects.toBeInstanceOf(SessionRefreshError);
+    });
+
+    it('leaves requests unbounded when no deadline is given', async () => {
+        await expect(service.get('/api/v1/status')).resolves.toEqual({ ok: true });
+        expect(fetchMock.mock.calls[0][1].signal).toBeUndefined();
+    });
+
     it('omits both headers when the adapter does not implement getVersionHeaders', async () => {
         const { getVersionHeaders, ...rest } = originalAdapter;
         setRuntimeAdapter(rest);

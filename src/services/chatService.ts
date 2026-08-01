@@ -1,14 +1,17 @@
 import { ApiService } from './apiService';
 import API_BASE_URL from '../utils/getAPIBaseURL';
-import { ProviderType } from '../../react/atoms/models';
-import type { CustomChatModel } from '../../react/types/customChatModel';
+import type { ModelProvider, CustomChatModel } from '../../react/types/customChatModel';
 import { ApiError } from '../../react/types/apiErrors';
+import { logger } from '../utils/logger';
 
+
+/** Upper bound on the key-verification round trip, including the provider call. */
+const VERIFY_KEY_TIMEOUT_MS = 30_000;
 
 export type ErrorType = "AuthenticationError" | "PermissionDeniedError" | "RateLimitError" | "UnexpectedError" | "VerificationRequiredError";
 
 export interface VerifyKeyRequest {
-    provider: ProviderType;
+    provider: ModelProvider;
     user_api_key: string;
 }
 
@@ -60,25 +63,21 @@ export class ChatService extends ApiService {
      * @param userApiKey The API key to verify
      * @returns Promise resolving to a verification response with valid status and optional error
      */
-    async verifyApiKey(provider: ProviderType, userApiKey: string): Promise<VerifyKeyResponse> {
+    async verifyApiKey(provider: ModelProvider, userApiKey: string): Promise<VerifyKeyResponse> {
         try {
-            const endpoint = `${this.baseUrl}/api/v1/chat/verify-key`;
-            const headers = await this.getAuthHeaders();
-            
             const requestBody: VerifyKeyRequest = {
                 provider,
                 user_api_key: userApiKey
             };
 
-            const response = await Zotero.HTTP.request('POST', endpoint, {
-                body: JSON.stringify(requestBody),
-                headers,
-                responseType: 'json'
+            // The endpoint calls out to the model provider, and the preferences
+            // UI blocks on the result, so bound the wait rather than leaving the
+            // button spinning when the provider stalls.
+            return await this.post<VerifyKeyResponse>('/api/v1/chat/verify-key', requestBody, {
+                timeoutMs: VERIFY_KEY_TIMEOUT_MS,
             });
-            
-            return response.response as VerifyKeyResponse;
         } catch (error) {
-            Zotero.debug(`ChatService: verifyApiKey error - ${error}`, 1);
+            logger(`ChatService: verifyApiKey error - ${error}`, 1);
 
             // If we can't reach the endpoint or get a response, return an error
             return {

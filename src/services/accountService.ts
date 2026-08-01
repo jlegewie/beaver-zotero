@@ -1,10 +1,9 @@
 import { ApiService } from './apiService';
 import API_BASE_URL from '../utils/getAPIBaseURL';
-import { ExcludedLibrary, SafeProfileWithPlan } from '../../react/types/profile';
-import { getZoteroUserIdentifier } from '../utils/zoteroUtils';
-import { ModelConfig } from '../../react/atoms/models';
+import { ExcludedLibrary, OverallSyncStatus, SafeProfileWithPlan } from '../../react/types/profile';
+import { ModelConfig } from '../../react/types/models';
 import { ZoteroLibrary } from '../../react/types/zotero';
-import { OverallSyncStatus } from '../../react/atoms/sync';
+import { resolveClientIdentity } from './clientIdentity';
 import { logger } from '../utils/logger';
 
 interface AuthorizationRequest {
@@ -144,16 +143,16 @@ export class AccountService extends ApiService {
      * @returns Promise with the profile data
      */
     async getProfileWithPlan(): Promise<ProfileResponse> {
-        const version = Zotero.Beaver.pluginVersion || '';
-        const { userID, localUserKey } = getZoteroUserIdentifier();
-        logger(`accountService.getProfileWithPlan: zotero_local_id=${localUserKey}, zotero_user_id=${userID}, version=${version}`);
+        const { frontendVersion, zoteroInstance } = resolveClientIdentity();
+        const { local_user_key: localUserKey = '', user_id: userID } = zoteroInstance ?? {};
+        logger(`accountService.getProfileWithPlan: zotero_local_id=${localUserKey}, zotero_user_id=${userID}, version=${frontendVersion}`);
 
         try {
             const result = await this.post<ProfileResponse>('/api/v1/account/profile', {
                 zotero_local_id: localUserKey,
                 zotero_user_id: userID,
-                frontend_version: version,
-                // Opt in to backend auto-registering this device. Backend guarded on 
+                frontend_version: frontendVersion,
+                // Opt in to backend auto-registering this device. Backend guarded on
                 // `has_authorized_free_access && zotero_local_ids == []`.
                 register_first_device: true,
             } as ProfileRequest);
@@ -171,17 +170,9 @@ export class AccountService extends ApiService {
      */
     async getModelList(plan_id: string): Promise<ModelConfig[]> {
         try {
-            const endpoint = `${this.baseUrl}/api/v1/account/model-configs?plan_id=${plan_id}`;
-            const headers = await this.getAuthHeaders();
-            
-            const response = await Zotero.HTTP.request('GET', endpoint, {
-                headers,
-                responseType: 'json'
-            });
-            
-            return response.response as ModelConfig[];
+            return await this.get<ModelConfig[]>(`/api/v1/account/model-configs?plan_id=${plan_id}`);
         } catch (error) {
-            Zotero.debug(`getModelList: getModelList error - ${error}`, 1);
+            logger(`getModelList: getModelList error - ${error}`, 1);
             // Return empty array on error
             return [];
         }
@@ -213,7 +204,7 @@ export class AccountService extends ApiService {
         consentToShare: boolean = false,
         emailNotifications: boolean = false
     ): Promise<{ message: string }> {
-        const { userID, localUserKey } = getZoteroUserIdentifier();
+        const { local_user_key: localUserKey = '', user_id: userID } = resolveClientIdentity().zoteroInstance ?? {};
         return this.post<{ message: string }>('/api/v1/account/authorize', {
             zotero_local_id: localUserKey,
             zotero_user_id: userID,
@@ -242,7 +233,7 @@ export class AccountService extends ApiService {
         consentToShare: boolean = false,
         emailNotifications: boolean = false
     ): Promise<{ message: string }> {
-        const { userID, localUserKey } = getZoteroUserIdentifier();
+        const { local_user_key: localUserKey = '', user_id: userID } = resolveClientIdentity().zoteroInstance ?? {};
         return this.post<{ message: string }>('/api/v1/account/authorize-free', {
             zotero_local_id: localUserKey,
             zotero_user_id: userID,
@@ -375,7 +366,7 @@ export class AccountService extends ApiService {
      * @returns Promise with the response message
      */
     async completeUpgradeConsent(): Promise<{ message: string }> {
-        const { userID, localUserKey } = getZoteroUserIdentifier();
+        const { local_user_key: localUserKey = '', user_id: userID } = resolveClientIdentity().zoteroInstance ?? {};
         return this.post<{ message: string }>('/api/v1/account/complete-upgrade-consent', {
             zotero_local_id: localUserKey,
             zotero_user_id: userID,
@@ -388,7 +379,7 @@ export class AccountService extends ApiService {
      * @returns Promise with the response message
      */
     async acknowledgeDowngrade(): Promise<{ message: string }> {
-        const { userID, localUserKey } = getZoteroUserIdentifier();
+        const { local_user_key: localUserKey = '', user_id: userID } = resolveClientIdentity().zoteroInstance ?? {};
         return this.post<{ message: string }>('/api/v1/account/acknowledge-downgrade', {
             zotero_local_id: localUserKey,
             zotero_user_id: userID,
