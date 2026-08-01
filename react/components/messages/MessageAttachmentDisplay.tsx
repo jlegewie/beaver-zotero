@@ -120,7 +120,8 @@ const MessageAttachmentDisplay = ({
                     selectedLibraries.length == 0 &&
                     selectedCollections.length == 0 &&
                     currentTagSelections.length == 0 &&
-                    currentMessageExternalFiles.length == 0
+                    currentMessageExternalFiles.length == 0 &&
+                    currentMessageCollections.length == 0
                 }
                 onClose={() => {
                     focusInput?.();
