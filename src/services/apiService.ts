@@ -3,6 +3,7 @@ import { ApiError, ServerError, SessionExpiredError, SessionRefreshError } from 
 import { logger } from '../utils/logger';
 import { supabase } from './supabaseClient';
 import { recordBackendHttpSuccess } from './backendReachability';
+import { getRuntimeAdapter } from '../platform/runtime';
 
 type HttpMethod = 'GET' | 'POST' | 'PATCH' | 'DELETE';
 
@@ -209,23 +210,18 @@ export class ApiService {
     }
 
     /**
-    * Adds Zotero and plugin version identifiers to outgoing headers when available
+    * Adds host and plugin version identifiers to outgoing headers when available.
+    *
+    * These headers are diagnostic, so a host adapter that cannot report them
+    * must not fail the request: a throwing adapter degrades to no headers.
     */
     private getVersionHeaders(): Record<string, string> {
-        const versionHeaders: Record<string, string> = {};
-
-        if (typeof Zotero !== 'undefined') {
-            const { version, Beaver } = Zotero;
-            if (version && typeof version === 'string') {
-                versionHeaders['X-Zotero-Version'] = version;
-            }
-            const pluginVersion = Beaver?.pluginVersion;
-            if (pluginVersion && typeof pluginVersion === 'string') {
-                versionHeaders['X-Beaver-Version'] = pluginVersion;
-            }
+        try {
+            return getRuntimeAdapter().getVersionHeaders?.() ?? {};
+        } catch (error) {
+            logger(`ApiService: version headers unavailable: ${error}`, 2);
+            return {};
         }
-
-        return versionHeaders;
     }
     
     /**

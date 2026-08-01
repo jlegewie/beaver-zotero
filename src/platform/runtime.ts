@@ -24,6 +24,13 @@ export interface RuntimeAdapter {
     setPref(key: string, value: unknown): void;
     /** Clear a fully-qualified preference key. */
     clearPref(key: string): void;
+    /**
+     * Version identifiers to attach to outgoing backend requests, keyed by header
+     * name (e.g. `X-Zotero-Version`). Optional: hosts with nothing to report can
+     * omit it, and callers should treat a missing implementation the same as one
+     * that returns no headers.
+     */
+    getVersionHeaders?(): Record<string, string>;
 }
 
 const zoteroAdapter: RuntimeAdapter = {
@@ -41,6 +48,22 @@ const zoteroAdapter: RuntimeAdapter = {
     },
     clearPref(key) {
         Zotero.Prefs.clear(key, true);
+    },
+    getVersionHeaders() {
+        const versionHeaders: Record<string, string> = {};
+
+        if (typeof Zotero !== 'undefined') {
+            const { version, Beaver } = Zotero;
+            if (version && typeof version === 'string') {
+                versionHeaders['X-Zotero-Version'] = version;
+            }
+            const pluginVersion = Beaver?.pluginVersion;
+            if (pluginVersion && typeof pluginVersion === 'string') {
+                versionHeaders['X-Beaver-Version'] = pluginVersion;
+            }
+        }
+
+        return versionHeaders;
     },
 };
 
