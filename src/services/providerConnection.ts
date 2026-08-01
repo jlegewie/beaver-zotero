@@ -24,7 +24,7 @@ import { store } from '../../react/store';
 import { searchableLibraryIdsAtom } from '../../react/atoms/profile';
 import {
     AgentDataProviderMap,
-    createZoteroDataProvider,
+    resolveDefaultAgentDataProvider,
 } from './agentDataDispatch';
 import { getWSAuthToken } from './agentService';
 import {
@@ -82,7 +82,12 @@ export class ProviderConnection {
     /** Queue to serialize mutating action execution */
     private actionExecutionQueue: Promise<void> = Promise.resolve();
     private serverSupportsRequestAcks: boolean = false;
-    private dataProvider: AgentDataProviderMap;
+    /**
+     * Resolved lazily from the registered default (see
+     * `resolveDefaultAgentDataProvider`) on first use, so this module-level
+     * singleton can be constructed before a host has registered its provider.
+     */
+    private dataProvider: AgentDataProviderMap | null;
     /** Settles the in-flight connect promise; set for the duration of connect(). */
     private activeFinish: ((err?: Error) => void) | null = null;
     /** Set by close() so a connect() still fetching its token aborts cleanly. */
@@ -100,9 +105,17 @@ export class ProviderConnection {
 
     constructor(baseUrl: string, dataProvider?: AgentDataProviderMap) {
         this.baseUrl = baseUrl;
-        this.dataProvider = dataProvider ?? createZoteroDataProvider({
-            syncPauseOwner: PROVIDER_MUTATING_RUN_SYNC_PAUSE_OWNER,
-        });
+        this.dataProvider = dataProvider ?? null;
+    }
+
+    /** Resolve the data-provider map, falling back to the registered default on first use. */
+    private getDataProvider(): AgentDataProviderMap {
+        if (!this.dataProvider) {
+            this.dataProvider = resolveDefaultAgentDataProvider({
+                syncPauseOwner: PROVIDER_MUTATING_RUN_SYNC_PAUSE_OWNER,
+            });
+        }
+        return this.dataProvider;
     }
 
     private getWebSocketUrl(): string {
@@ -410,7 +423,7 @@ export class ProviderConnection {
 
             default: {
                 const eventName = event.event;
-                const entry = this.dataProvider[eventName];
+                const entry = this.getDataProvider()[eventName];
                 if (!entry) {
                     logger(`ProviderConnection: Unknown event type: ${eventName}`, 1);
                     break;

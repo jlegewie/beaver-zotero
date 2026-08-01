@@ -33,6 +33,7 @@ import { useBackgroundWorkerStatus } from './hooks/useBackgroundWorkerStatus';
 import { useSyncSuppression } from './hooks/useSyncSuppression';
 import { BeaverTemporaryAnnotations } from './utils/annotationUtils';
 import { registerZoteroHost } from './host/zotero';
+import { registerZoteroDataProvider } from '../src/services/zoteroDataProvider';
 import { notifyWorkerStartFailure } from './utils/workerUnavailableNotice';
 
 // Configure the PDF package (webpack bundle copy). The esbuild bundle
@@ -48,6 +49,12 @@ configurePDFForBeaver({ onWorkerStartFailure: notifyWorkerStartFailure });
 // resolve host-specific navigation and data lookups. Non-Zotero clients omit
 // this and run the render surface with the default empty host.
 registerZoteroHost();
+
+// Register the Zotero agent data-provider as the default for AgentService and
+// ProviderConnection. Must run before either singleton serves its first
+// WebSocket data request (both resolve their provider lazily on first use, so
+// this only needs to land before that point, not before module load).
+registerZoteroDataProvider();
 
 /**
  * Component to initialize global hooks that should only run once.

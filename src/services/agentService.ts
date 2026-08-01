@@ -16,7 +16,7 @@ import { toAgentAction } from '../../react/agents/agentActionTypes';
 import { ApiService } from './apiService';
 import {
     AgentDataProviderMap,
-    createZoteroDataProvider,
+    resolveDefaultAgentDataProvider,
 } from './agentDataDispatch';
 import { AgentRunRequest, ZoteroInstanceWire } from './agentProtocol';
 import {
@@ -170,19 +170,29 @@ export class AgentService {
     private serverSupportsRequestAcks: boolean = false;
     /**
      * Map of backend data-request event -> handler. Injectable so a non-Zotero
-     * host can serve the same requests its own way. Defaults to the Zotero
-     * plugin's handlers.
+     * host can serve the same requests its own way. Resolved lazily from the
+     * registered default (see `resolveDefaultAgentDataProvider`) on first use,
+     * so this module-level singleton can be constructed before a host has
+     * registered its provider.
      */
-    private dataProvider: AgentDataProviderMap;
+    private dataProvider: AgentDataProviderMap | null;
 
     constructor(baseUrl: string, dataProvider?: AgentDataProviderMap) {
         this.baseUrl = baseUrl;
-        this.dataProvider = dataProvider ?? createZoteroDataProvider();
+        this.dataProvider = dataProvider ?? null;
     }
 
     /** Replace the data-request provider map (e.g. a Word add-in injects its own). */
     setDataProvider(dataProvider: AgentDataProviderMap): void {
         this.dataProvider = dataProvider;
+    }
+
+    /** Resolve the data-provider map, falling back to the registered default on first use. */
+    private getDataProvider(): AgentDataProviderMap {
+        if (!this.dataProvider) {
+            this.dataProvider = resolveDefaultAgentDataProvider();
+        }
+        return this.dataProvider;
     }
 
     private resetConnectionState(): void {
@@ -813,7 +823,7 @@ export class AgentService {
                     // resolves with the response to send; on failure the entry's
                     // error fallback is sent so the backend doesn't time out.
                     const eventName = (event as any).event;
-                    const entry = this.dataProvider[eventName];
+                    const entry = this.getDataProvider()[eventName];
                     if (!entry) {
                         logger(`AgentService: Unknown event type: ${eventName}`, 1);
                         break;

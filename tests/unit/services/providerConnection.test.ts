@@ -12,9 +12,6 @@ vi.mock('../../../src/services/agentService', () => ({
 vi.mock('../../../src/services/busyContext', () => ({
     getBusyContext: vi.fn(() => ({ busy: false })),
 }));
-vi.mock('../../../src/services/agentDataDispatch', () => ({
-    createZoteroDataProvider: vi.fn(() => ({})),
-}));
 vi.mock('../../../src/services/syncPause', () => ({
     PROVIDER_MUTATING_RUN_SYNC_PAUSE_OWNER: 'provider-mutating-run',
     scheduleResumeAfterRun: vi.fn(),
