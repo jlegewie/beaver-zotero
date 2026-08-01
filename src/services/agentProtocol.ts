@@ -4,7 +4,7 @@ import { ZoteroItemReference } from '../../react/types/zotero';
 import { ItemDataWithStatus, AttachmentDataWithStatus, ItemStub, ItemSummary, AttachmentInfo, AttachmentStub } from '../../react/types/zotero';
 import { ReaderState, NoteState } from '../../react/types/attachments/apiTypes';
 import { BeaverAgentPrompt } from '../../react/agents/types';
-import { CustomChatModel } from '../../react/types/settings';
+import type { CustomChatModel } from '../../react/types/customChatModel';
 import { AttachmentData, ItemData } from '../../react/types/zotero';
 import type { BeaverExtractResult } from '../beaver-extract/schema/schema';
 import type { ExtractContentKind } from './documentExtraction/shared/contentKinds';

@@ -1,7 +1,7 @@
 import { ApiService } from './apiService';
 import API_BASE_URL from '../utils/getAPIBaseURL';
 import { ProviderType } from '../../react/atoms/models';
-import { CustomChatModel } from '../../react/types/settings';
+import type { CustomChatModel } from '../../react/types/customChatModel';
 import { ApiError } from '../../react/types/apiErrors';
 
 
