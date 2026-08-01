@@ -98,7 +98,7 @@ export interface WSRunCompleteEvent extends WSBaseEvent {
     usage: RunUsage | null;
     cost: number | null;
     citations: import('../../react/types/citations').Citation[] | null;
-    agent_actions: import('../../react/agents/agentActions').AgentAction[] | null;
+    agent_actions: import('../../react/agents/agentActionTypes').AgentAction[] | null;
     /** Whether the run had high input token usage (backend-assessed). */
     high_token_usage?: boolean;
     /** Whether the soft cap history processor was triggered during this run. */
@@ -207,7 +207,7 @@ export interface WSRetryEvent extends WSBaseEvent {
 export interface WSAgentActionsEvent extends WSBaseEvent {
     event: 'agent_actions';
     run_id: string;
-    actions: import('../../react/agents/agentActions').AgentAction[];
+    actions: import('../../react/agents/agentActionTypes').AgentAction[];
 }
 
 /** Missing Zotero data event sent when referenced items are not available in the backend */

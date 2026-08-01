@@ -11,7 +11,8 @@ import { supabase } from './supabaseClient';
 import API_BASE_URL from '../utils/getAPIBaseURL';
 import { logger } from '../utils/logger';
 import { AgentRun } from '../../react/agents/types';
-import { AgentAction, toAgentAction } from '../../react/agents/agentActions';
+import type { AgentAction } from '../../react/agents/agentActionTypes';
+import { toAgentAction } from '../../react/agents/agentActionTypes';
 import { ApiService } from './apiService';
 import {
     AgentDataProviderMap,
