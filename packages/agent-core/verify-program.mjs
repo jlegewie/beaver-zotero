@@ -4,6 +4,9 @@
 // but missing from the list fails, and a listed file no longer reachable
 // fails. `files` alone cannot enforce either — it seeds the program without
 // bounding it, and every listed file is in the program by construction.
+// Also asserts every file under src/ is part of that closure, so an orphan
+// module cannot sit in the package outside the gate's typecheck.
+import { readdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
@@ -52,8 +55,22 @@ const stale = listed.filter((f) => !closureSet.has(f));
 // Even a listed-and-reachable file must live inside the package — the core
 // must not reach back into the host repo.
 const escapees = closure.filter((f) => !f.startsWith(pkgDir + path.sep));
+// And every file on disk under src/ must be in the closure — an orphan would
+// be typechecked (and lint-guarded) only loosely, never by this gate.
+const onDisk = readdirSync(path.join(pkgDir, "src"), {
+  recursive: true,
+  withFileTypes: true,
+})
+  .filter((d) => d.isFile() && /\.(ts|tsx|mts|cts|js|mjs)$/.test(d.name))
+  .map((d) => path.resolve(d.parentPath ?? d.path, d.name));
+const orphans = onDisk.filter((f) => !closureSet.has(f));
 
-if (unlisted.length > 0 || stale.length > 0 || escapees.length > 0) {
+if (
+  unlisted.length > 0 ||
+  stale.length > 0 ||
+  escapees.length > 0 ||
+  orphans.length > 0
+) {
   for (const f of unlisted) {
     console.error(
       `reachable from the entry but not in tsconfig files: ${path.relative(pkgDir, f)}`,
@@ -67,11 +84,18 @@ if (unlisted.length > 0 || stale.length > 0 || escapees.length > 0) {
   for (const f of escapees) {
     console.error(`in the closure but outside the package: ${f}`);
   }
-  console.error(
+  for (const f of orphans) {
+    console.error(
+      `on disk under src/ but not in the closure: ${path.relative(pkgDir, f)}`,
+    );
+  }
+  const summary =
     escapees.length > 0
       ? "agent-core reaches outside the package — remove the offending import."
-      : "agent-core `files` drifted from the real closure — update the list to match.",
-  );
+      : orphans.length > 0
+        ? "agent-core has files outside the entry closure — wire them into the protocol or remove them."
+        : "agent-core `files` drifted from the real closure — update the list to match.";
+  console.error(summary);
   process.exit(1);
 }
 console.log(`agent-core closure verified: ${listedSet.size} files.`);

@@ -100,6 +100,9 @@ const l1CoreImportBans = (reactPrefix) => [
             "**/busyContext",
             "**/syncPause",
             "**/libraryIdentity",
+            "**/utils/prefs",
+            "**/host/zotero",
+            "**/host/zotero/**",
         ],
         message:
             "L1 core must not import Zotero adapter modules directly — these exist to keep this layer client-agnostic.",
@@ -141,7 +144,14 @@ const l1CoreAmbientTypeBan = [
 
 export default tseslint.config(
     {
-        ignores: ["build/**", ".scaffold/**", "node_modules/**", "scripts/"],
+        ignores: [
+            "build/**",
+            ".scaffold/**",
+            "node_modules/**",
+            "scripts/",
+            // Generated webpack output, present only after a build.
+            "addon/content/reactBundle.js",
+        ],
     },
     {
         extends: [eslint.configs.recommended, ...tseslint.configs.recommended],
@@ -290,16 +300,30 @@ export default tseslint.config(
         },
     },
     // The L1 core (wire protocol, transport, backend clients) stays free of the
-    // Zotero global and the React/Jotai app graph, so it can be extracted into a
-    // package a non-Zotero client also consumes. Zotero behavior reaches it
-    // through the injectable adapter modules rather than a direct import. See
+    // Zotero global and the React/Jotai app graph, so it can be consumed by a
+    // non-Zotero client. Zotero behavior reaches it through the injectable
+    // adapter modules rather than a direct import. See
     // docs-zotero/client-decoupling-plan.md.
     //
-    // Two blocks, because the react/* bans depend on how deep the guarded file
-    // sits: from src/** the specifier carries a `react/` segment, while from a
-    // file one level under react/ (react/types, react/utils) a sibling is just
-    // `../utils/*` — and that shorter form would otherwise also match the
-    // src/utils helpers src/services legitimately uses.
+    // Several blocks. The file sets differ (the package sources, the src/**
+    // modules, the react/-rooted modules), and the react/* bans additionally
+    // depend on how deep the guarded file sits: from packages/agent-core/src/**
+    // and src/** the specifier always carries a `react/` segment (matched by
+    // the `**/react/...` patterns), while from a file one level under react/
+    // (react/types, react/utils) a sibling is just `../utils/*` — and that
+    // shorter form would otherwise also match the src/utils helpers
+    // src/services legitimately uses. The `_ZoteroTypes` ambient ban for all
+    // of these lives in the trailing block below.
+    {
+        files: ["packages/agent-core/src/**/*.ts"],
+        rules: {
+            "no-restricted-globals": ["error", ...l1CoreGlobals],
+            "no-restricted-imports": [
+                "error",
+                { patterns: l1CoreImportBans("**/react") },
+            ],
+        },
+    },
     {
         files: l1CoreSrcFiles,
         rules: {
@@ -344,6 +368,7 @@ export default tseslint.config(
     // bans depend on a directory depth those blocks do not model.
     {
         files: [
+            "packages/agent-core/src/**/*.ts",
             ...l1CoreSrcFiles,
             ...l1CoreReactTypeFiles,
             ...l1CoreReactUtilFiles,
