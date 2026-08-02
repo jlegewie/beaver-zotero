@@ -19,16 +19,15 @@ const restrictedGlobals = [
 
 /**
  * Modules that must not reach for Zotero or the app graph themselves. Adding a
- * file here asserts that of the file, not of everything it imports: a listed
- * module may still call a helper that reads `Zotero` internally
- * (`libraryIdentity.ts` does today). Those belong behind an adapter, and until
- * they are, the guard catches the direct regression rather than the
- * transitive one.
+ * file here asserts that of the file, not of everything it imports — the guard
+ * catches a direct regression rather than a transitive one, so a helper that
+ * reads `Zotero` internally has to be kept out by the import ban below.
  *
- * `busyContext.ts` and `syncPause.ts` are absent because they read Zotero's
- * live sync, DB transaction, lock, and full-text-index state directly — guarded
- * files reach their snapshots/hooks through the `busyContextProvider.ts` /
- * `agentDataDispatch.ts` seams instead, enforced by the import ban below.
+ * `busyContext.ts`, `syncPause.ts`, and `libraryIdentity.ts` are absent because
+ * they read Zotero state directly — live sync, DB transactions, locks and the
+ * full-text index for the first two, the local library registry for the third.
+ * Guarded files reach them through the `busyContextProvider.ts` /
+ * `agentDataDispatch.ts` / `libraryRef.ts` seams instead.
  */
 const l1CoreSrcFiles = [
     "src/services/agentProtocol.ts",
@@ -100,6 +99,7 @@ const l1CoreImportBans = (reactPrefix) => [
             "**/zoteroInstanceWire",
             "**/busyContext",
             "**/syncPause",
+            "**/libraryIdentity",
         ],
         message:
             "L1 core must not import Zotero adapter modules directly — these exist to keep this layer client-agnostic.",

@@ -1,6 +1,5 @@
 import { ApiService } from './apiService';
 import API_BASE_URL from '../utils/getAPIBaseURL';
-import { libraryRefForLibraryID } from '../utils/libraryIdentity';
 
 
 /**
@@ -53,6 +52,22 @@ export interface PaginatedThreadsResponse {
 export interface ZoteroInstanceRef {
     zoteroUserId?: string | null;
     zoteroLocalId?: string | null;
+}
+
+/**
+ * A library to search for item references, identified both ways: the
+ * device-local `libraryId` and, when the caller can compute one, the
+ * device-portable `libraryRef` ("u" / "g<groupID>").
+ *
+ * Sending both lets the backend also match group-library items written on
+ * another device, where the local id differs; rows stored without a
+ * `library_ref` still match on the numeric id. Plain data, like
+ * {@link ZoteroInstanceRef} — callers derive the ref from their client
+ * environment, since only they know how local ids map to portable ones.
+ */
+export interface ThreadItemLibraryRef {
+    libraryId: number;
+    libraryRef?: string | null;
 }
 
 /** Appends the instance-scope query params for a `ZoteroInstanceRef`. */
@@ -111,31 +126,23 @@ export class ThreadService extends ApiService {
 
     /**
      * Finds threads where Zotero items appear as user attachments or citations.
-     * @param libraryId Zotero library ID
+     * @param library Library to search, as a {@link ThreadItemLibraryRef}
      * @param zoteroKeys Zotero item keys to search for
      * @param mode Search in attachments, citations, or both
      * @returns List of thread+run matches (thread may appear multiple times).
      *   NOTE: No ordering guarantee — callers must sort client-side if order matters.
-     *
-     * Sends the device-portable `library_ref` ("u" / "g<groupID>") alongside the
-     * device-local `libraryId` so the backend also matches group-library items
-     * written on another device (where the local library_id differs). Legacy
-     * rows with no stored library_ref still match by the numeric library_id.
      */
     async findThreadsByItem(
-        libraryId: number,
+        library: ThreadItemLibraryRef,
         zoteroKeys: string[],
         mode: 'attachments' | 'citations' | 'both' = 'attachments'
     ): Promise<ThreadRunMatch[]> {
         const params = new URLSearchParams({
-            library_id: String(libraryId),
+            library_id: String(library.libraryId),
             mode,
         });
-        // Derive the portable ref (best-effort; null for the external-file sentinel
-        // or when Zotero mapping is unavailable) and send it when present.
-        const libraryRef = libraryRefForLibraryID(libraryId);
-        if (libraryRef) {
-            params.append('library_ref', libraryRef);
+        if (library.libraryRef) {
+            params.append('library_ref', library.libraryRef);
         }
         for (const key of zoteroKeys) {
             params.append('zotero_keys', key);

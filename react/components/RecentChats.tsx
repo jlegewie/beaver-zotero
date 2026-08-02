@@ -9,6 +9,7 @@ import { threadService } from '../../src/services/threadService';
 import { convertUTCToLocal } from '../utils/dateUtils';
 import { deduplicateByThread, threadModelToThreadData, isThreadInstanceMismatch } from '../utils/threadMatches';
 import { currentZoteroInstanceRef } from '../../src/utils/zoteroUtils';
+import { libraryRefForLibraryID } from '../../src/utils/libraryIdentity';
 import { getReaderOrNoteContextItem } from '../utils/zoteroTabContext';
 import { buildThreadItemFilter } from '../utils/threadItemFilter';
 import { buildRecentChatsCacheKey, buildRecentChatsItemLookup } from '../utils/recentChatsLookup';
@@ -174,7 +175,12 @@ const RecentChats: React.FC = () => {
             if (itemLookup) {
                 try {
                     const matches = await threadService.findThreadsByItem(
-                        itemLookup.libraryId, itemLookup.zoteroKeys, 'both'
+                        {
+                            libraryId: itemLookup.libraryId,
+                            libraryRef: libraryRefForLibraryID(itemLookup.libraryId),
+                        },
+                        itemLookup.zoteroKeys,
+                        'both'
                     );
                     if (isCancelled()) return;
                     // By-item results are scoped client-side from the identity

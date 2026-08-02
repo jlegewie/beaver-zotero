@@ -185,7 +185,11 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
             setThreads([]);
             setIsLoading(true);
             try {
-                const matches = await threadService.findThreadsByItem(filter.libraryId, filter.keys, 'both');
+                const matches = await threadService.findThreadsByItem(
+                    { libraryId: filter.libraryId, libraryRef: filter.libraryRef },
+                    filter.keys,
+                    'both'
+                );
                 const deduped = deduplicateByThread(matches);
                 if (seq === fetchSeqRef.current) {
                     setThreads(deduped);

@@ -288,3 +288,4 @@ export async function resolveItemReference(
 export function registerZoteroObjectIdResolver(): void {
     setObjectIdResolver(resolveObjectId);
 }
+

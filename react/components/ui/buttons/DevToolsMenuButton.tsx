@@ -21,6 +21,7 @@ import { getCurrentReaderAndWaitForView } from '../../../utils/readerUtils';
 import { semanticSearchService } from '../../../../src/services/semanticSearchService';
 import { BeaverDB } from '../../../../src/services/database';
 import { threadService } from '../../../../src/services/threadService';
+import { libraryRefForLibraryID } from '../../../../src/utils/libraryIdentity';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { zoteroContextAtom } from '../../../atoms/zoteroContext';
 import { firstRunReturnRequestedAtom } from '../../../atoms/firstRun';
@@ -320,7 +321,11 @@ const DevToolsMenuButton: React.FC<DevToolsMenuButtonProps> = ({
         }
         console.log('[Find Threads by Item] attachments mode, libraryId:', libraryId, 'keys:', Array.from(keys));
         try {
-            const results = await threadService.findThreadsByItem(libraryId, Array.from(keys), 'attachments');
+            const results = await threadService.findThreadsByItem(
+                { libraryId, libraryRef: libraryRefForLibraryID(libraryId) },
+                Array.from(keys),
+                'attachments'
+            );
             console.log('[Find Threads by Item] attachments results:', results);
         } catch (err) {
             console.error('[Find Threads by Item] attachments failed:', err);
@@ -346,7 +351,11 @@ const DevToolsMenuButton: React.FC<DevToolsMenuButtonProps> = ({
         }
         console.log('[Find Threads by Item] citations mode, libraryId:', libraryId, 'keys:', Array.from(keys));
         try {
-            const results = await threadService.findThreadsByItem(libraryId, Array.from(keys), 'citations');
+            const results = await threadService.findThreadsByItem(
+                { libraryId, libraryRef: libraryRefForLibraryID(libraryId) },
+                Array.from(keys),
+                'citations'
+            );
             console.log('[Find Threads by Item] citations results:', results);
         } catch (err) {
             console.error('[Find Threads by Item] citations failed:', err);
