@@ -22,37 +22,37 @@
   // The full transitive closure, listed explicitly so the package surface is
   // readable. `verify-program.mjs` keeps this list honest.
   "files": [
-    "./globals.d.ts",
-    "../../src/services/agentProtocol.ts",
-    "../../src/services/connectionFailure.ts",
-    "../../src/services/documentExtraction/dom/schema.ts",
-    "../../src/services/documentExtraction/epub/schema.ts",
-    "../../src/services/documentExtraction/shared/contentKinds.ts",
-    "../../src/services/documentExtraction/shared/documentExtractResult.ts",
-    "../../src/services/documentExtraction/snapshot/schema.ts",
-    "../../src/utils/libraryRef.ts",
-    "../../src/beaver-extract/types.ts",
-    "../../src/beaver-extract/schema/schema.ts",
-    "../../react/agents/types.ts",
-    "../../react/types/actions.ts",
-    "../../react/types/attachments/apiTypes.ts",
-    "../../react/types/citations.ts",
-    "../../react/types/customChatModel.ts",
-    "../../react/types/librarySuggestions.ts",
-    "../../react/types/profile.ts",
-    "../../react/types/zotero.ts",
-    "../../react/utils/citationGrammar.ts",
+    "./src/globals.d.ts",
+    "./src/protocol/agentProtocol.ts",
+    "./src/transport/connectionFailure.ts",
+    "./src/extract/document/dom/schema.ts",
+    "./src/extract/document/epub/schema.ts",
+    "./src/extract/document/shared/contentKinds.ts",
+    "./src/extract/document/shared/documentExtractResult.ts",
+    "./src/extract/document/snapshot/schema.ts",
+    "./src/identity/libraryRef.ts",
+    "./src/extract/types.ts",
+    "./src/extract/schema.ts",
+    "./src/agents/types.ts",
+    "./src/types/actions.ts",
+    "./src/types/attachments/apiTypes.ts",
+    "./src/types/citations.ts",
+    "./src/types/customChatModel.ts",
+    "./src/types/librarySuggestions.ts",
+    "./src/types/profile.ts",
+    "./src/types/zotero.ts",
+    "./src/citations/citationGrammar.ts",
 
-    // Reached through the inline `import('../../react/agents/agentActionTypes')`
-    // type references in agentProtocol.ts, and from there the agent-action
-    // payload types they describe.
-    "../../react/agents/agentActionTypes.ts",
-    "../../react/types/agentActions/base.ts",
-    "../../react/types/agentActions/items.ts",
-    "../../react/types/agentActions/editNote.ts",
-    "../../react/types/agentActions/editNoteBatch.ts",
-    "../../react/types/agentActions/annotations.ts",
-    "../../react/types/agentActions/createAnnotations.ts",
-    "../../react/types/externalReferences.ts"
+    // Reached through the inline `import('../agents/agentActionTypes')` type
+    // references in agentProtocol.ts, and from there the agent-action payload
+    // types they describe.
+    "./src/agents/agentActionTypes.ts",
+    "./src/types/agentActions/base.ts",
+    "./src/types/agentActions/items.ts",
+    "./src/types/agentActions/editNote.ts",
+    "./src/types/agentActions/editNoteBatch.ts",
+    "./src/types/agentActions/annotations.ts",
+    "./src/types/agentActions/createAnnotations.ts",
+    "./src/types/externalReferences.ts"
   ]
 }

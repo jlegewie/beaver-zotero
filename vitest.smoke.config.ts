@@ -1,5 +1,8 @@
+import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vitest/config';
 import 'dotenv/config';
+
+const agentCoreSrc = fileURLToPath(new URL('./packages/agent-core/src', import.meta.url));
 
 // Smoke-tier config — opt-in, exercises real MuPDF WASM and sharp.
 // Slower and more environment-sensitive than `npm test`, so kept out of
@@ -18,5 +21,10 @@ export default defineConfig({
         // No `setupFiles` — smoke tests want real Node, not the unit-tier
         // Mozilla-globals stubs in tests/setup.ts.
         testTimeout: 60000,
+    },
+    resolve: {
+        alias: {
+            '@beaver/agent-core': agentCoreSrc,
+        },
     },
 });

@@ -63,6 +63,9 @@ export default (env, argv) => {
         },
         resolve: {
             extensions: ['.js', '.jsx', '.ts', '.tsx'],
+            alias: {
+                '@beaver/agent-core': path.resolve(__dirname, 'packages', 'agent-core', 'src')
+            },
         },
         plugins: [
             new webpack.DefinePlugin({

@@ -1,4 +1,7 @@
+import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vitest/config';
+
+const agentCoreSrc = fileURLToPath(new URL('./packages/agent-core/src', import.meta.url));
 
 export default defineConfig({
     test: {
@@ -14,5 +17,10 @@ export default defineConfig({
         // (document cache, MuPDF worker). Running files in parallel races
         // those endpoints, so execute every file sequentially.
         fileParallelism: false,
+    },
+    resolve: {
+        alias: {
+            '@beaver/agent-core': agentCoreSrc,
+        },
     },
 });

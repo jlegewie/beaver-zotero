@@ -49,8 +49,11 @@ const listedSet = new Set(listed);
 const closureSet = new Set(closure);
 const unlisted = closure.filter((f) => !listedSet.has(f));
 const stale = listed.filter((f) => !closureSet.has(f));
+// Even a listed-and-reachable file must live inside the package — the core
+// must not reach back into the host repo.
+const escapees = closure.filter((f) => !f.startsWith(pkgDir + path.sep));
 
-if (unlisted.length > 0 || stale.length > 0) {
+if (unlisted.length > 0 || stale.length > 0 || escapees.length > 0) {
   for (const f of unlisted) {
     console.error(
       `reachable from the entry but not in tsconfig files: ${path.relative(pkgDir, f)}`,
@@ -61,8 +64,13 @@ if (unlisted.length > 0 || stale.length > 0) {
       `listed in tsconfig files but not reachable from the entry: ${path.relative(pkgDir, f)}`,
     );
   }
+  for (const f of escapees) {
+    console.error(`in the closure but outside the package: ${f}`);
+  }
   console.error(
-    "agent-core `files` drifted from the real closure — update the list to match.",
+    escapees.length > 0
+      ? "agent-core reaches outside the package — remove the offending import."
+      : "agent-core `files` drifted from the real closure — update the list to match.",
   );
   process.exit(1);
 }
