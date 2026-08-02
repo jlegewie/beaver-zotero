@@ -9,7 +9,10 @@ import type { AttachmentStub, ItemStub } from "../zotero";
 export const VALID_ANNOTATION_TYPES = ["highlight", "underline", "note", "image"] as const;
 export type ValidAnnotationType = typeof VALID_ANNOTATION_TYPES[number];
 
-export function isValidAnnotationType(type: _ZoteroTypes.Annotations.AnnotationType): type is ValidAnnotationType {
+// Accepts `string` so this module needs no ambient Zotero types. Callers pass
+// a Zotero item's `annotationType` or a value parsed from drag/drop data, and
+// rely on the predicate's own narrowing rather than the argument type.
+export function isValidAnnotationType(type: string): type is ValidAnnotationType {
     return VALID_ANNOTATION_TYPES.includes(type as ValidAnnotationType);
 }
 

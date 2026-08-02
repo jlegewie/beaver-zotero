@@ -1,16 +1,16 @@
 /**
  * Platform runtime abstraction.
  *
- * Lets shared modules (logger, prefs) access logging and preferences without a
- * hard dependency on the `Zotero` global. Shared code can inject a different
- * adapter via `setRuntimeAdapter` when it runs outside the Zotero plugin host.
+ * Lets shared modules access logging, preferences, and host version reporting
+ * without a hard dependency on the `Zotero` global. A host installs its own
+ * adapter via `setRuntimeAdapter` before shared code reads host services; the Zotero
+ * plugin's adapter lives in `zoteroRuntime.ts` and is installed as a side
+ * effect of importing `src/utils/prefs.ts` (see the comment there for why it
+ * is not registered from the bundle entries like the other host seams).
  *
- * The default adapter is Zotero-backed. It references the `Zotero` global only
- * inside its methods (never at import time), so importing this module is safe in
- * any context; callers can replace the adapter before first use.
- *
- * Must stay free of `react/*` imports so it is safe in both the esbuild and
- * webpack bundles.
+ * Must stay free of `react/*` imports and the `Zotero` global so it is safe in
+ * both the esbuild and webpack bundles, and so it can typecheck standalone
+ * outside the Zotero plugin host.
  */
 
 export interface RuntimeAdapter {
@@ -38,53 +38,48 @@ export interface RuntimeAdapter {
     getVersionHeaders?(): Record<string, string>;
 }
 
-/** The running Zotero's version, or an empty string when it reports none. */
-function zoteroVersion(): string {
-    if (typeof Zotero === 'undefined') return '';
-    const { version } = Zotero;
-    return version && typeof version === 'string' ? version : '';
-}
-
-const zoteroAdapter: RuntimeAdapter = {
-    debug(message, level, maxDepth, stack) {
-        Zotero.debug(message, level as any, maxDepth as any, stack as any);
-    },
+/**
+ * Installed before any host registers its own adapter. `debug` and
+ * `isDevelopment` degrade silently — no host to log to is a normal state, not
+ * an error. `getPref`/`setPref`/`clearPref` throw instead of degrading: a
+ * caller reaching these without a registered host would otherwise read back
+ * `undefined` and have writes silently discarded, which is a worse failure
+ * mode (a wrong default, or a lost user preference) than an immediate error at
+ * the source. `hostVersion`/`getVersionHeaders` are left off entirely, since
+ * both are optional.
+ */
+const unregisteredAdapter: RuntimeAdapter = {
+    debug() {},
     isDevelopment() {
-        return "Beaver" in Zotero && (Zotero as any).Beaver.data.env === "development";
+        return false;
     },
     getPref(key) {
-        return Zotero.Prefs.get(key, true);
+        throw new Error(`No runtime adapter registered; cannot read preference "${key}".`);
     },
-    setPref(key, value) {
-        Zotero.Prefs.set(key, value as any, true);
+    setPref(key) {
+        throw new Error(`No runtime adapter registered; cannot write preference "${key}".`);
     },
     clearPref(key) {
-        Zotero.Prefs.clear(key, true);
-    },
-    hostVersion() {
-        return zoteroVersion();
-    },
-    getVersionHeaders() {
-        const versionHeaders: Record<string, string> = {};
-
-        const version = zoteroVersion();
-        if (version) {
-            versionHeaders['X-Zotero-Version'] = version;
-        }
-
-        const pluginVersion = typeof Zotero !== 'undefined' ? Zotero.Beaver?.pluginVersion : undefined;
-        if (pluginVersion && typeof pluginVersion === 'string') {
-            versionHeaders['X-Beaver-Version'] = pluginVersion;
-        }
-
-        return versionHeaders;
+        throw new Error(`No runtime adapter registered; cannot clear preference "${key}".`);
     },
 };
 
-let adapter: RuntimeAdapter = zoteroAdapter;
+let adapter: RuntimeAdapter = unregisteredAdapter;
 
 /** Replace the runtime adapter before shared code reads host services. */
 export function setRuntimeAdapter(next: RuntimeAdapter): void {
+    adapter = next;
+}
+
+/**
+ * Install an adapter only if no host has installed one yet. Lets a host-specific
+ * module that a client may reach indirectly supply its adapter without
+ * overwriting the one that client already chose. Derived from the active
+ * adapter rather than a separate flag, so restoring the unregistered adapter
+ * re-arms it.
+ */
+export function setRuntimeAdapterIfUnset(next: RuntimeAdapter): void {
+    if (adapter !== unregisteredAdapter) return;
     adapter = next;
 }
 

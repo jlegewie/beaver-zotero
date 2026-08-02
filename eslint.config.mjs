@@ -54,6 +54,7 @@ const l1CoreSrcFiles = [
     "src/utils/libraryRef.ts",
     "src/utils/logger.ts",
     "src/utils/getAPIBaseURL.ts",
+    "src/platform/runtime.ts",
 ];
 
 /** L1-core files under react/types. Siblings there are type modules, so `./x` is allowed. */
@@ -79,7 +80,10 @@ const l1CoreGlobals = [
     },
 ];
 
-/** Import bans for the L1 core. `reactPrefix` is how the guarded file reaches `react/`. */
+/**
+ * Import bans for the L1 core. `reactPrefix` is how the guarded file reaches `react/`.
+ * @param {string} reactPrefix
+ */
 const l1CoreImportBans = (reactPrefix) => [
     {
         group: ["**/agentDataProvider*", "**/agentDataProvider/**"],
@@ -90,6 +94,7 @@ const l1CoreImportBans = (reactPrefix) => [
             "**/zoteroDataProvider",
             "**/zoteroClientIdentity",
             "**/zoteroSupabaseStorage",
+            "**/zoteroRuntime",
             "**/EncryptedStorage",
             "**/zoteroUtils",
             "**/zoteroInstanceWire",
@@ -118,6 +123,19 @@ const l1CoreImportBans = (reactPrefix) => [
     {
         group: [`${reactPrefix}/components/*`, `${reactPrefix}/components/**`],
         message: "L1 core must not import React components (react/components).",
+    },
+];
+
+/**
+ * The `Zotero` global ban covers value references but not `zotero-types`
+ * ambient TYPE namespaces, which are equally unavailable once the L1 core is
+ * typechecked outside the Zotero plugin host.
+ */
+const l1CoreAmbientTypeBan = [
+    {
+        selector: 'Identifier[name="_ZoteroTypes"]',
+        message:
+            "L1 core must not use ambient Zotero types — it has to typecheck without zotero-types.",
     },
 ];
 
@@ -319,6 +337,27 @@ export default tseslint.config(
                     ],
                 },
             ],
+        },
+    },
+    // Ambient-type ban, kept separate from the blocks above because it also
+    // covers wire-type modules the L1 core pulls in transitively, whose import
+    // bans depend on a directory depth those blocks do not model.
+    {
+        files: [
+            ...l1CoreSrcFiles,
+            ...l1CoreReactTypeFiles,
+            ...l1CoreReactUtilFiles,
+            "react/types/attachments/apiTypes.ts",
+            "react/types/zotero.ts",
+            "react/types/citations.ts",
+            "react/types/profile.ts",
+            "react/types/actions.ts",
+            "react/types/agentActions/**/*.ts",
+            "react/agents/types.ts",
+            "react/agents/agentActionTypes.ts",
+        ],
+        rules: {
+            "no-restricted-syntax": ["error", ...l1CoreAmbientTypeBan],
         },
     },
 );

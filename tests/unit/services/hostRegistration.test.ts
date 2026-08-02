@@ -15,6 +15,14 @@
  * This checks that each call runs on import, not that the imports resolve
  * (the type checker covers that) and not the order of the calls relative to
  * the first use of what they register.
+ *
+ * The platform runtime adapter (`registerZoteroRuntime` in
+ * `src/platform/zoteroRuntime.ts`) is deliberately absent from this list:
+ * some `getPref()` callers read at module scope, so an entry-body call — the
+ * pattern every registration below follows — always runs too late, since an
+ * entry's imports fully evaluate before its own body (see the comment on the
+ * `registerZoteroRuntime()` call in `src/utils/prefs.ts`). That ordering
+ * guarantee is locked by `tests/unit/platform/zoteroRuntime.test.ts` instead.
  */
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
