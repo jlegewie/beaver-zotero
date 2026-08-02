@@ -2,7 +2,7 @@ import { useCallback } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { isStreamingAtom } from '../agents/atoms';
 import { isWSChatPendingAtom } from '../atoms/agentRunAtoms';
-import { Action } from '../types/actions';
+import { Action } from '@beaver/agent-core/types/actions';
 import { stageActionPillAtom, actionContextAtom } from '../atoms/actions';
 import { getActiveTarget, resolveActionBinding } from '../utils/actionVisibility';
 

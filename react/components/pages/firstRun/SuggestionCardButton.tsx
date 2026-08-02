@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
 import { useSetAtom } from 'jotai';
-import { CardKind, SuggestionCard } from '../../../types/librarySuggestions';
+import { CardKind, SuggestionCard } from '@beaver/agent-core/types/librarySuggestions';
 import { submitFirstRunCardAtom } from '../../../atoms/firstRun';
-import { ChargingPermissions } from '../../../../src/services/agentProtocol';
+import { ChargingPermissions } from '@beaver/agent-core/protocol/agentProtocol';
 import BookmarkIcon from '../../icons/BookmarkIcon';
 import BrainIcon from '../../icons/BrainIcon';
 import GlobalSearchIcon from '../../icons/GlobalSearchIcon';

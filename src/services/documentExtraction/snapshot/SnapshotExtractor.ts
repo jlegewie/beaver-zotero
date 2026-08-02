@@ -20,7 +20,7 @@ import {
     SNAPSHOT_SCHEMA_VERSION,
     type ExtractSnapshotResult,
     type SnapshotDocument,
-} from "./schema";
+} from "@beaver/agent-core/extract/document/snapshot/schema";
 import { getDeclaredCharset, isLikelyNonUtf8Charset, parseSnapshotHtml } from "./snapshotDom";
 import { getReadableContentKind } from "../attachmentResolution";
 import { effectiveMaxSnapshotFileSizeMB } from "../../attachmentLimits";

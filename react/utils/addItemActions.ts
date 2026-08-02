@@ -1,5 +1,5 @@
-import { CreateItemProposedAction, CreateItemProposedData, CreateItemResultData } from '../types/agentActions/items';
-import { ExternalReference, NormalizedPublicationType } from '../types/externalReferences';
+import { CreateItemProposedAction, CreateItemProposedData, CreateItemResultData } from '@beaver/agent-core/types/agentActions/items';
+import { ExternalReference, NormalizedPublicationType } from '@beaver/agent-core/types/externalReferences';
 import { logger } from '../../src/utils/logger';
 import { getZoteroTargetContext } from '../../src/utils/zoteroUtils';
 import { scheduleBackgroundTask, generateTaskId, isPdfFetchInProgress, deduplicatedSync } from '../../src/utils/backgroundTasks';

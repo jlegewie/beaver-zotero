@@ -15,8 +15,8 @@
  * clipboard). Actual file I/O lives in `react/utils/actionShareFile.ts`.
  */
 
-import type { Action, ActionCategory, ActionClient, ActionTargetType } from './actions';
-import { CURRENT_ACTION_CLIENT } from './actions';
+import type { Action, ActionCategory, ActionClient, ActionTargetType } from '@beaver/agent-core/types/actions';
+import { CURRENT_ACTION_CLIENT } from '@beaver/agent-core/types/actions';
 
 // ---------------------------------------------------------------------------
 // Format constants

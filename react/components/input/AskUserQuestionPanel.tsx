@@ -4,7 +4,7 @@ import type { PendingQuestion } from '../../agents/pendingQuestions';
 import type {
     AskUserQuestionAnswer,
     AskUserQuestionItem,
-} from '../../../src/services/agentProtocol';
+} from '@beaver/agent-core/protocol/agentProtocol';
 import {
     closeWSConnectionAtom,
     sendAskUserQuestionResponseAtom,

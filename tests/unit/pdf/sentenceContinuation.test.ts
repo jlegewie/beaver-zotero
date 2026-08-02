@@ -19,7 +19,7 @@ import {
     type SectionHeaderItem,
     type SentenceItem,
     type TextItem,
-} from "../../../src/beaver-extract/types";
+} from "@beaver/agent-core/extract/types";
 
 // ---------------------------------------------------------------------------
 // Fixture helpers

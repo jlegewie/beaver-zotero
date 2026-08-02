@@ -1,4 +1,4 @@
-import { AgentRun, TextPart, ToolCallPart } from '../agents/types';
+import { AgentRun, TextPart, ToolCallPart } from '@beaver/agent-core/agents/types';
 import { getToolCallLabel } from '../agents/toolLabels';
 import { isToolResultView } from '../types/toolResultViews';
 

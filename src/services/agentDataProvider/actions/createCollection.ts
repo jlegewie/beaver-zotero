@@ -7,7 +7,7 @@ import {
     WSAgentActionExecuteRequest,
     WSAgentActionExecuteResponse,
 
-} from '../../agentProtocol';
+} from '@beaver/agent-core/protocol/agentProtocol';
 import { checkLibraryExcluded, excludedLibraryMessage, getDeferredToolPreference } from '../utils';
 import {
     libraryRefForLibraryID,

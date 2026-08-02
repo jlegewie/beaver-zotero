@@ -21,7 +21,7 @@ import {
     EPUB_SCHEMA_VERSION,
     type EpubDocument,
     type ExtractEpubResult,
-} from "./schema";
+} from "@beaver/agent-core/extract/document/epub/schema";
 import {
     epubPageLabelForPosition,
     extractSectionPageMarkers,

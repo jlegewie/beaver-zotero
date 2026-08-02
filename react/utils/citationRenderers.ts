@@ -6,11 +6,11 @@ import MarkdownRenderer from '../components/messages/MarkdownRenderer';
 import { Citation } from '../../src/services/CitationService';
 import { citationsAtom, citationByKeyAtom, citationKeyToMarkerAtom, pageLabelsByAttachmentIdAtom, externalFileLocalPathsAtom, type PageLabelsByAttachmentId } from '../atoms/citations';
 import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '../atoms/externalReferences';
-import { Citation as BeaverCitation } from '../types/citations';
+import { Citation as BeaverCitation } from '@beaver/agent-core/types/citations';
 import { CITATION_TAG_PATTERN } from '../utils/citationPreprocessing';
-import { ZoteroItemReference } from '../types/zotero';
+import { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import { logger } from '../../src/utils/logger';
-import { ExternalReference } from '../types/externalReferences';
+import { ExternalReference } from '@beaver/agent-core/types/externalReferences';
 import { formatExternalCitation } from '../atoms/externalReferences';
 import { UNRESOLVED_LIBRARY_ID } from '../../src/utils/libraryIdentity';
 import {
@@ -22,7 +22,7 @@ import {
     normalizeCitationTag,
     parseRawCitationAttributes,
     requestedCitationKey,
-} from './citationGrammar';
+} from '@beaver/agent-core/citations/citationGrammar';
 
 // Regex for citation syntax - matches self-closing (/>) and non-self-closing (>) with or without closing tag
 const citationRegex = /<citation(?:\s+([^>]*?))?\s*(\/>|>(?:.*?<\/citation>)?)/g;

@@ -4,7 +4,7 @@ import Button from "./ui/Button";
 import Tooltip from "./ui/Tooltip";
 import { CSSIcon, CSSItemTypeIcon } from "./icons/zotero";
 import { ArrowUpRightIcon, ArrowRightIcon } from "./icons/icons";
-import { Action, ActionCategory, TARGET_TYPE_LABELS } from "../types/actions";
+import { Action, ActionCategory, TARGET_TYPE_LABELS } from "@beaver/agent-core/types/actions";
 import { actionsForContextAtom, actionContextAtom } from "../atoms/actions";
 import { GroupIconInfo, splitCategoryActions, getActiveTarget } from "../utils/actionVisibility";
 import { useActionRunner } from "../hooks/useActionRunner";

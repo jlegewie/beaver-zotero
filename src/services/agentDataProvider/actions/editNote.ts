@@ -1,7 +1,7 @@
 import { logger } from '../../../utils/logger';
 import { libraryRefForLibraryID, modelObjectIdFromReference, resolveItemReference, resolveLibraryRef } from '../../../utils/libraryIdentity';
 import { searchableLibraryIdsAtom } from '../../../../react/atoms/profile';
-import { EditNoteProposedData, type EditNoteOperation } from '../../../../react/types/agentActions/editNote';
+import { EditNoteProposedData, type EditNoteOperation } from '@beaver/agent-core/types/agentActions/editNote';
 import {
     getOrSimplify,
     invalidateSimplificationCache,
@@ -70,7 +70,7 @@ import {
     WSAgentActionValidateResponse,
     WSAgentActionExecuteRequest,
     WSAgentActionExecuteResponse,
-} from '../../agentProtocol';
+} from '@beaver/agent-core/protocol/agentProtocol';
 import { checkLibraryExcluded, excludedLibraryMessage, getDeferredToolPreference } from '../utils';
 import { TimeoutContext, checkAborted } from '../timeout';
 import { TimeoutError } from '../timeout';

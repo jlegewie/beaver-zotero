@@ -9,7 +9,7 @@
  * No DOM, no fs, no Node-only imports — safe to consume from React or
  * Node code paths.
  */
-import type { LayoutAnalysisResult } from "../types";
+import type { LayoutAnalysisResult } from "@beaver/agent-core/extract/types";
 
 export interface AnalyzeLayoutWire {
     page_count: number;

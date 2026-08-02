@@ -1,4 +1,4 @@
-import { AgentRun, TextPart } from '../agents/types';
+import { AgentRun, TextPart } from '@beaver/agent-core/agents/types';
 
 const MAX_RESPONSE_ANNOUNCEMENT_CHARS = 4000;
 

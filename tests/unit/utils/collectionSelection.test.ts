@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { Action, ActionTargetType } from '../../../react/types/actions';
+import { Action, ActionTargetType } from '@beaver/agent-core/types/actions';
 import type { LibraryViewInfo, SelectedCollectionInfo, ZoteroContext } from '../../../react/atoms/zoteroContext';
 
 // actionVisibility has Zotero/supabase-coupled value imports that run side

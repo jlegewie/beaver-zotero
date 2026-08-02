@@ -4,8 +4,8 @@ import { firstRunReturnRequestedAtom } from '../../../atoms/firstRun';
 import { newThreadAtom } from '../../../atoms/threads';
 import { currentMessageContentAtom } from '../../../atoms/messageComposition';
 import { sendWSMessageAtom } from '../../../atoms/agentRunAtoms';
-import { PromptOrigin } from '../../../agents/types';
-import { CardKind } from '../../../types/librarySuggestions';
+import { PromptOrigin } from '@beaver/agent-core/agents/types';
+import { CardKind } from '@beaver/agent-core/types/librarySuggestions';
 import {
     FirstRunFollowup,
     getFollowupsForCardKind,

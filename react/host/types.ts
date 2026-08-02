@@ -1,10 +1,10 @@
 import type { ReactNode } from 'react';
-import type { ZoteroItemReference } from '../types/zotero';
-import type { CitationRef } from '../utils/citationGrammar';
-import type { Citation, PartLocation } from '../types/citations';
+import type { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
+import type { CitationRef } from '@beaver/agent-core/citations/citationGrammar';
+import type { Citation, PartLocation } from '@beaver/agent-core/types/citations';
 import type { PageLabelsByAttachmentId } from '../atoms/citations';
-import type { ExternalReference } from '../types/externalReferences';
-import type { ToolCallPart, AgentRun, AgentRunStatus } from '../agents/types';
+import type { ExternalReference } from '@beaver/agent-core/types/externalReferences';
+import type { ToolCallPart, AgentRun, AgentRunStatus } from '@beaver/agent-core/agents/types';
 import type { PendingApproval } from '../agents/agentActions';
 import type { EditNoteResolvedTarget } from '../components/agentRuns/editNoteShared';
 

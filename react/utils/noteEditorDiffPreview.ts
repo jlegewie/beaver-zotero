@@ -22,7 +22,7 @@
  */
 
 import { logger } from '../../src/utils/logger';
-import type { EditNoteOperation } from '../types/agentActions/editNote';
+import type { EditNoteOperation } from '@beaver/agent-core/types/agentActions/editNote';
 import {
     getOrSimplify,
     normalizeNoteHtml,

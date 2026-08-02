@@ -1,6 +1,6 @@
 import type React from 'react';
 import type { ChipPopupContent } from './ChipPopup';
-import type { ActionCategory } from '../../../types/actions';
+import type { ActionCategory } from '@beaver/agent-core/types/actions';
 import { ZapIcon, BookSearchIcon, LayersIcon, HighlighterIcon, QuillWriteIcon } from '../../icons/icons';
 import { truncateText } from '../../../utils/stringUtils';
 

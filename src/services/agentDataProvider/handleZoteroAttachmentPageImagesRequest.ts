@@ -14,7 +14,7 @@ import {
     WSZoteroAttachmentPageImagesResponse,
     AttachmentPageImagesErrorCode,
     WSPageImage,
-} from '../agentProtocol';
+} from '@beaver/agent-core/protocol/agentProtocol';
 import {
     BeaverExtractor,
     ExtractionError,

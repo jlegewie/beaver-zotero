@@ -6,7 +6,7 @@
 
 import { atom } from 'jotai';
 import { v4 as uuidv4 } from 'uuid';
-import { Action, ActionOverride, ActionTargetType, generateActionId, sameTargets } from '../types/actions';
+import { Action, ActionOverride, ActionTargetType, generateActionId, sameTargets } from '@beaver/agent-core/types/actions';
 import { ALL_BUILTIN_ACTIONS } from '../types/builtinActions';
 import {
     getMergedActions,
@@ -31,13 +31,13 @@ import {
     pendingPillInsertsAtom,
     addItemsToCurrentMessageItemsAtom,
 } from './messageComposition';
-import { CollectionReference, collectionReferenceKey } from '../types/zotero';
+import { CollectionReference, collectionReferenceKey } from '@beaver/agent-core/types/zotero';
 import { addPopupMessageAtom } from '../utils/popupMessageUtils';
 import { isRejectedItemValidation, itemValidationResultsAtom } from './itemValidation';
 import { searchableLibraryIdsAtom } from './profile';
 import { getActionCommand, toSlashToken, type SlashCommandDescriptor } from '../utils/slashCommands';
-import type { PromptAction } from '../agents/types';
-import { MessageAttachment, messageAttachmentKey, messageAttachmentLookupKeys } from '../types/attachments/apiTypes';
+import type { PromptAction } from '@beaver/agent-core/agents/types';
+import { MessageAttachment, messageAttachmentKey, messageAttachmentLookupKeys } from '@beaver/agent-core/types/attachments/apiTypes';
 import { toMessageAttachment } from '../types/attachments/converters';
 
 // ---------------------------------------------------------------------------

@@ -1,8 +1,8 @@
 import { type PageLabelsByAttachmentId } from '../../atoms/citations';
 import { getBestPDFAttachment } from '../../../src/utils/zoteroItemHelpers';
 import { getLibraryByIdOrName, getCollectionByIdOrName } from '../../../src/services/agentDataProvider/utils';
-import type { CitationRef } from '../../utils/citationGrammar';
-import type { ZoteroItemReference } from '../../types/zotero';
+import type { CitationRef } from '@beaver/agent-core/citations/citationGrammar';
+import type { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import { logger } from '../../../src/utils/logger';
 import { resolveLibraryRef } from '../../../src/utils/libraryIdentity';
 import type { ItemDataHost, ResolvedItemDisplay } from '../types';

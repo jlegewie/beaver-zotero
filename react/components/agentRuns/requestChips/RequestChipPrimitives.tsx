@@ -2,11 +2,11 @@ import React from 'react';
 import { CSSIcon, CSSItemTypeIcon, LibraryIcon, NoteIcon, HighlighterIcon, ExternalLinkIcon } from '../../icons/icons';
 import { ZoteroIcon, ZOTERO_ICONS } from '../../icons/ZoteroIcon';
 import { getHost } from '../../../host';
-import type { ZoteroItemReference } from '../../../types/zotero';
-import type { ContentKind } from '../../../types/zotero';
+import type { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
+import type { ContentKind } from '@beaver/agent-core/types/zotero';
 import { truncateText } from '../../../utils/stringUtils';
 import { ANNOTATION_ICON_BY_TYPE, ANNOTATION_TEXT_BY_TYPE } from '../../../utils/annotationDisplay';
-import type { ValidAnnotationType, ExternalFileContentKind } from '../../../types/attachments/apiTypes';
+import type { ValidAnnotationType, ExternalFileContentKind } from '@beaver/agent-core/types/attachments/apiTypes';
 import { ChipWithPopup, type ChipPopupContent, type ChipPopupSubtitle } from './ChipPopup';
 import { ChipButton } from './ChipButton';
 

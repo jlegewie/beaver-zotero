@@ -8,9 +8,9 @@ import {
   createHighlightAnnotation,
   createNoteAnnotation,
 } from "../../../../src/services/annotations/createAnnotation";
-import { normalizeAnnotationTags } from "../../../../react/types/agentActions/createAnnotations";
-import { CoordOrigin } from "../../../../react/types/citations";
-import type { PageGeometry } from "../../../../src/beaver-extract/types";
+import { normalizeAnnotationTags } from "@beaver/agent-core/types/agentActions/createAnnotations";
+import { CoordOrigin } from "@beaver/agent-core/types/citations";
+import type { PageGeometry } from "@beaver/agent-core/extract/types";
 
 const geometry: PageGeometry = {
   viewBox: [0, 0, 400, 600],

@@ -6,7 +6,7 @@
  * the worker's error envelope passes the *string* code over postMessage, we
  * also re-export plain string constants for convenience.
  */
-import { ExtractionErrorCode } from "../types";
+import { ExtractionErrorCode } from "@beaver/agent-core/extract/types";
 import { getWorkerSelf } from "./workerScope";
 import { pdfLog, type PDFLogLevel } from "../logging";
 

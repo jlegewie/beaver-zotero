@@ -1,10 +1,10 @@
 import { getPref, setPref } from "../../src/utils/prefs";
 import { store } from "../store";
 import { addPopupMessageAtom } from "../utils/popupMessageUtils";
-import { ProcessingMode } from "./profile";
-import { CustomChatModel, isCustomChatModel, OPENROUTER_API_BASE } from "./customChatModel";
+import { ProcessingMode } from "@beaver/agent-core/types/profile";
+import { CustomChatModel, isCustomChatModel, OPENROUTER_API_BASE } from "@beaver/agent-core/types/customChatModel";
 
-export * from "./customChatModel";
+export * from "@beaver/agent-core/types/customChatModel";
 
 // Session flag to prevent repeated popup warnings
 let hasShownCustomModelsParsingWarning = false;

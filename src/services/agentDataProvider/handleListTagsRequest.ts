@@ -12,7 +12,7 @@ import {
     WSListTagsRequest,
     WSListTagsResponse,
     TagInfo,
-} from '../agentProtocol';
+} from '@beaver/agent-core/protocol/agentProtocol';
 import { getCollectionByIdOrName, validateLibraryAccess, isLibrarySearchable, getSearchableLibraries, excludedLibraryMessage } from './utils';
 import { libraryRefForLibraryID } from '../../utils/libraryIdentity';
 

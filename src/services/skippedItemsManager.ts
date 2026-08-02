@@ -1,4 +1,4 @@
-import { ZoteroItemReference } from '../../react/types/zotero';
+import { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import { SkippedItem } from '../../react/types/fileStatus';
 import { getPref, setPref } from '../utils/prefs';
 import { libraryRefForLibraryID } from '../utils/libraryIdentity';

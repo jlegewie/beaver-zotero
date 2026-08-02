@@ -18,7 +18,7 @@ import {
     AvailableLibraryInfo,
     WSFindAnnotationsRequest,
     WSFindAnnotationsResponse,
-} from '../agentProtocol';
+} from '@beaver/agent-core/protocol/agentProtocol';
 import {
     excludedLibraryMessage,
     getCollectionByIdOrName,

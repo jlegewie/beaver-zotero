@@ -7,7 +7,7 @@ import type {
 import ActionButtons from './ActionButtons';
 import { AgentActionInStream } from './AgentActionInStream';
 import { AgentActionsReview } from './AgentActionsReview';
-import type { AgentRun } from '../../../agents/types';
+import type { AgentRun } from '@beaver/agent-core/agents/types';
 
 /**
  * Zotero implementations of the host-provided, client-specific UI components.

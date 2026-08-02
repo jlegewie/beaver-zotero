@@ -12,11 +12,11 @@ import {
     isExternalCitation,
     isExternalFileCitation,
     itemTypeToIconName,
-} from '../../types/citations';
+} from '@beaver/agent-core/types/citations';
 import Tooltip from '../ui/Tooltip';
 import { externalReferenceMappingAtom, externalReferenceItemMappingAtom, formatExternalCitation } from '../../atoms/externalReferences';
-import { ExternalReference } from '../../types/externalReferences';
-import { ZoteroItemReference } from '../../types/zotero';
+import { ExternalReference } from '@beaver/agent-core/types/externalReferences';
+import { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import { getHost, type ResolvedItemDisplay } from '../../host';
 
 interface CitedSourcesListProps {

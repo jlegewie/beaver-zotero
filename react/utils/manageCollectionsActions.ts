@@ -26,7 +26,7 @@
  */
 
 import { AgentAction, ManageCollectionsAgentAction } from '../agents/agentActions';
-import type { ManageCollectionsProposedData, ManageCollectionsResultData } from '../types/agentActions/base';
+import type { ManageCollectionsProposedData, ManageCollectionsResultData } from '@beaver/agent-core/types/agentActions/base';
 import { logger } from '../../src/utils/logger';
 import { libraryRefForLibraryID, resolveWriteTargetLibrary } from '../../src/utils/libraryIdentity';
 

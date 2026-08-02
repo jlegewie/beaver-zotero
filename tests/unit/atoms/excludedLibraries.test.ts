@@ -1,7 +1,7 @@
 import { createStore } from 'jotai';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { SafeProfileWithPlan } from '../../../react/types/profile';
-import { ZoteroLibrary } from '../../../react/types/zotero';
+import { SafeProfileWithPlan } from '@beaver/agent-core/types/profile';
+import { ZoteroLibrary } from '@beaver/agent-core/types/zotero';
 
 const { updateExcludedLibrariesMock, popupMessages } = vi.hoisted(() => ({
     updateExcludedLibrariesMock: vi.fn(),

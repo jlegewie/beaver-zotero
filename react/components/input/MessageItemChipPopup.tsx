@@ -3,7 +3,7 @@ import { CSSItemTypeIcon, NoteIcon, LibraryIcon } from '../icons/icons';
 import type { ChipListPopupContent, ChipPopupAction, ChipPopupContent, ChipPopupStatus, ChipPopupSubtitle } from '../agentRuns/requestChips/ChipPopup';
 import type { ItemValidationState } from '../../atoms/itemValidation';
 import { getDisplayNameFromItem } from '../../utils/sourceUtils';
-import type { AttachmentInfo, ContentKind } from '../../../src/services/documentExtraction/shared/contentKinds';
+import type { AttachmentInfo, ContentKind } from '@beaver/agent-core/extract/document/shared/contentKinds';
 import {
     toReadabilityInfo,
     attachmentIssueLabel,

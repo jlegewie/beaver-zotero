@@ -1,5 +1,5 @@
 import React from 'react';
-import { ToolCallPart, AgentRunStatus } from '../../agents/types';
+import { ToolCallPart, AgentRunStatus } from '@beaver/agent-core/agents/types';
 import { TOOL_BASE_LABELS, parseArgs } from '../../agents/toolCallRequest';
 
 /**

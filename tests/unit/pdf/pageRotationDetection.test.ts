@@ -11,7 +11,7 @@ import {
     type RawPageData,
     type RawLine,
     type RawBlock,
-} from "../../../src/beaver-extract/types";
+} from "@beaver/agent-core/extract/types";
 
 // ---------------------------------------------------------------------------
 // dirToRotation — oracle values from real MuPDF detailed walk on the

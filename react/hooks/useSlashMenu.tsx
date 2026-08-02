@@ -6,7 +6,7 @@ import { currentMessageContentAtom } from '../atoms/messageComposition';
 import { actionsAtom, actionContextAtom, resolveActionForStagingAtom } from '../atoms/actions';
 import { computeActionGroups } from '../utils/actionVisibility';
 import { openPreferencesWindow } from '../../src/ui/openPreferencesWindow';
-import { Action, ActionCategory, ActionTargetType } from '../types/actions';
+import { Action, ActionCategory, ActionTargetType } from '@beaver/agent-core/types/actions';
 import { SlashCommandDescriptor, getActionCommand } from '../utils/slashCommands';
 import { MenuPosition, SearchMenuItem } from '../components/ui/menus/SearchMenu';
 

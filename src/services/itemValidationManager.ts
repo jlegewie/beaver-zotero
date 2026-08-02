@@ -4,7 +4,7 @@ import {
     prepareAttachmentInfoBatchData,
     processAttachmentInfoBatch,
 } from './documentExtraction/attachmentInfoBatch';
-import type { AttachmentInfo, ContentKind } from './documentExtraction/shared/contentKinds';
+import type { AttachmentInfo, ContentKind } from '@beaver/agent-core/extract/document/shared/contentKinds';
 import { effectiveMaxPageCount } from './attachmentLimits';
 import { parseItemReference } from '../utils/libraryIdentity';
 

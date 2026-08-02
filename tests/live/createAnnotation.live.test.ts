@@ -21,7 +21,7 @@ import {
   type AttachmentFixture,
 } from "../helpers/fixtures";
 import { post } from "../helpers/zoteroHttpClient";
-import { CoordOrigin } from "../../react/types/citations";
+import { CoordOrigin } from "@beaver/agent-core/types/citations";
 
 let available = false;
 let createdItemIds: string[] = [];

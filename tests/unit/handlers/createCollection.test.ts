@@ -27,7 +27,7 @@ import {
     validateCreateCollectionAction,
     executeCreateCollectionAction,
 } from '../../../src/services/agentDataProvider/actions/createCollection';
-import type { WSAgentActionValidateRequest, WSAgentActionExecuteRequest } from '../../../src/services/agentProtocol';
+import type { WSAgentActionValidateRequest, WSAgentActionExecuteRequest } from '@beaver/agent-core/protocol/agentProtocol';
 
 function makeItem(libraryID: number, key: string) {
     return {

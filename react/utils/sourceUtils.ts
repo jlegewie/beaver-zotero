@@ -2,9 +2,9 @@ import { truncateText } from './stringUtils';
 import { stripHtmlTags, computeDiff } from '../components/agentRuns/EditNotePreview';
 import { logger } from '../../src/utils/logger';
 import { isAgentSupportedItem, agentItemFilter, agentItemFilterAsync } from '../../src/utils/agentItemSupport';
-import { isValidAnnotationType, SourceAttachment } from '../types/attachments/apiTypes';
+import { isValidAnnotationType, SourceAttachment } from '@beaver/agent-core/types/attachments/apiTypes';
 import { selectItemById } from '../../src/utils/selectItem';
-import { ZoteroItemReference } from '../types/zotero';
+import { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import { searchableLibraryIdsAtom } from '../atoms/profile';
 import { store } from '../store';
 import { userIdAtom } from '../atoms/auth';
@@ -12,7 +12,7 @@ import { isAttachmentOnServer } from '../../src/utils/webAPI';
 import { safeFileExists } from '../../src/utils/zoteroUtils';
 import { getSelectedCollection } from '../../src/utils/zoteroSelection';
 import { getNoteContentPreviewText } from './noteText';
-import type { EditNoteOperation } from '../types/agentActions/editNote';
+import type { EditNoteOperation } from '@beaver/agent-core/types/agentActions/editNote';
 import { getBeaverFooterAppendPoint } from '../../src/utils/noteEditFooter';
 import { notifyReferenceUnavailable } from '../host/zotero/sourceActions';
 import {
@@ -26,7 +26,7 @@ import {
     getPageLocator,
     normalizeCitationTag,
     parseRawCitationAttributes,
-} from './citationGrammar';
+} from '@beaver/agent-core/citations/citationGrammar';
 
 // Constants
 export const MAX_NOTE_TITLE_LENGTH = 20;

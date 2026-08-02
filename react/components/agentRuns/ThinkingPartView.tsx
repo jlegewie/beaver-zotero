@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { ThinkingPart } from '../../agents/types';
+import { ThinkingPart } from '@beaver/agent-core/agents/types';
 import MarkdownRenderer from '../messages/MarkdownRenderer';
 import { Spinner, Icon, BrainIcon, ArrowRightIcon, ArrowDownIcon } from '../icons/icons';
 import { thinkingVisibilityAtom, toggleThinkingVisibilityAtom } from '../../atoms/messageUIState';

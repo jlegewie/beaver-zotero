@@ -1,7 +1,7 @@
 import React from "react";
 import Button from "./ui/Button";
 import { useAtomValue } from "jotai";
-import { Action } from "../types/actions";
+import { Action } from "@beaver/agent-core/types/actions";
 import { actionsForContextAtom, actionContextAtom } from "../atoms/actions";
 import { useActionRunner } from "../hooks/useActionRunner";
 import { getActiveTarget } from "../utils/actionVisibility";

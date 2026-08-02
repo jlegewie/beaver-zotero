@@ -181,7 +181,7 @@ import type {
     WSAgentActionExecuteRequest,
     // Notes
     WSReadNoteRequest,
-} from '../../src/services/agentProtocol';
+} from '@beaver/agent-core/protocol/agentProtocol';
 
 
 // =============================================================================

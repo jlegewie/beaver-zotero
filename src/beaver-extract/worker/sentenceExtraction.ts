@@ -68,8 +68,8 @@ import type {
     RawPageDataDetailed,
     StructuredPagePhaseTimings,
     StyleProfile,
-} from "../types";
-import { shouldProbeGraphicsLayer } from "../types";
+} from "@beaver/agent-core/extract/types";
+import { shouldProbeGraphicsLayer } from "@beaver/agent-core/extract/types";
 import {
     extractGraphicsFromDoc,
     extractRawPageDetailedFromDoc,

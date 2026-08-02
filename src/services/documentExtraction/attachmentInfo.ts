@@ -6,7 +6,7 @@ import { effectiveMaxFileSizeMB } from '../attachmentLimits';
 import { isRemoteFilePath, makeRemoteFilePath } from '../documentFileIdentity';
 import type { DocumentCacheMetadata } from '../documentCache';
 import { getContentKind } from './attachmentResolution';
-import { isReadableContentKind, type AttachmentInfo, type ContentKind } from './shared/contentKinds';
+import { isReadableContentKind, type AttachmentInfo, type ContentKind } from '@beaver/agent-core/extract/document/shared/contentKinds';
 import { getPDFPageCountFromFulltext, getPDFPageCountFromWorker } from './shared/pageCount';
 import type { TimingAccumulator } from '../../utils/timing';
 import { libraryRefForLibraryID, modelObjectId } from '../../utils/libraryIdentity';

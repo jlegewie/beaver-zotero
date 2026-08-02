@@ -14,7 +14,7 @@ import { isLibraryValidForSync } from "../../../src/utils/sync";
 import { store } from "../../store";
 import SelectLibraries from "./onboarding/SelectLibraries";
 import { serializeZoteroLibrary } from "../../../src/utils/zoteroSerializers";
-import { ZoteroLibrary } from "../../types/zotero";
+import { ZoteroLibrary } from "@beaver/agent-core/types/zotero";
 import { OnboardingHeader, OnboardingFooter, ExamplePrompts } from "./onboarding";
 import ConsentToggles from "./onboarding/ConsentToggles";
 import { LockIcon, Icon, AlertIcon } from "../icons/icons";

@@ -11,11 +11,11 @@ import {
     mergeEffectiveOptions,
     projectOcrSnapshot,
 } from "../../../src/beaver-extract/debug/ocrSnapshot";
-import { DEFAULT_OCR_DETECTION_OPTIONS } from "../../../src/beaver-extract/types";
+import { DEFAULT_OCR_DETECTION_OPTIONS } from "@beaver/agent-core/extract/types";
 import type {
     OCRDetectionResult,
     OCRIssueReason,
-} from "../../../src/beaver-extract/types";
+} from "@beaver/agent-core/extract/types";
 import type { CapturedOcrFixture } from "../../../src/beaver-extract/cli/fixture/ocrFixtureSchema";
 
 const ALL_REASONS_ZERO = (): Record<OCRIssueReason, number> => ({

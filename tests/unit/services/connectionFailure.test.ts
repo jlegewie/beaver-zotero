@@ -5,7 +5,7 @@ import {
     isAbruptTransportCloseCode,
     isRetryablePreReadyConnectFailure,
     presentConnectionFailure,
-} from '../../../src/services/connectionFailure';
+} from '@beaver/agent-core/transport/connectionFailure';
 
 const opening1006: ConnectionFailureEvidence = {
     stage: 'opening',

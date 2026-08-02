@@ -14,7 +14,7 @@ import {
     TextNode,
 } from 'lexical';
 import { actionsAtom } from '../../../atoms/actions';
-import { Action } from '../../../types/actions';
+import { Action } from '@beaver/agent-core/types/actions';
 import { $createSlashCommandNode } from './SlashCommandNode';
 import { truncateText } from '../../../utils/stringUtils';
 

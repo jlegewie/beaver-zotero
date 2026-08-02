@@ -1,4 +1,4 @@
-import { FileHashReference, ZoteroItemReference } from './zotero';
+import { FileHashReference, ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 
 export type ConnectionStatus = 'idle' | 'connecting' | 'connected' | 'disconnected' | 'reconnecting' | 'polling' | 'error';
 

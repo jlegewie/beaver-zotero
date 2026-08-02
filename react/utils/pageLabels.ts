@@ -20,7 +20,7 @@
 import { makeRemoteFilePath } from '../../src/services/documentFileIdentity';
 import { getAttachmentFileStatus, isRemoteAccessAvailable } from '../../src/services/agentDataProvider/utils';
 import type { PageLabels } from '../../src/services/documentCache';
-import type { Citation } from '../types/citations';
+import type { Citation } from '@beaver/agent-core/types/citations';
 import { getBestPDFAttachmentAsync } from '../../src/utils/zoteroItemHelpers';
 import { UNRESOLVED_LIBRARY_ID, resolveLibraryRef } from '../../src/utils/libraryIdentity';
 import {
@@ -29,7 +29,7 @@ import {
     getResolvedRef,
     normalizeCitationTag,
     parseRawCitationAttributes,
-} from './citationGrammar';
+} from '@beaver/agent-core/citations/citationGrammar';
 import type { PageLabelsByAttachmentId } from '../atoms/citations';
 
 // Regex for citation tags — matches self-closing and non-self-closing forms

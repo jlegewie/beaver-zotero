@@ -4,7 +4,7 @@ import { initializeReactUI } from "../../react/ui/initialization";
 import { KeyboardManager } from "../utils/keyboardManager";
 import { getPref } from "../utils/prefs";
 import { PreferencePageTab } from "../../react/atoms/ui";
-import { ActionCategoryFilter } from "../../react/types/actions";
+import { ActionCategoryFilter } from "@beaver/agent-core/types/actions";
 
 let keyboardManager: KeyboardManager | null = null;
 

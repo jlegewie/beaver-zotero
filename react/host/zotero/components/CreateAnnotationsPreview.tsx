@@ -21,7 +21,7 @@ import type {
     FailedAnnotationResult,
     HighlightAnnotationItem,
     NoteAnnotationItem,
-} from '../../../types/agentActions/createAnnotations';
+} from '@beaver/agent-core/types/agentActions/createAnnotations';
 
 type ActionStatus = 'pending' | 'applied' | 'rejected' | 'undone' | 'error' | 'awaiting';
 

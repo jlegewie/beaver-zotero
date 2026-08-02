@@ -1,5 +1,5 @@
 import React, { useCallback } from 'react';
-import { ExternalReference } from '../../types/externalReferences';
+import { ExternalReference } from '@beaver/agent-core/types/externalReferences';
 import { getHost } from '../../host';
 import ReferenceMetadataDisplay from './ReferenceMetadataDisplay';
 

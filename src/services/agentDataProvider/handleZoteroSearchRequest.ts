@@ -15,8 +15,8 @@ import {
     ZoteroSearchResultItem,
     RegularSearchResultItem,
     AttachmentRowResult,
-} from '../agentProtocol';
-import { ItemStub } from '../../../react/types/zotero';
+} from '@beaver/agent-core/protocol/agentProtocol';
+import { ItemStub } from '@beaver/agent-core/types/zotero';
 import { serializeNote, serializeItemStub } from '../../utils/zoteroSerializers';
 import { libraryRefForLibraryID, modelObjectId } from '../../utils/libraryIdentity';
 import { validateLibraryAccess, extractYear, formatCreatorsString, getAttachmentInfoForItem, isReadableItemField, readItemField } from './utils';

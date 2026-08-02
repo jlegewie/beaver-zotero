@@ -7,7 +7,7 @@ import {
     SHAREABLE_ACTION_VERSION,
     SHAREABLE_ACTION_FILE_EXTENSION,
 } from '../../../react/types/actionShare';
-import type { Action } from '../../../react/types/actions';
+import type { Action } from '@beaver/agent-core/types/actions';
 
 const fullAction: Action = {
     id: 'custom-abc',

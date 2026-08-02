@@ -9,7 +9,7 @@
  */
 
 import { zoteroItemData } from '../../host/zotero/itemData';
-import type { ZoteroItemReference } from '../../types/zotero';
+import type { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 
 export async function handleTestResolveItemDisplayHttpRequest(request: any): Promise<any> {
     const { library_id, zotero_key } = request || {};

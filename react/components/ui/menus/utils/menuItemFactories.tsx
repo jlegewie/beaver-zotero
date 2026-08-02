@@ -2,7 +2,7 @@ import React from 'react';
 import { Icon, TickIcon, CSSItemTypeIcon, CSSIcon } from '../../../icons/icons';
 import { SearchMenuItem } from '../SearchMenu';
 import { getDisplayNameFromItem, isValidZoteroItem } from '../../../../utils/sourceUtils';
-import { ZoteroTag } from '../../../../types/zotero';
+import { ZoteroTag } from '@beaver/agent-core/types/zotero';
 import { ThreadItemFilter } from '../../../../atoms/ui';
 
 /**

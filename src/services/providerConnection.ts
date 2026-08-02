@@ -27,7 +27,7 @@ import {
     notifySyncPauseOwnerSettled,
 } from './agentDataDispatch';
 import { getWSAuthToken } from './agentService';
-import { WSAuthMessage, WSRequestReceivedAck } from './agentProtocol';
+import { WSAuthMessage, WSRequestReceivedAck } from '@beaver/agent-core/protocol/agentProtocol';
 import { resolveBusyContext } from './busyContextProvider';
 import {
     isPreparedJsonMessage,

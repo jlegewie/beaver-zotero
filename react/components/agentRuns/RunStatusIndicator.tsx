@@ -1,7 +1,7 @@
 import React from 'react';
 import { useAtomValue } from 'jotai';
 import { Icon, Spinner, RepeatIcon } from '../icons/icons';
-import { AgentRunStatus } from '../../agents/types';
+import { AgentRunStatus } from '@beaver/agent-core/agents/types';
 import { wsReconnectingAtom, wsRetryAtom } from '../../atoms/agentRunAtoms';
 
 interface RunStatusIndicatorProps {

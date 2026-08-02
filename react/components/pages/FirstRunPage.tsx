@@ -21,7 +21,7 @@ import EmptyLibraryDiscovery from './firstRun/EmptyLibraryDiscovery';
 import IconButton from '../ui/IconButton';
 import RepeatIcon from '../icons/RepeatIcon';
 import { OnboardingHeader, OnboardingFooter } from './onboarding';
-import { ChargingPermissions } from '../../../src/services/agentProtocol';
+import { ChargingPermissions } from '@beaver/agent-core/protocol/agentProtocol';
 import { logger } from '../../../src/utils/logger';
 
 // Suggested first-run actions launch without cost-confirmation prompts.

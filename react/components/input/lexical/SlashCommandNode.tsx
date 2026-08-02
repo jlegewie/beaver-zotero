@@ -7,7 +7,7 @@ import {
     Spread,
     TextNode,
 } from 'lexical';
-import { ActionTargetType } from '../../../types/actions';
+import { ActionTargetType } from '@beaver/agent-core/types/actions';
 
 export type SerializedSlashCommandNode = Spread<
     {

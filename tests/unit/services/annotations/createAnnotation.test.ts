@@ -12,9 +12,9 @@ import {
 import {
   CoordOrigin,
   type BoundingBox,
-} from "../../../../react/types/citations";
-import type { NotePosition } from "../../../../react/types/agentActions/annotations";
-import type { PageGeometry } from "../../../../src/beaver-extract/types";
+} from "@beaver/agent-core/types/citations";
+import type { NotePosition } from "@beaver/agent-core/types/agentActions/annotations";
+import type { PageGeometry } from "@beaver/agent-core/extract/types";
 
 const baseGeometry: PageGeometry = {
   viewBox: [0, 0, 400, 600],

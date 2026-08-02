@@ -17,9 +17,9 @@
  *   stops a phantom from becoming the anchor in the first place.
  */
 
-import type { AgentRun } from './types';
+import type { AgentRun } from '@beaver/agent-core/agents/types';
 import type { AgentAction } from './agentActions';
-import type { Citation } from '../types/citations';
+import type { Citation } from '@beaver/agent-core/types/citations';
 
 /**
  * What a retry asks the server to replace.

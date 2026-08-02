@@ -6,8 +6,8 @@
  * labels and arg-derived references without pulling Zotero into guarded code.
  */
 
-import { ToolCallPart } from './types';
-import { ZoteroItemReference } from '../types/zotero';
+import { ToolCallPart } from '@beaver/agent-core/agents/types';
+import { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import { resolveObjectId } from '../../src/utils/libraryIdentity';
 
 /**

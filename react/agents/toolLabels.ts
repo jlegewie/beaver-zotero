@@ -1,5 +1,5 @@
 import { ToolCallStatus } from './atoms';
-import { ToolCallPart } from './types';
+import { ToolCallPart } from '@beaver/agent-core/agents/types';
 import { parseArgs, TOOL_BASE_LABELS } from './toolCallRequest';
 import { isItemRow, type ToolResultView } from '../types/toolResultViews';
 

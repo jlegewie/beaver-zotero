@@ -2,7 +2,7 @@ import { logger } from '../../utils/logger';
 import {
     WSAgentActionValidateRequest,
     WSAgentActionValidateResponse,
-} from '../agentProtocol';
+} from '@beaver/agent-core/protocol/agentProtocol';
 import { validateEditNoteAction } from './actions/editNote';
 import { validateEditNoteBatchAction } from './actions/editNoteBatch';
 import { validateEditMetadataAction } from './actions/editMetadata';

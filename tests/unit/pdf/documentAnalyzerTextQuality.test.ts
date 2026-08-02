@@ -26,7 +26,7 @@ import type {
     RawFont,
     RawLine,
     RawPageData,
-} from "../../../src/beaver-extract/types";
+} from "@beaver/agent-core/extract/types";
 
 function makeBox(): BoundingBox {
     return { l: 50, t: 50, r: 550, b: 750, origin: "top-left" };

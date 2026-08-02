@@ -26,7 +26,7 @@ import {
     type EpubPrimaryView,
 } from '../../utils/epubVisualizer/epubReaderView';
 import { BeaverTemporaryAnnotations } from '../../utils/annotationUtils';
-import type { SymbolicLocation } from '../../types/citations';
+import type { SymbolicLocation } from '@beaver/agent-core/types/citations';
 import { UNRESOLVED_LIBRARY_ID } from '../../../src/utils/libraryIdentity';
 
 const ELEMENT_NODE = 1;

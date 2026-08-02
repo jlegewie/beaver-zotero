@@ -27,7 +27,7 @@
  * pulling `MuPDFWorkerClient` into Node code.
  */
 import { MarginFilter } from "../MarginFilter";
-import { bboxFromXYWH, DEFAULT_MARGINS, DEFAULT_MARGIN_ZONE } from "../types";
+import { bboxFromXYWH, DEFAULT_MARGINS, DEFAULT_MARGIN_ZONE } from "@beaver/agent-core/extract/types";
 import type {
     BoundingBox,
     DocItem,
@@ -35,7 +35,7 @@ import type {
     MarginPosition,
     InternalProcessedPage,
     SentenceItem,
-} from "../types";
+} from "@beaver/agent-core/extract/types";
 import type { PageSentenceResult } from "../ParagraphSentenceMapper";
 import type { PageDebugData } from "../schema";
 import { rectToBBox } from "../schema/bbox";

@@ -52,7 +52,7 @@ import {
     GROUP_LIB_PDF,
     type AttachmentFixture,
 } from '../helpers/fixtures';
-import { SCHEMA_VERSION } from '../../src/beaver-extract/schema/schema';
+import { SCHEMA_VERSION } from '@beaver/agent-core/extract/schema';
 
 let available = false;
 beforeAll(async () => {

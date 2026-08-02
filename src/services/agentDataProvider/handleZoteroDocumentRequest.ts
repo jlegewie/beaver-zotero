@@ -11,9 +11,9 @@ import { logger } from '../../utils/logger';
 import {
     WSZoteroDocumentRequest,
     WSZoteroDocumentResponse,
-} from '../agentProtocol';
-import type { ZoteroDocumentErrorCode } from '../agentProtocol';
-import type { AttachmentStub, ItemStub } from '../../../react/types/zotero';
+} from '@beaver/agent-core/protocol/agentProtocol';
+import type { ZoteroDocumentErrorCode } from '@beaver/agent-core/protocol/agentProtocol';
+import type { AttachmentStub, ItemStub } from '@beaver/agent-core/types/zotero';
 import {
     extractAndCacheEpubDocument,
     extractAndCacheResolvedPdfDocument,
@@ -25,7 +25,7 @@ import {
     resolveToReadableAttachment,
     resolveAttachmentFileSource,
 } from '../documentExtraction';
-import { readableToExtractKind, type ExtractContentKind, type ReadableContentKind } from '../documentExtraction/shared/contentKinds';
+import { readableToExtractKind, type ExtractContentKind, type ReadableContentKind } from '@beaver/agent-core/extract/document/shared/contentKinds';
 import {
     DEFAULT_PAGES_TIMEOUT_SECONDS,
     MAX_PDF_TIMEOUT_SECONDS,

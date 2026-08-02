@@ -5,8 +5,8 @@
  * sorted in natural reading order.
  */
 
-import type { BoundingBox, RawPageData, RawBlock, RawLine, TextStyle } from "./types";
-import { bboxHeight, bboxWidth } from "./types";
+import type { BoundingBox, RawPageData, RawBlock, RawLine, TextStyle } from "@beaver/agent-core/extract/types";
+import { bboxHeight, bboxWidth } from "@beaver/agent-core/extract/types";
 import { pdfLog, isAnalyzerLoggingEnabled } from "./logging";
 import { StyleAnalyzer } from "./StyleAnalyzer";
 

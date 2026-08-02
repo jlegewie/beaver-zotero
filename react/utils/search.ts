@@ -1,5 +1,5 @@
 import { logger } from '../../src/utils/logger';
-import { ZoteroTag } from '../types/zotero';
+import { ZoteroTag } from '@beaver/agent-core/types/zotero';
 
 
 /**

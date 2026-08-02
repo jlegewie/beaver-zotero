@@ -47,7 +47,7 @@ import {
     type BaseExpansion,
 } from '../../../src/utils/editNoteMatcher';
 import { expandToRawHtml } from '../../../src/utils/noteCitationExpand';
-import type { EditNoteOperation } from '../../../react/types/agentActions/editNote';
+import type { EditNoteOperation } from '@beaver/agent-core/types/agentActions/editNote';
 
 // =============================================================================
 // Helpers

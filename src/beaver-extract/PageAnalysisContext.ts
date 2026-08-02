@@ -26,7 +26,7 @@ import {
     type MarginSettings,
     type RawPageData,
     type StyleProfile,
-} from "./types";
+} from "@beaver/agent-core/extract/types";
 
 export interface PageAnalysisContextInput {
     /**

@@ -6,9 +6,9 @@
  * - `metadata.summary`: Summary data for frontend rendering (required)
  */
 
-import { ExternalReference } from "../types/externalReferences";
-import { ZoteroItemReference, CollectionReference, AttachmentInfo } from "../types/zotero";
-import { ToolReturnPart } from "./types";
+import { ExternalReference } from "@beaver/agent-core/types/externalReferences";
+import { ZoteroItemReference, CollectionReference, AttachmentInfo } from "@beaver/agent-core/types/zotero";
+import { ToolReturnPart } from "@beaver/agent-core/agents/types";
 import { logger } from "../../src/utils/logger";
 import { libraryRefForLibraryID, resolveObjectId } from "../../src/utils/libraryIdentity";
 

@@ -12,7 +12,7 @@ import {
     parseZoteroId,
     requestedCitationKey,
     parseRawCitationAttributes,
-} from '../../../react/utils/citationGrammar';
+} from '@beaver/agent-core/citations/citationGrammar';
 
 describe('citationGrammar', () => {
     it('parses registered locator prefixes and ranges', () => {

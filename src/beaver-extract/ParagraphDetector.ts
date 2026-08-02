@@ -16,8 +16,8 @@
  */
 
 import type { PageLine, PageLineResult, ColumnLineResult } from "./LineDetector";
-import type { BoundingBox, TextStyle, StyleProfile } from "./types";
-import { bboxHeight, mergeBoxes } from "./types";
+import type { BoundingBox, TextStyle, StyleProfile } from "@beaver/agent-core/extract/types";
+import { bboxHeight, mergeBoxes } from "@beaver/agent-core/extract/types";
 import type { Rect } from "./ColumnDetector";
 import { pdfLog, isAnalyzerLoggingEnabled } from "./logging";
 

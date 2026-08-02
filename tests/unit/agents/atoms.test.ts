@@ -1,10 +1,10 @@
 import { createStore } from 'jotai';
 import { describe, expect, it, vi } from 'vitest';
-import type { AgentRun } from '../../../react/agents/types';
+import type { AgentRun } from '@beaver/agent-core/agents/types';
 import type {
     MessageAttachment,
     SourceAttachment,
-} from '../../../react/types/attachments/apiTypes';
+} from '@beaver/agent-core/types/attachments/apiTypes';
 
 vi.mock('../../../src/services/supabaseClient', () => ({
     supabase: { auth: { getSession: vi.fn() } },

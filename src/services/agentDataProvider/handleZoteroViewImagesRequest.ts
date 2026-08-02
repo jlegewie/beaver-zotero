@@ -14,8 +14,8 @@ import {
     WSZoteroViewImagesResponse,
     WSViewImage,
     ViewImagesErrorCode,
-} from '../agentProtocol';
-import { ZoteroItemReference, ItemStub, AttachmentStub } from '../../../react/types/zotero';
+} from '@beaver/agent-core/protocol/agentProtocol';
+import { ZoteroItemReference, ItemStub, AttachmentStub } from '@beaver/agent-core/types/zotero';
 import { libraryRefForLibraryID, modelObjectIdFromReference } from '../../utils/libraryIdentity';
 import {
     getReadableContentKind,

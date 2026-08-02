@@ -5,7 +5,7 @@ import {
     getCitationBoundingBoxes,
     getContentKind,
     getSymbolicLocation,
-} from '../../types/citations';
+} from '@beaver/agent-core/types/citations';
 import { externalReferenceMappingAtom } from '../../atoms/externalReferences';
 import { pageLabelsByAttachmentIdAtom, externalFileLocalPathsAtom } from '../../atoms/citations';
 import { useCitationMarker } from '../../hooks/useCitationMarker';

@@ -61,7 +61,7 @@ import type {
     StructuredPagePhaseTimings,
     StyleProfile,
     DegradationSummary,
-} from "../types";
+} from "@beaver/agent-core/extract/types";
 import {
     DEFAULT_EXTRACTION_SETTINGS,
     DEFAULT_MARGIN_ZONE,
@@ -71,7 +71,7 @@ import {
     bboxFromXYWH,
     bboxHeight,
     bboxWidth,
-} from "../types";
+} from "@beaver/agent-core/extract/types";
 import {
     SCHEMA_VERSION,
     assignDocumentIds,

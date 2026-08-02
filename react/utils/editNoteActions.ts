@@ -4,13 +4,13 @@
  */
 
 import { AgentAction } from '../agents/agentActions';
-import type { EditNoteResultData, EditNoteOperation } from '../types/agentActions/editNote';
+import type { EditNoteResultData, EditNoteOperation } from '@beaver/agent-core/types/agentActions/editNote';
 import type {
     EditNoteBatchProposedData,
     EditNoteBatchResultData,
     EditNoteBatchUndoRecord,
     EditNoteBatchEditItem,
-} from '../types/agentActions/editNoteBatch';
+} from '@beaver/agent-core/types/agentActions/editNoteBatch';
 import { logger } from '../../src/utils/logger';
 import {
     libraryRefForLibraryID,

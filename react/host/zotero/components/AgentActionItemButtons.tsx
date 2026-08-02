@@ -25,7 +25,7 @@ import {
 } from '../../../atoms/externalReferences';
 import { ButtonVariant } from '../../../components/ui/Button';
 import { CreateItemAgentAction } from '../../../agents/agentActions';
-import { ZoteroItemReference } from '../../../types/zotero';
+import { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import { resolveSearchableLibraryId } from '../libraryAccess';
 import { searchableLibraryIdsAtom } from '../../../atoms/profile';
 

@@ -3,7 +3,7 @@ import {
     WSAgentActionExecuteResponse,
     WSAgentActionValidateRequest,
     WSAgentActionValidateResponse,
-} from '../../agentProtocol';
+} from '@beaver/agent-core/protocol/agentProtocol';
 import {
     EpubAnnotationError,
     MissingPageGeometryError,
@@ -21,10 +21,10 @@ import type {
     CreateHighlightAnnotationsProposedData,
     FailedAnnotationResult,
     HighlightAnnotationItem,
-} from '../../../../react/types/agentActions/createAnnotations';
-import type { ZoteroItemReference } from '../../../../react/types/zotero';
-import { normalizePageLocations } from '../../../../react/types/agentActions/annotations';
-import { normalizeAnnotationTags } from '../../../../react/types/agentActions/createAnnotations';
+} from '@beaver/agent-core/types/agentActions/createAnnotations';
+import type { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
+import { normalizePageLocations } from '@beaver/agent-core/types/agentActions/annotations';
+import { normalizeAnnotationTags } from '@beaver/agent-core/types/agentActions/createAnnotations';
 import { shortItemTitle } from '../../../utils/zoteroUtils';
 import { libraryRefForLibraryID, resolveItemReference, resolveLibraryRef } from '../../../utils/libraryIdentity';
 import { logger } from '../../../utils/logger';

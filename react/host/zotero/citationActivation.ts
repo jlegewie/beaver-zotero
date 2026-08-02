@@ -10,8 +10,8 @@ import {
     getCitationBoundingBoxes,
     getContentKind,
     getSymbolicLocation,
-} from '../../types/citations';
-import { ZoteroItemReference } from '../../types/zotero';
+} from '@beaver/agent-core/types/citations';
+import { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import { revealSource } from '../../utils/sourceUtils';
 import { createZoteroURI } from '../../utils/zoteroURI';
 import { getCurrentReaderAndWaitForView } from '../../utils/readerUtils';

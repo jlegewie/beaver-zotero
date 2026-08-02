@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { CSSItemTypeIcon, ArrowDownIcon, ArrowRightIcon, ExternalLinkIcon, Icon } from '../../icons/icons';
-import { itemTypeToIconName, ContentKind } from '../../../types/citations';
+import { itemTypeToIconName, ContentKind } from '@beaver/agent-core/types/citations';
 import {
     AttachmentSearchView,
     AttachmentSearchRowView,

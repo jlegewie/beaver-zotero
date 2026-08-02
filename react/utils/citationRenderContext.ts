@@ -1,4 +1,4 @@
-import type { Citation, PartLocation } from '../types/citations';
+import type { Citation, PartLocation } from '@beaver/agent-core/types/citations';
 import type { RenderContextData } from './citationRenderers';
 import { store } from '../store';
 import { citationMapAtom } from '../atoms/citations';
@@ -10,9 +10,9 @@ import {
     parseRawCitationAttributes,
     requestedCitationKey,
     type Locator,
-} from './citationGrammar';
+} from '@beaver/agent-core/citations/citationGrammar';
 import { getCitationPreloadFilePath, preloadPageLabelsForContent } from './pageLabels';
-import type { CitationIndexEntry, StructuredExtractResult } from '../../src/beaver-extract/schema/schema';
+import type { CitationIndexEntry, StructuredExtractResult } from '@beaver/agent-core/extract/schema';
 import { UNRESOLVED_LIBRARY_ID } from '../../src/utils/libraryIdentity';
 
 function citationLocationsFromEntries(entries: CitationIndexEntry[]): PartLocation[] {

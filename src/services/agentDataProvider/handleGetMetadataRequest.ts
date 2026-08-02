@@ -11,8 +11,8 @@ import { logger } from '../../utils/logger';
 import {
     WSGetMetadataRequest,
     WSGetMetadataResponse,
-} from '../agentProtocol';
-import { ItemStub } from '../../../react/types/zotero';
+} from '@beaver/agent-core/protocol/agentProtocol';
+import { ItemStub } from '@beaver/agent-core/types/zotero';
 import { serializeNote, serializeAnnotation, serializeItemStub } from '../../utils/zoteroSerializers';
 import { libraryRefForLibraryID, modelObjectId, resolveItemReference, resolveObjectId, UNRESOLVED_LIBRARY_ID } from '../../utils/libraryIdentity';
 import { checkLibraryExcluded, getAttachmentInfoForItem, formatCreatorsString, extractYear } from './utils';

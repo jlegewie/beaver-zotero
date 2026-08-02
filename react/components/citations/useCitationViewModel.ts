@@ -8,18 +8,18 @@ import {
     getContentKind,
     isExternalCitation,
     isExternalFileCitation,
-} from '../../types/citations';
+} from '@beaver/agent-core/types/citations';
 import {
     baseCitationKey,
     CitationRef,
     getResolvedRef,
     LocatorKind,
     requestedCitationKey,
-} from '../../utils/citationGrammar';
+} from '@beaver/agent-core/citations/citationGrammar';
 import { formatNumberRanges, formatPageRangesWithLabels } from '../../utils/stringUtils';
 import { resolvePageLabelFromLabels } from '../../utils/pageLabels';
 import { explicitPageLabel } from '../../utils/locationDisplay';
-import { ZoteroItemReference } from '../../types/zotero';
+import { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import { getHost } from '../../host';
 
 /**

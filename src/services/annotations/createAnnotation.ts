@@ -1,10 +1,10 @@
 import {
     BoundingBox,
     CoordOrigin,
-} from "../../../react/types/citations";
-import { ZoteroItemReference } from "../../../react/types/zotero";
-import { NotePosition } from "../../../react/types/agentActions/annotations";
-import { PageGeometry } from "../../beaver-extract/types";
+} from "@beaver/agent-core/types/citations";
+import { ZoteroItemReference } from "@beaver/agent-core/types/zotero";
+import { NotePosition } from "@beaver/agent-core/types/agentActions/annotations";
+import { PageGeometry } from "@beaver/agent-core/extract/types";
 import { getAttachmentFileStatus } from "../agentDataProvider/utils";
 import { isRemoteFilePath } from "../documentFileIdentity";
 import { libraryRefForLibraryID } from "../../utils/libraryIdentity";

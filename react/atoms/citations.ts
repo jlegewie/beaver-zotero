@@ -4,7 +4,7 @@ import {
     Citation,
     isExternalCitation,
     getCitationPages,
-} from '../types/citations';
+} from '@beaver/agent-core/types/citations';
 import {
     baseCitationKey,
     type CitationRef,
@@ -14,12 +14,12 @@ import {
     normalizeCitationTag,
     parseRawCitationAttributes,
     requestedCitationKey,
-} from '../utils/citationGrammar';
+} from '@beaver/agent-core/citations/citationGrammar';
 import { getPref, setPref } from '../../src/utils/prefs';
 import { addPopupMessageAtom } from '../utils/popupMessageUtils';
 import { isFirstRunVisibleAtom } from './firstRun';
 import { activeRunAtom, threadRunsAtom } from '../agents/atoms';
-import { isFirstRunOrigin } from '../agents/types';
+import { isFirstRunOrigin } from '@beaver/agent-core/agents/types';
 
 /**
  * Thread-scoped citation marker assignment.

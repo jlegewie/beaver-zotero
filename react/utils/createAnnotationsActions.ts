@@ -11,7 +11,7 @@ import {
     CreateNoteAnnotationsProposedData,
     CreateNoteAnnotationsResultData,
     FailedAnnotationResult,
-} from '../types/agentActions/createAnnotations';
+} from '@beaver/agent-core/types/agentActions/createAnnotations';
 import {
     EpubAnnotationError,
     MissingPageGeometryError,
@@ -24,7 +24,7 @@ import { getReadableContentKind } from '../../src/services/documentExtraction/at
 import { getAttachmentFileStatus } from '../../src/services/agentDataProvider/utils';
 import { logger } from '../../src/utils/logger';
 import { libraryRefForLibraryID, resolveItemReference } from '../../src/utils/libraryIdentity';
-import type { ZoteroItemReference } from '../types/zotero';
+import type { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 
 type AnnotationContentKind = 'pdf' | 'epub';
 

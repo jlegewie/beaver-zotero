@@ -58,7 +58,7 @@ import {
     readNote as readSavedNote,
 } from './helpers/noteTestClient';
 import { NORMAL_PDF, PARENT_ITEM } from '../helpers/fixtures';
-import { CoordOrigin } from '../../react/types/citations';
+import { CoordOrigin } from '@beaver/agent-core/types/citations';
 
 const LIBRARY_ID = Number(process.env.ZOTERO_TEST_LIBRARY_ID ?? 1);
 // Simplified note output emits portable citation ids ("u-KEY" for the personal

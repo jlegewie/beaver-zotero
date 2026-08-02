@@ -13,8 +13,8 @@ import { containsPreviewMarkers, stripPreviewMarkers } from '../../utils/notePre
 import {
     WSReadNoteRequest,
     WSReadNoteResponse,
-} from '../agentProtocol';
-import { ItemStub, ItemSummary } from '../../../react/types/zotero';
+} from '@beaver/agent-core/protocol/agentProtocol';
+import { ItemStub, ItemSummary } from '@beaver/agent-core/types/zotero';
 import { serializeItemStub, serializeItemSummary } from '../../utils/zoteroSerializers';
 import {
     libraryRefForLibraryID,
@@ -28,7 +28,7 @@ import {
     normalizeCitationTag,
     parseRawCitationAttributes,
     parseZoteroId,
-} from '../../../react/utils/citationGrammar';
+} from '@beaver/agent-core/citations/citationGrammar';
 import { getNoteContentPreviewText } from '../../../react/utils/noteText';
 
 const CITED_NOTE_PREVIEW_LENGTH = 500;

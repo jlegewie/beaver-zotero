@@ -17,8 +17,8 @@ import type {
     PageGeometry,
     PDFPageSearchResult,
     PageImageResult,
-} from "../types";
-import { bboxFromXYWH, DEFAULT_MAX_RENDER_PIXELS } from "../types";
+} from "@beaver/agent-core/extract/types";
+import { bboxFromXYWH, DEFAULT_MAX_RENDER_PIXELS } from "@beaver/agent-core/extract/types";
 import type { RawPageProvider } from "../DocumentAnalyzer";
 import type {
     CollectGraphicsOptions,

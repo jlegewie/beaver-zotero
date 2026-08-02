@@ -10,15 +10,15 @@
 import { supabase } from './supabaseClient';
 import API_BASE_URL from '../utils/getAPIBaseURL';
 import { logger } from '../utils/logger';
-import { AgentRun } from '../../react/agents/types';
-import type { AgentAction } from '../../react/agents/agentActionTypes';
-import { toAgentAction } from '../../react/agents/agentActionTypes';
+import { AgentRun } from '@beaver/agent-core/agents/types';
+import type { AgentAction } from '@beaver/agent-core/agents/agentActionTypes';
+import { toAgentAction } from '@beaver/agent-core/agents/agentActionTypes';
 import { ApiService } from './apiService';
 import {
     AgentDataProviderMap,
     resolveDefaultAgentDataProvider,
 } from './agentDataDispatch';
-import { AgentRunRequest, ZoteroInstanceWire } from './agentProtocol';
+import { AgentRunRequest, ZoteroInstanceWire } from '@beaver/agent-core/protocol/agentProtocol';
 import {
     WSEvent,
     WSErrorEvent,
@@ -28,7 +28,7 @@ import {
     WSRequestAckData,
     WSRequestReceivedAck,
     AskUserQuestionAnswer,
-} from './agentProtocol';
+} from '@beaver/agent-core/protocol/agentProtocol';
 import { resolveBusyContext } from './busyContextProvider';
 import {
     isPreparedJsonMessage,
@@ -43,7 +43,7 @@ import {
     ConnectRecoveryAuthFields,
     ConnectionFailureEvidence,
     ConnectionFailureStage,
-} from './connectionFailure';
+} from '@beaver/agent-core/transport/connectionFailure';
 
 
 // =============================================================================

@@ -7,7 +7,7 @@ import {
     type RawLineDetailed,
     type RawPageDataDetailed,
 } from "../../../src/beaver-extract";
-import { bboxFromXYWH } from "../../../src/beaver-extract/types";
+import { bboxFromXYWH } from "@beaver/agent-core/extract/types";
 import type { PageLine } from "../../../src/beaver-extract/LineDetector";
 import type {
     ContentItem,

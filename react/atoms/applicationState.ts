@@ -9,15 +9,15 @@
  */
 
 import { Getter } from 'jotai';
-import { NoteState, ReaderState } from '../types/attachments/apiTypes';
-import { ZoteroItemReference } from '../types/zotero';
+import { NoteState, ReaderState } from '@beaver/agent-core/types/attachments/apiTypes';
+import { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import {
     ApplicationStateInput,
     CurrentCollection,
     CurrentLibrary,
     CurrentSavedSearch,
     IndexingStatus,
-} from '../../src/services/agentProtocol';
+} from '@beaver/agent-core/protocol/agentProtocol';
 import { currentReaderAttachmentAtom, readerTextSelectionAtom } from './messageComposition';
 import { currentNoteItemAtom } from './zoteroContext';
 import { getCurrentPage, getCurrentReader, getEpubReaderPage } from '../utils/readerUtils';
@@ -33,7 +33,7 @@ import {
     getSubcollectionCounts,
 } from '../../src/services/agentDataProvider/collectionCounts';
 import { searchableLibraryIdsAtom, processingModeAtom } from './profile';
-import { ProcessingMode } from '../types/profile';
+import { ProcessingMode } from '@beaver/agent-core/types/profile';
 import { isLibraryTabAtom } from './ui';
 import { embeddingIndexStateAtom } from './embeddingIndex';
 import { BeaverDB } from '../../src/services/database';

@@ -6,14 +6,14 @@ import type {
     MessageAttachment,
     NoteAttachment,
     SourceAttachment,
-} from '../../../react/types/attachments/apiTypes';
+} from '@beaver/agent-core/types/attachments/apiTypes';
 import {
     messageAttachmentKey,
     messageAttachmentLookupKeys,
     messageAttachmentsHaveSameIdentity,
     zoteroReferenceKey,
     zoteroReferenceLookupKeys,
-} from '../../../react/types/attachments/apiTypes';
+} from '@beaver/agent-core/types/attachments/apiTypes';
 
 vi.mock('../../../src/utils/zoteroSerializers', () => ({
     safeStub: vi.fn((build: () => unknown) => {

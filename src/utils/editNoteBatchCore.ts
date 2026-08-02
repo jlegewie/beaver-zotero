@@ -23,7 +23,7 @@
  *     sibling edit's anchor is caught as a genuine conflict.
  */
 
-import type { EditNoteOperation } from '../../react/types/agentActions/editNote';
+import type { EditNoteOperation } from '@beaver/agent-core/types/agentActions/editNote';
 import type { SimplificationMetadata } from './noteHtmlSimplifier';
 import type { PageLabelsByAttachmentId } from '../../react/atoms/citations';
 import type { CandidateSnippet } from './editNoteHints';

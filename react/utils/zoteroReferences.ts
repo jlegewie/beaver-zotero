@@ -5,7 +5,7 @@
  * not next to the DTOs, so that module stays Zotero-free.
  */
 import { libraryRefForLibraryID, resolveObjectId } from '../../src/utils/libraryIdentity';
-import type { CollectionReference, ZoteroItemReference } from '../types/zotero';
+import type { CollectionReference, ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 
 /**
  * Parses a model-facing item id: either a portable `<library_ref>-<zotero_key>`

@@ -1,4 +1,4 @@
-import { ID_PREFIXES } from "../../../beaver-extract/schema/schema";
+import { ID_PREFIXES } from "@beaver/agent-core/extract/schema";
 import {
     collectDomItems,
     normalizeText,
@@ -8,7 +8,7 @@ import { splitSentences } from "./sentenceSplitter";
 import type {
     DomItem,
     DomSection,
-} from "./schema";
+} from "@beaver/agent-core/extract/document/dom/schema";
 
 export interface DomExtractionCounters {
     itemCounters: Map<string, number>;

@@ -11,7 +11,7 @@
 
 import { getMergedActions } from './zoteroContextMenu';
 import { openPreferencesWindow } from '../ui/openPreferencesWindow';
-import { ActionCategory } from '../../react/types/actions';
+import { ActionCategory } from '@beaver/agent-core/types/actions';
 
 // Module-level handler reference for cleanup
 let toolbarHandler: ((event: any) => void) | null = null;

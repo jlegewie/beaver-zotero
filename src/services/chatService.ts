@@ -1,6 +1,6 @@
 import { ApiService } from './apiService';
 import API_BASE_URL from '../utils/getAPIBaseURL';
-import type { ModelProvider, CustomChatModel } from '../../react/types/customChatModel';
+import type { ModelProvider, CustomChatModel } from '@beaver/agent-core/types/customChatModel';
 import { ApiError } from '../../react/types/apiErrors';
 import { logger } from '../utils/logger';
 

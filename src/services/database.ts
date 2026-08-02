@@ -5,7 +5,7 @@ import { SyncMethod, SyncType } from '../../react/atoms/sync';
 import {
     isExtractContentKind,
     parseCachedDocumentMetadata,
-} from './documentExtraction/shared/contentKinds';
+} from '@beaver/agent-core/extract/document/shared/contentKinds';
 import {
     parseBackgroundJobPayload,
     type BackgroundJobPayload,
@@ -14,9 +14,9 @@ import type {
     CachedDocumentMetadata,
     DocumentCachePageLabels,
     ExtractContentKind,
-} from './documentExtraction/shared/contentKinds';
+} from '@beaver/agent-core/extract/document/shared/contentKinds';
 
-export type { DocumentCachePageLabels } from './documentExtraction/shared/contentKinds';
+export type { DocumentCachePageLabels } from '@beaver/agent-core/extract/document/shared/contentKinds';
 
 type PdfCachedDocumentMetadata = Extract<CachedDocumentMetadata, { content_kind: 'pdf' }>;
 

@@ -28,8 +28,8 @@ import type {
     WSZoteroDocumentRequest,
     WSZoteroDocumentResponse,
     ZoteroDocumentErrorCode,
-} from '../../../src/services/agentProtocol';
-import type { ExtractContentKind } from '../../../src/services/documentExtraction/shared/contentKinds';
+} from '@beaver/agent-core/protocol/agentProtocol';
+import type { ExtractContentKind } from '@beaver/agent-core/extract/document/shared/contentKinds';
 
 function makeRequest(maxPayloadBytes?: number | null): WSZoteroDocumentRequest {
     return {

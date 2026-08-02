@@ -1,8 +1,8 @@
 import { ApiService } from './apiService';
 import API_BASE_URL from '../utils/getAPIBaseURL';
 import { UploadStatus } from './attachmentsService';
-import { ItemData, DeleteData, AttachmentDataWithMimeType, ZoteroCollection } from '../../react/types/zotero';
-import { ZoteroItemReference } from '../../react/types/zotero';
+import { ItemData, DeleteData, AttachmentDataWithMimeType, ZoteroCollection } from '@beaver/agent-core/types/zotero';
+import { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import { SyncMethod, SyncType } from '../../react/atoms/sync';
 import { logger } from '../utils/logger';
 

@@ -1,6 +1,6 @@
 import { BeaverUIFactory } from './ui';
 import { PreferencePageTab } from '../../react/atoms/ui';
-import { ActionCategoryFilter } from '../../react/types/actions';
+import { ActionCategoryFilter } from '@beaver/agent-core/types/actions';
 
 /**
  * Open Beaver preferences in a separate window.

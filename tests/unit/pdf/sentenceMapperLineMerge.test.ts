@@ -23,8 +23,8 @@ import type {
     QuadPoint,
     RawChar,
     RawLineDetailed,
-} from "../../../src/beaver-extract/types";
-import { bboxFromXYWH, bboxHeight, bboxWidth } from "../../../src/beaver-extract/types";
+} from "@beaver/agent-core/extract/types";
+import { bboxFromXYWH, bboxHeight, bboxWidth } from "@beaver/agent-core/extract/types";
 
 function makeLine(
     text: string,

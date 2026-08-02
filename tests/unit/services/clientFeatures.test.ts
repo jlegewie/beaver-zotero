@@ -5,7 +5,7 @@ import {
     CLIENT_FEATURES,
     ZOTERO_PLUGIN_CLIENT_TYPE,
     ZOTERO_PLUGIN_FEATURES,
-} from '../../../src/services/agentProtocol';
+} from '@beaver/agent-core/protocol/agentProtocol';
 
 // Guards the client-feature handshake (Lane C).
 type Op = 'gt' | 'gte';

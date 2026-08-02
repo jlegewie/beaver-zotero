@@ -17,7 +17,7 @@ import type {
     RemovalCandidate,
     MarginRemovalResult,
     TextStyle,
-} from "./types";
+} from "@beaver/agent-core/extract/types";
 import { pdfLog, isAnalyzerLoggingEnabled } from "./logging";
 import { StyleAnalyzer } from "./StyleAnalyzer";
 

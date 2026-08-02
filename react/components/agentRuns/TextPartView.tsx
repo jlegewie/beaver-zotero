@@ -1,5 +1,5 @@
 import React from 'react';
-import { TextPart } from '../../agents/types';
+import { TextPart } from '@beaver/agent-core/agents/types';
 import MarkdownRenderer from '../messages/MarkdownRenderer';
 
 interface TextPartViewProps {

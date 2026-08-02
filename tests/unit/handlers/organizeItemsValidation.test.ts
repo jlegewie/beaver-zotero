@@ -16,7 +16,7 @@ vi.mock("../../../src/services/agentDataProvider/utils", () => ({
 
 import { validateOrganizeItemsAction } from "../../../src/services/agentDataProvider/actions/organizeItems";
 import { store } from "../../../react/store";
-import type { WSAgentActionValidateRequest } from "../../../src/services/agentProtocol";
+import type { WSAgentActionValidateRequest } from "@beaver/agent-core/protocol/agentProtocol";
 
 type ItemKind = "annotation" | "regular";
 

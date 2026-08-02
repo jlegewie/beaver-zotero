@@ -13,7 +13,7 @@ import {
 import {
     WSGetAnnotationsRequest,
     WSGetAnnotationsResponse,
-} from '../agentProtocol';
+} from '@beaver/agent-core/protocol/agentProtocol';
 import { checkLibraryExcluded } from './utils';
 
 

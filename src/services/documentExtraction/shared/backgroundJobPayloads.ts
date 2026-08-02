@@ -1,4 +1,7 @@
-import { type ExtractContentKind, isExtractContentKind } from "./contentKinds";
+import {
+  type ExtractContentKind,
+  isExtractContentKind,
+} from "@beaver/agent-core/extract/document/shared/contentKinds";
 
 export interface PdfBackgroundJobPayload {
   content_kind: "pdf";

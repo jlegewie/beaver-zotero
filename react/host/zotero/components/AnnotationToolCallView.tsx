@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useSetAtom, useAtomValue } from 'jotai';
-import { AgentRunStatus, ToolCallPart } from '../../../agents/types';
+import { AgentRunStatus, ToolCallPart } from '@beaver/agent-core/agents/types';
 import { toolResultsMapAtom, getToolCallStatus } from '../../../agents/atoms';
 import {
     AgentAction,
@@ -13,7 +13,7 @@ import {
     undoAgentActionAtom,
 } from '../../../agents/agentActions';
 import { AckActionLink } from '../../../../src/services/agentActionsService';
-import { AnnotationResultData } from '../../../types/agentActions/annotations';
+import { AnnotationResultData } from '@beaver/agent-core/types/agentActions/annotations';
 import { applyAnnotation, deleteAnnotationFromReader } from '../../../utils/annotationActions';
 import { getCurrentPage, getCurrentReaderAndWaitForView, navigateToAnnotation, navigateToPage } from '../../../utils/readerUtils';
 import { currentReaderAttachmentKeyAtom } from '../../../atoms/messageComposition';

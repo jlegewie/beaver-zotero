@@ -11,7 +11,7 @@ import {
     CollectionSignal,
     RecentItem,
     SignalItem,
-} from "../../react/types/librarySuggestions";
+} from "@beaver/agent-core/types/librarySuggestions";
 
 const ABSTRACT_MAX_CHARS = 500;
 const ACTIVE_LOOKBACK_DAYS = 30;

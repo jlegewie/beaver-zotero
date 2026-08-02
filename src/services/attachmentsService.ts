@@ -1,6 +1,6 @@
 import { ApiService } from './apiService';
 import API_BASE_URL from '../utils/getAPIBaseURL';
-import { FileHashReference, ZoteroItemReference } from '../../react/types/zotero';
+import { FileHashReference, ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import { FileStatus } from '../../react/types/fileStatus';
 import { logger } from '../utils/logger';
 import { fileUploader } from './FileUploader';

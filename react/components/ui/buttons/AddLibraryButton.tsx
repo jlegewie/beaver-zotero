@@ -8,7 +8,7 @@ import { getLibraryItemCounts, LibraryStatistics } from '../../../../src/utils/l
 import { isLibraryValidForSync, isLibraryValidForSyncWithServerCheck } from '../../../../src/utils/sync';
 import { logger } from '../../../../src/utils/logger';
 import { accountService } from '../../../../src/services/accountService';
-import { ZoteroLibrary } from '../../../types/zotero';
+import { ZoteroLibrary } from '@beaver/agent-core/types/zotero';
 import { serializeZoteroLibrary } from '../../../../src/utils/zoteroSerializers';
 
 interface AddLibraryButtonProps {

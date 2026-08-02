@@ -23,7 +23,7 @@ import {
     type RawLineDetailed,
     type RawPageDataDetailed,
     type QuadPoint,
-} from '../src/beaver-extract/types';
+} from '@beaver/agent-core/extract/types';
 
 // ---------------------------------------------------------------------------
 // Synthetic page builder

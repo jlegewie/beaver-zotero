@@ -17,7 +17,7 @@ import {
     normalizeStoredAction,
     normalizeStoredOverride,
     generateActionId,
-} from './actions';
+} from '@beaver/agent-core/types/actions';
 import { ALL_BUILTIN_ACTIONS } from './builtinActions';
 import { CustomPrompt, getCustomPromptsFromPreferences } from './settings';
 

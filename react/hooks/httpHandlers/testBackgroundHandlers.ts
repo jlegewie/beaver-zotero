@@ -13,7 +13,7 @@ import type {
     BackgroundJobRecord,
     DocumentCachePayloadKind,
 } from '../../../src/services/database';
-import type { ExtractContentKind } from '../../../src/services/documentExtraction/shared/contentKinds';
+import type { ExtractContentKind } from '@beaver/agent-core/extract/document/shared/contentKinds';
 
 interface EnqueueRequest {
     library_id?: number;

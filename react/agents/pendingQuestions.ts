@@ -15,7 +15,7 @@ import { atom } from 'jotai';
 import type {
     AskUserQuestionItem,
     WSAskUserQuestionRequest,
-} from '../../src/services/agentProtocol';
+} from '@beaver/agent-core/protocol/agentProtocol';
 
 /**
  * Pending ask_user_question request from the backend.

@@ -4,7 +4,7 @@ import { readerTextSelectionAtom } from '../atoms/messageComposition';
 import { currentReaderAttachmentAtom, updateReaderAttachmentAtom, clearReaderAttachmentAtom, isReaderLibrarySearchable, addItemToCurrentMessageItemsAtom, currentMessageItemsAtom } from '../atoms/messageComposition';
 import { logger } from '../../src/utils/logger';
 import { addSelectionChangeListener, getCurrentReader, getSelectedTextAsTextSelection } from '../utils/readerUtils';
-import { isValidAnnotationType, TextSelection } from '../types/attachments/apiTypes';
+import { isValidAnnotationType, TextSelection } from '@beaver/agent-core/types/attachments/apiTypes';
 import { isAuthenticatedAtom } from "../atoms/auth";
 import { isBeaverUIVisibleAtom } from '../atoms/ui';
 import {
@@ -18,7 +18,7 @@ import { store } from '../store';
 import { threadAgentActionsAtom, getZoteroItemReferenceFromAgentAction, hasAppliedBulkAnnotations, AgentAction } from '../agents/agentActions';
 import { BEAVER_CITATION_ANNOTATION_AUTHOR, isBeaverAuthoredAnnotation } from '../../src/constants/annotations';
 import { getItemValidationAtom, isRejectedItemValidation } from '../atoms/itemValidation';
-import type { CreatedAnnotationResult } from '../types/agentActions/createAnnotations';
+import type { CreatedAnnotationResult } from '@beaver/agent-core/types/agentActions/createAnnotations';
 
 /**
  * Module-level variable to track the Zotero notifier observer ID.

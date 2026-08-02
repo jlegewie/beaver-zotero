@@ -11,7 +11,7 @@ import { logger } from '../../utils/logger';
 import {
     WSListLibrariesRequest,
     WSListLibrariesResponse,
-} from '../agentProtocol';
+} from '@beaver/agent-core/protocol/agentProtocol';
 import { getSearchableLibraryIds } from './utils';
 import { getLibrarySummaries } from './libraryCounts';
 

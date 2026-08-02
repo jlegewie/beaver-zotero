@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { buildExtractedDocumentCacheMetadata } from '../../../src/services/documentExtractionCore';
-import type { BeaverExtractResult } from '../../../src/beaver-extract/schema/schema';
+import type { BeaverExtractResult } from '@beaver/agent-core/extract/schema';
 
 describe('buildExtractedDocumentCacheMetadata', () => {
     it('builds dense page geometry from sparse extracted pages', () => {

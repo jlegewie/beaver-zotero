@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
     collectionReferenceKey,
     type CollectionReference,
-} from '../../../react/types/zotero';
+} from '@beaver/agent-core/types/zotero';
 import { collectionToReference } from '../../../react/utils/zoteroReferences';
 
 describe('collectionReferenceKey', () => {

@@ -1,5 +1,5 @@
 import React, { useMemo, useRef } from 'react';
-import { AgentRunStatus, ModelResponse, ToolCallPart } from '../../agents/types';
+import { AgentRunStatus, ModelResponse, ToolCallPart } from '@beaver/agent-core/agents/types';
 import { TextPartView } from './TextPartView';
 import { ThinkingPartView } from './ThinkingPartView';
 import { ToolCallPartView } from './ToolCallPartView';

@@ -12,7 +12,7 @@ import { TagButton } from '../library/TagButton';
 import { MessageItemButton } from '../input/MessageItemButton';
 import { MessageCollectionButton } from '../input/MessageCollectionButton';
 import { ExternalFileButton } from '../input/ExternalFileButton';
-import { collectionReferenceKey } from '../../types/zotero';
+import { collectionReferenceKey } from '@beaver/agent-core/types/zotero';
 import { ChipWithListPopup } from '../agentRuns/requestChips/ChipPopup';
 import { buildItemsSummaryListPopup } from '../input/MessageItemChipPopup';
 

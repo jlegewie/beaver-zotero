@@ -59,4 +59,4 @@ export type {
     DomItemKind,
     DomSection,
     DomSentence,
-} from "./schema";
+} from "@beaver/agent-core/extract/document/dom/schema";

@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Icon, ArrowRightIcon } from '../../../components/icons/icons';
-import type { ManageTagsResultData } from '../../../types/agentActions/base';
+import type { ManageTagsResultData } from '@beaver/agent-core/types/agentActions/base';
 import { shortenActionError } from './agentActionViewHelpers';
 import { TagPill } from '../../../components/agentRuns/TagPill';
 import { resolveLibraryRef } from '../../../../src/utils/libraryIdentity';

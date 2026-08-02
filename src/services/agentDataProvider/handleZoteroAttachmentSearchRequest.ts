@@ -15,7 +15,7 @@ import {
     AttachmentSearchErrorCode,
     WSPageSearchResult,
     WSSearchHit,
-} from '../agentProtocol';
+} from '@beaver/agent-core/protocol/agentProtocol';
 import {
     BeaverExtractor,
     ExtractionError,

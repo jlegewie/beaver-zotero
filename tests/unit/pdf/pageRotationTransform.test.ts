@@ -16,7 +16,7 @@ import {
     type RawLineDetailed,
     type RawPageData,
     type RawPageDataDetailed,
-} from "../../../src/beaver-extract/types";
+} from "@beaver/agent-core/extract/types";
 
 function bbox(x: number, y: number, w: number, h: number): BoundingBox {
     return bboxFromXYWH(x, y, w, h, "top-left");

@@ -1,5 +1,5 @@
 import { atom } from 'jotai';
-import type { OverallSyncStatus } from '../types/profile';
+import type { OverallSyncStatus } from '@beaver/agent-core/types/profile';
 
 // File uploader status to track running, failed and backoff states
 export const isFileUploaderRunningAtom = atom<boolean>(false);

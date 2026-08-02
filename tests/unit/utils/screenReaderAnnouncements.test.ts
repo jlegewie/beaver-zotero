@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { AgentRun } from '../../../react/agents/types';
+import { AgentRun } from '@beaver/agent-core/agents/types';
 import {
     buildRunCompletionAnnouncement,
     extractAssistantResponseText,

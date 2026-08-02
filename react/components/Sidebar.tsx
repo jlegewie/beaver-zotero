@@ -8,7 +8,7 @@ import { useEventSubscription } from '../hooks/useEventSubscription';
 import { ThreadView } from "./agentRuns";
 import { currentThreadScrollPositionAtom, windowScrollPositionAtom } from '../atoms/threads';
 import { allRunsAtom } from '../agents/atoms';
-import { isFirstRunOrigin } from '../agents/types';
+import { isFirstRunOrigin } from '@beaver/agent-core/agents/types';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { ScrollDownButton } from './ui/buttons/ScrollDownButton';
 import { scrollToBottom } from '../utils/scrollToBottom';

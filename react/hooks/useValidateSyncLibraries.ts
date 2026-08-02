@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef } from 'react';
 import { syncedLibraryIdsAtom, profileWithPlanAtom } from '../atoms/profile';
 import { accountService } from '../../src/services/accountService';
 import { useLibraryDeletions } from './useLibraryDeletions';
-import { ZoteroLibrary } from '../types/zotero';
+import { ZoteroLibrary } from '@beaver/agent-core/types/zotero';
 import { logger } from '../../src/utils/logger';
 
 /**

@@ -11,7 +11,7 @@ import WindowSidebar from './components/WindowSidebar';
 import FloatingPopupRoot from './components/FloatingPopupRoot';
 import PreferencesWindow from './components/PreferencesWindow';
 import { PreferencePageTab } from './atoms/ui';
-import type { ActionCategoryFilter } from './types/actions';
+import type { ActionCategoryFilter } from '@beaver/agent-core/types/actions';
 import { useZoteroTabSelection } from './hooks/useZoteroTabSelection';
 import { useZoteroContext } from './hooks/useZoteroContext';
 import { useReaderTabSelection } from './hooks/useReaderTabSelection';

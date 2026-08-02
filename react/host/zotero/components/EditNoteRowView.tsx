@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { AgentRunStatus, ToolCallPart } from '../../../agents/types';
+import { AgentRunStatus, ToolCallPart } from '@beaver/agent-core/agents/types';
 import {
     AlertIcon,
     ArrowUpRightIcon,
