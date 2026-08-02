@@ -195,6 +195,8 @@ export default tseslint.config(
     //   ../../X         → src/X                   (Beaver app dirs)
     //   ../../../X      → repo-root/X             (e.g. `react/`)
     //   ../../../../X   → one level above repo root
+    // Bare `@beaver/agent-core/...` specifiers also leave the directory; only
+    // its extract/* subpaths are worker-safe (enforced below).
     {
         files: ["src/beaver-extract/worker/**/*.ts"],
         rules: {
@@ -233,6 +235,19 @@ export default tseslint.config(
                             group: ["../../../react/*"],
                             message:
                                 "Worker code must not import the webpack-only React bundle.",
+                        },
+                        {
+                            // From agent-core, only the extract types are
+                            // worker-safe; the protocol/transport layers are
+                            // backend-facing app code.
+                            group: [
+                                "@beaver/agent-core/*",
+                                "@beaver/agent-core/**",
+                                "!@beaver/agent-core/extract",
+                                "!@beaver/agent-core/extract/**",
+                            ],
+                            message:
+                                "Worker code may import only @beaver/agent-core/extract/* from agent-core.",
                         },
                     ],
                 },
