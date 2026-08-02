@@ -1,3 +1,5 @@
+import { FileHashReference, ZoteroItemReference } from './zotero';
+
 export type ConnectionStatus = 'idle' | 'connecting' | 'connected' | 'disconnected' | 'reconnecting' | 'polling' | 'error';
 
 /**
@@ -67,4 +69,28 @@ export interface FileStatusSummary {
     indexingProgress: number, // backend progress calculation
     indexingComplete: boolean,
     pageBalanceExhausted: boolean,
+}
+
+/*
+ * Row shapes for the file status lists. These extend the plain Zotero
+ * references with presentation-only fields (React icon components), which is
+ * why they live in this UI-side module rather than `./zotero`.
+ */
+
+export interface FailedItemReference extends ZoteroItemReference {
+    errorCode?: string;
+    buttonText?: string;
+    buttonAction?: () => void;
+    buttonIcon?: React.ComponentType<React.SVGProps<SVGSVGElement>>;
+}
+
+export interface SkippedItem extends ZoteroItemReference {
+    reason: string;
+}
+
+export interface FailedFileReference extends FileHashReference {
+    errorCode?: string;
+    buttonText?: string;
+    buttonAction?: () => void;
+    buttonIcon?: React.ComponentType<React.SVGProps<SVGSVGElement>>;
 }
