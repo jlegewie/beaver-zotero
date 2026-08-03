@@ -15,7 +15,7 @@ import {
     sentenceToBoxes,
     extractPageWideSentences,
     buildFeasibilityReport,
-} from '../src/beaver-extract/SentenceMapper';
+} from '../../../src/beaver-extract/SentenceMapper';
 import {
     bboxFromXYWH,
     bboxWidth,

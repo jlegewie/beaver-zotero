@@ -227,7 +227,7 @@ describe('showDiffPreview approveAll revision-guard flow', () => {
 
     function makeHarness(initialHtml: string, opts?: { liveHtml?: string; otherEditorHtml?: string }) {
         let noteHtml = initialHtml;
-        let liveHtml = opts?.liveHtml;
+        const liveHtml = opts?.liveHtml;
         let otherHtml = opts?.otherEditorHtml;
         const viewDom = { querySelector: vi.fn(() => null), contentEditable: 'true' };
         const wrapped: any = {

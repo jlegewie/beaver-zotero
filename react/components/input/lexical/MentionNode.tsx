@@ -76,6 +76,10 @@ export class MentionNode extends DecoratorNode<React.ReactElement> {
     // --- DOM ---------------------------------------------------------------
 
     createDOM(config: EditorConfig): HTMLElement {
+        // Lexical inserts the element into the editor's own document; creating
+        // it from the bundle's global document is fine (Gecko adopts nodes on
+        // insertion).
+        // eslint-disable-next-line no-restricted-globals
         const span = document.createElement('span');
         span.className = 'beaver-mention';
         // Keep the pill from being split by the browser during selection
@@ -88,6 +92,7 @@ export class MentionNode extends DecoratorNode<React.ReactElement> {
     }
 
     exportDOM(): DOMExportOutput {
+        // eslint-disable-next-line no-restricted-globals
         const span = document.createElement('span');
         span.setAttribute('data-lexical-mention', 'true');
         span.setAttribute('data-library-id', String(this.__libraryID));
