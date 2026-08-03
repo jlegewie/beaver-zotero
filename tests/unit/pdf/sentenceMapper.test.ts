@@ -15,7 +15,7 @@ import {
     sentenceToBoxes,
     extractPageWideSentences,
     buildFeasibilityReport,
-} from '../src/beaver-extract/SentenceMapper';
+} from '../../../src/beaver-extract/SentenceMapper';
 import {
     bboxFromXYWH,
     bboxWidth,
@@ -23,7 +23,7 @@ import {
     type RawLineDetailed,
     type RawPageDataDetailed,
     type QuadPoint,
-} from '../src/beaver-extract/types';
+} from '../../../src/beaver-extract/types';
 
 // ---------------------------------------------------------------------------
 // Synthetic page builder

@@ -1905,7 +1905,7 @@ describe('PM whitespace indentation changes (regression)', () => {
      */
     function aggressivePMNormalization(html: string): string {
         // First apply standard PM normalization (newlines, tag conversion, etc.)
-        let result = simulatePMNormalization(html);
+        const result = simulatePMNormalization(html);
         // Then add indentation like real Zotero PM does
         let indent = 0;
         const lines = result.split('\n');

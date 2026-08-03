@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      - name: Typecheck CLI
+        run: npm run typecheck:cli
+
+      # No-op until the agent-core package lands; picked up automatically after.
+      - name: Typecheck agent-core
+        run: npm run typecheck:core --if-present
+
+      # eslint directly rather than lint:check — the prettier half of that
+      # script is a separate, repo-wide formatting decision.
+      - name: Lint
+        run: npx eslint .
+
+      - name: Unit tests
+        run: npm test

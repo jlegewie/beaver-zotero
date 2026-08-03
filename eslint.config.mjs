@@ -141,7 +141,19 @@ const l1CoreAmbientTypeBan = [
 
 export default tseslint.config(
     {
-        ignores: ["build/**", ".scaffold/**", "node_modules/**", "scripts/"],
+        ignores: [
+            "build/**",
+            ".scaffold/**",
+            "node_modules/**",
+            "scripts/",
+            // Generated third-party WASM glue, checked in as-is.
+            "addon/content/lib/mupdf-wasm.mjs",
+            "addon/content/lib/sentencex/sentencex_wasm.js",
+            // Generated webpack output (entry + chunks), present only after a build.
+            "addon/content/*reactBundle.js",
+            // Nested worktree checkouts (local dev only).
+            ".claude/",
+        ],
     },
     {
         extends: [eslint.configs.recommended, ...tseslint.configs.recommended],
@@ -170,6 +182,33 @@ export default tseslint.config(
                 },
             ],
             "@typescript-eslint/no-non-null-assertion": "off",
+        },
+    },
+    // Tests run under node with stubbed globals, so the Zotero-window bans on
+    // `window`/`document` do not apply, and bare property access is a
+    // legitimate way to trigger the lazy getters under test.
+    {
+        files: ["tests/**/*.ts"],
+        rules: {
+            "no-restricted-globals": "off",
+            "@typescript-eslint/no-unused-expressions": "off",
+        },
+    },
+    // Manual-test scripts execute inside Zotero's chrome context, where these
+    // are real globals and running in the window is the point.
+    {
+        files: ["tests/manual/scripts/**/*.js"],
+        languageOptions: {
+            globals: {
+                Zotero: "readonly",
+                IOUtils: "readonly",
+                window: "readonly",
+                setTimeout: "readonly",
+                fetch: "readonly",
+            },
+        },
+        rules: {
+            "no-restricted-globals": "off",
         },
     },
     // The MuPDF worker bundle is a separate execution context: no DOM, no
