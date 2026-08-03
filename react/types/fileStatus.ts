@@ -74,7 +74,8 @@ export interface FileStatusSummary {
 /*
  * Row shapes for the file status lists. These extend the plain Zotero
  * references with presentation-only fields (React icon components), which is
- * why they live in this UI-side module rather than `./zotero`.
+ * why they live in this UI-side module rather than with the wire types in
+ * `@beaver/agent-core/types/zotero`.
  */
 
 export interface FailedItemReference extends ZoteroItemReference {

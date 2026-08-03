@@ -30,7 +30,6 @@ const restrictedGlobals = [
  * `agentDataDispatch.ts` / `libraryRef.ts` seams instead.
  */
 const l1CoreSrcFiles = [
-    "src/services/agentProtocol.ts",
     "src/services/agentService.ts",
     "src/services/providerConnection.ts",
     "src/services/apiService.ts",
@@ -45,30 +44,17 @@ const l1CoreSrcFiles = [
     "src/services/embeddingsService.ts",
     "src/services/searchService.ts",
     "src/services/diagnosticsService.ts",
-    "src/services/connectionFailure.ts",
     "src/services/preparedJsonMessage.ts",
     "src/services/backendReachability.ts",
     "src/services/attachmentLimits.ts",
     "src/services/agentActionQueue.ts",
-    "src/utils/libraryRef.ts",
     "src/utils/logger.ts",
     "src/utils/getAPIBaseURL.ts",
     "src/platform/runtime.ts",
 ];
 
 /** L1-core files under react/types. Siblings there are type modules, so `./x` is allowed. */
-const l1CoreReactTypeFiles = [
-    "react/types/customChatModel.ts",
-    "react/types/models.ts",
-];
-
-/**
- * L1-core files under react/utils. Siblings there are app-graph modules that
- * reach Zotero, and a sibling import reads `./x` rather than `../utils/x`, so
- * these also ban `./x` — otherwise the `react/utils` ban below cannot fire for
- * the very directory the file lives in.
- */
-const l1CoreReactUtilFiles = ["react/utils/citationGrammar.ts"];
+const l1CoreReactTypeFiles = ["react/types/models.ts"];
 
 const l1CoreGlobals = [
     ...restrictedGlobals,
@@ -186,8 +172,9 @@ export default tseslint.config(
     // window, no Zotero. It must not import the BeaverExtract index barrel (re-exports
     // BeaverExtractor, MuPDFService, the logger — none of which are
     // worker-safe) or any Beaver app utilities. Worker-safe internals
-    // (analyzers, types, mappers) are still allowed via direct subpath
-    // imports like `../types`, `../StyleAnalyzer`.
+    // (analyzers, mappers) are still allowed via direct subpath imports like
+    // `../StyleAnalyzer`, and the extract types via
+    // `@beaver/agent-core/extract/*`.
     //
     // Path math reminder — relative specifiers from a file at
     // `src/beaver-extract/worker/<file>.ts`:
@@ -320,15 +307,15 @@ export default tseslint.config(
     // adapter modules rather than a direct import. See
     // docs-zotero/client-decoupling-plan.md.
     //
-    // Several blocks. The file sets differ (the package sources, the src/**
+    // Three blocks. The file sets differ (the package sources, the src/**
     // modules, the react/-rooted modules), and the react/* bans additionally
     // depend on how deep the guarded file sits: from packages/agent-core/src/**
     // and src/** the specifier always carries a `react/` segment (matched by
     // the `**/react/...` patterns), while from a file one level under react/
-    // (react/types, react/utils) a sibling is just `../utils/*` — and that
-    // shorter form would otherwise also match the src/utils helpers
-    // src/services legitimately uses. The `_ZoteroTypes` ambient ban for all
-    // of these lives in the trailing block below.
+    // (react/types) a sibling is just `../utils/*` — and that shorter form
+    // would otherwise also match the src/utils helpers src/services
+    // legitimately uses. The `_ZoteroTypes` ambient ban for all of these lives
+    // in the trailing block below.
     {
         files: ["packages/agent-core/src/**/*.ts"],
         rules: {
@@ -359,42 +346,13 @@ export default tseslint.config(
             ],
         },
     },
-    {
-        files: l1CoreReactUtilFiles,
-        rules: {
-            "no-restricted-globals": ["error", ...l1CoreGlobals],
-            "no-restricted-imports": [
-                "error",
-                {
-                    patterns: [
-                        ...l1CoreImportBans(".."),
-                        {
-                            group: ["./*", "./**"],
-                            message:
-                                "L1 core must not import its react/utils siblings — that pulls in the app graph.",
-                        },
-                    ],
-                },
-            ],
-        },
-    },
-    // Ambient-type ban, kept separate from the blocks above because it also
-    // covers wire-type modules the L1 core pulls in transitively, whose import
-    // bans depend on a directory depth those blocks do not model.
+    // Ambient-type ban, kept separate from the blocks above so one list covers
+    // every L1-core file set regardless of which import-ban block guards it.
     {
         files: [
             "packages/agent-core/src/**/*.ts",
             ...l1CoreSrcFiles,
             ...l1CoreReactTypeFiles,
-            ...l1CoreReactUtilFiles,
-            "react/types/attachments/apiTypes.ts",
-            "react/types/zotero.ts",
-            "react/types/citations.ts",
-            "react/types/profile.ts",
-            "react/types/actions.ts",
-            "react/types/agentActions/**/*.ts",
-            "react/agents/types.ts",
-            "react/agents/agentActionTypes.ts",
         ],
         rules: {
             "no-restricted-syntax": ["error", ...l1CoreAmbientTypeBan],

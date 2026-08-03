@@ -1,9 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-// zoteroSerializers.ts transitively imports the Supabase client (via `./sync`
-// and `react/agents/types` -> `react/atoms/auth`), which throws at module
-// load time without env vars. Stub it at the root so every transitive path
-// resolves to a harmless stand-in.
+// zoteroSerializers.ts transitively imports the Supabase client (via
+// `./sync`), which throws at module load time without env vars. Stub it at
+// the root so every transitive path resolves to a harmless stand-in.
 vi.mock('../../../src/services/supabaseClient', () => ({
     supabase: {
         auth: {
@@ -15,7 +14,7 @@ vi.mock('../../../src/services/supabaseClient', () => ({
 // `react/atoms/profile` calls `getZoteroUserIdentifier()` (needs
 // `Zotero.Users`, unavailable in unit tests) as a module-level side effect.
 // Stub it — its atoms are not exercised by the serializer functions tested
-// here, only pulled in transitively via `react/agents/types`.
+// here, only pulled in transitively via `./sync`.
 vi.mock('../../../react/atoms/profile', () => ({
     isProfileLoadedAtom: Symbol('isProfileLoadedAtom'),
     profileWithPlanAtom: Symbol('profileWithPlanAtom'),
