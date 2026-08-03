@@ -1,5 +1,5 @@
 import type { DomDocument } from "../dom/schema";
-import type { ZoteroDocumentErrorCode } from "../../agentProtocol";
+import type { ZoteroDocumentErrorCode } from "../../../protocol/agentProtocol";
 
 export const EPUB_CONTENT_KIND = "epub" as const;
 // Bump when persisted EPUB extraction payloads need to be regenerated.

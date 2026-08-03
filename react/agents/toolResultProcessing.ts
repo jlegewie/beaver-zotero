@@ -3,7 +3,7 @@ import { addExternalReferencesToMappingAtom, checkExternalReferencesAtom } from 
 import { loadFullItemDataWithAllTypes } from "../../src/utils/zoteroUtils";
 import { resolveItemReference } from "../../src/utils/libraryIdentity";
 import { extractExternalSearchData, extractLookupWorkData, isExternalSearchResult, isLookupWorkResult } from "./toolResultTypes";
-import { ToolReturnPart } from "./types";
+import { ToolReturnPart } from "@beaver/agent-core/agents/types";
 import { extractZoteroReferences } from "./toolResultTypes";
 import { logger } from "../../src/utils/logger";
 

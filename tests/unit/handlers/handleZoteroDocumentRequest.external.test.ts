@@ -29,7 +29,7 @@ import {
     extractAndCacheEpubDocument,
     extractAndCacheResolvedPdfDocument,
 } from '../../../src/services/documentExtractionCore';
-import type { WSZoteroDocumentRequest } from '../../../src/services/agentProtocol';
+import type { WSZoteroDocumentRequest } from '@beaver/agent-core/protocol/agentProtocol';
 
 const EXT_KEY = 'AB12CD34';
 

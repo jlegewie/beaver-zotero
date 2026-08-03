@@ -2,14 +2,14 @@ import { v4 as uuidv4 } from 'uuid';
 import { calculateObjectHash } from '../utils/hash';
 import { logger } from './logger';
 import { libraryRefForLibraryID, modelObjectId } from './libraryIdentity';
-import { ItemDataHashedFields, AttachmentDataHashedFields, ItemData, ItemStub, ItemSummary, CollectionSummary, ZoteroCreator, ZoteroCollection, BibliographicIdentifier, AttachmentDataWithMimeType, ZoteroLibrary, AttachmentStub } from '../../react/types/zotero';
+import { ItemDataHashedFields, AttachmentDataHashedFields, ItemData, ItemStub, ItemSummary, CollectionSummary, ZoteroCreator, ZoteroCollection, BibliographicIdentifier, AttachmentDataWithMimeType, ZoteroLibrary, AttachmentStub } from '@beaver/agent-core/types/zotero';
 import { getCollectionClientDateModifiedAsISOString, getCitationKeyFromItem, getMimeType, safeIsInTrash, safeFileExists } from './zoteroUtils';
 import { syncingItemFilterAsync } from './sync';
 import { isAttachmentOnServer } from './webAPI';
 import { skippedItemsManager } from '../services/skippedItemsManager';
-import { AnnotationResultItem, NoteResultItem } from '../services/agentProtocol';
+import { AnnotationResultItem, NoteResultItem } from '@beaver/agent-core/protocol/agentProtocol';
 import { getContentKind } from '../services/documentExtraction/attachmentResolution';
-import type { ContentKind } from '../services/documentExtraction/shared/contentKinds';
+import type { ContentKind } from '@beaver/agent-core/extract/document/shared/contentKinds';
 import type { ItemSearchResult } from '../services/searchService';
 
 export interface FileData {

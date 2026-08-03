@@ -1,4 +1,4 @@
-import type { ContentKind } from '../types/citations';
+import type { ContentKind } from '@beaver/agent-core/types/citations';
 
 function cleanLabel(label: string | null | undefined): string {
     return (label ?? '').trim();

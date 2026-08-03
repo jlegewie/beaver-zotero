@@ -66,7 +66,7 @@ import {
     stripPartialSimplifiedElements,
     stripSpuriousWrappingTags,
 } from './editNoteStrippers';
-import type { EditNoteOperation } from '../../react/types/agentActions/editNote';
+import type { EditNoteOperation } from '@beaver/agent-core/types/agentActions/editNote';
 import type { PageLabelsByAttachmentId } from '../../react/atoms/citations';
 
 // =============================================================================

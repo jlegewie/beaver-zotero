@@ -27,7 +27,7 @@ import {
     getPageLocator,
     normalizeCitationTag,
     parseRawCitationAttributes,
-} from '../../react/utils/citationGrammar';
+} from '@beaver/agent-core/citations/citationGrammar';
 import type { PageLabelsByAttachmentId } from '../../react/atoms/citations';
 import { modelObjectId, modelObjectIdFromReference, resolveObjectId, UNRESOLVED_LIBRARY_ID } from './libraryIdentity';
 import { checkLibraryExcluded } from '../services/agentDataProvider/utils';

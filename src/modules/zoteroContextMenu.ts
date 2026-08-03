@@ -22,7 +22,7 @@ import {
     isStoredAction,
     normalizeStoredAction,
     normalizeStoredOverride,
-} from '../../react/types/actions';
+} from '@beaver/agent-core/types/actions';
 import { ALL_BUILTIN_ACTIONS } from '../../react/types/builtinActions';
 import { getPref } from '../utils/prefs';
 import { openPreferencesWindow } from '../ui/openPreferencesWindow';

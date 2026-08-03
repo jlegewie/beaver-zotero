@@ -15,7 +15,7 @@ import {
     WSExternalReferenceCheckResponse,
     ExternalReferenceCheckResult,
 
-} from '../agentProtocol';
+} from '@beaver/agent-core/protocol/agentProtocol';
 import { getSearchableLibraryIds } from './utils';
 import { libraryRefForLibraryID } from '../../utils/libraryIdentity';
 

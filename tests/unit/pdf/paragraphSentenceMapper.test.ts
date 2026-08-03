@@ -37,7 +37,7 @@ import {
     type RawBlockDetailed,
     type RawPageDataDetailed,
     type QuadPoint,
-} from '../../../src/beaver-extract/types';
+} from '@beaver/agent-core/extract/types';
 
 // ---------------------------------------------------------------------------
 // Synthetic page builder (same grid as sentenceMapper.unit.test.ts)

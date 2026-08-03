@@ -18,8 +18,8 @@ import { getAppliedPdfAnnotationCount } from '../../../react/agents/agentActionC
 import type {
     CreateHighlightAnnotationsProposedData,
     CreateNoteAnnotationsProposedData,
-} from '../../../react/types/agentActions/createAnnotations';
-import type { CreateItemProposedData } from '../../../react/types/agentActions/items';
+} from '@beaver/agent-core/types/agentActions/createAnnotations';
+import type { CreateItemProposedData } from '@beaver/agent-core/types/agentActions/items';
 
 describe('validateAppliedAgentAction', () => {
     const zotero = (globalThis as any).Zotero;

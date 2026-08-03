@@ -73,7 +73,7 @@ vi.mock('../../../react/store', () => ({
 import { handleReadNoteRequest } from '../../../src/services/agentDataProvider/handleReadNoteRequest';
 import { getOrSimplify } from '../../../src/utils/noteHtmlSimplifier';
 import { getLatestNoteHtml, getNoteHtmlForRead } from '../../../src/utils/noteEditorIO';
-import type { WSReadNoteRequest } from '../../../src/services/agentProtocol';
+import type { WSReadNoteRequest } from '@beaver/agent-core/protocol/agentProtocol';
 
 
 // =============================================================================

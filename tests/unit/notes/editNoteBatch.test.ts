@@ -268,8 +268,8 @@ import {
 import type {
     WSAgentActionValidateRequest,
     WSAgentActionExecuteRequest,
-} from '../../../src/services/agentProtocol';
-import type { EditNoteBatchEditItem } from '../../../react/types/agentActions/editNoteBatch';
+} from '@beaver/agent-core/protocol/agentProtocol';
+import type { EditNoteBatchEditItem } from '@beaver/agent-core/types/agentActions/editNoteBatch';
 import { MAX_BATCH_EDITS } from '../../../src/services/agentDataProvider/actions/editNoteBatch';
 
 

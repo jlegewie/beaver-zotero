@@ -7,7 +7,7 @@ import {
 import type {
     Rect,
     StructuredPage,
-} from "../../../src/beaver-extract/schema/schema";
+} from "@beaver/agent-core/extract/schema";
 
 function expectTopLeftInPage(
     bbox: Rect,

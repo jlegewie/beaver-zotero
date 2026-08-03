@@ -4,7 +4,7 @@ import {
     type ContentKind,
     type ExtractContentKind,
     type ReadableContentKind,
-} from './shared/contentKinds';
+} from '@beaver/agent-core/extract/document/shared/contentKinds';
 import {
     hasSnapshotContentType,
     isLinkedUrlAttachment,

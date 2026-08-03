@@ -33,7 +33,7 @@ import {
   checkExternalReferencesAtom,
   externalReferenceItemMappingAtom,
 } from "../../../react/atoms/externalReferences";
-import type { ExternalReference } from "../../../react/types/externalReferences";
+import type { ExternalReference } from "@beaver/agent-core/types/externalReferences";
 
 describe("checkExternalReferencesAtom", () => {
   beforeEach(() => {

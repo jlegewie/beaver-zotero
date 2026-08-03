@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { CSSItemTypeIcon } from '../icons/icons';
-import { FailedFileReference, FailedItemReference } from '../../types/zotero';
+import { FailedFileReference, FailedItemReference } from '../../types/fileStatus';
 import { errorMapping } from '../../atoms/errors';
 import { selectItemById } from '../../../src/utils/selectItem';
 import { UNRESOLVED_LIBRARY_ID } from '../../../src/utils/libraryIdentity';

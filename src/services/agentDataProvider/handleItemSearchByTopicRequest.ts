@@ -16,7 +16,7 @@ import {
     WSItemSearchByTopicResponse,
     ItemSearchFrontendResultItem,
     FrontendTimingMetadata,
-} from '../agentProtocol';
+} from '@beaver/agent-core/protocol/agentProtocol';
 import { semanticSearchService, SearchResult } from '../semanticSearchService';
 import { BeaverDB } from '../database';
 import {

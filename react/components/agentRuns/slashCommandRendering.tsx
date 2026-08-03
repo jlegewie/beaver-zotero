@@ -10,7 +10,7 @@
  */
 
 import React from 'react';
-import type { PromptAction } from '../../agents/types';
+import type { PromptAction } from '@beaver/agent-core/agents/types';
 import { splitContentBySlashTokens } from '../../utils/slashCommands';
 import { ChipWithPopup } from './requestChips/ChipPopup';
 import { buildActionPopup } from './requestChips/actionPopup';

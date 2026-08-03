@@ -1,4 +1,4 @@
-import { SourceAttachment, AnnotationAttachment, NoteAttachment, MessageAttachment, ItemMetadataAttachment } from "./apiTypes";
+import { SourceAttachment, AnnotationAttachment, NoteAttachment, MessageAttachment, ItemMetadataAttachment } from "@beaver/agent-core/types/attachments/apiTypes";
 
 /**
  * Attachment with messageId and optional item.

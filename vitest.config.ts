@@ -1,4 +1,7 @@
+import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vitest/config';
+
+const agentCoreSrc = fileURLToPath(new URL('./packages/agent-core/src', import.meta.url));
 
 export default defineConfig({
     test: {
@@ -10,8 +13,7 @@ export default defineConfig({
     },
     resolve: {
         alias: {
-            // Stub out imports that reference Zotero/React bundles
-            // These are not needed in unit tests
+            '@beaver/agent-core': agentCoreSrc,
         },
     },
 });

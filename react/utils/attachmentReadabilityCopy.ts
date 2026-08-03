@@ -1,4 +1,4 @@
-import type { ContentKind } from '../../src/services/documentExtraction/shared/contentKinds';
+import type { ContentKind } from '@beaver/agent-core/extract/document/shared/contentKinds';
 import type { ItemValidationState } from '../atoms/itemValidation';
 
 /**

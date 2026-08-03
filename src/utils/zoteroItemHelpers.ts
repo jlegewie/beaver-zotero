@@ -1,5 +1,5 @@
 import { getReadableContentKind } from '../services/documentExtraction/attachmentResolution';
-import type { ReadableContentKind } from '../services/documentExtraction/shared/contentKinds';
+import type { ReadableContentKind } from '@beaver/agent-core/extract/document/shared/contentKinds';
 
 /**
  * Find the best PDF attachment for a regular Zotero item.

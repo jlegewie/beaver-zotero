@@ -1,7 +1,7 @@
 import React from 'react';
 import ReferenceMetadataDisplay from '../../../components/externalReferences/ReferenceMetadataDisplay';
 import { AgentAction } from '../../../agents/agentActions';
-import { CreateItemProposedData, CreateItemResultData } from '../../../types/agentActions/items';
+import { CreateItemProposedData, CreateItemResultData } from '@beaver/agent-core/types/agentActions/items';
 import { CheckmarkCircleIcon, CancelCircleIcon, AlertIcon, Icon } from '../../../components/icons/icons';
 import { revealSource } from '../../../utils/sourceUtils';
 import IconButton from '../../../components/ui/IconButton';

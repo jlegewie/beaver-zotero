@@ -293,7 +293,7 @@ import { prepareCitationRenderContext } from '../../../react/utils/citationRende
 import type {
     WSAgentActionValidateRequest,
     WSAgentActionExecuteRequest,
-} from '../../../src/services/agentProtocol';
+} from '@beaver/agent-core/protocol/agentProtocol';
 
 
 // =============================================================================

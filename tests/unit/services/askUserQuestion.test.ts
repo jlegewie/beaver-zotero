@@ -51,7 +51,7 @@ import type {
     AgentRunRequest,
     WSAskUserQuestionRequest,
     WSCallbacks,
-} from '../../../src/services/agentProtocol';
+} from '@beaver/agent-core/protocol/agentProtocol';
 import {
     addPendingQuestionAtom,
     clearAllPendingQuestionsAtom,

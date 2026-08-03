@@ -27,8 +27,8 @@ import {
     isLinkCitationItem,
 } from './zoteroLinkCitation';
 import type { SimplificationMetadata } from './noteHtmlSimplifier';
-import type { ExternalReference } from '../../react/types/externalReferences';
-import type { ZoteroItemReference } from '../../react/types/zotero';
+import type { ExternalReference } from '@beaver/agent-core/types/externalReferences';
+import type { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import type { PageLabelsByAttachmentId } from '../../react/atoms/citations';
 import {
     citationIndexCandidateIdsForLocator,
@@ -38,9 +38,9 @@ import {
     requestedCitationKey,
     type CitationRef,
     type Locator,
-} from '../../react/utils/citationGrammar';
+} from '@beaver/agent-core/citations/citationGrammar';
 import type { PageLabels } from '../services/documentCache';
-import type { StructuredExtractResult } from '../beaver-extract/schema/schema';
+import type { StructuredExtractResult } from '@beaver/agent-core/extract/schema';
 import { translatePageNumberToLabel } from './pageLabelTranslation';
 import { extractItemKeyFromUri } from './zoteroUri';
 import {

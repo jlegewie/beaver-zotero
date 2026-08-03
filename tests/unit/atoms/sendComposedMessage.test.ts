@@ -123,7 +123,7 @@ import {
     pendingPillInsertsAtom,
 } from '../../../react/atoms/messageComposition';
 import { resolvePromptVariables, resolveTargetContext } from '../../../react/utils/promptVariables';
-import type { Action } from '../../../react/types/actions';
+import type { Action } from '@beaver/agent-core/types/actions';
 
 const sendWSMessageMock = (await import('../../../react/atoms/agentRunAtoms') as any).__sendWSMessageMock as ReturnType<typeof vi.fn>;
 const addPopupMessageMock = (await import('../../../react/utils/popupMessageUtils') as any).__addPopupMessageMock as ReturnType<typeof vi.fn>;

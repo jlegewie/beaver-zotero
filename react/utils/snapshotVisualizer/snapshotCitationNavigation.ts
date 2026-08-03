@@ -5,7 +5,7 @@ import {
     buildSnapshotSortIndex,
     toSnapshotSelector,
 } from "../../../src/services/annotations/snapshot/snapshotAnnotationGeometry";
-import type { SymbolicLocation } from "../../types/citations";
+import type { SymbolicLocation } from "@beaver/agent-core/types/citations";
 import type { ZoteroReader } from "../annotationUtils";
 import { presentTemporaryAnnotations } from "../citationNavigation";
 import { setTemporaryAnnotations } from "../epubVisualizer/epubReaderView";

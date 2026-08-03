@@ -32,7 +32,7 @@ import { getPref } from "../utils/prefs";
 import { store } from "../../react/store";
 import { isSidebarVisibleAtom } from "../../react/atoms/ui";
 import { BeaverUIFactory } from "../ui/ui";
-import { WSAskUserQuestionRequest, WSDeferredApprovalRequest } from "./agentProtocol";
+import { WSAskUserQuestionRequest, WSDeferredApprovalRequest } from "@beaver/agent-core/protocol/agentProtocol";
 
 type BeaverVisibility = "beaver-visible" | "zotero-focused" | "zotero-unfocused";
 

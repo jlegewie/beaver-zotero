@@ -1,6 +1,6 @@
-import type { BoundingBox, CoordOrigin } from "../types";
-import { bboxToTuple } from "../types";
-import type { Rect } from "./schema";
+import type { BoundingBox, CoordOrigin } from "@beaver/agent-core/extract/types";
+import { bboxToTuple } from "@beaver/agent-core/extract/types";
+import type { Rect } from "@beaver/agent-core/extract/schema";
 
 function round(value: number, precision: number): number {
     const factor = 10 ** precision;

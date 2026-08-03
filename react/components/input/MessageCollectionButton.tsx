@@ -2,7 +2,7 @@ import React from 'react';
 import { useSetAtom, useAtomValue } from 'jotai';
 import { CSSIcon, LibraryIcon } from '../icons/icons';
 import { currentMessageCollectionsAtom } from '../../atoms/messageComposition';
-import { CollectionReference, collectionReferenceKey } from '../../types/zotero';
+import { CollectionReference, collectionReferenceKey } from '@beaver/agent-core/types/zotero';
 import { truncateText } from '../../utils/stringUtils';
 import { selectCollection } from '../../../src/utils/selectItem';
 import { UNRESOLVED_LIBRARY_ID } from '../../../src/utils/libraryIdentity';

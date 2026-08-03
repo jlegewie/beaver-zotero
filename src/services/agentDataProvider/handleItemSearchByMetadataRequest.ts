@@ -16,7 +16,7 @@ import {
     WSItemSearchByMetadataResponse,
     ItemSearchFrontendResultItem,
     FrontendTimingMetadata,
-} from '../agentProtocol';
+} from '@beaver/agent-core/protocol/agentProtocol';
 import { searchItemsByMetadata, SearchItemsByMetadataOptions } from '../../../react/utils/searchTools';
 import {
     getCollectionByIdOrName,

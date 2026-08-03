@@ -1,14 +1,14 @@
 import { logger } from '../../../utils/logger';
 import { searchableLibraryIdsAtom } from '../../../../react/atoms/profile';
 import { store } from '../../../../react/store';
-import { MetadataEdit } from '../../../../react/types/agentActions/base';
+import { MetadataEdit } from '@beaver/agent-core/types/agentActions/base';
 import { canSetField, getCreatorTypeInfo, resolveFieldForItemType, SETTABLE_PRIMARY_FIELDS, sanitizeCreators } from '../../../utils/zoteroUtils';
 import {
     WSAgentActionValidateRequest,
     WSAgentActionValidateResponse,
     WSAgentActionExecuteRequest,
     WSAgentActionExecuteResponse,
-} from '../../agentProtocol';
+} from '@beaver/agent-core/protocol/agentProtocol';
 import { checkLibraryExcluded, excludedLibraryMessage, getDeferredToolPreference } from '../utils';
 import { TimeoutContext, checkAborted } from '../timeout';
 import { TimeoutError } from '../timeout';

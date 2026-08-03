@@ -25,7 +25,7 @@ import {
     ConnectionDiagnosticResult,
     ConnectionFailureEvidence,
     presentConnectionFailure,
-} from './connectionFailure';
+} from '@beaver/agent-core/transport/connectionFailure';
 
 const DIAGNOSTICS_ENDPOINT = '/api/v1/diagnostics/connection-failure';
 const REPORT_TIMEOUT_MS = 8_000;

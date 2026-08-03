@@ -33,10 +33,10 @@ import {
     getPendingCreateItemActionBySourceIdAtom,
     ackAgentActionsAtom,
 } from '../../../agents/agentActions';
-import { CreateItemResultData } from '../../../types/agentActions/items';
+import { CreateItemResultData } from '@beaver/agent-core/types/agentActions/items';
 import { currentThreadIdAtom } from '../../../atoms/threads';
 import { searchableLibraryIdsAtom } from '../../../atoms/profile';
-import type { ZoteroItemReference } from '../../../types/zotero';
+import type { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import type { ExternalReferenceActionMode, ExternalReferenceActionsProps } from '../../types';
 import { resolveSearchableLibraryId } from '../libraryAccess';
 

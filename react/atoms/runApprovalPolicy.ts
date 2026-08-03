@@ -1,5 +1,5 @@
 import { atom } from 'jotai';
-import type { AgentActionType } from '../../src/services/agentProtocol';
+import type { AgentActionType } from '@beaver/agent-core/protocol/agentProtocol';
 
 /**
  * Stable groups for actual deferred tool names. These seed persistent

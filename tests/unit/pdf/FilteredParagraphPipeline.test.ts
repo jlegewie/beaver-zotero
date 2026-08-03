@@ -15,7 +15,7 @@ import {
     type RawBlock,
     type RawLine,
     type RawPageData,
-} from "../../../src/beaver-extract/types";
+} from "@beaver/agent-core/extract/types";
 
 // ---------------------------------------------------------------------------
 // Synthetic page builders

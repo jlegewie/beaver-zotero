@@ -51,7 +51,7 @@ vi.mock('../../../src/utils/zoteroSerializers', async (importOriginal) => {
     };
 });
 
-import type { WSZoteroSearchResponse } from '../../../src/services/agentProtocol';
+import type { WSZoteroSearchResponse } from '@beaver/agent-core/protocol/agentProtocol';
 import { handleZoteroSearchRequest } from '../../../src/services/agentDataProvider/handleZoteroSearchRequest';
 import { getAttachmentInfoForItem, isReadableItemField, validateLibraryAccess } from '../../../src/services/agentDataProvider/utils';
 

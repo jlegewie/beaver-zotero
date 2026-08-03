@@ -8,7 +8,7 @@ import { creditBreakdownAtom, creditPlanAtom, hasCreditPlanAtom, isCreditPlanPas
 import { useAtomValue, useSetAtom } from "jotai";
 import { useBilling } from "../../hooks/useBilling";
 import { PlanInfo } from "../../../src/services/accountService";
-import { CreditBreakdown, ProfileBalance, CreditPlan } from "../../types/profile";
+import { CreditBreakdown, ProfileBalance, CreditPlan } from "@beaver/agent-core/types/profile";
 
 
 const getPackPrice = (pack: PlanInfo) => {

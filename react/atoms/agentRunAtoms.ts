@@ -16,7 +16,7 @@ import {
     connectRecoveryAuthFields,
     isRetryablePreReadyConnectFailure,
     presentConnectionFailure,
-} from '../../src/services/connectionFailure';
+} from '@beaver/agent-core/transport/connectionFailure';
 import {
     WSCallbacks,
     AgentRunRequest,
@@ -39,15 +39,15 @@ import {
     WSStreamingDoneEvent,
     WSThreadNameEvent,
     ChargingPermissions,
-} from '../../src/services/agentProtocol';
+} from '@beaver/agent-core/protocol/agentProtocol';
 import { logger } from '../../src/utils/logger';
 import { selectedModelAtom, ModelConfig } from './models';
 import { getPref } from '../../src/utils/prefs';
-import { MessageAttachment, SourceAttachment } from '../types/attachments/apiTypes';
-import type { ZoteroCollection } from '../types/zotero';
+import { MessageAttachment, SourceAttachment } from '@beaver/agent-core/types/attachments/apiTypes';
+import type { ZoteroCollection } from '@beaver/agent-core/types/zotero';
 import { toMessageAttachment } from '../types/attachments/converters';
 import { safeStub, serializeAttachmentStub, serializeCollection, serializeItemStub, serializeZoteroLibrary } from '../../src/utils/zoteroSerializers';
-import { SubscriptionStatus, ProcessingMode } from '../types/profile';
+import { SubscriptionStatus, ProcessingMode } from '@beaver/agent-core/types/profile';
 import {
     isDatabaseSyncSupportedAtom,
     profileSyncStatusAtom,
@@ -67,12 +67,12 @@ import {
 } from './messageComposition';
 import { isWebSearchEnabledAtom, removePopupMessagesByTypeAtom, isWebSearchAllowedAtom } from './ui';
 import { currentNoteItemAtom } from './zoteroContext';
-import { isAnnotationAttachment, messageAttachmentKey, zoteroReferenceLookupKeys } from '../types/attachments/apiTypes';
-import type { ExternalFileAttachment } from '../types/attachments/apiTypes';
+import { isAnnotationAttachment, messageAttachmentKey, zoteroReferenceLookupKeys } from '@beaver/agent-core/types/attachments/apiTypes';
+import type { ExternalFileAttachment } from '@beaver/agent-core/types/attachments/apiTypes';
 import { getApplicationStateProvider } from './applicationState';
 import { uint8ArrayToBase64 } from '../utils/fileUtils';
 import { isAttachmentOnServer } from '../../src/utils/webAPI';
-import { AgentRun, BeaverAgentPrompt, MessageSearchFilters, PromptAction, PromptOrigin, ToolRequest } from '../agents/types';
+import { AgentRun, BeaverAgentPrompt, MessageSearchFilters, PromptAction, PromptOrigin, ToolRequest } from '@beaver/agent-core/agents/types';
 import {
     threadRunsAtom,
     activeRunAtom,
@@ -87,7 +87,7 @@ import {
 } from '../agents/atoms';
 import { userIdAtom } from './auth';
 import { citationsAtom, processCitationsAtom, resetCitationMarkersAtom, mergePageLabelsByAttachmentIdAtom } from './citations';
-import type { Citation } from '../types/citations';
+import type { Citation } from '@beaver/agent-core/types/citations';
 import { preloadPageLabelsForCitations } from '../utils/pageLabels';
 import { sanitizeMessageFiltersForSearchableLibraries } from '../utils/messageFilters';
 import {
@@ -160,10 +160,10 @@ import { agentItemFilterAsync, isAgentSupportedItem } from '../../src/utils/agen
 import { safeIsInTrash } from '../../src/utils/zoteroUtils';
 import { wasItemAddedBeforeLastSync } from '../utils/sourceUtils';
 import { libraryRefForLibraryID, resolveItemReference, resolveLibraryRef } from '../../src/utils/libraryIdentity';
-import { ZoteroItemReference } from '../types/zotero';
+import { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import { createZoteroItemReference } from '../utils/zoteroReferences';
 import { markExternalReferenceImportedAtom } from './externalReferences';
-import type { CreateItemProposedData, CreateItemResultData } from '../types/agentActions/items';
+import type { CreateItemProposedData, CreateItemResultData } from '@beaver/agent-core/types/agentActions/items';
 import { appendRunIfMissing, findResumeChainRoot, findRunForResume, hasOnlyThinkingParts, lingeringCompletedRun, resolveErrorRunId, toRunError } from '../agents/runResumeHelpers';
 import {
     planRetryRollback,

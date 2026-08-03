@@ -152,7 +152,7 @@ vi.mock('../../../react/types/attachments/converters', () => ({
     enrichMessageAttachmentStub: vi.fn(),
 }));
 
-vi.mock('../../../react/types/attachments/apiTypes', () => ({
+vi.mock('@beaver/agent-core/types/attachments/apiTypes', () => ({
     zoteroReferenceKey: vi.fn(() => 'key'),
 }));
 

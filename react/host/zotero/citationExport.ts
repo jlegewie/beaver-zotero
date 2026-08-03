@@ -1,5 +1,5 @@
 import { getPageLabelsForItem } from './itemData';
-import { getPageLocator } from '../../utils/citationGrammar';
+import { getPageLocator } from '@beaver/agent-core/citations/citationGrammar';
 import { resolvePageLabelFromLabels, translatePageNumberToLabelFromLabels } from '../../utils/pageLabels';
 import { buildZoteroCitationLinkHTML, isLinkCitationItem } from '../../../src/utils/zoteroLinkCitation';
 import { resolveLibraryRef } from '../../../src/utils/libraryIdentity';

@@ -1,4 +1,4 @@
-import { ToolCallPart } from '../../agents/types';
+import { ToolCallPart } from '@beaver/agent-core/agents/types';
 import type { ToolCallStatus } from '../../agents/atoms';
 import type { AgentAction, PendingApproval } from '../../agents/agentActions';
 import { resolveObjectId } from '../../../src/utils/libraryIdentity';

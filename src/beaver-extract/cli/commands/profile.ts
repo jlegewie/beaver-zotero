@@ -29,7 +29,7 @@ import type { ExtractInput } from "../../node/api";
 import type {
     ExtractionTimings,
     StructuredPagePhaseTimings,
-} from "../../types";
+} from "@beaver/agent-core/extract/types";
 import type { BeaverExtractResult } from "../../schema";
 import {
     buildErrorEnvelope,

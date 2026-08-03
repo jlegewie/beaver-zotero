@@ -11,8 +11,8 @@ import type {
     EditNoteBatchEditItem,
     EditNoteBatchUndoRecord,
     EditNoteBatchAppliedEdit,
-} from '../../../../react/types/agentActions/editNoteBatch';
-import type { EditNoteOperation } from '../../../../react/types/agentActions/editNote';
+} from '@beaver/agent-core/types/agentActions/editNoteBatch';
+import type { EditNoteOperation } from '@beaver/agent-core/types/agentActions/editNote';
 import {
     getOrSimplify,
     invalidateSimplificationCache,
@@ -59,7 +59,7 @@ import {
     WSAgentActionExecuteResponse,
     type EditValidationError,
     type ErrorCandidate,
-} from '../../agentProtocol';
+} from '@beaver/agent-core/protocol/agentProtocol';
 import { checkLibraryExcluded, excludedLibraryMessage, getDeferredToolPreference } from '../utils';
 import { TimeoutContext, checkAborted, TimeoutError } from '../timeout';
 import {

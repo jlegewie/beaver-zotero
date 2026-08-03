@@ -8,8 +8,8 @@
  */
 
 import { CITATION_TAG_PATTERN } from '../../../../react/utils/citationPreprocessing';
-import { ZoteroItemReference } from '../../../../react/types/zotero';
-import { normalizeCitationTag, parseRawCitationAttributes } from '../../../../react/utils/citationGrammar';
+import { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
+import { normalizeCitationTag, parseRawCitationAttributes } from '@beaver/agent-core/citations/citationGrammar';
 import { modelObjectIdFromReference } from '../../../utils/libraryIdentity';
 
 

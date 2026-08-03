@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { CSSIcon } from '../../../components/icons/icons';
-import type { TagChanges, CollectionChanges, OrganizeItemsResultData } from '../../../types/agentActions/base';
+import type { TagChanges, CollectionChanges, OrganizeItemsResultData } from '@beaver/agent-core/types/agentActions/base';
 import { MessageItemButton } from '../../../components/input/MessageItemButton';
 import { ChipWithListPopup } from '../../../components/agentRuns/requestChips/ChipPopup';
 import { buildItemsSummaryListPopup } from '../../../components/input/MessageItemChipPopup';

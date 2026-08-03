@@ -2,7 +2,7 @@ import type {
     DomCitationIndex,
     DomCitationIndexEntry,
     DomSection,
-} from "./schema";
+} from "@beaver/agent-core/extract/document/dom/schema";
 
 /** Build raw-id citation lookup entries for DOM items and sentences. */
 export function buildDomCitationIndex(sections: DomSection[]): DomCitationIndex {

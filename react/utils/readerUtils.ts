@@ -1,4 +1,4 @@
-import { TextSelection } from '../types/attachments/apiTypes';
+import { TextSelection } from '@beaver/agent-core/types/attachments/apiTypes';
 import { logger } from '../../src/utils/logger';
 import { ZoteroReader } from './annotationUtils';
 import { waitForPDFDocument } from './pdfUtils';

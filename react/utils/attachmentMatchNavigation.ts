@@ -3,8 +3,8 @@ import { logger } from '../../src/utils/logger';
 import { getPref } from '../../src/utils/prefs';
 import { selectItemById } from '../../src/utils/selectItem';
 import type { AttachmentMatchTarget } from '../agents/toolResultTypes';
-import { CoordOrigin, type BoundingBox, type SymbolicLocation } from '../types/citations';
-import type { ZoteroItemReference } from '../types/zotero';
+import { CoordOrigin, type BoundingBox, type SymbolicLocation } from '@beaver/agent-core/types/citations';
+import type { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import {
     BeaverTemporaryAnnotations,
     createBoundingBoxHighlights,

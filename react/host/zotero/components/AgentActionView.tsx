@@ -1,7 +1,7 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { navigateToAnnotation } from '../../../utils/readerUtils';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { AgentRunStatus } from '../../../agents/types';
+import { AgentRunStatus } from '@beaver/agent-core/agents/types';
 import {
     AgentAction,
     PendingApproval,
@@ -38,7 +38,7 @@ import {
     executeCreateNoteAnnotationsAction,
     undoCreateAnnotationsAction,
 } from '../../../utils/createAnnotationsActions';
-import type { CreateItemProposedData } from '../../../types/agentActions/items';
+import type { CreateItemProposedData } from '@beaver/agent-core/types/agentActions/items';
 import { shortItemTitle } from '../../../../src/utils/zoteroUtils';
 import { resolveItemReference, resolveLibraryRef } from '../../../../src/utils/libraryIdentity';
 import { notifyReferenceUnavailable } from '../sourceActions';

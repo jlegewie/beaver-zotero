@@ -14,7 +14,10 @@ const ZOTERO_LOCALES = [
 ];
 
 export default defineConfig({
-  source: ["src", "addon"],
+  // `source` drives the serve watcher AND asset-destination stripping in
+  // copyAssets. "packages" is safe there only while `build.assets` globs stay
+  // under addon/ — revisit if assets ever come from elsewhere.
+  source: ["src", "addon", "packages"],
   // source: {
   //   paths: ["src", "addon"],
   //   ignored: ["src/react/**"]

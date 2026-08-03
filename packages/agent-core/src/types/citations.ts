@@ -1,4 +1,4 @@
-import type { ReadableContentKind } from "../../src/services/documentExtraction/shared/contentKinds";
+import type { ReadableContentKind } from "../extract/document/shared/contentKinds";
 import {
     baseCitationKey,
     type CitationRef,
@@ -8,7 +8,7 @@ import {
     normalizeCitationTag,
     parseRawCitationAttributes,
     requestedCitationKey,
-} from "../utils/citationGrammar";
+} from "../citations/citationGrammar";
 
 
 export enum CoordOrigin {
@@ -69,7 +69,7 @@ export function toZoteroRectFromBBox(
 //
 // Edge semantics are preserved: `t` is the visual top edge (larger y in BL),
 // `b` the visual bottom edge (smaller y in BL). Mirrors `bboxToReaderFrame`
-// and `flipOrigin` in src/beaver-extract/types.ts -- do not swap the edges.
+// and `flipOrigin` in ../extract/types.ts -- do not swap the edges.
 export function convertBoundingBoxToBottomLeft(
 	bbox: BoundingBox,
 	pageHeight: number

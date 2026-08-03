@@ -7,8 +7,8 @@
  * models that ship on `ToolReturnMetadata.view`.
  */
 
-import type { ContentKind, PartLocation } from "./citations";
-import type { ExternalReference } from "./externalReferences";
+import type { ContentKind, PartLocation } from "@beaver/agent-core/types/citations";
+import type { ExternalReference } from "@beaver/agent-core/types/externalReferences";
 
 // ---------------------------------------------------------------------------
 // Shared row sub-models

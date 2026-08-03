@@ -44,7 +44,7 @@ vi.mock('../../../src/services/agentDataProvider/imageProcessing', async () => {
 
 import { handleZoteroViewImagesRequest } from '../../../src/services/agentDataProvider/handleZoteroViewImagesRequest';
 import { resolveExternalFile } from '../../../src/services/externalFiles';
-import type { WSZoteroViewImagesRequest } from '../../../src/services/agentProtocol';
+import type { WSZoteroViewImagesRequest } from '@beaver/agent-core/protocol/agentProtocol';
 
 const EXT_KEY = 'AB12CD34';
 

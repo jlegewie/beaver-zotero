@@ -10,7 +10,7 @@ import { getActionCustomizations, getHiddenBuiltinActions, getMergedActions, sav
 import { BUILTIN_ACTIONS, ALL_BUILTIN_ACTIONS } from '../../../react/types/builtinActions';
 import { ARCHIVED_ACTIONS } from '../../../react/types/archivedActions';
 import { getActionCommand, toSlashToken } from '../../../react/utils/slashCommands';
-import type { ActionCustomizations } from '../../../react/types/actions';
+import type { ActionCustomizations } from '@beaver/agent-core/types/actions';
 
 // In-memory pref store backing the Zotero.Prefs stub from tests/setup.ts, so
 // customizations round-trip through the real JSON serialization.

@@ -13,8 +13,8 @@ import {
     WSZoteroAttachmentImageRequest,
     WSZoteroAttachmentImageResponse,
     AttachmentImageErrorCode,
-} from '../agentProtocol';
-import { ZoteroItemReference } from '../../../react/types/zotero';
+} from '@beaver/agent-core/protocol/agentProtocol';
+import { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import { libraryRefForLibraryID } from '../../utils/libraryIdentity';
 import { makeRemoteFilePath } from '../documentFileIdentity';
 import {

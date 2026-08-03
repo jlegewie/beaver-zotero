@@ -29,7 +29,7 @@ import {
     ItemRowView,
     AnnotationRowView,
 } from '../../../react/types/toolResultViews';
-import { ToolReturnPart } from '../../../react/agents/types';
+import { ToolReturnPart } from '@beaver/agent-core/agents/types';
 
 // ---------------------------------------------------------------------------
 // Mock Zotero item store

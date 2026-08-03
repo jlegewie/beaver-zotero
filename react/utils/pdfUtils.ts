@@ -1,6 +1,6 @@
 import { logger } from "../../src/utils/logger";
 import { ZoteroReader } from "./annotationUtils";
-import { BoundingBox } from "../types/citations";
+import { BoundingBox } from "@beaver/agent-core/types/citations";
 export {
     getPDFPageCountFromFulltext,
     getPDFPageCountFromWorker,

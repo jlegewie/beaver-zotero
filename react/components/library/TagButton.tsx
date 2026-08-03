@@ -3,7 +3,7 @@ import { useSetAtom } from 'jotai';
 import { CSSIcon, TagIcon } from '../icons/icons';
 import { removeTagIdAtom } from '../../atoms/messageComposition';
 import { truncateText } from '../../utils/stringUtils';
-import { ZoteroTag } from '../../types/zotero';
+import { ZoteroTag } from '@beaver/agent-core/types/zotero';
 import { useRemoveContextMenu } from '../../hooks/useRemoveContextMenu';
 import { ChipWithPopup, type ChipPopupContent } from '../agentRuns/requestChips/ChipPopup';
 import { ChipButton } from '../agentRuns/requestChips/ChipButton';

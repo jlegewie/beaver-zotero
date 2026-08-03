@@ -7,7 +7,7 @@ import { logger } from '../../../src/utils/logger';
 import ZoteroAttachmentList from '../ui/ZoteroAttachmentList';
 import Button from '../ui/Button';
 import Tooltip from '../ui/Tooltip';
-import { FailedFileReference } from '../../types/zotero';
+import { FailedFileReference } from '../../types/fileStatus';
 import { Icon, ArrowDownIcon, ArrowRightIcon, RepeatIcon } from '../icons/icons';
 import { getMimeType, loadFullItemData } from '../../../src/utils/zoteroUtils';
 import { UNRESOLVED_LIBRARY_ID } from '../../../src/utils/libraryIdentity';

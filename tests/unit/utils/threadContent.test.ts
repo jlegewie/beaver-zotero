@@ -10,7 +10,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { getToolCallDetails } from '../../../react/utils/threadContent';
-import type { ToolCallPart, ToolReturnPart } from '../../../react/agents/types';
+import type { ToolCallPart, ToolReturnPart } from '@beaver/agent-core/agents/types';
 
 function tc(tool_name: string, args: Record<string, unknown> = {}): ToolCallPart {
     return { part_kind: 'tool-call', tool_name, args, tool_call_id: 't1' };

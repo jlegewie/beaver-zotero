@@ -64,7 +64,7 @@ import type {
     AttachmentRowResult,
     ZoteroItemCategory,
     ItemSearchFrontendResultItem,
-} from '../../src/services/agentProtocol';
+} from '@beaver/agent-core/protocol/agentProtocol';
 
 // =============================================================================
 // MCP stdio bridge script

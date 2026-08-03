@@ -18,7 +18,7 @@ import {
     type RawBlock,
     type RawLine,
     type RawPageData,
-} from "../../../src/beaver-extract/types";
+} from "@beaver/agent-core/extract/types";
 
 const PAGE_W = 612;
 const PAGE_H = 792;

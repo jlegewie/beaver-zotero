@@ -3,7 +3,7 @@ import {
     getContentKind,
     getSymbolicLocation,
     type Citation,
-} from '../../../react/types/citations';
+} from '@beaver/agent-core/types/citations';
 
 describe('citation content kind helpers', () => {
     it('defaults citations without a content kind to pdf', () => {

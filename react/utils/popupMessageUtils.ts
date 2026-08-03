@@ -3,7 +3,7 @@ import { createElement } from 'react';
 import { PopupMessage } from '../types/popupMessage';
 import { popupMessagesAtom } from '../atoms/ui';
 import { v4 as uuidv4 } from 'uuid';
-import { ZoteroItemReference } from '../types/zotero';
+import { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import { RepeatIcon, CSSItemTypeIcon } from '../components/icons/icons';
 import { retryUploads } from '../../src/services/FileUploader';
 import { RegularItemsSummaryContent } from '../components/ui/popup/RegularItemsSummaryContent';

@@ -8,7 +8,7 @@ import Button from '../ui/Button';
 import Tooltip from '../ui/Tooltip';
 import { retryUploads } from "../../../src/services/FileUploader";
 import { UNRESOLVED_LIBRARY_ID } from '../../../src/utils/libraryIdentity';
-import { FailedFileReference } from '../../types/zotero';
+import { FailedFileReference } from '../../types/fileStatus';
 import { Icon, ArrowDownIcon, ArrowRightIcon, RepeatIcon } from '../icons/icons';
 import IconButton from '../ui/IconButton';
 import { store } from '../../../react/store';

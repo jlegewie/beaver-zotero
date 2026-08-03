@@ -1,5 +1,5 @@
 import { logger } from '../../utils/logger';
-import { WSAgentActionExecuteRequest, WSAgentActionExecuteResponse } from '../agentProtocol';
+import { WSAgentActionExecuteRequest, WSAgentActionExecuteResponse } from '@beaver/agent-core/protocol/agentProtocol';
 import { TimeoutContext, DEFAULT_TIMEOUT_SECONDS } from './timeout';
 import { TimeoutError } from './timeout';
 import { executeEditNoteAction } from './actions/editNote';

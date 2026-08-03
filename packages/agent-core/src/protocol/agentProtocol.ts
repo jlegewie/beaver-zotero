@@ -1,15 +1,15 @@
-import { SubscriptionStatus, ProcessingMode, ChargeType } from '../../react/types/profile';
-import { TextPart, ThinkingPart, ToolCallPart, ToolReturnPart, RetryPromptPart, RunUsage } from '../../react/agents/types';
-import { ZoteroItemReference } from '../../react/types/zotero';
-import { ItemDataWithStatus, AttachmentDataWithStatus, ItemStub, ItemSummary, AttachmentInfo, AttachmentStub } from '../../react/types/zotero';
-import { ReaderState, NoteState } from '../../react/types/attachments/apiTypes';
-import { BeaverAgentPrompt } from '../../react/agents/types';
-import type { CustomChatModel } from '../../react/types/customChatModel';
-import { AttachmentData, ItemData } from '../../react/types/zotero';
-import type { BeaverExtractResult } from '../beaver-extract/schema/schema';
-import type { ExtractContentKind } from './documentExtraction/shared/contentKinds';
-import type { DocumentExtractResult } from './documentExtraction/shared/documentExtractResult';
-import type { ConnectionFailureEvidence } from './connectionFailure';
+import { SubscriptionStatus, ProcessingMode, ChargeType } from '../types/profile';
+import { TextPart, ThinkingPart, ToolCallPart, ToolReturnPart, RetryPromptPart, RunUsage } from '../agents/types';
+import { ZoteroItemReference } from '../types/zotero';
+import { ItemDataWithStatus, AttachmentDataWithStatus, ItemStub, ItemSummary, AttachmentInfo, AttachmentStub } from '../types/zotero';
+import { ReaderState, NoteState } from '../types/attachments/apiTypes';
+import { BeaverAgentPrompt } from '../agents/types';
+import type { CustomChatModel } from '../types/customChatModel';
+import { AttachmentData, ItemData } from '../types/zotero';
+import type { BeaverExtractResult } from '../extract/schema';
+import type { ExtractContentKind } from '../extract/document/shared/contentKinds';
+import type { DocumentExtractResult } from '../extract/document/shared/documentExtractResult';
+import type { ConnectionFailureEvidence } from '../transport/connectionFailure';
 
 // =============================================================================
 // WebSocket Event Types (matching backend ws_events.py)
@@ -97,8 +97,8 @@ export interface WSRunCompleteEvent extends WSBaseEvent {
     run_id: string;
     usage: RunUsage | null;
     cost: number | null;
-    citations: import('../../react/types/citations').Citation[] | null;
-    agent_actions: import('../../react/agents/agentActionTypes').AgentAction[] | null;
+    citations: import('../types/citations').Citation[] | null;
+    agent_actions: import('../agents/agentActionTypes').AgentAction[] | null;
     /** Whether the run had high input token usage (backend-assessed). */
     high_token_usage?: boolean;
     /** Whether the soft cap history processor was triggered during this run. */
@@ -117,7 +117,7 @@ export interface WSRunCompleteEvent extends WSBaseEvent {
 export interface WSRunCitationsEvent extends WSBaseEvent {
     event: 'run_citations';
     run_id: string;
-    citations: import('../../react/types/citations').Citation[];
+    citations: import('../types/citations').Citation[];
 }
 
 /** Done event signaling the request is fully complete (after persistence, usage logging, etc.) */
@@ -207,7 +207,7 @@ export interface WSRetryEvent extends WSBaseEvent {
 export interface WSAgentActionsEvent extends WSBaseEvent {
     event: 'agent_actions';
     run_id: string;
-    actions: import('../../react/agents/agentActionTypes').AgentAction[];
+    actions: import('../agents/agentActionTypes').AgentAction[];
 }
 
 /** Missing Zotero data event sent when referenced items are not available in the backend */

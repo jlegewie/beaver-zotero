@@ -1,5 +1,5 @@
 import type { DomDocument } from "../dom/schema";
-import type { ZoteroDocumentErrorCode } from "../../agentProtocol";
+import type { ZoteroDocumentErrorCode } from "../../../protocol/agentProtocol";
 
 export const SNAPSHOT_CONTENT_KIND = "snapshot" as const;
 // Bump when persisted snapshot extraction payloads need to be regenerated.

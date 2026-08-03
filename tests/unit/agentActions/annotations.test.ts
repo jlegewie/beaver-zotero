@@ -3,8 +3,8 @@ import { describe, expect, it } from "vitest";
 import {
   normalizeBoundingBox,
   normalizePageLocations,
-} from "../../../react/types/agentActions/annotations";
-import { CoordOrigin } from "../../../react/types/citations";
+} from "@beaver/agent-core/types/agentActions/annotations";
+import { CoordOrigin } from "@beaver/agent-core/types/citations";
 
 describe("annotation action normalization", () => {
   describe("normalizeBoundingBox", () => {

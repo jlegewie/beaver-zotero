@@ -1,6 +1,6 @@
 import { getDisplayNameFromItem } from "../../react/utils/sourceUtils";
-import { ZoteroItemReference } from "../../react/types/zotero";
-import type { CreatorJSON } from "../../react/types/agentActions/base";
+import { ZoteroItemReference } from "@beaver/agent-core/types/zotero";
+import type { CreatorJSON } from "@beaver/agent-core/types/agentActions/base";
 import { logger } from "./logger";
 import { libraryRefForLibraryID, UNRESOLVED_LIBRARY_ID } from "./libraryIdentity";
 import type { ZoteroInstanceRef } from "../services/threadService";

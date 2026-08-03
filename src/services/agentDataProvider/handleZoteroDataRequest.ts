@@ -11,7 +11,7 @@ import { lookupZoteroReferences } from './lookupZoteroReferences';
 import {
     WSZoteroDataRequest,
     WSZoteroDataResponse,
-} from '../agentProtocol';
+} from '@beaver/agent-core/protocol/agentProtocol';
 
 
 /**

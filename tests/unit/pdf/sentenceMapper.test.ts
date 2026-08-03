@@ -23,7 +23,7 @@ import {
     type RawLineDetailed,
     type RawPageDataDetailed,
     type QuadPoint,
-} from '../../../src/beaver-extract/types';
+} from '@beaver/agent-core/extract/types';
 
 // ---------------------------------------------------------------------------
 // Synthetic page builder
@@ -73,11 +73,15 @@ function makePage(lines: RawLineDetailed[]): RawPageDataDetailed {
         if (l.bbox.r > maxX) maxX = l.bbox.r;
         if (l.bbox.b > maxY) maxY = l.bbox.b;
     }
+    const width = maxX + 50;
+    const height = maxY + 50;
     return {
         pageIndex: 0,
         pageNumber: 1,
-        width: maxX + 50,
-        height: maxY + 50,
+        width,
+        height,
+        viewBox: [0, 0, width, height],
+        rotation: 0,
         blocks: [
             {
                 type: 'text',

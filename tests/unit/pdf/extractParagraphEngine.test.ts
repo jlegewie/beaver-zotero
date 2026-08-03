@@ -14,7 +14,7 @@ import {
     type RawBlock,
     type RawLine,
     type RawPageData,
-} from "../../../src/beaver-extract/types";
+} from "@beaver/agent-core/extract/types";
 
 // Mock the doc-helpers walker BEFORE importing the module under test so the
 // import sees the mocked binding. We hand-build RawPageData per page index.

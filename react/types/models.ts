@@ -4,7 +4,7 @@
  * used by client-agnostic code.
  */
 
-import { ModelProvider, CustomChatModel } from './customChatModel';
+import { ModelProvider, CustomChatModel } from '@beaver/agent-core/types/customChatModel';
 
 export type ProviderType = ModelProvider;
 export type ReasoningEffort = "low" | "medium" | "high";

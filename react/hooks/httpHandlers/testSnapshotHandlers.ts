@@ -15,7 +15,7 @@ import type {
     DomItem,
     DomItemKind,
     DomSection,
-} from '../../../src/services/documentExtraction/dom/schema';
+} from '@beaver/agent-core/extract/document/dom/schema';
 import { UNRESOLVED_LIBRARY_ID } from '../../../src/utils/libraryIdentity';
 
 const DEFAULT_SHORT_SENTENCE_CHARS = 15;

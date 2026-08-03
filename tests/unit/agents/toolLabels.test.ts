@@ -24,7 +24,7 @@ import type {
     AttachmentSearchView,
     ExternalReferenceListView,
 } from '../../../react/types/toolResultViews';
-import type { ToolCallPart } from '../../../react/agents/types';
+import type { ToolCallPart } from '@beaver/agent-core/agents/types';
 
 function tc(tool_name: string, args: Record<string, unknown> = {}): ToolCallPart {
     return { part_kind: 'tool-call', tool_name, args, tool_call_id: 't1' };

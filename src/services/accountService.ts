@@ -1,8 +1,8 @@
 import { ApiService } from './apiService';
 import API_BASE_URL from '../utils/getAPIBaseURL';
-import { ExcludedLibrary, OverallSyncStatus, SafeProfileWithPlan } from '../../react/types/profile';
+import { ExcludedLibrary, OverallSyncStatus, SafeProfileWithPlan } from '@beaver/agent-core/types/profile';
 import { ModelConfig } from '../../react/types/models';
-import { ZoteroLibrary } from '../../react/types/zotero';
+import { ZoteroLibrary } from '@beaver/agent-core/types/zotero';
 import { resolveClientIdentity } from './clientIdentity';
 import { logger } from '../utils/logger';
 

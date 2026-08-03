@@ -11,7 +11,7 @@ import { readFile } from "node:fs/promises";
 import type {
     ExtractionSettings,
     GraphicsLayerMode,
-} from "../types";
+} from "@beaver/agent-core/extract/types";
 
 export function parsePagesList(value: string): number[] {
     const parts = value.split(",").map((s) => s.trim()).filter(Boolean);

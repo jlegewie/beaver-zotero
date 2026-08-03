@@ -1,4 +1,4 @@
-import type { LibrarySummary } from '../agentProtocol';
+import type { LibrarySummary } from '@beaver/agent-core/protocol/agentProtocol';
 import { logger } from '../../utils/logger';
 import { libraryRefForLibraryID } from '../../utils/libraryIdentity';
 

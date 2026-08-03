@@ -9,7 +9,12 @@
     // Prefer path prefixes over baseUrl
     "paths": {
       "zotero-plugin-toolkit/*": ["./node_modules/zotero-plugin-toolkit/*"],
-      "../../addon/content/reactBundle": ["./typings/reactBundle.d.ts"]
+      "../../addon/content/reactBundle": ["./typings/reactBundle.d.ts"],
+      // `packages` is deliberately absent from `include`: the package's
+      // globals.d.ts declares narrowed `navigator`/`crypto`/`URL` that would
+      // clash with lib.dom here. Its .ts files still enter this program by
+      // being imported.
+      "@beaver/agent-core/*": ["./packages/agent-core/src/*"]
     },
     "jsx": "react",
     "esModuleInterop": true,

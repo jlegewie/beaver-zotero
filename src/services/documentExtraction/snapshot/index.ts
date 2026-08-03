@@ -18,9 +18,9 @@ export type {
     ExtractSnapshotResult,
     SnapshotContentKind,
     SnapshotDocument,
-} from "./schema";
+} from "@beaver/agent-core/extract/document/snapshot/schema";
 export {
     SNAPSHOT_CONTENT_KIND,
     SNAPSHOT_SCHEMA_VERSION,
     validateSnapshotDocument,
-} from "./schema";
+} from "@beaver/agent-core/extract/document/snapshot/schema";

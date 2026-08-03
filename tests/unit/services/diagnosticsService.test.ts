@@ -30,7 +30,7 @@ import {
 } from '../../../src/services/diagnosticsService';
 import { supabase } from '../../../src/services/supabaseClient';
 import { resolveClientIdentity } from '../../../src/services/clientIdentity';
-import type { ConnectionFailureEvidence } from '../../../src/services/connectionFailure';
+import type { ConnectionFailureEvidence } from '@beaver/agent-core/transport/connectionFailure';
 
 const getSessionMock = vi.mocked(supabase.auth.getSession);
 const resolveClientIdentityMock = vi.mocked(resolveClientIdentity);

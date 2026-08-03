@@ -1,5 +1,5 @@
 import React from 'react';
-import { ToolReturnPart } from '../../agents/types';
+import { ToolReturnPart } from '@beaver/agent-core/agents/types';
 import { isToolResultView, ToolResultView as ToolResultViewModel } from '../../types/toolResultViews';
 import { getHost } from '../../host';
 import { ItemListResultView } from './toolResultViews/ItemListResultView';

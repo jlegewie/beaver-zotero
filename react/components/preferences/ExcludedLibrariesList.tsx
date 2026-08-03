@@ -2,8 +2,8 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useAtomValue, useSetAtom } from 'jotai';
 import { getLibraryItemCounts, LibraryStatistics } from '../../../src/utils/libraries';
 import { logger } from '../../../src/utils/logger';
-import { ExcludedLibrary } from '../../types/profile';
-import { ZoteroLibrary } from '../../types/zotero';
+import { ExcludedLibrary } from '@beaver/agent-core/types/profile';
+import { ZoteroLibrary } from '@beaver/agent-core/types/zotero';
 import {
     allLibrariesExcludedAtom,
     excludedEntryKey,

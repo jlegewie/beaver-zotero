@@ -1,0 +1,58 @@
+{
+  // Standalone typecheck for the client-agnostic wire-protocol closure.
+  // These files are compiled WITHOUT the zotero-types ambient globals; the
+  // only host globals available are the narrow declarations in globals.d.ts.
+  // `types: []` keeps @types packages out of the automatic program, and
+  // `verify-program.mjs` asserts the program matches the `files` list exactly
+  // — that check, not `types: []`, is what catches an explicit import pulling
+  // in @types or zotero-types.
+  "compilerOptions": {
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "target": "ES2020",
+    "lib": ["ES2020"],
+    "types": [],
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": false,
+    "noEmit": true,
+    "isolatedModules": true,
+    "forceConsistentCasingInFileNames": true
+  },
+  // The full transitive closure, listed explicitly so the package surface is
+  // readable. `verify-program.mjs` keeps this list honest.
+  "files": [
+    "./src/globals.d.ts",
+    "./src/protocol/agentProtocol.ts",
+    "./src/transport/connectionFailure.ts",
+    "./src/extract/document/dom/schema.ts",
+    "./src/extract/document/epub/schema.ts",
+    "./src/extract/document/shared/contentKinds.ts",
+    "./src/extract/document/shared/documentExtractResult.ts",
+    "./src/extract/document/snapshot/schema.ts",
+    "./src/identity/libraryRef.ts",
+    "./src/extract/types.ts",
+    "./src/extract/schema.ts",
+    "./src/agents/types.ts",
+    "./src/types/actions.ts",
+    "./src/types/attachments/apiTypes.ts",
+    "./src/types/citations.ts",
+    "./src/types/customChatModel.ts",
+    "./src/types/librarySuggestions.ts",
+    "./src/types/profile.ts",
+    "./src/types/zotero.ts",
+    "./src/citations/citationGrammar.ts",
+
+    // Reached through the inline `import('../agents/agentActionTypes')` type
+    // references in agentProtocol.ts, and from there the agent-action payload
+    // types they describe.
+    "./src/agents/agentActionTypes.ts",
+    "./src/types/agentActions/base.ts",
+    "./src/types/agentActions/items.ts",
+    "./src/types/agentActions/editNote.ts",
+    "./src/types/agentActions/editNoteBatch.ts",
+    "./src/types/agentActions/annotations.ts",
+    "./src/types/agentActions/createAnnotations.ts",
+    "./src/types/externalReferences.ts"
+  ]
+}

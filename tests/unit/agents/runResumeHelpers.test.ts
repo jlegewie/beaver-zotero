@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import type { AgentRun } from '../../../react/agents/types';
+import type { AgentRun } from '@beaver/agent-core/agents/types';
 import {
     appendRunIfMissing,
     findResumeChainRoot,
@@ -10,7 +10,7 @@ import {
     resolveErrorRunId,
     toRunError,
 } from '../../../react/agents/runResumeHelpers';
-import type { WSErrorEvent } from '../../../src/services/agentProtocol';
+import type { WSErrorEvent } from '@beaver/agent-core/protocol/agentProtocol';
 
 function makeRun(id: string, status: AgentRun['status'] = 'error'): AgentRun {
     return {

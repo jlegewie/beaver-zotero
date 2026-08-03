@@ -4,7 +4,7 @@ import Button from "./ui/Button";
 import Tooltip from "./ui/Tooltip";
 import { QuillWriteIcon, BookSearchIcon, LayersIcon, HighlighterIcon } from "./icons/icons";
 import CategoryPanel from "./CategoryPanel";
-import { ActionCategory } from "../types/actions";
+import { ActionCategory } from "@beaver/agent-core/types/actions";
 import { homeLauncherCategoryAtom, HomeLauncherCategoryId } from "../atoms/ui";
 
 type CategoryId = HomeLauncherCategoryId;

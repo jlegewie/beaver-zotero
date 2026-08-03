@@ -3,8 +3,8 @@ import { diffWords, diffLines, diffChars } from 'diff';
 import { getOrSimplify } from '../../../src/utils/noteHtmlSimplifier';
 import { preloadNotePageLabels } from '../../../src/utils/noteCitationExpand';
 import { getLatestNoteHtml } from '../../../src/utils/noteEditorIO';
-import type { EditNoteOperation } from '../../types/agentActions/editNote';
-import { getPageLocator, normalizeCitationTag, parseRawCitationAttributes } from '../../utils/citationGrammar';
+import type { EditNoteOperation } from '@beaver/agent-core/types/agentActions/editNote';
+import { getPageLocator, normalizeCitationTag, parseRawCitationAttributes } from '@beaver/agent-core/citations/citationGrammar';
 import { modelObjectIdFromReference, resolveObjectId, UNRESOLVED_LIBRARY_ID } from '../../../src/utils/libraryIdentity';
 
 type ActionStatus = 'pending' | 'applied' | 'rejected' | 'undone' | 'error' | 'awaiting';

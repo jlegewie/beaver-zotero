@@ -21,7 +21,7 @@ import { createHash } from "node:crypto";
 import { runCli } from "../../../src/beaver-extract/node/runCli";
 import type { CliDeps } from "../../../src/beaver-extract/cli/runCliTypes";
 import type * as NodeApi from "../../../src/beaver-extract/node/api";
-import type { OCRDetectionResult } from "../../../src/beaver-extract/types";
+import type { OCRDetectionResult } from "@beaver/agent-core/extract/types";
 
 // ---------------------------------------------------------------------------
 // Harness

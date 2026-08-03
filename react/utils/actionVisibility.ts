@@ -11,7 +11,7 @@
  * Also provides `computeActionGroups` for building grouped slash-menu sections.
  */
 
-import { Action, ActionCategory, ActionTargetType } from '../types/actions';
+import { Action, ActionCategory, ActionTargetType } from '@beaver/agent-core/types/actions';
 // Type-only: this module must not pull the Jotai atom graph (and the Supabase
 // client behind it) into consumers that only need the visibility rules.
 import type { ZoteroContext, LibraryViewInfo, SelectedCollectionInfo } from '../atoms/zoteroContext';

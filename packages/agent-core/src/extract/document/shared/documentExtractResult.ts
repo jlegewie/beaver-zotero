@@ -1,4 +1,4 @@
-import type { BeaverExtractResult } from '../../../beaver-extract/schema/schema';
+import type { BeaverExtractResult } from '../../schema';
 import type { EpubDocument } from '../epub/schema';
 import type { SnapshotDocument } from '../snapshot/schema';
 import type { ExtractContentKind } from './contentKinds';

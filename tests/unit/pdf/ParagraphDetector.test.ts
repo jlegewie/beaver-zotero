@@ -22,7 +22,7 @@ import type {
     DetectedSpan,
     PageLineResult,
 } from '../../../src/beaver-extract/LineDetector';
-import { bboxHeight, type BoundingBox, type TextStyle } from '../../../src/beaver-extract/types';
+import { bboxHeight, type BoundingBox, type TextStyle } from '@beaver/agent-core/extract/types';
 
 // ---------------------------------------------------------------------------
 // Factories

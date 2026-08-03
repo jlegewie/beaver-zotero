@@ -27,8 +27,8 @@ import { searchableLibraryIdsAtom } from '../atoms/profile';
 import { currentReaderAttachmentAtom } from '../atoms/messageComposition';
 import { selectedZoteroItemsAtom, currentNoteItemAtom, libraryViewAtom } from '../atoms/zoteroContext';
 import { pureCollectionSelection } from './actionVisibility';
-import { ActionTargetType } from '../types/actions';
-import { CollectionReference } from '../types/zotero';
+import { ActionTargetType } from '@beaver/agent-core/types/actions';
+import { CollectionReference } from '@beaver/agent-core/types/zotero';
 import { collectionToReference } from './zoteroReferences';
 
 // ---------------------------------------------------------------------------

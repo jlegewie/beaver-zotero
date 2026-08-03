@@ -1,5 +1,5 @@
 import React from 'react';
-import { ModelMessage, AgentRunStatus } from '../../agents/types';
+import { ModelMessage, AgentRunStatus } from '@beaver/agent-core/agents/types';
 import { ModelResponseView } from './ModelResponseView';
 import { RunStatusIndicator } from './RunStatusIndicator';
 import { ContextCompressionIndicator } from './ContextCompressionIndicator';

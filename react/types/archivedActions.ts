@@ -3,7 +3,7 @@
  * in a released build and were later removed from the default set.
  */
 
-import { Action } from './actions';
+import { Action } from '@beaver/agent-core/types/actions';
 
 export const ARCHIVED_ACTIONS: Action[] = [
 

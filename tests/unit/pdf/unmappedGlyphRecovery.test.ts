@@ -5,7 +5,7 @@ import {
     collectPageText,
     UNMAPPED_GLYPH_RECOVERY,
 } from "../../../src/beaver-extract/unmappedGlyphRecovery";
-import type { RawBlock } from "../../../src/beaver-extract/types";
+import type { RawBlock } from "@beaver/agent-core/extract/types";
 
 // Minimal page builder — the recovery helpers only read block.type,
 // block.lines and line.text.

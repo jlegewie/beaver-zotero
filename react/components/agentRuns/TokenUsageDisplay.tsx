@@ -1,5 +1,5 @@
 import React from 'react';
-import { RunUsage } from '../../agents/types';
+import { RunUsage } from '@beaver/agent-core/agents/types';
 import { Icon, DollarCircleIcon } from '../icons/icons';
 import Tooltip from '../ui/Tooltip';
 

@@ -12,7 +12,7 @@ import sharp from 'sharp';
 
 import { drawBBoxOverlayPNGNode } from '../../src/beaver-extract/node/overlayPng';
 import type { OverlayRect } from '../../src/beaver-extract/debug/overlayBuilders';
-import { bboxFromXYWH } from '../../src/beaver-extract/types';
+import { bboxFromXYWH } from '@beaver/agent-core/extract/types';
 
 async function makeBlankPng(width: number, height: number): Promise<Uint8Array> {
     const buf = await sharp({

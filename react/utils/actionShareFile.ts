@@ -7,7 +7,7 @@
  * only touches the filesystem and the picker.
  */
 
-import type { Action } from '../types/actions';
+import type { Action } from '@beaver/agent-core/types/actions';
 import {
     serializeAction,
     parseShareableAction,

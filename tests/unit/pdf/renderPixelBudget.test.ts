@@ -10,7 +10,7 @@
 import { describe, it, expect } from 'vitest';
 
 import { renderOnePage, DEFAULT_PAGE_IMAGE_OPTIONS } from '../../../src/beaver-extract/worker/docHelpers';
-import { DEFAULT_MAX_RENDER_PIXELS } from '../../../src/beaver-extract/types';
+import { DEFAULT_MAX_RENDER_PIXELS } from '@beaver/agent-core/extract/types';
 import type { DocumentLike, MuPDFApi, MatrixTuple, RectTuple } from '../../../src/beaver-extract/worker/mupdfApi';
 
 const A4_PT: RectTuple = [0, 0, 595, 842];

@@ -46,8 +46,8 @@ import type {
     RawPageData,
     RawPageDataDetailed,
     QuadPoint,
-} from "./types";
-import { bboxHeight, bboxWidth } from "./types";
+} from "@beaver/agent-core/extract/types";
+import { bboxHeight, bboxWidth } from "@beaver/agent-core/extract/types";
 
 export type RotationAngle = 0 | 90 | 180 | 270;
 

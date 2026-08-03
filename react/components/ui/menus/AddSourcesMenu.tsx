@@ -21,7 +21,7 @@ import { useLibrariesMenu } from './hooks/useLibrariesMenu';
 import { useCollectionsMenu } from './hooks/useCollectionsMenu';
 import { useTagsMenu } from './hooks/useTagsMenu';
 import { useNotesMenu } from './hooks/useNotesMenu';
-import { ZoteroTag } from '../../../types/zotero';
+import { ZoteroTag } from '@beaver/agent-core/types/zotero';
 import Tooltip from '../Tooltip';
 
 const RECENT_ITEMS_LIMIT = 5;

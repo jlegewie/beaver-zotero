@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { AgentRunStatus, ToolCallPart } from '../../agents/types';
+import { AgentRunStatus, ToolCallPart } from '@beaver/agent-core/agents/types';
 import { toolResultsMapAtom, getToolCallStatus } from '../../agents/atoms';
 import { getToolCallLabel, getLabelEnrichmentNeeds, type ToolCallLabelEnrich } from '../../agents/toolLabels';
 import { extractZoteroReferencesFromToolCall, parseArgs } from '../../agents/toolCallRequest';

@@ -1,5 +1,5 @@
 import React from 'react';
-import { ExternalReference } from '../../types/externalReferences';
+import { ExternalReference } from '@beaver/agent-core/types/externalReferences';
 import { formatAuthors } from './utils';
 import { getHost } from '../../host';
 

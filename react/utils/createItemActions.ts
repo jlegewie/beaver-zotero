@@ -6,7 +6,7 @@
  */
 
 import { AgentAction } from '../agents/agentActions';
-import { CreateItemProposedData, CreateItemResultData } from '../types/agentActions/items';
+import { CreateItemProposedData, CreateItemResultData } from '@beaver/agent-core/types/agentActions/items';
 import { applyCreateItemData } from './addItemActions';
 import { logger } from '../../src/utils/logger';
 import { ensureItemSynced } from '../../src/utils/sync';

@@ -7,9 +7,9 @@ import {
     undoAgentActionAtom,
     isCreateNoteAgentAction,
 } from '../../../agents/agentActions';
-import { NoteProposedData } from '../../../types/agentActions/base';
-import { AgentRun } from '../../../agents/types';
-import { ZoteroItemReference } from '../../../types/zotero';
+import { NoteProposedData } from '@beaver/agent-core/types/agentActions/base';
+import { AgentRun } from '@beaver/agent-core/agents/types';
+import { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import { ZOTERO_ICONS, ZoteroIcon } from '../../../components/icons/ZoteroIcon';
 import {
     TickIcon,

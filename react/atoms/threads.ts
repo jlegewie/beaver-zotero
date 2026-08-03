@@ -14,10 +14,10 @@ import { logger } from "../../src/utils/logger";
 import { ApiError } from "../types/apiErrors";
 import { resetMessageUIStateAtom } from "./messageUIState";
 import { checkExternalReferencesAtom, clearExternalReferenceCacheAtom, addExternalReferencesToMappingAtom } from "./externalReferences";
-import { ExternalReference } from "../types/externalReferences";
+import { ExternalReference } from "@beaver/agent-core/types/externalReferences";
 import { threadRunsAtom, activeRunAtom } from "../agents/atoms";
 import { isWSChatPendingAtom, isWSConnectedAtom, isWSReadyAtom } from "./agentRunAtoms";
-import { AgentRun } from "../agents/types";
+import { AgentRun } from "@beaver/agent-core/agents/types";
 import { 
     threadAgentActionsAtom, 
     isCreateItemAgentAction, 
@@ -32,9 +32,9 @@ import { upgradeToolReturn } from "../compat/legacyToolResults";
 import { loadItemDataForAgentActions } from "../utils/agentActionUtils";
 import { BeaverTemporaryAnnotations } from "../utils/annotationUtils";
 import { enrichMessageAttachmentStub } from "../types/attachments/converters";
-import { zoteroReferenceKey } from "../types/attachments/apiTypes";
+import { zoteroReferenceKey } from "@beaver/agent-core/types/attachments/apiTypes";
 import { resolveItemReference } from "../../src/utils/libraryIdentity";
-import type { ZoteroItemReference } from "../types/zotero";
+import type { ZoteroItemReference } from "@beaver/agent-core/types/zotero";
 
 /**
  * Stores a run ID that ThreadView should scroll to after a thread finishes loading.

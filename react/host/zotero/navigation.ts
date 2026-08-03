@@ -1,5 +1,5 @@
 import type { NavigationHost, AttachmentMatchNavigation } from '../types';
-import type { ZoteroItemReference } from '../../types/zotero';
+import type { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import type { AttachmentMatchTarget } from '../../agents/toolResultTypes';
 import { revealSource, openSource as openZoteroSource } from '../../utils/sourceUtils';
 import { selectCollection, selectLibrary } from '../../../src/utils/selectItem';

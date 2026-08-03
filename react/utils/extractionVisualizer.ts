@@ -26,7 +26,7 @@ import { getItemLanguage } from "../../src/utils/zoteroUtils";
 import { getCurrentReaderAndWaitForView } from "./readerUtils";
 import { getPageViewportInfo } from "./pdfUtils";
 import { BeaverTemporaryAnnotations, ZoteroReader } from "./annotationUtils";
-import { ZoteroItemReference } from "../types/zotero";
+import { ZoteroItemReference } from "@beaver/agent-core/types/zotero";
 import {
     buildColumnOverlayFromDebugPage,
     buildItemOverlayFromDebugPage,

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import type { AgentRun } from '../../../react/agents/types';
+import type { AgentRun } from '@beaver/agent-core/agents/types';
 import {
     buildRetryAnchor,
     planRetryRollback,

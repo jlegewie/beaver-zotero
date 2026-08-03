@@ -10,15 +10,15 @@ import {
     ThinkingPart,
     RetryPromptPart,
     AgentRunStatus,
-} from "./types";
+} from "@beaver/agent-core/agents/types";
 import {
     WSPartEvent,
     WSToolReturnEvent,
     WSRunCompleteEvent,
     WSToolCallProgressEvent,
     WSToolCallArgsStreamEvent,
-} from "../../src/services/agentProtocol";
-import { MessageAttachment, messageAttachmentKey, messageAttachmentsHaveSameIdentity } from "../types/attachments/apiTypes";
+} from "@beaver/agent-core/protocol/agentProtocol";
+import { MessageAttachment, messageAttachmentKey, messageAttachmentsHaveSameIdentity } from "@beaver/agent-core/types/attachments/apiTypes";
 
 // =============================================================================
 // Core Atoms

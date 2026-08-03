@@ -1,5 +1,5 @@
 import { NON_CONTENT_SELECTOR, normalizeText } from "./domWalk";
-import type { DomExtractionDiagnostics, DomSection } from "./schema";
+import type { DomExtractionDiagnostics, DomSection } from "@beaver/agent-core/extract/document/dom/schema";
 
 // NodeFilter.SHOW_TEXT; headless DOMParser documents may lack the global.
 const SHOW_TEXT = 0x4;

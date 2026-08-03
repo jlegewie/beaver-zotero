@@ -4,7 +4,7 @@ import {
     FrontendFileStatus,
     AttachmentInfo,
     type ZoteroItemReference,
-} from '../../../react/types/zotero';
+} from '@beaver/agent-core/types/zotero';
 import { safeIsInTrash, safeFileExists, isLinkedUrlAttachment } from '../../utils/zoteroUtils';
 import {
     libraryRefForLibraryID,
@@ -19,7 +19,7 @@ import { getPref } from '../../utils/prefs';
 import { isAttachmentOnServer } from '../../utils/webAPI';
 import { addPopupMessageAtom } from '../../../react/utils/popupMessageUtils';
 import { wasItemAddedBeforeLastSync } from '../../../react/utils/sourceUtils';
-import { DeferredToolPreference } from '../agentProtocol';
+import { DeferredToolPreference } from '@beaver/agent-core/protocol/agentProtocol';
 import { deferredToolPreferencesAtom } from '../../../react/atoms/deferredToolPreferences';
 import {
     isActionApprovedForCurrentRun,

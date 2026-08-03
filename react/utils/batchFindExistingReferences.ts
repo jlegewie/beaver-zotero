@@ -23,7 +23,7 @@
  */
 
 import { FindReferenceData } from './findExistingReference';
-import { ZoteroItemReference } from '../types/zotero';
+import { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import { logger } from '../../src/utils/logger';
 import { libraryRefForLibraryID } from '../../src/utils/libraryIdentity';
 

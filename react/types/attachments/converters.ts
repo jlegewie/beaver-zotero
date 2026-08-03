@@ -6,8 +6,8 @@ import {
     Annotation,
     AnnotationPosition,
     ItemMetadataAttachment
-} from './apiTypes';
-import { ZoteroItemReference } from '../zotero';
+} from '@beaver/agent-core/types/attachments/apiTypes';
+import { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import { safeStub, serializeAttachmentStub, serializeItemStub } from '../../../src/utils/zoteroSerializers';
 import { libraryRefForLibraryID } from '../../../src/utils/libraryIdentity';
 

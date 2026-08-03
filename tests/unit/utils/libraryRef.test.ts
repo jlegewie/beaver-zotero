@@ -8,7 +8,7 @@
  * registered by the time the test body runs.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { UNRESOLVED_LIBRARY_ID } from '../../../src/utils/libraryRef';
+import { UNRESOLVED_LIBRARY_ID } from '@beaver/agent-core/identity/libraryRef';
 
 describe('object-id resolver registry', () => {
     let originalLibraries: unknown;
@@ -31,7 +31,7 @@ describe('object-id resolver registry', () => {
     });
 
     it('falls back to a pure parse of a portable ref when nothing is registered', async () => {
-        const { resolveObjectIdReference } = await import('../../../src/utils/libraryRef');
+        const { resolveObjectIdReference } = await import('@beaver/agent-core/identity/libraryRef');
 
         expect(resolveObjectIdReference('u-ABCD1234')).toEqual({
             library_id: UNRESOLVED_LIBRARY_ID,
@@ -46,13 +46,13 @@ describe('object-id resolver registry', () => {
     });
 
     it('falls back to a pure parse of a legacy numeric ref when nothing is registered', async () => {
-        const { resolveObjectIdReference } = await import('../../../src/utils/libraryRef');
+        const { resolveObjectIdReference } = await import('@beaver/agent-core/identity/libraryRef');
 
         expect(resolveObjectIdReference('1-ABCD1234')).toEqual({ library_id: 1, zotero_key: 'ABCD1234' });
     });
 
     it('returns null on malformed input when nothing is registered', async () => {
-        const { resolveObjectIdReference } = await import('../../../src/utils/libraryRef');
+        const { resolveObjectIdReference } = await import('@beaver/agent-core/identity/libraryRef');
 
         expect(resolveObjectIdReference('ABC')).toBeNull();
         expect(resolveObjectIdReference('0-ABC')).toBeNull();
@@ -60,7 +60,7 @@ describe('object-id resolver registry', () => {
     });
 
     it('uses the registered resolver instead of the pure parse', async () => {
-        const { setObjectIdResolver, resolveObjectIdReference } = await import('../../../src/utils/libraryRef');
+        const { setObjectIdResolver, resolveObjectIdReference } = await import('@beaver/agent-core/identity/libraryRef');
         const resolved = { library_id: 7, library_ref: 'g42', zotero_key: 'ABCD1234' };
         const resolver = vi.fn(() => resolved);
 

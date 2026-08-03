@@ -33,7 +33,7 @@ vi.mock('../../../src/utils/zoteroSerializers', () => ({
 }));
 
 import { handleFindAnnotationsRequest } from '../../../src/services/agentDataProvider/handleFindAnnotationsRequest';
-import type { WSFindAnnotationsRequest } from '../../../src/services/agentProtocol';
+import type { WSFindAnnotationsRequest } from '@beaver/agent-core/protocol/agentProtocol';
 
 type MockAnnotation = Zotero.Item & {
     annotationType: string;

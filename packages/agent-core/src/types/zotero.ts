@@ -1,3 +1,9 @@
+/*
+ * Wire/DTO reference types shared with the client-agnostic protocol layer.
+ * Keep this module free of React and other UI-only types; presentation
+ * variants of these references live in `./fileStatus`.
+ */
+
 /**
  * ZoteroLibrary is a reference to a Zotero library.
  */
@@ -31,24 +37,6 @@ export interface FileHashReference {
     file_hash: string;
     library_id: number;
     zotero_key: string;
-}
-
-export interface FailedItemReference extends ZoteroItemReference {
-    errorCode?: string;
-    buttonText?: string;
-    buttonAction?: () => void;
-    buttonIcon?: React.ComponentType<React.SVGProps<SVGSVGElement>>;
-}
-
-export interface SkippedItem extends ZoteroItemReference {
-    reason: string;
-}
-
-export interface FailedFileReference extends FileHashReference {
-    errorCode?: string;
-    buttonText?: string;
-    buttonAction?: () => void;
-    buttonIcon?: React.ComponentType<React.SVGProps<SVGSVGElement>>;
 }
 
 /**
@@ -355,10 +343,10 @@ import type {
     AttachmentStub,
     ContentInfoStatus,
     ContentKind,
-} from "../../src/services/documentExtraction/shared/contentKinds";
+} from "../extract/document/shared/contentKinds";
 export type {
     AttachmentInfo,
     AttachmentStub,
     ContentInfoStatus,
     ContentKind,
-} from "../../src/services/documentExtraction/shared/contentKinds";
+} from "../extract/document/shared/contentKinds";

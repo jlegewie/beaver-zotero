@@ -1,5 +1,5 @@
 import React from 'react';
-import { ModelMessage } from '../../agents/types';
+import { ModelMessage } from '@beaver/agent-core/agents/types';
 import Button from '../ui/Button';
 import {
     Icon,

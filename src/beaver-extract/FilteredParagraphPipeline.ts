@@ -29,7 +29,7 @@ import {
     type RawPageData,
     type RawLine,
     type StyleProfile,
-} from "./types";
+} from "@beaver/agent-core/extract/types";
 import { buildPageAnalysisContext } from "./PageAnalysisContext";
 import {
     detectDominantTextOrientation,

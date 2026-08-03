@@ -33,7 +33,7 @@ import {
     isZoteroCitation,
     itemTypeToIconName,
     type Citation,
-} from '../../../react/types/citations';
+} from '@beaver/agent-core/types/citations';
 
 function citation(overrides: Partial<Citation>): Citation {
     return {

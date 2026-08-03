@@ -1,4 +1,7 @@
+import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vitest/config';
+
+const agentCoreSrc = fileURLToPath(new URL('./packages/agent-core/src', import.meta.url));
 
 export default defineConfig({
     test: {
@@ -9,6 +12,11 @@ export default defineConfig({
         testTimeout: 30000,
         sequence: {
             concurrent: false,
+        },
+    },
+    resolve: {
+        alias: {
+            '@beaver/agent-core': agentCoreSrc,
         },
     },
 });

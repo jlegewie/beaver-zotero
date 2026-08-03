@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { SearchMenuItem } from '../SearchMenu';
 import { TagMenuItemContext, createTagMenuItem } from '../utils/menuItemFactories';
 import { getActiveZoteroLibraryId } from '../../../../../src/utils/zoteroUtils';
-import { ZoteroTag } from '../../../../types/zotero';
+import { ZoteroTag } from '@beaver/agent-core/types/zotero';
 
 interface UseTagsMenuOptions {
     isActive: boolean;

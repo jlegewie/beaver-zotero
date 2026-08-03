@@ -17,7 +17,7 @@ import type {
     Sentence,
     StructuredPage,
 } from "../../schema";
-import type { ExtractionSettings } from "../../types";
+import type { ExtractionSettings } from "@beaver/agent-core/extract/types";
 import type { ParagraphDetectionSettings } from "../../ParagraphDetector";
 import type { SentenceSplitterConfig } from "../../sentenceTypes";
 import { parseAnalysisScope, type AnalysisScope } from "./analysisScope";

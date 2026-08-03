@@ -1,4 +1,4 @@
-import type { PageGeometry } from '../../../beaver-extract/types';
+import type { PageGeometry } from '../../types';
 
 export type ExtractContentKind = 'pdf' | 'epub' | 'text' | 'snapshot';
 export type DocumentCachePageLabels = Record<string, string>;

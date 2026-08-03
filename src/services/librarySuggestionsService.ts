@@ -6,7 +6,7 @@ import {
     LibrarySuggestionsResponse,
     SignalItem,
     UiViewType,
-} from "../../react/types/librarySuggestions";
+} from "@beaver/agent-core/types/librarySuggestions";
 import {
     toSignalItem,
     getActiveItems,

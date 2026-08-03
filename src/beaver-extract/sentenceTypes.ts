@@ -27,7 +27,7 @@ import type {
     RawDocumentData,
     RawPageData,
     RawPageDataDetailed,
-} from "./types";
+} from "@beaver/agent-core/extract/types";
 import type { FilteredParagraphResult } from "./FilteredParagraphPipeline";
 import type { PageSentenceResult } from "./ParagraphSentenceMapper";
 

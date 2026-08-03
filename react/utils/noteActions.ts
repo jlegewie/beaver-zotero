@@ -1,4 +1,4 @@
-import { ZoteroItemReference } from "../types/zotero";
+import { ZoteroItemReference } from "@beaver/agent-core/types/zotero";
 import { renderToHTML, RenderContextData } from "./citationRenderers";
 import { prepareCitationRenderContext } from "./citationRenderContext";
 import { hasSchemaVersionWrapper } from "../../src/utils/noteWrapper";

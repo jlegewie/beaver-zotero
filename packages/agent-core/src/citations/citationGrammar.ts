@@ -1,5 +1,5 @@
-import { ID_PREFIXES } from '../../src/beaver-extract/schema/schema';
-import { resolveObjectIdReference } from '../../src/utils/libraryRef';
+import { ID_PREFIXES } from '../extract/schema';
+import { resolveObjectIdReference } from '../identity/libraryRef';
 import type { ZoteroItemReference } from '../types/zotero';
 
 export type LocatorKind =

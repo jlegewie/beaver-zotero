@@ -2,15 +2,15 @@ import { logger } from "../../src/utils/logger";
 import { BEAVER_ANNOTATION_AUTHOR } from '../../src/constants/annotations';
 import { libraryRefForLibraryID } from '../../src/utils/libraryIdentity';
 import { getCurrentReader } from "./readerUtils";
-import { ZoteroItemReference } from "../types/zotero";
+import { ZoteroItemReference } from "@beaver/agent-core/types/zotero";
 import { getPageViewportInfo } from './pdfUtils';
 import {
     displayBoxToZoteroRect,
     sourceBboxesToZoteroRects,
 } from '../../src/services/annotations/annotationGeometry';
 import { getCurrentReaderAndWaitForView } from './readerUtils';
-import type { BoundingBox } from '../types/citations';
-import type { NotePosition } from '../types/agentActions/annotations';
+import type { BoundingBox } from '@beaver/agent-core/types/citations';
+import type { NotePosition } from '@beaver/agent-core/types/agentActions/annotations';
 
 const TEMPORARY_NOTE_RECT_SIZE = 18;
 const TEMPORARY_NOTE_SIDE_MARGIN = 12;

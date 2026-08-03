@@ -4,7 +4,7 @@ import { Icon, TickIcon, ArrowDownIcon, UploadCircleIcon, ImportIcon } from '../
 import PlusSignIcon from '../icons/PlusSignIcon';
 import Button from "../ui/Button";
 import { useSetAtom } from 'jotai';
-import { Action, ActionCategory, ActionCategoryFilter, ActionTargetType, generateActionId, TARGET_TYPE_LABELS, CATEGORY_LABELS } from "../../types/actions";
+import { Action, ActionCategory, ActionCategoryFilter, ActionTargetType, generateActionId, TARGET_TYPE_LABELS, CATEGORY_LABELS } from "@beaver/agent-core/types/actions";
 import { actionsAtom, saveActionsAtom, hideActionAtom, restoreActionAtom, resetActionToDefaultAtom, importActionAtom } from "../../atoms/actions";
 import { pendingActionsCategoryFilterAtom, pendingActionEditRequestAtom } from "../../atoms/ui";
 import { importActionFromFile } from "../../utils/actionShareFile";

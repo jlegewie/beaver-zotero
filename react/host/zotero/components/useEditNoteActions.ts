@@ -1,6 +1,6 @@
 import { useAtomValue, useSetAtom } from 'jotai';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AgentRunStatus, ToolCallPart } from '../../../agents/types';
+import { AgentRunStatus, ToolCallPart } from '@beaver/agent-core/agents/types';
 import {
     AgentAction,
     PendingApproval,
@@ -49,7 +49,7 @@ import {
     resolveEditNoteTargetFromData,
     type EditNoteRowDescriptor,
 } from '../../../components/agentRuns/editNoteShared';
-import type { EditNoteOperation } from '../../../types/agentActions/editNote';
+import type { EditNoteOperation } from '@beaver/agent-core/types/agentActions/editNote';
 
 export async function dismissActiveEditNotePreview(): Promise<void> {
     // A deferred re-render (the revision guard's bounce) is pending-but-not-

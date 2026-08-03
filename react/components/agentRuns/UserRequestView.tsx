@@ -1,6 +1,6 @@
 import React, { useRef, useState, useEffect, useCallback, useMemo } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { BeaverAgentPrompt } from '../../agents/types';
+import { BeaverAgentPrompt } from '@beaver/agent-core/agents/types';
 import ContextMenu from '../ui/menu/ContextMenu';
 import useSelectionContextMenu from '../../hooks/useSelectionContextMenu';
 import { RequestChips } from './requestChips';

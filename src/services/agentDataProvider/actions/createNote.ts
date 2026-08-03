@@ -17,8 +17,8 @@ import {
     WSAgentActionValidateResponse,
     WSAgentActionExecuteRequest,
     WSAgentActionExecuteResponse,
-} from '../../agentProtocol';
-import { ItemDataWithStatus, AttachmentDataWithStatus } from '../../../../react/types/zotero';
+} from '@beaver/agent-core/protocol/agentProtocol';
+import { ItemDataWithStatus, AttachmentDataWithStatus } from '@beaver/agent-core/types/zotero';
 import { checkLibraryExcluded, excludedLibraryMessage, getDeferredToolPreference, getLibraryByIdOrName, getCollectionByIdOrName } from '../utils';
 import {
     libraryRefForLibraryID,
@@ -30,7 +30,7 @@ import {
 import { TimeoutContext, checkAborted } from '../timeout';
 import { extractCitationReferences } from './extractCitationReferences';
 import { lookupZoteroReferences, LookupZoteroReferencesResult } from '../lookupZoteroReferences';
-import { WSDataError, NoteResultItem } from '../../agentProtocol';
+import { WSDataError, NoteResultItem } from '@beaver/agent-core/protocol/agentProtocol';
 import { resolveCreateNoteParent } from './resolveCreateNoteParent';
 import { TimingAccumulator } from '../../../utils/timing';
 

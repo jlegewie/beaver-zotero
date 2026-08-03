@@ -7,7 +7,7 @@
 
 import { logger } from '../../utils/logger';
 import { libraryRefForLibraryID, modelObjectId, resolveItemReference, resolveLibraryRef } from '../../utils/libraryIdentity';
-import { ItemDataWithStatus, AttachmentDataWithStatus, ZoteroItemReference, ItemStub } from '../../../react/types/zotero';
+import { ItemDataWithStatus, AttachmentDataWithStatus, ZoteroItemReference, ItemStub } from '@beaver/agent-core/types/zotero';
 import { searchableLibraryIdsAtom, syncWithZoteroAtom } from '../../../react/atoms/profile';
 import { userIdAtom } from '../../../react/atoms/auth';
 import { store } from '../../../react/store';
@@ -27,7 +27,7 @@ import {
     AnnotationResultItem,
     NoteResultItem,
     FileStatusLevel,
-} from '../agentProtocol';
+} from '@beaver/agent-core/protocol/agentProtocol';
 
 
 export interface LookupZoteroReferencesOptions {

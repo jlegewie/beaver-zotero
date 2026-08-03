@@ -90,7 +90,7 @@ import {
     undoEditNoteAction,
 } from '../../../react/utils/editNoteActions';
 import type { AgentAction } from '../../../react/agents/agentActions';
-import type { EditNoteResultData } from '../../../react/types/agentActions/editNote';
+import type { EditNoteResultData } from '@beaver/agent-core/types/agentActions/editNote';
 
 // =============================================================================
 // Helpers

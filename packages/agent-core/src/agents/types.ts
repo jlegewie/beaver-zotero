@@ -1,4 +1,4 @@
-import { ApplicationStateInput } from "../../src/services/agentProtocol";
+import { ApplicationStateInput } from "../protocol/agentProtocol";
 import { Citation } from "../types/citations";
 import { MessageAttachment } from "../types/attachments/apiTypes";
 import { ZoteroLibrary, ZoteroCollection, ZoteroTag } from "../types/zotero";

@@ -1,5 +1,5 @@
-import type { DocumentItem, StructuredPage } from "./schema";
-import { ID_PREFIXES } from "./schema";
+import type { DocumentItem, StructuredPage } from "@beaver/agent-core/extract/schema";
+import { ID_PREFIXES } from "@beaver/agent-core/extract/schema";
 
 function sortedItems(page: StructuredPage): DocumentItem[] {
     return [...page.items].sort((a, b) => a.order - b.order);

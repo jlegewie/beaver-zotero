@@ -5,9 +5,9 @@ import { dismissDiffPreview } from '../utils/noteEditorDiffPreview';
 import { updateDiffPreviewForNote, diffPreviewNoteKeyAtom } from '../utils/diffPreviewCoordinator';
 import { agentActionsService, AckActionLink } from '../../src/services/agentActionsService';
 import { notifyApprovalRequest } from '../../src/services/systemNotifications';
-import type { ZoteroItemReference } from '../types/zotero';
-import type { ActionStatus } from '../types/agentActions/base';
-import type { WSDeferredApprovalRequest, AgentActionType } from '../../src/services/agentProtocol';
+import type { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
+import type { ActionStatus } from '@beaver/agent-core/types/agentActions/base';
+import type { WSDeferredApprovalRequest, AgentActionType } from '@beaver/agent-core/protocol/agentProtocol';
 import {
     AgentAction,
     CreateItemAgentAction,
@@ -17,9 +17,9 @@ import {
     hasAppliedZoteroItem,
     hasAppliedBulkAnnotations,
     getZoteroItemReferenceFromAgentAction,
-} from './agentActionTypes';
+} from '@beaver/agent-core/agents/agentActionTypes';
 
-export * from './agentActionTypes';
+export * from '@beaver/agent-core/agents/agentActionTypes';
 
 // =============================================================================
 // Applied Action Validation

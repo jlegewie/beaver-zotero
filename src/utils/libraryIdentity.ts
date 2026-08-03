@@ -19,8 +19,8 @@ import {
     parseLibraryRef,
     setObjectIdResolver,
     UNRESOLVED_LIBRARY_ID,
-} from './libraryRef';
-import type { ObjectIdReference, WriteTargetLibraryResolution } from './libraryRef';
+} from '@beaver/agent-core/identity/libraryRef';
+import type { ObjectIdReference, WriteTargetLibraryResolution } from '@beaver/agent-core/identity/libraryRef';
 
 export {
     LIBRARY_REF_PATTERN,
@@ -31,14 +31,14 @@ export {
     resolveObjectIdReference,
     setObjectIdResolver,
     writeTargetLibraryError,
-} from './libraryRef';
+} from '@beaver/agent-core/identity/libraryRef';
 export type {
     ParsedLibraryRef,
     ParsedItemReference,
     ObjectIdReference,
     ObjectIdResolver,
     WriteTargetLibraryResolution,
-} from './libraryRef';
+} from '@beaver/agent-core/identity/libraryRef';
 
 /**
  * Computes the portable `library_ref` for a device-local `libraryID`.

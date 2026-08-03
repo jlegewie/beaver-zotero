@@ -1,6 +1,6 @@
 import React from 'react';
 import type { AgentAction } from '../../../agents/agentActions';
-import type { OrganizeItemsResultData } from '../../../types/agentActions/base';
+import type { OrganizeItemsResultData } from '@beaver/agent-core/types/agentActions/base';
 import { EditMetadataPreview } from './EditMetadataPreview';
 import { CreateCollectionPreview } from './CreateCollectionPreview';
 import { OrganizeItemsPreview } from './OrganizeItemsPreview';
@@ -257,7 +257,7 @@ export const ActionPreview: React.FC<{
             <div className="flex flex-col gap-3">
                 {edits.map((edit, position) => {
                     const editIndex = typeof edit?.index === 'number' ? edit.index : position;
-                    const op = (edit?.operation ?? 'str_replace') as import('../../../types/agentActions/editNote').EditNoteOperation;
+                    const op = (edit?.operation ?? 'str_replace') as import('@beaver/agent-core/types/agentActions/editNote').EditNoteOperation;
                     const isRewrite = op === 'rewrite';
                     const oldString = isRewrite ? '' : (edit?.old_string || '');
                     const newString = edit?.new_string || '';
@@ -293,7 +293,7 @@ export const ActionPreview: React.FC<{
     }
 
     if (editNotePreviewKind === 'legacy') {
-        const op = (previewData.actionData.operation ?? 'str_replace') as import('../../../types/agentActions/editNote').EditNoteOperation;
+        const op = (previewData.actionData.operation ?? 'str_replace') as import('@beaver/agent-core/types/agentActions/editNote').EditNoteOperation;
         const isRewrite = op === 'rewrite';
         const oldString = isRewrite ? '' : (previewData.actionData.old_string || '');
         const newString = previewData.actionData.new_string || '';

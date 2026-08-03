@@ -1,6 +1,6 @@
 import React from 'react';
 import { useSetAtom, useAtomValue } from 'jotai';
-import { ToolCallPart } from '../../agents/types';
+import { ToolCallPart } from '@beaver/agent-core/agents/types';
 import { sendWSMessageAtom, isWSChatPendingAtom } from '../../atoms/agentRunAtoms';
 import { CancelIcon } from '../icons/icons';
 import IconButton from '../ui/IconButton';

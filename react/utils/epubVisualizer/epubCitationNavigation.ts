@@ -1,7 +1,7 @@
 import { BEAVER_CITATION_ANNOTATION_AUTHOR } from "../../../src/constants/annotations";
 import { logger } from "../../../src/utils/logger";
 import { getBestEpubAttachmentAsync } from "../../../src/utils/zoteroItemHelpers";
-import type { SymbolicLocation } from "../../types/citations";
+import type { SymbolicLocation } from "@beaver/agent-core/types/citations";
 import type { ZoteroReader } from "../annotationUtils";
 import { presentTemporaryAnnotations } from "../citationNavigation";
 import { getCurrentReaderAndWaitForView, waitForReaderForItem } from "../readerUtils";

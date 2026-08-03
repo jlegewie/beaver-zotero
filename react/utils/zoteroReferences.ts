@@ -1,11 +1,11 @@
 /**
  * Zotero-side constructors for the reference DTOs defined in
- * `react/types/zotero.ts`. They read live Zotero state — the `Zotero.Collection`
+ * `@beaver/agent-core/types/zotero`. They read live Zotero state — the `Zotero.Collection`
  * type and this device's library resolution — which is why they live here and
  * not next to the DTOs, so that module stays Zotero-free.
  */
 import { libraryRefForLibraryID, resolveObjectId } from '../../src/utils/libraryIdentity';
-import type { CollectionReference, ZoteroItemReference } from '../types/zotero';
+import type { CollectionReference, ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 
 /**
  * Parses a model-facing item id: either a portable `<library_ref>-<zotero_key>`

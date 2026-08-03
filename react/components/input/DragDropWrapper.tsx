@@ -2,7 +2,7 @@ import React, { useState, useRef } from 'react';
 import { getPref } from '../../../src/utils/prefs';
 import { ZoteroIcon, ZOTERO_ICONS } from '../icons/ZoteroIcon';
 import { CSSItemTypeIcon, CSSIcon } from '../icons/zotero';
-import { isValidAnnotationType } from '../../types/attachments/apiTypes';
+import { isValidAnnotationType } from '@beaver/agent-core/types/attachments/apiTypes';
 import { addItemToCurrentMessageItemsAtom, addItemsToCurrentMessageItemsAtom, currentMessageFiltersAtom } from '../../atoms/messageComposition';
 import { useSetAtom, useAtomValue } from 'jotai';
 import { searchableLibraryIdsAtom } from '../../atoms/profile';

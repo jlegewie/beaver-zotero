@@ -3,7 +3,7 @@ import type {
     ExtractionSettings,
     ExtractionTimings,
     PageGeometry,
-} from "../types";
+} from "./types";
 
 export const SCHEMA_VERSION = "4";
 

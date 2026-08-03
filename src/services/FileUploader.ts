@@ -14,13 +14,13 @@ import { isAuthenticatedAtom, userAtom, userIdAtom } from '../../react/atoms/aut
 import { attachmentsService, UploadQueueItem, CompleteUploadRequest, UploadErrorCode, ErrorCode, FailureStatus } from './attachmentsService';
 import { isFileUploaderRunningAtom, isFileUploaderFailedAtom, fileUploaderBackoffUntilAtom } from '../../react/atoms/sync';
 import { hasCompletedOnboardingAtom, planFeaturesAtom } from '../../react/atoms/profile';
-import { FileHashReference, ZoteroItemReference } from '../../react/types/zotero';
+import { FileHashReference, ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import { supabase } from "./supabaseClient";
 import { addOrUpdateFailedUploadMessageAtom } from '../../react/utils/popupMessageUtils';
 import { showFileStatusDetailsAtom, zoteroServerCredentialsErrorAtom, zoteroServerDownloadErrorAtom } from '../../react/atoms/ui';
 import { getMimeType, getMimeTypeFromData, safeFileExists } from '../utils/zoteroUtils';
 import { isAttachmentOnServer, getAttachmentDataInMemory } from '../utils/webAPI';
-import { PlanFeatures } from '../../react/types/profile';
+import { PlanFeatures } from '@beaver/agent-core/types/profile';
 import { UNRESOLVED_LIBRARY_ID } from '../utils/libraryIdentity';
 
 /**

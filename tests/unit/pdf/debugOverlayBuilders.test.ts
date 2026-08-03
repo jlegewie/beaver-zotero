@@ -17,8 +17,8 @@ import {
     buildSentenceOverlayFromPage,
     OVERLAY_COLORS,
 } from '../../../src/beaver-extract/debug/overlayBuilders';
-import { bboxFromXYWH } from '../../../src/beaver-extract/types';
-import type { InternalProcessedPage } from '../../../src/beaver-extract/types';
+import { bboxFromXYWH } from '@beaver/agent-core/extract/types';
+import type { InternalProcessedPage } from '@beaver/agent-core/extract/types';
 import type { PageDebugData } from '../../../src/beaver-extract/schema';
 
 const bbox = (x: number, y: number, w: number, h: number) =>

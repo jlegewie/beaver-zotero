@@ -7,8 +7,8 @@ import {
 import {
   CoordOrigin,
   type BoundingBox,
-} from "../../../../react/types/citations";
-import type { PageGeometry } from "../../../../src/beaver-extract/types";
+} from "@beaver/agent-core/types/citations";
+import type { PageGeometry } from "@beaver/agent-core/extract/types";
 
 const baseGeometry: PageGeometry = {
   viewBox: [0, 0, 400, 600],

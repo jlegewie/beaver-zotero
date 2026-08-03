@@ -6,7 +6,7 @@
  * `beaver.actions` preference via ActionCustomizations.
  */
 
-import { Action } from './actions';
+import { Action } from '@beaver/agent-core/types/actions';
 import { ARCHIVED_ACTIONS } from './archivedActions';
 
 

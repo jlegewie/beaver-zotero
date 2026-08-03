@@ -80,7 +80,7 @@ vi.mock('../../../react/atoms/profile', async () => {
 import { actionsAtom, hideActionAtom, importActionAtom, resetActionToDefaultAtom, restoreActionAtom, saveActionsAtom } from '../../../react/atoms/actions';
 import { getActionCommand } from '../../../react/utils/slashCommands';
 import { BUILTIN_ACTIONS } from '../../../react/types/builtinActions';
-import type { Action } from '../../../react/types/actions';
+import type { Action } from '@beaver/agent-core/types/actions';
 
 const existing: Action = {
     id: 'custom-existing',

@@ -17,7 +17,7 @@
  * `setClientIdentityProvider`.
  */
 
-import type { ZoteroInstanceWire } from './agentProtocol';
+import type { ZoteroInstanceWire } from '@beaver/agent-core/protocol/agentProtocol';
 
 /** Handshake identity fields resolved fresh for each connect attempt. */
 export interface ClientIdentity {

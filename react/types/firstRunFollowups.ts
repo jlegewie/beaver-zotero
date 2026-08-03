@@ -1,4 +1,4 @@
-import { CardKind } from './librarySuggestions';
+import { CardKind } from '@beaver/agent-core/types/librarySuggestions';
 
 export interface FirstRunFollowup {
     id: string;

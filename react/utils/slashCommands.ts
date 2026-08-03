@@ -6,8 +6,8 @@
  * client-agnostic render layer as well as by composition code.
  */
 
-import type { PromptAction } from '../agents/types';
-import type { Action, ActionTargetType } from '../types/actions';
+import type { PromptAction } from '@beaver/agent-core/agents/types';
+import type { Action, ActionTargetType } from '@beaver/agent-core/types/actions';
 
 /** A /slash-command pill present in the editor, with the action identity it
  *  carries so the send path can resolve it back to the action's prompt. */

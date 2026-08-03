@@ -1,6 +1,6 @@
 import React, { forwardRef, useMemo, useState, useCallback } from 'react';
 import { useAtomValue } from 'jotai';
-import { AgentRun, ModelResponse, ToolCallPart } from '../../agents/types';
+import { AgentRun, ModelResponse, ToolCallPart } from '@beaver/agent-core/agents/types';
 import { isAutoLoadingToolCall } from './ModelResponseView';
 import { UserRequestView } from './UserRequestView';
 import { ModelMessagesView } from './ModelMessagesView';

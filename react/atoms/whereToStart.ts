@@ -3,8 +3,8 @@
  */
 import { atom } from 'jotai';
 import { v4 as uuidv4 } from 'uuid';
-import { ActionTargetType } from '../types/actions';
-import { SignalItem } from '../types/librarySuggestions';
+import { ActionTargetType } from '@beaver/agent-core/types/actions';
+import { SignalItem } from '@beaver/agent-core/types/librarySuggestions';
 import { getActiveItems, getRecentItems, toSignalItem } from '../../src/utils/librarySignals';
 import { libraryItemCountAtom, SMALL_LIBRARY_THRESHOLD } from './zoteroContext';
 import { currentReaderAttachmentAtom, currentMessageItemsAtom } from './messageComposition';
@@ -16,8 +16,8 @@ import { isWebSearchAllowedAtom, isWebSearchEnabledAtom } from './ui';
 import { beaverDefaultModelAtom, updateSelectedModelAtom } from './models';
 import { resolvePromptVariables } from '../utils/promptVariables';
 import { ensurePromptActionTokens, getActionCommand } from '../utils/slashCommands';
-import { PromptAction } from '../agents/types';
-import { ChargingPermissions } from '../../src/services/agentProtocol';
+import { PromptAction } from '@beaver/agent-core/agents/types';
+import { ChargingPermissions } from '@beaver/agent-core/protocol/agentProtocol';
 import { logger } from '../../src/utils/logger';
 
 // Built-in action ids the launcher maps to.

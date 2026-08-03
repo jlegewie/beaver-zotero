@@ -1,5 +1,5 @@
-import type { AgentRun } from './types';
-import type { WSErrorEvent } from '../../src/services/agentProtocol';
+import type { AgentRun } from '@beaver/agent-core/agents/types';
+import type { WSErrorEvent } from '@beaver/agent-core/protocol/agentProtocol';
 
 export function appendRunIfMissing(runs: AgentRun[], run: AgentRun): AgentRun[] {
     return runs.some(existing => existing.id === run.id) ? runs : [...runs, run];

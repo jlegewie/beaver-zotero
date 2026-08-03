@@ -1,6 +1,6 @@
 import React from 'react';
 import { useAtomValue } from 'jotai';
-import { AgentRun } from '../../../agents/types';
+import { AgentRun } from '@beaver/agent-core/agents/types';
 import {
     getAgentActionsByRunAtom,
     isCreateItemAgentAction,

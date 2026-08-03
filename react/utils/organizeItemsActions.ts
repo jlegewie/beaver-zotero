@@ -4,7 +4,7 @@
  */
 
 import { AgentAction } from '../agents/agentActions';
-import type { OrganizeItemsResultData, TagChanges, CollectionChanges } from '../types/agentActions/base';
+import type { OrganizeItemsResultData, TagChanges, CollectionChanges } from '@beaver/agent-core/types/agentActions/base';
 import { logger } from '../../src/utils/logger';
 import { parseItemReference, resolveItemReference } from '../../src/utils/libraryIdentity';
 

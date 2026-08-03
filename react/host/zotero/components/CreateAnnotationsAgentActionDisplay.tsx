@@ -11,7 +11,7 @@ import {
     CreateHighlightAnnotationsAgentAction,
     CreateNoteAnnotationsAgentAction,
 } from '../../../agents/agentActions';
-import { AgentRun } from '../../../agents/types';
+import { AgentRun } from '@beaver/agent-core/agents/types';
 import {
     CancelIcon,
     Icon,
