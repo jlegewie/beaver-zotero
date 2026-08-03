@@ -253,7 +253,7 @@ const CustomProviderCard: React.FC<CustomProviderCardProps> = ({
                     />
                     {model.api_base?.trim() && !apiBaseValidation.valid && (
                         <span className="display-flex flex-row items-start text-sm font-color-error">
-                            <Icon icon={AlertIcon} className="flex-shrink-0 mt-020" />
+                            <Icon icon={AlertIcon} className="flex-shrink-0 mt-020 mr-1" />
                             <span>
                                 {apiBaseValidation.error}{' '}
                                 <DocLink path="custom-models">Network requirements</DocLink>
