@@ -10,6 +10,7 @@ import {
     ThinkingPart,
     RetryPromptPart,
     AgentRunStatus,
+    isUnsuccessfulToolReturn,
 } from "@beaver/agent-core/agents/types";
 import {
     WSPartEvent,
@@ -147,8 +148,10 @@ export function getToolCallStatus(
     if (!result && runStatus && runStatus === 'in_progress') return 'in_progress';
     if (!result) return 'error';
 
-    // Check if result indicates error
-    if (result.part_kind === 'retry-prompt') {
+    // Two shapes reach here: a retry request (the model was asked to fix its
+    // call) and a tool-return whose outcome is anything but success. Both mean
+    // the call produced no usable result, which is what the user sees as an error.
+    if (result.part_kind === 'retry-prompt' || isUnsuccessfulToolReturn(result)) {
         return 'error';
     }
 

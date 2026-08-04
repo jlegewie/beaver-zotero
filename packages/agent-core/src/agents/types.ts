@@ -175,12 +175,26 @@ export interface UserPromptPart {
     content: string;
 }
 
+/**
+ * Outcome of a tool call, mirroring `ToolReturnPart.outcome`.
+ *
+ * - `success`: the tool returned a result payload.
+ * - `failed`: the tool failed terminally; `content` is an error message.
+ * - `denied`: the call was refused by an approval mechanism.
+ * - `interrupted`: the run was cut off before the tool produced a result.
+ *
+ * Absent on older threads persisted before the field existed, so an absent
+ * value must be read as `success` or handled by previous code paths.
+ */
+export type ToolReturnOutcome = 'success' | 'failed' | 'denied' | 'interrupted';
+
 export interface ToolReturnPart {
     part_kind: 'tool-return';
     tool_name: string;
     content: any;
     tool_call_id: string;
     metadata?: Record<string, any>;
+    outcome?: ToolReturnOutcome;
 }
 
 export interface RetryPromptPart{
@@ -188,6 +202,25 @@ export interface RetryPromptPart{
     tool_name: string;
     content: any;
     tool_call_id: string;
+}
+
+/**
+ * True when a tool return did not produce a usable result.
+ *
+ * Every non-success outcome carries an explanatory message as `content` instead
+ * of a result payload, so none of them may reach the reference-extraction,
+ * view-synthesis, or result-rendering paths that assume success-shaped content.
+ * Treating the whole non-success set alike also keeps an outcome the backend
+ * starts emitting later from silently rendering as a completed call.
+ */
+export function isUnsuccessfulToolReturn(
+    part: ToolReturnPart | RetryPromptPart | null | undefined
+): boolean {
+    return (
+        part?.part_kind === 'tool-return' &&
+        part.outcome != null &&
+        part.outcome !== 'success'
+    );
 }
 
 export interface TextPart {
