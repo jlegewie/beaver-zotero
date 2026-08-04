@@ -123,7 +123,13 @@ describe('validateItem — attachment content kinds (default capabilities)', () 
     it('marks a local HTML snapshot as unreadable', async (ctx) => {
         const res = await validateItem(SNAPSHOT_ATTACHMENT.library_id, SNAPSHOT_ATTACHMENT.zotero_key);
         expect(res.ok).toBe(true);
-        if (res.status_code === 'file_not_local_remote') ctx.skip();
+        // The fixture lives in a group library, so its file may not be synced
+        // down on this machine. Validation reports that as `file_not_local`
+        // or `file_not_local_remote` depending on whether it has already seen
+        // the remote copy — which of the two comes back also varies with how
+        // long the instance has been up. Either means the file isn't here, and
+        // this test is about content-kind classification, not availability.
+        if (res.status_code?.startsWith('file_not_local')) ctx.skip();
         expect(res.state).toBe('unreadable');
         expect(res.content_kind).toBe('snapshot');
         expect(res.reason).toContain('snapshot');

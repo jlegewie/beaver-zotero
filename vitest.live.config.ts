@@ -8,7 +8,12 @@ export default defineConfig({
         globals: true,
         environment: 'node',
         include: ['tests/live/**/*.live.test.ts'],
-        // No setupFiles — live tests run against live Zotero, no stubs
+        // No stubs — live tests run against live Zotero. These two only
+        // normalize the instance's excluded-libraries set (see
+        // tests/helpers/liveExclusions.ts): once per run, and again at the
+        // start of each file so a leak stays contained to its own file.
+        globalSetup: ['tests/helpers/liveGlobalSetup.ts'],
+        setupFiles: ['tests/helpers/liveSetupFile.ts'],
         testTimeout: 15000,
         sequence: {
             concurrent: false,

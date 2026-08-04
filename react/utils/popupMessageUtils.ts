@@ -2,6 +2,7 @@ import { atom } from 'jotai';
 import { createElement } from 'react';
 import { PopupMessage } from '../types/popupMessage';
 import { popupMessagesAtom } from '../atoms/ui';
+import { localZoteroLibrariesAtom } from '../atoms/profile';
 import { v4 as uuidv4 } from 'uuid';
 import { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import { RepeatIcon, CSSItemTypeIcon } from '../components/icons/icons';
@@ -115,6 +116,58 @@ export const removePopupMessageAtom = atom(
         set(popupMessagesAtom, (prevMessages) =>
             prevMessages.filter((msg) => msg.id !== messageId)
         );
+    }
+);
+
+/**
+ * Stable ids for the excluded-library notices, one per context funnel.
+ */
+export const EXCLUDED_LIBRARY_READER_POPUP_ID = 'library-excluded-reader';
+export const EXCLUDED_LIBRARY_SELECTION_POPUP_ID = 'library-excluded-selection';
+
+/**
+ * User-facing copy naming the excluded libraries behind skipped context.
+ */
+function excludedLibraryText(names: string[]): string {
+    const unique = [...new Set(names)].map((name) => `"${name}"`);
+
+    const subject = unique.length === 0
+        ? 'This library is'
+        : unique.length === 1
+            ? `The library ${unique[0]} is`
+            : `The libraries ${unique.join(', ')} are`;
+
+    return `${subject} excluded from Beaver. You can change excluded libraries in Beaver Preferences.`;
+}
+
+/**
+ * Notify the user that context was skipped because its library is excluded
+ * from Beaver.
+ *
+ * Context funnels drop excluded libraries before item validation runs, so the
+ * "Item Removed" popup that explains every other rejection never fires for
+ * them. Without this the item simply never shows up, with no explanation.
+ */
+export const addExcludedLibraryPopupAtom = atom(
+    null,
+    (get, set, params: { id: string; libraryIDs: number[]; title: string; expire?: boolean }) => {
+        const { id, libraryIDs, title, expire = true } = params;
+        // Names come from the same library snapshot that decided the exclusion,
+        // so the notice cannot disagree with the decision behind it and no
+        // second lookup is needed.
+        const libraries = get(localZoteroLibrariesAtom);
+        const names = libraryIDs
+            .map((libraryID) => libraries.find((library) => library.library_id === libraryID)?.name)
+            .filter((name): name is string => !!name);
+        set(removePopupMessageAtom, id);
+        set(addPopupMessageAtom, {
+            id,
+            type: 'error',
+            title,
+            text: excludedLibraryText(names),
+            expire,
+            duration: 5000,
+        });
     }
 );
 

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useCallback } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { readerTextSelectionAtom } from '../atoms/messageComposition';
-import { currentReaderAttachmentAtom, updateReaderAttachmentAtom, clearReaderAttachmentAtom, isReaderLibrarySearchable, addItemToCurrentMessageItemsAtom, currentMessageItemsAtom } from '../atoms/messageComposition';
+import { currentReaderAttachmentAtom, updateReaderAttachmentAtom, clearReaderAttachmentAtom, isReaderLibrarySearchable, addItemToCurrentMessageItemsAtom, currentMessageItemsAtom, notifyReaderLibraryExcludedAtom } from '../atoms/messageComposition';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { addSelectionChangeListener, getCurrentReader, getSelectedTextAsTextSelection } from '../utils/readerUtils';
 import { isValidAnnotationType, TextSelection } from '@beaver/agent-core/types/attachments/apiTypes';
@@ -67,6 +67,7 @@ export function useReaderTabSelection() {
     const searchableLibraryIdsKey = searchableLibraryIds.join(',');
     const updateReaderAttachment = useSetAtom(updateReaderAttachmentAtom);
     const clearReaderAttachment = useSetAtom(clearReaderAttachmentAtom);
+    const notifyReaderLibraryExcluded = useSetAtom(notifyReaderLibraryExcludedAtom);
     const setReaderTextSelection = useSetAtom(readerTextSelectionAtom);
     const setCurrentMessageItems = useSetAtom(currentMessageItemsAtom);
     const addItemToCurrentMessageItems = useSetAtom(addItemToCurrentMessageItemsAtom);
@@ -170,6 +171,10 @@ export function useReaderTabSelection() {
             logger(`useReaderTabSelection:setupReader: Reader ${reader.itemID} is in an excluded library. Not tracking.`);
             detachActiveReader();
             clearReaderAttachment();
+            // After the clear, which drops the previous notice: tracking stops
+            // before `updateReaderAttachmentAtom` runs, so this is the only
+            // place that can explain the missing file for this tab.
+            notifyReaderLibraryExcluded(reader);
             return;
         }
 
@@ -201,6 +206,7 @@ export function useReaderTabSelection() {
             if (isActiveSetup()) {
                 detachActiveReader();
                 clearReaderAttachment();
+                notifyReaderLibraryExcluded(reader);
             }
             return false;
         };
@@ -301,7 +307,7 @@ export function useReaderTabSelection() {
             );
         });
 
-    }, [detachActiveReader, clearReaderAttachment, setReaderTextSelection, updateReaderAttachment, waitForInternalReader]); // Dependencies
+    }, [detachActiveReader, clearReaderAttachment, notifyReaderLibraryExcluded, setReaderTextSelection, updateReaderAttachment, waitForInternalReader]); // Dependencies
 
 
     useEffect(() => {
