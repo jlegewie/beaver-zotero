@@ -272,13 +272,42 @@ describe('supabaseClient reload bridge', () => {
         await flushAsync();
 
         expect(firstClient.auth.stopAutoRefresh).toHaveBeenCalled();
-        // Taken, not just read: the disposer must not run a second time.
-        expect((window as any).__beaverDisposeSupabase).toBeUndefined();
+        // Left in place until this instance publishes its own, so a stop that
+        // failed can still be retried from the host's shutdown path.
+        expect((window as any).__beaverDisposeSupabase).toBeTypeOf('function');
 
         secondModule.setSupabaseStorageAdapter(createMockStorageAdapter());
         secondModule.supabase.auth;
 
         expect((window as any).__beaverDisposeSupabase).toBeTypeOf('function');
         expect((window as any).__beaverDisposeSupabase).toBe(secondModule.disposeSupabaseClient);
+    });
+
+    // A stop that fails leaves the old ticker running, so the disposer has to
+    // stay reachable for the host to retry rather than being consumed by the
+    // attempt that failed.
+    it('keeps the previous disposer reachable when stopping it fails', async () => {
+        const firstModule = await import('@beaver/agent-core/transport/supabaseClient');
+        await registerReloadBridge();
+        firstModule.setSupabaseStorageAdapter(createMockStorageAdapter());
+        firstModule.supabase.auth;
+
+        const firstClient = mockCreateClient.mock.results[0].value as {
+            auth: { stopAutoRefresh: ReturnType<typeof vi.fn> };
+        };
+        firstClient.auth.stopAutoRefresh.mockRejectedValueOnce(new Error('stop failed'));
+
+        vi.resetModules();
+        await import('@beaver/agent-core/transport/supabaseClient');
+        await registerReloadBridge();
+        await flushAsync();
+
+        expect(firstClient.auth.stopAutoRefresh).toHaveBeenCalledTimes(1);
+
+        const disposer = (window as any).__beaverDisposeSupabase;
+        expect(disposer).toBeTypeOf('function');
+
+        await disposer();
+        expect(firstClient.auth.stopAutoRefresh).toHaveBeenCalledTimes(2);
     });
 });

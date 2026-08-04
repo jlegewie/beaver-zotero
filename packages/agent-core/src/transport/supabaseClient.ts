@@ -44,7 +44,7 @@ export type SupabaseDisposer = () => Promise<void>;
  * Reloading the bundle creates a second module instance while the first one's
  * auto-refresh ticker is still running. Two tickers refreshing the same session
  * race for a single-use refresh token, so the new instance stops the old one
- * through `takePreviousDisposer()`. The auth lock is shared for the mirror-image
+ * through `previousDisposer()`. The auth lock is shared for the mirror-image
  * reason: an operation already waiting behind an in-flight refresh must still be
  * released by the old holder once the new instance takes over.
  *
@@ -60,13 +60,15 @@ export type SupabaseDisposer = () => Promise<void>;
  */
 export interface SupabaseReloadBridge {
     /**
-     * Returns the disposer published by the previous instance, if any, and
-     * clears it so it runs at most once.
+     * Returns the disposer published by the previous instance, if any, without
+     * consuming it. Stopping a client is idempotent, and leaving the disposer
+     * reachable is what lets the host's shutdown path retry a stop that failed.
      */
-    takePreviousDisposer(): SupabaseDisposer | undefined;
+    previousDisposer(): SupabaseDisposer | undefined;
     /**
-     * Publishes this instance's disposer, for the next instance's
-     * `takePreviousDisposer()` and for the host's own shutdown path.
+     * Publishes this instance's disposer, replacing the previous instance's,
+     * for the next instance's `previousDisposer()` and for the host's own
+     * shutdown path.
      */
     publishDisposer(dispose: SupabaseDisposer): void;
     /**
@@ -99,7 +101,7 @@ export function setSupabaseReloadBridge(bridge: SupabaseReloadBridge): void {
     reloadBridge = bridge;
     authLock = bridge.shareAuthLock(authLock);
 
-    const previousDispose = bridge.takePreviousDisposer();
+    const previousDispose = bridge.previousDisposer();
     if (previousDispose) {
         // Not awaited: registration runs during bundle init and must not block
         // on the old client's teardown.

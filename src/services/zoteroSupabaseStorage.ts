@@ -118,13 +118,7 @@ export function registerZoteroSupabaseStorage(): void {
  */
 export function registerZoteroSupabaseReloadBridge(): void {
     setSupabaseReloadBridge({
-        takePreviousDisposer: () => {
-            const previous = currentWindow?.__beaverDisposeSupabase;
-            if (currentWindow) {
-                currentWindow.__beaverDisposeSupabase = undefined;
-            }
-            return previous;
-        },
+        previousDisposer: () => currentWindow?.__beaverDisposeSupabase,
         publishDisposer: (dispose) => {
             if (currentWindow) {
                 currentWindow.__beaverDisposeSupabase = dispose;
