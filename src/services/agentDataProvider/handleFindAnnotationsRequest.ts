@@ -7,7 +7,8 @@ import {
     ZOTERO_ANNOTATION_PALETTE_COLORS,
 } from '../../constants/annotations';
 import { logger } from '@beaver/agent-core/platform/logger';
-import { modelObjectId, resolveItemReference, resolveObjectId } from '../../utils/libraryIdentity';
+import { describeItemKind } from '../documentExtraction/attachmentResolution';
+import { modelObjectId, resolveItemReference, resolveLibraryRef, resolveObjectId } from '../../utils/libraryIdentity';
 import {
     formatZoteroCreatorsString,
     getCreatorsFromItem,
@@ -20,6 +21,7 @@ import {
     WSFindAnnotationsResponse,
 } from '@beaver/agent-core/protocol/agentProtocol';
 import {
+    checkLibraryExcluded,
     excludedLibraryMessage,
     getCollectionByIdOrName,
     getSearchableLibraries,
@@ -628,6 +630,17 @@ export async function handleFindAnnotationsRequest(
             if (!parsedRef) {
                 return invalidResponse(request, 'Invalid attachment_id format', 'invalid_attachment_id');
             }
+
+            // Enforce the library privacy boundary before looking up the item.
+            // Otherwise even a rejected non-attachment can disclose its kind.
+            const attachmentLibraryID = resolveLibraryRef(parsedRef);
+            const excluded = attachmentLibraryID === null
+                ? null
+                : checkLibraryExcluded(attachmentLibraryID);
+            if (excluded) {
+                return invalidResponse(request, excluded.message, 'library_excluded');
+            }
+
             const resolved = await resolveItemReference(parsedRef);
             if (resolved.status === 'library_unavailable') {
                 return invalidResponse(
@@ -641,7 +654,14 @@ export async function handleFindAnnotationsRequest(
             }
             const attachment = resolved.item;
             if (!attachment.isFileAttachment?.()) {
-                return invalidResponse(request, 'Item is not a file attachment', 'not_attachment');
+                // Name the actual kind: this rejects notes, annotations, regular
+                // items, and linked URLs alike, and the model cannot fix the id
+                // without knowing which one it passed.
+                return invalidResponse(
+                    request,
+                    `The id '${attachmentInput}' is a ${describeItemKind(attachment)}, not a file attachment.`,
+                    'not_attachment',
+                );
             }
             if (attachment.libraryID !== library.libraryID) {
                 const resolvedLib = Zotero.Libraries.get(attachment.libraryID);

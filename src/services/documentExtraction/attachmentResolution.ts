@@ -139,6 +139,22 @@ export async function isLocallyReadableAttachment(item: Zotero.Item): Promise<bo
 }
 
 /**
+ * Name the kind of item an id points at, for agent-facing errors raised when
+ * the id is not the attachment the tool needs. Naming the actual type lets the
+ * model correct itself instead of guessing which id it got wrong.
+ *
+ * Linked URLs are attachments with no local file, so callers that require a
+ * file attachment reject them too.
+ */
+export function describeItemKind(item: Zotero.Item): string {
+    if (item.isNote()) return 'note';
+    if (item.isAnnotation()) return 'annotation';
+    if (item.isRegularItem()) return 'regular item';
+    if (isLinkedUrlAttachment(item)) return 'linked URL attachment';
+    return 'non-attachment item';
+}
+
+/**
  * Result of resolving a Zotero item to a PDF attachment.
  */
 export type PdfAttachmentResolveResult =
@@ -231,10 +247,9 @@ export async function resolveToPdfAttachment(
         return { resolved: false, error: message, error_code: 'not_attachment' };
     }
 
-    const kind = item.isNote() ? 'note' : item.isAnnotation() ? 'annotation' : 'non-attachment item';
     return {
         resolved: false,
-        error: `The id '${uniqueKey}' is a ${kind}, not an attachment.`,
+        error: `The id '${uniqueKey}' is a ${describeItemKind(item)}, not an attachment.`,
         error_code: 'not_attachment',
     };
 }
@@ -323,10 +338,9 @@ export async function resolveToImageAttachment(
         return { resolved: false, error: message, error_code: 'not_attachment' };
     }
 
-    const kind = item.isNote() ? 'note' : item.isAnnotation() ? 'annotation' : 'non-attachment item';
     return {
         resolved: false,
-        error: `The id '${uniqueKey}' is a ${kind}, not an attachment.`,
+        error: `The id '${uniqueKey}' is a ${describeItemKind(item)}, not an attachment.`,
         error_code: 'not_attachment',
     };
 }
@@ -503,10 +517,9 @@ export async function resolveToReadableAttachment(
         return { resolved: false, error: message, error_code: 'not_attachment' };
     }
 
-    const kind = item.isNote() ? 'note' : item.isAnnotation() ? 'annotation' : 'non-attachment item';
     return {
         resolved: false,
-        error: `The id '${uniqueKey}' is a ${kind}, not an attachment.`,
+        error: `The id '${uniqueKey}' is a ${describeItemKind(item)}, not an attachment.`,
         error_code: 'not_attachment',
     };
 }

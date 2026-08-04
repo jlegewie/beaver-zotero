@@ -18,6 +18,7 @@ import {
 import { ZoteroItemReference, ItemStub, AttachmentStub } from '@beaver/agent-core/types/zotero';
 import { libraryRefForLibraryID, modelObjectIdFromReference } from '../../utils/libraryIdentity';
 import {
+    describeItemKind,
     getReadableContentKind,
     resolveToImageAttachment,
     resolveToPdfAttachment,
@@ -159,10 +160,9 @@ async function resolveViewTarget(
         };
     }
 
-    const kind = item.isNote() ? 'note' : item.isAnnotation() ? 'annotation' : 'non-attachment item';
     return {
         resolved: false,
-        error: `The id '${requestKey}' is a ${kind}, not an attachment.`,
+        error: `The id '${requestKey}' is a ${describeItemKind(item)}, not an attachment.`,
         error_code: 'not_attachment',
     };
 }
