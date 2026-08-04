@@ -8,6 +8,7 @@ import {
 import {
     hasSnapshotContentType,
     isLinkedUrlAttachment,
+    safeAttachmentFilename,
     safeFileExists,
 } from '../../utils/attachmentFiles';
 import { modelObjectId } from '../../utils/libraryIdentity';
@@ -204,8 +205,8 @@ export async function resolveToPdfAttachment(
             );
             if (!resolved) {
                 const label = bestAttachmentKey === onlyKey
-                    ? `'${only.attachmentFilename}' (${onlyKey}, primary)`
-                    : `'${only.attachmentFilename}' (${onlyKey})`;
+                    ? `'${safeAttachmentFilename(only) ?? ''}' (${onlyKey}, primary)`
+                    : `'${safeAttachmentFilename(only) ?? ''}' (${onlyKey})`;
                 return {
                     resolved: false,
                     error: `The id '${uniqueKey}' is a regular item with one attachment (${label}) but it could not be resolved.`,
@@ -220,8 +221,8 @@ export async function resolveToPdfAttachment(
             .map((a) => {
                 const k = modelObjectId(a.libraryID, a.key);
                 return k === bestAttachmentKey
-                    ? `'${a.attachmentFilename}' (${k}, primary)`
-                    : `'${a.attachmentFilename}' (${k})`;
+                    ? `'${safeAttachmentFilename(a) ?? ''}' (${k}, primary)`
+                    : `'${safeAttachmentFilename(a) ?? ''}' (${k})`;
             })
             .join(', ');
         const message = pdfAttachments.length > 0
@@ -305,7 +306,7 @@ export async function resolveToImageAttachment(
             if (!resolved) {
                 return {
                     resolved: false,
-                    error: `The id '${uniqueKey}' is a regular item with one image attachment ('${only.attachmentFilename}' (${onlyKey})) but it could not be resolved.`,
+                    error: `The id '${uniqueKey}' is a regular item with one image attachment ('${safeAttachmentFilename(only) ?? ''}' (${onlyKey})) but it could not be resolved.`,
                     error_code: 'not_attachment',
                 };
             }
@@ -314,7 +315,7 @@ export async function resolveToImageAttachment(
         }
 
         const text = imageAttachments
-            .map((a) => `'${a.attachmentFilename}' (${modelObjectId(a.libraryID, a.key)})`)
+            .map((a) => `'${safeAttachmentFilename(a) ?? ''}' (${modelObjectId(a.libraryID, a.key)})`)
             .join(', ');
         const message = imageAttachments.length > 0
             ? `The id '${uniqueKey}' is a regular item, not an attachment. The item has ${imageAttachments.length} image attachments: ${text}`
@@ -357,7 +358,7 @@ function labelReadableAttachment(
 ): string {
     const key = modelObjectId(item.libraryID, item.key);
     const primary = key === bestAttachmentKey ? ', primary' : '';
-    return `'${item.attachmentFilename}' (${key}${primary}, ${contentKind})`;
+    return `'${safeAttachmentFilename(item) ?? ''}' (${key}${primary}, ${contentKind})`;
 }
 
 /**

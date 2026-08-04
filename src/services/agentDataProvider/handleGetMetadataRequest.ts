@@ -12,10 +12,10 @@ import {
     WSGetMetadataRequest,
     WSGetMetadataResponse,
 } from '@beaver/agent-core/protocol/agentProtocol';
-import { ItemStub } from '@beaver/agent-core/types/zotero';
+import { AttachmentInfo, ItemStub } from '@beaver/agent-core/types/zotero';
 import { serializeNote, serializeAnnotation, serializeItemStub } from '../../utils/zoteroSerializers';
 import { libraryRefForLibraryID, modelObjectId, resolveItemReference, resolveObjectId, UNRESOLVED_LIBRARY_ID } from '../../utils/libraryIdentity';
-import { checkLibraryExcluded, getAttachmentInfoForItem, formatCreatorsString, extractYear } from './utils';
+import { checkLibraryExcluded, getAttachmentInfoForItem, degradedAttachmentInfo, formatCreatorsString, extractYear } from './utils';
 import { getCreatorTypeInfo } from '../../utils/zoteroUtils';
 
 
@@ -107,12 +107,22 @@ export async function handleGetMetadataRequest(
                         // getBestAttachment failure is non-fatal — is_primary stays false.
                     }
                 }
-                const info = await getAttachmentInfoForItem(item, {
-                    parentItemId,
-                    isPrimary,
-                    includeAnnotationsCount: true,
-                    skipWorkerFallback: true,
-                });
+                let info: AttachmentInfo;
+                try {
+                    info = await getAttachmentInfoForItem(item, {
+                        parentItemId,
+                        isPrimary,
+                        includeAnnotationsCount: true,
+                        skipWorkerFallback: true,
+                    });
+                } catch (error) {
+                    // Isolate the row so one unreadable record does not fail the
+                    // whole batch. Unlike a child attachment (dropped by the loop
+                    // below), a requested item must still come back — the model
+                    // asked for it by id and needs to know it exists.
+                    logger(`handleGetMetadataRequest: Degrading unreadable attachment ${item.key}: ${error}`, 2);
+                    info = degradedAttachmentInfo(item, parentItemId ?? null, isPrimary);
+                }
                 items.push({
                     ...info,
                     item_id: itemId,

@@ -23,6 +23,7 @@ import {
 } from "@beaver/agent-core/extract/document/snapshot/schema";
 import { getDeclaredCharset, isLikelyNonUtf8Charset, parseSnapshotHtml } from "./snapshotDom";
 import { getReadableContentKind } from "../attachmentResolution";
+import { safeAttachmentFilename } from "../../../utils/attachmentFiles";
 import { effectiveMaxSnapshotFileSizeMB } from "@beaver/agent-core/transport/attachmentLimits";
 import { isRemoteAccessAvailable } from "../attachmentSource";
 import { logger } from "@beaver/agent-core/platform/logger";
@@ -122,7 +123,7 @@ export async function resolveSnapshotSectionMeta(
     } catch {
         title = undefined;
     }
-    const filename = item.attachmentFilename || undefined;
+    const filename = safeAttachmentFilename(item) ?? undefined;
     return {
         rawHref: url || filename,
         fallbackLabel: title || filename,

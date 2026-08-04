@@ -19,6 +19,7 @@ import { ToolReturnPart } from "@beaver/agent-core/agents/types";
 import { ZoteroItemReference } from "@beaver/agent-core/types/zotero";
 import { logger } from "@beaver/agent-core/platform/logger";
 import { resolveItemReference } from "../../src/utils/libraryIdentity";
+import { safeAttachmentFilename } from "../../src/utils/attachmentFiles";
 import { truncateText, formatNumberRanges } from "../utils/stringUtils";
 import { EXTERNAL_LIBRARY_ID } from "../../src/services/externalFiles";
 import {
@@ -159,7 +160,7 @@ function titleOf(item: Zotero.Item): string {
 }
 
 function attachmentOwnName(item: Zotero.Item): string {
-    return item.getField?.("title") || item.attachmentFilename || "";
+    return item.getField?.("title") || safeAttachmentFilename(item) || "";
 }
 
 /**

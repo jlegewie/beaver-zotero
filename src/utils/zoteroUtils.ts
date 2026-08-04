@@ -3,6 +3,7 @@ import { ZoteroItemReference } from "@beaver/agent-core/types/zotero";
 import type { CreatorJSON } from "@beaver/agent-core/types/agentActions/base";
 import { logger } from "@beaver/agent-core/platform/logger";
 import { libraryRefForLibraryID, UNRESOLVED_LIBRARY_ID } from "./libraryIdentity";
+import { safeAttachmentFilename } from "./attachmentFiles";
 import type { ZoteroInstanceRef } from "@beaver/agent-core/transport/threadService";
 import { getSelectedLibraryId, getSelectedCollection } from "./zoteroSelection";
 
@@ -624,7 +625,7 @@ export function getMimeTypeFromData(attachment: Zotero.Item, fileData: Uint8Arra
         }
 
         // Get the file extension from the attachment's filename as a hint.
-        const extension = (attachment.attachmentFilename.split('.').pop() || '').toLowerCase();
+        const extension = ((safeAttachmentFilename(attachment) ?? '').split('.').pop() || '').toLowerCase();
 
         // Use Zotero's internal data-based MIME type detection
         return Zotero.MIME.getMIMETypeFromData(sampleString, extension);
