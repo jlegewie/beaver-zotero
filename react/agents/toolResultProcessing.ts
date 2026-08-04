@@ -3,7 +3,7 @@ import { addExternalReferencesToMappingAtom, checkExternalReferencesAtom } from 
 import { loadFullItemDataWithAllTypes } from "../../src/utils/zoteroUtils";
 import { resolveItemReference } from "../../src/utils/libraryIdentity";
 import { extractExternalSearchData, extractLookupWorkData, isExternalSearchResult, isLookupWorkResult } from "./toolResultTypes";
-import { ToolReturnPart } from "@beaver/agent-core/agents/types";
+import { ToolReturnPart, isFailedToolReturn } from "@beaver/agent-core/agents/types";
 import { extractZoteroReferences } from "./toolResultTypes";
 import { logger } from "@beaver/agent-core/platform/logger";
 
@@ -18,6 +18,9 @@ export async function processToolReturnResults(
     set: Setter
 ): Promise<void> {
     if (part.part_kind !== "tool-return") return;
+    // A failed return carries an error message where the result payload would
+    // be, so there are no references to cache or items to preload.
+    if (isFailedToolReturn(part)) return;
 
     // Check for external references and populate cache
     if (

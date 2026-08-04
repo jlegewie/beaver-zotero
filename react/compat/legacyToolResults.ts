@@ -15,7 +15,7 @@
  * plus live Zotero loads (display names, subtitles, icons, annotation fields).
  */
 
-import { ToolReturnPart } from "@beaver/agent-core/agents/types";
+import { ToolReturnPart, isFailedToolReturn } from "@beaver/agent-core/agents/types";
 import { ZoteroItemReference } from "@beaver/agent-core/types/zotero";
 import { logger } from "@beaver/agent-core/platform/logger";
 import { resolveItemReference } from "../../src/utils/libraryIdentity";
@@ -886,6 +886,10 @@ export async function upgradeToolReturn(
     toolCallArgs?: string | Record<string, any> | null,
 ): Promise<ToolReturnPart> {
     if (part.part_kind !== "tool-return") return part;
+    // A failed return carries an error message where the result payload would be.
+    // Synthesizing a view from it would fabricate an empty result card, so leave
+    // it view-less and let the error rendering path handle it.
+    if (isFailedToolReturn(part)) return part;
     // Pass through only when the existing view is a VALID, renderable view model.
     // A truthy-but-malformed view falls through to re-synthesis below (and, if it
     // can't be rebuilt, is rejected by the same `isToolResultView` check at render

@@ -202,6 +202,24 @@ describe('upgradeToolReturn', () => {
         expect(result.metadata!.view).toBeUndefined();
     });
 
+    it('leaves a failed return without a view', async () => {
+        // A terminal tool failure carries an error message, not a result payload.
+        // Synthesizing a view here would render an empty result card under a call
+        // the user should see as failed.
+        installItems([{ id: 1, key: 'AAAA1111', firstCreator: 'Smith', date: '2004', title: 'A Paper' }]);
+        const part = returnPart('zotero_search', {
+            tool_name: 'zotero_search',
+            total_count: 1,
+            items: [{ library_id: 1, zotero_key: 'AAAA1111' }],
+        });
+        part.outcome = 'failed';
+        part.content = 'Zotero search is not available in this context.';
+
+        const result = await upgradeToolReturn(part);
+
+        expect(result.metadata!.view).toBeUndefined();
+    });
+
     it('attaches a synthesized view for a legacy result', async () => {
         installItems([{ id: 1, key: 'AAAA1111', firstCreator: 'Smith', date: '2004-01-01', title: 'A Paper' }]);
         const part = returnPart('zotero_search', {

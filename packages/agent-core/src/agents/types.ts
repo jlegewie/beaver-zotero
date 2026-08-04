@@ -175,12 +175,18 @@ export interface UserPromptPart {
     content: string;
 }
 
+/**
+ * Outcome of a tool call, mirroring `ToolReturnPart.outcome`.
+ */
+export type ToolReturnOutcome = 'success' | 'failed' | 'denied' | 'interrupted';
+
 export interface ToolReturnPart {
     part_kind: 'tool-return';
     tool_name: string;
     content: any;
     tool_call_id: string;
     metadata?: Record<string, any>;
+    outcome?: ToolReturnOutcome;
 }
 
 export interface RetryPromptPart{
@@ -188,6 +194,20 @@ export interface RetryPromptPart{
     tool_name: string;
     content: any;
     tool_call_id: string;
+}
+
+/**
+ * True when a tool result represents a failure the model was told to accept
+ * rather than retry.
+ *
+ * Failed returns carry an error message as `content` instead of a result
+ * payload, so they must not be fed to the reference-extraction, view-synthesis,
+ * or result-rendering paths that assume success-shaped content.
+ */
+export function isFailedToolReturn(
+    part: ToolReturnPart | RetryPromptPart | null | undefined
+): boolean {
+    return part?.part_kind === 'tool-return' && part.outcome === 'failed';
 }
 
 export interface TextPart {

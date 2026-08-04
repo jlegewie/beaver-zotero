@@ -89,4 +89,13 @@ describe('processToolReturnResults — eager item loading', () => {
 
         expect(mockLoadFullItemDataWithAllTypes).toHaveBeenCalledWith([]);
     });
+
+    it('skips a failed return, whose content is an error message rather than results', async () => {
+        const failed = { ...makePart(), outcome: 'failed', content: 'Reading files is not available.' };
+
+        await expect(processToolReturnResults(failed, vi.fn() as any)).resolves.toBeUndefined();
+
+        expect(mockExtractZoteroReferences).not.toHaveBeenCalled();
+        expect(mockLoadFullItemDataWithAllTypes).not.toHaveBeenCalled();
+    });
 });
