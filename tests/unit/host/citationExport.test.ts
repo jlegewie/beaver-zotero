@@ -14,7 +14,7 @@ vi.mock('../../../src/utils/zoteroLinkCitation', () => ({
     buildZoteroCitationLinkHTML: vi.fn(() => '<a href="https://example.com">Example</a>'),
 }));
 
-vi.mock('../../../src/utils/logger', () => ({ logger: vi.fn() }));
+vi.mock('@beaver/agent-core/platform/logger', () => ({ logger: vi.fn() }));
 
 import { zoteroDocumentExport } from '../../../react/host/zotero/citationExport';
 

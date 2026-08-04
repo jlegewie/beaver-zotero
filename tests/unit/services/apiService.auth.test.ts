@@ -10,7 +10,7 @@ const { mockSupabase } = vi.hoisted(() => ({
     },
 }));
 
-vi.mock('../../../src/services/supabaseClient', () => ({
+vi.mock('@beaver/agent-core/transport/supabaseClient', () => ({
     supabase: mockSupabase,
 }));
 

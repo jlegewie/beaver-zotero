@@ -9,8 +9,8 @@ const { mockSupabase } = vi.hoisted(() => ({
     },
 }));
 
-vi.mock('../../../src/services/supabaseClient', () => ({ supabase: mockSupabase }));
-vi.mock('../../../src/utils/logger', () => ({ logger: vi.fn() }));
+vi.mock('@beaver/agent-core/transport/supabaseClient', () => ({ supabase: mockSupabase }));
+vi.mock('@beaver/agent-core/platform/logger', () => ({ logger: vi.fn() }));
 vi.mock('../../../src/services/agentDataProvider', () => ({
     handleZoteroDataRequest: vi.fn(),
     handleExternalReferenceCheckRequest: vi.fn(),

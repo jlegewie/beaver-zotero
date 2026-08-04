@@ -40,12 +40,12 @@ vi.mock('../../../src/services/agentDataProvider/utils', () => ({
 }));
 
 // Mock logger
-vi.mock('../../../src/utils/logger', () => ({
+vi.mock('@beaver/agent-core/platform/logger', () => ({
     logger: vi.fn(),
 }));
 
 // Mock transitive dependencies pulled in by agentDataProvider
-vi.mock('../../../src/services/supabaseClient', () => ({
+vi.mock('@beaver/agent-core/transport/supabaseClient', () => ({
     supabase: {
         auth: { getSession: vi.fn() },
     },

@@ -36,7 +36,7 @@ vi.mock('../../../react/utils/noteActions', () => ({
     getBeaverNoteFooterHTML: vi.fn(() => '<footer/>'),
 }));
 
-vi.mock('../../../src/utils/logger', () => ({
+vi.mock('@beaver/agent-core/platform/logger', () => ({
     logger: vi.fn(),
 }));
 

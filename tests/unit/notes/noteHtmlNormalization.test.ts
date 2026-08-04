@@ -6,7 +6,7 @@ vi.mock('../../../src/utils/zoteroUtils', () => ({
     createCitationHTML: vi.fn(),
     getZoteroUserIdentifier: vi.fn(() => ({ userID: undefined, localUserKey: 'test-user' })),
 }));
-vi.mock('../../../src/services/supabaseClient', () => ({
+vi.mock('@beaver/agent-core/transport/supabaseClient', () => ({
     supabase: { auth: { getSession: vi.fn() } },
 }));
 

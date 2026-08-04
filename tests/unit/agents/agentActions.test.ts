@@ -3,10 +3,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 // `toAgentAction` transitively imports the Supabase client and Zotero-aware
 // profile atoms, which require live globals at import time. Stub the leaf
 // modules before the SUT is loaded so unit tests can run cold.
-vi.mock('../../../src/services/supabaseClient', () => ({
+vi.mock('@beaver/agent-core/transport/supabaseClient', () => ({
     supabase: { auth: { getSession: vi.fn() } },
 }));
-vi.mock('../../../src/utils/logger', () => ({ logger: vi.fn() }));
+vi.mock('@beaver/agent-core/platform/logger', () => ({ logger: vi.fn() }));
 vi.mock('../../../src/utils/zoteroUtils', () => ({
     loadFullItemDataWithAllTypes: vi.fn(),
     getZoteroUserIdentifier: vi.fn(() => ({ userID: undefined, localUserKey: 'test' })),

@@ -1,4 +1,2 @@
-const getAPIBaseURL = () => process.env.API_BASE_URL;
-
-const API_BASE_URL = getAPIBaseURL() || '';
-export default API_BASE_URL;
+// Re-export: this module lives in @beaver/agent-core.
+export { default } from "@beaver/agent-core/platform/getAPIBaseURL";

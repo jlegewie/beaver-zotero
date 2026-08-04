@@ -139,15 +139,38 @@ if (!parsed.options.lib || nonEsLibs.length > 0) {
 // The roots the closure is computed from. Everything else in `files` must be
 // reachable from these, so an ambient .d.ts added to `files` cannot silently
 // widen the program.
-const entryBasenames = ["globals.d.ts", "agentProtocol.ts"];
+//
+// The transport roots are the modules no other package file imports: the
+// connection a host opens (`providerConnection` also pulls in `agentService`),
+// each backend client a host calls directly, and the three standalone helpers
+// (`threadService`, `agentActionQueue`, `attachmentLimits`). Everything else in
+// transport/ is reached from one of them.
+const entryPaths = [
+  "src/globals.d.ts",
+  "src/protocol/agentProtocol.ts",
+  "src/transport/providerConnection.ts",
+  "src/transport/threadService.ts",
+  "src/transport/agentActionQueue.ts",
+  "src/transport/attachmentLimits.ts",
+  "src/transport/clients/accountService.ts",
+  "src/transport/clients/chatService.ts",
+  "src/transport/clients/agentActionsService.ts",
+  "src/transport/clients/embeddingsService.ts",
+  "src/transport/clients/searchService.ts",
+  "src/transport/clients/diagnosticsService.ts",
+].map((p) => path.join(pkgDir, p));
 
 const listed = parsed.fileNames.map((f) => path.resolve(f));
-const entries = listed.filter((f) => entryBasenames.includes(path.basename(f)));
-if (entries.length !== entryBasenames.length) {
+const listedSet = new Set(listed);
+const missingEntries = entryPaths.filter((f) => !listedSet.has(f));
+if (missingEntries.length > 0) {
   throw new Error(
-    `tsconfig \`files\` must list the entry points: ${entryBasenames.join(", ")}`,
+    `tsconfig \`files\` must list the entry points; missing: ${missingEntries
+      .map((f) => path.relative(pkgDir, f))
+      .join(", ")}`,
   );
 }
+const entries = entryPaths;
 
 const program = ts.createProgram({
   rootNames: entries,
@@ -164,7 +187,6 @@ const isInPackage = (f) => f.startsWith(pkgDir + path.sep);
 const isDependency = (f) =>
   path.relative(repoRoot, f).split(path.sep).includes("node_modules");
 
-const listedSet = new Set(listed);
 const closureSet = new Set(closure);
 // `files` describes the package's own surface, so the two-way match is scoped
 // to in-package files; a dependency's .d.ts graph is never listed.

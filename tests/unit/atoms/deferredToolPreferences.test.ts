@@ -17,7 +17,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock('../../../src/utils/prefs', () => mocks);
-vi.mock('../../../src/utils/logger', () => ({ logger: vi.fn() }));
+vi.mock('@beaver/agent-core/platform/logger', () => ({ logger: vi.fn() }));
 
 import { deferredToolPreferencesAtom } from '../../../react/atoms/deferredToolPreferences';
 

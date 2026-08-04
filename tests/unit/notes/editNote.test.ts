@@ -183,7 +183,7 @@ vi.mock('../../../src/utils/editNoteRawPosition', async () => {
     };
 });
 
-vi.mock('../../../src/services/supabaseClient', () => ({
+vi.mock('@beaver/agent-core/transport/supabaseClient', () => ({
     supabase: {
         auth: {
             getSession: vi.fn(),
@@ -228,7 +228,7 @@ vi.mock('../../../src/services/agentDataProvider/utils', () => ({
     checkLibraryExcluded: vi.fn(() => null),
 }));
 
-vi.mock('../../../src/utils/logger', () => ({
+vi.mock('@beaver/agent-core/platform/logger', () => ({
     logger: vi.fn(),
 }));
 

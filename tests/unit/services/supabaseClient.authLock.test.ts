@@ -29,7 +29,7 @@ vi.mock('@supabase/supabase-js', () => {
     };
 });
 
-vi.mock('../../../src/utils/logger', () => ({
+vi.mock('@beaver/agent-core/platform/logger', () => ({
     logger: mockLogger,
 }));
 

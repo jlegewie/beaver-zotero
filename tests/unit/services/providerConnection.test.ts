@@ -1,15 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('../../../src/utils/getAPIBaseURL', () => ({ default: 'https://api.example.com' }));
-vi.mock('../../../src/utils/logger', () => ({ logger: vi.fn() }));
-vi.mock('../../../src/services/agentService', () => ({
+vi.mock('@beaver/agent-core/platform/getAPIBaseURL', () => ({ default: 'https://api.example.com' }));
+vi.mock('@beaver/agent-core/platform/logger', () => ({ logger: vi.fn() }));
+vi.mock('@beaver/agent-core/transport/agentService', () => ({
     getWSAuthToken: vi.fn().mockResolvedValue('token'),
 }));
 // Busy context resolves to `{}` by default (no provider registered in this
 // test environment), so it needs no mock. The sync-pause resume seam does
 // need a mock, since asserting on it is the point of the tests below.
-vi.mock('../../../src/services/agentDataDispatch', async (importOriginal) => {
-    const actual = await importOriginal<typeof import('../../../src/services/agentDataDispatch')>();
+vi.mock('@beaver/agent-core/transport/agentDataDispatch', async (importOriginal) => {
+    const actual = await importOriginal<typeof import('@beaver/agent-core/transport/agentDataDispatch')>();
     return {
         ...actual,
         notifySyncPauseOwnerSettled: vi.fn(),

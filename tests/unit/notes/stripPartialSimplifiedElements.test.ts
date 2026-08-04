@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 
 // Mock transitive dependencies that pull in Supabase/Zotero APIs
-vi.mock('../../../src/services/supabaseClient', () => ({
+vi.mock('@beaver/agent-core/transport/supabaseClient', () => ({
     supabase: { auth: { getSession: vi.fn() } },
 }));
 vi.mock('../../../src/utils/zoteroUtils', () => ({
@@ -18,7 +18,7 @@ vi.mock('../../../src/services/agentDataProvider/utils', () => ({
     validateZoteroItemReference: vi.fn(),
     backfillMetadataForError: vi.fn(),
 }));
-vi.mock('../../../src/utils/logger', () => ({
+vi.mock('@beaver/agent-core/platform/logger', () => ({
     logger: vi.fn(),
 }));
 vi.mock('../../../react/utils/batchFindExistingReferences', () => ({

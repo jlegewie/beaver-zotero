@@ -19,7 +19,7 @@ vi.mock('../../../src/services/agentDataProvider/utils', () => ({
     getDeferredToolPreference: vi.fn(() => 'always_ask'),
 }));
 
-vi.mock('../../../src/utils/logger', () => ({
+vi.mock('@beaver/agent-core/platform/logger', () => ({
     logger: vi.fn(),
 }));
 

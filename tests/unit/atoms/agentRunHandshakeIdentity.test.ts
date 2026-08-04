@@ -16,11 +16,11 @@ const { connectMock, resolveClientIdentityMock } = vi.hoisted(() => ({
     connectMock: vi.fn().mockResolvedValue(undefined),
     resolveClientIdentityMock: vi.fn(),
 }));
-vi.mock('../../../src/services/agentService', () => ({
+vi.mock('@beaver/agent-core/transport/agentService', () => ({
     agentService: { connect: connectMock, close: vi.fn() },
     AgentConnectionError: class AgentConnectionError extends Error {},
 }));
-vi.mock('../../../src/services/clientIdentity', () => ({
+vi.mock('@beaver/agent-core/transport/clientIdentity', () => ({
     resolveClientIdentity: resolveClientIdentityMock,
 }));
 
@@ -33,11 +33,11 @@ vi.mock('../../../src/services/systemNotifications', () => ({
     notifyUserQuestion: vi.fn(),
 }));
 
-vi.mock('../../../src/services/diagnosticsService', () => ({
+vi.mock('@beaver/agent-core/transport/clients/diagnosticsService', () => ({
     reportConnectionFailure: vi.fn(),
 }));
 
-vi.mock('../../../src/services/supabaseClient', () => ({
+vi.mock('@beaver/agent-core/transport/supabaseClient', () => ({
     supabase: {
         auth: { getSession: vi.fn(), refreshSession: vi.fn() },
     },
@@ -47,7 +47,7 @@ vi.mock('../../../src/beaver-extract', () => ({
     prewarmMuPDFWorker: vi.fn(),
 }));
 
-vi.mock('../../../src/utils/logger', () => ({ logger: vi.fn() }));
+vi.mock('@beaver/agent-core/platform/logger', () => ({ logger: vi.fn() }));
 
 import { store } from '../../../react/store';
 import { sendWSMessageAtom } from '../../../react/atoms/agentRunAtoms';

@@ -25,13 +25,13 @@ vi.mock('../../../src/utils/zoteroUtils', () => ({
     getZoteroUserIdentifier: vi.fn(() => ({ userID: undefined, localUserKey: 'test-user' })),
 }));
 
-vi.mock('../../../src/utils/logger', () => ({
+vi.mock('@beaver/agent-core/platform/logger', () => ({
     logger: vi.fn(),
 }));
 
 // Mock supabaseClient to avoid "Missing Supabase URL or Anon Key" error.
 // editNoteActions → agentActions → agentActionsService → apiService → supabaseClient
-vi.mock('../../../src/services/supabaseClient', () => ({
+vi.mock('@beaver/agent-core/transport/supabaseClient', () => ({
     supabase: {
         auth: {
             getSession: vi.fn(),

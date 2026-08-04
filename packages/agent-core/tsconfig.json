@@ -65,6 +65,32 @@
     "./src/types/agentActions/editNoteBatch.ts",
     "./src/types/agentActions/annotations.ts",
     "./src/types/agentActions/createAnnotations.ts",
-    "./src/types/externalReferences.ts"
+    "./src/types/externalReferences.ts",
+
+    // The transport layer: the agent connection and the backend clients, plus
+    // the platform seams and error/model types they need.
+    "./src/transport/providerConnection.ts",
+    "./src/transport/agentService.ts",
+    "./src/transport/apiService.ts",
+    "./src/transport/supabaseClient.ts",
+    "./src/transport/clientIdentity.ts",
+    "./src/transport/agentDataDispatch.ts",
+    "./src/transport/agentActionQueue.ts",
+    "./src/transport/threadService.ts",
+    "./src/transport/busyContextProvider.ts",
+    "./src/transport/preparedJsonMessage.ts",
+    "./src/transport/backendReachability.ts",
+    "./src/transport/attachmentLimits.ts",
+    "./src/transport/clients/accountService.ts",
+    "./src/transport/clients/chatService.ts",
+    "./src/transport/clients/agentActionsService.ts",
+    "./src/transport/clients/embeddingsService.ts",
+    "./src/transport/clients/searchService.ts",
+    "./src/transport/clients/diagnosticsService.ts",
+    "./src/platform/runtime.ts",
+    "./src/platform/logger.ts",
+    "./src/platform/getAPIBaseURL.ts",
+    "./src/types/models.ts",
+    "./src/types/apiErrors.ts"
   ]
 }

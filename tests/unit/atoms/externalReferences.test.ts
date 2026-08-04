@@ -25,7 +25,7 @@ vi.mock("../../../src/utils/zoteroUtils", () => ({
   loadFullItemDataWithAllTypes: mocks.loadFullItemDataWithAllTypes,
 }));
 
-vi.mock("../../../src/utils/logger", () => ({
+vi.mock("@beaver/agent-core/platform/logger", () => ({
   logger: vi.fn(),
 }));
 

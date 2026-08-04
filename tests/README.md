@@ -126,8 +126,13 @@ const pdf = createMockAttachment({ contentType: 'application/pdf' });
 
 **Mocking transitive dependencies**: Code under `src/services/agentDataProvider/` transitively imports Supabase, auth atoms, and other React/store modules. If your test imports from this area, you'll need to mock these:
 
+Mock a module at the path it actually lives at. Modules that moved into
+`@beaver/agent-core` must be mocked by their package specifier: mocking the
+old `src/` path only replaces the re-export shim, so anything importing the
+module from inside the package still gets the real one.
+
 ```ts
-vi.mock('../../../src/services/supabaseClient', () => ({
+vi.mock('@beaver/agent-core/transport/supabaseClient', () => ({
     supabase: { auth: { getSession: vi.fn() } },
 }));
 vi.mock('../../../src/utils/zoteroUtils', () => ({

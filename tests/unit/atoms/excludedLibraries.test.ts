@@ -8,7 +8,7 @@ const { updateExcludedLibrariesMock, popupMessages } = vi.hoisted(() => ({
     popupMessages: [] as any[],
 }));
 
-vi.mock('../../../src/services/accountService', () => ({
+vi.mock('@beaver/agent-core/transport/clients/accountService', () => ({
     accountService: {
         updateExcludedLibraries: updateExcludedLibrariesMock,
     },
@@ -18,7 +18,7 @@ vi.mock('../../../src/utils/zoteroUtils', () => ({
     getZoteroUserIdentifier: vi.fn(() => ({ userID: undefined, localUserKey: 'test-local' })),
 }));
 
-vi.mock('../../../src/utils/logger', () => ({ logger: vi.fn() }));
+vi.mock('@beaver/agent-core/platform/logger', () => ({ logger: vi.fn() }));
 
 vi.mock('../../../react/utils/popupMessageUtils', async () => {
     const { atom } = await vi.importActual<typeof import('jotai')>('jotai');

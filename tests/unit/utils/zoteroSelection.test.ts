@@ -4,7 +4,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 // the logger, which pulls in the runtime adapter. Stub it and capture calls so
 // the "log once per failure kind" behavior can be asserted.
 const loggerCalls: string[] = [];
-vi.mock('../../../src/utils/logger', () => ({
+vi.mock('@beaver/agent-core/platform/logger', () => ({
     logger: (msg: string) => { loggerCalls.push(msg); },
 }));
 

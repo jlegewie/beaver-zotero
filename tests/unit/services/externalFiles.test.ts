@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
-vi.mock('../../../src/utils/logger', () => ({ logger: vi.fn() }));
+vi.mock('@beaver/agent-core/platform/logger', () => ({ logger: vi.fn() }));
 
 const getPageCountMock = vi.fn().mockResolvedValue(12);
 const analyzeOCRNeedsMock = vi.fn().mockResolvedValue({ needsOCR: false });

@@ -1,12 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
 
-vi.mock('../../../src/services/embeddingsService', () => ({
+vi.mock('@beaver/agent-core/transport/clients/embeddingsService', () => ({
     embeddingsService: {
         generateQueryEmbeddingWithRetry: vi.fn(),
     },
 }));
 
-vi.mock('../../../src/services/apiService', () => ({
+vi.mock('@beaver/agent-core/transport/apiService', () => ({
     ApiService: vi.fn(),
 }));
 
