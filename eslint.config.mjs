@@ -17,45 +17,6 @@ const restrictedGlobals = [
     "Zotero_Tabs",
 ];
 
-/**
- * Modules that must not reach for Zotero or the app graph themselves. Adding a
- * file here asserts that of the file, not of everything it imports — the guard
- * catches a direct regression rather than a transitive one, so a helper that
- * reads `Zotero` internally has to be kept out by the import ban below.
- *
- * `busyContext.ts`, `syncPause.ts`, and `libraryIdentity.ts` are absent because
- * they read Zotero state directly — live sync, DB transactions, locks and the
- * full-text index for the first two, the local library registry for the third.
- * Guarded files reach them through the `busyContextProvider.ts` /
- * `agentDataDispatch.ts` / `libraryRef.ts` seams instead.
- */
-const l1CoreSrcFiles = [
-    "src/services/agentService.ts",
-    "src/services/providerConnection.ts",
-    "src/services/apiService.ts",
-    "src/services/supabaseClient.ts",
-    "src/services/agentDataDispatch.ts",
-    "src/services/clientIdentity.ts",
-    "src/services/busyContextProvider.ts",
-    "src/services/threadService.ts",
-    "src/services/accountService.ts",
-    "src/services/chatService.ts",
-    "src/services/agentActionsService.ts",
-    "src/services/embeddingsService.ts",
-    "src/services/searchService.ts",
-    "src/services/diagnosticsService.ts",
-    "src/services/preparedJsonMessage.ts",
-    "src/services/backendReachability.ts",
-    "src/services/attachmentLimits.ts",
-    "src/services/agentActionQueue.ts",
-    "src/utils/logger.ts",
-    "src/utils/getAPIBaseURL.ts",
-    "src/platform/runtime.ts",
-];
-
-/** L1-core files under react/types. Siblings there are type modules, so `./x` is allowed. */
-const l1CoreReactTypeFiles = ["react/types/models.ts"];
-
 const l1CoreGlobals = [
     ...restrictedGlobals,
     {
@@ -66,10 +27,11 @@ const l1CoreGlobals = [
 ];
 
 /**
- * Import bans for the L1 core. `reactPrefix` is how the guarded file reaches `react/`.
- * @param {string} reactPrefix
+ * Import bans for the L1 core. The `react/` specifiers are matched with a
+ * `**` prefix because the package always reaches the app graph through a
+ * path that carries a `react/` segment.
  */
-const l1CoreImportBans = (reactPrefix) => [
+const l1CoreImportBans = [
     {
         group: ["**/agentDataProvider*", "**/agentDataProvider/**"],
         message: "L1 core must not import the Zotero data-provider handlers (agentDataProvider).",
@@ -94,23 +56,23 @@ const l1CoreImportBans = (reactPrefix) => [
             "L1 core must not import Zotero adapter modules directly — these exist to keep this layer client-agnostic.",
     },
     {
-        group: [`${reactPrefix}/atoms/*`, `${reactPrefix}/atoms/**`],
+        group: ["**/react/atoms/*", "**/react/atoms/**"],
         message: "L1 core must not import Jotai atoms (react/atoms).",
     },
     {
-        group: [`${reactPrefix}/store`],
+        group: ["**/react/store"],
         message: "L1 core must not import the Jotai store (react/store).",
     },
     {
-        group: [`${reactPrefix}/utils/*`, `${reactPrefix}/utils/**`],
+        group: ["**/react/utils/*", "**/react/utils/**"],
         message: "L1 core must not import react/utils — that pulls in the app graph.",
     },
     {
-        group: [`${reactPrefix}/hooks/*`, `${reactPrefix}/hooks/**`],
+        group: ["**/react/hooks/*", "**/react/hooks/**"],
         message: "L1 core must not import React hooks (react/hooks).",
     },
     {
-        group: [`${reactPrefix}/components/*`, `${reactPrefix}/components/**`],
+        group: ["**/react/components/*", "**/react/components/**"],
         message: "L1 core must not import React components (react/components).",
     },
 ];
@@ -339,54 +301,12 @@ export default tseslint.config(
     // adapter modules rather than a direct import. See
     // docs-zotero/client-decoupling-plan.md.
     //
-    // Three blocks. The file sets differ (the package sources, the src/**
-    // modules, the react/-rooted modules), and the react/* bans additionally
-    // depend on how deep the guarded file sits: from packages/agent-core/src/**
-    // and src/** the specifier always carries a `react/` segment (matched by
-    // the `**/react/...` patterns), while from a file one level under react/
-    // (react/types) a sibling is just `../utils/*` — and that shorter form
-    // would otherwise also match the src/utils helpers src/services
-    // legitimately uses. The `_ZoteroTypes` ambient ban for all of these lives
-    // in the trailing block below.
+    // The core lives in packages/agent-core/src, so one path covers it.
     {
         files: ["packages/agent-core/src/**/*.ts"],
         rules: {
             "no-restricted-globals": ["error", ...l1CoreGlobals],
-            "no-restricted-imports": [
-                "error",
-                { patterns: l1CoreImportBans("**/react") },
-            ],
-        },
-    },
-    {
-        files: l1CoreSrcFiles,
-        rules: {
-            "no-restricted-globals": ["error", ...l1CoreGlobals],
-            "no-restricted-imports": [
-                "error",
-                { patterns: l1CoreImportBans("**/react") },
-            ],
-        },
-    },
-    {
-        files: l1CoreReactTypeFiles,
-        rules: {
-            "no-restricted-globals": ["error", ...l1CoreGlobals],
-            "no-restricted-imports": [
-                "error",
-                { patterns: l1CoreImportBans("..") },
-            ],
-        },
-    },
-    // Ambient-type ban, kept separate from the blocks above so one list covers
-    // every L1-core file set regardless of which import-ban block guards it.
-    {
-        files: [
-            "packages/agent-core/src/**/*.ts",
-            ...l1CoreSrcFiles,
-            ...l1CoreReactTypeFiles,
-        ],
-        rules: {
+            "no-restricted-imports": ["error", { patterns: l1CoreImportBans }],
             "no-restricted-syntax": ["error", ...l1CoreAmbientTypeBan],
         },
     },
