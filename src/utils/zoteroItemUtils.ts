@@ -4,11 +4,11 @@
  * Kept in its own module so esbuild-side callers can use them without dragging
  * the rest of `zoteroUtils.ts`.
  *
- * Allowed imports: `./logger` and type-only references. Never value-import
- * from `react/*`.
+ * Allowed imports: the agent-core logger and type-only references. Never
+ * value-import from `react/*`.
  */
 
-import { logger } from "./logger";
+import { logger } from "@beaver/agent-core/platform/logger";
 
 /**
  * Build Beaver's stable library-key identifier for a Zotero item.

@@ -2,7 +2,7 @@ import { atom } from 'jotai';
 import { ExternalReference, extractAuthorLastName } from '@beaver/agent-core/types/externalReferences';
 import { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import { findExistingReference, FindReferenceData } from '../utils/findExistingReference';
-import { logger } from '../../src/utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 import { loadFullItemDataWithAllTypes } from '../../src/utils/zoteroUtils';
 import { libraryRefForLibraryID, modelObjectIdFromReference, resolveItemReference, resolveLibraryRef } from '../../src/utils/libraryIdentity';
 

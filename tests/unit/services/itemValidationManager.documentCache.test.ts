@@ -25,7 +25,7 @@ vi.mock('../../../src/services/documentExtraction/attachmentInfoBatch', () => ({
 }));
 
 import { itemValidationManager, resultFromAttachmentInfo } from '../../../src/services/itemValidationManager';
-import { HARD_ATTACHMENT_LIMITS } from '../../../src/services/attachmentLimits';
+import { HARD_ATTACHMENT_LIMITS } from '@beaver/agent-core/transport/attachmentLimits';
 
 type ValidationItem = Parameters<typeof itemValidationManager.validateItem>[0];
 

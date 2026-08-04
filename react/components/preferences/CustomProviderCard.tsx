@@ -21,7 +21,7 @@ import {
     chatService,
     RockPaperScissorsMove,
     RockPaperScissorsTestResult,
-} from "../../../src/services/chatService";
+} from "@beaver/agent-core/transport/clients/chatService";
 
 interface CustomProviderCardProps {
     model: CustomChatModel;

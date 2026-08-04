@@ -22,7 +22,7 @@ vi.mock('@beaver/agent-core/transport/clientIdentity', () => ({
 }));
 vi.mock('@beaver/agent-core/platform/logger', () => ({ logger: vi.fn() }));
 
-import { accountService } from '../../../src/services/accountService';
+import { accountService } from '@beaver/agent-core/transport/clients/accountService';
 
 const IDENTITY = {
     frontendVersion: '0.22.5',

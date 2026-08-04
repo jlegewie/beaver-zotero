@@ -1,7 +1,7 @@
 import { BoundingBox, CoordOrigin, PageLocation, convertBoundingBoxToBottomLeft, toZoteroRectFromBBox } from '@beaver/agent-core/types/citations';
 import { getCurrentReader, getCurrentReaderAndWaitForView } from './readerUtils';
 import { ZoteroReader } from './annotationUtils';
-import { logger } from '../../src/utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 import { getPageViewportInfo, isPDFDocumentAvailable, waitForPDFDocument, applyRotationToBoundingBox } from './pdfUtils';
 import { isLibraryEditable } from '../../src/utils/zoteroUtils';
 import { BEAVER_ANNOTATION_AUTHOR, resolveBeaverAnnotationColor } from '../../src/constants/annotations';

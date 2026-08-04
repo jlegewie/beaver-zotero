@@ -17,9 +17,9 @@
 import { useEffect, useRef } from 'react';
 import { useAtomValue } from 'jotai';
 import type { RealtimeChannel } from '@supabase/supabase-js';
-import { supabase } from '../../src/services/supabaseClient';
-import { providerConnection } from '../../src/services/providerConnection';
-import { logger } from '../../src/utils/logger';
+import { supabase } from '@beaver/agent-core/transport/supabaseClient';
+import { providerConnection } from '@beaver/agent-core/transport/providerConnection';
+import { logger } from '@beaver/agent-core/platform/logger';
 import { isAuthenticatedAtom, sessionAtom } from '../atoms/auth';
 import { isProfileLoadedAtom } from '../atoms/profile';
 import { dataProviderEnabledAtom } from '../atoms/ui';

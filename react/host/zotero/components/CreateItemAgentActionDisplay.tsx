@@ -14,7 +14,7 @@ import IconButton from '../../../components/ui/IconButton';
 import Tooltip from '../../../components/ui/Tooltip';
 import { applyCreateItemData } from '../../../utils/addItemActions';
 import { ensureItemSynced, ensureItemsSynced } from '../../../../src/utils/sync';
-import { logger } from '../../../../src/utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 import { resolveItemReference } from '../../../../src/utils/libraryIdentity';
 import { notifyReferenceUnavailable } from '../sourceActions';
 import {
@@ -24,7 +24,7 @@ import {
     rejectAgentActionAtom,
     undoAgentActionAtom,
 } from '../../../agents/agentActions';
-import { AckActionLink } from '../../../../src/services/agentActionsService';
+import { AckActionLink } from '@beaver/agent-core/transport/clients/agentActionsService';
 import { CreateItemResultData } from '@beaver/agent-core/types/agentActions/items';
 import {
     annotationBusyAtom,

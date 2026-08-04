@@ -44,8 +44,8 @@ import type {
     DocumentCacheSourceIdentity,
     SerializedDocumentCacheResult,
 } from './documentCache';
-import { logger } from '../utils/logger';
-import { effectiveMaxFileSizeMB, effectiveMaxPageCount, effectiveMaxSnapshotFileSizeMB } from './attachmentLimits';
+import { logger } from '@beaver/agent-core/platform/logger';
+import { effectiveMaxFileSizeMB, effectiveMaxPageCount, effectiveMaxSnapshotFileSizeMB } from '@beaver/agent-core/transport/attachmentLimits';
 import {
     loadAttachmentData,
     resolveAttachmentFileSource,

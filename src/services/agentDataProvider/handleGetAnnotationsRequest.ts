@@ -2,7 +2,7 @@
  * Handle get_annotations requests from the backend.
  */
 
-import { logger } from '../../utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 import { modelObjectId, resolveItemReference, resolveObjectId, UNRESOLVED_LIBRARY_ID } from '../../utils/libraryIdentity';
 import {
     formatZoteroCreatorsString,

@@ -7,9 +7,9 @@
 
 import { atom, Getter, Setter } from 'jotai';
 import { v4 as uuidv4 } from 'uuid';
-import { agentService, AgentConnectionError } from '../../src/services/agentService';
+import { agentService, AgentConnectionError } from '@beaver/agent-core/transport/agentService';
 import { notifyRunComplete, notifyUserQuestion } from '../../src/services/systemNotifications';
-import { reportConnectionFailure } from '../../src/services/diagnosticsService';
+import { reportConnectionFailure } from '@beaver/agent-core/transport/clients/diagnosticsService';
 import {
     baselineConnectionEvidence,
     ConnectionFailureEvidence,
@@ -40,7 +40,7 @@ import {
     WSThreadNameEvent,
     ChargingPermissions,
 } from '@beaver/agent-core/protocol/agentProtocol';
-import { logger } from '../../src/utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 import { selectedModelAtom, ModelConfig } from './models';
 import { getPref } from '../../src/utils/prefs';
 import { MessageAttachment, SourceAttachment } from '@beaver/agent-core/types/attachments/apiTypes';
@@ -152,7 +152,7 @@ import {
     runApprovalPolicyAtom,
 } from './runApprovalPolicy';
 import { loadFullItemDataWithAllTypes } from '../../src/utils/zoteroUtils';
-import { resolveClientIdentity } from '../../src/services/clientIdentity';
+import { resolveClientIdentity } from '@beaver/agent-core/transport/clientIdentity';
 import { dismissDiffPreview } from '../utils/noteEditorDiffPreview';
 import { store } from '../store';
 import { triggerProfileRefresh } from '../hooks/useProfileSync';

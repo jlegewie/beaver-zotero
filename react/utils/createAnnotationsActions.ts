@@ -22,7 +22,7 @@ import {
 } from '../../src/services/annotations/createAnnotation';
 import { getReadableContentKind } from '../../src/services/documentExtraction/attachmentResolution';
 import { getAttachmentFileStatus } from '../../src/services/agentDataProvider/utils';
-import { logger } from '../../src/utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 import { libraryRefForLibraryID, resolveItemReference } from '../../src/utils/libraryIdentity';
 import type { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 

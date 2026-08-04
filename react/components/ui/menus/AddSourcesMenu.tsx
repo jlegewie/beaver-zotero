@@ -1,7 +1,7 @@
 import React from 'react';
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { PlusSignIcon, Icon } from '../../icons/icons';
-import { ItemSearchResult } from '../../../../src/services/searchService';
+import { ItemSearchResult } from '@beaver/agent-core/transport/clients/searchService';
 import { itemSearchResultFromZoteroItem } from '../../../../src/utils/zoteroSerializers';
 import SearchMenu, { MenuPosition } from './SearchMenu';
 import { currentMessageFiltersAtom, removeItemFromMessageAtom, addItemToCurrentMessageItemsAtom, currentMessageItemsAtom } from '../../../atoms/messageComposition';
@@ -12,7 +12,7 @@ import { getPref, setPref } from '../../../../src/utils/prefs';
 import { getRecentAsync, loadFullItemData, getActiveZoteroLibraryId } from '../../../../src/utils/zoteroUtils';
 import { libraryRefForLibraryID, UNRESOLVED_LIBRARY_ID } from '../../../../src/utils/libraryIdentity';
 import { searchTitleCreatorYear, scoreSearchResult } from '../../../utils/search';
-import { logger } from '../../../../src/utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 import { searchableLibraryIdsAtom } from '../../../atoms/profile';
 import { store } from '../../../store';
 import { SourceMenuItemContext, LibraryMenuItemContext, CollectionMenuItemContext, TagMenuItemContext } from './utils/menuItemFactories';

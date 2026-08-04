@@ -3,7 +3,7 @@ import {
     getPDFPageCountFromFulltext,
     getPDFPageCountFromWorker,
 } from "../../react/utils/pdfUtils";
-import { logger } from "./logger";
+import { logger } from "@beaver/agent-core/platform/logger";
 
 export interface LibraryStatistics {
     libraryID: number;

@@ -5,7 +5,7 @@
  * (e.g., citation resolution during create_note).
  */
 
-import { logger } from '../../utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 import { libraryRefForLibraryID, modelObjectId, resolveItemReference, resolveLibraryRef } from '../../utils/libraryIdentity';
 import { ItemDataWithStatus, AttachmentDataWithStatus, ZoteroItemReference, ItemStub } from '@beaver/agent-core/types/zotero';
 import { searchableLibraryIdsAtom, syncWithZoteroAtom } from '../../../react/atoms/profile';

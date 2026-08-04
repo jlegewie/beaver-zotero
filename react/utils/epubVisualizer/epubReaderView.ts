@@ -1,5 +1,5 @@
 import { BEAVER_VISUALIZER_ANNOTATION_AUTHOR } from "../../../src/constants/annotations";
-import { logger } from "../../../src/utils/logger";
+import { logger } from "@beaver/agent-core/platform/logger";
 import { libraryRefForLibraryID } from "../../../src/utils/libraryIdentity";
 import type { ZoteroItemReference } from "@beaver/agent-core/types/zotero";
 import { ZoteroReader } from "../annotationUtils";

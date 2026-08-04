@@ -1,5 +1,5 @@
 import { BEAVER_CITATION_ANNOTATION_AUTHOR } from "../../../src/constants/annotations";
-import { logger } from "../../../src/utils/logger";
+import { logger } from "@beaver/agent-core/platform/logger";
 import { getBestSnapshotAttachmentAsync } from "../../../src/utils/zoteroItemHelpers";
 import {
     buildSnapshotSortIndex,

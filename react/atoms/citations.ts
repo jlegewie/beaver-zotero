@@ -1,5 +1,5 @@
 import { atom } from 'jotai';
-import { logger } from '../../src/utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 import {
     Citation,
     isExternalCitation,

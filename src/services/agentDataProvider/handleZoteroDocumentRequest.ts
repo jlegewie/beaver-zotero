@@ -7,7 +7,7 @@
  * `document_timeout_retry` background job; EPUB timeouts are returned directly.
  */
 
-import { logger } from '../../utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 import {
     WSZoteroDocumentRequest,
     WSZoteroDocumentResponse,
@@ -51,7 +51,7 @@ import { libraryRefForLibraryID, modelObjectIdFromReference } from '../../utils/
 import {
     createPreparedJsonMessage,
     type PreparedJsonMessage,
-} from '../preparedJsonMessage';
+} from '@beaver/agent-core/transport/preparedJsonMessage';
 
 export interface ZoteroDocumentRequestOptions {
     responseMode?: 'object' | 'websocket';

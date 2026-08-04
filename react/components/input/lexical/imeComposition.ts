@@ -6,7 +6,7 @@ import {
     COMPOSITION_END_COMMAND,
     type LexicalEditor,
 } from 'lexical';
-import { logger } from '../../../../src/utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 import { isImeKeyEvent } from '../../../utils/ime';
 import {
     $getFlatSelectionOffsets,

@@ -24,7 +24,7 @@ import {
     markExternalReferenceImportedAtom,
 } from '../../../atoms/externalReferences';
 import { createZoteroItem, stampBeaverProvenanceExtra } from '../../../utils/addItemActions';
-import { logger } from '../../../../src/utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 import { ensureItemSynced } from '../../../../src/utils/sync';
 import { getPref } from '../../../../src/utils/prefs';
 import { libraryRefForLibraryID } from '../../../../src/utils/libraryIdentity';

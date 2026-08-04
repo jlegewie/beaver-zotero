@@ -15,7 +15,7 @@ import {
     type ParseShareableActionResult,
 } from '../types/actionShare';
 import { getActionCommand } from './slashCommands';
-import { logger } from '../../src/utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 
 const DOT_EXT = `.${SHAREABLE_ACTION_FILE_EXTENSION}`;
 

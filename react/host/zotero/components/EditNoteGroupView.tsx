@@ -51,7 +51,7 @@ import {
     getUserFacingErrorMessage,
     undoEditNoteOrBatchAction,
 } from '../../../utils/editNoteActions';
-import { logger } from '../../../../src/utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 import { UNRESOLVED_LIBRARY_ID } from '../../../../src/utils/libraryIdentity';
 import { EditNoteRowView } from './EditNoteRowView';
 import { buildUndoByIndex } from './editNoteBatchPreviewData';

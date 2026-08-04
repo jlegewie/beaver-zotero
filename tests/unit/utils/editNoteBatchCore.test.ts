@@ -58,7 +58,7 @@ import {
     addOrUpdateEditFooter,
     getBeaverFooterAppendPoint,
 } from '../../../src/utils/noteEditFooter';
-import { logger } from '../../../src/utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 import type { EditNoteOperation } from '@beaver/agent-core/types/agentActions/editNote';
 
 // =============================================================================

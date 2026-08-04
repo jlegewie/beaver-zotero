@@ -1,7 +1,7 @@
 import { useState, useCallback } from 'react';
-import { accountService, PlanInfo } from '../../src/services/accountService';
-import { ApiError, ServerError } from '../types/apiErrors';
-import { logger } from '../../src/utils/logger';
+import { accountService, PlanInfo } from '@beaver/agent-core/transport/clients/accountService';
+import { ApiError, ServerError } from '@beaver/agent-core/types/apiErrors';
+import { logger } from '@beaver/agent-core/platform/logger';
 
 const WEBAPP_BASE_URL = (process.env.WEBAPP_BASE_URL || '').replace(/\/$/, '');
 

@@ -1,6 +1,6 @@
 import { syncService, DeleteLibraryTask } from '../services/syncService';
 import { fileUploader } from '../services/FileUploader';
-import { logger } from './logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 import { logoutAtom, userIdAtom } from "../../react/atoms/auth";
 import { store } from "../../react/store";
 import { syncStatusAtom, LibrarySyncStatus, SyncStatus, SyncType } from '../../react/atoms/sync';
@@ -11,7 +11,7 @@ import { addPopupMessageAtom } from '../../react/utils/popupMessageUtils';
 import { openPreferencesWindow } from '../ui/openPreferencesWindow';
 import { SettingsIcon } from '../../react/components/icons/icons';
 import { syncWithZoteroAtom, isDatabaseSyncSupportedAtom, syncDeniedForPlanAtom } from '../../react/atoms/profile';
-import { ApiError, SessionExpiredError } from '../../react/types/apiErrors';
+import { ApiError, SessionExpiredError } from '@beaver/agent-core/types/apiErrors';
 import { SyncMethod } from '../../react/atoms/sync';
 import { SyncLogsRecord } from '../services/database';
 import { isAttachmentOnServer } from './webAPI';

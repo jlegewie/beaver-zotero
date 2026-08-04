@@ -1,9 +1,9 @@
-import { logger } from '../utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 import {
     LOCAL_MUTATING_RUN_SYNC_PAUSE_OWNER,
     PROVIDER_MUTATING_RUN_SYNC_PAUSE_OWNER,
     setSyncPauseResumeHandler,
-} from './agentDataDispatch';
+} from '@beaver/agent-core/transport/agentDataDispatch';
 
 export const RELEASE_DEBOUNCE_MS = 1000;
 export const SAFETY_IDLE_MS = 600_000;

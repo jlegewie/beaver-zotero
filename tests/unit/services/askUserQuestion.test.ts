@@ -46,7 +46,7 @@ vi.mock('../../../src/services/agentDataProvider', () => ({
 }));
 
 import { createStore } from 'jotai';
-import { AgentService } from '../../../src/services/agentService';
+import { AgentService } from '@beaver/agent-core/transport/agentService';
 import type {
     AgentRunRequest,
     WSAskUserQuestionRequest,

@@ -1,10 +1,10 @@
-import { ApiService } from './apiService';
-import API_BASE_URL from '../utils/getAPIBaseURL';
+import { ApiService } from '@beaver/agent-core/transport/apiService';
+import API_BASE_URL from '@beaver/agent-core/platform/getAPIBaseURL';
 import { UploadStatus } from './attachmentsService';
 import { ItemData, DeleteData, AttachmentDataWithMimeType, ZoteroCollection } from '@beaver/agent-core/types/zotero';
 import { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import { SyncMethod, SyncType } from '../../react/atoms/sync';
-import { logger } from '../utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 
 // Types that match the backend models
 export interface ItemBatchRequest {

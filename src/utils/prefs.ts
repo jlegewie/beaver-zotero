@@ -1,5 +1,5 @@
 import config from "../../package.json";
-import { getRuntimeAdapter } from "../platform/runtime";
+import { getRuntimeAdapter } from "@beaver/agent-core/platform/runtime";
 import { registerZoteroRuntime } from "../platform/zoteroRuntime";
 
 type PluginPrefsMap = _ZoteroTypes.Prefs["PluginPrefsMap"];

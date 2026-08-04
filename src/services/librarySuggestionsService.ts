@@ -1,6 +1,6 @@
-import { ApiService } from "./apiService";
-import API_BASE_URL from "../utils/getAPIBaseURL";
-import { logger } from "../utils/logger";
+import { ApiService } from "@beaver/agent-core/transport/apiService";
+import API_BASE_URL from "@beaver/agent-core/platform/getAPIBaseURL";
+import { logger } from "@beaver/agent-core/platform/logger";
 import {
     LibrarySuggestionsRequest,
     LibrarySuggestionsResponse,

@@ -1,4 +1,4 @@
-import { logger } from './logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 
 /**
  * Markers that identify HTML produced by the in-editor diff preview

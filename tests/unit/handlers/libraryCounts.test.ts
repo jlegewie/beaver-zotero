@@ -5,7 +5,7 @@ vi.mock('@beaver/agent-core/platform/logger', () => ({
 }));
 
 import { getLibrarySummaries } from '../../../src/services/agentDataProvider/libraryCounts';
-import { logger } from '../../../src/utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 
 function rowWithCount(count: number) {
     return {

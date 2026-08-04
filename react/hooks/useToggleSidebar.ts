@@ -7,7 +7,7 @@ import { getPref } from '../../src/utils/prefs';
 import { removePopupMessagesByTypeAtom } from '../atoms/ui';
 import { currentMessageItemsAtom, updateMessageItemsFromZoteroSelectionAtom } from '../atoms/messageComposition';
 import { isProfileLoadedAtom } from '../atoms/profile';
-import { logger } from '../../src/utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 import { dismissDiffPreview } from '../utils/noteEditorDiffPreview';
 
 export function useToggleSidebar() {

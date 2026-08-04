@@ -9,7 +9,7 @@ import { CancelIcon } from '../icons/icons';
 import Button from '../ui/Button';
 import IconButton from '../ui/IconButton';
 import { getJotaiState } from '../../utils/getJotaiState';
-import { accountService } from '../../../src/services/accountService';
+import { accountService } from '@beaver/agent-core/transport/clients/accountService';
 import { getPref } from '../../../src/utils/prefs';
 import { getDocumentFromElement } from '../../utils/windowContext';
 

@@ -1,4 +1,4 @@
-import { logger } from '../../../utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 import { searchableLibraryIdsAtom } from '../../../../react/atoms/profile';
 import { store } from '../../../../react/store';
 import { MetadataEdit } from '@beaver/agent-core/types/agentActions/base';

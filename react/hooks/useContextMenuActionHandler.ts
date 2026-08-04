@@ -15,7 +15,7 @@ import { collectionToReference } from '../utils/zoteroReferences';
 import { stageActionPillAtom } from '../atoms/actions';
 import { eventManager } from '../events/eventManager';
 import { useEventSubscription } from './useEventSubscription';
-import { logger } from '../../src/utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 
 export function useContextMenuActionHandler() {
     const user = useAtomValue(userAtom);

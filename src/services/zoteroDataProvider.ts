@@ -30,7 +30,7 @@ import {
     handleAgentActionExecuteRequest,
     handleReadNoteRequest,
 } from './agentDataProvider';
-import { AgentDataProviderMap, setDefaultAgentDataProvider } from './agentDataDispatch';
+import { AgentDataProviderMap, setDefaultAgentDataProvider } from '@beaver/agent-core/transport/agentDataDispatch';
 import {
     SyncPauseOwner,
     LOCAL_MUTATING_RUN_SYNC_PAUSE_OWNER,

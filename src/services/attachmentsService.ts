@@ -1,8 +1,8 @@
-import { ApiService } from './apiService';
-import API_BASE_URL from '../utils/getAPIBaseURL';
+import { ApiService } from '@beaver/agent-core/transport/apiService';
+import API_BASE_URL from '@beaver/agent-core/platform/getAPIBaseURL';
 import { FileHashReference, ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import { FileStatus } from '../../react/types/fileStatus';
-import { logger } from '../utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 import { fileUploader } from './FileUploader';
 
 // processing_status from backend

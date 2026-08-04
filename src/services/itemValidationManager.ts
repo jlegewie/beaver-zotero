@@ -1,11 +1,11 @@
-import { logger } from '../utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 import { getAttachmentInfo } from './documentExtraction/attachmentInfo';
 import {
     prepareAttachmentInfoBatchData,
     processAttachmentInfoBatch,
 } from './documentExtraction/attachmentInfoBatch';
 import type { AttachmentInfo, ContentKind } from '@beaver/agent-core/extract/document/shared/contentKinds';
-import { effectiveMaxPageCount } from './attachmentLimits';
+import { effectiveMaxPageCount } from '@beaver/agent-core/transport/attachmentLimits';
 import { parseItemReference } from '../utils/libraryIdentity';
 
 export type ItemValidationResultState = 'readable' | 'unreadable' | 'blocked';

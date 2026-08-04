@@ -4,7 +4,7 @@ import { addPopupMessageAtom } from '../utils/popupMessageUtils';
 import { planDisplayNameAtom, planNameAtom } from '../atoms/profile';
 import { getPref, setPref } from '../../src/utils/prefs';
 import { useEffect } from 'react';
-import { logger } from '../../src/utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 import { store } from '../store';
 
 export const useIndexingCompleteMessage = () => {

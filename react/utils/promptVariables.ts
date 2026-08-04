@@ -19,7 +19,7 @@
  *   {{current_collection}} — (text)  Name of the currently selected collection
  */
 
-import { logger } from '../../src/utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 import { agentItemFilter } from '../../src/utils/agentItemSupport';
 import { getCurrentReader } from './readerUtils';
 import { store } from '../store';

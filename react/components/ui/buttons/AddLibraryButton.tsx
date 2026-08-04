@@ -6,8 +6,8 @@ import { PlusSignIcon, CSSIcon, Icon } from '../../icons/icons';
 import SearchMenu, { MenuPosition, SearchMenuItem } from '../../ui/menus/SearchMenu';
 import { getLibraryItemCounts, LibraryStatistics } from '../../../../src/utils/libraries';
 import { isLibraryValidForSync, isLibraryValidForSyncWithServerCheck } from '../../../../src/utils/sync';
-import { logger } from '../../../../src/utils/logger';
-import { accountService } from '../../../../src/services/accountService';
+import { logger } from '@beaver/agent-core/platform/logger';
+import { accountService } from '@beaver/agent-core/transport/clients/accountService';
 import { ZoteroLibrary } from '@beaver/agent-core/types/zotero';
 import { serializeZoteroLibrary } from '../../../../src/utils/zoteroSerializers';
 

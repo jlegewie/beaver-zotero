@@ -3,7 +3,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { LibrarySuggestionsResponse, SuggestionCard } from '@beaver/agent-core/types/librarySuggestions';
 import { MessageAttachment, isCollectionAttachment } from '@beaver/agent-core/types/attachments/apiTypes';
 import { librarySuggestionsService } from '../../src/services/librarySuggestionsService';
-import { accountService } from '../../src/services/accountService';
+import { accountService } from '@beaver/agent-core/transport/clients/accountService';
 import {
     readCachedSuggestions,
     writeCachedSuggestions,
@@ -22,7 +22,7 @@ import { libraryItemCountAtom, SMALL_LIBRARY_THRESHOLD } from './zoteroContext';
 import { isWebSearchAllowedAtom, isWebSearchEnabledAtom } from './ui';
 import { beaverDefaultModelAtom, updateSelectedModelAtom } from './models';
 import { ChargingPermissions } from '@beaver/agent-core/protocol/agentProtocol';
-import { logger } from '../../src/utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 import { UNRESOLVED_LIBRARY_ID } from '../../src/utils/libraryIdentity';
 
 export const firstRunSuggestionsAtom = atom<LibrarySuggestionsResponse | null>(null);

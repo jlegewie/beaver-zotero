@@ -16,10 +16,10 @@ vi.mock('@beaver/agent-core/transport/agentDataDispatch', async (importOriginal)
     };
 });
 
-import { ProviderConnection } from '../../../src/services/providerConnection';
-import { notifySyncPauseOwnerSettled } from '../../../src/services/agentDataDispatch';
-import { setClientIdentityProvider } from '../../../src/services/clientIdentity';
-import type { ClientIdentity } from '../../../src/services/clientIdentity';
+import { ProviderConnection } from '@beaver/agent-core/transport/providerConnection';
+import { notifySyncPauseOwnerSettled } from '@beaver/agent-core/transport/agentDataDispatch';
+import { setClientIdentityProvider } from '@beaver/agent-core/transport/clientIdentity';
+import type { ClientIdentity } from '@beaver/agent-core/transport/clientIdentity';
 
 const OriginalWebSocket = (globalThis as any).WebSocket;
 

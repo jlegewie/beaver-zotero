@@ -8,7 +8,7 @@
  * first element, matching Zotero's own internal usage of these plural getters.
  */
 
-import { logger } from "./logger";
+import { logger } from "@beaver/agent-core/platform/logger";
 
 // A selection read failing means none of the accessors worked, i.e. the pane
 // API changed shape again. Callers degrade to "nothing selected", so log each

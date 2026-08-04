@@ -38,7 +38,7 @@ import { liveAttachmentContentKind } from './documentExtraction/attachmentResolu
  * exported by `database.ts`.
  */
 type QueueDB = NonNullable<typeof Zotero.Beaver.db>;
-import { logger } from '../utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 // Import `safeIsInTrash` from the react-free helper module
 import { safeIsInTrash } from '../utils/zoteroItemUtils';
 import { createAbortController } from '../utils/abortController';

@@ -6,7 +6,7 @@ vi.mock('@beaver/agent-core/transport/supabaseClient', () => ({
     supabase: { auth: { getSession: vi.fn() } },
 }));
 
-import { ThreadService } from '../../../src/services/threadService';
+import { ThreadService } from '@beaver/agent-core/transport/threadService';
 
 /**
  * Unit tests for ThreadService.findThreadsByItem — the library arrives as a DTO

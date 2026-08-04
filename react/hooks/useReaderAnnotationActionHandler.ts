@@ -12,7 +12,7 @@ import { sendWSMessageAtom } from '../atoms/agentRunAtoms';
 import { eventManager } from '../events/eventManager';
 import { useEventSubscription } from './useEventSubscription';
 import { store } from '../store';
-import { logger } from '../../src/utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 import { getPref } from '../../src/utils/prefs';
 
 export function useReaderAnnotationActionHandler() {

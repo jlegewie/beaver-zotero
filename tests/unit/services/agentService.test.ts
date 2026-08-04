@@ -44,7 +44,7 @@ vi.mock('../../../react/agents/agentActions', () => ({
     toAgentAction: vi.fn((action) => action),
 }));
 
-import { AgentConnectionError, AgentService, ConnectTimeoutError } from '../../../src/services/agentService';
+import { AgentConnectionError, AgentService, ConnectTimeoutError } from '@beaver/agent-core/transport/agentService';
 import type { AgentRunRequest, WSCallbacks } from '@beaver/agent-core/protocol/agentProtocol';
 
 class MockWebSocket {

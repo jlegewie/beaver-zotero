@@ -7,7 +7,7 @@ import { flashHighlightBoundingBoxes } from '../../../utils/citationNavigation';
 import { formatLocationChip } from '../../../utils/locationDisplay';
 import { resolveEpubAnnotationTarget } from '../../../../src/services/annotations/epub/epubAnnotationResolver';
 import { BeaverTemporaryAnnotations } from '../../../utils/annotationUtils';
-import { logger } from '../../../../src/utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 import { BEAVER_ANNOTATION_COLORS } from '../../../../src/constants/annotations';
 import { resolveLibraryRef } from '../../../../src/utils/libraryIdentity';
 import { TagPill } from '../../../components/agentRuns/TagPill';

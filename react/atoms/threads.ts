@@ -4,14 +4,14 @@ import { isLibraryTabAtom, isWebSearchEnabledAtom, removePopupMessagesByTypeAtom
 
 import { citationsAtom, citationMapAtom, processCitationsAtom, resetCitationMarkersAtom, mergePageLabelsByAttachmentIdAtom } from "./citations";
 import { preloadPageLabelsForCitations } from "../utils/pageLabels";
-import { agentRunService, agentService } from "../../src/services/agentService";
-import { threadService, ZoteroInstanceRef } from "../../src/services/threadService";
+import { agentRunService, agentService } from "@beaver/agent-core/transport/agentService";
+import { threadService, ZoteroInstanceRef } from "@beaver/agent-core/transport/threadService";
 import { getPref } from "../../src/utils/prefs";
 import { loadFullItemDataWithAllTypes, currentZoteroInstanceRef } from "../../src/utils/zoteroUtils";
 import { isThreadInstanceMismatch } from "../utils/threadMatches";
 import { getHost } from "../host";
-import { logger } from "../../src/utils/logger";
-import { ApiError } from "../types/apiErrors";
+import { logger } from "@beaver/agent-core/platform/logger";
+import { ApiError } from "@beaver/agent-core/types/apiErrors";
 import { resetMessageUIStateAtom } from "./messageUIState";
 import { checkExternalReferencesAtom, clearExternalReferenceCacheAtom, addExternalReferencesToMappingAtom } from "./externalReferences";
 import { ExternalReference } from "@beaver/agent-core/types/externalReferences";

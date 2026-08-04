@@ -27,7 +27,7 @@
  */
 
 import { config } from "../../package.json";
-import { logger } from "../utils/logger";
+import { logger } from "@beaver/agent-core/platform/logger";
 import { getPref } from "../utils/prefs";
 import { store } from "../../react/store";
 import { isSidebarVisibleAtom } from "../../react/atoms/ui";

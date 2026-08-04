@@ -35,7 +35,7 @@ import {
     resolveObjectId,
     UNRESOLVED_LIBRARY_ID,
 } from '../../src/utils/libraryIdentity';
-import { logger } from '../../src/utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 import { isAuthenticatedAtom } from '../atoms/auth';
 import { mcpCreateNoteToolEnabledAtom, mcpServerEnabledAtom } from '../atoms/ui';
 import { store } from '../store';

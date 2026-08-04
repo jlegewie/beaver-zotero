@@ -4,7 +4,7 @@ import { Icon, DeleteIcon, CSSIcon, PlusSignIcon, AlertIcon } from '../../icons/
 import IconButton from '../../ui/IconButton';
 import SearchMenu, { MenuPosition, SearchMenuItem } from '../../ui/menus/SearchMenu';
 import { isLibrarySynced } from '../../../../src/utils/zoteroUtils';
-import { logger } from '../../../../src/utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 import { isLibraryValidForSync, isLibraryValidForSyncWithServerCheck } from '../../../../src/utils/sync';
 
 interface SelectLibrariesProps {

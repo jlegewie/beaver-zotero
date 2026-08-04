@@ -4,7 +4,7 @@ import { deletionJobsAtom, DeletionJob, DeletionStatus } from '../atoms/sync';
 import { getPref, setPref } from '../../src/utils/prefs';
 import { scheduleLibraryDeletion } from '../../src/utils/sync';
 import { syncService, DeletionStatusRequestItem, DeletionStatusResponse, DeleteLibraryTask } from '../../src/services/syncService';
-import { logger } from '../../src/utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 import { hasAuthorizedProAccessAtom, isDeviceAuthorizedAtom } from '../atoms/profile';
 import { isAuthenticatedAtom } from '../atoms/auth';
 

@@ -11,7 +11,7 @@ import type {
     EditNoteBatchUndoRecord,
     EditNoteBatchEditItem,
 } from '@beaver/agent-core/types/agentActions/editNoteBatch';
-import { logger } from '../../src/utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 import {
     libraryRefForLibraryID,
     resolveItemReference,

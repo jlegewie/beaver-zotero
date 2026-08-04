@@ -20,7 +20,7 @@ import {
     Icon,
     StopStrokeIcon,
 } from '../icons/icons';
-import { logger } from '../../../src/utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 
 interface AskUserQuestionPanelProps {
     pendingQuestion: PendingQuestion;

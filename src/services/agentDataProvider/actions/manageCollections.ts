@@ -30,7 +30,7 @@ import {
     writeTargetLibraryError,
 } from '../../../utils/libraryIdentity';
 import { TimeoutContext, checkAborted, TimeoutError } from '../timeout';
-import { logger } from '../../../utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 
 /**
  * Parse a collection identifier that may be a plain 8-char Zotero key or a

@@ -14,9 +14,9 @@ vi.mock('@beaver/agent-core/transport/supabaseClient', () => ({
     supabase: mockSupabase,
 }));
 
-import { SessionExpiredError, SessionRefreshError } from '../../../react/types/apiErrors';
-import { ApiService } from '../../../src/services/apiService';
-import { getRuntimeAdapter, setRuntimeAdapter, type RuntimeAdapter } from '../../../src/platform/runtime';
+import { SessionExpiredError, SessionRefreshError } from '@beaver/agent-core/types/apiErrors';
+import { ApiService } from '@beaver/agent-core/transport/apiService';
+import { getRuntimeAdapter, setRuntimeAdapter, type RuntimeAdapter } from '@beaver/agent-core/platform/runtime';
 
 describe('ApiService authentication recovery', () => {
     let service: ApiService;

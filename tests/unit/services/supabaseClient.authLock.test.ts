@@ -81,7 +81,7 @@ beforeEach(() => {
 
 describe('supabaseClient auth lock reload handling', () => {
     it('does not create the client until the exported client is first used', async () => {
-        const module = await import('../../../src/services/supabaseClient');
+        const module = await import('@beaver/agent-core/transport/supabaseClient');
         module.setSupabaseStorageAdapter(createMockStorageAdapter());
 
         expect(mockCreateClient).not.toHaveBeenCalled();
@@ -93,7 +93,7 @@ describe('supabaseClient auth lock reload handling', () => {
 
     it('uses the registered storage adapter when the exported client is first used', async () => {
         const registeredStorage = createMockStorageAdapter();
-        const module = await import('../../../src/services/supabaseClient');
+        const module = await import('@beaver/agent-core/transport/supabaseClient');
 
         module.setSupabaseStorageAdapter(registeredStorage);
         module.supabase.auth;
@@ -103,7 +103,7 @@ describe('supabaseClient auth lock reload handling', () => {
     });
 
     it('throws when the exported client is used without a registered storage adapter', async () => {
-        const module = await import('../../../src/services/supabaseClient');
+        const module = await import('@beaver/agent-core/transport/supabaseClient');
 
         expect(() => module.supabase.auth).toThrow(
             'No Supabase storage adapter registered.'
@@ -112,7 +112,7 @@ describe('supabaseClient auth lock reload handling', () => {
     });
 
     it('rejects storage registration after the exported client has been used', async () => {
-        const module = await import('../../../src/services/supabaseClient');
+        const module = await import('@beaver/agent-core/transport/supabaseClient');
         module.setSupabaseStorageAdapter(createMockStorageAdapter());
 
         module.supabase.auth;
@@ -122,7 +122,7 @@ describe('supabaseClient auth lock reload handling', () => {
     });
 
     it('keeps inherited waiters queued across module reloads', async () => {
-        const firstModule = await import('../../../src/services/supabaseClient');
+        const firstModule = await import('@beaver/agent-core/transport/supabaseClient');
         await registerReloadBridge();
         firstModule.setSupabaseStorageAdapter(createMockStorageAdapter());
         firstModule.supabase.auth;
@@ -150,7 +150,7 @@ describe('supabaseClient auth lock reload handling', () => {
         expect(events).toEqual(['holder:start']);
 
         vi.resetModules();
-        const secondModule = await import('../../../src/services/supabaseClient');
+        const secondModule = await import('@beaver/agent-core/transport/supabaseClient');
         await registerReloadBridge();
         secondModule.setSupabaseStorageAdapter(createMockStorageAdapter());
         secondModule.supabase.auth;
@@ -179,7 +179,7 @@ describe('supabaseClient auth lock reload handling', () => {
     });
 
     it('starts with a fresh auth lock after shutdown cleanup removes the persisted state', async () => {
-        const firstModule = await import('../../../src/services/supabaseClient');
+        const firstModule = await import('@beaver/agent-core/transport/supabaseClient');
         await registerReloadBridge();
         firstModule.setSupabaseStorageAdapter(createMockStorageAdapter());
         firstModule.supabase.auth;
@@ -191,7 +191,7 @@ describe('supabaseClient auth lock reload handling', () => {
         (window as any).__beaverDisposeSupabase = undefined;
 
         vi.resetModules();
-        const secondModule = await import('../../../src/services/supabaseClient');
+        const secondModule = await import('@beaver/agent-core/transport/supabaseClient');
         await registerReloadBridge();
         secondModule.setSupabaseStorageAdapter(createMockStorageAdapter());
         secondModule.supabase.auth;
@@ -210,7 +210,7 @@ describe('supabaseClient auth lock reload handling', () => {
 
 describe('supabaseClient reload bridge', () => {
     it('creates a working client and touches no host state when no bridge is registered', async () => {
-        const module = await import('../../../src/services/supabaseClient');
+        const module = await import('@beaver/agent-core/transport/supabaseClient');
         module.setSupabaseStorageAdapter(createMockStorageAdapter());
 
         module.supabase.auth;
@@ -221,7 +221,7 @@ describe('supabaseClient reload bridge', () => {
     });
 
     it('disposes without a client and without a bridge', async () => {
-        const module = await import('../../../src/services/supabaseClient');
+        const module = await import('@beaver/agent-core/transport/supabaseClient');
 
         await expect(module.disposeSupabaseClient()).resolves.toBeUndefined();
 
@@ -231,7 +231,7 @@ describe('supabaseClient reload bridge', () => {
     // Registering late would hand this generation its own disposer back and
     // swap the lock out from under any queued waiter, both silently.
     it('rejects bridge registration after the exported client has been used', async () => {
-        const module = await import('../../../src/services/supabaseClient');
+        const module = await import('@beaver/agent-core/transport/supabaseClient');
         module.setSupabaseStorageAdapter(createMockStorageAdapter());
 
         module.supabase.auth;
@@ -242,7 +242,7 @@ describe('supabaseClient reload bridge', () => {
     });
 
     it('publishes the disposer only once a client exists', async () => {
-        const module = await import('../../../src/services/supabaseClient');
+        const module = await import('@beaver/agent-core/transport/supabaseClient');
         await registerReloadBridge();
         module.setSupabaseStorageAdapter(createMockStorageAdapter());
 
@@ -256,7 +256,7 @@ describe('supabaseClient reload bridge', () => {
     // Two auto-refresh tickers on one session race for the single-use refresh
     // token, so the reloaded instance has to stop the previous one.
     it('stops the previous instance when the next one registers the bridge', async () => {
-        const firstModule = await import('../../../src/services/supabaseClient');
+        const firstModule = await import('@beaver/agent-core/transport/supabaseClient');
         await registerReloadBridge();
         firstModule.setSupabaseStorageAdapter(createMockStorageAdapter());
         firstModule.supabase.auth;
@@ -267,7 +267,7 @@ describe('supabaseClient reload bridge', () => {
         expect(firstClient.auth.stopAutoRefresh).not.toHaveBeenCalled();
 
         vi.resetModules();
-        const secondModule = await import('../../../src/services/supabaseClient');
+        const secondModule = await import('@beaver/agent-core/transport/supabaseClient');
         await registerReloadBridge();
         await flushAsync();
 

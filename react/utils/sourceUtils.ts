@@ -1,6 +1,6 @@
 import { truncateText } from './stringUtils';
 import { stripHtmlTags, computeDiff } from '../components/agentRuns/EditNotePreview';
-import { logger } from '../../src/utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 import { isAgentSupportedItem, agentItemFilter, agentItemFilterAsync } from '../../src/utils/agentItemSupport';
 import { isValidAnnotationType, SourceAttachment } from '@beaver/agent-core/types/attachments/apiTypes';
 import { selectItemById } from '../../src/utils/selectItem';

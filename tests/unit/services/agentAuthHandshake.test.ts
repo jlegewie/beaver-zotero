@@ -35,7 +35,7 @@ vi.mock('../../../src/services/agentDataProvider', () => ({
 }));
 vi.mock('../../../react/agents/agentActions', () => ({ toAgentAction: vi.fn((a) => a) }));
 
-import { AgentService } from '../../../src/services/agentService';
+import { AgentService } from '@beaver/agent-core/transport/agentService';
 import type { AgentRunRequest, WSCallbacks, ZoteroInstanceWire } from '@beaver/agent-core/protocol/agentProtocol';
 
 class MockWebSocket {

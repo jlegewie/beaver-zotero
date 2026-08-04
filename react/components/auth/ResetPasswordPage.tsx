@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { supabase } from '../../../src/services/supabaseClient';
+import { supabase } from '@beaver/agent-core/transport/supabaseClient';
 import { isServiceUnavailableError, SERVICE_UNAVAILABLE_MESSAGE } from './otp';
 
 /**

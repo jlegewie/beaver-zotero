@@ -7,14 +7,14 @@ import Button from "../ui/Button";
 import { useSetAtom } from 'jotai';
 import { profileWithPlanAtom, creditPlanAtom, hasCreditPlanAtom } from "../../atoms/profile";
 import { activePreferencePageTabAtom, PreferencePageTab } from "../../atoms/ui";
-import { logger } from "../../../src/utils/logger";
+import { logger } from "@beaver/agent-core/platform/logger";
 import { isDiffPreviewSupported } from "../../utils/noteEditorDiffPreview";
 import { 
     embeddingIndexStateAtom, 
     forceReindexAtom, 
     isEmbeddingIndexingAtom 
 } from "../../atoms/embeddingIndex";
-import { accountService } from "../../../src/services/accountService";
+import { accountService } from "@beaver/agent-core/transport/clients/accountService";
 import {SettingsGroup, SettingsRow, SectionLabel} from "./components/SettingsElements";
 import ActionsPreferenceSection from "./ActionsPreferenceSection";
 import BillingSection, { formatPlanName } from "./BillingSection";

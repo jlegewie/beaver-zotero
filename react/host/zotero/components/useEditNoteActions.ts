@@ -34,7 +34,7 @@ import {
     type EditOperation,
 } from '../../../utils/noteEditorDiffPreview';
 import { diffPreviewNoteKeyAtom, isDiffPreviewLive } from '../../../utils/diffPreviewCoordinator';
-import { logger } from '../../../../src/utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 import { store } from '../../../store';
 import { PreviewData, STATUS_CONFIGS, buildPreviewData } from './agentActionViewHelpers';
 import {

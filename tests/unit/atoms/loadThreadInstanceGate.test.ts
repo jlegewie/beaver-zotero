@@ -166,7 +166,7 @@ import {
     isLoadingThreadAtom,
     pendingScrollToRunAtom,
 } from '../../../react/atoms/threads';
-import { ApiError } from '../../../react/types/apiErrors';
+import { ApiError } from '@beaver/agent-core/types/apiErrors';
 
 const CURRENT = { zoteroUserId: '111', zoteroLocalId: 'CURKEY' };
 const FOREIGN = { zoteroUserId: '999', zoteroLocalId: 'FOREIGNKEY' };

@@ -17,7 +17,7 @@
 
 import { ToolReturnPart } from "@beaver/agent-core/agents/types";
 import { ZoteroItemReference } from "@beaver/agent-core/types/zotero";
-import { logger } from "../../src/utils/logger";
+import { logger } from "@beaver/agent-core/platform/logger";
 import { resolveItemReference } from "../../src/utils/libraryIdentity";
 import { truncateText, formatNumberRanges } from "../utils/stringUtils";
 import { EXTERNAL_LIBRARY_ID } from "../../src/services/externalFiles";

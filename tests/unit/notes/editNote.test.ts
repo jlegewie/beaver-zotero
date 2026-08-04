@@ -255,7 +255,7 @@ vi.mock('../../../react/utils/addItemActions', () => ({
 
 import { handleAgentActionValidateRequest } from '../../../src/services/agentDataProvider/handleAgentActionValidateRequest';
 import { handleAgentActionExecuteRequest } from '../../../src/services/agentDataProvider/handleAgentActionExecuteRequest';
-import { logger } from '../../../src/utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 import {
     getOrSimplify,
     countOccurrences,

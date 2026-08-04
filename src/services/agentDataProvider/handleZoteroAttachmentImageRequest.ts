@@ -7,7 +7,7 @@
  * is not already PNG/JPEG.
  */
 
-import { logger } from '../../utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 import { isAttachmentAvailableRemotely } from '../../utils/webAPI';
 import {
     WSZoteroAttachmentImageRequest,
@@ -30,7 +30,7 @@ import {
     TimeoutError,
     createTimeoutController,
 } from './timeout';
-import { effectiveMaxFileSizeMB } from '../attachmentLimits';
+import { effectiveMaxFileSizeMB } from '@beaver/agent-core/transport/attachmentLimits';
 import {
     DEFAULT_MAX_IMAGE_DIMENSION,
     HARD_MAX_IMAGE_DIMENSION,

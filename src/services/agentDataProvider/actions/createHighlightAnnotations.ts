@@ -27,7 +27,7 @@ import { normalizePageLocations } from '@beaver/agent-core/types/agentActions/an
 import { normalizeAnnotationTags } from '@beaver/agent-core/types/agentActions/createAnnotations';
 import { shortItemTitle } from '../../../utils/zoteroUtils';
 import { libraryRefForLibraryID, resolveItemReference, resolveLibraryRef } from '../../../utils/libraryIdentity';
-import { logger } from '../../../utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 
 function mapAnnotationErrorCode(error: unknown): string {
     if (error instanceof MissingPageGeometryError) {

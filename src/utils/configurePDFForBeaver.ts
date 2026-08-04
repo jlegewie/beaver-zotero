@@ -20,7 +20,7 @@ import {
     type PDFTimerFunctions,
     type WorkerStartFailureInfo,
 } from "../beaver-extract/config";
-import { logger } from "./logger";
+import { logger } from "@beaver/agent-core/platform/logger";
 
 /**
  * Realm-independent timers for the PDF package's internal watchdogs (idle

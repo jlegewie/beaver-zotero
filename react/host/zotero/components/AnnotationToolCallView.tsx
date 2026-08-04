@@ -12,14 +12,14 @@ import {
     rejectAgentActionAtom,
     undoAgentActionAtom,
 } from '../../../agents/agentActions';
-import { AckActionLink } from '../../../../src/services/agentActionsService';
+import { AckActionLink } from '@beaver/agent-core/transport/clients/agentActionsService';
 import { AnnotationResultData } from '@beaver/agent-core/types/agentActions/annotations';
 import { applyAnnotation, deleteAnnotationFromReader } from '../../../utils/annotationActions';
 import { getCurrentPage, getCurrentReaderAndWaitForView, navigateToAnnotation, navigateToPage } from '../../../utils/readerUtils';
 import { currentReaderAttachmentKeyAtom } from '../../../atoms/messageComposition';
 import { isLibraryEditable, shortItemTitle } from '../../../../src/utils/zoteroUtils';
 import { ZoteroReader } from '../../../utils/annotationUtils';
-import { logger } from '../../../../src/utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 import { resolveItemReference, resolveLibraryRef } from '../../../../src/utils/libraryIdentity';
 import { notifyReferenceUnavailable } from '../sourceActions';
 import { ZoteroIcon, ZOTERO_ICONS } from '../../../components/icons/ZoteroIcon';

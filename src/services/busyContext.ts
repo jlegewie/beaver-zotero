@@ -18,7 +18,7 @@
  * this module directly.
  */
 
-import { setBusyContextProvider } from './busyContextProvider';
+import { setBusyContextProvider } from '@beaver/agent-core/transport/busyContextProvider';
 
 /**
  * Numeric-only snapshot (booleans encoded as 0/1) so the fields can be merged

@@ -23,13 +23,13 @@ vi.mock('@beaver/agent-core/transport/clientIdentity', () => ({
 import {
     clearBackendHttpSuccess,
     recordBackendHttpSuccess,
-} from '../../../src/services/backendReachability';
+} from '@beaver/agent-core/transport/backendReachability';
 import {
     clearConnectionFailureReportState,
     reportConnectionFailure,
-} from '../../../src/services/diagnosticsService';
-import { supabase } from '../../../src/services/supabaseClient';
-import { resolveClientIdentity } from '../../../src/services/clientIdentity';
+} from '@beaver/agent-core/transport/clients/diagnosticsService';
+import { supabase } from '@beaver/agent-core/transport/supabaseClient';
+import { resolveClientIdentity } from '@beaver/agent-core/transport/clientIdentity';
 import type { ConnectionFailureEvidence } from '@beaver/agent-core/transport/connectionFailure';
 
 const getSessionMock = vi.mocked(supabase.auth.getSession);

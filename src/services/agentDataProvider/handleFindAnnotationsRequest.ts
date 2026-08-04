@@ -6,7 +6,7 @@ import {
     ANNOTATION_TYPE_DB_IDS,
     ZOTERO_ANNOTATION_PALETTE_COLORS,
 } from '../../constants/annotations';
-import { logger } from '../../utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 import { modelObjectId, resolveItemReference, resolveObjectId } from '../../utils/libraryIdentity';
 import {
     formatZoteroCreatorsString,

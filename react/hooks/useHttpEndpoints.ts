@@ -21,10 +21,10 @@
 import { useEffect } from 'react';
 import { useAtomValue } from 'jotai';
 import { isAuthenticatedAtom } from '../atoms/auth';
-import { logger } from '../../src/utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 import { getZoteroUserIdentifier } from '../../src/utils/zoteroUtils';
-import { providerConnection } from '../../src/services/providerConnection';
-import { enqueueMutatingAction } from '../../src/services/agentActionQueue';
+import { providerConnection } from '@beaver/agent-core/transport/providerConnection';
+import { enqueueMutatingAction } from '@beaver/agent-core/transport/agentActionQueue';
 import { getPref, setPref } from '../../src/utils/prefs';
 import {
     handleZoteroDataRequest,

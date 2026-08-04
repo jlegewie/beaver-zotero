@@ -8,12 +8,12 @@
  */
 
 import { EncryptedStorage } from './EncryptedStorage';
-import { logger } from '../utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 import {
     SupabaseStorageAdapter,
     setSupabaseStorageAdapter,
     setSupabaseReloadBridge,
-} from './supabaseClient';
+} from '@beaver/agent-core/transport/supabaseClient';
 
 /**
  * The window that loaded this bundle, which is where the reload-persistent

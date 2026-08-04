@@ -1,6 +1,6 @@
 import React from "react";
 import { setPref } from "../../src/utils/prefs";
-import { logger } from "../../src/utils/logger";
+import { logger } from "@beaver/agent-core/platform/logger";
 import { SafeProfileWithPlan } from "@beaver/agent-core/types/profile";
 import { addPopupMessageAtom } from "./popupMessageUtils";
 import { store } from "../store";

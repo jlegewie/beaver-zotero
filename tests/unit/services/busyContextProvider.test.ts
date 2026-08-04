@@ -9,13 +9,13 @@ describe('busy-context provider registry', () => {
     });
 
     it('resolves to an empty snapshot when nothing has been registered', async () => {
-        const { resolveBusyContext } = await import('../../../src/services/busyContextProvider');
+        const { resolveBusyContext } = await import('@beaver/agent-core/transport/busyContextProvider');
         expect(resolveBusyContext()).toEqual({});
     });
 
     it('resolves the snapshot from the registered provider', async () => {
         const { setBusyContextProvider, resolveBusyContext } =
-            await import('../../../src/services/busyContextProvider');
+            await import('@beaver/agent-core/transport/busyContextProvider');
         const snapshot = { busy_sync: 1, busy_db_tx: 0 };
         const provider = vi.fn(() => snapshot);
 

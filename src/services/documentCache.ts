@@ -9,7 +9,7 @@ import type {
     DocumentCachePayloadRecord,
 } from './database';
 import { getFileSignature, isRemoteFilePath, type FileSignature } from './documentFileIdentity';
-import { logger } from '../utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 import {
     gzipJsonValueChunked,
     gzipUtf8BytesChunked,

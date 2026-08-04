@@ -9,7 +9,7 @@ import { userAtom } from '../atoms/auth';
 import { currentThreadIdAtom, loadThreadAtom, pendingScrollToRunAtom } from '../atoms/threads';
 import { eventManager } from '../events/eventManager';
 import { useEventSubscription } from './useEventSubscription';
-import { logger } from '../../src/utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 
 interface PendingProtocolTarget {
     threadId: string;
