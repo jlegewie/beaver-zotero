@@ -1,11 +1,23 @@
 {
-  // Standalone typecheck for the client-agnostic wire-protocol closure.
+  // Standalone typecheck for the client-agnostic core.
   // These files are compiled WITHOUT the zotero-types ambient globals; the
   // only host globals available are the narrow declarations in globals.d.ts.
   // `types: []` keeps @types packages out of the automatic program, and
-  // `verify-program.mjs` asserts the program matches the `files` list exactly
-  // — that check, not `types: []`, is what catches an explicit import pulling
-  // in @types or zotero-types.
+  // `verify-program.mjs` is what catches an explicit import reaching into
+  // @types, zotero-types, or any package the core does not declare.
+  //
+  // `skipLibCheck: true` is load-bearing rather than incidental: with no DOM
+  // lib and `types: []`, typechecking *inside* a dependency's own .d.ts flags
+  // its uses of fetch/BroadcastChannel/setInterval as missing names. Core code
+  // is still fully checked against those dependencies' types, and
+  // `verify-program.mjs` re-checks the package's own declarations with the flag
+  // off so globals.d.ts keeps failing loudly.
+  //
+  // When core code needs a host global, declare it in globals.d.ts. Do not
+  // reach for a `lib` entry that supplies it (DOM, WebWorker, …) or delete the
+  // `lib`/`types` lines: each licenses a whole host surface inside the core,
+  // which is exactly what globals.d.ts exists to prevent. `verify-program.mjs`
+  // rejects all of those.
   "compilerOptions": {
     "module": "esnext",
     "moduleResolution": "bundler",
@@ -14,7 +26,7 @@
     "types": [],
     "strict": true,
     "esModuleInterop": true,
-    "skipLibCheck": false,
+    "skipLibCheck": true,
     "noEmit": true,
     "isolatedModules": true,
     "forceConsistentCasingInFileNames": true
