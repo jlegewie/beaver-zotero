@@ -20,13 +20,13 @@ import {
 import { getCurrentReaderAndWaitForView } from '../../../utils/readerUtils';
 import { semanticSearchService } from '../../../../src/services/semanticSearchService';
 import { BeaverDB } from '../../../../src/services/database';
-import { threadService } from '../../../../src/services/threadService';
+import { threadService } from '@beaver/agent-core/transport/threadService';
 import { libraryRefForLibraryID } from '../../../../src/utils/libraryIdentity';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { zoteroContextAtom } from '../../../atoms/zoteroContext';
 import { firstRunReturnRequestedAtom } from '../../../atoms/firstRun';
 import { whereToStartVisibleAtom } from '../../../atoms/whereToStart';
-import { logger } from '../../../../src/utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 
 interface DevToolsMenuButtonProps {
     className?: string;

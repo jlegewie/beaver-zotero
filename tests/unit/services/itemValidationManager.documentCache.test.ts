@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AttachmentInfo } from '@beaver/agent-core/extract/document/shared/contentKinds';
 
-vi.mock('../../../src/utils/logger', () => ({
+vi.mock('@beaver/agent-core/platform/logger', () => ({
     logger: vi.fn(),
 }));
 
@@ -25,7 +25,7 @@ vi.mock('../../../src/services/documentExtraction/attachmentInfoBatch', () => ({
 }));
 
 import { itemValidationManager, resultFromAttachmentInfo } from '../../../src/services/itemValidationManager';
-import { HARD_ATTACHMENT_LIMITS } from '../../../src/services/attachmentLimits';
+import { HARD_ATTACHMENT_LIMITS } from '@beaver/agent-core/transport/attachmentLimits';
 
 type ValidationItem = Parameters<typeof itemValidationManager.validateItem>[0];
 

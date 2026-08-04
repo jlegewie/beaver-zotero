@@ -1,4 +1,4 @@
-import { logger } from '../../../utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 import { searchableLibraryIdsAtom } from '../../../../react/atoms/profile';
 import { batchFindExistingReferences, BatchReferenceCheckItem } from '../../../../react/utils/batchFindExistingReferences';
 import { store } from '../../../../react/store';

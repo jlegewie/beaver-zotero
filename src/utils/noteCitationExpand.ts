@@ -16,7 +16,7 @@ import { createCitationHTML } from './zoteroUtils';
 import { getBestPDFAttachment, getBestPDFAttachmentAsync } from './zoteroItemHelpers';
 import { getAttachmentFileStatus, checkLibraryExcluded } from '../services/agentDataProvider/utils';
 import { isRemoteFilePath, makeRemoteFilePath } from '../services/documentFileIdentity';
-import { logger } from './logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 import {
     escapeAttr,
     normalizeWS,

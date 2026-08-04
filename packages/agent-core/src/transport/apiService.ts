@@ -1,8 +1,9 @@
 import { AuthApiError, AuthError, AuthSessionMissingError, isAuthRetryableFetchError } from '@supabase/supabase-js';
-import { ApiError, ServerError, SessionExpiredError, SessionRefreshError } from '../../react/types/apiErrors';
-import { logger } from '../utils/logger';
+import { ApiError, ServerError, SessionExpiredError, SessionRefreshError } from '../types/apiErrors';
+import { logger } from '../platform/logger';
 import { supabase } from './supabaseClient';
 import { recordBackendHttpSuccess } from './backendReachability';
+import { getApiBaseUrl } from './config';
 import { getRuntimeAdapter } from '../platform/runtime';
 
 type HttpMethod = 'GET' | 'POST' | 'PATCH' | 'DELETE';
@@ -89,18 +90,27 @@ async function withDeadline<T>(
 * Base API service that handles authentication and common HTTP methods
 */
 export class ApiService {
-    protected baseUrl: string;
-    
-    constructor(baseUrl: string) {
-        this.baseUrl = baseUrl;
+    /** Set only when a caller pins this instance to a specific backend. */
+    private overrideBaseUrl?: string;
+
+    constructor(baseUrl?: string) {
+        this.overrideBaseUrl = baseUrl;
     }
-    
+
+    /**
+    * Resolved per use rather than captured at construction, so a host can
+    * register its transport config after this module has loaded.
+    */
+    protected get baseUrl(): string {
+        return this.overrideBaseUrl ?? getApiBaseUrl();
+    }
+
     /**
     * Sets the base URL for API requests
     * @param baseUrl The new base URL
     */
     setBaseUrl(baseUrl: string): void {
-        this.baseUrl = baseUrl;
+        this.overrideBaseUrl = baseUrl;
     }
 
     private buildAuthHeaders(token: string): Record<string, string> {

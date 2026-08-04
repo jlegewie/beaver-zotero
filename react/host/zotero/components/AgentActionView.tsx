@@ -42,7 +42,7 @@ import type { CreateItemProposedData } from '@beaver/agent-core/types/agentActio
 import { shortItemTitle } from '../../../../src/utils/zoteroUtils';
 import { resolveItemReference, resolveLibraryRef } from '../../../../src/utils/libraryIdentity';
 import { notifyReferenceUnavailable } from '../sourceActions';
-import { logger } from '../../../../src/utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 import {
     TickIcon,
     CancelIcon,

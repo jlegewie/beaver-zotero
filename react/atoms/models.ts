@@ -1,8 +1,8 @@
 import { atom } from 'jotai';
 import { getPref, setPref } from '../../src/utils/prefs';
 import { getCustomChatModelsFromPreferences, CustomChatModel } from '../types/settings';
-import { logger } from '../../src/utils/logger';
-import { ProviderType, ReasoningEffort, AccessMode, ModelPricing, ModelConfig } from '../types/models';
+import { logger } from '@beaver/agent-core/platform/logger';
+import { ProviderType, ReasoningEffort, AccessMode, ModelPricing, ModelConfig } from '@beaver/agent-core/types/models';
 
 export type { ProviderType, ReasoningEffort, AccessMode, ModelPricing, ModelConfig };
 

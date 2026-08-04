@@ -18,7 +18,7 @@ import { resolvePromptVariables } from '../utils/promptVariables';
 import { ensurePromptActionTokens, getActionCommand } from '../utils/slashCommands';
 import { PromptAction } from '@beaver/agent-core/agents/types';
 import { ChargingPermissions } from '@beaver/agent-core/protocol/agentProtocol';
-import { logger } from '../../src/utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 
 // Built-in action ids the launcher maps to.
 const START_PROJECT = 'builtin-start-project';

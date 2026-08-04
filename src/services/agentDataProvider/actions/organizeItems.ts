@@ -5,7 +5,7 @@ import { checkLibraryExcluded, excludedLibraryMessage, getDeferredToolPreference
 import { resolveItemReference, resolveLibraryRef, parseItemReference, modelObjectId } from '../../../utils/libraryIdentity';
 import { TimeoutContext, checkAborted } from '../timeout';
 import { TimeoutError } from '../timeout';
-import { logger } from '../../../utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 import { TimingAccumulator } from '../../../utils/timing';
 
 

@@ -17,8 +17,8 @@
  *   not stranded; beyond that, the next wake reopens it.
  */
 
-import API_BASE_URL from '../utils/getAPIBaseURL';
-import { logger } from '../utils/logger';
+import { getApiBaseUrl } from './config';
+import { logger } from '../platform/logger';
 import { resolveClientIdentity } from './clientIdentity';
 import {
     AgentDataProviderMap,
@@ -27,7 +27,7 @@ import {
     notifySyncPauseOwnerSettled,
 } from './agentDataDispatch';
 import { getWSAuthToken } from './agentService';
-import { WSAuthMessage, WSRequestReceivedAck } from '@beaver/agent-core/protocol/agentProtocol';
+import { WSAuthMessage, WSRequestReceivedAck } from '../protocol/agentProtocol';
 import { resolveBusyContext } from './busyContextProvider';
 import {
     isPreparedJsonMessage,
@@ -58,7 +58,8 @@ export interface ProviderConnectionStatus {
 }
 
 export class ProviderConnection {
-    private baseUrl: string;
+    /** Set only when a caller pins this instance to a specific backend. */
+    private overrideBaseUrl?: string;
     private ws: WebSocket | null = null;
     private connecting: boolean = false;
     /** Monotonic counter incremented on close to invalidate stale queued messages */
@@ -89,9 +90,17 @@ export class ProviderConnection {
     private reconnectAttempts: number = 0;
     private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
-    constructor(baseUrl: string, dataProvider?: AgentDataProviderMap) {
-        this.baseUrl = baseUrl;
+    constructor(baseUrl?: string, dataProvider?: AgentDataProviderMap) {
+        this.overrideBaseUrl = baseUrl;
         this.dataProvider = dataProvider ?? null;
+    }
+
+    /**
+     * Resolved per use rather than captured at construction, so a host can
+     * register its transport config after this module has loaded.
+     */
+    private get baseUrl(): string {
+        return this.overrideBaseUrl ?? getApiBaseUrl();
     }
 
     /** Resolve the data-provider map, falling back to the registered default on first use. */
@@ -451,4 +460,4 @@ export class ProviderConnection {
 // Singleton
 // =============================================================================
 
-export const providerConnection = new ProviderConnection(API_BASE_URL);
+export const providerConnection = new ProviderConnection();

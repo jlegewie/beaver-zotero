@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react'
-import { supabase } from '../../../src/services/supabaseClient'
+import { supabase } from '@beaver/agent-core/transport/supabaseClient'
 import { useAtom, useAtomValue, useSetAtom } from 'jotai'
 import { isProfileLoadedAtom } from '../../atoms/profile'
 import {
@@ -17,7 +17,7 @@ import {
 import { OTPVerification } from './OTPVerification'
 import { sendOTP, verifyOTP, getOTPErrorMessage, isServiceUnavailableError, SERVICE_UNAVAILABLE_MESSAGE } from './otp'
 import { getPref } from '../../../src/utils/prefs'
-import { logger } from '../../../src/utils/logger'
+import { logger } from '@beaver/agent-core/platform/logger'
 import { performAccountSwitchAtom } from '../../atoms/accountSwitch'
 
 interface SignInFormProps {

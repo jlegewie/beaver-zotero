@@ -4,7 +4,7 @@ import { ExcludedLibrary, SafeProfileWithPlan, PlanFeatures, ProfileBalance, Pro
 import { ZoteroLibrary } from "@beaver/agent-core/types/zotero";
 import { fileStatusAtom } from "./files";
 import { compareVersions } from "../utils/compareVersions";
-import { effectiveMaxFileSizeMB, effectiveMaxPageCount } from "../../src/services/attachmentLimits";
+import { effectiveMaxFileSizeMB, effectiveMaxPageCount } from "@beaver/agent-core/transport/attachmentLimits";
 
 // Profile and plan state
 export const isProfileLoadedAtom = atom<boolean>(false);

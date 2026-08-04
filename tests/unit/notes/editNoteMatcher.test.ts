@@ -7,7 +7,7 @@ import { describe, it, expect, vi } from 'vitest';
 // noteHtmlSimplifier module pulls in via zoteroUtils → apiService → supabase.
 // These stubs are only here to let the module load in a unit-test harness.
 
-vi.mock('../../../src/services/supabaseClient', () => ({
+vi.mock('@beaver/agent-core/transport/supabaseClient', () => ({
     supabase: { auth: { getSession: vi.fn() } },
 }));
 
@@ -21,7 +21,7 @@ vi.mock('../../../src/utils/zoteroUtils', () => ({
     getZoteroUserIdentifier: vi.fn(() => ({ userID: undefined, localUserKey: 'test' })),
 }));
 
-vi.mock('../../../src/utils/logger', () => ({ logger: vi.fn() }));
+vi.mock('@beaver/agent-core/platform/logger', () => ({ logger: vi.fn() }));
 
 // Identity expansion: simplified == raw for these tests. All other primitives
 // (entity encode/decode, NFKC via String.prototype, countOccurrences, strip*)

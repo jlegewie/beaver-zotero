@@ -1,5 +1,5 @@
 import { BEAVER_CITATION_ANNOTATION_AUTHOR } from '../../src/constants/annotations';
-import { logger } from '../../src/utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 import { getPref } from '../../src/utils/prefs';
 import { selectItemById } from '../../src/utils/selectItem';
 import type { AttachmentMatchTarget } from '../agents/toolResultTypes';

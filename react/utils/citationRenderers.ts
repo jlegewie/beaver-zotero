@@ -9,7 +9,7 @@ import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '
 import { Citation as BeaverCitation } from '@beaver/agent-core/types/citations';
 import { CITATION_TAG_PATTERN } from '../utils/citationPreprocessing';
 import { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
-import { logger } from '../../src/utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 import { ExternalReference } from '@beaver/agent-core/types/externalReferences';
 import { formatExternalCitation } from '../atoms/externalReferences';
 import { UNRESOLVED_LIBRARY_ID } from '../../src/utils/libraryIdentity';

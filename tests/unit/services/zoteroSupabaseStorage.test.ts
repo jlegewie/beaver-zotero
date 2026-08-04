@@ -2,10 +2,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const {
     mockSetSupabaseStorageAdapter,
+    mockSetSupabaseReloadBridge,
     mockEncryptedStorageConstructed,
     store,
 } = vi.hoisted(() => ({
     mockSetSupabaseStorageAdapter: vi.fn(),
+    mockSetSupabaseReloadBridge: vi.fn(),
     mockEncryptedStorageConstructed: vi.fn(),
     store: {
         getItem: vi.fn(),
@@ -14,8 +16,9 @@ const {
     },
 }));
 
-vi.mock('../../../src/services/supabaseClient', () => ({
+vi.mock('@beaver/agent-core/transport/supabaseClient', () => ({
     setSupabaseStorageAdapter: mockSetSupabaseStorageAdapter,
+    setSupabaseReloadBridge: mockSetSupabaseReloadBridge,
 }));
 
 vi.mock('../../../src/services/EncryptedStorage', () => ({
@@ -30,7 +33,7 @@ vi.mock('../../../src/services/EncryptedStorage', () => ({
     },
 }));
 
-vi.mock('../../../src/utils/logger', () => ({
+vi.mock('@beaver/agent-core/platform/logger', () => ({
     logger: vi.fn(),
 }));
 

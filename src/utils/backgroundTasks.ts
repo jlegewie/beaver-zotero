@@ -6,7 +6,7 @@
  * the main request/response cycle.
  */
 
-import { logger } from './logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 
 /** Status of a background task */
 export type BackgroundTaskStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';

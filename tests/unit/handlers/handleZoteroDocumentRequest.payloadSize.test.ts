@@ -10,7 +10,7 @@ import { describe, expect, it, vi } from 'vitest';
 // The handler module's import chain reaches supabaseClient (which throws
 // without env config) — stub it and its store dependencies like the
 // companion cache test does.
-vi.mock('../../../src/services/supabaseClient', () => ({
+vi.mock('@beaver/agent-core/transport/supabaseClient', () => ({
     supabase: { auth: { getSession: vi.fn() } },
 }));
 vi.mock('../../../react/store', () => ({

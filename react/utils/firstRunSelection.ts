@@ -1,5 +1,5 @@
 import { getPref, setPref } from '../../src/utils/prefs';
-import { logger } from '../../src/utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 
 export type FirstRunSelectionVariant = 'first_run' | 'where_to_start';
 

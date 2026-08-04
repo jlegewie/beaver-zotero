@@ -11,7 +11,7 @@ import { currentThreadIdAtom } from '../atoms/threads';
 import { renderToHTML } from './citationRenderers';
 import { prepareCitationRenderContext } from './citationRenderContext';
 import { wrapWithSchemaVersion, getBeaverNoteFooterHTML } from './noteActions';
-import { logger } from '../../src/utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 import { resolveCreateNoteParent } from '../../src/services/agentDataProvider/actions/resolveCreateNoteParent';
 import { getCollectionByIdOrName } from '../../src/services/agentDataProvider/utils';
 import { libraryRefForLibraryID, resolveItemReference, resolveWriteTargetLibrary } from '../../src/utils/libraryIdentity';

@@ -11,7 +11,7 @@ import { selectedModelAtom } from '../atoms/models';
 import { requestPlusToolsAtom } from '../atoms/ui';
 import { addPopupMessageAtom } from '../utils/popupMessageUtils';
 import { getPref } from '../../src/utils/prefs';
-import { logger } from '../../src/utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 
 /** A file to attach: a path (file picker, clipboard) or an `nsIFile` (drop). */
 export type ExternalFileSource = string | { path: string };

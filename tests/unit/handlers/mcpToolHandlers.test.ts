@@ -44,7 +44,7 @@ vi.mock('../../../src/utils/zoteroUtils', () => ({
     getCitationKeyFromItem: vi.fn().mockResolvedValue(null),
 }));
 
-vi.mock('../../../src/utils/logger', () => ({
+vi.mock('@beaver/agent-core/platform/logger', () => ({
     logger: vi.fn(),
 }));
 

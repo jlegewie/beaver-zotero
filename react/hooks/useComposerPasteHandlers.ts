@@ -11,7 +11,7 @@ import {
     removeTempFile,
     writePastedFileToTemp,
 } from '../../src/services/clipboardFiles';
-import { logger } from '../../src/utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 
 /**
  * Wires the composer's paste handling to the external-file attach path, so a

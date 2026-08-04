@@ -11,7 +11,7 @@
  * rather than on the default they mean to test.
  */
 import { afterEach, describe, expect, it } from 'vitest';
-import { getRuntimeAdapter, setRuntimeAdapter, type RuntimeAdapter } from '../../../src/platform/runtime';
+import { getRuntimeAdapter, setRuntimeAdapter, type RuntimeAdapter } from '@beaver/agent-core/platform/runtime';
 
 describe('the unregistered default runtime adapter', () => {
     it('reports not running a development build', () => {

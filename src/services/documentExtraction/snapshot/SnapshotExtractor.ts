@@ -23,9 +23,9 @@ import {
 } from "@beaver/agent-core/extract/document/snapshot/schema";
 import { getDeclaredCharset, isLikelyNonUtf8Charset, parseSnapshotHtml } from "./snapshotDom";
 import { getReadableContentKind } from "../attachmentResolution";
-import { effectiveMaxSnapshotFileSizeMB } from "../../attachmentLimits";
+import { effectiveMaxSnapshotFileSizeMB } from "@beaver/agent-core/transport/attachmentLimits";
 import { isRemoteAccessAvailable } from "../attachmentSource";
-import { logger } from "../../../utils/logger";
+import { logger } from "@beaver/agent-core/platform/logger";
 
 // Coverage below this fraction means the walk dropped a meaningful share of the
 // page's visible text (an unrecognized container/table structure) and warrants a

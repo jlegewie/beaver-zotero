@@ -22,7 +22,7 @@ import IconButton from '../ui/IconButton';
 import RepeatIcon from '../icons/RepeatIcon';
 import { OnboardingHeader, OnboardingFooter } from './onboarding';
 import { ChargingPermissions } from '@beaver/agent-core/protocol/agentProtocol';
-import { logger } from '../../../src/utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 
 // Suggested first-run actions launch without cost-confirmation prompts.
 const FIRST_RUN_PERMISSIONS_OVERRIDE: Partial<ChargingPermissions> = {

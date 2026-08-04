@@ -1,7 +1,6 @@
-import { ApiService } from './apiService';
-import API_BASE_URL from '../utils/getAPIBaseURL';
-import { ActionStatus, ActionResultDataType } from '@beaver/agent-core/types/agentActions/base';
-import { logger } from '../utils/logger';
+import { ApiService } from '../apiService';
+import { ActionStatus, ActionResultDataType } from '../../types/agentActions/base';
+import { logger } from '../../platform/logger';
 
 // ============================================================================
 // Request/Response Types
@@ -109,7 +108,7 @@ const MAX_PENDING_UPDATE_ENTRIES = 25;
 
 class AgentActionUpdateBatcher {
     private pendingUpdates = new Map<string, PendingActionUpdate>();
-    private timer: NodeJS.Timeout | null = null;
+    private timer: ReturnType<typeof setTimeout> | null = null;
     private isFlushing = false;
     private flushRequestedWhileRunning = false;
 
@@ -255,7 +254,7 @@ class AgentActionUpdateBatcher {
 export class AgentActionsService extends ApiService {
     private readonly updateBatcher: AgentActionUpdateBatcher;
 
-    constructor(backendUrl: string) {
+    constructor(backendUrl?: string) {
         super(backendUrl);
         this.updateBatcher = new AgentActionUpdateBatcher((entries) =>
             this.dispatchActionUpdates(entries)
@@ -364,5 +363,5 @@ export class AgentActionsService extends ApiService {
     }
 }
 
-export const agentActionsService = new AgentActionsService(API_BASE_URL);
+export const agentActionsService = new AgentActionsService();
 

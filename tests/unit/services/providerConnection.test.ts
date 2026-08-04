@@ -1,25 +1,25 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('../../../src/utils/getAPIBaseURL', () => ({ default: 'https://api.example.com' }));
-vi.mock('../../../src/utils/logger', () => ({ logger: vi.fn() }));
-vi.mock('../../../src/services/agentService', () => ({
+vi.mock('@beaver/agent-core/platform/logger', () => ({ logger: vi.fn() }));
+vi.mock('@beaver/agent-core/transport/agentService', () => ({
     getWSAuthToken: vi.fn().mockResolvedValue('token'),
 }));
 // Busy context resolves to `{}` by default (no provider registered in this
 // test environment), so it needs no mock. The sync-pause resume seam does
 // need a mock, since asserting on it is the point of the tests below.
-vi.mock('../../../src/services/agentDataDispatch', async (importOriginal) => {
-    const actual = await importOriginal<typeof import('../../../src/services/agentDataDispatch')>();
+vi.mock('@beaver/agent-core/transport/agentDataDispatch', async (importOriginal) => {
+    const actual = await importOriginal<typeof import('@beaver/agent-core/transport/agentDataDispatch')>();
     return {
         ...actual,
         notifySyncPauseOwnerSettled: vi.fn(),
     };
 });
 
-import { ProviderConnection } from '../../../src/services/providerConnection';
-import { notifySyncPauseOwnerSettled } from '../../../src/services/agentDataDispatch';
-import { setClientIdentityProvider } from '../../../src/services/clientIdentity';
-import type { ClientIdentity } from '../../../src/services/clientIdentity';
+import { ProviderConnection } from '@beaver/agent-core/transport/providerConnection';
+import { setTransportConfig } from '@beaver/agent-core/transport/config';
+import { notifySyncPauseOwnerSettled } from '@beaver/agent-core/transport/agentDataDispatch';
+import { setClientIdentityProvider } from '@beaver/agent-core/transport/clientIdentity';
+import type { ClientIdentity } from '@beaver/agent-core/transport/clientIdentity';
 
 const OriginalWebSocket = (globalThis as any).WebSocket;
 
@@ -95,6 +95,19 @@ describe('ProviderConnection', () => {
 
     afterEach(() => {
         (globalThis as any).WebSocket = OriginalWebSocket;
+    });
+
+    // The exported singleton is constructed with no URL, so its socket address
+    // comes from the transport config at connect time.
+    it('derives the socket URL from config registered after construction', () => {
+        const conn = new ProviderConnection();
+        setTransportConfig({
+            apiBaseUrl: 'https://api.example.com',
+            supabaseUrl: 'https://p.supabase.co',
+            supabaseAnonKey: 'anon',
+        });
+
+        expect((conn as any).getWebSocketUrl()).toBe('wss://api.example.com/api/v1/agents/beaver/provider');
     });
 
     it('schedules sync resume with the mutating entry owner after a provider action settles', async () => {

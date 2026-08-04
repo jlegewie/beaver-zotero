@@ -7,7 +7,7 @@
  * See the comment on the `registerZoteroRuntime()` call in `prefs.ts`.
  */
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { getRuntimeAdapter, type RuntimeAdapter } from '../../../src/platform/runtime';
+import { getRuntimeAdapter, type RuntimeAdapter } from '@beaver/agent-core/platform/runtime';
 import { registerZoteroRuntime } from '../../../src/platform/zoteroRuntime';
 
 describe('the Zotero runtime adapter', () => {
@@ -79,7 +79,7 @@ describe('registration ordering guarantee', () => {
     it('is installed as a side effect of importing src/utils/prefs.ts', async () => {
         vi.resetModules();
 
-        const runtimeModule = await import('../../../src/platform/runtime');
+        const runtimeModule = await import('@beaver/agent-core/platform/runtime');
         // Sanity check: a fresh runtime module starts unregistered.
         expect(() => runtimeModule.getRuntimeAdapter().getPref('sanity.key')).toThrow();
 
@@ -94,7 +94,7 @@ describe('registration ordering guarantee', () => {
     it('leaves an adapter a host already registered in place', async () => {
         vi.resetModules();
 
-        const runtimeModule = await import('../../../src/platform/runtime');
+        const runtimeModule = await import('@beaver/agent-core/platform/runtime');
         const hostAdapter = {
             debug: () => {},
             isDevelopment: () => false,
@@ -114,7 +114,7 @@ describe('registration ordering guarantee', () => {
     it('still installs after an adapter was set and then restored', async () => {
         vi.resetModules();
 
-        const runtimeModule = await import('../../../src/platform/runtime');
+        const runtimeModule = await import('@beaver/agent-core/platform/runtime');
         const original = runtimeModule.getRuntimeAdapter();
         runtimeModule.setRuntimeAdapter({
             debug: () => {},

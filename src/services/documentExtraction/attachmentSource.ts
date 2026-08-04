@@ -1,11 +1,11 @@
-import { effectiveMaxFileSizeMB } from '../attachmentLimits';
+import { effectiveMaxFileSizeMB } from '@beaver/agent-core/transport/attachmentLimits';
 import { isRemoteFilePath, makeRemoteFilePath } from '../documentFileIdentity';
 import {
     ExternalAbortError,
     TimeoutError,
     awaitWithRequestAbort,
 } from '../agentDataProvider/timeout';
-import { logger } from '../../utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 import { getPref } from '../../utils/prefs';
 import {
     getAttachmentDataInMemory,

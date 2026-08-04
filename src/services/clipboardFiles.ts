@@ -18,7 +18,7 @@
  * webpack-bundled code.
  */
 
-import { logger } from '../utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 
 const FILE_FLAVOR = 'application/x-moz-file';
 

@@ -1,4 +1,4 @@
-import { logger } from '../../utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 import { safeIsInTrash } from '../../utils/zoteroUtils';
 import type { TimingAccumulator } from '../../utils/timing';
 import { getAttachmentInfo, type AttachmentInfoOptions } from './attachmentInfo';

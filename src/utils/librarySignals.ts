@@ -2,7 +2,7 @@
  * Library-suggestions payload assembly helpers.
  */
 import { serializeItemSummary } from "./zoteroSerializers";
-import { logger } from "./logger";
+import { logger } from "@beaver/agent-core/platform/logger";
 import { hasAgentSupportedAttachment } from "./agentItemSupport";
 import { libraryRefForLibraryID } from "./libraryIdentity";
 import {

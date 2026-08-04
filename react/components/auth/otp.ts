@@ -1,4 +1,4 @@
-import { supabase } from '../../../src/services/supabaseClient'
+import { supabase } from '@beaver/agent-core/transport/supabaseClient'
 import { EmailOtpType } from '@supabase/supabase-js'
 
 export interface OTPSendOptions {

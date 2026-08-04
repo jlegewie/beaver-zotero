@@ -1,8 +1,8 @@
 import { BeaverExtractor, ExtractionError, ExtractionErrorCode, isTransientWorkerError } from '../../beaver-extract';
-import { logger } from '../../utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 import { getPref } from '../../utils/prefs';
 import { isAttachmentAvailableRemotely } from '../../utils/webAPI';
-import { effectiveMaxFileSizeMB } from '../attachmentLimits';
+import { effectiveMaxFileSizeMB } from '@beaver/agent-core/transport/attachmentLimits';
 import { isRemoteFilePath, makeRemoteFilePath } from '../documentFileIdentity';
 import type { DocumentCacheMetadata } from '../documentCache';
 import { getContentKind } from './attachmentResolution';

@@ -1,7 +1,6 @@
-import { ApiService } from './apiService';
-import { ApiError, ServerError } from '../../react/types/apiErrors';
-import { logger } from '../utils/logger';
-import API_BASE_URL from '../utils/getAPIBaseURL';
+import { ApiService } from '../apiService';
+import { ApiError, ServerError } from '../../types/apiErrors';
+import { logger } from '../../platform/logger';
 
 /**
  * Request to generate embeddings for multiple texts
@@ -83,7 +82,7 @@ export class EmbeddingsService extends ApiService {
      * Creates a new EmbeddingsService instance
      * @param backendUrl The base URL of the backend API
      */
-    constructor(backendUrl: string) {
+    constructor(backendUrl?: string) {
         super(backendUrl);
     }
 
@@ -309,5 +308,5 @@ export class EmbeddingsService extends ApiService {
 }
 
 // Export embeddingsService singleton
-export const embeddingsService = new EmbeddingsService(API_BASE_URL);
+export const embeddingsService = new EmbeddingsService();
 

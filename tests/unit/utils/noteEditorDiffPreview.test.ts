@@ -9,7 +9,7 @@ vi.mock('../../../react/atoms/externalReferences', () => ({
     externalReferenceItemMappingAtom: Symbol('externalReferenceItemMappingAtom'),
 }));
 
-vi.mock('../../../src/services/supabaseClient', () => ({
+vi.mock('@beaver/agent-core/transport/supabaseClient', () => ({
     supabase: {
         auth: {
             getSession: vi.fn(),

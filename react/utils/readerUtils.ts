@@ -1,5 +1,5 @@
 import { TextSelection } from '@beaver/agent-core/types/attachments/apiTypes';
-import { logger } from '../../src/utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 import { ZoteroReader } from './annotationUtils';
 import { waitForPDFDocument } from './pdfUtils';
 

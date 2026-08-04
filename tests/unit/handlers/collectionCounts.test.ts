@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('../../../src/utils/logger', () => ({
+vi.mock('@beaver/agent-core/platform/logger', () => ({
     logger: vi.fn(),
 }));
 
@@ -9,7 +9,7 @@ import {
     getCollectionItemCounts,
     getSubcollectionCounts,
 } from '../../../src/services/agentDataProvider/collectionCounts';
-import { logger } from '../../../src/utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 
 /** Build a grouped `collectionID -> count` result row. */
 function row(collectionId: number, count: number) {

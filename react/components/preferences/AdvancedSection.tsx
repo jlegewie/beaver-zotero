@@ -7,7 +7,7 @@ import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import { currentMessageExternalFilesAtom } from "../../atoms/messageComposition";
 import { ensureMcpBridgeScript } from "../../hooks/useMcpServer";
 import { copyToClipboard } from "../../utils/clipboard";
-import { logger } from "../../../src/utils/logger";
+import { logger } from "@beaver/agent-core/platform/logger";
 import { setPref } from "../../../src/utils/prefs";
 import { TickIcon, CopyIcon } from "../icons/icons";
 import CustomInstructionsSection from "./CustomInstructionsSection";

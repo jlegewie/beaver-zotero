@@ -1,9 +1,9 @@
 import { getDisplayNameFromItem } from "../../react/utils/sourceUtils";
 import { ZoteroItemReference } from "@beaver/agent-core/types/zotero";
 import type { CreatorJSON } from "@beaver/agent-core/types/agentActions/base";
-import { logger } from "./logger";
+import { logger } from "@beaver/agent-core/platform/logger";
 import { libraryRefForLibraryID, UNRESOLVED_LIBRARY_ID } from "./libraryIdentity";
-import type { ZoteroInstanceRef } from "../services/threadService";
+import type { ZoteroInstanceRef } from "@beaver/agent-core/transport/threadService";
 import { getSelectedLibraryId, getSelectedCollection } from "./zoteroSelection";
 
 function makeZoteroItemReference(libraryID: number, zoteroKey: string): ZoteroItemReference {

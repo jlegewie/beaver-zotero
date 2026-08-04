@@ -24,7 +24,7 @@
 
 import { FindReferenceData } from './findExistingReference';
 import { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
-import { logger } from '../../src/utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 import { libraryRefForLibraryID } from '../../src/utils/libraryIdentity';
 
 /**

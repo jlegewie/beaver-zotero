@@ -4,7 +4,7 @@ import { prepareCitationRenderContext } from "./citationRenderContext";
 import { hasSchemaVersionWrapper } from "../../src/utils/noteWrapper";
 import { store } from "../store";
 import { currentThreadNameAtom } from "../atoms/threads";
-import { logger } from "../../src/utils/logger";
+import { logger } from "@beaver/agent-core/platform/logger";
 import { libraryRefForLibraryID } from "../../src/utils/libraryIdentity";
 
 /**

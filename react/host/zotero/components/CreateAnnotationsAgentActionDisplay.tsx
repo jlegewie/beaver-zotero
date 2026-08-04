@@ -31,7 +31,7 @@ import {
     executeCreateNoteAnnotationsAction,
     undoCreateAnnotationsAction,
 } from '../../../utils/createAnnotationsActions';
-import { logger } from '../../../../src/utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 
 type CreateAnnotationsAction =
     | CreateHighlightAnnotationsAgentAction

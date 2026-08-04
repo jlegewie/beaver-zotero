@@ -31,7 +31,7 @@ import {
 import type { PageLabelsByAttachmentId } from '../../react/atoms/citations';
 import { modelObjectId, modelObjectIdFromReference, resolveObjectId, UNRESOLVED_LIBRARY_ID } from './libraryIdentity';
 import { checkLibraryExcluded } from '../services/agentDataProvider/utils';
-import { logger } from './logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 
 // =============================================================================
 // New-string validation

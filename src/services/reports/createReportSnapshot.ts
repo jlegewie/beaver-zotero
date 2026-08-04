@@ -7,7 +7,7 @@
  * is the same path the connector uses to save single-file page captures.
  */
 
-import { logger } from '../../utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 import { getZoteroSelectURI } from '../../utils/zoteroUtils';
 import { checkLibraryExcluded } from '../agentDataProvider/utils';
 import { buildReportHtml, CSS_RULE_BUDGET, type ReportSpec } from './reportHtml';

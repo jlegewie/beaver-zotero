@@ -29,7 +29,7 @@ import { resolvePageLabelFromLabels } from '../../utils/pageLabels';
 import { getPageLabelsForItem } from './itemData';
 import { launchExternalFile, notifyReferenceUnavailable } from './sourceActions';
 import { getPref } from '../../../src/utils/prefs';
-import { logger } from '../../../src/utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 import { selectItemById } from '../../../src/utils/selectItem';
 import {
     getBestPDFAttachmentAsync,

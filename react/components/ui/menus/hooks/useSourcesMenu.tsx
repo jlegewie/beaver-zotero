@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { ItemSearchResult } from '../../../../../src/services/searchService';
+import { ItemSearchResult } from '@beaver/agent-core/transport/clients/searchService';
 import { getActiveZoteroLibraryId, getRecentAsync, loadFullItemData } from '../../../../../src/utils/zoteroUtils';
 import { UNRESOLVED_LIBRARY_ID } from '../../../../../src/utils/libraryIdentity';
 import { ArrowRightIcon, CSSIcon, FileLinkIcon, Icon } from '../../../icons/icons';

@@ -7,7 +7,7 @@ import { userAtom } from "../../atoms/auth";
 import { creditBreakdownAtom, creditPlanAtom, hasCreditPlanAtom, isCreditPlanPastDueAtom, profileBalanceAtom } from "../../atoms/profile";
 import { useAtomValue, useSetAtom } from "jotai";
 import { useBilling } from "../../hooks/useBilling";
-import { PlanInfo } from "../../../src/services/accountService";
+import { PlanInfo } from "@beaver/agent-core/transport/clients/accountService";
 import { CreditBreakdown, ProfileBalance, CreditPlan } from "@beaver/agent-core/types/profile";
 
 

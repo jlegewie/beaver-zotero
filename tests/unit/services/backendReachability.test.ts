@@ -4,7 +4,7 @@ import {
     getLastBackendHttpSuccess,
     normalizeEndpointForTelemetry,
     recordBackendHttpSuccess,
-} from '../../../src/services/backendReachability';
+} from '@beaver/agent-core/transport/backendReachability';
 
 describe('normalizeEndpointForTelemetry', () => {
     it('keeps static route segments unchanged', () => {

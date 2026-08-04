@@ -1,4 +1,4 @@
-import { logger } from "../../src/utils/logger";
+import { logger } from "@beaver/agent-core/platform/logger";
 import { BEAVER_ANNOTATION_AUTHOR } from '../../src/constants/annotations';
 import { libraryRefForLibraryID } from '../../src/utils/libraryIdentity';
 import { getCurrentReader } from "./readerUtils";

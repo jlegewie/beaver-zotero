@@ -5,7 +5,7 @@ import { isThreadListViewAtom, isLibraryTabAtom, selectedZoteroTabIdAtom, hasPop
 import { ThreadData, loadThreadAtom } from '../atoms/threads';
 import { currentThreadIdAtom } from '../agents/atoms';
 import { searchableLibraryIdsAtom } from '../atoms/profile';
-import { threadService } from '../../src/services/threadService';
+import { threadService } from '@beaver/agent-core/transport/threadService';
 import { convertUTCToLocal } from '../utils/dateUtils';
 import { deduplicateByThread, threadModelToThreadData, isThreadInstanceMismatch } from '../utils/threadMatches';
 import { currentZoteroInstanceRef } from '../../src/utils/zoteroUtils';
@@ -14,7 +14,7 @@ import { getReaderOrNoteContextItem } from '../utils/zoteroTabContext';
 import { buildThreadItemFilter } from '../utils/threadItemFilter';
 import { buildRecentChatsCacheKey, buildRecentChatsItemLookup } from '../utils/recentChatsLookup';
 import Spinner from './icons/Spinner';
-import { logger } from '../../src/utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 import Button from './ui/Button';
 
 const MAX_RECENT = 3;

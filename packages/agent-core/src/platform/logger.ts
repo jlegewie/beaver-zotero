@@ -1,4 +1,4 @@
-import { getRuntimeAdapter } from "../platform/runtime";
+import { getRuntimeAdapter } from "./runtime";
 
 /**
  * Log a message to the host debug console and, in development, to the browser console.

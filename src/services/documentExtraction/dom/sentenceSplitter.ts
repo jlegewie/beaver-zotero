@@ -22,7 +22,7 @@ import {
     type SentencexBoundary,
 } from "../../../beaver-extract/SentencexSplitter";
 import { applyPostProcessing } from "../../../beaver-extract/sentencePostprocess";
-import { logger } from "../../../utils/logger";
+import { logger } from "@beaver/agent-core/platform/logger";
 
 // Minimal surface of the wasm-bindgen module we use (mirrors the worker's
 // `SentencexModule`); kept local so this file does not pull in worker code.

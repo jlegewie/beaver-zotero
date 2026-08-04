@@ -7,7 +7,7 @@
  * The Beaver agent is the primary agent that handles chat completions and tool execution.
  */
 
-import { logger } from '../../utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 import { isAttachmentAvailableRemotely } from '../../utils/webAPI';  // kept for file_missing message check
 import {
     WSZoteroAttachmentSearchRequest,
@@ -39,7 +39,7 @@ import {
     TimeoutError,
     createTimeoutController,
 } from './timeout';
-import { effectiveMaxFileSizeMB, effectiveMaxPageCount } from '../attachmentLimits';
+import { effectiveMaxFileSizeMB, effectiveMaxPageCount } from '@beaver/agent-core/transport/attachmentLimits';
 
 
 /**

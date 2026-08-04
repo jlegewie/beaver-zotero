@@ -8,7 +8,7 @@
  * (length 1 for image attachments).
  */
 
-import { logger } from '../../utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 import {
     WSZoteroViewImagesRequest,
     WSZoteroViewImagesResponse,
@@ -42,7 +42,7 @@ import {
     WorkerAbortError,
     isWorkerDeadlineError,
 } from '../../beaver-extract';
-import { effectiveMaxFileSizeMB, effectiveMaxPageCount } from '../attachmentLimits';
+import { effectiveMaxFileSizeMB, effectiveMaxPageCount } from '@beaver/agent-core/transport/attachmentLimits';
 import { createWorkerDispatchFlag, withWorkerDiagnostics } from './workerDiagnostics';
 import {
     DEFAULT_IMAGES_TIMEOUT_SECONDS,

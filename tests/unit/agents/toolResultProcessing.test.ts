@@ -24,7 +24,7 @@ vi.mock('../../../react/agents/toolResultTypes', () => ({
     extractLookupWorkData: vi.fn(),
 }));
 
-vi.mock('../../../src/utils/logger', () => ({ logger: vi.fn() }));
+vi.mock('@beaver/agent-core/platform/logger', () => ({ logger: vi.fn() }));
 
 import { processToolReturnResults } from '../../../react/agents/toolResultProcessing';
 

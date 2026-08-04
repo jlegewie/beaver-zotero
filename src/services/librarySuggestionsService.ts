@@ -1,6 +1,5 @@
-import { ApiService } from "./apiService";
-import API_BASE_URL from "../utils/getAPIBaseURL";
-import { logger } from "../utils/logger";
+import { ApiService } from "@beaver/agent-core/transport/apiService";
+import { logger } from "@beaver/agent-core/platform/logger";
 import {
     LibrarySuggestionsRequest,
     LibrarySuggestionsResponse,
@@ -56,7 +55,7 @@ function mapTreeRowType(t: LibraryTreeRowType): UiViewType | null {
  * Frontend client for `POST /api/v1/account/library-suggestions`.
  */
 export class LibrarySuggestionsService extends ApiService {
-    constructor(baseUrl: string) {
+    constructor(baseUrl?: string) {
         super(baseUrl);
     }
 
@@ -209,4 +208,4 @@ export class LibrarySuggestionsService extends ApiService {
     }
 }
 
-export const librarySuggestionsService = new LibrarySuggestionsService(API_BASE_URL);
+export const librarySuggestionsService = new LibrarySuggestionsService();

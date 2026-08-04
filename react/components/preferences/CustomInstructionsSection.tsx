@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { SectionLabel } from "./components/SettingsElements";
 import { getPref, setPref } from "../../../src/utils/prefs";
-import { logger } from "../../../src/utils/logger";
+import { logger } from "@beaver/agent-core/platform/logger";
 
 
 const CustomInstructionsSection: React.FC = () => {

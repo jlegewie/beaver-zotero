@@ -27,7 +27,7 @@ import {
 import { checkLibraryExcluded, getDeferredToolPreference, validateLibraryAccess } from '../utils';
 import { libraryRefForLibraryID, modelObjectId, resolveWriteTargetLibrary, writeTargetLibraryError } from '../../../utils/libraryIdentity';
 import { TimeoutContext, checkAborted, TimeoutError } from '../timeout';
-import { logger } from '../../../utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 
 // Safety cap: if a tag is on more than this many items, refuse to snapshot the
 // set so we don't balloon proposed_data. The agent can still perform the op

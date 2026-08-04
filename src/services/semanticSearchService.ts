@@ -1,6 +1,6 @@
 import { BeaverDB, EmbeddingRecord } from './database';
-import { embeddingsService } from './embeddingsService';
-import { logger } from '../utils/logger';
+import { embeddingsService } from '@beaver/agent-core/transport/clients/embeddingsService';
+import { logger } from '@beaver/agent-core/platform/logger';
 import { safeIsInTrash } from '../utils/zoteroUtils';
 
 

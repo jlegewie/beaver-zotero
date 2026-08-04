@@ -39,7 +39,7 @@ import { embeddingIndexStateAtom } from './embeddingIndex';
 import { BeaverDB } from '../../src/services/database';
 import { EmbeddingIndexer } from '../../src/services/embeddingIndexer';
 import { getLibrarySummaries } from '../../src/services/agentDataProvider/libraryCounts';
-import { logger } from '../../src/utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 
 /**
  * Maximum number of selected library items included in `library_selection`.

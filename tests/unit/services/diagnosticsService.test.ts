@@ -1,14 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('../../../src/utils/getAPIBaseURL', () => ({
-    default: 'https://api.example.com',
-}));
-
-vi.mock('../../../src/utils/logger', () => ({
+vi.mock('@beaver/agent-core/platform/logger', () => ({
     logger: vi.fn(),
 }));
 
-vi.mock('../../../src/services/supabaseClient', () => ({
+vi.mock('@beaver/agent-core/transport/supabaseClient', () => ({
     supabase: {
         auth: {
             getSession: vi.fn(),
@@ -16,20 +12,21 @@ vi.mock('../../../src/services/supabaseClient', () => ({
     },
 }));
 
-vi.mock('../../../src/services/clientIdentity', () => ({
+vi.mock('@beaver/agent-core/transport/clientIdentity', () => ({
     resolveClientIdentity: vi.fn(),
 }));
 
 import {
     clearBackendHttpSuccess,
     recordBackendHttpSuccess,
-} from '../../../src/services/backendReachability';
+} from '@beaver/agent-core/transport/backendReachability';
 import {
     clearConnectionFailureReportState,
     reportConnectionFailure,
-} from '../../../src/services/diagnosticsService';
-import { supabase } from '../../../src/services/supabaseClient';
-import { resolveClientIdentity } from '../../../src/services/clientIdentity';
+} from '@beaver/agent-core/transport/clients/diagnosticsService';
+import { setTransportConfig } from '@beaver/agent-core/transport/config';
+import { supabase } from '@beaver/agent-core/transport/supabaseClient';
+import { resolveClientIdentity } from '@beaver/agent-core/transport/clientIdentity';
 import type { ConnectionFailureEvidence } from '@beaver/agent-core/transport/connectionFailure';
 
 const getSessionMock = vi.mocked(supabase.auth.getSession);
@@ -52,6 +49,11 @@ const evidence: ConnectionFailureEvidence = {
 describe('reportConnectionFailure', () => {
     beforeEach(() => {
         vi.restoreAllMocks();
+        setTransportConfig({
+            apiBaseUrl: 'https://api.example.com',
+            supabaseUrl: 'https://example.supabase.co',
+            supabaseAnonKey: 'anon-key',
+        });
         clearBackendHttpSuccess();
         clearConnectionFailureReportState();
         // Default: signed out — no token attached, identity available.
@@ -68,6 +70,35 @@ describe('reportConnectionFailure', () => {
                 user_id: '5551234',
             },
         } as any);
+    });
+
+    it('skips the probe when no host has registered endpoints', async () => {
+        const fetchMock = vi.fn();
+        vi.stubGlobal('fetch', fetchMock);
+        // A fresh module generation starts from "nothing registered"; the
+        // top-level import keeps the registration made in beforeEach.
+        vi.resetModules();
+        const unconfigured = await import('@beaver/agent-core/transport/clients/diagnosticsService');
+
+        const result = await unconfigured.reportConnectionFailure({ evidence });
+
+        expect(result).toEqual({ apiReachable: false, receivedHttpResponse: false, durationMs: 0 });
+        expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it('probes a registered backend even when its base URL is empty', async () => {
+        setTransportConfig({
+            apiBaseUrl: '',
+            supabaseUrl: 'https://example.supabase.co',
+            supabaseAnonKey: 'anon-key',
+        });
+        const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+        vi.stubGlobal('fetch', fetchMock);
+
+        const result = await reportConnectionFailure({ evidence });
+
+        expect(result).toMatchObject({ apiReachable: true, receivedHttpResponse: true });
+        expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/diagnostics/connection-failure');
     });
 
     it('sends lifecycle evidence and recent profile reachability to the backend', async () => {

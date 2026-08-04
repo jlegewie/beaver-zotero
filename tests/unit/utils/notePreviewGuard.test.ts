@@ -4,7 +4,7 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-vi.mock('../../../src/utils/logger', () => ({
+vi.mock('@beaver/agent-core/platform/logger', () => ({
     logger: vi.fn(),
 }));
 
@@ -13,7 +13,7 @@ import {
     assertNoPreviewMarkers,
     stripPreviewMarkers,
 } from '../../../src/utils/notePreviewGuard';
-import { logger } from '../../../src/utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 
 const CLEAN_NOTES = [
     '<div data-schema-version="9"><p>Hello world.</p></div>',

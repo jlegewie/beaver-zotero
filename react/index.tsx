@@ -32,11 +32,12 @@ import { useOnboardingPopups } from './hooks/useOnboardingPopups';
 import { useBackgroundWorkerStatus } from './hooks/useBackgroundWorkerStatus';
 import { useSyncSuppression } from './hooks/useSyncSuppression';
 import { BeaverTemporaryAnnotations } from './utils/annotationUtils';
+import { setTransportConfig } from '@beaver/agent-core/transport/config';
 import { registerZoteroHost } from './host/zotero';
 import { registerZoteroDataProvider } from '../src/services/zoteroDataProvider';
 import { registerZoteroObjectIdResolver } from '../src/utils/libraryIdentity';
 import { registerZoteroClientIdentity } from '../src/services/zoteroClientIdentity';
-import { registerZoteroSupabaseStorage } from '../src/services/zoteroSupabaseStorage';
+import { registerZoteroSupabaseStorage, registerZoteroSupabaseReloadBridge } from '../src/services/zoteroSupabaseStorage';
 import { registerZoteroBusyContext } from '../src/services/busyContext';
 import { registerZoteroSyncPause } from '../src/services/syncPause';
 import { notifyWorkerStartFailure } from './utils/workerUnavailableNotice';
@@ -49,6 +50,16 @@ import { notifyWorkerStartFailure } from './utils/workerUnavailableNotice';
 //
 // Only the webpack copy wires `onWorkerStartFailure` to an in-app popup (hot worker only)
 configurePDFForBeaver({ onWorkerStartFailure: notifyWorkerStartFailure });
+
+// Register the backend endpoints. The `process.env` reads live here rather
+// than in the transport layer because they only work under a bundler that
+// substitutes them at build time; other hosts resolve the same values at
+// runtime. Must run before the first backend request or Supabase client use.
+setTransportConfig({
+    apiBaseUrl: process.env.API_BASE_URL ?? '',
+    supabaseUrl: process.env.SUPABASE_URL ?? '',
+    supabaseAnonKey: process.env.SUPABASE_ANON_KEY ?? '',
+});
 
 // Register the Zotero client host so rendered chat-history components can
 // resolve host-specific navigation and data lookups. Non-Zotero clients omit
@@ -75,6 +86,12 @@ registerZoteroClientIdentity();
 // persists into. Must run before the exported `supabase` client is first
 // used (the client is created lazily on first property access).
 registerZoteroSupabaseStorage();
+
+// Register the window-scoped bridge to Supabase state that survives a plugin
+// reload. Registering is what stops a previous bundle instance's auto-refresh
+// ticker (two tickers race for the single-use refresh token) and adopts its
+// auth lock, so it must run before the client is first used.
+registerZoteroSupabaseReloadBridge();
 
 // Register the Zotero busy-context snapshot attached to outgoing WS
 // diagnostics, and the sync-pause resume handler released when a mutating

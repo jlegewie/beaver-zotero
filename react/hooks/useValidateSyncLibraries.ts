@@ -1,10 +1,10 @@
 import { useAtom, useAtomValue } from 'jotai';
 import { useCallback, useEffect, useRef } from 'react';
 import { syncedLibraryIdsAtom, profileWithPlanAtom } from '../atoms/profile';
-import { accountService } from '../../src/services/accountService';
+import { accountService } from '@beaver/agent-core/transport/clients/accountService';
 import { useLibraryDeletions } from './useLibraryDeletions';
 import { ZoteroLibrary } from '@beaver/agent-core/types/zotero';
-import { logger } from '../../src/utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 
 /**
  * Validates that libraries in syncedLibraryIds exist in Zotero.

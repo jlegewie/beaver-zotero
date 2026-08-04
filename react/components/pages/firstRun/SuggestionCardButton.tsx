@@ -9,7 +9,7 @@ import GlobalSearchIcon from '../../icons/GlobalSearchIcon';
 import FolderDetailIcon from '../../icons/FolderDetailIcon';
 import TagIcon from '../../icons/TagIcon';
 import HighlighterIcon from '../../icons/HighlighterIcon';
-import { logger } from '../../../../src/utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 
 interface SuggestionCardButtonProps {
     card: SuggestionCard;

@@ -3,7 +3,7 @@ import { useAtom, useAtomValue, useSetAtom } from 'jotai';
 import { currentThreadIdAtom, recentThreadsAtom, loadThreadAtom, ThreadData } from '../../../atoms/threads';
 import MenuButton from '../MenuButton';
 import { MenuItem } from '../menu/ContextMenu';
-import { threadService } from '../../../../src/services/threadService';
+import { threadService } from '@beaver/agent-core/transport/threadService';
 import { ChattingIcon } from '../../icons/icons';
 import { ZoteroIcon, ZOTERO_ICONS } from '../../icons/ZoteroIcon';
 import { userAtom } from '../../../atoms/auth';

@@ -1,5 +1,5 @@
 import { sourceBboxesToZoteroRects } from '../../src/services/annotations/annotationGeometry';
-import { logger } from '../../src/utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 import type { BoundingBox } from '@beaver/agent-core/types/citations';
 import type { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import {

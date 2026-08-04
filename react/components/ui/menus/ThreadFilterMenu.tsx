@@ -13,7 +13,7 @@ import { getActiveZoteroLibraryId, getRecentAsync, loadFullItemData } from '../.
 import { UNRESOLVED_LIBRARY_ID } from '../../../../src/utils/libraryIdentity';
 import { searchTitleCreatorYear, scoreSearchResult } from '../../../utils/search';
 import { getPref } from '../../../../src/utils/prefs';
-import { logger } from '../../../../src/utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 import Tooltip from '../Tooltip';
 
 const RECENT_ITEMS_LIMIT = 5;

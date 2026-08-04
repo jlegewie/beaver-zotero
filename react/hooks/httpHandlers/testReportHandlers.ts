@@ -13,7 +13,7 @@ import {
     type ReportSpec,
 } from '../../../src/services/reports';
 import { getZoteroSelectURI } from '../../../src/utils/zoteroUtils';
-import { logger } from '../../../src/utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 
 interface CreateReportRequest {
     spec?: ReportSpec;

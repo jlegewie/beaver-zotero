@@ -1,4 +1,4 @@
-import { logger } from "./logger";
+import { logger } from "@beaver/agent-core/platform/logger";
 
 function redactUrlCredentials(message: string): string {
     if (!message) return message;

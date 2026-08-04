@@ -510,10 +510,11 @@ async function onMainWindowUnload(win: Window): Promise<void> {
 
         // 1. Stop Supabase auto-refresh timer to prevent stale timers
         //    surviving plugin reload and causing token refresh races.
-        //    The cleanup function is registered by supabaseClient.ts (webpack bundle)
-        //    on the window where the bundle was loaded.  Use the `win` parameter
-        //    (the window being unloaded) rather than Zotero.getMainWindow(), which
-        //    may be unreliable during unload of the last window.
+        //    The cleanup function is published by zoteroSupabaseStorage.ts
+        //    (webpack bundle) on the window where the bundle was loaded.  Use
+        //    the `win` parameter (the window being unloaded) rather than
+        //    Zotero.getMainWindow(), which may be unreliable during unload of
+        //    the last window.
         // Reset the shared auth lock even if disposing Supabase fails so a
         // stale held-lock cannot block authentication on the next load.
         await cleanupSupabaseWindowState(win);

@@ -787,7 +787,7 @@ export async function handleTestDocumentSerializedHttpRequest(request: any) {
         isPreparedJsonMessage,
         materializePreparedJsonMessage,
         preparedJsonEnvelope,
-    } = await import('../../../src/services/preparedJsonMessage');
+    } = await import('@beaver/agent-core/transport/preparedJsonMessage');
 
     const wsRequest = {
         event: 'zotero_document_request' as const,

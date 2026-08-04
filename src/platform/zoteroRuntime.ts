@@ -9,7 +9,7 @@
  * rather than from a bundle entry — see the comment there.
  */
 
-import { setRuntimeAdapterIfUnset, type RuntimeAdapter } from './runtime';
+import { setRuntimeAdapterIfUnset, type RuntimeAdapter } from '@beaver/agent-core/platform/runtime';
 
 /** The running Zotero's version, or an empty string when it reports none. */
 function zoteroVersion(): string {

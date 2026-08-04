@@ -45,7 +45,7 @@ import {
     defaultAnnotationPanelState,
     toggleAnnotationPanelVisibilityAtom,
 } from '../../../atoms/messageUIState';
-import { logger } from '../../../../src/utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 import Button from '../../../components/ui/Button';
 import { textWithTrailingNoWrap } from '../../../utils/textWithTrailingNoWrap';
 

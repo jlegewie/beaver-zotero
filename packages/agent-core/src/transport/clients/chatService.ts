@@ -1,8 +1,7 @@
-import { ApiService } from './apiService';
-import API_BASE_URL from '../utils/getAPIBaseURL';
-import type { ModelProvider, CustomChatModel } from '@beaver/agent-core/types/customChatModel';
-import { ApiError } from '../../react/types/apiErrors';
-import { logger } from '../utils/logger';
+import { ApiService } from '../apiService';
+import type { ModelProvider, CustomChatModel } from '../../types/customChatModel';
+import { ApiError } from '../../types/apiErrors';
+import { logger } from '../../platform/logger';
 
 
 /** Upper bound on the key-verification round trip, including the provider call. */
@@ -53,7 +52,7 @@ export class ChatService extends ApiService {
      * Creates a new ChatService instance
      * @param baseUrl The base URL of the backend API
      */
-    constructor(baseUrl: string) {
+    constructor(baseUrl?: string) {
         super(baseUrl);
     }
 
@@ -115,4 +114,4 @@ export class ChatService extends ApiService {
 }
 
 // Export a singleton instance for backward compatibility during transition
-export const chatService = new ChatService(API_BASE_URL);
+export const chatService = new ChatService();

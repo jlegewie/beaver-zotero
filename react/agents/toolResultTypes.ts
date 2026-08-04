@@ -9,7 +9,7 @@
 import { ExternalReference } from "@beaver/agent-core/types/externalReferences";
 import { ZoteroItemReference, CollectionReference, AttachmentInfo } from "@beaver/agent-core/types/zotero";
 import { ToolReturnPart } from "@beaver/agent-core/agents/types";
-import { logger } from "../../src/utils/logger";
+import { logger } from "@beaver/agent-core/platform/logger";
 import { libraryRefForLibraryID, resolveObjectId } from "../../src/utils/libraryIdentity";
 
 // ============================================================================

@@ -2,7 +2,7 @@ import { useEffect, useRef, useCallback } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { readerTextSelectionAtom } from '../atoms/messageComposition';
 import { currentReaderAttachmentAtom, updateReaderAttachmentAtom, clearReaderAttachmentAtom, isReaderLibrarySearchable, addItemToCurrentMessageItemsAtom, currentMessageItemsAtom, notifyReaderLibraryExcludedAtom } from '../atoms/messageComposition';
-import { logger } from '../../src/utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 import { addSelectionChangeListener, getCurrentReader, getSelectedTextAsTextSelection } from '../utils/readerUtils';
 import { isValidAnnotationType, TextSelection } from '@beaver/agent-core/types/attachments/apiTypes';
 import { isAuthenticatedAtom } from "../atoms/auth";

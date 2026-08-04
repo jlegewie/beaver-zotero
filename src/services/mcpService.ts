@@ -9,7 +9,7 @@
  * (via useMcpServer hook). Use `Zotero.Beaver?.xxx` instead of `addon.xxx`.
  */
 
-import { logger } from '../utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 
 // =============================================================================
 // Types

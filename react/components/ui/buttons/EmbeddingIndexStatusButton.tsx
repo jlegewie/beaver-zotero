@@ -10,7 +10,7 @@ import {
 import IconButton from "../IconButton";
 import { AlertIcon, SyncIcon } from "../../icons/icons";
 import Tooltip from "../Tooltip";
-import { logger } from "../../../../src/utils/logger";
+import { logger } from "@beaver/agent-core/platform/logger";
 
 
 /**

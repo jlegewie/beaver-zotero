@@ -1,4 +1,4 @@
-import { logger } from "./logger";
+import { logger } from "@beaver/agent-core/platform/logger";
 
 /**
  * Enhanced item selection that ensures the item is visible before selecting it

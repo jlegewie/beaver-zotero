@@ -9,7 +9,7 @@ import Button from '../ui/Button';
 import SearchMenu, { MenuPosition } from '../ui/menus/SearchMenu';
 import ModelSelectionButton from '../ui/buttons/ModelSelectionButton';
 import MessageAttachmentDisplay from '../messages/MessageAttachmentDisplay';
-import { logger } from '../../../src/utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 import { isLibraryTabAtom, isWebSearchAllowedAtom, isWebSearchEnabledAtom } from '../../atoms/ui';
 import { currentNoteItemAtom } from '../../atoms/zoteroContext';
 import { selectedModelAtom, isUsingBeaverCreditsAtom } from '../../atoms/models';

@@ -12,7 +12,7 @@
  * Trashed collections and items are excluded throughout.
  */
 
-import { logger } from '../../utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 
 /** Direct-membership counts for a single collection. */
 export interface CollectionItemCounts {

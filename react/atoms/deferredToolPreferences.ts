@@ -14,7 +14,7 @@
 
 import { atom } from 'jotai';
 import { getPref, setPref } from '../../src/utils/prefs';
-import { logger } from '../../src/utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 import {
     DEFAULT_DEFERRED_TOOL_GROUPS,
     RUN_APPROVAL_ACTION_TYPE_ALIASES,

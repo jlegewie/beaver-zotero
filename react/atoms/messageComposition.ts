@@ -2,7 +2,7 @@ import { atom } from "jotai";
 import { truncateText } from "../utils/stringUtils";
 import { allUserAttachmentKeysAtom } from "../agents/atoms";
 import { createElement } from 'react';
-import { logger } from "../../src/utils/logger";
+import { logger } from "@beaver/agent-core/platform/logger";
 import { addExcludedLibraryPopupAtom, addPopupMessageAtom, addRegularItemPopupAtom, addRegularItemsSummaryPopupAtom, EXCLUDED_LIBRARY_READER_POPUP_ID, EXCLUDED_LIBRARY_SELECTION_POPUP_ID, removePopupMessageAtom, safeChildAttachments } from "../utils/popupMessageUtils";
 import { getItemValidationAtom, isHardBlockedValidation, isRejectedItemValidation, validateItemsAtom, validateRegularItemAtom } from './itemValidation';
 import { excludedLibraryIdsAtom, searchableLibraryIdsAtom } from './profile';

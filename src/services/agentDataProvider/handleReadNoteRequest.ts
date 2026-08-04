@@ -5,7 +5,7 @@
  * warming the simplification cache used by edit_note.
  */
 
-import { logger } from '../../utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 import { getOrSimplify } from '../../utils/noteHtmlSimplifier';
 import { preloadNotePageLabels } from '../../utils/noteCitationExpand';
 import { getNoteHtmlForRead } from '../../utils/noteEditorIO';

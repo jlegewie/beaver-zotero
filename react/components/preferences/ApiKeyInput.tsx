@@ -3,9 +3,9 @@ import { LinkIcon, ArrowRightIcon, Spinner, TickIcon, AlertIcon, Icon, Informati
 import IconButton from "../ui/IconButton";
 import Button from "../ui/Button";
 import { useSetAtom, useAtomValue } from 'jotai';
-import { chatService, ErrorType } from '../../../src/services/chatService';
+import { chatService, ErrorType } from '@beaver/agent-core/transport/clients/chatService';
 import { ProviderType } from '../../atoms/models';
-import { logger } from "../../../src/utils/logger";
+import { logger } from "@beaver/agent-core/platform/logger";
 import { validateSelectedModelAtom, isAppKeyModelAtom, selectedModelAtom, setApiKeyAtom } from '../../atoms/models';
 import { addAPIKeyMessageAtom } from '../../utils/popupMessageUtils';
 

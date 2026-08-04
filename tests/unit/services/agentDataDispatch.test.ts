@@ -2,7 +2,7 @@
  * Registry contract for the default agent data-provider.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { AgentDataProviderMap } from '../../../src/services/agentDataDispatch';
+import type { AgentDataProviderMap } from '@beaver/agent-core/transport/agentDataDispatch';
 
 describe('default agent data-provider registry', () => {
     afterEach(() => {
@@ -10,13 +10,13 @@ describe('default agent data-provider registry', () => {
     });
 
     it('throws an actionable error when nothing has been registered', async () => {
-        const { resolveDefaultAgentDataProvider } = await import('../../../src/services/agentDataDispatch');
+        const { resolveDefaultAgentDataProvider } = await import('@beaver/agent-core/transport/agentDataDispatch');
         expect(() => resolveDefaultAgentDataProvider()).toThrow(/setDefaultAgentDataProvider/);
     });
 
     it('resolves the map from the registered factory', async () => {
         const { setDefaultAgentDataProvider, resolveDefaultAgentDataProvider } =
-            await import('../../../src/services/agentDataDispatch');
+            await import('@beaver/agent-core/transport/agentDataDispatch');
         const fakeMap: AgentDataProviderMap = {};
         const factory = vi.fn(() => fakeMap);
 
@@ -29,7 +29,7 @@ describe('default agent data-provider registry', () => {
 
     it('forwards options to the registered factory', async () => {
         const { setDefaultAgentDataProvider, resolveDefaultAgentDataProvider } =
-            await import('../../../src/services/agentDataDispatch');
+            await import('@beaver/agent-core/transport/agentDataDispatch');
         const factory = vi.fn(() => ({} as AgentDataProviderMap));
 
         setDefaultAgentDataProvider(factory);
@@ -45,13 +45,13 @@ describe('sync-pause resume seam', () => {
     });
 
     it('is a no-op when nothing has been registered', async () => {
-        const { notifySyncPauseOwnerSettled } = await import('../../../src/services/agentDataDispatch');
+        const { notifySyncPauseOwnerSettled } = await import('@beaver/agent-core/transport/agentDataDispatch');
         expect(() => notifySyncPauseOwnerSettled('local-mutating-run')).not.toThrow();
     });
 
     it('forwards the settled owner to the registered handler', async () => {
         const { setSyncPauseResumeHandler, notifySyncPauseOwnerSettled } =
-            await import('../../../src/services/agentDataDispatch');
+            await import('@beaver/agent-core/transport/agentDataDispatch');
         const handler = vi.fn();
 
         setSyncPauseResumeHandler(handler);

@@ -10,7 +10,7 @@ import { store } from '../../react/store';
 import { searchableLibraryIdsAtom } from '../../react/atoms/profile';
 import { buildZoteroInstanceWire } from './zoteroInstanceWire';
 import { ZOTERO_PLUGIN_CLIENT_TYPE, ZOTERO_PLUGIN_FEATURES } from '@beaver/agent-core/protocol/agentProtocol';
-import { ClientIdentity, setClientIdentityProvider } from './clientIdentity';
+import { ClientIdentity, setClientIdentityProvider } from '@beaver/agent-core/transport/clientIdentity';
 
 function resolveZoteroClientIdentity(): ClientIdentity {
     return {

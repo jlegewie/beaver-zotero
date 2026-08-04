@@ -5,7 +5,7 @@ import { syncZoteroDatabase } from '../../../../src/utils/sync';
 import IconButton from "../IconButton";
 import { AlertIcon, SyncIcon } from "../../icons/icons";
 import { syncedLibraryIdsAtom } from "../../../atoms/profile";
-import { logger } from '../../../../src/utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 import Tooltip from "../Tooltip";
 
 

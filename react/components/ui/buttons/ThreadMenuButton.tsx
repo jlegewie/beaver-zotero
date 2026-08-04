@@ -16,7 +16,7 @@ import { getSelectedCollection } from '../../../../src/utils/zoteroSelection';
 import { selectItem, selectItemById } from '../../../../src/utils/selectItem';
 import { store } from '../../../store';
 import { prepareCitationRenderContext } from '../../../utils/citationRenderContext';
-import { threadService } from '../../../../src/services/threadService';
+import { threadService } from '@beaver/agent-core/transport/threadService';
 import { clearRecentChatsCache } from '../../RecentChats';
 import { clearThreadListCache } from '../../ThreadListView';
 

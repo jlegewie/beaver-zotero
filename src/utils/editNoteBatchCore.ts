@@ -50,7 +50,7 @@ import {
     buildPartialSimplifiedTagMessage,
     buildExpansionErrorMessage,
 } from './editNoteValidation';
-import { logger } from './logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 
 // =============================================================================
 // Public types

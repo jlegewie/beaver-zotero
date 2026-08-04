@@ -8,14 +8,14 @@
 
 import PQueue from 'p-queue';
 import { getPDFPageCount, getPDFPageCountFromData } from '../../react/utils/pdfUtils';
-import { logger } from '../utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 import { store } from '../../react/store';
 import { isAuthenticatedAtom, userAtom, userIdAtom } from '../../react/atoms/auth';
 import { attachmentsService, UploadQueueItem, CompleteUploadRequest, UploadErrorCode, ErrorCode, FailureStatus } from './attachmentsService';
 import { isFileUploaderRunningAtom, isFileUploaderFailedAtom, fileUploaderBackoffUntilAtom } from '../../react/atoms/sync';
 import { hasCompletedOnboardingAtom, planFeaturesAtom } from '../../react/atoms/profile';
 import { FileHashReference, ZoteroItemReference } from '@beaver/agent-core/types/zotero';
-import { supabase } from "./supabaseClient";
+import { supabase } from "@beaver/agent-core/transport/supabaseClient";
 import { addOrUpdateFailedUploadMessageAtom } from '../../react/utils/popupMessageUtils';
 import { showFileStatusDetailsAtom, zoteroServerCredentialsErrorAtom, zoteroServerDownloadErrorAtom } from '../../react/atoms/ui';
 import { getMimeType, getMimeTypeFromData, safeFileExists } from '../utils/zoteroUtils';

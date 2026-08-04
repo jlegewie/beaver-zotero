@@ -16,13 +16,13 @@ const { mockSupabase, mockResolveClientIdentity } = vi.hoisted(() => ({
     mockResolveClientIdentity: vi.fn(),
 }));
 
-vi.mock('../../../src/services/supabaseClient', () => ({ supabase: mockSupabase }));
-vi.mock('../../../src/services/clientIdentity', () => ({
+vi.mock('@beaver/agent-core/transport/supabaseClient', () => ({ supabase: mockSupabase }));
+vi.mock('@beaver/agent-core/transport/clientIdentity', () => ({
     resolveClientIdentity: mockResolveClientIdentity,
 }));
-vi.mock('../../../src/utils/logger', () => ({ logger: vi.fn() }));
+vi.mock('@beaver/agent-core/platform/logger', () => ({ logger: vi.fn() }));
 
-import { accountService } from '../../../src/services/accountService';
+import { accountService } from '@beaver/agent-core/transport/clients/accountService';
 
 const IDENTITY = {
     frontendVersion: '0.22.5',

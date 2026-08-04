@@ -1,9 +1,9 @@
 import { atom } from 'jotai';
-import { logger } from '../../src/utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 import { isLibraryReferencePortable, resolveItemReference } from '../../src/utils/libraryIdentity';
 import { dismissDiffPreview } from '../utils/noteEditorDiffPreview';
 import { updateDiffPreviewForNote, diffPreviewNoteKeyAtom } from '../utils/diffPreviewCoordinator';
-import { agentActionsService, AckActionLink } from '../../src/services/agentActionsService';
+import { agentActionsService, AckActionLink } from '@beaver/agent-core/transport/clients/agentActionsService';
 import { notifyApprovalRequest } from '../../src/services/systemNotifications';
 import type { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import type { ActionStatus } from '@beaver/agent-core/types/agentActions/base';

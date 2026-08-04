@@ -1,10 +1,9 @@
-import { ApiService } from './apiService';
-import API_BASE_URL from '../utils/getAPIBaseURL';
-import { ExcludedLibrary, OverallSyncStatus, SafeProfileWithPlan } from '@beaver/agent-core/types/profile';
-import { ModelConfig } from '../../react/types/models';
-import { ZoteroLibrary } from '@beaver/agent-core/types/zotero';
-import { resolveClientIdentity } from './clientIdentity';
-import { logger } from '../utils/logger';
+import { ApiService } from '../apiService';
+import { ExcludedLibrary, OverallSyncStatus, SafeProfileWithPlan } from '../../types/profile';
+import { ModelConfig } from '../../types/models';
+import { ZoteroLibrary } from '../../types/zotero';
+import { resolveClientIdentity } from '../clientIdentity';
+import { logger } from '../../platform/logger';
 
 interface AuthorizationRequest {
     zotero_local_id: string;
@@ -126,7 +125,7 @@ export class AccountService extends ApiService {
      * Creates a new AccountService instance
      * @param backendUrl The base URL of the backend API
      */
-    constructor(backendUrl: string) {
+    constructor(backendUrl?: string) {
         super(backendUrl);
     }
 
@@ -401,4 +400,4 @@ export class AccountService extends ApiService {
 }
 
 // Export accountService
-export const accountService = new AccountService(API_BASE_URL); 
+export const accountService = new AccountService();

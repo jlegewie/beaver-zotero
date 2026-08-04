@@ -7,13 +7,13 @@ import { createStore } from 'jotai';
 // =============================================================================
 
 const getThreadRunsMock = vi.fn();
-vi.mock('../../../src/services/agentService', () => ({
+vi.mock('@beaver/agent-core/transport/agentService', () => ({
     agentRunService: { getThreadRuns: (...args: unknown[]) => getThreadRunsMock(...args) },
     agentService: { cancel: vi.fn() },
 }));
 
 const getThreadMock = vi.fn();
-vi.mock('../../../src/services/threadService', () => ({
+vi.mock('@beaver/agent-core/transport/threadService', () => ({
     threadService: { getThread: (...args: unknown[]) => getThreadMock(...args) },
 }));
 
@@ -166,7 +166,7 @@ import {
     isLoadingThreadAtom,
     pendingScrollToRunAtom,
 } from '../../../react/atoms/threads';
-import { ApiError } from '../../../react/types/apiErrors';
+import { ApiError } from '@beaver/agent-core/types/apiErrors';
 
 const CURRENT = { zoteroUserId: '111', zoteroLocalId: 'CURKEY' };
 const FOREIGN = { zoteroUserId: '999', zoteroLocalId: 'FOREIGNKEY' };
