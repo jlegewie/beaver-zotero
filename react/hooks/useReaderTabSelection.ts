@@ -19,6 +19,7 @@ import { threadAgentActionsAtom, getZoteroItemReferenceFromAgentAction, hasAppli
 import { BEAVER_CITATION_ANNOTATION_AUTHOR, isBeaverAuthoredAnnotation } from '../../src/constants/annotations';
 import { getItemValidationAtom, isRejectedItemValidation } from '../atoms/itemValidation';
 import type { CreatedAnnotationResult } from '@beaver/agent-core/types/agentActions/createAnnotations';
+import { isActiveReaderTabType } from '../utils/zoteroTabTypes';
 
 /**
  * Module-level variable to track the Zotero notifier observer ID.
@@ -356,7 +357,7 @@ export function useReaderTabSelection() {
                     const selectedTab = mainWindow.Zotero_Tabs._tabs.find(tab => tab.id === ids[0]);
                     if (!selectedTab) return;
 
-                    if (selectedTab.type === 'reader') {
+                    if (isActiveReaderTabType(selectedTab.type)) {
                         // Re-selecting the reader already being tracked is a
                         // no-op — keep its listener and staged selection.
                         const activeReader = Zotero.Reader.getByTabID(selectedTab.id);
@@ -373,6 +374,18 @@ export function useReaderTabSelection() {
                         // kind, which read straight from the open reader.
                         const previousReader = detachActiveReader();
                         clearReaderAttachment();
+
+                        // A restored reader is selected as `reader-loading`,
+                        // before Zotero has registered a Reader instance. The
+                        // tab already carries the attachment item ID, which is
+                        // enough to report an excluded library immediately.
+                        // Do this after clearing so the clear cannot remove the
+                        // notice we just added.
+                        if (selectedTab.data?.itemID) {
+                            notifyReaderLibraryExcluded({
+                                itemID: selectedTab.data.itemID,
+                            });
+                        }
 
                         await BeaverTemporaryAnnotations.cleanupAll(previousReader as ZoteroReader);
                         if (!isMounted || transition !== tabTransitionGeneration) return;
@@ -401,6 +414,32 @@ export function useReaderTabSelection() {
 
                         await BeaverTemporaryAnnotations.cleanupAll(previousReader as ZoteroReader);
                     }
+                }
+                // Selecting a restored reader emits `select` while its type is
+                // `reader-loading`, followed by `load` once the Reader instance
+                // is initialized. The initial poll may time out on a slow PDF,
+                // so use the load event as the authoritative setup retry.
+                // Zotero emits this event even though the current zotero-types
+                // Notifier.Event union does not include `load`.
+                if (type === 'tab' && (event as string) === 'load') {
+                    const loadedTabId = String(ids[0]);
+                    if (loadedTabId !== mainWindow.Zotero_Tabs.selectedID) return;
+
+                    const loadedTab = mainWindow.Zotero_Tabs._tabs.find(
+                        (tab) => tab.id === loadedTabId,
+                    );
+                    if (!loadedTab || loadedTab.type !== 'reader') return;
+
+                    const transition = ++tabTransitionGeneration;
+                    const loadedReader = Zotero.Reader.getByTabID(loadedTabId);
+                    if (!loadedReader) {
+                        logger(`useReaderTabSelection: Reader tab ${loadedTabId} loaded without a reader instance.`);
+                        return;
+                    }
+                    if (!isMounted || transition !== tabTransitionGeneration) return;
+
+                    logger(`useReaderTabSelection: Reader tab finished loading (itemID: ${loadedReader.itemID}). Setting up reader.`);
+                    await setupReader(loadedReader);
                 }
                 // Annotation events
                 if (type === 'item') {
@@ -511,6 +550,6 @@ export function useReaderTabSelection() {
                 logger(`useReaderTabSelection: Error cleaning up temporary annotations on unmount: ${error}`);
             });
         };
-    }, [setupReader, detachActiveReader, setReaderTextSelection, updateReaderAttachment, clearReaderAttachment, mainWindow, waitForInternalReader, isBeaverUIVisible, isAuthenticated, isDeviceAuthorized, hasAuthorized, isLibraryAccessReady, searchableLibraryIdsKey]);
+    }, [setupReader, detachActiveReader, setReaderTextSelection, updateReaderAttachment, clearReaderAttachment, notifyReaderLibraryExcluded, mainWindow, waitForInternalReader, isBeaverUIVisible, isAuthenticated, isDeviceAuthorized, hasAuthorized, isLibraryAccessReady, searchableLibraryIdsKey]);
 
 }
