@@ -36,7 +36,7 @@ import { registerZoteroHost } from './host/zotero';
 import { registerZoteroDataProvider } from '../src/services/zoteroDataProvider';
 import { registerZoteroObjectIdResolver } from '../src/utils/libraryIdentity';
 import { registerZoteroClientIdentity } from '../src/services/zoteroClientIdentity';
-import { registerZoteroSupabaseStorage } from '../src/services/zoteroSupabaseStorage';
+import { registerZoteroSupabaseStorage, registerZoteroSupabaseReloadBridge } from '../src/services/zoteroSupabaseStorage';
 import { registerZoteroBusyContext } from '../src/services/busyContext';
 import { registerZoteroSyncPause } from '../src/services/syncPause';
 import { notifyWorkerStartFailure } from './utils/workerUnavailableNotice';
@@ -75,6 +75,12 @@ registerZoteroClientIdentity();
 // persists into. Must run before the exported `supabase` client is first
 // used (the client is created lazily on first property access).
 registerZoteroSupabaseStorage();
+
+// Register the window-scoped bridge to Supabase state that survives a plugin
+// reload. Registering is what stops a previous bundle instance's auto-refresh
+// ticker (two tickers race for the single-use refresh token) and adopts its
+// auth lock, so it must run before the client is first used.
+registerZoteroSupabaseReloadBridge();
 
 // Register the Zotero busy-context snapshot attached to outgoing WS
 // diagnostics, and the sync-pause resume handler released when a mutating

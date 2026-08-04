@@ -2,10 +2,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const {
     mockSetSupabaseStorageAdapter,
+    mockSetSupabaseReloadBridge,
     mockEncryptedStorageConstructed,
     store,
 } = vi.hoisted(() => ({
     mockSetSupabaseStorageAdapter: vi.fn(),
+    mockSetSupabaseReloadBridge: vi.fn(),
     mockEncryptedStorageConstructed: vi.fn(),
     store: {
         getItem: vi.fn(),
@@ -16,6 +18,7 @@ const {
 
 vi.mock('../../../src/services/supabaseClient', () => ({
     setSupabaseStorageAdapter: mockSetSupabaseStorageAdapter,
+    setSupabaseReloadBridge: mockSetSupabaseReloadBridge,
 }));
 
 vi.mock('../../../src/services/EncryptedStorage', () => ({

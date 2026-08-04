@@ -1,17 +1,6 @@
 import { createClient, AuthApiError, type SupabaseClient } from '@supabase/supabase-js';
 import { logger } from '../utils/logger';
 
-// Stop any previous Supabase client's auto-refresh timer that may have survived
-// a plugin reload.  Use `window` (the current script's window) rather than
-// Zotero.getMainWindow() so that opening a second main window doesn't
-// accidentally stop the first window's active auto-refresh timer.
-// eslint-disable-next-line no-restricted-globals -- intentionally using `window` (this script's window), not getMainWindow()
-const currentWindow: Window | undefined = typeof window !== 'undefined' ? window : undefined;
-if (currentWindow?.__beaverDisposeSupabase) {
-    currentWindow.__beaverDisposeSupabase();
-    logger('Stopped previous Supabase client auto-refresh timer');
-}
-
 /**
  * Storage backend Supabase persists the auth session into. Matches the subset of
  * the Web Storage / Supabase storage interface the auth client uses.
@@ -45,6 +34,80 @@ export function setSupabaseStorageAdapter(adapter: SupabaseStorageAdapter): void
     injectedStorageAdapter = adapter;
 }
 
+/** Stops a Supabase client: marks it disposed and stops its auto-refresh ticker. */
+export type SupabaseDisposer = () => Promise<void>;
+
+/**
+ * Host access to the Supabase state that has to outlive a bundle reload: the
+ * previous instance's disposer, and the auth lock.
+ *
+ * Reloading the bundle creates a second module instance while the first one's
+ * auto-refresh ticker is still running. Two tickers refreshing the same session
+ * race for a single-use refresh token, so the new instance stops the old one
+ * through `takePreviousDisposer()`. The auth lock is shared for the mirror-image
+ * reason: an operation already waiting behind an in-flight refresh must still be
+ * released by the old holder once the new instance takes over.
+ *
+ * The host decides how far that state reaches — the Zotero plugin scopes it to
+ * the window that loaded the bundle, so reloading one window never touches
+ * another window's live client.
+ *
+ * A host that neither reloads its bundle nor needs to stop the client from
+ * outside this bundle can skip registration entirely: there is then no previous
+ * instance to stop and no lock to inherit. Code in the same bundle can always
+ * call `disposeSupabaseClient` directly; `publishDisposer` exists for the
+ * reload and cross-bundle cases, where the caller cannot import it.
+ */
+export interface SupabaseReloadBridge {
+    /**
+     * Returns the disposer published by the previous instance, if any, and
+     * clears it so it runs at most once.
+     */
+    takePreviousDisposer(): SupabaseDisposer | undefined;
+    /**
+     * Publishes this instance's disposer, for the next instance's
+     * `takePreviousDisposer()` and for the host's own shutdown path.
+     */
+    publishDisposer(dispose: SupabaseDisposer): void;
+    /**
+     * Returns the auth lock shared with previous instances, adopting `fallback`
+     * as the shared lock when there is none yet.
+     */
+    shareAuthLock(fallback: AuthLockState): AuthLockState;
+}
+
+let reloadBridge: SupabaseReloadBridge | null = null;
+
+/**
+ * Register the bridge to reload-persistent Supabase state. Call once at bundle
+ * init (e.g. `registerZoteroSupabaseReloadBridge()` from `react/index.tsx`),
+ * before the Supabase client is first used.
+ *
+ * Registering adopts the shared auth lock and stops any previous instance's
+ * auto-refresh ticker; this instance's disposer is published later, when its
+ * client is created.
+ *
+ * Throws once a client exists, because every effect of registering is wrong at
+ * that point: the disposer taken off the host would be this client's own, so
+ * stopping it would kill a live auto-refresh ticker, and swapping the auth lock
+ * would strand any operation already queued on the old one.
+ */
+export function setSupabaseReloadBridge(bridge: SupabaseReloadBridge): void {
+    if (supabaseInstance) {
+        throw new Error('Supabase reload bridge must be set before the Supabase client is first used');
+    }
+    reloadBridge = bridge;
+    authLock = bridge.shareAuthLock(authLock);
+
+    const previousDispose = bridge.takePreviousDisposer();
+    if (previousDispose) {
+        // Not awaited: registration runs during bundle init and must not block
+        // on the old client's teardown.
+        logger('Stopping previous Supabase client auto-refresh timer');
+        previousDispose().catch((e) => logger(`Failed to stop previous Supabase client: ${e}`, 2));
+    }
+}
+
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseAnonKey = process.env.SUPABASE_ANON_KEY;
 
@@ -71,7 +134,7 @@ interface LockQueueEntry {
     timeoutId: ReturnType<typeof setTimeout> | null;
 }
 
-interface AuthLockState {
+export interface AuthLockState {
     locked: boolean;
     queue: LockQueueEntry[];
     lockName: string | null;
@@ -79,21 +142,20 @@ interface AuthLockState {
     tokenCounter: number;      // Counter for generating unique lock tokens
 }
 
-// Persist auth lock on the current window so it survives webpack module reloads
-const previousLock: AuthLockState | undefined = (currentWindow as any)?.__beaverAuthLock;
-const authLock: AuthLockState = previousLock ?? {
-    locked: false,
-    queue: [],
-    lockName: null,
-    lockToken: null,
-    tokenCounter: 0
-};
-// Preserve the existing queue when the bundle reloads. If an auth operation is
-// already waiting behind an in-flight refresh, the old holder can still release
-// this shared lock and let that waiter continue under the new module instance.
-if (currentWindow) {
-    (currentWindow as any).__beaverAuthLock = authLock;
+function createAuthLockState(): AuthLockState {
+    return {
+        locked: false,
+        queue: [],
+        lockName: null,
+        lockToken: null,
+        tokenCounter: 0
+    };
 }
+
+// Starts instance-local and is swapped for the reload-persistent lock when a
+// host registers its bridge. Registration happens at bundle init, before any
+// auth operation runs, so no lock holder or waiter can observe the swap.
+let authLock: AuthLockState = createAuthLockState();
 
 /**
  * Error thrown when lock acquisition times out
@@ -264,6 +326,21 @@ async function stopDisposedSupabaseClient(client: SupabaseClientInstance): Promi
     await client.auth.stopAutoRefresh();
 }
 
+/**
+ * Stop this instance's Supabase client: mark it disposed so the pending
+ * `startAutoRefresh` chain doesn't restart the ticker, then stop the ticker.
+ *
+ * Published through the reload bridge so the next bundle instance and the
+ * host's shutdown path can stop this client. Safe to call repeatedly and when
+ * no client was ever created — the disposed flag is only set alongside a
+ * client, so it can never pre-emptively disable one created later.
+ */
+export async function disposeSupabaseClient(): Promise<void> {
+    if (!supabaseInstance) return;
+    disposed = true;
+    await stopDisposedSupabaseClient(supabaseInstance);
+}
+
 function createSupabaseClient(): SupabaseClientInstance {
     // Storage the auth client persists into: the host-registered adapter.
     // Falling back to an unpersisted in-memory store here would silently log
@@ -301,8 +378,8 @@ function createSupabaseClient(): SupabaseClientInstance {
     // startAutoRefresh() removes the visibility listener and runs the ticker
     // unconditionally.  We must call it AFTER initialize() resolves, because
     // _initialize()'s finally block re-registers the listener.  Calling it
-    // before (as was done previously) is a no-op — the listener doesn't exist
-    // yet and gets registered right after.
+    // earlier is a no-op — the listener doesn't exist yet and gets registered
+    // right after.
     // Guard: if the client is disposed (plugin reload / shutdown) before
     // initialize() resolves, skip startAutoRefresh() so we don't resurrect
     // the old client's ticker alongside the new one.
@@ -320,17 +397,9 @@ function createSupabaseClient(): SupabaseClientInstance {
         logger(`Failed to initialize/start Supabase auto-refresh: ${e}`, 2);
     });
 
-    // Register cleanup function on the current window so that:
-    // 1. Module-level reload cleanup (above) can stop this client's timer
-    // 2. hooks.ts (esbuild bundle) can call win.__beaverDisposeSupabase during shutdown
-    // Using `window` scopes the function to the window that loaded this bundle,
-    // so multi-window scenarios don't interfere with each other.
-    if (currentWindow) {
-        currentWindow.__beaverDisposeSupabase = async () => {
-            disposed = true;
-            await stopDisposedSupabaseClient(client);
-        };
-    }
+    // Publish the disposer now that there is a client to stop, so a later
+    // reload and the host's shutdown path can stop this client's ticker.
+    reloadBridge?.publishDisposer(disposeSupabaseClient);
 
     return client;
 }
