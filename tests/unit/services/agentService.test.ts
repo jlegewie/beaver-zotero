@@ -45,6 +45,7 @@ vi.mock('../../../react/agents/agentActions', () => ({
 }));
 
 import { AgentConnectionError, AgentService, ConnectTimeoutError } from '@beaver/agent-core/transport/agentService';
+import { setTransportConfig } from '@beaver/agent-core/transport/config';
 import type { AgentRunRequest, WSCallbacks } from '@beaver/agent-core/protocol/agentProtocol';
 
 class MockWebSocket {
@@ -181,6 +182,19 @@ describe('AgentService reconnect handling', () => {
     afterEach(() => {
         vi.unstubAllGlobals();
         vi.useRealTimers();
+    });
+
+    // The exported singleton is constructed with no URL, so its socket address
+    // comes from the transport config at connect time.
+    it('derives the socket URL from config registered after construction', () => {
+        const service = new AgentService();
+        setTransportConfig({
+            apiBaseUrl: 'https://api.example.com',
+            supabaseUrl: 'https://p.supabase.co',
+            supabaseAnonKey: 'anon',
+        });
+
+        expect((service as any).getWebSocketUrl()).toBe('wss://api.example.com/api/v1/agents/beaver/run');
     });
 
     it('silently supersedes the old socket on reconnect and ignores its later close event', async () => {

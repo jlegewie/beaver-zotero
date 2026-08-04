@@ -8,7 +8,7 @@
  */
 
 import { supabase } from './supabaseClient';
-import API_BASE_URL from '../platform/getAPIBaseURL';
+import { getApiBaseUrl } from './config';
 import { logger } from '../platform/logger';
 import { AgentRun } from '../agents/types';
 import type { AgentAction } from '../agents/agentActionTypes';
@@ -150,7 +150,8 @@ export class ConnectTimeoutError extends AgentConnectionError {
 }
 
 export class AgentService {
-    private baseUrl: string;
+    /** Set only when a caller pins this instance to a specific backend. */
+    private overrideBaseUrl?: string;
     private ws: WebSocket | null = null;
     private callbacks: WSCallbacks | null = null;
     private connecting: boolean = false;
@@ -177,9 +178,17 @@ export class AgentService {
      */
     private dataProvider: AgentDataProviderMap | null;
 
-    constructor(baseUrl: string, dataProvider?: AgentDataProviderMap) {
-        this.baseUrl = baseUrl;
+    constructor(baseUrl?: string, dataProvider?: AgentDataProviderMap) {
+        this.overrideBaseUrl = baseUrl;
         this.dataProvider = dataProvider ?? null;
+    }
+
+    /**
+     * Resolved per use rather than captured at construction, so a host can
+     * register its transport config after this module has loaded.
+     */
+    private get baseUrl(): string {
+        return this.overrideBaseUrl ?? getApiBaseUrl();
     }
 
     /** Replace the data-request provider map (e.g. a Word add-in injects its own). */
@@ -1021,7 +1030,7 @@ export interface PaginatedRunsResponse {
  * Handles fetching runs, run details, and associated actions.
  */
 export class AgentRunService extends ApiService {
-    constructor(baseUrl: string) {
+    constructor(baseUrl?: string) {
         super(baseUrl);
     }
 
@@ -1094,5 +1103,5 @@ export class AgentRunService extends ApiService {
 // Singleton Exports
 // =============================================================================
 
-export const agentService = new AgentService(API_BASE_URL);
-export const agentRunService = new AgentRunService(API_BASE_URL);
+export const agentService = new AgentService();
+export const agentRunService = new AgentRunService();

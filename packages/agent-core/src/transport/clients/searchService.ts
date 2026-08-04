@@ -1,5 +1,4 @@
 import { ApiService } from '../apiService';
-import API_BASE_URL from '../../platform/getAPIBaseURL';
 
 // Type for metadata search results that matches the ItemSearchResult from backend
 export interface ItemSearchResult {
@@ -33,7 +32,7 @@ export class SearchService extends ApiService {
      * Creates a new SearchService instance
      * @param backendUrl The base URL of the backend API
      */
-    constructor(backendUrl: string) {
+    constructor(backendUrl?: string) {
         super(backendUrl);
     }
 
@@ -92,4 +91,4 @@ export class SearchService extends ApiService {
 }
 
 // Export searchService
-export const searchService = new SearchService(API_BASE_URL);
+export const searchService = new SearchService();

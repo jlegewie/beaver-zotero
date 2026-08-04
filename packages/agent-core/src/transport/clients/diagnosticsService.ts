@@ -15,7 +15,7 @@
  * POST plus auth lookup.
  */
 
-import API_BASE_URL from '../../platform/getAPIBaseURL';
+import { getApiBaseUrl, isTransportConfigRegistered } from '../config';
 import { logger } from '../../platform/logger';
 import { supabase } from '../supabaseClient';
 import { resolveClientIdentity } from '../clientIdentity';
@@ -161,7 +161,7 @@ async function executeReport(
     const timeoutId = setTimeout(() => controller.abort(), REPORT_TIMEOUT_MS);
 
     try {
-        const response = await fetch(`${API_BASE_URL}${DIAGNOSTICS_ENDPOINT}`, {
+        const response = await fetch(`${getApiBaseUrl()}${DIAGNOSTICS_ENDPOINT}`, {
             method: 'POST',
             headers,
             body: JSON.stringify(body),
@@ -189,7 +189,10 @@ async function executeReport(
 export async function reportConnectionFailure(
     report: ConnectionFailureReport,
 ): Promise<ConnectionDiagnosticResult> {
-    if (!API_BASE_URL) {
+    // Nothing to probe until a host supplies endpoints. Registration is the
+    // test rather than a non-empty base URL: a configured backend is always
+    // probed, and a probe that fails says more than one that never ran.
+    if (!isTransportConfigRegistered()) {
         return { apiReachable: false, receivedHttpResponse: false, durationMs: 0 };
     }
 

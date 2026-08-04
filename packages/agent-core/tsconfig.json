@@ -73,6 +73,7 @@
     "./src/transport/agentService.ts",
     "./src/transport/apiService.ts",
     "./src/transport/supabaseClient.ts",
+    "./src/transport/config.ts",
     "./src/transport/clientIdentity.ts",
     "./src/transport/agentDataDispatch.ts",
     "./src/transport/agentActionQueue.ts",
@@ -89,7 +90,6 @@
     "./src/transport/clients/diagnosticsService.ts",
     "./src/platform/runtime.ts",
     "./src/platform/logger.ts",
-    "./src/platform/getAPIBaseURL.ts",
     "./src/types/models.ts",
     "./src/types/apiErrors.ts"
   ]

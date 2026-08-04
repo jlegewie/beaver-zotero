@@ -24,6 +24,11 @@ const l1CoreGlobals = [
         message:
             "L1 core must stay client-agnostic — Zotero specifics belong behind an adapter module, not here.",
     },
+    {
+        name: "process",
+        message:
+            "L1 core must not read build-time config — not every host has a bundler that substitutes it. Register it with setTransportConfig() (transport/config) and read it there.",
+    },
 ];
 
 /**

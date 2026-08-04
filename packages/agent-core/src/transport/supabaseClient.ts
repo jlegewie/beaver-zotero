@@ -1,4 +1,5 @@
 import { createClient, AuthApiError, type SupabaseClient } from '@supabase/supabase-js';
+import { getSupabaseConfig, markSupabaseConfigInUse } from './config';
 import { logger } from '../platform/logger';
 
 /**
@@ -109,16 +110,6 @@ export function setSupabaseReloadBridge(bridge: SupabaseReloadBridge): void {
         previousDispose().catch((e) => logger(`Failed to stop previous Supabase client: ${e}`, 2));
     }
 }
-
-const supabaseUrl = process.env.SUPABASE_URL;
-const supabaseAnonKey = process.env.SUPABASE_ANON_KEY;
-
-if (!supabaseUrl || !supabaseAnonKey) {
-    throw new Error('Missing Supabase URL or Anon Key');
-}
-
-const requiredSupabaseUrl: string = supabaseUrl;
-const requiredSupabaseAnonKey: string = supabaseAnonKey;
 
 // =============================================================================
 // Auth Lock Implementation
@@ -356,7 +347,11 @@ function createSupabaseClient(): SupabaseClientInstance {
     }
     const sessionStorage: SupabaseStorageAdapter = injectedStorageAdapter;
 
-    const client = createClient(requiredSupabaseUrl, requiredSupabaseAnonKey, {
+    // Read at creation, not at module load, so a host whose project URL is only
+    // known at runtime can register it before the client is first used.
+    const { url, anonKey } = getSupabaseConfig();
+
+    const client = createClient(url, anonKey, {
         auth: {
             persistSession: true,
             autoRefreshToken: true,
@@ -366,6 +361,12 @@ function createSupabaseClient(): SupabaseClientInstance {
             lock: acquireAuthLock
         }
     });
+
+    // Pin the values only once a client actually holds them: this client keeps
+    // them for the rest of its life, so a later registration that changed them
+    // is rejected. A creation that threw leaves nothing pinned, so a host can
+    // correct bad values and retry.
+    markSupabaseConfigInUse({ url, anonKey });
 
     // Force-start auto-refresh and remove the visibility-change listener.
     //

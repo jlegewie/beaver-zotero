@@ -1,5 +1,4 @@
 import { ApiService } from './apiService';
-import API_BASE_URL from '../platform/getAPIBaseURL';
 
 
 /**
@@ -84,7 +83,7 @@ export class ThreadService extends ApiService {
      * Creates a new ThreadService instance
      * @param backendUrl The base URL of the backend API
      */
-    constructor(backendUrl: string) {
+    constructor(backendUrl?: string) {
         super(backendUrl);
     }
 
@@ -258,4 +257,4 @@ export class ThreadService extends ApiService {
 }
 
 // Export threadService
-export const threadService = new ThreadService(API_BASE_URL);
+export const threadService = new ThreadService();

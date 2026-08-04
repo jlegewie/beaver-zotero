@@ -1,5 +1,4 @@
 import { ApiService } from '@beaver/agent-core/transport/apiService';
-import API_BASE_URL from '@beaver/agent-core/platform/getAPIBaseURL';
 import { UploadStatus } from './attachmentsService';
 import { ItemData, DeleteData, AttachmentDataWithMimeType, ZoteroCollection } from '@beaver/agent-core/types/zotero';
 import { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
@@ -183,7 +182,7 @@ export class SyncService extends ApiService {
      * Creates a new SyncService instance
      * @param backendUrl The base URL of the backend API
      */
-    constructor(backendUrl: string) {
+    constructor(backendUrl?: string) {
         super(backendUrl);
     }
 
@@ -386,4 +385,4 @@ export class SyncService extends ApiService {
 }
 
 // Export syncService
-export const syncService = new SyncService(API_BASE_URL);
+export const syncService = new SyncService();

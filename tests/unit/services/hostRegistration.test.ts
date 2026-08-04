@@ -1,8 +1,9 @@
 /**
  * Lock on the host registrations in the webpack entry.
  *
- * The transport layer resolves its data provider, client identity, auth
- * storage, and reload-persistent state from registries that a host fills in.
+ * The transport layer resolves its backend endpoints, data provider, client
+ * identity, auth storage, and reload-persistent state from registries that a
+ * host fills in.
  * `react/index.tsx` is the only place the Zotero plugin fills them, and it does
  * so at module scope so the calls land before the bundle's `onload` mounts any
  * React root.
@@ -32,6 +33,7 @@ import { resolve } from 'node:path';
 const ENTRY = resolve(__dirname, '../../../react/index.tsx');
 
 const REQUIRED_REGISTRATIONS = [
+    'setTransportConfig',
     'registerZoteroHost',
     'registerZoteroDataProvider',
     'registerZoteroObjectIdResolver',

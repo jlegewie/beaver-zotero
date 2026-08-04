@@ -25,7 +25,6 @@ vi.mock("@beaver/agent-core/transport/apiService", () => ({
         constructor(_baseUrl: string) {}
     },
 }));
-vi.mock("@beaver/agent-core/platform/getAPIBaseURL", () => ({ default: "http://test" }));
 vi.mock("@beaver/agent-core/platform/logger", () => ({ logger: vi.fn() }));
 vi.mock("../../../src/utils/agentItemSupport", () => ({
     isAgentSupportedItem: vi.fn(() => true),

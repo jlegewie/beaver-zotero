@@ -1,5 +1,4 @@
 import { ApiService } from '../apiService';
-import API_BASE_URL from '../../platform/getAPIBaseURL';
 import { ActionStatus, ActionResultDataType } from '../../types/agentActions/base';
 import { logger } from '../../platform/logger';
 
@@ -255,7 +254,7 @@ class AgentActionUpdateBatcher {
 export class AgentActionsService extends ApiService {
     private readonly updateBatcher: AgentActionUpdateBatcher;
 
-    constructor(backendUrl: string) {
+    constructor(backendUrl?: string) {
         super(backendUrl);
         this.updateBatcher = new AgentActionUpdateBatcher((entries) =>
             this.dispatchActionUpdates(entries)
@@ -364,5 +363,5 @@ export class AgentActionsService extends ApiService {
     }
 }
 
-export const agentActionsService = new AgentActionsService(API_BASE_URL);
+export const agentActionsService = new AgentActionsService();
 

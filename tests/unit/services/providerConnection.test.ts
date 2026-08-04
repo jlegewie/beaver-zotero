@@ -1,6 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('@beaver/agent-core/platform/getAPIBaseURL', () => ({ default: 'https://api.example.com' }));
 vi.mock('@beaver/agent-core/platform/logger', () => ({ logger: vi.fn() }));
 vi.mock('@beaver/agent-core/transport/agentService', () => ({
     getWSAuthToken: vi.fn().mockResolvedValue('token'),
@@ -17,6 +16,7 @@ vi.mock('@beaver/agent-core/transport/agentDataDispatch', async (importOriginal)
 });
 
 import { ProviderConnection } from '@beaver/agent-core/transport/providerConnection';
+import { setTransportConfig } from '@beaver/agent-core/transport/config';
 import { notifySyncPauseOwnerSettled } from '@beaver/agent-core/transport/agentDataDispatch';
 import { setClientIdentityProvider } from '@beaver/agent-core/transport/clientIdentity';
 import type { ClientIdentity } from '@beaver/agent-core/transport/clientIdentity';
@@ -95,6 +95,19 @@ describe('ProviderConnection', () => {
 
     afterEach(() => {
         (globalThis as any).WebSocket = OriginalWebSocket;
+    });
+
+    // The exported singleton is constructed with no URL, so its socket address
+    // comes from the transport config at connect time.
+    it('derives the socket URL from config registered after construction', () => {
+        const conn = new ProviderConnection();
+        setTransportConfig({
+            apiBaseUrl: 'https://api.example.com',
+            supabaseUrl: 'https://p.supabase.co',
+            supabaseAnonKey: 'anon',
+        });
+
+        expect((conn as any).getWebSocketUrl()).toBe('wss://api.example.com/api/v1/agents/beaver/provider');
     });
 
     it('schedules sync resume with the mutating entry owner after a provider action settles', async () => {

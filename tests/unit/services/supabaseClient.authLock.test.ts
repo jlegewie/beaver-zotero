@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { capturedLocks, mockCreateClient, mockLogger } = vi.hoisted(() => ({
+const { capturedLocks, mockCreateClient, mockLogger, mockMarkSupabaseConfigInUse } = vi.hoisted(() => ({
+    mockMarkSupabaseConfigInUse: vi.fn(),
     capturedLocks: [] as Array<(name: string, acquireTimeout: number, fn: () => Promise<unknown>) => Promise<unknown>>,
     mockCreateClient: vi.fn((_url: string, _key: string, options: {
         auth: {
@@ -31,6 +32,17 @@ vi.mock('@supabase/supabase-js', () => {
 
 vi.mock('@beaver/agent-core/platform/logger', () => ({
     logger: mockLogger,
+}));
+
+// The Supabase project URL and key reach the client through the transport
+// config seam. These tests reload the module repeatedly, so serve fixed values
+// instead of re-registering them for every generation.
+vi.mock('@beaver/agent-core/transport/config', () => ({
+    setTransportConfig: vi.fn(),
+    isTransportConfigRegistered: () => true,
+    markSupabaseConfigInUse: mockMarkSupabaseConfigInUse,
+    getApiBaseUrl: () => 'https://api.example.com',
+    getSupabaseConfig: () => ({ url: 'https://example.supabase.co', anonKey: 'anon-key' }),
 }));
 
 function createMockStorageAdapter() {
@@ -71,10 +83,8 @@ beforeEach(() => {
     capturedLocks.length = 0;
     mockCreateClient.mockClear();
     mockLogger.mockClear();
+    mockMarkSupabaseConfigInUse.mockClear();
     vi.resetModules();
-
-    process.env.SUPABASE_URL = 'https://example.supabase.co';
-    process.env.SUPABASE_ANON_KEY = 'anon-key';
 
     vi.stubGlobal('window', {});
 });
@@ -100,6 +110,22 @@ describe('supabaseClient auth lock reload handling', () => {
 
         expect(mockCreateClient).toHaveBeenCalledTimes(1);
         expect(mockCreateClient.mock.calls[0][2].auth.storage).toBe(registeredStorage);
+    });
+
+    it('creates the client with the configured project URL and anon key, and pins them', async () => {
+        const module = await import('@beaver/agent-core/transport/supabaseClient');
+
+        module.setSupabaseStorageAdapter(createMockStorageAdapter());
+        module.supabase.auth;
+
+        expect(mockCreateClient.mock.calls[0][0]).toBe('https://example.supabase.co');
+        expect(mockCreateClient.mock.calls[0][1]).toBe('anon-key');
+        // Pinning is what stops a later registration from stranding this client
+        // on a different project.
+        expect(mockMarkSupabaseConfigInUse).toHaveBeenCalledWith({
+            url: 'https://example.supabase.co',
+            anonKey: 'anon-key',
+        });
     });
 
     it('throws when the exported client is used without a registered storage adapter', async () => {

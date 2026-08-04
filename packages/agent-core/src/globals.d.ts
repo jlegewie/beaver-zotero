@@ -22,21 +22,6 @@ declare const navigator:
  */
 declare const console: { log(...args: any[]): void } | undefined;
 
-/**
- * Build-time configuration, listed key by key rather than as an open record.
- * Each read has to be substituted by the host's bundler; a bundler that does
- * not define one emits a bare `process` reference that throws at load in a
- * host with no Node runtime. Adding a key here is the point at which to check
- * that every bundler consuming the core defines it.
- */
-declare const process: {
-  env: {
-    API_BASE_URL?: string;
-    SUPABASE_URL?: string;
-    SUPABASE_ANON_KEY?: string;
-  };
-};
-
 /** Unique-id generation. */
 declare const crypto: { randomUUID(): string };
 
