@@ -26,6 +26,51 @@ npx vitest run -t "returns empty"               # tests matching name pattern
 - **Live tests** hit a single Beaver HTTP endpoint against a running Zotero instance. Use these to verify individual handlers produce correct results with real data. Tests skip gracefully when Zotero is unavailable.
 - **Integration tests** exercise multi-step pipelines (e.g., HTTP request -> PDF extraction -> cache write -> cache read). Sequential execution, longer timeout.
 
+## Shared state on the live instance
+
+Live and integration tests all drive **one** Zotero instance, so anything a test
+changes there outlives the test file. Two pieces of that state have bitten whole
+suites at once; both are handled for you, but new tests need to respect them.
+
+### Excluded libraries
+
+Beaver's excluded-libraries set is a **user preference stored on the account
+profile**, so every instance that logs in inherits it — including a freshly
+cloned worktree profile. The fixtures assume every local library is readable, so
+an exclusion set in Beaver Preferences shows up as a spray of `library_excluded`
+failures in unrelated suites (group-library tests, or every note test when the
+user library is excluded). A suite that excludes a library and then fails before
+its own teardown poisons every file after it in the same way.
+
+`vitest.live.config.ts` and `vitest.integration.config.ts` therefore wire two
+hooks (see `helpers/liveExclusions.ts`):
+
+- **`globalSetup`** (`helpers/liveGlobalSetup.ts`) captures the excluded set once
+  per run, clears it, and restores it in teardown. It prints a `[live-setup]`
+  notice naming what it re-enabled.
+- **`setupFiles`** (`helpers/liveSetupFile.ts`) re-clears at the start of every
+  test file, so a leak stays contained to the file that produced it.
+
+Both write through `/beaver/test/excluded-libraries`, which mutates the
+in-memory profile only — nothing reaches the backend, and a run that dies before
+teardown is undone by restarting Zotero. A suite that tests exclusion behavior
+(`libraryExclusion`, `readerContextTracking`) still captures and restores its own
+set; it just starts from a normalized one.
+
+### The background queue's idle gate
+
+`BackgroundExtractor` claims jobs at or above priority 100 — **the enqueue
+default** — only once the OS has been idle for 30 seconds. A test that enqueues
+at the default and asserts the job drains therefore passes or fails depending on
+whether someone is at the keyboard, and the symptom is confusing: `processOnce`
+returns `reason: "empty"` while `/beaver/test/background-stats` reports
+`available: 1`.
+
+Any test that needs a deterministic drain must enqueue **below** 100 (the
+suites use `DRAIN_PRIORITY = 10`, which is also what production uses for
+hot-path timeout retries). Tests that only assert queue bookkeeping — ordering,
+dedup, stats, the `priority` default itself — can use any priority.
+
 ## Directory structure
 
 ```
@@ -221,6 +266,19 @@ Integration tests exercise full pipelines. Same prerequisites as live tests plus
 - Test attachments present (see `helpers/fixtures.ts`)
 - Set `ZOTERO_HTTP_PORT` if not 23119: `ZOTERO_HTTP_PORT=23124 npm run test:integration`
 
+`ZOTERO_HTTP_PORT` **pins** the run to that instance — there is no fallback to
+23119/23124, because several Zotero instances often run side by side and the
+fixtures exist in all of them, so a fallback would run the suite against the
+wrong library without saying so. A run whose named instance does not answer
+`/beaver/test/ping` **fails** rather than skipping every test; without the env
+var, suites still skip gracefully when no Zotero is running.
+
+Read the `Tests` line before calling a run green: every live suite skips itself
+when the instance is unreachable, so `530 skipped` and exit 0 means nothing ran.
+The usual cause is Beaver being logged out — `/beaver/test/*` is registered by
+the React bundle only once the plugin is authenticated, so the port answers
+`/connector/ping` while every dev endpoint returns `No endpoint found`.
+
 ### Test-only endpoints
 
 | Endpoint | Purpose |
@@ -270,3 +328,4 @@ The reader's dev menu has a "Copy Fixture Capture Command" item that builds the 
 - **Shared factories**: Use `helpers/factories.ts` for mock Zotero items. File-local helpers (`makeRecord`, etc.) go at the top of the test file.
 - **Cleanup**: Close DB connections in `afterEach`. Call `vi.clearAllMocks()` in `beforeEach`.
 - **Fixture updates**: Fixtures in `helpers/fixtures.ts` reference real items by `library_id + zotero_key`. Update keys to match your library.
+- **Don't pipe a live run through `tail`/`head`**: the pipe buffers everything until vitest exits, so a multi-minute run shows no progress and an interrupted one shows nothing at all. Redirect to a file (`npm run test:live > run.log 2>&1`) and read that instead.

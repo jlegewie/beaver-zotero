@@ -310,7 +310,9 @@ describe("headless annotation creation primitives", () => {
 
     expectSuccessfulCreate(res);
     expect(res.reader_visible).toBe(true);
-  }, 30000);
+    // Opening the reader plus the handler's own notifier-refresh poll can take
+    // most of a minute on an instance loaded down by a full live run.
+  }, 60000);
 
   it("creates a multi-box highlight whose rects share the page index sort prefix", async () => {
     await triggerFileStatus(
