@@ -90,12 +90,24 @@ describe('processToolReturnResults — eager item loading', () => {
         expect(mockLoadFullItemDataWithAllTypes).toHaveBeenCalledWith([]);
     });
 
-    it('skips a failed return, whose content is an error message rather than results', async () => {
+    it('skips a non-success return, whose content is a message rather than results', async () => {
         const failed = { ...makePart(), outcome: 'failed', content: 'Reading files is not available.' };
 
         await expect(processToolReturnResults(failed, vi.fn() as any)).resolves.toBeUndefined();
 
         expect(mockExtractZoteroReferences).not.toHaveBeenCalled();
         expect(mockLoadFullItemDataWithAllTypes).not.toHaveBeenCalled();
+    });
+
+    // Parts from a pre-outcome backend must keep taking the original path.
+    it('still processes a part with no outcome field', async () => {
+        mockExtractZoteroReferences.mockReturnValue([{ library_id: 1, zotero_key: 'GOODKEY1' }]);
+        const legacy = makePart();
+        expect('outcome' in legacy).toBe(false);
+
+        await processToolReturnResults(legacy, vi.fn() as any);
+
+        expect(mockExtractZoteroReferences).toHaveBeenCalled();
+        expect(mockLoadFullItemDataWithAllTypes).toHaveBeenCalledWith([foundItem]);
     });
 });

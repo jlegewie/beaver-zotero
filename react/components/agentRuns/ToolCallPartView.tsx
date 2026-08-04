@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { AgentRunStatus, ToolCallPart, isFailedToolReturn } from '@beaver/agent-core/agents/types';
+import { AgentRunStatus, ToolCallPart, isUnsuccessfulToolReturn } from '@beaver/agent-core/agents/types';
 import { toolResultsMapAtom, getToolCallStatus } from '../../agents/atoms';
 import { getToolCallLabel, getLabelEnrichmentNeeds, type ToolCallLabelEnrich } from '../../agents/toolLabels';
 import { extractZoteroReferencesFromToolCall, parseArgs } from '../../agents/toolCallRequest';
@@ -348,9 +348,9 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
     const canExpand =
         hasResult &&
         result?.part_kind === 'tool-return' &&
-        // A failed return holds an error message, not a result payload. Keep it
-        // collapsed so it reads like any other failed call rather than a result.
-        !isFailedToolReturn(result) &&
+        // A non-success return holds an explanatory message, not a result
+        // payload. Keep it collapsed so it reads as a failed call, not a result.
+        !isUnsuccessfulToolReturn(result) &&
         // If we can compute a count (search-like tools), block expansion for 0 results.
         (renderableCount === null || renderableCount > 0) &&
         !NON_EXPANDABLE_TOOLS.has(part.tool_name) &&

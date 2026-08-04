@@ -32,9 +32,16 @@ import {
 function run(id: string, attachments: MessageAttachment[]): AgentRun {
     return {
         id,
+        user_id: 'user-1',
+        thread_id: 'thread-1',
+        agent_name: 'beaver',
         user_prompt: { content: '', attachments },
+        status: 'completed',
         model_messages: [],
-    } as AgentRun;
+        model_name: 'model',
+        created_at: '2026-01-01T00:00:00.000Z',
+        consent_to_share: false,
+    };
 }
 
 describe('getToolCallStatus', () => {
@@ -57,6 +64,18 @@ describe('getToolCallStatus', () => {
         expect(getToolCallStatus('call-1', map)).toBe('error');
     });
 
+    // Neither outcome is emitted today, but a backend that starts sending one
+    // must not have those calls render as successfully completed.
+    it('reports error for an interrupted call', () => {
+        const map = resultsMap(toolReturn({ outcome: 'interrupted', content: 'The tool call was interrupted.' }));
+        expect(getToolCallStatus('call-1', map)).toBe('error');
+    });
+
+    it('reports error for a denied call', () => {
+        const map = resultsMap(toolReturn({ outcome: 'denied', content: 'The user denied this call.' }));
+        expect(getToolCallStatus('call-1', map)).toBe('error');
+    });
+
     it('reports error for a retry prompt', () => {
         const map = resultsMap({
             part_kind: 'retry-prompt',
@@ -71,7 +90,10 @@ describe('getToolCallStatus', () => {
         expect(getToolCallStatus('call-1', resultsMap(toolReturn({ outcome: 'success' })))).toBe('completed');
     });
 
-    it('treats a missing outcome as success, for threads persisted before the field existed', () => {
+    // Only threads persisted by a pre-outcome backend lack the field. The new
+    // outcome check must stay inert for them so the legacy rule still decides:
+    // a tool-return is completed, and failure was expressed as a retry-prompt.
+    it('leaves an absent outcome to the legacy categorization', () => {
         expect(getToolCallStatus('call-1', resultsMap(toolReturn()))).toBe('completed');
     });
 
