@@ -4,6 +4,7 @@ import { logger } from '@beaver/agent-core/platform/logger';
 import { libraryRefForLibraryID, modelObjectId } from './libraryIdentity';
 import { ItemDataHashedFields, AttachmentDataHashedFields, ItemData, ItemStub, ItemSummary, CollectionSummary, ZoteroCreator, ZoteroCollection, BibliographicIdentifier, AttachmentDataWithMimeType, ZoteroLibrary, AttachmentStub } from '@beaver/agent-core/types/zotero';
 import { getCollectionClientDateModifiedAsISOString, getCitationKeyFromItem, getMimeType, safeIsInTrash, safeFileExists } from './zoteroUtils';
+import { safeAttachmentFilename } from './attachmentFiles';
 import { syncingItemFilterAsync } from './sync';
 import { isAttachmentOnServer } from './webAPI';
 import { skippedItemsManager } from '../services/skippedItemsManager';
@@ -459,7 +460,7 @@ export function serializeAttachmentStub(item: Zotero.Item, contentKind?: Content
         library_ref: libraryRefForLibraryID(item.libraryID) ?? undefined,
         parent_item_id: item.parentKey ? modelObjectId(item.libraryID, item.parentKey) : null,
         title: item.getField?.('title') || item.getDisplayTitle?.() || null,
-        filename: item.attachmentFilename || null,
+        filename: safeAttachmentFilename(item),
         content_kind: contentKind ?? getContentKind(item),
     };
 }
@@ -546,7 +547,9 @@ export async function serializeAttachment(
             return trashState;
         })(),
         title: item.getField('title', false, true),
-        filename: item.attachmentFilename,
+        // `?? ''` keeps the hash identical to a direct `attachmentFilename` read
+        // for healthy rows (the getter returns '' for an empty path).
+        filename: safeAttachmentFilename(item) ?? '',
     };
 
     // 3. Metadata Hash: Calculate hash from the prepared hashed fields object

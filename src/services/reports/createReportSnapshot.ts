@@ -9,6 +9,7 @@
 
 import { logger } from '@beaver/agent-core/platform/logger';
 import { getZoteroSelectURI } from '../../utils/zoteroUtils';
+import { safeAttachmentFilename } from '../../utils/attachmentFiles';
 import { checkLibraryExcluded } from '../agentDataProvider/utils';
 import { buildReportHtml, CSS_RULE_BUDGET, type ReportSpec } from './reportHtml';
 
@@ -139,7 +140,7 @@ export async function createReportSnapshot(options: CreateReportOptions): Promis
         key: attachment.key,
         libraryID: attachment.libraryID,
         title,
-        filename: attachment.attachmentFilename || null,
+        filename: safeAttachmentFilename(attachment),
         byteLength: new TextEncoder().encode(html).length,
         cssRuleCount,
         selectUri: getZoteroSelectURI(attachment.libraryID, attachment.key),

@@ -3,11 +3,15 @@ import {
     ZoteroItemStatus,
     FrontendFileStatus,
     AttachmentInfo,
+    type ItemStub,
     type ZoteroItemReference,
 } from '@beaver/agent-core/types/zotero';
 import { safeIsInTrash, safeFileExists, isLinkedUrlAttachment } from '../../utils/zoteroUtils';
+import { safeAttachmentFilename } from '../../utils/attachmentFiles';
+import { safeStub } from '../../utils/zoteroSerializers';
 import {
     libraryRefForLibraryID,
+    modelObjectId,
     modelObjectIdFromReference,
     parseItemReference,
     parseLibraryRef,
@@ -19,7 +23,7 @@ import { getPref } from '../../utils/prefs';
 import { isAttachmentOnServer } from '../../utils/webAPI';
 import { addPopupMessageAtom } from '../../../react/utils/popupMessageUtils';
 import { wasItemAddedBeforeLastSync } from '../../../react/utils/sourceUtils';
-import { DeferredToolPreference } from '@beaver/agent-core/protocol/agentProtocol';
+import { DeferredToolPreference, type AttachmentRowResult } from '@beaver/agent-core/protocol/agentProtocol';
 import { deferredToolPreferencesAtom } from '../../../react/atoms/deferredToolPreferences';
 import {
     isActionApprovedForCurrentRun,
@@ -414,6 +418,52 @@ export async function getAttachmentInfoForItem(
         ...options,
         nonPdfReadableEnabled: options?.nonPdfReadableEnabled ?? false,
     });
+}
+
+/**
+ * Build a minimal AttachmentInfo for an attachment that could not be resolved.
+ */
+export function degradedAttachmentInfo(
+    item: Zotero.Item,
+    parentItemId: string | null,
+    isPrimary = false,
+): AttachmentInfo {
+    return {
+        attachment_id: modelObjectId(item.libraryID, item.key),
+        library_ref: libraryRefForLibraryID(item.libraryID) ?? undefined,
+        parent_item_id: parentItemId,
+        title: safeStub(() => item.getDisplayTitle?.()) ?? null,
+        filename: safeAttachmentFilename(item),
+        content_kind: 'other',
+        status: 'unreadable',
+        // States what is known (the read failed) without asserting a cause: the
+        // catch this comes from covers any failure, not just a malformed record.
+        status_reason:
+            'Beaver could not read this attachment from Zotero, so only its '
+            + 'identity is available here. Its stored file path may be invalid — '
+            + 'the user can check the attachment in Zotero.',
+        page_count: null,
+        line_count: null,
+        // Callers that resolved the parent's best attachment already know this;
+        // list/search rows never do and leave it at the default.
+        is_primary: isPrimary,
+    };
+}
+
+/**
+ * Search/list row wrapper around {@link degradedAttachmentInfo}.
+ */
+export function degradedAttachmentRow(
+    item: Zotero.Item,
+    parentInfo: ItemStub | null,
+): AttachmentRowResult {
+    return {
+        ...degradedAttachmentInfo(item, parentInfo?.item_id ?? null),
+        result_type: 'attachment',
+        parent_title: parentInfo?.title ?? null,
+        parent_item: parentInfo ?? null,
+        date_modified: safeStub(() => item.dateModified) ?? null,
+    };
 }
 
 /**
@@ -1096,8 +1146,8 @@ export async function getAttachmentInfo(item: Zotero.Item): Promise<{ count: num
             const isPrimary = bestAttachmentKey && key === bestAttachmentKey;
             // return isPrimary ? `${key} (primary)` : key;
             return isPrimary
-                ? `'${attachment.attachmentFilename}' (${key}, primary)`
-                : `'${attachment.attachmentFilename}' (${key})`;
+                ? `'${safeAttachmentFilename(attachment) ?? ''}' (${key}, primary)`
+                : `'${safeAttachmentFilename(attachment) ?? ''}' (${key})`;
         });
 
     return {

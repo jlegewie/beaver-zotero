@@ -10,6 +10,7 @@ import { isReadableContentKind, type AttachmentInfo, type ContentKind } from '@b
 import { getPDFPageCountFromFulltext, getPDFPageCountFromWorker } from './shared/pageCount';
 import type { TimingAccumulator } from '../../utils/timing';
 import { libraryRefForLibraryID, modelObjectId } from '../../utils/libraryIdentity';
+import { safeAttachmentFilename } from '../../utils/attachmentFiles';
 import { createAbortController } from '../../utils/abortController';
 import { MAX_INTERACTIVE_PDF_TIMEOUT_SECONDS } from '../agentDataProvider/timeout';
 
@@ -551,7 +552,7 @@ export async function getAttachmentInfo(
         library_ref: libraryRefForLibraryID(item.libraryID) ?? undefined,
         parent_item_id: options.parentItemId ?? defaultParentItemId(item),
         title: item.getField?.('title') || item.getDisplayTitle?.() || null,
-        filename: item.attachmentFilename || null,
+        filename: safeAttachmentFilename(item),
         content_kind: contentKind,
         status: 'unreadable',
         page_count: null,
