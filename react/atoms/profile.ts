@@ -101,6 +101,16 @@ export const searchableLibraryIdsAtom = atom<number[]>((get) => {
 });
 
 /**
+ * Local library IDs the user explicitly excluded in Beaver Preferences.
+ */
+export const excludedLibraryIdsAtom = atom<number[]>((get) => {
+    const excluded = new Set(get(excludedLibrariesAtom).map(excludedEntryKey));
+    return get(localZoteroLibrariesAtom)
+        .filter(lib => excluded.has(libraryExclusionKey(lib)))
+        .map(lib => lib.library_id);
+});
+
+/**
  * Whether the library-access snapshot is ready to make allow/deny decisions.
  *
  * `searchableLibraryIdsAtom` intentionally remains fail-closed while the

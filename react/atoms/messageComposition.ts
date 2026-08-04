@@ -3,9 +3,9 @@ import { truncateText } from "../utils/stringUtils";
 import { allUserAttachmentKeysAtom } from "../agents/atoms";
 import { createElement } from 'react';
 import { logger } from "../../src/utils/logger";
-import { addPopupMessageAtom, addRegularItemPopupAtom, addRegularItemsSummaryPopupAtom, removePopupMessageAtom, safeChildAttachments } from "../utils/popupMessageUtils";
+import { addExcludedLibraryPopupAtom, addPopupMessageAtom, addRegularItemPopupAtom, addRegularItemsSummaryPopupAtom, EXCLUDED_LIBRARY_READER_POPUP_ID, EXCLUDED_LIBRARY_SELECTION_POPUP_ID, removePopupMessageAtom, safeChildAttachments } from "../utils/popupMessageUtils";
 import { getItemValidationAtom, isHardBlockedValidation, isRejectedItemValidation, validateItemsAtom, validateRegularItemAtom } from './itemValidation';
-import { searchableLibraryIdsAtom } from './profile';
+import { excludedLibraryIdsAtom, searchableLibraryIdsAtom } from './profile';
 import type { ItemValidationState } from './itemValidation';
 import { toReadabilityInfo, summarizeRegularItemReadability } from '../utils/attachmentReadabilityCopy';
 import { InvalidItemsMessageContent } from '../components/ui/popup/InvalidItemsMessageContent';
@@ -593,10 +593,29 @@ export const updateMessageItemsFromZoteroSelectionAtom = atom(
         const items = Zotero.getActiveZoteroPane().getSelectedItems();
         // Never stage items from libraries the user excluded from Beaver.
         const searchableLibraryIds = get(searchableLibraryIdsAtom);
-        const itemsFiltered = items.filter((item) =>
-            (item.isRegularItem() || item.isAttachment() || item.isNote()) &&
+        const supportedItems = items.filter((item) =>
+            item.isRegularItem() || item.isAttachment() || item.isNote()
+        );
+        const itemsFiltered = supportedItems.filter((item) =>
             searchableLibraryIds.includes(item.libraryID)
         );
+
+        // The exclusion filter runs ahead of validation, so these items never
+        // reach the "Item Removed" popup that explains every other rejection.
+        // Say why they were skipped rather than dropping them silently.
+        const excludedLibraryIds = get(excludedLibraryIdsAtom);
+        const excludedItems = supportedItems.filter((item) =>
+            excludedLibraryIds.includes(item.libraryID)
+        );
+        if (excludedItems.length > 0) {
+            set(addExcludedLibraryPopupAtom, {
+                id: EXCLUDED_LIBRARY_SELECTION_POPUP_ID,
+                libraryIDs: excludedItems.map((item) => item.libraryID),
+                title: excludedItems.length === 1
+                    ? 'Item Not Added'
+                    : `${excludedItems.length} Items Not Added`,
+            });
+        }
 
         // Filter out items already in the thread
         const existingKeys = get(allUserAttachmentKeysAtom);
@@ -640,6 +659,35 @@ export function isReaderLibrarySearchable(searchableLibraryIds: number[], reader
 let readerAttachmentGeneration = 0;
 
 /**
+ * Tell the user why the file open in the reader never became Beaver context.
+ *
+ * The reader is gated on the library before anything is read, so the "File
+ * Removed" popup that explains every other rejection never fires for an
+ * excluded library.
+ */
+export const notifyReaderLibraryExcludedAtom = atom(
+    null,
+    (get, set, reader?: any) => {
+        if (!reader) return;
+        const libraryAndKey = Zotero.Items.getLibraryAndKeyFromID(reader.itemID);
+        if (!libraryAndKey) return;
+        // Tracking stops for anything unsearchable, but only a library the user
+        // actually excluded may be reported as one — "absent from searchable"
+        // also covers unsupported library types and the not-yet-loaded scope,
+        // and pointing either at Beaver Preferences would be wrong.
+        if (!get(excludedLibraryIdsAtom).includes(libraryAndKey.libraryID)) return;
+        set(addExcludedLibraryPopupAtom, {
+            id: EXCLUDED_LIBRARY_READER_POPUP_ID,
+            libraryIDs: [libraryAndKey.libraryID],
+            title: 'File Not Added',
+            // The file stays open, so the notice stays until the user leaves
+            // the tab or dismisses it, matching other reader-tab popups.
+            expire: false,
+        });
+    }
+);
+
+/**
 * Update current reader attachment
 *
 * The single choke point for the reader attachment: an attachment from a
@@ -658,6 +706,7 @@ export const updateReaderAttachmentAtom = atom(
         if (currentReaderAttachmentKey) {
             set(removePopupMessageAtom, currentReaderAttachmentKey);
         }
+        set(removePopupMessageAtom, EXCLUDED_LIBRARY_READER_POPUP_ID);
 
         // Get current reader
         reader = reader || getCurrentReader();
@@ -669,6 +718,7 @@ export const updateReaderAttachmentAtom = atom(
         // Excluded libraries are never tracked
         if (!isReaderLibrarySearchable(get(searchableLibraryIdsAtom), reader)) {
             set(currentReaderAttachmentAtom, null);
+            set(notifyReaderLibraryExcludedAtom, reader);
             return;
         }
 
@@ -682,6 +732,7 @@ export const updateReaderAttachmentAtom = atom(
         // background validation.
         if (!isReaderLibrarySearchable(get(searchableLibraryIdsAtom), reader)) {
             set(currentReaderAttachmentAtom, null);
+            set(notifyReaderLibraryExcludedAtom, reader);
             return;
         }
         if (item) {
@@ -706,6 +757,7 @@ export const clearReaderAttachmentAtom = atom(
         if (currentReaderAttachmentKey) {
             set(removePopupMessageAtom, currentReaderAttachmentKey);
         }
+        set(removePopupMessageAtom, EXCLUDED_LIBRARY_READER_POPUP_ID);
         set(currentReaderAttachmentAtom, null);
     }
 );
