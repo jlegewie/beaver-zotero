@@ -77,11 +77,13 @@ async function classifyNonCollectionKey(
     key: string,
     libraryIdHint: number | undefined,
 ): Promise<string | null> {
-    // Best-effort on an error path
+    // Best-effort on an error path. Scoped to the searchable libraries: this
+    // message tells the agent what a key points at, and a library excluded from
+    // Beaver must not disclose what it holds.
     try {
         const libraryIds = libraryIdHint !== undefined
-            ? [libraryIdHint]
-            : (Zotero.Libraries.getAll() ?? []).map((lib: any) => lib.libraryID);
+            ? [libraryIdHint].filter(isLibrarySearchable)
+            : getSearchableLibraryIds();
         for (const libraryID of libraryIds) {
             const item = await Zotero.Items.getByLibraryAndKeyAsync(libraryID, key);
             if (item) {
@@ -144,10 +146,8 @@ export async function validateManageCollectionsAction(
     const hintLibraryId = refLibraryId
         ?? (typeof rawLibraryId === 'number' && rawLibraryId > 0 ? rawLibraryId : undefined);
 
-    // Consistency check: when both the scoped collection_key and the
-    // separate library_id are sent, they must agree. (library_id is on its
-    // way out — once all agents send a scoped collection_key it can be
-    // dropped from the schema.)
+    // Consistency check: when both the scoped collection_key and the separate
+    // library_id are sent, they must agree.
     const scopedCollectionId = parseScopedCollectionId(trimmedCollectionKey);
     // The identifier embedded a portable library_ref this device can't map to a
     // local library. Report unavailability rather than resolving against the

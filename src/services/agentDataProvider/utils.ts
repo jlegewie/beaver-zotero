@@ -946,10 +946,13 @@ export function librariesForCollectionError(
  * Resolve with `libraryId` as a scope *hint*: look inside the hinted library
  * first, and widen to `fallbackLibraryIds` only when nothing matched there, so a
  * key present in both the hint and another library resolves to the one the
- * caller meant. Any other failure inside the hinted library (ambiguity there, or
- * a scoped identifier naming an unavailable/excluded library) is final —
- * widening must not paper it over. Names stay scoped to the hint because names
- * like "Inbox" are commonly duplicated across libraries.
+ * caller meant. An ambiguity or an unavailable library inside the hinted step is
+ * final — widening must not paper it over. A reference that only misses the
+ * hint's scope (not found there, or naming a library the hint's caller may not
+ * read) falls through to `fallbackLibraryIds`, which decides on its own terms:
+ * the searchable set still rejects an excluded library, while the display path
+ * spans every local library. Names stay scoped to the hint because names like
+ * "Inbox" are commonly duplicated across libraries.
  *
  * Every failure, including ambiguity, reads as no-match: these callers must act
  * on (or render) nothing rather than arbitrarily pick one of several targets.
@@ -966,7 +969,7 @@ function resolveCollectionWithHint(
             nameLibraryIds: [libraryId],
         });
         if (hinted.ok) return hinted.match;
-        if (hinted.code !== 'collection_not_found') return null;
+        if (hinted.code !== 'collection_not_found' && hinted.code !== 'library_not_searchable') return null;
     }
     const widened = resolveSingleCollection(collectionIdOrName, {
         eligibleLibraryIds: hasLibraryId ? [libraryId, ...fallbackLibraryIds] : fallbackLibraryIds,
@@ -1004,9 +1007,7 @@ export function getCollectionByIdOrName(
  *
  * `libraryId` is a scope hint (see {@link resolveCollectionWithHint}); every
  * failure, ambiguity included, returns null so a label renders nothing rather
- * than guessing a target. The hinted step scopes to that one library, so a
- * scoped identifier naming a *different* library still goes through the
- * resolver's exclusion check and renders nothing when that library is excluded.
+ * than guessing a target.
  */
 export function resolveCollectionForDisplay(
     collectionIdOrName: number | string | null | undefined,

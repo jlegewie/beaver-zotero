@@ -468,6 +468,17 @@ describe('resolveCollectionForDisplay', () => {
         });
     });
 
+    it('resolves an excluded-library identifier even when the hint names another library', () => {
+        // A persisted tool call can pair a library argument with a collection
+        // identifier from elsewhere; the label must still render, while the
+        // data path stays scoped to the searchable libraries.
+        expect(resolveCollectionForDisplay(`g67890-${excludedCollection.key}`, PERSONAL_LIBRARY)).toEqual({
+            collection: excludedCollection,
+            libraryID: EXCLUDED_LIBRARY,
+        });
+        expect(getCollectionByIdOrName(`g67890-${excludedCollection.key}`, PERSONAL_LIBRARY)).toBeNull();
+    });
+
     it('resolves while the searchable-library set is still empty', () => {
         // The searchable set is fail-closed until the profile loads; a label
         // must not depend on it.
