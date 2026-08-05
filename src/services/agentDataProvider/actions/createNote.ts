@@ -709,7 +709,19 @@ async function executeCreateNoteAction(
             : (collectionKey ? [collectionKey] : []);
         const appliedCollectionKeys: string[] = [];
         if (collectionKeysToApply.length > 0 && !parentKey) {
-            for (const key of collectionKeysToApply) {
+            for (const reference of collectionKeysToApply) {
+                // Validation resolves these to bare keys, but an action executed
+                // without going through it still carries what the agent wrote,
+                // which may be a scoped identifier `addToCollection` cannot read.
+                const resolution = resolveSingleCollection(reference, {
+                    eligibleLibraryIds: [targetLibraryId],
+                    explicitLibrary: true,
+                });
+                if (!resolution.ok) {
+                    logger(`executeCreateNoteAction: Collection "${reference}" not resolved (${resolution.code}), skipping`, 1);
+                    continue;
+                }
+                const key = resolution.match.collection.key;
                 try {
                     zoteroNote.addToCollection(key);
                     appliedCollectionKeys.push(key);

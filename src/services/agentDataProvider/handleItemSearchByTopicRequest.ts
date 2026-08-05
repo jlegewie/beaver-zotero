@@ -237,7 +237,9 @@ export async function handleItemSearchByTopicRequest(
     // bounded.
     const COLLECTION_FILTER_TOP_K = 500;
     const topK = collectionFilterKeys.size > 0
-        ? COLLECTION_FILTER_TOP_K
+        // Never below what the requested page needs, so a deep page still reaches
+        // its own candidates.
+        ? Math.max(COLLECTION_FILTER_TOP_K, (offset + request.limit) * 4)
         : (offset + request.limit) * 4; // Fetch extra to account for filtering and pagination offset
 
     let searchResults: SearchResult[];

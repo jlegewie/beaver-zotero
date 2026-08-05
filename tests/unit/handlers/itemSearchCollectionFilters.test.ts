@@ -776,6 +776,20 @@ describe('handleItemSearchByTopicRequest collection filters', () => {
         expect((Zotero as any).Items.getAsync).toHaveBeenCalledTimes(2);
     });
 
+    it('asks for a ranking deep enough to reach a requested page beyond the floor', async () => {
+        harness.topicResults = Array.from({ length: 10 }, (_, index) => {
+            const id = index + 1;
+            makeItem({ id, key: itemKey(id), libraryID: PERSONAL_LIBRARY, title: `Topic item ${id}` });
+            return { itemId: id, similarity: 1 - index / 10000 };
+        });
+
+        await handleItemSearchByTopicRequest(
+            topicRequest({ collections_filter: [`u-${personalA.key}`], limit: 10, offset: 500 })
+        );
+
+        expect(semanticSearch.mock.calls.map(call => call[1].topK)).toEqual([2040]);
+    });
+
     it('runs one search even when the filter matches nothing', async () => {
         harness.topicResults = Array.from({ length: 500 }, (_, index) => {
             const id = index + 1;

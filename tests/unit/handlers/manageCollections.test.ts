@@ -591,6 +591,26 @@ describe('executeManageCollectionsAction', () => {
         expect(mockCollection.eraseTx).not.toHaveBeenCalled();
     });
 
+    it('resolves a scoped collection identifier and parent at execute time', async () => {
+        // An action can reach execute without the validation that normalizes
+        // these to bare keys, so both must still resolve here.
+        const parent: any = { id: 11, libraryID: 1, name: 'Parent', key: 'PRNT2345' };
+        harness.collections.push(parent);
+        const resp = await executeManageCollectionsAction({
+            event: 'agent_action_execute',
+            request_id: 'e6',
+            action_type: 'manage_collections',
+            action_data: {
+                action: 'move',
+                collection_key: `u-${mockCollection.key}`,
+                new_parent_key: `u-${parent.key}`,
+                library_id: 1,
+            },
+        } as any, ctx);
+        expect(resp.success).toBe(true);
+        expect(mockCollection.parentKey).toBe(parent.key);
+    });
+
     it('fails when library_id is missing', async () => {
         const resp = await executeManageCollectionsAction({
             event: 'agent_action_execute',
@@ -603,7 +623,8 @@ describe('executeManageCollectionsAction', () => {
     });
 
     it('fails when collection not found at execute time', async () => {
-        Zot.Collections.getByLibraryAndKeyAsync.mockImplementation(async () => null);
+        // The collection disappeared between validation and execution.
+        harness.collections = harness.collections.filter(c => c.key !== mockCollection.key);
         const resp = await executeManageCollectionsAction({
             event: 'agent_action_execute',
             request_id: 'e5',

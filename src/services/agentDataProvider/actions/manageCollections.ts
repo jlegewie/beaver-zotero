@@ -494,16 +494,23 @@ export async function executeManageCollectionsAction(
     }
 
     try {
-        const collection = await Zotero.Collections.getByLibraryAndKeyAsync(resolvedLibraryId, collection_key);
-        if (!collection) {
+        // Validation resolves collection_key to a bare key, but an action
+        // executed without going through it still carries what the agent wrote,
+        // which may be a scoped identifier.
+        const collectionResolution = resolveCollectionForWrite(collection_key, {
+            eligibleLibraryIds: [resolvedLibraryId],
+            explicitLibrary: true,
+        });
+        if (!collectionResolution.ok) {
             return {
                 type: 'agent_action_execute_response',
                 request_id: request.request_id,
                 success: false,
-                error: `Collection not found: ${collection_key}`,
-                error_code: 'collection_not_found',
+                error: collectionResolution.message,
+                error_code: collectionResolution.code,
             };
         }
+        const collection = collectionResolution.match.collection;
 
         // Re-snapshot the authoritative pre-apply state at execute time.
         // A re-apply after manual library edits produces a fresh snapshot
@@ -550,7 +557,24 @@ export async function executeManageCollectionsAction(
         } else if (action === 'move') {
             // Zotero uses `false` to signal top-level (see collection.js parentKey setter).
             checkAborted(ctx, 'manage_collections:before_move');
-            (collection as any).parentKey = new_parent_key ? new_parent_key : false;
+            let parentKeyToApply: string | false = false;
+            if (new_parent_key) {
+                const parentResolution = resolveCollectionForWrite(new_parent_key, {
+                    eligibleLibraryIds: [resolvedLibraryId],
+                    explicitLibrary: true,
+                });
+                if (!parentResolution.ok) {
+                    return {
+                        type: 'agent_action_execute_response',
+                        request_id: request.request_id,
+                        success: false,
+                        error: parentResolution.message,
+                        error_code: parentResolution.code === 'collection_not_found' ? 'parent_not_found' : parentResolution.code,
+                    };
+                }
+                parentKeyToApply = parentResolution.match.collection.key;
+            }
+            (collection as any).parentKey = parentKeyToApply;
             await collection.saveTx();
             logger(`executeManageCollectionsAction: Moved collection ${resolvedLibraryId}-${collection_key} to parent ${new_parent_key ?? 'top-level'}`, 1);
         } else if (action === 'delete') {
