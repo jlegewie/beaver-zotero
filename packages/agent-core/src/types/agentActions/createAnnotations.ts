@@ -87,6 +87,16 @@ export interface CreatedAnnotationResult extends ZoteroItemReference {
     client_item_id: string;
     index: number;
     loc_raw: string;
+    /**
+     * 0-based PDF page this annotation was written to. A highlight spanning
+     * several pages produces one row per page, all sharing `client_item_id`;
+     * these fields are what let a consumer tell those rows apart. Absent for
+     * EPUB / snapshot annotations, which are always 1:1, and absent on rows
+     * created before the fields existed.
+     */
+    page_idx?: number;
+    /** Page label Zotero stored on the annotation (PDF label, else page number). */
+    page_label?: string | null;
 }
 
 export interface FailedAnnotationResult {

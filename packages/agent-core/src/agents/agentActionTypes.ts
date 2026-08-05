@@ -300,11 +300,24 @@ function normalizeNoteAnnotationItem(item: any): NoteAnnotationItem {
 }
 
 function normalizeCreatedAnnotation(item: any): CreatedAnnotationResult {
+    // Rows of a page-spanning highlight share client_item_id, loc_raw and title,
+    // so the page is the only thing that tells them apart. Carry it through, and
+    // leave both fields absent for rows that predate them rather than inventing
+    // a page 0.
+    const rawPageIdx = item?.page_idx ?? item?.pageIdx;
+    const pageIdx = typeof rawPageIdx === 'number' && Number.isFinite(rawPageIdx)
+        ? rawPageIdx
+        : undefined;
+    const rawPageLabel = item?.page_label ?? item?.pageLabel;
+    const pageLabel = typeof rawPageLabel === 'string' ? rawPageLabel : undefined;
+
     return {
         ...normalizeZoteroItemReference(item),
         client_item_id: String(item?.client_item_id ?? item?.clientItemId ?? ''),
         index: typeof item?.index === 'number' ? item.index : Number(item?.index ?? 0),
         loc_raw: String(item?.loc_raw ?? item?.locRaw ?? ''),
+        ...(pageIdx !== undefined ? { page_idx: pageIdx } : {}),
+        ...(pageLabel !== undefined ? { page_label: pageLabel } : {}),
     };
 }
 
