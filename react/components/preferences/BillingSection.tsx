@@ -61,9 +61,9 @@ const ProgressBar: React.FC<{ creditPlan: CreditPlan, creditBreakdown: CreditBre
     return (
         <div style={{ marginTop: '12px' }}>
             <div className="display-flex flex-row items-center gap-3" style={{ marginBottom: '4px' }}>
-                <span className="text-sm font-color-primary font-medium">Plan Credits</span>
+                <span className="text-base font-color-primary font-medium">Plan Credits</span>
                 <div className="flex-1" />
-                <span className="text-sm font-color-primary font-medium">
+                <span className="text-base font-color-primary font-medium">
                     {usedPct}% used
                 </span>
             </div>
@@ -89,7 +89,7 @@ const ProgressBar: React.FC<{ creditPlan: CreditPlan, creditBreakdown: CreditBre
                 </div>
             </div>
             <div className="display-flex flex-col">
-                <div className="text-sm font-color-secondary" style={{ marginTop: '4px' }}>
+                <div className="text-base font-color-secondary" style={{ marginTop: '4px' }}>
                     {used} / {total} used
                 </div>
                 {creditBreakdown.rolledOverCredits > 0 && (
