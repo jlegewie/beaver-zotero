@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { AgentRunStatus, ToolCallPart, isUnsuccessfulToolReturn } from '@beaver/agent-core/agents/types';
 import { toolResultsMapAtom, getToolCallStatus } from '@beaver/agent-core/run-state/atoms';
-import { getToolCallLabel, getLabelEnrichmentNeeds, type ToolCallLabelEnrich } from '@beaver/agent-core/run-state/toolLabels';
+import { getToolCallLabel, getLabelEnrichmentNeeds, readCollectionArg, type ToolCallLabelEnrich } from '@beaver/agent-core/run-state/toolLabels';
 import { extractZoteroReferencesFromToolCall, parseArgs } from '@beaver/agent-core/run-state/toolCallRequest';
 import {
     isToolResultView,
@@ -254,7 +254,7 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
                     : refParsed
                         ? resolveLibraryRef({ library_ref: libParam }) ?? undefined
                         : (typeof libParam === 'string' ? parseInt(libParam, 10) : undefined);
-                const collParam = (args.collection_key ?? args.collection ?? args.parent_collection) as string | undefined;
+                const collParam = readCollectionArg(args);
                 if (collParam && itemData.resolveCollectionName) {
                     const name = await itemData.resolveCollectionName(collParam, Number.isNaN(libId as number) ? undefined : libId);
                     if (!cancelled && name) next.collectionName = name;

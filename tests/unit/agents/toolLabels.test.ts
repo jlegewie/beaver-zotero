@@ -15,6 +15,7 @@ import {
     getViewDisplayName,
     getToolResultLabelSuffix,
     getLabelEnrichmentNeeds,
+    readCollectionArg,
 } from '@beaver/agent-core/run-state/toolLabels';
 import { getToolResultRenderableCount } from '@beaver/agent-core/run-state/toolResultViews';
 import type {
@@ -188,5 +189,75 @@ describe('getLabelEnrichmentNeeds', () => {
     it('always needs scope resolution for list_* tools', () => {
         const view: CollectionListView = { view_type: 'collection_list', tool_name: 'list_collections', collections: [], total_count: 2 };
         expect(getLabelEnrichmentNeeds(tc('list_collections', { library: 1 }), view)).toEqual({ itemName: false, scope: true });
+    });
+});
+
+describe('readCollectionArg', () => {
+    it('reads each spelling tools use for the collection parameter', () => {
+        expect(readCollectionArg({ collection_key: 'ABCD2345' })).toBe('ABCD2345');
+        expect(readCollectionArg({ collection: 'ABCD2345' })).toBe('ABCD2345');
+        expect(readCollectionArg({ parent_collection: 'ABCD2345' })).toBe('ABCD2345');
+        expect(readCollectionArg({ parent_collection_key: 'ABCD2345' })).toBe('ABCD2345');
+    });
+
+    it('reads a library-scoped collection identifier unchanged', () => {
+        expect(readCollectionArg({ collection: 'g123-ABCD2345' })).toBe('g123-ABCD2345');
+    });
+
+    it('returns undefined when no collection argument is present', () => {
+        expect(readCollectionArg({ library: 1, tag: 'method' })).toBeUndefined();
+    });
+
+    it('ignores non-string values (a filter list is not a single collection)', () => {
+        expect(readCollectionArg({ collections_filter: ['ABCD2345', 'KLMNPQRS'] })).toBeUndefined();
+        expect(readCollectionArg({ collection: ['ABCD2345'] })).toBeUndefined();
+        expect(readCollectionArg({ collection: 42 })).toBeUndefined();
+    });
+});
+
+describe('collection-scoped tool labels', () => {
+    it('labels list_tags scoped by its own `collection` argument', () => {
+        expect(getToolCallLabel(tc('list_tags', { collection: 'ABCD2345' }), 'completed')).toBe(
+            'List tags in collection',
+        );
+        expect(getToolCallLabel(tc('list_tags', { collection: 'ABCD2345' }), 'completed', {
+            enrich: { collectionName: 'Methods' },
+        })).toBe('List tags in "Methods"');
+    });
+
+    it('labels manage_collections by its own `collection_key` argument', () => {
+        expect(getToolCallLabel(tc('manage_collections', { collection_key: 'ABCD2345' }), 'completed')).toBe(
+            'Manage collections: "ABCD2345"',
+        );
+    });
+
+    it('labels find_annotations scoped by collection', () => {
+        expect(getToolCallLabel(tc('find_annotations', { collection: 'ABCD2345' }), 'completed')).toBe(
+            'Find annotations: ABCD2345',
+        );
+    });
+
+    it('labels list_collections scoped by parent collection', () => {
+        expect(getToolCallLabel(tc('list_collections', { parent_collection: 'ABCD2345' }), 'completed')).toBe(
+            'List collections: subcollections',
+        );
+        expect(getToolCallLabel(tc('list_collections', { parent_collection: 'ABCD2345' }), 'completed', {
+            enrich: { collectionName: 'Methods' },
+        })).toBe('List collections in "Methods"');
+    });
+
+    it('labels a library-scoped collection identifier', () => {
+        expect(getToolCallLabel(tc('manage_collections', { collection_key: 'u-ABCD2345' }), 'completed')).toBe(
+            'Manage collections: "u-ABCD2345"',
+        );
+        expect(getToolCallLabel(tc('find_annotations', { collection: 'g123-ABCD2345' }), 'completed')).toBe(
+            'Find annotations: g123-ABCD2345',
+        );
+    });
+
+    it('does not label find_annotations from a collections filter list', () => {
+        expect(getToolCallLabel(tc('find_annotations', { collections_filter: ['ABCD2345'] }), 'completed')).toBe(
+            'Find annotations',
+        );
     });
 });

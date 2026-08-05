@@ -77,6 +77,24 @@ export function getLabelEnrichmentNeeds(
     return { itemName, scope: LIST_SCOPE_TOOLS.has(toolName) };
 }
 
+/** Collection argument spellings, in the order a tool call is read for one. */
+const COLLECTION_ARG_KEYS = ['collection_key', 'collection', 'parent_collection', 'parent_collection_key'];
+
+/**
+ * The collection argument a tool call carries, whatever spelling it used —
+ * tools name the same parameter differently. Args arrive as untyped JSON, so
+ * only string values are returned (a list such as `collections_filter` is not a
+ * single collection). The value may be a bare key, a library-scoped identifier
+ * ("u-ABCD2345"), or a collection name.
+ */
+export function readCollectionArg(args: Record<string, unknown>): string | undefined {
+    for (const key of COLLECTION_ARG_KEYS) {
+        const value = args[key];
+        if (typeof value === 'string' && value) return value;
+    }
+    return undefined;
+}
+
 /**
  * The headline display name a completed view supplies for a tool-call label, or
  * null when the view carries none (the label then falls back to the host-resolved
@@ -593,7 +611,7 @@ function computeMainLabel(
                 return `${baseLabel}: "${truncate(text, 40)}"`;
             }
 
-            const collection = args.collection as string | undefined;
+            const collection = readCollectionArg(args);
             if (collection) {
                 return `${baseLabel}: ${truncate(collection, 40)}`;
             }
@@ -714,7 +732,7 @@ function computeMainLabel(
         case 'list_collections': {
             const libraryParam = args.library as string | number | undefined;
 
-            const parentKey = args.parent_collection as string | undefined;
+            const parentKey = readCollectionArg(args);
             if (parentKey) {
                 if (opts?.enrich?.collectionName) {
                     return `${baseLabel} in "${opts.enrich.collectionName}"`;
@@ -734,7 +752,7 @@ function computeMainLabel(
         case 'list_tags': {
             const libraryParam = args.library as string | number | undefined;
 
-            const collectionKey = args.collection_key as string | undefined;
+            const collectionKey = readCollectionArg(args);
             if (collectionKey) {
                 if (opts?.enrich?.collectionName) {
                     return `${baseLabel} in "${opts.enrich.collectionName}"`;
@@ -760,7 +778,7 @@ function computeMainLabel(
         }
 
         case 'manage_collections': {
-            const collection = args.collection as string | undefined;
+            const collection = readCollectionArg(args);
             if (collection) {
                 return `${baseLabel}: "${truncate(collection, 20)}"`;
             }
