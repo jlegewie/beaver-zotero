@@ -215,7 +215,8 @@ export async function isValidZoteroItem(item: Zotero.Item): Promise<{valid: bool
 /**
  * Reveal source item in Zotero, optionally in a specific collection
  * @param source - The source item to reveal
- * @param collectionKey - Optional collection key to navigate to before revealing
+ * @param collectionKey - Optional collection reference (bare key or scoped
+ *   identifier) to navigate to before revealing
  */
 export function revealSource(source: ZoteroItemReference | SourceAttachment, collectionKey?: string) {
     if (!source.zotero_key) return;
@@ -232,12 +233,17 @@ export function revealSource(source: ZoteroItemReference | SourceAttachment, col
         return;
     }
     if (Zotero.getActiveZoteroPane()) {
-        // Convert collection key to collection ID if provided
+        // The reference may be a bare key or a scoped identifier, so strip the
+        // library scope before the key lookup. An identifier naming another
+        // library is skipped: the pane reveals the item inside its own library.
+        // An unresolved reference just reveals the item without navigating.
         let collectionId: number | undefined;
         if (collectionKey) {
-            const id = Zotero.Collections.getIDFromLibraryAndKey(libraryID, collectionKey);
-            if (id !== false) {
-                collectionId = id;
+            const scoped = resolveObjectId(collectionKey);
+            const isScopedId = !!scoped && Zotero.Utilities.isValidObjectKey(scoped.zotero_key);
+            if (!isScopedId || scoped!.library_id === libraryID) {
+                const key = isScopedId ? scoped!.zotero_key : collectionKey;
+                collectionId = Zotero.Collections.getIDFromLibraryAndKey(libraryID, key) || undefined;
             }
         }
         selectItemById(itemID, true, collectionId);

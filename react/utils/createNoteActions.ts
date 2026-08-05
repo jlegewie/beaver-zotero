@@ -13,7 +13,7 @@ import { prepareCitationRenderContext } from './citationRenderContext';
 import { wrapWithSchemaVersion, getBeaverNoteFooterHTML } from './noteActions';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { resolveCreateNoteParent } from '../../src/services/agentDataProvider/actions/resolveCreateNoteParent';
-import { getCollectionByIdOrName } from '../../src/services/agentDataProvider/utils';
+import { resolveSingleCollection } from '../../src/services/agentDataProvider/utils';
 import { libraryRefForLibraryID, resolveItemReference, resolveWriteTargetLibrary } from '../../src/utils/libraryIdentity';
 
 
@@ -94,26 +94,35 @@ export async function executeCreateNoteAction(action: AgentAction, runId?: strin
         warning = resolution.warning;
     }
 
-    // Collections: prefer keys already resolved by validation; otherwise
-    // resolve raw keys-or-names from the proposed data (covers pending actions
-    // persisted before validation normalized them).
+    // Collections: a child note can never be in a collection (Zotero's
+    // fki_collectionItems_itemID_parentItemID trigger aborts the save), so once
+    // the parent is known the collection arguments are ignored — and never
+    // resolved. For a standalone note, prefer the keys validation already
+    // resolved; otherwise resolve the raw keys-or-names from the proposed data
+    // (covers pending actions persisted before validation normalized them).
     let collectionKeysToApply: string[] = [];
-    if (proposed.collection_keys && proposed.collection_keys.length > 0) {
-        collectionKeysToApply = [...proposed.collection_keys];
-    } else {
-        const rawCollections = (proposed.collections && proposed.collections.length > 0)
-            ? proposed.collections
-            : (proposed.collection ? [proposed.collection] : []);
-        for (const entry of rawCollections) {
-            const match = getCollectionByIdOrName(entry, targetLibraryId);
-            if (match && !collectionKeysToApply.includes(match.collection.key)) {
-                collectionKeysToApply.push(match.collection.key);
-            } else if (!match) {
-                logger(`executeCreateNoteAction: Collection "${entry}" not found, skipping`, 1);
+    if (!parentKey) {
+        if (proposed.collection_keys && proposed.collection_keys.length > 0) {
+            collectionKeysToApply = [...proposed.collection_keys];
+        } else {
+            const rawCollections = (proposed.collections && proposed.collections.length > 0)
+                ? proposed.collections
+                : (proposed.collection ? [proposed.collection] : []);
+            for (const entry of rawCollections) {
+                const resolution = resolveSingleCollection(entry, {
+                    eligibleLibraryIds: [targetLibraryId],
+                    explicitLibrary: true,
+                });
+                // All-or-nothing, same rule as validation: filing the note in
+                // some of the requested collections and not the rest is a
+                // silent wrong answer.
+                if (!resolution.ok) throw new Error(resolution.message);
+                const key = resolution.match.collection.key;
+                if (!collectionKeysToApply.includes(key)) collectionKeysToApply.push(key);
             }
-        }
-        if (collectionKeysToApply.length === 0 && proposed.collection_key) {
-            collectionKeysToApply = [proposed.collection_key];
+            if (collectionKeysToApply.length === 0 && proposed.collection_key) {
+                collectionKeysToApply = [proposed.collection_key];
+            }
         }
     }
 

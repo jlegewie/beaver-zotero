@@ -1,5 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+// Fixture state the faked collection resolver reads. Library 200 is local but
+// excluded from Beaver, so nothing may resolve there.
+const harness = vi.hoisted(() => ({
+  collections: [] as any[],
+  libraryRefs: { 1: "u", 100: "g12345", 200: "g67890" } as Record<number, string>,
+  libraryNames: { 1: "My Library", 100: "Group", 200: "Secret Group" } as Record<number, string>,
+  searchableLibraryIds: [1, 100] as number[],
+}));
+
 vi.mock("../../../react/store", () => ({
   // Personal library (1) + a local group library (100) are searchable.
   store: { get: vi.fn(() => [1, 100]) },
@@ -9,10 +18,16 @@ vi.mock("../../../react/atoms/profile", () => ({
   searchableLibraryIdsAtom: Symbol("searchableLibraryIdsAtom"),
 }));
 
-vi.mock("../../../src/services/agentDataProvider/utils", () => ({
-  getDeferredToolPreference: vi.fn(() => "always_ask"),
-  excludedLibraryMessage: vi.fn((libraryId: number) => `Library ${libraryId} is excluded from Beaver.`),
-}));
+vi.mock("../../../src/services/agentDataProvider/utils", async () => {
+  const { createCollectionResolverFake } = await import("../../helpers/collectionResolverFake");
+  const fake = createCollectionResolverFake(harness);
+  return {
+    getDeferredToolPreference: vi.fn(() => "always_ask"),
+    excludedLibraryMessage: vi.fn((libraryId: number) => `Library ${libraryId} is excluded from Beaver.`),
+    resolveSingleCollection: vi.fn(fake.resolveSingleCollection),
+    resolveCollectionForWrite: vi.fn(fake.resolveCollectionForWrite),
+  };
+});
 
 import { validateOrganizeItemsAction } from "../../../src/services/agentDataProvider/actions/organizeItems";
 import { store } from "../../../react/store";
@@ -54,6 +69,11 @@ describe("validateOrganizeItemsAction", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     itemKind = "regular";
+    harness.collections = [
+      { id: 1, key: "CLLKEY23", libraryID: 1, name: "Reading" },
+      { id: 2, key: "CLLKEY24", libraryID: 100, name: "Group Reading" },
+    ];
+    harness.searchableLibraryIds = [1, 100];
     previousZotero = (globalThis as any).Zotero;
     (globalThis as any).Zotero = {
       Libraries: {
@@ -100,7 +120,7 @@ describe("validateOrganizeItemsAction", () => {
       buildRequest({
         item_ids: ["1-ANNOTKEY"],
         tags: null,
-        collections: { add: ["COLLKEY1"], remove: [] },
+        collections: { add: ["CLLKEY23"], remove: [] },
       }),
     );
 
@@ -193,23 +213,14 @@ describe("validateOrganizeItemsAction", () => {
   });
 
   it("reports a collection that only exists in a non-searchable library as not found, without naming it", async () => {
-    const zotero = (globalThis as any).Zotero;
     // Library 200 exists locally but is not searchable (user excluded it).
-    zotero.Libraries.getAll = vi.fn(() => [
-      { libraryID: 1, name: "My Library" },
-      { libraryID: 100, name: "Group" },
-      { libraryID: 200, name: "Secret Group" },
-    ]);
-    zotero.Collections.getByLibraryAndKeyAsync = vi.fn(
-      async (libId: number, key: string) =>
-        libId === 200 && key === "EXCLKEY1" ? { key } : null,
-    );
+    harness.collections.push({ id: 3, key: "EXCLKEY2", libraryID: 200, name: "Excluded" });
 
     const res = await validateOrganizeItemsAction(
       buildRequest({
         item_ids: ["1-REGULARKEY"],
         tags: null,
-        collections: { add: ["EXCLKEY1"], remove: [] },
+        collections: { add: ["EXCLKEY2"], remove: [] },
       }),
     );
 
@@ -227,20 +238,19 @@ describe("validateOrganizeItemsAction", () => {
       key === "GOODITEM" ? makeItem("regular", libId, key) : false,
     );
     zotero.Libraries.getAll = vi.fn(() => [{ libraryID: 1, name: "My Library" }]);
-    zotero.Collections.getByLibraryAndKeyAsync = vi.fn(async () => null);
 
     const res = await validateOrganizeItemsAction(
       buildRequest({
         item_ids: ["1-GOODITEM", "1-MISSING01"],
         tags: null,
-        collections: { add: ["BADCOLL1"], remove: [] },
+        collections: { add: ["BADCOLL2"], remove: [] },
       }),
     );
 
     expect(res.valid).toBe(false);
     expect(res.error_code).toBe("multiple_item_errors");
     expect(res.error).toContain("1-MISSING01");
-    expect(res.error).toContain("BADCOLL1");
+    expect(res.error).toContain("BADCOLL2");
     // The frontend never had to be asked twice — both problems in one shot.
     expect(res.error).not.toContain("GOODITEM");
   });
@@ -269,6 +279,76 @@ describe("validateOrganizeItemsAction", () => {
     expect(res.error_code).toBe("library_not_searchable");
     expect(res.error).toContain("100-EXCLKEY1");
     expect(res.error).toContain("1-MISSING01");
+  });
+
+  it("rejects a collection name even when it resolves cleanly in the item library", async () => {
+    const res = await validateOrganizeItemsAction(
+      buildRequest({
+        item_ids: ["1-REGULARKEY"],
+        tags: null,
+        collections: { add: ["Reading"], remove: [] },
+      }),
+    );
+
+    expect(res.valid).toBe(false);
+    expect(res.error).toContain("u-CLLKEY23");
+    expect(res.error).toContain("list_collections");
+  });
+
+  it("accepts a scoped collection identifier and normalizes it to a bare key", async () => {
+    const res = await validateOrganizeItemsAction(
+      buildRequest({
+        item_ids: ["1-REGULARKEY"],
+        tags: null,
+        collections: { add: ["u-CLLKEY23"], remove: [] },
+      }),
+    );
+
+    expect(res.valid).toBe(true);
+    expect(res.normalized_action_data).toEqual({
+      item_ids: ["u-REGULARKEY"],
+      collections: { add: ["CLLKEY23"], remove: [] },
+      library_id: 1,
+      library_ref: "u",
+    });
+  });
+
+  it("still reports a collection that lives in another searchable library", async () => {
+    const res = await validateOrganizeItemsAction(
+      buildRequest({
+        item_ids: ["1-REGULARKEY"],
+        tags: null,
+        // CLLKEY24 is in the group library, the items are in the personal one.
+        collections: { add: ["CLLKEY24"], remove: [] },
+      }),
+    );
+
+    expect(res.valid).toBe(false);
+    expect(res.error_code).toBe("collection_in_different_library");
+    expect(res.error).toContain("CLLKEY24");
+    expect(res.error).toContain("library-scoped");
+  });
+
+  it("flags an item key pasted into add_to_collections, bare or scoped", async () => {
+    const bare = await validateOrganizeItemsAction(
+      buildRequest({
+        item_ids: ["1-ITEMKEY2"],
+        tags: null,
+        collections: { add: ["ITEMKEY2"], remove: [] },
+      }),
+    );
+    expect(bare.valid).toBe(false);
+    expect(bare.error).toContain("also appear in item_ids");
+
+    const scoped = await validateOrganizeItemsAction(
+      buildRequest({
+        item_ids: ["1-ITEMKEY2"],
+        tags: null,
+        collections: { add: ["u-ITEMKEY2"], remove: [] },
+      }),
+    );
+    expect(scoped.valid).toBe(false);
+    expect(scoped.error).toContain("also appear in item_ids");
   });
 
   it("rejects a malformed item id", async () => {

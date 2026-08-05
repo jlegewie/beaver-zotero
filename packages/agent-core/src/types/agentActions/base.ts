@@ -141,7 +141,7 @@ export interface CreateCollectionProposedData {
     library_ref?: string;
     /** Name of the collection to create */
     name: string;
-    /** Parent collection key (optional, for subcollections) */
+    /** Parent collection identifier or bare key (optional, for subcollections) */
     parent_key?: string | null;
     /** Item IDs to add to the collection after creation (optional) */
     item_ids?: string[];
@@ -174,7 +174,9 @@ export interface TagChanges {
 }
 
 /**
- * Collection changes for organize_items
+ * Collection changes for organize_items. Entries are collection identifiers
+ * ("u-ABCD2345", "g123-ABCD2345") or bare Zotero keys; validation normalizes
+ * them to bare keys scoped to the items' library.
  */
 export interface CollectionChanges {
     add?: string[];
@@ -192,6 +194,10 @@ export interface OrganizeItemsProposedData {
      * `parseItemReference`.
      */
     item_ids: string[];
+    /** Library the collection changes are scoped to, set by validation */
+    library_id?: number;
+    /** Device-portable library identity ("u" | "g<groupID>"). See `src/utils/libraryIdentity.ts`. */
+    library_ref?: string;
     /** Tags to add/remove */
     tags?: TagChanges | null;
     /** Collections to add/remove */
@@ -210,9 +216,9 @@ export interface OrganizeItemsResultData {
     tags_added?: string[];
     /** Tags that were removed */
     tags_removed?: string[];
-    /** Collection keys that items were added to */
+    /** Bare collection keys that items were added to */
     collections_added?: string[];
-    /** Collection keys that items were removed from */
+    /** Bare collection keys that items were removed from */
     collections_removed?: string[];
     /** Items that failed (item_id -> error message) */
     failed_items?: Record<string, string>;
@@ -286,9 +292,10 @@ export interface ManageCollectionsProposedData {
     /** Device-portable library identity ("u" | "g<groupID>"). See `src/utils/libraryIdentity.ts`. */
     library_ref?: string;
     action: 'rename' | 'move' | 'delete';
+    /** Collection identifier or bare key; validation normalizes it to a bare key */
     collection_key: string;
     new_name?: string | null;
-    /** Target parent key for move; null means top-level */
+    /** Target parent identifier or bare key for move; null means top-level */
     new_parent_key?: string | null;
 }
 
@@ -372,7 +379,7 @@ export interface NoteProposedData {
     library_ref?: string;
     /** Library name or ID string (resolved by frontend via getLibraryByIdOrName) */
     library?: string | null;
-    /** Collection name or key (resolved by frontend via getCollectionByIdOrName) */
+    /** Collection identifier, bare key or name (resolved by the frontend) */
     collection?: string | null;
     /** Raw tag from LLM output - used for matching during streaming */
     raw_tag?: string;

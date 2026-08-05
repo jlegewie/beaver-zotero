@@ -9,6 +9,7 @@ import { emitAttachmentResolved } from './attachmentResolvedEvent';
 import { getPref } from '../../src/utils/prefs';
 import { createProvenanceNote } from './noteActions';
 import { libraryRefForLibraryID, resolveLibraryRef } from '../../src/utils/libraryIdentity';
+import { resolveCollectionForWrite } from '../../src/services/agentDataProvider/utils';
 import { getSelectedLibraryId, getSelectedCollection } from '../../src/utils/zoteroSelection';
 
 const SAVE_ATTACHMENTS_WITH_TRANSLATORS = false;
@@ -514,12 +515,21 @@ export async function applyCreateItemData(
 
     needsSave = stampBeaverProvenanceExtra(item, { reason: proposedData.reason }) || needsSave;
 
-    // 2. Collections (from proposed data, in addition to context collection)
+    // 2. Collections (from proposed data, in addition to context collection).
+    // These per-item `collection_keys` are not normalized by validation: each
+    // one arrives as the agent authored it, in either grammar (bare key or
+    // scoped identifier), so it is resolved here against the item's library.
+    // Names are rejected, as they are at validation — filing an item into a
+    // name-matched collection is not something the caller can verify.
     if (proposedData.collection_keys && proposedData.collection_keys.length > 0) {
         const collectionIds: number[] = [];
-        for (const key of proposedData.collection_keys) {
-            const collection = Zotero.Collections.getByLibraryAndKey(libraryId, key);
-            if (collection) collectionIds.push(collection.id);
+        for (const collectionRef of proposedData.collection_keys) {
+            const resolution = resolveCollectionForWrite(collectionRef, {
+                eligibleLibraryIds: [libraryId],
+                explicitLibrary: true,
+            });
+            if (resolution.ok) collectionIds.push(resolution.match.collection.id);
+            else logger(`applyCreateItemData: Collection "${collectionRef}" not resolved (${resolution.code}), skipping`, 1);
         }
         if (collectionIds.length > 0) {
             // Append to existing collections if any (from translation or context)

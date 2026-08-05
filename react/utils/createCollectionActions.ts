@@ -13,6 +13,7 @@ import {
     resolveObjectId,
     resolveWriteTargetLibrary,
 } from '../../src/utils/libraryIdentity';
+import { resolveCollectionForWrite } from '../../src/services/agentDataProvider/utils';
 
 /**
  * Execute a create_collection agent action by creating the collection in Zotero.
@@ -41,14 +42,16 @@ export async function executeCreateCollectionAction(
         libraryID: library_id,
     };
 
-    // Set parent if provided
+    // Set parent if provided. The `parent_key` on the persisted action may still
+    // be the value the agent authored, in either grammar (bare key or scoped
+    // identifier), so it is resolved against the target library.
     if (parent_key) {
-        const parentCollection = await Zotero.Collections.getByLibraryAndKeyAsync(library_id, parent_key);
-        if (parentCollection) {
-            collectionParams.parentID = parentCollection.id;
-        } else {
-            throw new Error(`Parent collection not found: ${parent_key}`);
-        }
+        const parentResolution = resolveCollectionForWrite(parent_key, {
+            eligibleLibraryIds: [library_id],
+            explicitLibrary: true,
+        });
+        if (!parentResolution.ok) throw new Error(parentResolution.message);
+        collectionParams.parentID = parentResolution.match.collection.id;
     }
 
     // Create the collection

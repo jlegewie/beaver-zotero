@@ -20,36 +20,23 @@ import {
     WSAgentActionExecuteRequest,
     WSAgentActionExecuteResponse,
 } from '@beaver/agent-core/protocol/agentProtocol';
-import { checkLibraryExcluded, excludedLibraryMessage, getDeferredToolPreference, isLibrarySearchable, getCollectionByIdOrName } from '../utils';
+import {
+    checkLibraryExcluded,
+    excludedLibraryMessage,
+    getDeferredToolPreference,
+    getSearchableLibraryIds,
+    isLibrarySearchable,
+    parseScopedCollectionId,
+    resolveCollectionForWrite,
+} from '../utils';
 import {
     libraryRefForLibraryID,
-    parseItemReference,
-    resolveLibraryRef,
     resolveWriteTargetLibrary,
     UNRESOLVED_LIBRARY_ID,
     writeTargetLibraryError,
 } from '../../../utils/libraryIdentity';
 import { TimeoutContext, checkAborted, TimeoutError } from '../timeout';
 import { logger } from '@beaver/agent-core/platform/logger';
-
-/**
- * Parse a collection identifier that may be a plain 8-char Zotero key or a
- * compound '<library_ref>-<key>' / '<libraryID>-<key>' string. Returns
- * { libraryId, key } where libraryId is null if the input was a plain key,
- * or `UNRESOLVED_LIBRARY_ID` if it embedded a portable ref this device
- * can't resolve (the caller's existing "not found" path handles that).
- */
-function parseCollectionRef(ref: string): { libraryId: number | null; key: string } {
-    const parsed = parseItemReference(ref);
-    if (!parsed) {
-        return { libraryId: null, key: ref };
-    }
-    const libraryId = parsed.library_ref
-        ? resolveLibraryRef(parsed) ?? UNRESOLVED_LIBRARY_ID
-        : parsed.library_id!;
-    return { libraryId, key: parsed.zotero_key };
-}
-
 
 interface SubcollectionSummary {
     key: string;
@@ -157,16 +144,15 @@ export async function validateManageCollectionsAction(
     const hintLibraryId = refLibraryId
         ?? (typeof rawLibraryId === 'number' && rawLibraryId > 0 ? rawLibraryId : undefined);
 
-    // Consistency check: when both the compound collection_key and the
+    // Consistency check: when both the scoped collection_key and the
     // separate library_id are sent, they must agree. (library_id is on its
-    // way out — once all agents send compound collection_key it can be
+    // way out — once all agents send a scoped collection_key it can be
     // dropped from the schema.)
-    const parsed = parseCollectionRef(trimmedCollectionKey);
-    // The compound key embedded a portable library_ref this device can't map
-    // to a local library. Report unavailability rather than falling through
-    // to getCollectionByIdOrName with the unresolved sentinel, which would
-    // throw when passed to a raw Collections lookup.
-    if (parsed.libraryId === UNRESOLVED_LIBRARY_ID) {
+    const scopedCollectionId = parseScopedCollectionId(trimmedCollectionKey);
+    // The identifier embedded a portable library_ref this device can't map to a
+    // local library. Report unavailability rather than resolving against the
+    // unresolved sentinel.
+    if (scopedCollectionId?.library_id === UNRESOLVED_LIBRARY_ID) {
         return {
             type: 'agent_action_validate_response',
             request_id: request.request_id,
@@ -176,54 +162,80 @@ export async function validateManageCollectionsAction(
             preference: 'always_ask',
         };
     }
-    if (parsed.libraryId !== null && hintLibraryId !== undefined && parsed.libraryId !== hintLibraryId) {
+    if (scopedCollectionId && hintLibraryId !== undefined && scopedCollectionId.library_id !== hintLibraryId) {
         return {
             type: 'agent_action_validate_response',
             request_id: request.request_id,
             valid: false,
-            error: `collection_key embeds library ${parsed.libraryId} but library_id=${hintLibraryId} was also provided`,
+            error: `collection_key embeds library ${scopedCollectionId.library_id} but library_id=${hintLibraryId} was also provided`,
             error_code: 'invalid_library_id',
             preference: 'always_ask',
         };
     }
 
-    // Pass the raw input through getCollectionByIdOrName. It handles the
-    // compound form strictly (lookup scoped to the embedded library with no
-    // cross-library fallback), and uses library_id as a hint for plain keys.
-    const effectiveLibraryId = parsed.libraryId ?? hintLibraryId;
-    const lookup = getCollectionByIdOrName(trimmedCollectionKey, effectiveLibraryId);
-    if (!lookup) {
-        // The key matched no collection. Check whether it belongs to a library
-        // item so the agent gets a specific error instead of a bare
-        // "not found" — the recurring failure is the agent passing a note /
-        // item / attachment / annotation key to this collection-only tool.
-        const objectType = await classifyNonCollectionKey(parsed.key, effectiveLibraryId);
-        if (objectType) {
+    // The named library may come straight from the model, so it is
+    // exclusion-checked before the collection is resolved: an excluded library
+    // must not disclose whether the collection exists in it.
+    if (hintLibraryId !== undefined) {
+        const excluded = checkLibraryExcluded(hintLibraryId);
+        if (excluded) {
             return {
                 type: 'agent_action_validate_response',
                 request_id: request.request_id,
                 valid: false,
-                error:
-                    `The key '${rawCollectionKey}' refers to a ${objectType}, not a collection. ` +
-                    `manage_collections operates only on collections (folders). It cannot rename, ` +
-                    `move, or delete library items, notes, attachments, or annotations. ` +
-                    `If the user asked to delete this object, tell them to do it manually in Zotero.`,
-                error_code: 'not_a_collection',
+                error: excluded.message,
+                error_code: 'library_not_searchable',
                 preference: 'always_ask',
             };
+        }
+    }
+
+    // A request that named a library confines the reference to it; otherwise any
+    // searchable library may resolve it. A scoped identifier carries its own
+    // library either way. Names are rejected: this tool acts on one collection,
+    // and a name can denote several.
+    const explicitLibrary = hintLibraryId !== undefined;
+    const resolution = resolveCollectionForWrite(trimmedCollectionKey, {
+        eligibleLibraryIds: explicitLibrary ? [hintLibraryId] : getSearchableLibraryIds(),
+        explicitLibrary,
+    });
+    if (!resolution.ok) {
+        if (resolution.code === 'collection_not_found') {
+            // The key matched no collection. Check whether it belongs to a
+            // library item so the agent gets a specific error instead of a bare
+            // "not found" — the recurring failure is the agent passing a note /
+            // item / attachment / annotation key to this collection-only tool.
+            const objectType = await classifyNonCollectionKey(
+                scopedCollectionId?.zotero_key ?? trimmedCollectionKey,
+                scopedCollectionId?.library_id ?? hintLibraryId,
+            );
+            if (objectType) {
+                return {
+                    type: 'agent_action_validate_response',
+                    request_id: request.request_id,
+                    valid: false,
+                    error:
+                        `The key '${rawCollectionKey}' refers to a ${objectType}, not a collection. ` +
+                        `manage_collections operates only on collections (folders). It cannot rename, ` +
+                        `move, or delete library items, notes, attachments, or annotations. ` +
+                        `If the user asked to delete this object, tell them to do it manually in Zotero.`,
+                    error_code: 'not_a_collection',
+                    preference: 'always_ask',
+                };
+            }
         }
         return {
             type: 'agent_action_validate_response',
             request_id: request.request_id,
             valid: false,
-            error: `Collection not found: ${rawCollectionKey}`,
-            error_code: 'collection_not_found',
+            error: resolution.message,
+            error_code: resolution.code,
             preference: 'always_ask',
         };
     }
 
-    const collection = lookup.collection;
-    const libraryID = lookup.libraryID;
+    const collection = resolution.match.collection;
+    const libraryID = resolution.match.libraryID;
     const library = Zotero.Libraries.get(libraryID);
     if (!library) {
         return {
@@ -288,42 +300,40 @@ export async function validateManageCollectionsAction(
     } else if (action === 'move') {
         const trimmedParent = rawNewParentKey ? rawNewParentKey.trim() || null : null;
         if (trimmedParent) {
-            // Accept plain 8-char key or compound '<libraryID>-<key>'. The
-            // compound form must reference the same library as the child being
-            // moved (Zotero can't reparent across libraries — that's a copy).
-            const parsedParent = parseCollectionRef(trimmedParent);
-            if (!parsedParent) {
+            // Accept a scoped identifier or a plain key. A scoped identifier
+            // must reference the same library as the child being moved (Zotero
+            // can't reparent across libraries — that's a copy).
+            const scopedParentId = parseScopedCollectionId(trimmedParent);
+            if (scopedParentId && scopedParentId.library_id !== libraryID) {
+                const parentLocation = scopedParentId.library_id === UNRESOLVED_LIBRARY_ID
+                    ? 'a library that is not available on this computer'
+                    : `library ${scopedParentId.library_id}`;
                 return {
                     type: 'agent_action_validate_response',
                     request_id: request.request_id,
                     valid: false,
-                    error: `Invalid new_parent_key format: '${trimmedParent}'`,
+                    error: `new_parent_key '${trimmedParent}' is in ${parentLocation}, but the collection is in library ${libraryID}. Cross-library moves are not supported.`,
                     error_code: 'invalid_parent',
                     preference: 'always_ask',
                 };
             }
-            if (parsedParent.libraryId !== null && parsedParent.libraryId !== libraryID) {
+            const parentResolution = resolveCollectionForWrite(trimmedParent, {
+                eligibleLibraryIds: [libraryID],
+                explicitLibrary: true,
+            });
+            if (!parentResolution.ok) {
                 return {
                     type: 'agent_action_validate_response',
                     request_id: request.request_id,
                     valid: false,
-                    error: `new_parent_key '${trimmedParent}' is in library ${parsedParent.libraryId}, but the collection is in library ${libraryID}. Cross-library moves are not supported.`,
-                    error_code: 'invalid_parent',
+                    error: parentResolution.code === 'collection_not_found'
+                        ? `Parent collection not found in library '${library.name}': ${trimmedParent}`
+                        : parentResolution.message,
+                    error_code: parentResolution.code === 'collection_not_found' ? 'parent_not_found' : 'invalid_parent',
                     preference: 'always_ask',
                 };
             }
-            const parentKeyLookup = parsedParent.key;
-            const parent = await Zotero.Collections.getByLibraryAndKeyAsync(libraryID, parentKeyLookup);
-            if (!parent) {
-                return {
-                    type: 'agent_action_validate_response',
-                    request_id: request.request_id,
-                    valid: false,
-                    error: `Parent collection not found in library '${library.name}': ${trimmedParent}`,
-                    error_code: 'parent_not_found',
-                    preference: 'always_ask',
-                };
-            }
+            const parent = parentResolution.match.collection;
             // Cannot move into self
             if (parent.id === collection.id) {
                 return {

@@ -71,6 +71,7 @@ import {
     getCollectionByIdOrName,
     librariesForCollectionError,
     resolveCollectionForDisplay,
+    resolveCollectionForWrite,
     resolveCollectionMatches,
     resolveSingleCollection,
 } from '../../../src/services/agentDataProvider/utils';
@@ -312,6 +313,16 @@ describe('resolveSingleCollection', () => {
         ).toMatchObject({ ok: false, code: 'collection_not_found' });
     });
 
+    it('treats a bare key and its scoped identifier identically when the library is eligible', () => {
+        // The manual apply / undo shape: the caller passes the item's own
+        // library, which may be excluded. Eligibility is the authority, so the
+        // grammar the model happened to emit must not change the outcome.
+        const options = { eligibleLibraryIds: [EXCLUDED_LIBRARY] };
+        const expected = { ok: true, match: { collection: excludedCollection, libraryID: EXCLUDED_LIBRARY } };
+        expect(resolveSingleCollection(excludedCollection.key, options)).toMatchObject(expected);
+        expect(resolveSingleCollection(`g67890-${excludedCollection.key}`, options)).toMatchObject(expected);
+    });
+
     it('returns collection_not_found for empty and null input', () => {
         expect(resolveSingleCollection(null, { eligibleLibraryIds: searchableIds() })).toMatchObject({
             ok: false,
@@ -412,6 +423,33 @@ describe('getCollectionByIdOrName', () => {
     it('returns null for null/undefined input', () => {
         expect(getCollectionByIdOrName(null)).toBeNull();
         expect(getCollectionByIdOrName(undefined)).toBeNull();
+    });
+});
+
+describe('resolveCollectionForWrite', () => {
+    it('resolves a scoped identifier, a bare key and a row id like the read resolver', () => {
+        expect(resolveCollectionForWrite(`u-${personalCollection.key}`, { eligibleLibraryIds: searchableIds() }))
+            .toEqual({ ok: true, match: { collection: personalCollection, libraryID: PERSONAL_LIBRARY } });
+        expect(resolveCollectionForWrite(personalCollection.key, { eligibleLibraryIds: searchableIds() }))
+            .toEqual({ ok: true, match: { collection: personalCollection, libraryID: PERSONAL_LIBRARY } });
+        expect(resolveCollectionForWrite(personalCollection.id, { eligibleLibraryIds: searchableIds() }))
+            .toEqual({ ok: true, match: { collection: personalCollection, libraryID: PERSONAL_LIBRARY } });
+    });
+
+    it('rejects a name that resolves to exactly one collection, and names its identifier', () => {
+        const resolved = resolveCollectionForWrite('Personal Coll', { eligibleLibraryIds: [PERSONAL_LIBRARY] });
+        expect(resolved).toMatchObject({ ok: false, code: 'invalid_request' });
+        expect((resolved as any).message).toContain('u-ABCDEFGH');
+        expect((resolved as any).message).toContain('list_collections');
+    });
+
+    it('passes a typed resolution failure through unchanged', () => {
+        expect(resolveCollectionForWrite('ZZZZ2345', { eligibleLibraryIds: searchableIds() }))
+            .toMatchObject({ ok: false, code: 'collection_not_found' });
+        expect(resolveCollectionForWrite(`g67890-${excludedCollection.key}`, { eligibleLibraryIds: searchableIds() }))
+            .toMatchObject({ ok: false, code: 'library_not_searchable' });
+        expect(resolveCollectionForWrite(duplicateKeyPersonal.key, { eligibleLibraryIds: searchableIds() }))
+            .toMatchObject({ ok: false, code: 'ambiguous_collection' });
     });
 });
 

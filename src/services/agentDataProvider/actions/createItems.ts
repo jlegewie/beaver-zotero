@@ -9,7 +9,7 @@ import {
     WSAgentActionExecuteResponse,
     FrontendTimingMetadata,
 } from '@beaver/agent-core/protocol/agentProtocol';
-import { checkLibraryExcluded, excludedLibraryMessage, getDeferredToolPreference } from '../utils';
+import { checkLibraryExcluded, excludedLibraryMessage, getDeferredToolPreference, resolveCollectionForWrite } from '../utils';
 import { libraryRefForLibraryID, resolveWriteTargetLibrary, writeTargetLibraryError } from '../../../utils/libraryIdentity';
 import { TimeoutContext, checkAborted } from '../timeout';
 import { TimeoutError } from '../timeout';
@@ -122,23 +122,33 @@ async function validateCreateItemAction(
         };
     }
 
-    // Validate collections exist (if specified)
+    // Validate collections exist (if specified). Every collection must be in the
+    // target library, so that library is a hard scope and a scoped identifier
+    // from elsewhere is a scope conflict. Names are rejected: the items go into
+    // one specific collection each.
     const resolvedCollections: Array<{ key: string; name: string }> = [];
+    const normalizedCollectionKeys: string[] = [];
     if (collections && collections.length > 0) {
-        for (const collectionKey of collections) {
-            const collection = await Zotero.Collections.getByLibraryAndKeyAsync(targetLibraryId, collectionKey);
-            if (!collection) {
+        for (const collectionRef of collections) {
+            const resolution = resolveCollectionForWrite(collectionRef, {
+                eligibleLibraryIds: [targetLibraryId],
+                explicitLibrary: true,
+            });
+            if (!resolution.ok) {
                 return {
                     type: 'agent_action_validate_response',
                     request_id: request.request_id,
                     valid: false,
-                    error: `Collection not found: ${collectionKey}`,
-                    error_code: 'collection_not_found',
+                    error: resolution.message,
+                    error_code: resolution.code,
                     preference: 'always_ask',
                 };
             }
+            const collection = resolution.match.collection;
+            if (normalizedCollectionKeys.includes(collection.key)) continue;
+            normalizedCollectionKeys.push(collection.key);
             resolvedCollections.push({
-                key: collectionKey,
+                key: collection.key,
                 name: collection.name,
             });
         }
@@ -187,6 +197,15 @@ async function validateCreateItemAction(
             existing_items: existingItems,
             resolved_collections: resolvedCollections,
             tags: tags || [],
+        },
+        // Report the resolved target library and the batch `collections`
+        // argument as bare keys in it, whatever grammar the agent used. The
+        // per-item `collection_keys` are separate and stay as authored; the
+        // apply path resolves those against the item's library.
+        normalized_action_data: {
+            library_id: targetLibraryId,
+            library_ref: libraryRefForLibraryID(targetLibraryId) ?? undefined,
+            ...(collections && collections.length > 0 ? { collections: normalizedCollectionKeys } : {}),
         },
         preference,
     };

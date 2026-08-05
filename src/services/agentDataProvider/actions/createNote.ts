@@ -19,7 +19,15 @@ import {
     WSAgentActionExecuteResponse,
 } from '@beaver/agent-core/protocol/agentProtocol';
 import { ItemDataWithStatus, AttachmentDataWithStatus } from '@beaver/agent-core/types/zotero';
-import { checkLibraryExcluded, excludedLibraryMessage, getDeferredToolPreference, getLibraryByIdOrName, getCollectionByIdOrName } from '../utils';
+import {
+    checkLibraryExcluded,
+    excludedLibraryMessage,
+    getDeferredToolPreference,
+    getLibraryByIdOrName,
+    getSearchableLibraryIds,
+    isLibrarySearchable,
+    resolveSingleCollection,
+} from '../utils';
 import {
     libraryRefForLibraryID,
     resolveObjectId,
@@ -173,9 +181,15 @@ async function validateCreateNoteAction(
         let candidateKey: string;
         let candidateLibraryId: number | null = null;
         if (parsedInput) {
-            candidateLibraryId = parsedInput.library_id === UNRESOLVED_LIBRARY_ID
-                ? null
-                : parsedInput.library_id;
+            // The embedded library comes straight from the model, so it is
+            // exclusion-checked before either probe below reads from it: an
+            // excluded library must never disclose whether an item or a
+            // collection exists in it. A non-searchable library reads as no
+            // library at all, keeping both probes inside the searchable set.
+            const parsedLibraryId = parsedInput.library_id;
+            candidateLibraryId = parsedLibraryId !== UNRESOLVED_LIBRARY_ID && isLibrarySearchable(parsedLibraryId)
+                ? parsedLibraryId
+                : null;
             candidateKey = parsedInput.zotero_key;
         } else {
             candidateKey = parentItemIdInput;
@@ -194,11 +208,17 @@ async function validateCreateNoteAction(
                 }
                 if (itemExists) return;
 
-                const collectionMatch = getCollectionByIdOrName(
-                    parentItemIdInput!,
-                    candidateLibraryId ?? undefined,
-                );
-                if (!collectionMatch) return;
+                // A scoped identifier carries its own library; a bare key may
+                // resolve in any searchable library. Any failure (including
+                // ambiguity) leaves parent_id alone — this is a recovery path,
+                // not a lookup the caller asked for.
+                const collectionResolution = resolveSingleCollection(parentItemIdInput!, {
+                    eligibleLibraryIds: candidateLibraryId !== null
+                        ? [candidateLibraryId]
+                        : getSearchableLibraryIds(),
+                });
+                if (!collectionResolution.ok) return;
+                const collectionMatch = collectionResolution.match;
 
                 // If the caller already supplied explicit collections, defer
                 // to them
@@ -418,25 +438,44 @@ async function validateCreateNoteAction(
 
     // Resolve collections if specified.
     // Child notes cannot belong to collections directly (Zotero's
-    // fki_collectionItems_itemID_parentItemID trigger aborts the insert),
-    // so silently drop the collections when a parent is set — the note
-    // inherits collection membership from the parent.
+    // fki_collectionItems_itemID_parentItemID trigger aborts the insert), so a
+    // note with a parent ignores collection arguments entirely — they are never
+    // resolved and never rejected; the note inherits the parent's placement.
+    //
+    // For a standalone note every requested collection must resolve, or the
+    // whole action is rejected: dropping one would file the note somewhere other
+    // than where it was asked for, with nothing in the result to say so. The
+    // note's target library is a hard scope, so a collection elsewhere is
+    // reported as a scope conflict and a mixed-library set can never get
+    // through. Names are accepted here.
     const resolvedCollectionKeys: string[] = [];
-    if (collectionsInput.length > 0 && !parentKey) {
+    if (collectionsInput.length > 0 && parentKey) {
+        logger(`validateCreateNoteAction: Ignoring collections "${collectionsInput.join(', ')}" because note has parent_key ${parentKey}`, 1);
+    } else if (collectionsInput.length > 0) {
         const tColl = Date.now();
         for (const entry of collectionsInput) {
-            const collectionResult = getCollectionByIdOrName(entry, resolvedLibraryId);
-            if (collectionResult) {
-                if (!resolvedCollectionKeys.includes(collectionResult.collection.key)) {
-                    resolvedCollectionKeys.push(collectionResult.collection.key);
-                }
-            } else {
-                logger(`validateCreateNoteAction: Collection "${entry}" not found, will skip collection assignment`, 1);
+            const collectionResolution = resolveSingleCollection(entry, {
+                eligibleLibraryIds: [resolvedLibraryId],
+                explicitLibrary: true,
+            });
+            if (!collectionResolution.ok) {
+                ta.record('collection_resolution_ms', Date.now() - tColl);
+                return {
+                    type: 'agent_action_validate_response',
+                    request_id: request.request_id,
+                    valid: false,
+                    error: collectionResolution.message,
+                    error_code: collectionResolution.code,
+                    preference: 'always_ask',
+                    timing: buildTiming(),
+                };
+            }
+            const collectionKey = collectionResolution.match.collection.key;
+            if (!resolvedCollectionKeys.includes(collectionKey)) {
+                resolvedCollectionKeys.push(collectionKey);
             }
         }
         ta.record('collection_resolution_ms', Date.now() - tColl);
-    } else if (collectionsInput.length > 0 && parentKey) {
-        logger(`validateCreateNoteAction: Ignoring collections "${collectionsInput.join(', ')}" because note has parent_key ${parentKey}`, 1);
     }
     let resolvedCollectionKey: string | null = resolvedCollectionKeys[0] ?? null;
 

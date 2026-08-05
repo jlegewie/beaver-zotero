@@ -577,11 +577,12 @@ export type SingleCollectionResolution =
 
 export interface ResolveCollectionOptions {
     /**
-     * Libraries a key, name or row id may resolve within. Callers pass an
-     * already exclusion-filtered list (e.g. `getSearchableLibraryIds()`), since
-     * the resolver treats membership here as permission to read. A scoped
-     * identifier carries its own library and is bounded by this list only when
-     * `explicitLibrary` is set — otherwise it resolves in any searchable library.
+     * Libraries any reference may resolve within, and the resolver's single
+     * authority on access for every grammar. Callers pass a list they have
+     * already decided is readable — `getSearchableLibraryIds()` on data paths,
+     * a single library on paths that act inside one. A scoped identifier for a
+     * library outside the list is bounded by `explicitLibrary` and by the
+     * exclusion check; see {@link resolveCollectionMatches}.
      */
     eligibleLibraryIds: number[];
     /** Libraries a *name* may resolve within. Defaults to `eligibleLibraryIds`. */
@@ -593,12 +594,6 @@ export interface ResolveCollectionOptions {
      * instead of resolving it.
      */
     explicitLibrary?: boolean;
-    /**
-     * Skip the exclusion check a scoped identifier normally goes through. Only
-     * display-oriented resolution sets this (see
-     * {@link resolveCollectionForDisplay}); every data path leaves it unset.
-     */
-    allowExcludedLibraries?: boolean;
 }
 
 function uniqueLibraryIds(ids: number[]): number[] {
@@ -659,8 +654,11 @@ function resolveCollectionRowId(
  * `1-ABCD1234`). Returns null when the value only looks structurally like one:
  * a suffix that isn't a valid Zotero key (e.g. `u-Drafts`) is a collection
  * *name* that happens to contain a hyphen, and must stay matchable as a name.
+ *
+ * `library_id` is `UNRESOLVED_LIBRARY_ID` when the embedded portable ref names
+ * a library this device doesn't have.
  */
-function parseScopedCollectionId(input: string): ObjectIdReference | null {
+export function parseScopedCollectionId(input: string): ObjectIdReference | null {
     const parsed = resolveObjectId(input);
     if (!parsed) return null;
     if (!Zotero.Utilities.isValidObjectKey(parsed.zotero_key)) return null;
@@ -676,6 +674,8 @@ function parseScopedCollectionId(input: string): ObjectIdReference | null {
  * 1. `number` — device-local collection row id.
  * 2. Scoped identifier (`u-KEY`, `g<groupID>-KEY`, `<libraryID>-KEY`). Authoritative:
  *    it resolves in its embedded library or fails, never falling through to a name.
+ *    Its library must be eligible, or — for a caller that named no library —
+ *    at least not excluded from Beaver.
  * 3. Zotero key — matched across every eligible library. Several hits are an
  *    ambiguity, not a list.
  * 4. Name — case-insensitive exact match across `nameLibraryIds`. One library can
@@ -710,22 +710,28 @@ export function resolveCollectionMatches(
                 message: `The collection "${input}" is in a library that is not available on this computer.`,
             };
         }
-        // Exclusion is checked before the lookup: an excluded library must not
-        // disclose whether the collection exists. The identifier names the
-        // library explicitly, so acknowledging the exclusion leaks nothing.
-        if (!options.allowExcludedLibraries && !isLibrarySearchable(libraryID)) {
-            return { ok: false, code: 'library_not_searchable', message: excludedLibraryMessage(libraryID) };
-        }
-        if (options.explicitLibrary && !eligibleLibraryIds.includes(libraryID)) {
-            const requested = eligibleLibraryIds.map(libraryDisplayName).join('", "');
-            return {
-                ok: false,
-                code: 'invalid_request',
-                message:
-                    `The collection "${input}" is in library "${libraryDisplayName(libraryID)}", but the request ` +
-                    `asked for library "${requested}". Omit the library parameter or pass a collection from ` +
-                    `the requested library.`,
-            };
+        // An eligible library needs no further check: the caller already
+        // declared it readable, and the key grammar below trusts the same list.
+        // Everything outside it is either a scope conflict or, for a caller that
+        // named no library, allowed only while the library is not excluded.
+        if (!eligibleLibraryIds.includes(libraryID)) {
+            if (options.explicitLibrary) {
+                const requested = eligibleLibraryIds.map(libraryDisplayName).join('", "');
+                return {
+                    ok: false,
+                    code: 'invalid_request',
+                    message:
+                        `The collection "${input}" is in library "${libraryDisplayName(libraryID)}", but the request ` +
+                        `asked for library "${requested}". Omit the library parameter or pass a collection from ` +
+                        `the requested library.`,
+                };
+            }
+            // Exclusion is checked before the lookup: an excluded library must
+            // not disclose whether the collection exists. The identifier names
+            // the library explicitly, so acknowledging the exclusion leaks nothing.
+            if (!isLibrarySearchable(libraryID)) {
+                return { ok: false, code: 'library_not_searchable', message: excludedLibraryMessage(libraryID) };
+            }
         }
         const collection = Zotero.Collections.getByLibraryAndKey(libraryID, identifier.zotero_key);
         if (!collection) return collectionNotFound(input);
@@ -782,6 +788,40 @@ export function resolveSingleCollection(
     return { ok: true, matchKind: resolution.matchKind, match: resolution.matches[0] };
 }
 
+/** The single collection a write reference matched, or a typed failure. */
+export type WriteCollectionResolution =
+    | { ok: true; match: CollectionMatch }
+    | CollectionResolutionFailure;
+
+/**
+ * Resolve a collection reference for a write operation, where a collection
+ * *name* is not an acceptable reference.
+ *
+ * A name can denote several collections — across libraries, and inside one
+ * library under different parents — and a write that lands in the wrong
+ * collection is not something the caller can detect from the result. Reads stay
+ * permissive; writes take the identifier that `list_collections` returns.
+ */
+export function resolveCollectionForWrite(
+    collectionIdOrName: number | string | null | undefined,
+    options: ResolveCollectionOptions
+): WriteCollectionResolution {
+    const resolution = resolveSingleCollection(collectionIdOrName, options);
+    if (!resolution.ok) return resolution;
+    if (resolution.matchKind === 'name') {
+        const { collection, libraryID } = resolution.match;
+        return {
+            ok: false,
+            code: 'invalid_request',
+            message:
+                `"${collectionIdOrName}" is a collection name, and this operation needs a collection ` +
+                `identifier. Pass ${modelObjectId(libraryID, collection.key)}, the identifier ` +
+                `list_collections returns for "${collection.name}".`,
+        };
+    }
+    return { ok: true, match: resolution.match };
+}
+
 /**
  * Libraries to echo alongside a failed collection resolution. Only library-scope
  * failures get the list, since it tells the caller where it may retry; a
@@ -815,15 +855,13 @@ export function librariesForCollectionError(
 function resolveCollectionWithHint(
     collectionIdOrName: number | string | null | undefined,
     libraryId: number | undefined,
-    fallbackLibraryIds: number[],
-    allowExcludedLibraries = false
+    fallbackLibraryIds: number[]
 ): CollectionMatch | null {
     const hasLibraryId = libraryId !== undefined && Number.isFinite(libraryId);
     if (hasLibraryId) {
         const hinted = resolveSingleCollection(collectionIdOrName, {
             eligibleLibraryIds: [libraryId],
             nameLibraryIds: [libraryId],
-            allowExcludedLibraries,
         });
         if (hinted.ok) return hinted.match;
         if (hinted.code !== 'collection_not_found') return null;
@@ -831,7 +869,6 @@ function resolveCollectionWithHint(
     const widened = resolveSingleCollection(collectionIdOrName, {
         eligibleLibraryIds: hasLibraryId ? [libraryId, ...fallbackLibraryIds] : fallbackLibraryIds,
         nameLibraryIds: hasLibraryId ? [libraryId] : fallbackLibraryIds,
-        allowExcludedLibraries,
     });
     return widened.ok ? widened.match : null;
 }
@@ -855,23 +892,26 @@ export function getCollectionByIdOrName(
 
 /**
  * Display-only resolution over every local library, used to label persisted
- * chat history with a collection name.
+ * chat history with a collection name and to navigate to a collection the user
+ * clicked.
  *
- * Deliberately not exclusion-scoped: the exclusion boundary covers reads,
+ * Every local library is eligible: the exclusion boundary covers reads,
  * indexing, context and writes, not the rendering of history the user already
  * has. Scoping this to the searchable libraries would also drop the name
  * whenever the profile has not loaded yet, since that set is fail-closed.
  *
  * `libraryId` is a scope hint (see {@link resolveCollectionWithHint}); every
  * failure, ambiguity included, returns null so a label renders nothing rather
- * than guessing a target.
+ * than guessing a target. The hinted step scopes to that one library, so a
+ * scoped identifier naming a *different* library still goes through the
+ * resolver's exclusion check and renders nothing when that library is excluded.
  */
 export function resolveCollectionForDisplay(
     collectionIdOrName: number | string | null | undefined,
     libraryId?: number
 ): CollectionMatch | null {
     const localLibraryIds = Zotero.Libraries.getAll().map((lib: any) => lib.libraryID as number);
-    return resolveCollectionWithHint(collectionIdOrName, libraryId, localLibraryIds, true);
+    return resolveCollectionWithHint(collectionIdOrName, libraryId, localLibraryIds);
 }
 
 /**

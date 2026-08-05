@@ -7,6 +7,45 @@ import { AgentAction } from '../agents/agentActions';
 import type { OrganizeItemsResultData, TagChanges, CollectionChanges } from '@beaver/agent-core/types/agentActions/base';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { parseItemReference, resolveItemReference } from '../../src/utils/libraryIdentity';
+import { resolveCollectionForWrite } from '../../src/services/agentDataProvider/utils';
+
+/** A collection reference resolved to the live collection's row id and bare key. */
+interface ResolvedCollection {
+    id: number;
+    key: string;
+}
+
+/**
+ * Build a collection resolver memoized per (library, reference) pair.
+ *
+ * Every item in one action shares a library, so a batch resolves each distinct
+ * reference once instead of once per item. References may be scoped identifiers
+ * or bare keys; `key` is always the bare key, which is the form undo snapshots
+ * and result_data record — comparing anything else against a snapshot would
+ * silently fail to match.
+ *
+ * A name never resolves: a stored reference is always a key or identifier, so
+ * matching one by name could only redirect the write to a different collection
+ * (e.g. a since-deleted key that another collection carries as its name).
+ */
+function createCollectionResolver(): (libraryID: number, reference: string) => ResolvedCollection | null {
+    const cache = new Map<string, ResolvedCollection | null>();
+    return (libraryID, reference) => {
+        const cacheKey = `${libraryID}:${reference}`;
+        const cached = cache.get(cacheKey);
+        if (cached !== undefined) return cached;
+
+        const resolution = resolveCollectionForWrite(reference, {
+            eligibleLibraryIds: [libraryID],
+            explicitLibrary: true,
+        });
+        const resolved = resolution.ok
+            ? { id: resolution.match.collection.id, key: resolution.match.collection.key }
+            : null;
+        cache.set(cacheKey, resolved);
+        return resolved;
+    };
+}
 
 /**
  * Execute an organize_items agent action.
@@ -30,6 +69,7 @@ export async function executeOrganizeItemsAction(
     const actualTagsRemoved = new Set<string>();
     const actualCollectionsAdded = new Set<string>();
     const actualCollectionsRemoved = new Set<string>();
+    const resolveCollection = createCollectionResolver();
 
     // Process each item
     for (const itemId of item_ids) {
@@ -85,29 +125,23 @@ export async function executeOrganizeItemsAction(
 
             // Add to collections (only top-level items; only if not already member)
             if (isTopLevel && collections?.add && collections.add.length > 0) {
-                for (const collKey of collections.add) {
-                    if (!existingCollections.has(collKey)) {
-                        const collection = await Zotero.Collections.getByLibraryAndKeyAsync(item.libraryID, collKey);
-                        if (collection) {
-                            item.addToCollection(collection.id);
-                            actualCollectionsAdded.add(collKey);
-                            modified = true;
-                        }
-                    }
+                for (const collectionRef of collections.add) {
+                    const collection = resolveCollection(item.libraryID, collectionRef);
+                    if (!collection || existingCollections.has(collection.key)) continue;
+                    item.addToCollection(collection.id);
+                    actualCollectionsAdded.add(collection.key);
+                    modified = true;
                 }
             }
 
             // Remove from collections (only top-level items; only if member)
             if (isTopLevel && collections?.remove && collections.remove.length > 0) {
-                for (const collKey of collections.remove) {
-                    if (existingCollections.has(collKey)) {
-                        const collection = await Zotero.Collections.getByLibraryAndKeyAsync(item.libraryID, collKey);
-                        if (collection) {
-                            item.removeFromCollection(collection.id);
-                            actualCollectionsRemoved.add(collKey);
-                            modified = true;
-                        }
-                    }
+                for (const collectionRef of collections.remove) {
+                    const collection = resolveCollection(item.libraryID, collectionRef);
+                    if (!collection || !existingCollections.has(collection.key)) continue;
+                    item.removeFromCollection(collection.id);
+                    actualCollectionsRemoved.add(collection.key);
+                    modified = true;
                 }
             }
 
@@ -158,6 +192,10 @@ export async function undoOrganizeItemsAction(
     // If we have current_state, use it for precise undo
     // Otherwise, reverse the changes that were applied
     const resultData = action.result_data as OrganizeItemsResultData | undefined;
+    // Snapshots and result_data hold bare keys. Resolving the action's own
+    // references here puts both sides of every comparison on the bare key, so a
+    // scoped identifier in the action still matches its snapshot.
+    const resolveCollection = createCollectionResolver();
 
     for (const itemId of item_ids) {
         try {
@@ -202,27 +240,21 @@ export async function undoOrganizeItemsAction(
 
                 // Restore collections
                 if (collections?.add) {
-                    for (const collKey of collections.add) {
+                    for (const collectionRef of collections.add) {
+                        const collection = resolveCollection(item.libraryID, collectionRef);
                         // Only remove if it wasn't in the original state
-                        if (!originalState.collections.includes(collKey)) {
-                            const collection = await Zotero.Collections.getByLibraryAndKeyAsync(item.libraryID, collKey);
-                            if (collection) {
-                                item.removeFromCollection(collection.id);
-                                modified = true;
-                            }
-                        }
+                        if (!collection || originalState.collections.includes(collection.key)) continue;
+                        item.removeFromCollection(collection.id);
+                        modified = true;
                     }
                 }
                 if (collections?.remove) {
-                    for (const collKey of collections.remove) {
+                    for (const collectionRef of collections.remove) {
+                        const collection = resolveCollection(item.libraryID, collectionRef);
                         // Only add back if it was in the original state
-                        if (originalState.collections.includes(collKey)) {
-                            const collection = await Zotero.Collections.getByLibraryAndKeyAsync(item.libraryID, collKey);
-                            if (collection) {
-                                item.addToCollection(collection.id);
-                                modified = true;
-                            }
-                        }
+                        if (!collection || !originalState.collections.includes(collection.key)) continue;
+                        item.addToCollection(collection.id);
+                        modified = true;
                     }
                 }
             } else if (resultData) {
@@ -241,21 +273,19 @@ export async function undoOrganizeItemsAction(
                     }
                 }
                 if (resultData.collections_added) {
-                    for (const collKey of resultData.collections_added) {
-                        const collection = await Zotero.Collections.getByLibraryAndKeyAsync(item.libraryID, collKey);
-                        if (collection) {
-                            item.removeFromCollection(collection.id);
-                            modified = true;
-                        }
+                    for (const collectionRef of resultData.collections_added) {
+                        const collection = resolveCollection(item.libraryID, collectionRef);
+                        if (!collection) continue;
+                        item.removeFromCollection(collection.id);
+                        modified = true;
                     }
                 }
                 if (resultData.collections_removed) {
-                    for (const collKey of resultData.collections_removed) {
-                        const collection = await Zotero.Collections.getByLibraryAndKeyAsync(item.libraryID, collKey);
-                        if (collection) {
-                            item.addToCollection(collection.id);
-                            modified = true;
-                        }
+                    for (const collectionRef of resultData.collections_removed) {
+                        const collection = resolveCollection(item.libraryID, collectionRef);
+                        if (!collection) continue;
+                        item.addToCollection(collection.id);
+                        modified = true;
                     }
                 }
             } else {

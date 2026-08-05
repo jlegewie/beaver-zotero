@@ -8,7 +8,7 @@ import {
     WSAgentActionExecuteResponse,
 
 } from '@beaver/agent-core/protocol/agentProtocol';
-import { checkLibraryExcluded, excludedLibraryMessage, getDeferredToolPreference } from '../utils';
+import { checkLibraryExcluded, excludedLibraryMessage, getDeferredToolPreference, resolveCollectionForWrite } from '../utils';
 import {
     libraryRefForLibraryID,
     resolveItemReference,
@@ -99,19 +99,27 @@ async function validateCreateCollectionAction(
         };
     }
 
-    // Validate parent collection if provided
+    // Validate parent collection if provided. The target library is a hard
+    // scope, so a scoped identifier from another library is reported as a scope
+    // conflict rather than silently missing. Names are rejected: a subcollection
+    // must be attached to one specific parent.
+    let resolvedParentKey: string | null = null;
     if (parent_key) {
-        const parentCollection = await Zotero.Collections.getByLibraryAndKeyAsync(library_id, parent_key);
-        if (!parentCollection) {
+        const parentResolution = resolveCollectionForWrite(parent_key, {
+            eligibleLibraryIds: [library_id],
+            explicitLibrary: true,
+        });
+        if (!parentResolution.ok) {
             return {
                 type: 'agent_action_validate_response',
                 request_id: request.request_id,
                 valid: false,
-                error: `Parent collection not found: ${parent_key}`,
-                error_code: 'parent_not_found',
+                error: parentResolution.message,
+                error_code: parentResolution.code === 'collection_not_found' ? 'parent_not_found' : parentResolution.code,
                 preference: 'always_ask',
             };
         }
+        resolvedParentKey = parentResolution.match.collection.key;
     }
 
     // Validate item IDs if provided. Accepts both the portable
@@ -177,7 +185,7 @@ async function validateCreateCollectionAction(
         library_id: library_id,
         library_ref: libraryRefForLibraryID(library_id) ?? undefined,
         library_name: library.name,
-        parent_key: parent_key || null,
+        parent_key: resolvedParentKey,
         item_count: item_ids?.length || 0,
     };
 
@@ -186,6 +194,14 @@ async function validateCreateCollectionAction(
         request_id: request.request_id,
         valid: true,
         current_value: currentValue,
+        // Report the resolved target library and the parent as a bare key in
+        // it, whatever grammar the agent used, for consumers that read
+        // normalized_action_data.
+        normalized_action_data: {
+            library_id,
+            library_ref: libraryRefForLibraryID(library_id) ?? undefined,
+            parent_key: resolvedParentKey,
+        },
         preference,
     };
 }
@@ -238,20 +254,24 @@ async function executeCreateCollectionAction(
         libraryID: library_id,
     };
 
-    // Set parent if provided
+    // Set parent if provided. The `parent_key` this path receives may still be
+    // the value the agent authored, in either grammar (bare key or scoped
+    // identifier), so it is resolved against the target library.
     if (parent_key) {
-        const parentCollection = await Zotero.Collections.getByLibraryAndKeyAsync(library_id, parent_key);
-        if (parentCollection) {
-            collectionParams.parentID = parentCollection.id;
-        } else {
+        const parentResolution = resolveCollectionForWrite(parent_key, {
+            eligibleLibraryIds: [library_id],
+            explicitLibrary: true,
+        });
+        if (!parentResolution.ok) {
             return {
                 type: 'agent_action_execute_response',
                 request_id: request.request_id,
                 success: false,
-                error: `Parent collection not found: ${parent_key}`,
-                error_code: 'parent_not_found',
+                error: parentResolution.message,
+                error_code: parentResolution.code === 'collection_not_found' ? 'parent_not_found' : parentResolution.code,
             };
         }
+        collectionParams.parentID = parentResolution.match.collection.id;
     }
 
     let collection: any = null;

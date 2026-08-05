@@ -1,8 +1,21 @@
 import { WSAgentActionValidateRequest, WSAgentActionValidateResponse, WSAgentActionExecuteRequest, WSAgentActionExecuteResponse } from '@beaver/agent-core/protocol/agentProtocol';
 import { store } from '../../../../react/store';
 import { searchableLibraryIdsAtom } from '../../../../react/atoms/profile';
-import { checkLibraryExcluded, excludedLibraryMessage, getDeferredToolPreference } from '../utils';
-import { resolveItemReference, resolveLibraryRef, parseItemReference, modelObjectId } from '../../../utils/libraryIdentity';
+import {
+    checkLibraryExcluded,
+    excludedLibraryMessage,
+    getDeferredToolPreference,
+    resolveCollectionForWrite,
+    resolveSingleCollection,
+} from '../utils';
+import type { CollectionResolutionErrorCode } from '../utils';
+import {
+    resolveItemReference,
+    resolveLibraryRef,
+    parseItemReference,
+    libraryRefForLibraryID,
+    modelObjectId,
+} from '../../../utils/libraryIdentity';
 import { TimeoutContext, checkAborted } from '../timeout';
 import { TimeoutError } from '../timeout';
 import { logger } from '@beaver/agent-core/platform/logger';
@@ -247,6 +260,12 @@ export async function validateOrganizeItemsAction(
     // making the model fix items, resend, and only then discover the
     // collection keys were also wrong.
     let collectionError: { message: string; code: string } | null = null;
+    // Resolved bare collection keys + the library they belong to, returned to
+    // the backend as normalized_action_data. Items normalize *up* to the
+    // portable id; collections normalize *down* to a bare key plus an explicit
+    // library, since a collection key is only meaningful inside one library.
+    let normalizedCollections: { add?: string[]; remove?: string[] } | null = null;
+    let normalizedCollectionLibraryId: number | null = null;
 
     // Validate collection operations: all items must be in the same library.
     // Only meaningful once at least one item resolved — with zero valid
@@ -268,53 +287,77 @@ export async function validateOrganizeItemsAction(
             // Collections are library-scoped: a key that exists in another library is
             // not usable here. Distinguish "exists elsewhere" from "doesn't exist at all"
             // so the agent doesn't loop calling create_collection for a key we just returned.
-            const findCollectionLibrary = async (collKey: string): Promise<number | null> => {
-                for (const lib of Zotero.Libraries.getAll()) {
-                    if (!searchableLibraryIds.includes(lib.libraryID)) continue;
-                    const found = await Zotero.Collections.getByLibraryAndKeyAsync(lib.libraryID, collKey);
-                    if (found) return lib.libraryID;
-                }
-                return null;
+            // Names never resolve here (a write takes an identifier), so the probe
+            // only considers key/identifier matches.
+            const otherSearchableLibraryIds = searchableLibraryIds.filter((id: number) => id !== libraryId);
+            const findCollectionLibrary = (collectionRef: string): number | null => {
+                const probe = resolveSingleCollection(collectionRef, {
+                    eligibleLibraryIds: otherSearchableLibraryIds,
+                    nameLibraryIds: [],
+                });
+                return probe.ok ? probe.match.libraryID : null;
             };
 
-            // Collect ALL invalid collection keys (across add and remove) before
-            // returning, so the agent sees the full picture in one shot. Reporting
-            // only the first failure caused models to "fix" one key per retry while
-            // missing the systematic pattern (e.g. mistakenly pasting item keys
-            // into add_to_collections).
-            type InvalidColl = { key: string; otherLibraryId: number | null };
+            // Collect ALL invalid collection references (across add and remove)
+            // before returning, so the agent sees the full picture in one shot.
+            // Reporting only the first failure caused models to "fix" one key per
+            // retry while missing the systematic pattern (e.g. mistakenly pasting
+            // item keys into add_to_collections).
+            type InvalidColl = {
+                ref: string;
+                message: string;
+                code: CollectionResolutionErrorCode;
+                otherLibraryId: number | null;
+            };
             const invalidColls: InvalidColl[] = [];
             const seenInvalid = new Set<string>();
+            const resolvedAdd: string[] = [];
+            const resolvedRemove: string[] = [];
 
-            const checkKeys = async (keys: string[]) => {
-                for (const collKey of keys) {
-                    if (seenInvalid.has(collKey)) continue;
-                    const collection = await Zotero.Collections.getByLibraryAndKeyAsync(libraryId, collKey);
-                    if (!collection) {
-                        seenInvalid.add(collKey);
-                        invalidColls.push({
-                            key: collKey,
-                            otherLibraryId: await findCollectionLibrary(collKey),
-                        });
+            const resolveKeys = (refs: string[], resolvedKeys: string[]) => {
+                for (const collectionRef of refs) {
+                    const resolution = resolveCollectionForWrite(collectionRef, {
+                        eligibleLibraryIds: [libraryId],
+                        explicitLibrary: true,
+                    });
+                    if (resolution.ok) {
+                        const key = resolution.match.collection.key;
+                        if (!resolvedKeys.includes(key)) resolvedKeys.push(key);
+                        continue;
                     }
+                    if (seenInvalid.has(collectionRef)) continue;
+                    seenInvalid.add(collectionRef);
+                    invalidColls.push({
+                        ref: collectionRef,
+                        message: resolution.message,
+                        code: resolution.code,
+                        otherLibraryId: resolution.code === 'collection_not_found'
+                            ? findCollectionLibrary(collectionRef)
+                            : null,
+                    });
                 }
             };
 
-            if (collections?.add && collections.add.length > 0) await checkKeys(collections.add);
-            if (collections?.remove && collections.remove.length > 0) await checkKeys(collections.remove);
+            if (collections?.add && collections.add.length > 0) resolveKeys(collections.add, resolvedAdd);
+            if (collections?.remove && collections.remove.length > 0) resolveKeys(collections.remove, resolvedRemove);
 
             if (invalidColls.length > 0) {
-                const notFound = invalidColls.filter(x => x.otherLibraryId === null).map(x => x.key);
-                const inOtherLib = invalidColls.filter(x => x.otherLibraryId !== null);
+                const notFound = invalidColls.filter(x => x.code === 'collection_not_found' && x.otherLibraryId === null);
+                const inOtherLib = invalidColls.filter(x => x.code === 'collection_not_found' && x.otherLibraryId !== null);
+                // Everything the resolver already explained precisely (name given
+                // instead of an identifier, ambiguity, scope conflict, excluded or
+                // unavailable library) is surfaced with its own message.
+                const otherFailures = invalidColls.filter(x => x.code !== 'collection_not_found');
 
-                // Detect the common model failure mode: collection keys that are
-                // actually item zotero-keys copy-pasted from item_ids.
+                // Detect the common model failure mode: collection references that
+                // are actually item zotero-keys copy-pasted from item_ids. Compare
+                // key suffixes so a pasted scoped item id is caught too.
                 const itemZoteroKeys = new Set(
                     item_ids.map(id => parseItemReference(id)?.zotero_key).filter(Boolean) as string[]
                 );
                 const overlapWithItemKeys = invalidColls
-                    .map(x => x.key)
-                    .filter(key => itemZoteroKeys.has(key));
+                    .map(x => x.ref)
+                    .filter(ref => itemZoteroKeys.has(parseItemReference(ref)?.zotero_key ?? ref));
 
                 const currentLibrary = Zotero.Libraries.get(libraryId);
                 const currentLibraryName = currentLibrary ? currentLibrary.name : `library ${libraryId}`;
@@ -322,15 +365,15 @@ export async function validateOrganizeItemsAction(
                 const parts: string[] = [];
                 if (notFound.length > 0) {
                     parts.push(
-                        `Collection${notFound.length === 1 ? '' : 's'} not found in '${currentLibraryName}' (library ${libraryId}): ${notFound.join(', ')}.`
+                        `Collection${notFound.length === 1 ? '' : 's'} not found in '${currentLibraryName}' (library ${libraryId}): ${notFound.map(x => x.ref).join(', ')}.`
                     );
                 }
                 if (inOtherLib.length > 0) {
                     const byLib = new Map<number, string[]>();
-                    for (const { key, otherLibraryId } of inOtherLib) {
+                    for (const { ref, otherLibraryId } of inOtherLib) {
                         if (otherLibraryId === null) continue;
                         const arr = byLib.get(otherLibraryId) ?? [];
-                        arr.push(key);
+                        arr.push(ref);
                         byLib.set(otherLibraryId, arr);
                     }
                     for (const [otherLibId, keys] of byLib) {
@@ -341,18 +384,35 @@ export async function validateOrganizeItemsAction(
                         );
                     }
                 }
+                for (const failure of otherFailures) {
+                    parts.push(failure.message);
+                }
                 if (overlapWithItemKeys.length > 0) {
                     parts.push(
-                        `Note: ${overlapWithItemKeys.length === 1 ? 'key' : 'keys'} ${overlapWithItemKeys.join(', ')} also appear in item_ids — collection keys must come from list_collections (or a prior create_collection), not from item IDs.`
+                        `Note: ${overlapWithItemKeys.length === 1 ? 'key' : 'keys'} ${overlapWithItemKeys.join(', ')} also appear in item_ids — collection identifiers must come from list_collections (or a prior create_collection), not from item IDs.`
                     );
                 }
-                parts.push('Use list_collections to find valid collection keys, or create_collection to make a new one.');
+                parts.push('Use list_collections to find valid collection identifiers, or create_collection to make a new one.');
 
-                const errorCode = notFound.length === 0 && inOtherLib.length > 0
-                    ? 'collection_in_different_library'
-                    : 'collection_not_found';
+                // One code has to represent the batch: prefer a precisely
+                // explained failure, then "exists but in another library", and
+                // fall back to plain not-found.
+                let errorCode: CollectionResolutionErrorCode | 'collection_in_different_library';
+                if (otherFailures.length > 0) {
+                    errorCode = otherFailures[0].code;
+                } else if (notFound.length === 0 && inOtherLib.length > 0) {
+                    errorCode = 'collection_in_different_library';
+                } else {
+                    errorCode = 'collection_not_found';
+                }
 
                 collectionError = { message: parts.join(' '), code: errorCode };
+            } else {
+                normalizedCollectionLibraryId = libraryId;
+                normalizedCollections = {
+                    ...(collections?.add ? { add: resolvedAdd } : {}),
+                    ...(collections?.remove ? { remove: resolvedRemove } : {}),
+                };
             }
         }
     }
@@ -401,7 +461,19 @@ export async function validateOrganizeItemsAction(
         current_value: currentState,
         // Return the portable ids so the backend persists + replays them instead
         // of the model-authored device-local ids (the validate-time enrichment seam).
-        normalized_action_data: { item_ids: normalizedItemIds },
+        // Collection changes ride along as bare keys plus the library they are
+        // scoped to, so apply and undo compare against the same key form the
+        // undo snapshots hold.
+        normalized_action_data: {
+            item_ids: normalizedItemIds,
+            ...(normalizedCollections && normalizedCollectionLibraryId != null
+                ? {
+                    collections: normalizedCollections,
+                    library_id: normalizedCollectionLibraryId,
+                    library_ref: libraryRefForLibraryID(normalizedCollectionLibraryId) ?? undefined,
+                }
+                : {}),
+        },
         preference,
     };
 }
@@ -474,12 +546,16 @@ export async function executeOrganizeItemsAction(
         collections: number[];
     }>();
 
-    // Resolve collection keys to objects once, before opening the write transaction.
-    // Validation guarantees all items share a library when collection changes are
-    // requested, and that every key in add/remove resolves — so a miss here is a
-    // benign race (collection deleted between validate and execute) and is skipped.
-    const addCollections = new Map<string, { id: number }>();
-    const removeCollections = new Map<string, { id: number }>();
+    // Resolve collection references to objects once, before opening the write
+    // transaction. Validation guarantees all items share a library when collection
+    // changes are requested, and that every reference in add/remove resolves — so
+    // a miss here is a benign race (collection deleted between validate and
+    // execute) and is skipped. The resolved bare key is what result_data records,
+    // so a scoped identifier still produces the key form undo compares against.
+    // Names never resolve here, matching validation: a deleted collection whose
+    // key happens to be another collection's name must not redirect the write.
+    const addCollections = new Map<string, { id: number; key: string }>();
+    const removeCollections = new Map<string, { id: number; key: string }>();
     const hasCollectionChanges = !!(collections && ((collections.add && collections.add.length > 0) || (collections.remove && collections.remove.length > 0)));
     if (hasCollectionChanges && item_ids.length > 0) {
         // Validation guarantees a collection batch shares one library. Resolve the
@@ -496,17 +572,24 @@ export async function executeOrganizeItemsAction(
             }
         }
         if (collectionLibraryId != null) {
+            const resolveInto = (refs: string[], target: Map<string, { id: number; key: string }>) => {
+                for (const collectionRef of refs) {
+                    checkAborted(ctx, 'organize_items:collection_resolve');
+                    const resolution = resolveCollectionForWrite(collectionRef, {
+                        eligibleLibraryIds: [collectionLibraryId!],
+                        explicitLibrary: true,
+                    });
+                    if (resolution.ok) {
+                        target.set(collectionRef, {
+                            id: resolution.match.collection.id,
+                            key: resolution.match.collection.key,
+                        });
+                    }
+                }
+            };
             await ta.track('collection_resolve_ms', async () => {
-                for (const collKey of collections?.add ?? []) {
-                    checkAborted(ctx, 'organize_items:collection_resolve');
-                    const collection = await Zotero.Collections.getByLibraryAndKeyAsync(collectionLibraryId!, collKey);
-                    if (collection) addCollections.set(collKey, collection);
-                }
-                for (const collKey of collections?.remove ?? []) {
-                    checkAborted(ctx, 'organize_items:collection_resolve');
-                    const collection = await Zotero.Collections.getByLibraryAndKeyAsync(collectionLibraryId!, collKey);
-                    if (collection) removeCollections.set(collKey, collection);
-                }
+                resolveInto(collections?.add ?? [], addCollections);
+                resolveInto(collections?.remove ?? [], removeCollections);
             });
         }
     }
@@ -591,29 +674,23 @@ export async function executeOrganizeItemsAction(
 
                 // Add to collections (only for top-level items)
                 if (isTopLevel && collections?.add && collections.add.length > 0) {
-                    for (const collKey of collections.add) {
-                        if (!existingCollections.has(collKey)) {
-                            const collection = addCollections.get(collKey);
-                            if (collection) {
-                                item.addToCollection(collection.id);
-                                actualCollectionsAdded.add(collKey);
-                                modified = true;
-                            }
-                        }
+                    for (const collectionRef of collections.add) {
+                        const collection = addCollections.get(collectionRef);
+                        if (!collection || existingCollections.has(collection.key)) continue;
+                        item.addToCollection(collection.id);
+                        actualCollectionsAdded.add(collection.key);
+                        modified = true;
                     }
                 }
 
                 // Remove from collections (only for top-level items)
                 if (isTopLevel && collections?.remove && collections.remove.length > 0) {
-                    for (const collKey of collections.remove) {
-                        if (existingCollections.has(collKey)) {
-                            const collection = removeCollections.get(collKey);
-                            if (collection) {
-                                item.removeFromCollection(collection.id);
-                                actualCollectionsRemoved.add(collKey);
-                                modified = true;
-                            }
-                        }
+                    for (const collectionRef of collections.remove) {
+                        const collection = removeCollections.get(collectionRef);
+                        if (!collection || !existingCollections.has(collection.key)) continue;
+                        item.removeFromCollection(collection.id);
+                        actualCollectionsRemoved.add(collection.key);
+                        modified = true;
                     }
                 }
 

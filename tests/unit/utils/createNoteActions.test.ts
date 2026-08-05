@@ -1,7 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { currentThreadIdAtom } = vi.hoisted(() => ({
+const { currentThreadIdAtom, harness } = vi.hoisted(() => ({
     currentThreadIdAtom: Symbol('currentThreadIdAtom'),
+    // Fixture state the faked collection resolver reads.
+    harness: {
+        collections: [] as any[],
+        libraryRefs: { 1: 'u', 7: 'g42' } as Record<number, string>,
+        libraryNames: { 1: 'My Library', 7: 'Group' } as Record<number, string>,
+        searchableLibraryIds: [1, 7] as number[],
+    },
 }));
 
 vi.mock('../../../react/store', () => ({
@@ -45,14 +52,18 @@ vi.mock('../../../src/services/agentDataProvider/actions/resolveCreateNoteParent
 }));
 
 // Mocked to keep the real module (which pulls in supabaseClient via sync/webAPI)
-// out of this suite's import graph.
-vi.mock('../../../src/services/agentDataProvider/utils', () => ({
-    getCollectionByIdOrName: vi.fn(),
-}));
+// out of this suite's import graph; the fake mirrors the real resolution rules.
+vi.mock('../../../src/services/agentDataProvider/utils', async () => {
+    const { createCollectionResolverFake } = await import('../../helpers/collectionResolverFake');
+    const fake = createCollectionResolverFake(harness);
+    return {
+        resolveSingleCollection: vi.fn(fake.resolveSingleCollection),
+    };
+});
 
 import { executeCreateNoteAction } from '../../../react/utils/createNoteActions';
 import { resolveCreateNoteParent } from '../../../src/services/agentDataProvider/actions/resolveCreateNoteParent';
-import { getCollectionByIdOrName } from '../../../src/services/agentDataProvider/utils';
+import { resolveSingleCollection } from '../../../src/services/agentDataProvider/utils';
 
 describe('executeCreateNoteAction', () => {
     let collectionsLoaded = false;
@@ -118,17 +129,12 @@ describe('executeCreateNoteAction', () => {
             warning: 'fallback warning',
         });
 
-        // Resolves known collection names to keys; treats anything else as a
-        // literal key. "NOSUCH" models a collection that doesn't exist.
-        vi.mocked(getCollectionByIdOrName).mockImplementation((idOrName: any, libraryId?: number) => {
-            if (idOrName == null || idOrName === 'NOSUCH') return null;
-            const byName: Record<string, string> = {
-                'Reading List': 'RLKEY',
-                'Inbox': 'INBOXKEY',
-            };
-            const key = byName[String(idOrName)] ?? String(idOrName);
-            return { collection: { key } as any, libraryID: libraryId ?? 1 };
-        });
+        // "NOSUCH" models a collection that doesn't exist.
+        harness.collections = [
+            { id: 1, key: 'RLKEY234', libraryID: 1, name: 'Reading List' },
+            { id: 2, key: 'INBXKEY2', libraryID: 1, name: 'Inbox' },
+        ];
+        harness.searchableLibraryIds = [1, 7];
     });
 
     it('loads collections before inheriting a standalone parent collection', async () => {
@@ -248,40 +254,70 @@ describe('executeCreateNoteAction', () => {
             proposed_data: {
                 title: 'Title',
                 content: 'Body',
-                collection_keys: ['RLKEY', 'INBOXKEY'],
+                collection_keys: ['RLKEY234', 'INBXKEY2'],
                 tags: ['alpha', 'beta'],
             },
         } as any, 'run-1');
 
         const note = noteInstances[0];
         expect(note.addToCollection).toHaveBeenCalledTimes(2);
-        expect(note.addToCollection).toHaveBeenCalledWith('RLKEY');
-        expect(note.addToCollection).toHaveBeenCalledWith('INBOXKEY');
+        expect(note.addToCollection).toHaveBeenCalledWith('RLKEY234');
+        expect(note.addToCollection).toHaveBeenCalledWith('INBXKEY2');
         expect(note.addTag).toHaveBeenCalledWith('alpha');
         expect(note.addTag).toHaveBeenCalledWith('beta');
 
         expect(result).toMatchObject({
-            collection_key: 'RLKEY',
-            collection_keys: ['RLKEY', 'INBOXKEY'],
+            collection_key: 'RLKEY234',
+            collection_keys: ['RLKEY234', 'INBXKEY2'],
             tags: ['alpha', 'beta'],
         });
     });
 
-    it('resolves raw collection names, dedupes them, and skips ones that do not exist', async () => {
+    it('resolves raw collection names and dedupes them', async () => {
         const result = await executeCreateNoteAction({
             proposed_data: {
                 title: 'Title',
                 content: 'Body',
-                // "Reading List" and RLKEY resolve to the same key -> deduped.
-                collections: ['Reading List', 'RLKEY', 'NOSUCH', 'Inbox'],
+                // "Reading List" and RLKEY234 resolve to the same key -> deduped.
+                collections: ['Reading List', 'RLKEY234', 'Inbox'],
             },
         } as any, 'run-1');
 
         const note = noteInstances[0];
         expect(note.addToCollection).toHaveBeenCalledTimes(2);
         expect(result).toMatchObject({
-            collection_keys: ['RLKEY', 'INBOXKEY'],
+            collection_keys: ['RLKEY234', 'INBXKEY2'],
         });
+    });
+
+    it('rejects the whole apply when one requested collection does not resolve', async () => {
+        // Filing the note in some of the requested collections and not the rest
+        // would be a silent wrong answer, so nothing is created.
+        await expect(executeCreateNoteAction({
+            proposed_data: {
+                title: 'Title',
+                content: 'Body',
+                collections: ['Reading List', 'NOSUCH'],
+            },
+        } as any, 'run-1')).rejects.toThrow(/NOSUCH/);
+
+        expect(noteInstances).toHaveLength(0);
+    });
+
+    it('uses the keys validation resolved without re-resolving them', async () => {
+        await executeCreateNoteAction({
+            proposed_data: {
+                title: 'Title',
+                content: 'Body',
+                collection_keys: ['RLKEY234'],
+                // Raw names are only a fallback for actions stored before
+                // validation normalized them.
+                collections: ['Inbox'],
+            },
+        } as any, 'run-1');
+
+        expect(noteInstances[0].addToCollection).toHaveBeenCalledExactlyOnceWith('RLKEY234');
+        expect(vi.mocked(resolveSingleCollection)).not.toHaveBeenCalled();
     });
 
     it('falls back to the legacy singular collection_key when no plural keys are present', async () => {
@@ -289,14 +325,14 @@ describe('executeCreateNoteAction', () => {
             proposed_data: {
                 title: 'Title',
                 content: 'Body',
-                collection_key: 'LEGACYKEY',
+                collection_key: 'LGCYKEY2',
             },
         } as any, 'run-1');
 
-        expect(noteInstances[0].addToCollection).toHaveBeenCalledExactlyOnceWith('LEGACYKEY');
+        expect(noteInstances[0].addToCollection).toHaveBeenCalledExactlyOnceWith('LGCYKEY2');
         expect(result).toMatchObject({
-            collection_key: 'LEGACYKEY',
-            collection_keys: ['LEGACYKEY'],
+            collection_key: 'LGCYKEY2',
+            collection_keys: ['LGCYKEY2'],
         });
     });
 
@@ -314,10 +350,11 @@ describe('executeCreateNoteAction', () => {
                 title: 'Title',
                 content: 'Body',
                 parent_item_id: '1-PARENTKEY',
-                collection_keys: ['RLKEY'],
+                collection_keys: ['RLKEY234'],
                 tags: ['alpha'],
             },
         } as any, 'run-1');
+
 
         // Zotero's fki_collectionItems_itemID_parentItemID trigger aborts saveTx
         // if a child item is put in a collection.
@@ -328,6 +365,32 @@ describe('executeCreateNoteAction', () => {
         expect(result).not.toHaveProperty('collection_key');
         expect(result).not.toHaveProperty('collection_keys');
         expect(result).toMatchObject({ parent_key: 'PARENTKEY', tags: ['alpha'] });
+    });
+
+    it('ignores a child note\'s collection arguments without resolving them', async () => {
+        vi.mocked(resolveCreateNoteParent).mockResolvedValueOnce({
+            ok: true,
+            parentKey: 'PARENTKEY',
+            resolvedLibraryId: 1,
+            relatedItemKey: null,
+            warning: null,
+        });
+
+        const result = await executeCreateNoteAction({
+            proposed_data: {
+                title: 'Title',
+                content: 'Body',
+                parent_item_id: '1-PARENTKEY',
+                collections: ['NOSUCH', 'g99999-ZZZZ2345'],
+                collection_key: 'ALSOBGUS',
+            },
+        } as any, 'run-1');
+
+        // A child note can never be in a collection, so the arguments are not
+        // resolved at all — they can neither be applied nor fail the apply.
+        expect(vi.mocked(resolveSingleCollection)).not.toHaveBeenCalled();
+        expect(noteInstances[0].addToCollection).not.toHaveBeenCalled();
+        expect(result).toMatchObject({ parent_key: 'PARENTKEY' });
     });
 
     it('stages each tag once and ignores blank tags', async () => {

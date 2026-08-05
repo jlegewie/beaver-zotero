@@ -20,7 +20,7 @@ export interface CreateItemProposedData {
     text_path?: string;  // Path to extracted text file
 
     // Zotero organization
-    collection_keys?: string[];  // Collection keys to add item to
+    collection_keys?: string[];  // Collection identifiers or bare keys to add item to
     suggested_tags?: string[];  // Tags suggested for the item
 }
 

@@ -5,6 +5,14 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+// Fixture state the faked collection resolver reads.
+const harness = vi.hoisted(() => ({
+    collections: [] as any[],
+    libraryRefs: { 1: 'u', 100: 'g12345' } as Record<number, string>,
+    libraryNames: { 1: 'My Library', 100: 'Group Library' } as Record<number, string>,
+    searchableLibraryIds: [1, 100] as number[],
+}));
+
 vi.mock('../../../react/store', () => ({
     store: { get: vi.fn(() => [1, 100]) },
 }));
@@ -13,11 +21,16 @@ vi.mock('../../../react/atoms/profile', () => ({
     searchableLibraryIdsAtom: Symbol('searchableLibraryIdsAtom'),
 }));
 
-vi.mock('../../../src/services/agentDataProvider/utils', () => ({
-    checkLibraryExcluded: vi.fn(() => null),
-    excludedLibraryMessage: vi.fn((id: number) => `Library ${id} excluded`),
-    getDeferredToolPreference: vi.fn(() => 'always_ask'),
-}));
+vi.mock('../../../src/services/agentDataProvider/utils', async () => {
+    const { createCollectionResolverFake } = await import('../../helpers/collectionResolverFake');
+    const fake = createCollectionResolverFake(harness);
+    return {
+        checkLibraryExcluded: vi.fn(() => null),
+        excludedLibraryMessage: vi.fn((id: number) => `Library ${id} excluded`),
+        getDeferredToolPreference: vi.fn(() => 'always_ask'),
+        resolveCollectionForWrite: vi.fn(fake.resolveCollectionForWrite),
+    };
+});
 
 vi.mock('@beaver/agent-core/platform/logger', () => ({
     logger: vi.fn(),
@@ -54,6 +67,11 @@ describe('validateCreateCollectionAction', () => {
 
     beforeEach(() => {
         vi.clearAllMocks();
+        harness.collections = [
+            { id: 1, key: 'PRNT2345', libraryID: 1, name: 'Parent' },
+            { id: 2, key: 'GRPPRN23', libraryID: 100, name: 'Group Parent' },
+        ];
+        harness.searchableLibraryIds = [1, 100];
         previousZotero = (globalThis as any).Zotero;
         (globalThis as any).Zotero = {
             Libraries: {
@@ -129,6 +147,43 @@ describe('validateCreateCollectionAction', () => {
         expect(res.error_code).toBe('library_unavailable');
     });
 
+    it('accepts a scoped parent identifier and normalizes it to a bare key', async () => {
+        const res = await validateCreateCollectionAction(
+            buildValidateRequest({ name: 'New Collection', parent_key: 'u-PRNT2345' })
+        );
+        expect(res.valid).toBe(true);
+        expect(res.normalized_action_data).toMatchObject({
+            library_id: 1,
+            library_ref: 'u',
+            parent_key: 'PRNT2345',
+        });
+    });
+
+    it('rejects a parent given as a collection name, naming the identifier to use', async () => {
+        const res = await validateCreateCollectionAction(
+            buildValidateRequest({ name: 'New Collection', parent_key: 'Parent' })
+        );
+        expect(res.valid).toBe(false);
+        expect(res.error).toContain('u-PRNT2345');
+        expect(res.error).toContain('list_collections');
+    });
+
+    it('rejects a scoped parent identifier from another library as a scope conflict', async () => {
+        const res = await validateCreateCollectionAction(
+            buildValidateRequest({ name: 'New Collection', parent_key: 'g12345-GRPPRN23' })
+        );
+        expect(res.valid).toBe(false);
+        expect(res.error_code).toBe('invalid_request');
+    });
+
+    it('rejects a parent key that does not exist with parent_not_found', async () => {
+        const res = await validateCreateCollectionAction(
+            buildValidateRequest({ name: 'New Collection', parent_key: 'ZZZZ2345' })
+        );
+        expect(res.valid).toBe(false);
+        expect(res.error_code).toBe('parent_not_found');
+    });
+
     it('rejects a malformed item_id', async () => {
         const res = await validateCreateCollectionAction(
             buildValidateRequest({ name: 'New Collection', item_ids: ['not-valid-###'] })
@@ -144,6 +199,11 @@ describe('executeCreateCollectionAction', () => {
 
     beforeEach(() => {
         vi.clearAllMocks();
+        harness.collections = [
+            { id: 1, key: 'PRNT2345', libraryID: 1, name: 'Parent' },
+            { id: 2, key: 'GRPPRN23', libraryID: 100, name: 'Group Parent' },
+        ];
+        harness.searchableLibraryIds = [1, 100];
         previousZotero = (globalThis as any).Zotero;
         (globalThis as any).Zotero = {
             Libraries: {
@@ -181,6 +241,14 @@ describe('executeCreateCollectionAction', () => {
             action_data: actionData,
         } as unknown as WSAgentActionExecuteRequest;
     }
+
+    it('resolves a scoped parent identifier at execute time', async () => {
+        const res = await executeCreateCollectionAction(
+            buildExecuteRequest({ name: 'New Collection', parent_key: 'u-PRNT2345' }),
+            ctx
+        );
+        expect(res.success).toBe(true);
+    });
 
     it('adds items resolved via both portable and legacy item_id forms', async () => {
         const res = await executeCreateCollectionAction(
