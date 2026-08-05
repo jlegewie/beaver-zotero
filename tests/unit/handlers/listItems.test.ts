@@ -25,10 +25,10 @@ vi.mock('../../../react/atoms/profile', () => ({
 }));
 
 vi.mock('../../../src/services/agentDataProvider/utils', () => ({
-    getCollectionByIdOrName: vi.fn(),
+    resolveSingleCollection: vi.fn(),
+    getSearchableLibraryIds: vi.fn(() => [1, 100]),
+    librariesForCollectionError: vi.fn(() => [{ library_id: 1, name: 'My Library' }]),
     validateLibraryAccess: vi.fn(),
-    isLibrarySearchable: vi.fn(() => true),
-    getSearchableLibraries: vi.fn(() => []),
     extractYear: vi.fn(() => null),
     formatCreatorsString: vi.fn(() => ''),
     getAttachmentInfoForItem: vi.fn(),
@@ -69,7 +69,7 @@ vi.mock('../../../src/utils/zoteroSerializers', async (importOriginal) => {
 });
 
 import { handleListItemsRequest } from '../../../src/services/agentDataProvider/handleListItemsRequest';
-import { getAttachmentInfoForItem, getCollectionByIdOrName, validateLibraryAccess } from '../../../src/services/agentDataProvider/utils';
+import { getAttachmentInfoForItem, resolveSingleCollection, validateLibraryAccess } from '../../../src/services/agentDataProvider/utils';
 
 type MockItem = Omit<
     Partial<Zotero.Item>,
@@ -128,11 +128,13 @@ describe('handleListItemsRequest', () => {
 
         (validateLibraryAccess as any).mockReturnValue({
             valid: true,
+            wasExplicitlyRequested: false,
             library: { libraryID: 1, name: 'My Library' },
         });
-        (getCollectionByIdOrName as any).mockReturnValue({
-            libraryID: 1,
-            collection: { id: 10, name: 'Collection' },
+        (resolveSingleCollection as any).mockReturnValue({
+            ok: true,
+            matchKind: 'key',
+            match: { libraryID: 1, collection: { id: 10, name: 'Collection' } },
         });
         vi.mocked(getAttachmentInfoForItem).mockImplementation(async (item: any, options: any = {}) => ({
             attachment_id: `${item.libraryID}-${item.key}`,
@@ -164,6 +166,103 @@ describe('handleListItemsRequest', () => {
             }),
             loadDataTypes: vi.fn(async () => undefined),
         };
+    });
+
+    it('confines collection resolution to an explicitly requested library', async () => {
+        (validateLibraryAccess as any).mockReturnValue({
+            valid: true,
+            wasExplicitlyRequested: true,
+            library: { libraryID: 1, name: 'My Library' },
+        });
+        searchResults.push([]);
+
+        await handleListItemsRequest({
+            event: 'list_items_request',
+            request_id: 'req-scope-1',
+            library_id: 1,
+            collection_key: 'COLLECTION',
+            item_category: 'regular',
+            recursive: true,
+            sort_by: 'dateModified',
+            sort_order: 'desc',
+            limit: 20,
+            offset: 0,
+        });
+
+        expect(resolveSingleCollection).toHaveBeenCalledWith('COLLECTION', {
+            eligibleLibraryIds: [1],
+            explicitLibrary: true,
+        });
+    });
+
+    it('lets a collection resolve in any searchable library when the request omitted the library', async () => {
+        searchResults.push([]);
+
+        await handleListItemsRequest({
+            event: 'list_items_request',
+            request_id: 'req-scope-2',
+            collection_key: 'COLLECTION',
+            item_category: 'regular',
+            recursive: true,
+            sort_by: 'dateModified',
+            sort_order: 'desc',
+            limit: 20,
+            offset: 0,
+        });
+
+        expect(resolveSingleCollection).toHaveBeenCalledWith('COLLECTION', {
+            eligibleLibraryIds: [1, 100],
+            explicitLibrary: false,
+        });
+    });
+
+    it('reports a typed collection resolution failure', async () => {
+        (resolveSingleCollection as any).mockReturnValue({
+            ok: false,
+            code: 'ambiguous_collection',
+            message: 'matches 2 collections',
+        });
+
+        const response = await handleListItemsRequest({
+            event: 'list_items_request',
+            request_id: 'req-scope-3',
+            collection_key: 'Inbox',
+            item_category: 'regular',
+            recursive: true,
+            sort_by: 'dateModified',
+            sort_order: 'desc',
+            limit: 20,
+            offset: 0,
+        });
+
+        expect(response).toMatchObject({
+            error: 'matches 2 collections',
+            error_code: 'ambiguous_collection',
+            total_count: 0,
+        });
+    });
+
+    it('echoes the available libraries on a library-scope failure', async () => {
+        (resolveSingleCollection as any).mockReturnValue({
+            ok: false,
+            code: 'library_not_searchable',
+            message: 'That library is excluded from Beaver.',
+        });
+
+        const response = await handleListItemsRequest({
+            event: 'list_items_request',
+            request_id: 'req-scope-4',
+            collection_key: 'g99-ABCDEFGH',
+            item_category: 'regular',
+            recursive: true,
+            sort_by: 'dateModified',
+            sort_order: 'desc',
+            limit: 20,
+            offset: 0,
+        });
+
+        expect(response.error_code).toBe('library_not_searchable');
+        expect(response.available_libraries).toEqual([{ library_id: 1, name: 'My Library' }]);
     });
 
     it('returns an empty result for annotation-only listings instead of malformed regular items', async () => {

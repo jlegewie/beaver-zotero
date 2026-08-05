@@ -13,10 +13,12 @@ import {
     libraryRefForLibraryID,
     modelObjectId,
     modelObjectIdFromReference,
-    parseItemReference,
     parseLibraryRef,
     resolveLibraryRef,
+    resolveObjectId,
+    UNRESOLVED_LIBRARY_ID,
 } from '../../utils/libraryIdentity';
+import type { ObjectIdReference } from '../../utils/libraryIdentity';
 import { syncingItemFilterAsync } from '../../utils/sync';
 import { getPref } from '../../utils/prefs';
 
@@ -536,124 +538,340 @@ export function getLibraryByIdOrName(libraryIdOrName: number | string | null | u
     };
 }
 
-/**
- * Result of collection lookup, including the library where the collection was found.
- */
-export interface CollectionLookupResult {
+/** How a collection reference matched. */
+export type CollectionMatchKind = 'identifier' | 'key' | 'name' | 'row_id';
+
+/** A single collection a reference resolved to. */
+export interface CollectionMatch {
     collection: Zotero.Collection;
     libraryID: number;
 }
 
+/** Result of collection lookup, including the library where the collection was found. */
+export type CollectionLookupResult = CollectionMatch;
+
+/** Typed failures of collection resolution. */
+export type CollectionResolutionErrorCode =
+    | 'collection_not_found'
+    | 'ambiguous_collection'
+    | 'library_unavailable'
+    | 'library_not_searchable'
+    | 'invalid_request';
+
+/** A failed collection resolution, ready to be mapped onto a response's `{ error, error_code }`. */
+export interface CollectionResolutionFailure {
+    ok: false;
+    code: CollectionResolutionErrorCode;
+    message: string;
+}
+
+/** Every collection a reference matched, or a typed failure. */
+export type CollectionResolution =
+    | { ok: true; matchKind: CollectionMatchKind; matches: CollectionMatch[] }
+    | CollectionResolutionFailure;
+
+/** The single collection a reference matched, or a typed failure. */
+export type SingleCollectionResolution =
+    | { ok: true; matchKind: CollectionMatchKind; match: CollectionMatch }
+    | CollectionResolutionFailure;
+
+export interface ResolveCollectionOptions {
+    /**
+     * Libraries a key, name or row id may resolve within. Callers pass an
+     * already exclusion-filtered list (e.g. `getSearchableLibraryIds()`), since
+     * the resolver treats membership here as permission to read. A scoped
+     * identifier carries its own library and is bounded by this list only when
+     * `explicitLibrary` is set — otherwise it resolves in any searchable library.
+     */
+    eligibleLibraryIds: number[];
+    /** Libraries a *name* may resolve within. Defaults to `eligibleLibraryIds`. */
+    nameLibraryIds?: number[];
+    /**
+     * True when `eligibleLibraryIds` came from a library the request named
+     * explicitly. Set it whenever the caller means the list as a hard scope: it
+     * turns a scoped identifier from another library into `invalid_request`
+     * instead of resolving it.
+     */
+    explicitLibrary?: boolean;
+    /**
+     * Skip the exclusion check a scoped identifier normally goes through. Only
+     * display-oriented resolution sets this (see
+     * {@link resolveCollectionForDisplay}); every data path leaves it unset.
+     */
+    allowExcludedLibraries?: boolean;
+}
+
+function uniqueLibraryIds(ids: number[]): number[] {
+    return Array.from(new Set(ids));
+}
+
+function libraryDisplayName(libraryID: number): string {
+    const library = Zotero.Libraries?.get?.(libraryID);
+    return library ? library.name : `library ${libraryID}`;
+}
+
+function collectionNotFound(input: string): CollectionResolutionFailure {
+    return { ok: false, code: 'collection_not_found', message: `Collection not found: ${input}` };
+}
+
 /**
- * Get collection by ID, key, or name.
+ * Ambiguity is an error rather than a silent first-match: a reference denotes
+ * one collection, so picking one of several candidates would quietly act on
+ * something other than what was asked for. The message names every candidate by
+ * scoped identifier so the caller can retry unambiguously.
+ */
+function ambiguousCollections(input: string, matches: CollectionMatch[]): CollectionResolutionFailure {
+    const candidates = matches
+        .map(
+            (match) =>
+                `${modelObjectId(match.libraryID, match.collection.key)} ` +
+                `("${match.collection.name}" in library "${libraryDisplayName(match.libraryID)}")`
+        )
+        .join('; ');
+    return {
+        ok: false,
+        code: 'ambiguous_collection',
+        message:
+            `"${input}" matches ${matches.length} collections: ${candidates}. ` +
+            `Retry with the scoped collection identifier of the one you want.`,
+    };
+}
+
+/**
+ * Resolve a device-local collection row id. A collection outside the eligible
+ * libraries reads as not-found so a row id can never disclose that a collection
+ * exists in a library the caller may not see.
+ */
+function resolveCollectionRowId(
+    rowId: number,
+    eligibleLibraryIds: number[],
+    input: string
+): CollectionResolution {
+    const collection = Zotero.Collections.get(rowId);
+    if (!collection || !eligibleLibraryIds.includes(collection.libraryID)) {
+        return collectionNotFound(input);
+    }
+    return { ok: true, matchKind: 'row_id', matches: [{ collection, libraryID: collection.libraryID }] };
+}
+
+/**
+ * Parse a scoped collection identifier (`u-ABCD1234`, `g123-ABCD1234`,
+ * `1-ABCD1234`). Returns null when the value only looks structurally like one:
+ * a suffix that isn't a valid Zotero key (e.g. `u-Drafts`) is a collection
+ * *name* that happens to contain a hyphen, and must stay matchable as a name.
+ */
+function parseScopedCollectionId(input: string): ObjectIdReference | null {
+    const parsed = resolveObjectId(input);
+    if (!parsed) return null;
+    if (!Zotero.Utilities.isValidObjectKey(parsed.zotero_key)) return null;
+    return parsed;
+}
+
+/**
+ * Resolve a collection reference to every match, scoped to the libraries the
+ * caller declares eligible. Callers apply their own cardinality rules; see
+ * {@link resolveSingleCollection} for the single-target case.
  *
- * Supports:
- * - Number: Looks up by collection ID
- * - String: Checks for a key (8 alphanumeric chars), then a compound "<library_ref>-<key>"
- *   or "<libraryID>-<key>" format (e.g. "u-ABCD1234", "g123-ABCD1234", "1-ABCD1234"), then
- *   numeric ID (digits only), then searches by name
- * - null/undefined: Returns null
+ * Grammars, in precedence order:
+ * 1. `number` — device-local collection row id.
+ * 2. Scoped identifier (`u-KEY`, `g<groupID>-KEY`, `<libraryID>-KEY`). Authoritative:
+ *    it resolves in its embedded library or fails, never falling through to a name.
+ * 3. Zotero key — matched across every eligible library. Several hits are an
+ *    ambiguity, not a list.
+ * 4. Name — case-insensitive exact match across `nameLibraryIds`. One library can
+ *    legitimately hold several same-named collections (e.g. under different parents),
+ *    so all of them are returned.
+ * 5. Digit-only string — row id.
+ */
+export function resolveCollectionMatches(
+    collectionIdOrName: number | string | null | undefined,
+    options: ResolveCollectionOptions
+): CollectionResolution {
+    if (collectionIdOrName == null) return collectionNotFound('');
+
+    const eligibleLibraryIds = uniqueLibraryIds(options.eligibleLibraryIds ?? []);
+    const nameLibraryIds = uniqueLibraryIds(options.nameLibraryIds ?? eligibleLibraryIds);
+
+    // A number is always a row id; no other grammar applies.
+    if (typeof collectionIdOrName === 'number') {
+        return resolveCollectionRowId(collectionIdOrName, eligibleLibraryIds, String(collectionIdOrName));
+    }
+
+    const input = collectionIdOrName;
+    if (input.trim() === '') return collectionNotFound(input);
+
+    const identifier = parseScopedCollectionId(input);
+    if (identifier) {
+        const libraryID = identifier.library_id;
+        if (libraryID === UNRESOLVED_LIBRARY_ID || !Zotero.Libraries?.get?.(libraryID)) {
+            return {
+                ok: false,
+                code: 'library_unavailable',
+                message: `The collection "${input}" is in a library that is not available on this computer.`,
+            };
+        }
+        // Exclusion is checked before the lookup: an excluded library must not
+        // disclose whether the collection exists. The identifier names the
+        // library explicitly, so acknowledging the exclusion leaks nothing.
+        if (!options.allowExcludedLibraries && !isLibrarySearchable(libraryID)) {
+            return { ok: false, code: 'library_not_searchable', message: excludedLibraryMessage(libraryID) };
+        }
+        if (options.explicitLibrary && !eligibleLibraryIds.includes(libraryID)) {
+            const requested = eligibleLibraryIds.map(libraryDisplayName).join('", "');
+            return {
+                ok: false,
+                code: 'invalid_request',
+                message:
+                    `The collection "${input}" is in library "${libraryDisplayName(libraryID)}", but the request ` +
+                    `asked for library "${requested}". Omit the library parameter or pass a collection from ` +
+                    `the requested library.`,
+            };
+        }
+        const collection = Zotero.Collections.getByLibraryAndKey(libraryID, identifier.zotero_key);
+        if (!collection) return collectionNotFound(input);
+        return {
+            ok: true,
+            matchKind: 'identifier',
+            matches: [{ collection, libraryID: collection.libraryID }],
+        };
+    }
+
+    // A key is unique only within a library, so the same key can exist in several.
+    if (Zotero.Utilities.isValidObjectKey(input)) {
+        const keyMatches: CollectionMatch[] = [];
+        for (const libraryID of eligibleLibraryIds) {
+            const collection = Zotero.Collections.getByLibraryAndKey(libraryID, input);
+            if (collection) keyMatches.push({ collection, libraryID: collection.libraryID });
+        }
+        if (keyMatches.length > 1) return ambiguousCollections(input, keyMatches);
+        // A key match wins over a collection whose name merely looks like a key.
+        if (keyMatches.length === 1) return { ok: true, matchKind: 'key', matches: keyMatches };
+    }
+
+    const inputLower = input.toLowerCase();
+    const nameMatches: CollectionMatch[] = [];
+    for (const libraryID of nameLibraryIds) {
+        for (const collection of Zotero.Collections.getByLibrary(libraryID, true)) {
+            if (collection.name?.toLowerCase() === inputLower) {
+                nameMatches.push({ collection, libraryID: collection.libraryID });
+            }
+        }
+    }
+    if (nameMatches.length > 0) return { ok: true, matchKind: 'name', matches: nameMatches };
+
+    if (/^\d+$/.test(input)) {
+        return resolveCollectionRowId(parseInt(input, 10), eligibleLibraryIds, input);
+    }
+
+    return collectionNotFound(input);
+}
+
+/**
+ * Resolve a collection reference for a single-target caller: exactly one match
+ * is required and several candidates are an `ambiguous_collection` failure.
+ */
+export function resolveSingleCollection(
+    collectionIdOrName: number | string | null | undefined,
+    options: ResolveCollectionOptions
+): SingleCollectionResolution {
+    const resolution = resolveCollectionMatches(collectionIdOrName, options);
+    if (!resolution.ok) return resolution;
+    if (resolution.matches.length > 1) {
+        return ambiguousCollections(String(collectionIdOrName), resolution.matches);
+    }
+    return { ok: true, matchKind: resolution.matchKind, match: resolution.matches[0] };
+}
+
+/**
+ * Libraries to echo alongside a failed collection resolution. Only library-scope
+ * failures get the list, since it tells the caller where it may retry; a
+ * not-found or ambiguous reference is already fully explained by its message.
+ */
+export function librariesForCollectionError(
+    code: CollectionResolutionErrorCode
+): AvailableLibraryInfo[] | undefined {
+    switch (code) {
+        case 'library_unavailable':
+        case 'library_not_searchable':
+        case 'invalid_request':
+            return getSearchableLibraries();
+        default:
+            return undefined;
+    }
+}
+
+/**
+ * Resolve with `libraryId` as a scope *hint*: look inside the hinted library
+ * first, and widen to `fallbackLibraryIds` only when nothing matched there, so a
+ * key present in both the hint and another library resolves to the one the
+ * caller meant. Any other failure inside the hinted library (ambiguity there, or
+ * a scoped identifier naming an unavailable/excluded library) is final —
+ * widening must not paper it over. Names stay scoped to the hint because names
+ * like "Inbox" are commonly duplicated across libraries.
  *
- * The compound format is resolved only in the embedded library, ignoring the
- * libraryId parameter.
+ * Every failure, including ambiguity, reads as no-match: these callers must act
+ * on (or render) nothing rather than arbitrarily pick one of several targets.
+ */
+function resolveCollectionWithHint(
+    collectionIdOrName: number | string | null | undefined,
+    libraryId: number | undefined,
+    fallbackLibraryIds: number[],
+    allowExcludedLibraries = false
+): CollectionMatch | null {
+    const hasLibraryId = libraryId !== undefined && Number.isFinite(libraryId);
+    if (hasLibraryId) {
+        const hinted = resolveSingleCollection(collectionIdOrName, {
+            eligibleLibraryIds: [libraryId],
+            nameLibraryIds: [libraryId],
+            allowExcludedLibraries,
+        });
+        if (hinted.ok) return hinted.match;
+        if (hinted.code !== 'collection_not_found') return null;
+    }
+    const widened = resolveSingleCollection(collectionIdOrName, {
+        eligibleLibraryIds: hasLibraryId ? [libraryId, ...fallbackLibraryIds] : fallbackLibraryIds,
+        nameLibraryIds: hasLibraryId ? [libraryId] : fallbackLibraryIds,
+        allowExcludedLibraries,
+    });
+    return widened.ok ? widened.match : null;
+}
+
+/**
+ * Data-path view over {@link resolveSingleCollection}: resolves a collection
+ * reference to a single match or null.
  *
- * When libraryId is provided, does a full lookup (key + name) in that library first.
- * Cross-library fallback only applies when the input looks like a Zotero key (8 alphanumeric
- * chars). Name-based lookups stay scoped to the requested
- * library to avoid returning a same-named collection from the wrong library.
- *
- * @param collectionIdOrName - Collection ID, key, or name
- * @param libraryId - Optional library ID to search first (falls back to other libraries)
- * @returns Collection and its library ID, or null if not found
+ * `libraryId` is a scope hint, not a hard scope — see
+ * {@link resolveCollectionWithHint}. A scoped identifier ignores the hint and
+ * resolves in its own embedded library. Callers that need to report *why* a
+ * reference failed (not found vs ambiguous vs excluded library) should use
+ * {@link resolveSingleCollection} directly.
  */
 export function getCollectionByIdOrName(
     collectionIdOrName: number | string | null | undefined,
     libraryId?: number
 ): CollectionLookupResult | null {
-    if (collectionIdOrName == null) {
-        return null;
-    }
-    
-    // If it's a number, look up by ID
-    if (typeof collectionIdOrName === 'number') {
-        const collection = Zotero.Collections.get(collectionIdOrName);
-        return collection ? { collection, libraryID: collection.libraryID } : null;
-    }
-
-    // Try a compound "<library_ref>-<key>" or "<libraryID>-<key>" format
-    // (e.g. "u-ABCD1234", "g123-ABCD1234", "1-ABCD1234")
-    const compoundParsed = parseItemReference(collectionIdOrName);
-    if (compoundParsed) {
-        const compoundLibId = compoundParsed.library_ref
-            ? resolveLibraryRef(compoundParsed)
-            : compoundParsed.library_id!;
-        if (compoundLibId != null && Zotero.Utilities.isValidObjectKey(compoundParsed.zotero_key)) {
-            const collection = Zotero.Collections.getByLibraryAndKey(compoundLibId, compoundParsed.zotero_key);
-            if (collection) return { collection, libraryID: collection.libraryID };
-        }
-    }
-
-    const isKeyLike = Zotero.Utilities.isValidObjectKey(collectionIdOrName);
-    const hasLibraryId = libraryId !== undefined && Number.isFinite(libraryId);
-
-    // If libraryId provided, do full lookup (key + name) there first
-    if (hasLibraryId) {
-        const found = findCollectionInLibrary(collectionIdOrName, libraryId, isKeyLike);
-        if (found) return found;
-    }
-
-    // Try numeric collection ID
-    if (/^\d+$/.test(collectionIdOrName)) {
-        const parsedId = parseInt(collectionIdOrName, 10);
-        const collection = Zotero.Collections.get(parsedId);
-        if (collection) return { collection, libraryID: collection.libraryID };
-    }
-    
-    // Cross-library fallback: only for key-like inputs.
-    // Name-based lookups stay scoped to the requested library since names like
-    // "Inbox" are commonly duplicated across libraries.
-    if (!isKeyLike && hasLibraryId) {
-        return null;
-    }
-
-    const searchableIds = getSearchableLibraryIds();
-    const otherLibraryIds = Zotero.Libraries.getAll()
-        .map((lib: any) => lib.libraryID as number)
-        .filter((id: number) => !hasLibraryId || id !== libraryId);
-    const sortedLibraryIds = [
-        ...otherLibraryIds.filter(id => searchableIds.includes(id)),
-        ...otherLibraryIds.filter(id => !searchableIds.includes(id)),
-    ];
-
-    for (const libId of sortedLibraryIds) {
-        const found = findCollectionInLibrary(collectionIdOrName, libId, isKeyLike);
-        if (found) return found;
-    }
-    
-    return null;
+    return resolveCollectionWithHint(collectionIdOrName, libraryId, getSearchableLibraryIds());
 }
 
 /**
- * Try to find a collection in a single library by key, then by name.
+ * Display-only resolution over every local library, used to label persisted
+ * chat history with a collection name.
+ *
+ * Deliberately not exclusion-scoped: the exclusion boundary covers reads,
+ * indexing, context and writes, not the rendering of history the user already
+ * has. Scoping this to the searchable libraries would also drop the name
+ * whenever the profile has not loaded yet, since that set is fail-closed.
+ *
+ * `libraryId` is a scope hint (see {@link resolveCollectionWithHint}); every
+ * failure, ambiguity included, returns null so a label renders nothing rather
+ * than guessing a target.
  */
-function findCollectionInLibrary(
-    input: string,
-    libraryId: number,
-    isKeyLike: boolean
-): CollectionLookupResult | null {
-    if (isKeyLike) {
-        const collection = Zotero.Collections.getByLibraryAndKey(libraryId, input);
-        if (collection) return { collection, libraryID: collection.libraryID };
-    }
-    
-    const collections = Zotero.Collections.getByLibrary(libraryId, true);
-    const inputLower = input.toLowerCase();
-    const byName = collections.find(
-        (c: Zotero.Collection) => c.name.toLowerCase() === inputLower
-    );
-    if (byName) return { collection: byName, libraryID: byName.libraryID };
-    
-    return null;
+export function resolveCollectionForDisplay(
+    collectionIdOrName: number | string | null | undefined,
+    libraryId?: number
+): CollectionMatch | null {
+    const localLibraryIds = Zotero.Libraries.getAll().map((lib: any) => lib.libraryID as number);
+    return resolveCollectionWithHint(collectionIdOrName, libraryId, localLibraryIds, true);
 }
 
 /**
@@ -1021,6 +1239,12 @@ export type LibraryValidationErrorCode = 'library_not_found' | 'library_not_sear
 export interface LibraryValidationResult {
     /** Whether the library is valid and searchable */
     valid: boolean;
+    /**
+     * Whether the request named a library (vs defaulting to the user library).
+     * Handlers use this to decide whether a reference must resolve inside that
+     * library or may resolve in any searchable one.
+     */
+    wasExplicitlyRequested: boolean;
     /** The validated library (only set if valid) */
     library?: _ZoteroTypes.Library.LibraryLike;
     /** Error message (only set if invalid) */
@@ -1045,26 +1269,29 @@ export function validateLibraryAccess(libraryIdOrName: number | string | null | 
     if (lookupResult.wasExplicitlyRequested && !lookupResult.library) {
         return {
             valid: false,
+            wasExplicitlyRequested: true,
             error: `Library not found: "${lookupResult.searchInput}"`,
             error_code: 'library_not_found',
             available_libraries: getSearchableLibraries(),
         };
     }
-    
+
     const library = lookupResult.library!;
-    
+
     // Check if library is searchable
     if (!isLibrarySearchable(library.libraryID)) {
         return {
             valid: false,
+            wasExplicitlyRequested: lookupResult.wasExplicitlyRequested,
             error: excludedLibraryMessage(library.libraryID),
             error_code: 'library_not_searchable',
             available_libraries: getSearchableLibraries(),
         };
     }
-    
+
     return {
         valid: true,
+        wasExplicitlyRequested: lookupResult.wasExplicitlyRequested,
         library,
     };
 }

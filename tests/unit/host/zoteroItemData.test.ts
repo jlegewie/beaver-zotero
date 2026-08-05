@@ -10,7 +10,7 @@ vi.mock('../../../src/utils/libraryIdentity', () => ({
 
 vi.mock('../../../src/services/agentDataProvider/utils', () => ({
     getLibraryByIdOrName: vi.fn(),
-    getCollectionByIdOrName: vi.fn(),
+    resolveCollectionForDisplay: vi.fn(),
 }));
 
 vi.mock('../../../src/utils/zoteroItemHelpers', () => ({

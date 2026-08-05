@@ -1180,7 +1180,7 @@ export interface WSZoteroSearchResponse {
     total_count: number;
     error?: string | null;
     error_code?: string | null;
-    /** Available libraries (only included when error_code is 'library_not_found') */
+    /** Available libraries (only included on library-scope failures, e.g. 'library_not_found') */
     available_libraries?: AvailableLibraryInfo[] | null;
     /** Non-fatal warnings (e.g., conditions Zotero rejected). Search still executed. */
     warnings?: string[] | null;
@@ -1228,7 +1228,7 @@ export interface WSListItemsResponse {
     collection_name?: string | null;
     error?: string | null;
     error_code?: string | null;
-    /** Available libraries (only included when error_code is 'library_not_found') */
+    /** Available libraries (only included on library-scope failures, e.g. 'library_not_found') */
     available_libraries?: AvailableLibraryInfo[] | null;
 }
 
@@ -1357,7 +1357,7 @@ export interface WSListCollectionsResponse {
     library_name?: string | null;
     error?: string | null;
     error_code?: string | null;
-    /** Available libraries (only included when error_code is 'library_not_found') */
+    /** Available libraries (only included on library-scope failures, e.g. 'library_not_found') */
     available_libraries?: AvailableLibraryInfo[] | null;
 }
 
@@ -1402,7 +1402,7 @@ export interface WSListTagsResponse {
     library_name?: string | null;
     error?: string | null;
     error_code?: string | null;
-    /** Available libraries (only included when error_code is 'library_not_found') */
+    /** Available libraries (only included on library-scope failures, e.g. 'library_not_found') */
     available_libraries?: AvailableLibraryInfo[] | null;
 }
 

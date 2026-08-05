@@ -4,9 +4,16 @@ vi.mock('../../../src/services/agentDataProvider/utils.ts', () => ({
     checkLibraryExcluded: vi.fn(() => null),
     validateLibraryAccess: vi.fn(() => ({
         valid: true,
+        wasExplicitlyRequested: false,
         library: { libraryID: 1, name: 'My Library' },
     })),
-    getCollectionByIdOrName: vi.fn(() => null),
+    resolveSingleCollection: vi.fn(() => ({
+        ok: false,
+        code: 'collection_not_found',
+        message: 'Collection not found',
+    })),
+    getSearchableLibraryIds: vi.fn(() => [1]),
+    librariesForCollectionError: vi.fn(() => undefined),
     getSearchableLibraries: vi.fn(() => [{ library_id: 1, name: 'My Library' }]),
     isLibrarySearchable: vi.fn(() => true),
 }));

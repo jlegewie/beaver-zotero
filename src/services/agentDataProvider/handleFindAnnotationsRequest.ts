@@ -22,10 +22,11 @@ import {
 } from '@beaver/agent-core/protocol/agentProtocol';
 import {
     checkLibraryExcluded,
-    excludedLibraryMessage,
-    getCollectionByIdOrName,
     getSearchableLibraries,
+    getSearchableLibraryIds,
     isLibrarySearchable,
+    librariesForCollectionError,
+    resolveSingleCollection,
     validateLibraryAccess,
 } from './utils';
 
@@ -603,25 +604,29 @@ export async function handleFindAnnotationsRequest(
         let attachmentScopeItem: Zotero.Item | null = null;
         const collectionInput = cleanString(request.collection);
         if (collectionInput) {
-            const result = getCollectionByIdOrName(collectionInput, library.libraryID);
-            if (!result) {
-                return invalidResponse(request, `Collection not found: ${collectionInput}`, 'collection_not_found');
+            // An explicitly requested library confines resolution to that
+            // library; otherwise any searchable library is eligible.
+            const resolved = resolveSingleCollection(collectionInput, {
+                eligibleLibraryIds: validation.wasExplicitlyRequested
+                    ? [library.libraryID]
+                    : getSearchableLibraryIds(),
+                explicitLibrary: validation.wasExplicitlyRequested,
+            });
+            if (!resolved.ok) {
+                return invalidResponse(
+                    request,
+                    resolved.message,
+                    resolved.code,
+                    librariesForCollectionError(resolved.code),
+                );
             }
-            if (result.libraryID !== library.libraryID) {
-                const resolvedLib = Zotero.Libraries.get(result.libraryID);
-                if (!resolvedLib || !isLibrarySearchable(result.libraryID)) {
-                    // Do not echo the collection's name: it is content from a
-                    // library the user excluded from Beaver.
-                    return invalidResponse(
-                        request,
-                        excludedLibraryMessage(result.libraryID),
-                        'library_not_searchable',
-                        getSearchableLibraries(),
-                    );
-                }
-                library = resolvedLib;
+            // The resolver only matches inside searchable libraries, so a
+            // different library here is a scope switch, not an access decision.
+            if (resolved.match.libraryID !== library.libraryID) {
+                const resolvedLib = Zotero.Libraries.get(resolved.match.libraryID);
+                if (resolvedLib) library = resolvedLib;
             }
-            collection = result.collection;
+            collection = resolved.match.collection;
         }
 
         const attachmentInput = cleanString(request.attachment_id);

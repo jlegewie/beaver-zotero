@@ -1,6 +1,6 @@
 import { type PageLabelsByAttachmentId } from '../../atoms/citations';
 import { getBestPDFAttachment } from '../../../src/utils/zoteroItemHelpers';
-import { getLibraryByIdOrName, getCollectionByIdOrName } from '../../../src/services/agentDataProvider/utils';
+import { getLibraryByIdOrName, resolveCollectionForDisplay } from '../../../src/services/agentDataProvider/utils';
 import type { CitationRef } from '@beaver/agent-core/citations/citationGrammar';
 import type { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import { logger } from '@beaver/agent-core/platform/logger';
@@ -118,7 +118,10 @@ export const zoteroItemData: ItemDataHost = {
 
     async resolveCollectionName(keyOrName: string | number, libraryId?: number): Promise<string | null> {
         try {
-            const result = getCollectionByIdOrName(keyOrName, libraryId);
+            // Display resolution spans every local library: labeling persisted
+            // history is outside the exclusion boundary, which covers reads,
+            // indexing, context and writes.
+            const result = resolveCollectionForDisplay(keyOrName, libraryId);
             return result?.collection.name ?? null;
         } catch (e) {
             logger(`zoteroItemData: collection name resolution failed: ${e}`);

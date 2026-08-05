@@ -13,7 +13,7 @@ import {
     WSListTagsResponse,
     TagInfo,
 } from '@beaver/agent-core/protocol/agentProtocol';
-import { getCollectionByIdOrName, validateLibraryAccess, isLibrarySearchable, getSearchableLibraries, excludedLibraryMessage } from './utils';
+import { resolveSingleCollection, getSearchableLibraryIds, librariesForCollectionError, validateLibraryAccess } from './utils';
 import { libraryRefForLibraryID } from '../../utils/libraryIdentity';
 
 
@@ -52,11 +52,19 @@ export async function handleListTagsRequest(
         let library = validation.library!;
         let resolvedCollection: Zotero.Collection | null = null;
         
-        // Resolve collection if specified, potentially updating library scope
+        // Resolve collection if specified (scoped identifier, key, name, or row id),
+        // potentially updating library scope. An explicitly requested library
+        // confines resolution to that library; otherwise any searchable library
+        // is eligible.
         if (request.collection_key) {
-            const result = getCollectionByIdOrName(request.collection_key, library.libraryID);
-            
-            if (!result) {
+            const resolved = resolveSingleCollection(request.collection_key, {
+                eligibleLibraryIds: validation.wasExplicitlyRequested
+                    ? [library.libraryID]
+                    : getSearchableLibraryIds(),
+                explicitLibrary: validation.wasExplicitlyRequested,
+            });
+
+            if (!resolved.ok) {
                 return {
                     type: 'list_tags',
                     request_id: request.request_id,
@@ -64,31 +72,20 @@ export async function handleListTagsRequest(
                     total_count: 0,
                     library_id: library.libraryID,
                     library_name: library.name,
-                    error: `Collection not found: ${request.collection_key}`,
-                    error_code: 'collection_not_found',
+                    error: resolved.message,
+                    error_code: resolved.code,
+                    available_libraries: librariesForCollectionError(resolved.code),
                 };
             }
-            
-            // Update library scope if collection was found in a different library
-            if (result.libraryID !== library.libraryID) {
-                const resolvedLib = Zotero.Libraries.get(result.libraryID);
-                if (!resolvedLib || !isLibrarySearchable(result.libraryID)) {
-                    return {
-                        type: 'list_tags',
-                        request_id: request.request_id,
-                        tags: [],
-                        total_count: 0,
-                        // Do not echo the collection's name: it is content from a
-                        // library the user excluded from Beaver.
-                        error: excludedLibraryMessage(result.libraryID),
-                        error_code: 'library_not_searchable',
-                        available_libraries: getSearchableLibraries(),
-                    };
-                }
-                library = resolvedLib;
+
+            // The resolver only matches inside searchable libraries, so a
+            // different library here is a scope switch, not an access decision.
+            if (resolved.match.libraryID !== library.libraryID) {
+                const resolvedLib = Zotero.Libraries.get(resolved.match.libraryID);
+                if (resolvedLib) library = resolvedLib;
             }
-            
-            resolvedCollection = result.collection;
+
+            resolvedCollection = resolved.match.collection;
         }
         
         const libraryName = library.name;

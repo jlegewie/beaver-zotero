@@ -18,7 +18,7 @@ import {
 import { ItemStub } from '@beaver/agent-core/types/zotero';
 import { serializeNote, serializeItemStub } from '../../utils/zoteroSerializers';
 import { libraryRefForLibraryID, modelObjectId } from '../../utils/libraryIdentity';
-import { getCollectionByIdOrName, validateLibraryAccess, isLibrarySearchable, getSearchableLibraries, excludedLibraryMessage, extractYear, formatCreatorsString, getAttachmentInfoForItem, degradedAttachmentRow } from './utils';
+import { resolveSingleCollection, getSearchableLibraryIds, librariesForCollectionError, validateLibraryAccess, extractYear, formatCreatorsString, getAttachmentInfoForItem, degradedAttachmentRow } from './utils';
 
 function isAnnotationItem(item: Zotero.Item): boolean {
     return String(item.itemType) === 'annotation' || (item as { isAnnotation?: () => boolean }).isAnnotation?.() === true;
@@ -51,42 +51,38 @@ export async function handleListItemsRequest(
         let collectionName: string | null = null;
         let resolvedCollectionId: number | null = null;
         
-        // Resolve collection if specified (supports both key and name)
+        // Resolve collection if specified (scoped identifier, key, name, or row id).
+        // An explicitly requested library confines resolution to that library;
+        // otherwise any searchable library is eligible.
         if (request.collection_key) {
-            const result = getCollectionByIdOrName(request.collection_key, library.libraryID);
-            
-            if (!result) {
+            const resolved = resolveSingleCollection(request.collection_key, {
+                eligibleLibraryIds: validation.wasExplicitlyRequested
+                    ? [library.libraryID]
+                    : getSearchableLibraryIds(),
+                explicitLibrary: validation.wasExplicitlyRequested,
+            });
+
+            if (!resolved.ok) {
                 return {
                     type: 'list_items',
                     request_id: request.request_id,
                     items: [],
                     total_count: 0,
-                    error: `Collection not found: ${request.collection_key}`,
-                    error_code: 'collection_not_found',
+                    error: resolved.message,
+                    error_code: resolved.code,
+                    available_libraries: librariesForCollectionError(resolved.code),
                 };
             }
-            
-            // Update library scope if collection was found in a different library
-            if (result.libraryID !== library.libraryID) {
-                const resolvedLib = Zotero.Libraries.get(result.libraryID);
-                if (!resolvedLib || !isLibrarySearchable(result.libraryID)) {
-                    return {
-                        type: 'list_items',
-                        request_id: request.request_id,
-                        items: [],
-                        total_count: 0,
-                        // Do not echo the collection's name: it is content from a
-                        // library the user excluded from Beaver.
-                        error: excludedLibraryMessage(result.libraryID),
-                        error_code: 'library_not_searchable',
-                        available_libraries: getSearchableLibraries(),
-                    };
-                }
-                library = resolvedLib;
+
+            // The resolver only matches inside searchable libraries, so a
+            // different library here is a scope switch, not an access decision.
+            if (resolved.match.libraryID !== library.libraryID) {
+                const resolvedLib = Zotero.Libraries.get(resolved.match.libraryID);
+                if (resolvedLib) library = resolvedLib;
             }
-            
-            collectionName = result.collection.name;
-            resolvedCollectionId = result.collection.id;
+
+            collectionName = resolved.match.collection.name;
+            resolvedCollectionId = resolved.match.collection.id;
         }
         
         const libraryName = library.name;
