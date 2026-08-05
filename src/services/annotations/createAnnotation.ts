@@ -344,6 +344,25 @@ export async function getPageGeometryForAttachment(
 }
 
 /**
+ * Suffix the comment of a highlight that spans several pages with its part
+ * position, e.g. "Key finding (2/3)".
+ *
+ * A Zotero annotation cannot span pages, so one requested highlight becomes one
+ * annotation per page it touches. Without the suffix those parts carry an
+ * identical comment and read as duplicates in the annotation list. Returns the
+ * comment unchanged for single-page highlights and for blank comments.
+ */
+export function highlightPartComment(
+    comment: string | null | undefined,
+    partIndex: number,
+    partCount: number,
+): string {
+    const base = comment ?? "";
+    if (partCount <= 1 || !base.trim()) return base;
+    return `${base} (${partIndex + 1}/${partCount})`;
+}
+
+/**
  * Create a headless Zotero PDF highlight annotation from cached geometry.
  */
 export async function createHighlightAnnotation(
