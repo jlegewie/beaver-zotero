@@ -43,7 +43,7 @@ const RELATED_IN_LIBRARY: FirstRunFollowup = {
 const FIND_RELATED_ONLINE: FirstRunFollowup = {
     id: 'find_recent_external',
     title: 'Find related papers online',
-    prompt: 'Use external search to find recent papers on the topic of this paper. Prefer the last 5 years and highly-cited work. Return up to 8 results, each with title, first author, year, citation count, and a brief description of how it relates to this paper.',
+    prompt: 'Use external search to find recent papers on the topic of this paper. Prefer the last 5 years and highly-cited work. Return up to 8 results, each with title, first author, year, citation count, and a brief description of how it relates to this paper. If external search is not available, tell me I can switch to the Beaver model or enable Plus Tools in settings rather than substituting a search of my own library.',
 };
 
 const SAVE_TOP_TO_COLLECTION: FirstRunFollowup = {
@@ -82,7 +82,7 @@ export const FIRST_RUN_FOLLOWUPS: Record<CardKind, FirstRunFollowup[]> = {
             id: 'discover_external',
             title: 'Find new research on this topic',
             titleWithTopic: 'Find new research on {topic}',
-            prompt: 'Use external search to find recent papers on this topic that go beyond what I already have in my library. Briefly summarize and cite the most relevant papers including how they extend work in my library. Prefer the last 5 years and highly-cited work.',
+            prompt: 'Use external search to find recent papers on this topic that go beyond what I already have in my library. Briefly summarize and cite the most relevant papers including how they extend work in my library. Prefer the last 5 years and highly-cited work. If external search is not available, tell me I can switch to the Beaver model or enable Plus Tools in settings rather than reporting on my library alone.',
         },
         {
             id: 'create_collection', // only if the lit review is NOT collection based!!!
@@ -132,7 +132,7 @@ export const WHERE_TO_START_FOLLOWUPS: Record<string, FirstRunFollowup[]> = {
             id: 'discover_more_external',
             title: 'Find more recent research on this topic',
             titleWithTopic: 'Find more recent research on {topic}',
-            prompt: 'Use external search to find even more recent papers on this project\'s topic that are not already in the collection. Your search should be extremely broad and cover many angles to ensure full coverage. Import relevant papers and add them to my new collection. Provide a high-level overview of what you found and why it is relevant to my project.',
+            prompt: 'Use external search to find even more recent papers on this project\'s topic that are not already in the collection. Your search should be extremely broad and cover many angles to ensure full coverage. Import relevant papers and add them to my new collection. Provide a high-level overview of what you found and why it is relevant to my project. If external search is not available, tell me I can switch to the Beaver model or enable Plus Tools in settings, and do not import anything found by guessing identifiers.',
         },
     ],
     // Color-code a paper — highlights are in place.
