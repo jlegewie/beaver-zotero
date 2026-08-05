@@ -298,14 +298,14 @@ const BillingSection: React.FC = () => {
                                         {' '}({formatTimeRemaining(creditPlan.periodEnd, creditPlan.plan?.includes('annual') ?? false)})
                                     </span>
                                 )}
-                                {creditPlan.plan?.includes('annual') && creditPlan.monthlyResetAt && !creditPlan.cancelAtPeriodEnd && (
-                                    <div className="text-sm font-color-secondary">
+                                {creditPlan.plan?.includes('annual') && creditPlan.monthlyResetAt && (
+                                    <div className="text-base font-color-secondary">
                                         Next monthly credit reset: {new Date(creditPlan.monthlyResetAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
                                     </div>
                                 )}
                                 {creditPlan.cancelAtPeriodEnd && creditPlan.periodEnd && (
-                                    <span className="text-sm font-color-secondary">
-                                        Your plan ends {new Date(creditPlan.periodEnd).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                                    <span className="text-base font-color-secondary">
+                                        Your plan ends {new Date(creditPlan.periodEnd).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
                                         {' '}({formatTimeRemaining(creditPlan.periodEnd, creditPlan.plan?.includes('annual') ?? false)} remaining)
                                     </span>
                                 )}
