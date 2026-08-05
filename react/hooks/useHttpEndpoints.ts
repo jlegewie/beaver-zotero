@@ -420,7 +420,7 @@ async function handleExternalReferenceCheckHttpRequest(request: any) {
     };
 }
 
-async function handleMetadataSearchHttpRequest(request: any) {
+export async function handleMetadataSearchHttpRequest(request: any) {
     const wsRequest: WSItemSearchByMetadataRequest = {
         event: 'item_search_by_metadata_request',
         request_id: generateRequestId(),
@@ -438,13 +438,18 @@ async function handleMetadataSearchHttpRequest(request: any) {
     };
     
     const response = await handleItemSearchByMetadataRequest(wsRequest);
-    
+
+    // A typed failure (an unresolvable collection filter, say) must reach the
+    // caller: without it a filtered-out search is indistinguishable from a
+    // search that legitimately found nothing.
     return {
         items: response.items,
+        error: response.error,
+        error_code: response.error_code,
     };
 }
 
-async function handleTopicSearchHttpRequest(request: any) {
+export async function handleTopicSearchHttpRequest(request: any) {
     const wsRequest: WSItemSearchByTopicRequest = {
         event: 'item_search_by_topic_request',
         request_id: generateRequestId(),
@@ -460,9 +465,11 @@ async function handleTopicSearchHttpRequest(request: any) {
     };
     
     const response = await handleItemSearchByTopicRequest(wsRequest);
-    
+
     return {
         items: response.items,
+        error: response.error,
+        error_code: response.error_code,
     };
 }
 

@@ -19,10 +19,10 @@ import {
 } from '@beaver/agent-core/protocol/agentProtocol';
 import { searchItemsByMetadata, SearchItemsByMetadataOptions } from '../../../react/utils/searchTools';
 import {
-    getCollectionByIdOrName,
     getSearchableLibraryIds,
     prepareAttachmentInfoBatchData,
     processAttachmentInfoBatch,
+    resolveCollectionFilters,
     resolveLibrariesFilterToSearchableIds,
 } from './utils';
 import { TimingAccumulator } from '../../utils/timing';
@@ -96,35 +96,31 @@ export async function handleItemSearchByMetadataRequest(
         };
     }
 
-    // Convert collections_filter names to keys if needed (scoped to libraryIds)
-    const collectionKeysSet = new Set<string>();
-    if (request.collections_filter && request.collections_filter.length > 0) {
-        for (const collectionFilter of request.collections_filter) {
-            if (typeof collectionFilter === 'number') {
-                const collection = Zotero.Collections.get(collectionFilter);
-                if (collection && (libraryIds.length === 0 || libraryIds.includes(collection.libraryID))) {
-                    collectionKeysSet.add(collection.key);
-                }
-                continue;
-            }
-
-            // String filter: search within each library
-            if (libraryIds.length > 0) {
-                for (const libId of libraryIds) {
-                    const result = getCollectionByIdOrName(collectionFilter, libId);
-                    if (result) {
-                        collectionKeysSet.add(result.collection.key);
-                    }
-                }
-            } else {
-                const result = getCollectionByIdOrName(collectionFilter);
-                if (result) {
-                    collectionKeysSet.add(result.collection.key);
-                }
-            }
-        }
+    // Resolve collections_filter to (library, key) pairs within the searched
+    // libraries. Every entry must resolve, so an unresolvable filter fails the
+    // request instead of running a search the caller believes is scoped.
+    const hasExplicitLibraries = !!(request.libraries_filter && request.libraries_filter.length > 0);
+    const filterResolution = resolveCollectionFilters(request.collections_filter, {
+        eligibleLibraryIds: libraryIds,
+        explicitLibrary: hasExplicitLibraries,
+    });
+    if (!filterResolution.ok) {
+        logger(`handleItemSearchByMetadataRequest: ${filterResolution.message}`, 1);
+        return {
+            type: 'item_search_by_metadata',
+            request_id: request.request_id,
+            items: [],
+            error: filterResolution.message,
+            error_code: filterResolution.code,
+            timing: {
+                total_ms: Date.now() - startTime,
+                item_count: 0,
+                attachment_count: 0,
+            },
+        };
     }
-    const collectionKeys = Array.from(collectionKeysSet);
+
+    const hasCollectionFilter = filterResolution.filters.length > 0;
 
     // Calculate offset for pagination (default 0, guard against negative values)
     const offset = Math.max(0, request.offset ?? 0);
@@ -134,14 +130,42 @@ export async function handleItemSearchByMetadataRequest(
         title_query: request.title_query,
         author_query: request.author_query,
         publication_query: request.publication_query,
+        collections: hasCollectionFilter ? filterResolution.filters : 'all',
     }, 1);
 
-    // Collect unique items across all libraries
+    // Collect unique items across all searches
     const uniqueItems = new Map<string, Zotero.Item>();
     const makeKey = (libraryId: number, key: string) => `${libraryId}-${key}`;
 
-    // Search each library using searchItemsByMetadata
+    // One search per (library, collection) pair, or one per library when no
+    // collection was requested. Conditions are ANDed (`join_mode: 'all'`), so two
+    // `collection` conditions would demand membership in both, and switching the
+    // join mode to `any` would OR the metadata predicates too — neither expresses
+    // `(collection A OR collection B) AND <predicates>`. The union of
+    // per-collection searches does, and each search is bounded by its collection.
+    // Searches are non-recursive, so the collection condition means direct
+    // membership. Libraries holding none of the requested collections are not
+    // searched.
+    const searches: { libraryId: number; collectionKey?: string }[] = [];
     for (const libraryId of libraryIds) {
+        if (!hasCollectionFilter) {
+            searches.push({ libraryId });
+            continue;
+        }
+        for (const filter of filterResolution.filters) {
+            if (filter.libraryID === libraryId) searches.push({ libraryId, collectionKey: filter.key });
+        }
+    }
+
+    // A collection-filtered page is assembled after the union, so its searches
+    // cannot truncate at the page size; they take a generous cap instead of
+    // running unbounded over a large collection. `limit: 0` means unlimited and
+    // is passed through unchanged.
+    const searchLimit = hasCollectionFilter && request.limit > 0
+        ? Math.max((offset + request.limit) * 4, 100)
+        : request.limit;
+
+    for (const { libraryId, collectionKey } of searches) {
         const options: SearchItemsByMetadataOptions = {
             title_query: request.title_query,
             author_query: request.author_query,
@@ -150,19 +174,21 @@ export async function handleItemSearchByMetadataRequest(
             year_max: request.year_max,
             item_type: request.item_type_filter,
             tags: request.tags_filter,
-            collection_key: collectionKeys.length > 0 ? collectionKeys[0] : undefined,
-            limit: request.limit,
+            collection_key: collectionKey,
+            limit: searchLimit,
             join_mode: 'all', // AND logic between query params
         };
 
         try {
             const results = await searchItemsByMetadata(libraryId, options);
+            if (hasCollectionFilter && searchLimit > 0 && results.length >= searchLimit) {
+                logger(`handleItemSearchByMetadataRequest: library ${libraryId} hit the ${searchLimit}-result cap; a deep page may be approximate`, 1);
+            }
             for (const item of results) {
-                if (item.isRegularItem() && !item.deleted) {
-                    const key = makeKey(item.libraryID, item.key);
-                    if (!uniqueItems.has(key)) {
-                        uniqueItems.set(key, item);
-                    }
+                if (!item.isRegularItem() || item.deleted) continue;
+                const key = makeKey(item.libraryID, item.key);
+                if (!uniqueItems.has(key)) {
+                    uniqueItems.set(key, item);
                 }
             }
         } catch (error) {
@@ -171,7 +197,7 @@ export async function handleItemSearchByMetadataRequest(
 
         // Early exit if we have enough results (fetch extra to account for cross-library duplicates and pagination offset)
         const preDedupBuffer = (offset + request.limit) * 2;
-        if (request.limit > 0 && uniqueItems.size >= preDedupBuffer) {
+        if (!hasCollectionFilter && request.limit > 0 && uniqueItems.size >= preDedupBuffer) {
             break;
         }
     }
@@ -181,6 +207,13 @@ export async function handleItemSearchByMetadataRequest(
 
     // Deduplicate items, prioritizing items from user's main library (library ID 1)
     items = deduplicateItems(items, 1);
+
+    // A page is a slice of this union in its natural order: libraries are
+    // iterated in order, each search returns a stable prefix of its own results,
+    // and both the union map and deduplication preserve insertion order.
+    // Identical requests therefore return the same page, and a larger offset
+    // extends the same prefixes rather than reordering them, so consecutive
+    // pages neither overlap nor skip.
 
     // Timing accumulator for serialization breakdown
     const ta = new TimingAccumulator();

@@ -296,8 +296,11 @@ describe('resolveSingleCollection', () => {
             explicitLibrary: true,
         });
         expect(resolved).toMatchObject({ ok: false, code: 'invalid_request' });
-        expect((resolved as any).message).toContain('Group A');
+        // The conflicting side is named by the identifier the caller passed; its
+        // library may be one the user excluded, so its name is never disclosed.
+        expect((resolved as any).message).toContain(`g12345-${groupCollection.key}`);
         expect((resolved as any).message).toContain('My Library');
+        expect((resolved as any).message).not.toContain('Group A');
     });
 
     it('resolves a bare group key when the request omitted the library but not when it named the personal library', () => {

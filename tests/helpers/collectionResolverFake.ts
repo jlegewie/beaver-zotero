@@ -102,8 +102,8 @@ export function createCollectionResolverFake(state: CollectionResolverFakeState)
                         ok: false as const,
                         code: 'invalid_request',
                         message:
-                            `The collection "${input}" is in library "${libraryName(scoped.libraryID)}", but the request ` +
-                            `asked for library "${eligible.map(libraryName).join('", "')}".`,
+                            `The collection "${input}" is not in library "${eligible.map(libraryName).join('", "')}", ` +
+                            `which the request asked for.`,
                     };
                 }
                 if (!state.searchableLibraryIds.includes(scoped.libraryID)) {

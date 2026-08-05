@@ -716,14 +716,16 @@ export function resolveCollectionMatches(
         // named no library, allowed only while the library is not excluded.
         if (!eligibleLibraryIds.includes(libraryID)) {
             if (options.explicitLibrary) {
+                // The conflicting library is named by the identifier the caller
+                // passed, never by its display name: it may be a library the
+                // user excluded from Beaver, whose name must not be disclosed.
                 const requested = eligibleLibraryIds.map(libraryDisplayName).join('", "');
                 return {
                     ok: false,
                     code: 'invalid_request',
                     message:
-                        `The collection "${input}" is in library "${libraryDisplayName(libraryID)}", but the request ` +
-                        `asked for library "${requested}". Omit the library parameter or pass a collection from ` +
-                        `the requested library.`,
+                        `The collection "${input}" is not in library "${requested}", which the request asked ` +
+                        `for. Pass a collection from the requested library, or omit the library parameter.`,
                 };
             }
             // Exclusion is checked before the lookup: an excluded library must
@@ -820,6 +822,106 @@ export function resolveCollectionForWrite(
         };
     }
     return { ok: true, match: resolution.match };
+}
+
+/** A collection filter resolved to the library that holds it. */
+export interface ResolvedCollectionFilter {
+    libraryID: number;
+    key: string;
+}
+
+/** Resolved collection filters, or the typed failure that stopped the search. */
+export type CollectionFilterResolution =
+    | { ok: true; filters: ResolvedCollectionFilter[] }
+    | CollectionResolutionFailure;
+
+/**
+ * Membership key for a collection filter. A collection key is unique only
+ * within its library, so comparing bare keys would match an item that sits in a
+ * same-keyed collection of a different library.
+ */
+export function collectionFilterKey(libraryID: number, collectionKey: string): string {
+    return `${libraryID}-${collectionKey}`;
+}
+
+/**
+ * Resolve a search request's `collections_filter` into (library, key) pairs.
+ *
+ * Every entry must resolve. Dropping an unresolvable filter would run a search
+ * the caller believes is collection-scoped and hand back items from outside the
+ * filter, so a single failure fails the whole search instead.
+ *
+ * Filters are OR'd, so a *name* matching several collections contributes all of
+ * them. A bare *key* denotes one collection, so matching in more than one
+ * eligible library is an ambiguity the caller must resolve with a scoped
+ * identifier.
+ *
+ * `eligibleLibraryIds` must already be intersected with the searchable
+ * libraries. Pass `explicitLibrary` when the request named its libraries, so a
+ * scoped identifier from another library is reported as a scope conflict rather
+ * than widening the search past the libraries that were asked for.
+ */
+export function resolveCollectionFilters(
+    collectionsFilter: (string | number)[] | null | undefined,
+    options: { eligibleLibraryIds: number[]; explicitLibrary?: boolean }
+): CollectionFilterResolution {
+    if (!collectionsFilter) return { ok: true, filters: [] };
+
+    // Request payloads are external JSON, so the container is checked like its
+    // entries: a non-array filter is a malformed request, not an absent one.
+    if (!Array.isArray(collectionsFilter)) {
+        return {
+            ok: false,
+            code: 'invalid_request',
+            message: `A collections filter must be a list of collection identifiers, keys or names, but was of type ${typeof collectionsFilter}.`,
+        };
+    }
+    if (collectionsFilter.length === 0) return { ok: true, filters: [] };
+
+    const filters: ResolvedCollectionFilter[] = [];
+    const seen = new Set<string>();
+    const failures: CollectionResolutionFailure[] = [];
+
+    for (const entry of collectionsFilter) {
+        // Request payloads are external JSON. A malformed entry counts as an
+        // unresolvable filter rather than being dropped, so it can never shrink
+        // the scope of a search the caller believes is filtered.
+        if (typeof entry !== 'string' && typeof entry !== 'number') {
+            failures.push({
+                ok: false,
+                code: 'invalid_request',
+                message: `A collection filter must be a collection identifier, key or name, but one was of type ${typeof entry}.`,
+            });
+            continue;
+        }
+
+        const resolution = resolveCollectionMatches(entry, {
+            eligibleLibraryIds: options.eligibleLibraryIds,
+            explicitLibrary: options.explicitLibrary,
+        });
+        if (!resolution.ok) {
+            failures.push(resolution);
+            continue;
+        }
+        for (const match of resolution.matches) {
+            const dedupKey = collectionFilterKey(match.libraryID, match.collection.key);
+            if (seen.has(dedupKey)) continue;
+            seen.add(dedupKey);
+            filters.push({ libraryID: match.libraryID, key: match.collection.key });
+        }
+    }
+
+    if (failures.length > 0) {
+        return {
+            ok: false,
+            code: failures[0].code,
+            message:
+                `No search was run: ${failures.length} of ${collectionsFilter.length} collection filters ` +
+                `could not be resolved. ${failures.map((failure) => failure.message).join(' ')}`,
+        };
+    }
+
+    return { ok: true, filters };
 }
 
 /**
