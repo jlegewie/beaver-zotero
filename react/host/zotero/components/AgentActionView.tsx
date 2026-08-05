@@ -38,6 +38,7 @@ import {
     executeCreateNoteAnnotationsAction,
     undoCreateAnnotationsAction,
 } from '../../../utils/createAnnotationsActions';
+import { executeEditAnnotationsAction, undoEditAnnotationsAction } from '../../../utils/editAnnotationsActions';
 import type { CreateItemProposedData } from '@beaver/agent-core/types/agentActions/items';
 import { shortItemTitle } from '../../../../src/utils/zoteroUtils';
 import { resolveItemReference, resolveLibraryRef } from '../../../../src/utils/libraryIdentity';
@@ -386,6 +387,10 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                     result_data: result,
                 }]);
                 logger(`AgentActionView: Applied create_note_annotations action ${action!.id}`, 1);
+            } else if (toolName === 'edit_annotations' || toolName === 'delete_annotations') {
+                const result = await executeEditAnnotationsAction(action!);
+                await ackAgentActions(runId, [{ action_id: action!.id, result_data: result }]);
+                logger(`AgentActionView: Applied edit_annotations action ${action!.id}`, 1);
             } else if (toolName === 'create_items' || toolName === 'create_item') {
                 const actionsToApply = actions.filter((candidate) => candidate.status !== 'applied');
                 if (actionsToApply.length === 0) return;
@@ -505,6 +510,19 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                 await undoCreateAnnotationsAction(action);
                 undoAgentAction(action.id);
                 logger(`AgentActionView: Undone ${toolName} action ${action.id}`, 1);
+            } else if (toolName === 'edit_annotations' || toolName === 'delete_annotations') {
+                let result: UndoResult = await undoEditAnnotationsAction(action, false);
+                if (result.needsConfirmation && result.manuallyModified.length > 0) {
+                    const shouldOverwrite = confirmOverwriteManualChanges(result.manuallyModified);
+                    if (shouldOverwrite) {
+                        result = await undoEditAnnotationsAction(action, true);
+                        logger(`AgentActionView: Force-reverted ${result.fieldsReverted} annotation fields after user confirmation`, 1);
+                    } else {
+                        logger(`AgentActionView: User declined to overwrite ${result.manuallyModified.length} manually modified annotation fields`, 1);
+                    }
+                }
+                undoAgentAction(action.id);
+                logger(`AgentActionView: Undone edit_annotations action ${action.id} (${result.fieldsReverted} fields reverted)`, 1);
             } else if (toolName === 'create_items' || toolName === 'create_item') {
                 const actionsToUndo = actions.filter((candidate) => candidate.status === 'applied');
                 if (actionsToUndo.length === 0) return;
@@ -586,6 +604,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
             if (toolName === 'create_note') return NoteIcon;
             if (toolName === 'create_highlight_annotations') return HighlighterIcon;
             if (toolName === 'create_note_annotations') return NoteIcon;
+            if (toolName === 'edit_annotations' || toolName === 'delete_annotations') return HighlighterIcon;
             if (toolName === 'create_collection') return FolderAddIcon;
             if (toolName === 'organize_items') return TaskDoneIcon;
             if (toolName === 'manage_tags') return TagIcon;

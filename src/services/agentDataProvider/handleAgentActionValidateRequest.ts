@@ -14,6 +14,7 @@ import { validateCreateCollectionAction } from './actions/createCollection';
 import { validateCreateItemAction } from './actions/createItems';
 import { validateCreateHighlightAnnotationsAction } from './actions/createHighlightAnnotations';
 import { validateCreateNoteAnnotationsAction } from './actions/createNoteAnnotations';
+import { validateEditAnnotationsAction } from './actions/editAnnotations';
 
 
 /**
@@ -61,6 +62,10 @@ export async function handleAgentActionValidateRequest(
 
         if (request.action_type === 'create_note_annotations') {
             return await validateCreateNoteAnnotationsAction(request);
+        }
+
+        if (request.action_type === 'edit_annotations') {
+            return await validateEditAnnotationsAction(request);
         }
 
         if (request.action_type === 'manage_tags') {

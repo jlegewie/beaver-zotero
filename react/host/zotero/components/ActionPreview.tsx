@@ -12,6 +12,7 @@ import { CreateNotePreview } from './CreateNotePreview';
 import { ManageTagsPreview } from './ManageTagsPreview';
 import { ManageCollectionsPreview } from './ManageCollectionsPreview';
 import { CreateAnnotationsPreview } from './CreateAnnotationsPreview';
+import { EditAnnotationsPreview } from './EditAnnotationsPreview';
 import { resolveLibraryRef } from '../../../../src/utils/libraryIdentity';
 import type { ActionStatus, PreviewData } from './agentActionViewHelpers';
 import {
@@ -191,6 +192,14 @@ export const ActionPreview: React.FC<{
                 isStreaming={isStreaming}
             />
         );
+    }
+
+    if (
+        toolName === 'edit_annotations' ||
+        toolName === 'delete_annotations' ||
+        previewData.actionType === 'edit_annotations'
+    ) {
+        return <EditAnnotationsPreview actionData={previewData.actionData} status={status} />;
     }
 
     if (toolName === 'confirm_extraction' || previewData.actionType === 'confirm_extraction') {

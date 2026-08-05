@@ -23,6 +23,7 @@ import type {
     NoteAnnotationItem,
 } from '../types/agentActions/createAnnotations';
 import { normalizeAnnotationTags } from '../types/agentActions/createAnnotations';
+import type { EditAnnotationsProposedData, EditAnnotationsResultData } from '../types/agentActions/editAnnotations';
 
 // =============================================================================
 // Agent Action Types
@@ -88,6 +89,9 @@ export const isCreateNoteAnnotationsAgentAction = (action: AgentAction): action 
 export const isCreateAnnotationsAgentAction = (action: AgentAction): action is CreateHighlightAnnotationsAgentAction | CreateNoteAnnotationsAgentAction => {
     return isCreateHighlightAnnotationsAgentAction(action) || isCreateNoteAnnotationsAgentAction(action);
 };
+
+export const isEditAnnotationsAgentAction = (action: AgentAction): action is EditAnnotationsAgentAction =>
+    action.action_type === 'edit_annotations';
 
 /**
  * Type guard for zotero note actions
@@ -205,6 +209,12 @@ export type CreateNoteAnnotationsAgentAction = AgentAction & {
     action_type: 'create_note_annotations';
     proposed_data: CreateNoteAnnotationsProposedData;
     result_data?: CreateNoteAnnotationsResultData;
+};
+
+export type EditAnnotationsAgentAction = AgentAction & {
+    action_type: 'edit_annotations';
+    proposed_data: EditAnnotationsProposedData;
+    result_data?: EditAnnotationsResultData;
 };
 
 /**
@@ -397,6 +407,44 @@ export function toAgentAction(raw: Record<string, any>): AgentAction {
                 : [],
             tags: normalizeAnnotationTags(proposedData.tags),
         } as CreateNoteAnnotationsProposedData;
+    } else if (actionType === 'edit_annotations') {
+        const skipped = Array.isArray(proposedData.skipped)
+            ? proposedData.skipped.map((row: any) => ({
+                annotation_id: String(row?.annotation_id ?? row?.annotationId ?? ''),
+                reason: String(row?.reason ?? ''),
+            }))
+            : [];
+        if (proposedData.operation === 'delete') {
+            proposedData = {
+                operation: 'delete',
+                annotation_refs: Array.isArray(proposedData.annotation_refs ?? proposedData.annotationRefs)
+                    ? (proposedData.annotation_refs ?? proposedData.annotationRefs).map(normalizeZoteroItemReference)
+                    : [],
+                skipped,
+            } as EditAnnotationsProposedData;
+        } else {
+            proposedData = {
+                operation: 'edit',
+                edits: (Array.isArray(proposedData.edits) ? proposedData.edits : []).map((group: any) => {
+                    const changes = group?.changes ?? {};
+                    const patch = {
+                        ...(changes.color !== undefined ? { color: changes.color } : {}),
+                        ...(changes.comment !== undefined ? { comment: changes.comment } : {}),
+                        ...(changes.add_tags !== undefined ? { add_tags: normalizeAnnotationTags(changes.add_tags) } : {}),
+                        ...(changes.remove_tags !== undefined ? { remove_tags: normalizeAnnotationTags(changes.remove_tags) } : {}),
+                    };
+                    const locator = group?.relocation?.locator;
+                    return {
+                        annotation_refs: Array.isArray(group?.annotation_refs)
+                            ? group.annotation_refs.map(normalizeZoteroItemReference)
+                            : [],
+                        ...(Object.keys(patch).length ? { changes: patch } : {}),
+                        ...(locator ? { relocation: { locator: String(locator) } } : {}),
+                    };
+                }),
+                skipped,
+            } as EditAnnotationsProposedData;
+        }
     } else if (actionType === 'zotero_note') {
         const libraryIdRaw = proposedData.library_id ?? proposedData.libraryId;
         const zoteroKeyRaw = proposedData.zotero_key ?? proposedData.zoteroKey;
@@ -527,6 +575,28 @@ export function toAgentAction(raw: Record<string, any>): AgentAction {
         }
     } else if (resultData && (actionType === 'create_highlight_annotations' || actionType === 'create_note_annotations')) {
         resultData = normalizeCreateAnnotationsResultData(resultData);
+    } else if (resultData && actionType === 'edit_annotations') {
+        const appliedRefs = Array.isArray(resultData.applied_refs ?? resultData.appliedRefs)
+            ? (resultData.applied_refs ?? resultData.appliedRefs).map(normalizeZoteroItemReference)
+            : [];
+        const before = Array.isArray(resultData.before) ? resultData.before.map((snapshot: any) => ({
+            annotation_id: String(snapshot.annotation_id ?? snapshot.annotationId ?? ''),
+            ...normalizeZoteroItemReference(snapshot),
+            color: String(snapshot.color ?? ''),
+            comment: String(snapshot.comment ?? ''),
+            tags: normalizeAnnotationTags(snapshot.tags),
+            ...(typeof snapshot.deleted === 'boolean' ? { deleted: snapshot.deleted } : {}),
+        })) : [];
+        const relocated = Array.isArray(resultData.relocated) ? resultData.relocated.map((mapping: any) => ({
+            old_ref: normalizeZoteroItemReference(mapping.old_ref ?? mapping.oldRef ?? {}),
+            new_ref: normalizeZoteroItemReference(mapping.new_ref ?? mapping.newRef ?? {}),
+        })) : undefined;
+        resultData = {
+            operation: resultData.operation === 'delete' ? 'delete' : 'edit',
+            applied_refs: appliedRefs,
+            before,
+            ...(relocated?.length ? { relocated } : {}),
+        } as EditAnnotationsResultData;
     } else if (resultData && actionType === 'zotero_note') {
         const zoteroKey = resultData.zotero_key ?? resultData.zoteroKey;
         const libraryId = resultData.library_id ?? resultData.libraryId;

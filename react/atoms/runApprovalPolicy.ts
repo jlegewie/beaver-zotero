@@ -22,6 +22,8 @@ export const DEFAULT_DEFERRED_TOOL_GROUPS: Record<string, string> = {
     manage_collections: 'library_structure',
     create_highlight_annotations: 'annotations',
     create_note_annotations: 'annotations',
+    edit_annotations: 'annotations',
+    delete_annotations: 'annotations',
     create_item: 'create_items',
     create_items: 'create_items',
 };
@@ -49,7 +51,7 @@ export const TOOL_GROUP_RUN_LABELS: Record<string, string> = {
     note_creation: 'note creation',
     library_modifications: 'item organization and collection creation',
     library_structure: 'library-wide tag and collection changes',
-    annotations: 'annotation creation',
+    annotations: 'annotation creation and editing',
     create_items: 'item creation',
 };
 

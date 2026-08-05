@@ -20,6 +20,7 @@ import type {
     CreateNoteAnnotationsProposedData,
     CreateNoteAnnotationsResultData,
 } from './createAnnotations';
+import type { EditAnnotationsProposedData, EditAnnotationsResultData } from './editAnnotations';
 
 
 /**
@@ -357,7 +358,7 @@ export interface ConfirmExternalSearchProposedData {
 /**
  * Types of actions that can be proposed by the AI
  */
-export type ActionType = 'highlight_annotation' | 'note_annotation' | 'create_highlight_annotations' | 'create_note_annotations' | 'zotero_note' | 'create_item' | 'edit_metadata' | 'create_collection' | 'organize_items' | 'manage_tags' | 'manage_collections' | 'confirm_extraction' | 'confirm_external_search' | 'edit_note' | 'edit_note_batch' | 'create_note';
+export type ActionType = 'highlight_annotation' | 'note_annotation' | 'create_highlight_annotations' | 'create_note_annotations' | 'edit_annotations' | 'zotero_note' | 'create_item' | 'edit_metadata' | 'create_collection' | 'organize_items' | 'manage_tags' | 'manage_collections' | 'confirm_extraction' | 'confirm_external_search' | 'edit_note' | 'edit_note_batch' | 'create_note';
 
 /**
  * Union type for all proposed data types
@@ -397,7 +398,8 @@ export type ProposedData =
     EditNoteProposedData |
     EditNoteBatchProposedData |
     CreateHighlightAnnotationsProposedData |
-    CreateNoteAnnotationsProposedData;
+    CreateNoteAnnotationsProposedData |
+    EditAnnotationsProposedData;
 
 /**
  * Type of result data after applying an action
@@ -414,7 +416,8 @@ export type ActionResultDataType =
     EditNoteResultData |
     EditNoteBatchResultData |
     CreateHighlightAnnotationsResultData |
-    CreateNoteAnnotationsResultData;
+    CreateNoteAnnotationsResultData |
+    EditAnnotationsResultData;
 
 /**
  * Core proposed action model matching the backend schema
@@ -455,6 +458,14 @@ export type {
     NotePosition,
     ToolAnnotationColor
 } from './annotations';
+
+export type {
+    AnnotationBeforeSnapshot,
+    EditAnnotationsPatch,
+    EditAnnotationsProposedData,
+    EditAnnotationsResultData,
+    NativeAnnotationColor,
+} from './editAnnotations';
 
 
 // Re-export annotation type guards and utilities for convenience

@@ -13,6 +13,7 @@ import {
     CreateItemAgentAction,
     isCreateItemAgentAction,
     isCreateAnnotationsAgentAction,
+    isEditAnnotationsAgentAction,
     isAnnotationAgentAction,
     hasAppliedZoteroItem,
     hasAppliedBulkAnnotations,
@@ -47,19 +48,30 @@ export type AppliedActionValidity = 'valid' | 'invalid' | 'unverifiable';
 
 const checkAppliedReference = async (
     ref: ZoteroItemReference,
-    mustBeAnnotation: boolean
+    mustBeAnnotation: boolean,
+    // Actions that only move an item to the trash leave it resolvable, so its
+    // existence proves nothing: being trashed *is* the applied state. Restoring
+    // it from the trash is the user reverting the action.
+    mustBeTrashed: boolean = false
 ): Promise<AppliedActionValidity> => {
     const resolved = await resolveItemReference(ref);
     if (resolved.status === 'library_unavailable') return 'unverifiable';
     if (resolved.status === 'not_found') {
-        // "Not found" is only proof of deletion when the reference identifies
-        // its library portably. A legacy reference (no library_ref) into a
-        // group library resolves through a device-local library_id, so a miss
-        // may just mean that id maps to a different group on this device — not
-        // that the item is gone. Treat that as unverifiable, never a revert.
-        return isLibraryReferencePortable(ref) ? 'invalid' : 'unverifiable';
+        // "Not found" is only decisive when the reference identifies its
+        // library portably. A legacy reference (no library_ref) into a group
+        // library resolves through a device-local library_id, so a miss may
+        // just mean that id maps to a different group on this device — not
+        // that the item is gone. Never conclude anything from that.
+        if (!isLibraryReferencePortable(ref)) return 'unverifiable';
+        // Portable and missing: for an action whose applied state IS deletion,
+        // the user emptied the trash and the deletion became permanent, so the
+        // action still holds. For anything else, the item being gone is the
+        // revert.
+        return mustBeTrashed ? 'valid' : 'invalid';
     }
-    return mustBeAnnotation && !resolved.item.isAnnotation() ? 'invalid' : 'valid';
+    if (mustBeAnnotation && !resolved.item.isAnnotation()) return 'invalid';
+    if (mustBeTrashed && !resolved.item.deleted) return 'invalid';
+    return 'valid';
 };
 
 /**
@@ -74,6 +86,22 @@ export const validateAppliedAgentAction = async (action: AgentAction): Promise<A
         let unverifiable = false;
         for (const ref of created) {
             const validity = await checkAppliedReference(ref, true);
+            if (validity === 'invalid') return 'invalid';
+            if (validity === 'unverifiable') unverifiable = true;
+        }
+        return unverifiable ? 'unverifiable' : 'valid';
+    }
+
+    if (isEditAnnotationsAgentAction(action)) {
+        const updated = action.result_data?.applied_refs ?? [];
+        // A delete keeps its applied_refs pointing at the (soft-deleted)
+        // originals, so the applied state is "still in the trash". An edit's
+        // applied_refs are live annotations, including the replacements
+        // created for anything that moved.
+        const mustBeTrashed = action.result_data?.operation === 'delete';
+        let unverifiable = false;
+        for (const ref of updated) {
+            const validity = await checkAppliedReference(ref, true, mustBeTrashed);
             if (validity === 'invalid') return 'invalid';
             if (validity === 'unverifiable') unverifiable = true;
         }

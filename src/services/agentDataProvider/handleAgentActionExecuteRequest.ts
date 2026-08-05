@@ -13,6 +13,7 @@ import { executeCreateCollectionAction } from './actions/createCollection';
 import { executeCreateItemAction } from './actions/createItems';
 import { executeCreateHighlightAnnotationsAction } from './actions/createHighlightAnnotations';
 import { executeCreateNoteAnnotationsAction } from './actions/createNoteAnnotations';
+import { executeEditAnnotationsAction } from './actions/editAnnotations';
 
 
 /**
@@ -66,6 +67,8 @@ export async function handleAgentActionExecuteRequest(
             result = await executeCreateHighlightAnnotationsAction(request, ctx);
         } else if (request.action_type === 'create_note_annotations') {
             result = await executeCreateNoteAnnotationsAction(request, ctx);
+        } else if (request.action_type === 'edit_annotations') {
+            result = await executeEditAnnotationsAction(request, ctx);
         } else if (request.action_type === 'manage_tags') {
             result = await executeManageTagsAction(request, ctx);
         } else if (request.action_type === 'manage_collections') {

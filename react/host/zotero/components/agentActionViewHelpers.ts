@@ -148,6 +148,19 @@ export function getOverallStatus(actions: AgentAction[]): ActionStatus {
 }
 
 /**
+ * Annotations targeted by an edit_annotations action. A delete carries a flat
+ * ref list; an edit carries them inside its per-group `edits` entries.
+ */
+function countEditAnnotationTargets(actionData?: Record<string, any>): number {
+    if (actionData?.operation === 'delete')
+        return actionData?.annotation_refs?.length ?? 0;
+    return (actionData?.edits ?? []).reduce(
+        (sum: number, group: any) => sum + (group?.annotation_refs?.length ?? 0),
+        0,
+    );
+}
+
+/**
  * Get human-readable label for the action
  */
 export function getActionLabel(
@@ -175,6 +188,16 @@ export function getActionLabel(
             return count > 1
                 ? `${count} Sticky Notes`
                 : 'Sticky Note';
+        }
+        // Both annotation-mutation tools share one action type, so the
+        // operation (not the tool name) decides the wording.
+        case 'edit_annotations':
+        case 'delete_annotations': {
+            const count = countEditAnnotationTargets(actionData);
+            const noun = actionData?.operation === 'delete'
+                ? 'Annotation Deletion'
+                : 'Annotation Edit';
+            return count > 1 ? `${count} ${noun}s` : noun;
         }
         case 'create_item':
         case 'create_items':
@@ -215,6 +238,12 @@ export function getActionTitle(
         }
         case 'create_note_annotations': {
             return itemTitle;
+        }
+        case 'edit_annotations':
+        case 'delete_annotations': {
+            const count = countEditAnnotationTargets(actionData);
+            const verb = actionData?.operation === 'delete' ? 'Delete' : 'Edit';
+            return count ? `${verb} ${count} annotation${count === 1 ? '' : 's'}` : null;
         }
         case 'create_collection':
             return actionData?.name ?? actionData?.proposed_data?.name ?? null;

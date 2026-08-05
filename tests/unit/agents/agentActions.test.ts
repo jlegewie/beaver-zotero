@@ -111,6 +111,44 @@ describe('validateAppliedAgentAction', () => {
         expect(await validateAppliedAgentAction(action)).toBe('unverifiable');
     });
 
+    it('returns valid for a deleted-annotation action while the annotations are still trashed', async () => {
+        getByLibraryAndKeyAsync.mockResolvedValue({ isAnnotation: () => true, deleted: true });
+        const action = appliedAction(1, {
+            action_type: 'edit_annotations',
+            result_data: {
+                operation: 'delete',
+                applied_refs: [{ library_id: 1, zotero_key: 'AAAAAAA1' }],
+            },
+        } as Partial<AgentAction>);
+        expect(await validateAppliedAgentAction(action)).toBe('valid');
+    });
+
+    it('returns invalid when a deleted annotation was restored from the trash', async () => {
+        // A soft-deleted annotation always resolves, so existence proves nothing:
+        // restoring it from the trash is the user reverting the delete.
+        getByLibraryAndKeyAsync.mockResolvedValue({ isAnnotation: () => true, deleted: false });
+        const action = appliedAction(1, {
+            action_type: 'edit_annotations',
+            result_data: {
+                operation: 'delete',
+                applied_refs: [{ library_id: 1, zotero_key: 'AAAAAAA1' }],
+            },
+        } as Partial<AgentAction>);
+        expect(await validateAppliedAgentAction(action)).toBe('invalid');
+    });
+
+    it('does not require the trash state for non-delete annotation edits', async () => {
+        getByLibraryAndKeyAsync.mockResolvedValue({ isAnnotation: () => true, deleted: false });
+        const action = appliedAction(1, {
+            action_type: 'edit_annotations',
+            result_data: {
+                operation: 'edit',
+                applied_refs: [{ library_id: 1, zotero_key: 'AAAAAAA1' }],
+            },
+        } as Partial<AgentAction>);
+        expect(await validateAppliedAgentAction(action)).toBe('valid');
+    });
+
     it('returns invalid for bulk annotations when a personal-library annotation is gone', async () => {
         getByLibraryAndKeyAsync.mockResolvedValue(null);
         const action = appliedAction(1, {
@@ -441,5 +479,108 @@ describe('toAgentAction created-annotation page plumbing', () => {
         const created = (action.result_data as any).created;
         expect('page_idx' in created[0]).toBe(false);
         expect('page_label' in created[0]).toBe(false);
+    });
+});
+
+describe('toAgentAction edit_annotations normalized contract', () => {
+    it('preserves per-group edits and the applied/before pairing', () => {
+        const action = toAgentAction({
+            id: 'edit-annotations-1', run_id: 'run-1', action_type: 'edit_annotations', status: 'applied',
+            proposed_data: {
+                operation: 'edit',
+                edits: [
+                    {
+                        annotation_refs: [{ library_id: 1, zotero_key: 'AAAAAAA1', library_ref: 'u' }],
+                        changes: { color: 'blue', add_tags: ['topic'] },
+                    },
+                    {
+                        annotation_refs: [{ library_id: 1, zotero_key: 'BBBBBBB2', library_ref: 'u' }],
+                        changes: { comment: '' },
+                    },
+                ],
+                skipped: [{ annotation_id: '1-CCCCCCC3', reason: 'annotation was not found' }],
+            },
+            result_data: {
+                operation: 'edit',
+                applied_refs: [{ library_id: 1, zotero_key: 'AAAAAAA1', library_ref: 'u' }],
+                before: [{
+                    annotation_id: 'u-AAAAAAA1', library_id: 1, zotero_key: 'AAAAAAA1', library_ref: 'u',
+                    color: '#ffd400', comment: 'old', tags: ['old-tag'],
+                }],
+            },
+        });
+
+        expect(action.proposed_data).toEqual({
+            operation: 'edit',
+            edits: [
+                {
+                    annotation_refs: [{ library_id: 1, zotero_key: 'AAAAAAA1', library_ref: 'u' }],
+                    changes: { color: 'blue', add_tags: ['topic'] },
+                },
+                {
+                    annotation_refs: [{ library_id: 1, zotero_key: 'BBBBBBB2', library_ref: 'u' }],
+                    changes: { comment: '' },
+                },
+            ],
+            skipped: [{ annotation_id: '1-CCCCCCC3', reason: 'annotation was not found' }],
+        });
+        expect(action.result_data).toEqual({
+            operation: 'edit',
+            applied_refs: [{ library_id: 1, zotero_key: 'AAAAAAA1', library_ref: 'u' }],
+            before: [{
+                annotation_id: 'u-AAAAAAA1', library_id: 1, zotero_key: 'AAAAAAA1', library_ref: 'u',
+                color: '#ffd400', comment: 'old', tags: ['old-tag'],
+            }],
+        });
+    });
+
+    it('preserves a delete payload and its flat target list', () => {
+        const action = toAgentAction({
+            id: 'edit-annotations-2', run_id: 'run-1', action_type: 'edit_annotations', status: 'applied',
+            proposed_data: {
+                operation: 'delete',
+                annotation_refs: [{ library_id: 1, zotero_key: 'AAAAAAA1', library_ref: 'u' }],
+            },
+            result_data: {
+                operation: 'delete',
+                applied_refs: [{ library_id: 1, zotero_key: 'AAAAAAA1', library_ref: 'u' }],
+                before: [],
+            },
+        });
+
+        expect(action.proposed_data).toEqual({
+            operation: 'delete',
+            annotation_refs: [{ library_id: 1, zotero_key: 'AAAAAAA1', library_ref: 'u' }],
+            skipped: [],
+        });
+        expect(action.result_data?.operation).toBe('delete');
+    });
+
+    it('preserves relocation locators and old-to-new mappings', () => {
+        const action = toAgentAction({
+            id: 'edit-annotations-3', run_id: 'run-1', action_type: 'edit_annotations', status: 'applied',
+            proposed_data: {
+                operation: 'edit',
+                edits: [{
+                    annotation_refs: [{ library_id: 1, zotero_key: 'AAAAAAA1', library_ref: 'u' }],
+                    relocation: { locator: 'heading3' },
+                }],
+            },
+            result_data: {
+                operation: 'edit',
+                applied_refs: [{ library_id: 1, zotero_key: 'BBBBBBB2', library_ref: 'u' }],
+                before: [],
+                relocated: [{
+                    old_ref: { library_id: 1, zotero_key: 'AAAAAAA1', library_ref: 'u' },
+                    new_ref: { library_id: 1, zotero_key: 'BBBBBBB2', library_ref: 'u' },
+                }],
+            },
+        });
+
+        expect((action.proposed_data as any).edits[0].relocation).toEqual({ locator: 'heading3' });
+        expect(action.result_data?.relocated).toEqual([{
+            old_ref: { library_id: 1, zotero_key: 'AAAAAAA1', library_ref: 'u' },
+            new_ref: { library_id: 1, zotero_key: 'BBBBBBB2', library_ref: 'u' },
+        }]);
     });
 });

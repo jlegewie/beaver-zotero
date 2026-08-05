@@ -16,6 +16,24 @@ function makeZoteroItemReference(libraryID: number, zoteroKey: string): ZoteroIt
 }
 
 /**
+ * Persist an item, joining an open transaction when there is one.
+ *
+ * `saveTx()` is `save({tx: true})`, which opens its OWN transaction. Called
+ * while a transaction is already open, Zotero's `executeTransaction` waits on
+ * the outer transaction's promise — which cannot settle, because that
+ * transaction is awaiting this very call — and throws `TimeoutError` after 30
+ * seconds, rolling the whole batch back. Inside a transaction the correct call
+ * is `save()`, which asserts `requireTransaction()` and joins the caller's.
+ *
+ * Use this anywhere a writer can be reached both standalone and from inside
+ * `Zotero.DB.executeTransaction`.
+ */
+export async function saveItem(item: Zotero.Item): Promise<void> {
+    if (Zotero.DB.inTransaction()) await item.save();
+    else await item.saveTx();
+}
+
+/**
  * Context for determining where to create or insert a new Zotero item
  */
 export interface ZoteroTargetContext {

@@ -31,6 +31,10 @@ class MockAnnotationItem {
   saveTx = vi.fn(async () => {
     this.tagsAtSave = [...this.tags];
   });
+  /** In-transaction write; the writers pick this when one is already open. */
+  save = vi.fn(async () => {
+    this.tagsAtSave = [...this.tags];
+  });
 
   constructor(public readonly itemType: string) {
     constructedItems.push(this);
@@ -53,13 +57,16 @@ function mockAttachment() {
 
 describe("createAnnotation tag application", () => {
   let previousZotero: any;
+  let inTransaction = false;
 
   beforeEach(() => {
     vi.clearAllMocks();
     constructedItems = [];
+    inTransaction = false;
     previousZotero = (globalThis as any).Zotero;
     (globalThis as any).Zotero = {
       Item: MockAnnotationItem,
+      DB: { inTransaction: () => inTransaction },
       Beaver: {
         documentCache: {
           getMetadata: vi.fn().mockResolvedValue({ pages: [geometry] }),
@@ -84,6 +91,23 @@ describe("createAnnotation tag application", () => {
     expect(constructedItems[0].tags).toEqual(["methods", "important"]);
     expect(constructedItems[0].tagsAtSave).toEqual(["methods", "important"]);
     expect(constructedItems[0].saveTx).toHaveBeenCalledTimes(1);
+  });
+
+  it("joins an open transaction instead of opening its own", async () => {
+    // Reached this way by annotation relocation, which wraps create + trash in
+    // one transaction. saveTx() there would deadlock and roll the batch back.
+    inTransaction = true;
+
+    await createHighlightAnnotation(mockAttachment(), {
+      pageIndex: 0,
+      boxes: [{ l: 10, t: 20, r: 110, b: 50, coord_origin: CoordOrigin.TOPLEFT }],
+      text: "highlighted text",
+      tags: ["methods"],
+    });
+
+    expect(constructedItems[0].saveTx).not.toHaveBeenCalled();
+    expect(constructedItems[0].save).toHaveBeenCalledTimes(1);
+    expect(constructedItems[0].tagsAtSave).toEqual(["methods"]);
   });
 
   it("applies note tags before saveTx", async () => {
