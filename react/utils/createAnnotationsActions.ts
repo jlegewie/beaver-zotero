@@ -19,6 +19,7 @@ import {
     createEpubNoteAnnotation,
     createHighlightAnnotation,
     createNoteAnnotation,
+    resolvedAnnotationPageLabel,
 } from '../../src/services/annotations/createAnnotation';
 import { getReadableContentKind } from '../../src/services/documentExtraction/attachmentResolution';
 import { getAttachmentFileStatus } from '../../src/services/agentDataProvider/utils';
@@ -146,6 +147,11 @@ export async function executeCreateHighlightAnnotationsAction(
                     library_id: ref.library_id,
                     zotero_key: ref.zotero_key,
                     library_ref: libraryRefForLibraryID(ref.library_id) ?? undefined,
+                    page_idx: loc.page_idx,
+                    page_label: resolvedAnnotationPageLabel(
+                        loc.page_idx,
+                        loc.page_label ?? itemPageLabelFallback,
+                    ),
                 });
             } catch (error: any) {
                 failed.push({

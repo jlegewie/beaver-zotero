@@ -398,3 +398,48 @@ describe('toAgentAction reading_order_offset plumbing', () => {
         });
     });
 });
+
+describe('toAgentAction created-annotation page plumbing', () => {
+    const createdAction = (created: Record<string, unknown>[]) =>
+        toAgentAction({
+            id: 'a',
+            run_id: 'r',
+            action_type: 'create_highlight_annotations',
+            status: 'applied',
+            proposed_data: { items: [] },
+            result_data: { created, failed: [] },
+        });
+
+    it('preserves page_idx and page_label on created annotations', () => {
+        // Rows of a page-spanning highlight are otherwise identical, so losing
+        // the page here would make them indistinguishable after a thread reload.
+        const action = createdAction([
+            { library_id: 1, zotero_key: 'AAAAAAA1', client_item_id: 'c1', index: 0, loc_raw: 's4-s9', page_idx: 0, page_label: '7' },
+            { library_id: 1, zotero_key: 'AAAAAAA2', client_item_id: 'c1', index: 0, loc_raw: 's4-s9', page_idx: 1, page_label: '8' },
+        ]);
+
+        const created = (action.result_data as any).created;
+        expect(created.map((c: any) => c.page_idx)).toEqual([0, 1]);
+        expect(created.map((c: any) => c.page_label)).toEqual(['7', '8']);
+    });
+
+    it('accepts camelCase pageIdx / pageLabel on the wire', () => {
+        const action = createdAction([
+            { libraryId: 1, zoteroKey: 'AAAAAAA1', clientItemId: 'c1', index: 0, locRaw: 's4', pageIdx: 3, pageLabel: 'iv' },
+        ]);
+
+        const created = (action.result_data as any).created;
+        expect(created[0].page_idx).toBe(3);
+        expect(created[0].page_label).toBe('iv');
+    });
+
+    it('leaves both fields absent on rows created before they existed', () => {
+        const action = createdAction([
+            { library_id: 1, zotero_key: 'AAAAAAA1', client_item_id: 'c1', index: 0, loc_raw: 's4' },
+        ]);
+
+        const created = (action.result_data as any).created;
+        expect('page_idx' in created[0]).toBe(false);
+        expect('page_label' in created[0]).toBe(false);
+    });
+});

@@ -107,6 +107,19 @@ function firstNonBlankPageLabel(...candidates: (string | null | undefined)[]): s
     return null;
 }
 
+/**
+ * The page label a PDF annotation on `pageIndex` ends up with, given the
+ * candidate labels the caller has. Callers that need to report the label
+ * alongside the created annotation use this so their reported value cannot
+ * drift from what the annotation writers below actually store.
+ */
+export function resolvedAnnotationPageLabel(
+    pageIndex: number,
+    ...candidates: (string | null | undefined)[]
+): string {
+    return firstNonBlankPageLabel(...candidates) ?? String(pageIndex + 1);
+}
+
 /** Coerce `value` to a non-negative integer ≤ `max`. NaN/Infinity/null/negatives become 0. */
 function clampNonNegativeInt(value: unknown, max: number): number {
     if (typeof value !== 'number' || !Number.isFinite(value)) return 0;
@@ -363,8 +376,7 @@ export async function createHighlightAnnotation(
     item.annotationText = input.text ?? "";
     item.annotationComment = input.comment ?? "";
     item.annotationColor = resolveBeaverAnnotationColor(input.color);
-    item.annotationPageLabel =
-        firstNonBlankPageLabel(input.pageLabel) ?? String(input.pageIndex + 1);
+    item.annotationPageLabel = resolvedAnnotationPageLabel(input.pageIndex, input.pageLabel);
     const sortIndexField: Pick<ZoteroAnnotationItem, "annotationSortIndex"> = {
         annotationSortIndex: sortIndex,
     };

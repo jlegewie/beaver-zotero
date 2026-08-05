@@ -12,6 +12,7 @@ import {
     createHighlightAnnotation,
     createSnapshotHighlightAnnotation,
     prepareSnapshotAnnotationDocument,
+    resolvedAnnotationPageLabel,
 } from '../../annotations/createAnnotation';
 import { getReadableContentKind } from '../../documentExtraction/attachmentResolution';
 import { checkLibraryExcluded, getAttachmentFileStatus, getDeferredToolPreference, validateLibraryAccess } from '../utils';
@@ -396,6 +397,11 @@ export async function executeCreateHighlightAnnotationsAction(
                         library_id: ref.library_id,
                         zotero_key: ref.zotero_key,
                         library_ref: libraryRefForLibraryID(ref.library_id) ?? undefined,
+                        page_idx: loc.page_idx,
+                        page_label: resolvedAnnotationPageLabel(
+                            loc.page_idx,
+                            loc.page_label ?? itemPageLabelFallback,
+                        ),
                     });
                 } catch (error: any) {
                     failed.push({
