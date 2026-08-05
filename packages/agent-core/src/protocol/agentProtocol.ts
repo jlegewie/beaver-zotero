@@ -1811,6 +1811,13 @@ export const CLIENT_FEATURES = {
     EXTERNAL_FILES: 'external_files',
     ASK_USER_QUESTION: 'ask_user_question',
     PORTABLE_IDS: 'portable_ids',
+    /**
+     * The client accepts library-scoped collection identifiers (`u-ABCD2345`,
+     * `g123-ABCD2345`, `1-ABCD2345`) wherever a collection key is accepted, so the
+     * backend may emit scoped collection ids instead of bare 8-character keys.
+     * Separate from `portable_ids`, which only picks the spelling of a compound id.
+     */
+    COLLECTION_IDS: 'collection_ids',
     LIST_ITEMS_INCLUDE_CHILDREN: 'list_items_include_children',
     CREATE_NOTE_TAGS_COLLECTIONS: 'create_note_tags_collections',
     /** Batch multi-edit note editing (edit_note_batch action type). */

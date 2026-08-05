@@ -48,10 +48,14 @@ const VERSION_GATES: { feature: string; minVersion: string; op: Op }[] = [
 // citations_event is declaration-only because it gates an outbound frame the
 // client must have a handler for — a version cannot vouch for that, and the
 // backend keeps embedding citations in run_complete without it.
+// collection_ids is declaration-only because it gates whether the client accepts
+// scoped collection identifiers in tool arguments — a capability of the handlers,
+// not something derivable from a version.
 const DECLARATION_ONLY_FEATURES = [
     'external_files',
     'ask_user_question',
     'portable_ids',
+    'collection_ids',
     'list_items_include_children',
     'create_note_tags_collections',
     'edit_note_batch',
