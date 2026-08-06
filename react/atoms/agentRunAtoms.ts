@@ -97,6 +97,7 @@ import {
     clearAgentActionsAtom,
     threadAgentActionsAtom,
     isAnnotationAgentAction,
+    isEditAnnotationsAgentAction,
     isEditMetadataAgentAction,
     isZoteroNoteAgentAction,
     isCreateItemAgentAction,
@@ -135,6 +136,7 @@ import { undoManageCollectionsAction } from '../utils/manageCollectionsActions';
 import { undoEditNoteAction, undoEditNoteBatchAction } from '../utils/editNoteActions';
 import { undoCreateNoteAction } from '../utils/createNoteActions';
 import { undoCreateAnnotationsAction } from '../utils/createAnnotationsActions';
+import { undoEditAnnotationsAction } from '../utils/editAnnotationsActions';
 import { processToolReturnResults } from '../agents/toolResultProcessing';
 import { upgradeToolReturn } from '../compat/legacyToolResults';
 import { isToolResultView } from '../types/toolResultViews';
@@ -881,6 +883,10 @@ async function undoAppliedActionsInReverse(actions: AgentAction[]): Promise<stri
         try {
             if (isCreateAnnotationsAgentAction(action)) {
                 await undoCreateAnnotationsAction(action);
+            } else if (isEditAnnotationsAgentAction(action)) {
+                // Preserve fields the user manually modified after apply, as
+                // the other edit-action retry paths do.
+                await undoEditAnnotationsAction(action, false);
             } else if (isAnnotationAgentAction(action) || isZoteroNoteAgentAction(action)) {
                 const ref = action.result_data as ZoteroItemReference | undefined;
                 if (!ref) continue;
@@ -920,6 +926,7 @@ async function undoAppliedActionsInReverse(actions: AgentAction[]): Promise<stri
  */
 interface ActionsToUndo {
     annotations: AgentAction[];
+    annotationEdits: AgentAction[];
     zoteroNotes: AgentAction[];
     metadataEdits: AgentAction[];
     noteEdits: AgentAction[];
@@ -940,8 +947,8 @@ type UndoConfirmResult = 'undo' | 'skip' | 'cancel';
  * or 'cancel' to abort regeneration entirely.
  */
 function confirmUndoAppliedActions(actions: ActionsToUndo): UndoConfirmResult {
-    const { annotations, zoteroNotes, metadataEdits, noteEdits, createItems, createCollections, organizeItems, manageTags, manageCollections, createNotes } = actions;
-    const totalActions = annotations.length + zoteroNotes.length + metadataEdits.length +
+    const { annotations, annotationEdits, zoteroNotes, metadataEdits, noteEdits, createItems, createCollections, organizeItems, manageTags, manageCollections, createNotes } = actions;
+    const totalActions = annotations.length + annotationEdits.length + zoteroNotes.length + metadataEdits.length +
                          noteEdits.length + createItems.length + createCollections.length + organizeItems.length +
                          manageTags.length + manageCollections.length + createNotes.length;
 
@@ -955,6 +962,19 @@ function confirmUndoAppliedActions(actions: ActionsToUndo): UndoConfirmResult {
             0,
         );
         changeLines.push(`• ${annotationCount} PDF annotation${annotationCount === 1 ? '' : 's'}`);
+    }
+    if (annotationEdits.length > 0) {
+        const annotationCount = annotationEdits.reduce((sum, action) => {
+            const before = action.result_data?.before;
+            const appliedRefs = action.result_data?.applied_refs;
+            const count = Array.isArray(before)
+                ? before.length
+                : Array.isArray(appliedRefs)
+                    ? appliedRefs.length
+                    : 1;
+            return sum + count;
+        }, 0);
+        changeLines.push(`• ${annotationCount} PDF annotation change${annotationCount === 1 ? '' : 's'}`);
     }
     if (zoteroNotes.length > 0) {
         changeLines.push(`• ${zoteroNotes.length} Zotero note${zoteroNotes.length === 1 ? '' : 's'}`);
@@ -2629,6 +2649,9 @@ export const regenerateFromRunAtom = atom(
                     (isAnnotationAgentAction(action) && hasAppliedZoteroItem(action)) ||
                     (isCreateAnnotationsAgentAction(action) && hasAppliedBulkAnnotations(action))
                 );
+            const annotationEditsToUndo = actionsInRemovedRuns
+                .filter(isEditAnnotationsAgentAction)
+                .filter(a => a.status === 'applied');
             const zoteroNotesToDelete = actionsInRemovedRuns
                 .filter(isZoteroNoteAgentAction)
                 .filter(hasAppliedZoteroItem);
@@ -2658,7 +2681,8 @@ export const regenerateFromRunAtom = atom(
                 .filter(a => a.status === 'applied');
 
             // Prompt user to confirm undoing applied actions
-            const hasActionsToUndo = annotationsToDelete.length > 0 || zoteroNotesToDelete.length > 0 ||
+            const hasActionsToUndo = annotationsToDelete.length > 0 || annotationEditsToUndo.length > 0 ||
+                                     zoteroNotesToDelete.length > 0 ||
                                      metadataEditsToUndo.length > 0 || noteEditsToUndo.length > 0 ||
                                      createItemsToUndo.length > 0 ||
                                      createCollectionsToUndo.length > 0 || organizeItemsToUndo.length > 0 ||
@@ -2667,6 +2691,7 @@ export const regenerateFromRunAtom = atom(
             if (hasActionsToUndo) {
                 const confirmResult = confirmUndoAppliedActions({
                     annotations: annotationsToDelete,
+                    annotationEdits: annotationEditsToUndo,
                     zoteroNotes: zoteroNotesToDelete,
                     metadataEdits: metadataEditsToUndo,
                     noteEdits: noteEditsToUndo,
@@ -2862,6 +2887,9 @@ export const regenerateWithEditedPromptAtom = atom(
                     (isAnnotationAgentAction(action) && hasAppliedZoteroItem(action)) ||
                     (isCreateAnnotationsAgentAction(action) && hasAppliedBulkAnnotations(action))
                 );
+            const annotationEditsToUndo = actionsInRemovedRuns
+                .filter(isEditAnnotationsAgentAction)
+                .filter(a => a.status === 'applied');
             const zoteroNotesToDelete = actionsInRemovedRuns
                 .filter(isZoteroNoteAgentAction)
                 .filter(hasAppliedZoteroItem);
@@ -2891,7 +2919,8 @@ export const regenerateWithEditedPromptAtom = atom(
                 .filter(a => a.status === 'applied');
 
             // Prompt user to confirm undoing applied actions
-            const hasActionsToUndo = annotationsToDelete.length > 0 || zoteroNotesToDelete.length > 0 ||
+            const hasActionsToUndo = annotationsToDelete.length > 0 || annotationEditsToUndo.length > 0 ||
+                                     zoteroNotesToDelete.length > 0 ||
                                      metadataEditsToUndo.length > 0 || noteEditsToUndo.length > 0 ||
                                      createItemsToUndo.length > 0 ||
                                      createCollectionsToUndo.length > 0 || organizeItemsToUndo.length > 0 ||
@@ -2900,6 +2929,7 @@ export const regenerateWithEditedPromptAtom = atom(
             if (hasActionsToUndo) {
                 const confirmResult = confirmUndoAppliedActions({
                     annotations: annotationsToDelete,
+                    annotationEdits: annotationEditsToUndo,
                     zoteroNotes: zoteroNotesToDelete,
                     metadataEdits: metadataEditsToUndo,
                     noteEdits: noteEditsToUndo,
