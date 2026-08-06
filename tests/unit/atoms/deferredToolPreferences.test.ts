@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
             zotero_note: 'note_creation',
             highlight_annotation: 'annotations',
             note_annotation: 'annotations',
+            delete_annotations: 'annotations',
         },
         groupPreferences: {
             custom_note_edits: 'always_apply',
@@ -30,5 +31,6 @@ describe('deferredToolPreferences', () => {
         expect(preferences.toolToGroup).not.toHaveProperty('zotero_note');
         expect(preferences.toolToGroup).not.toHaveProperty('highlight_annotation');
         expect(preferences.toolToGroup).not.toHaveProperty('note_annotation');
+        expect(preferences.toolToGroup.delete_annotations).toBe('annotation_deletion');
     });
 });

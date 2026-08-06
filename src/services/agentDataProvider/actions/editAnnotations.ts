@@ -1,4 +1,5 @@
 import type {
+    DeferredToolPreference,
     WSAgentActionExecuteRequest,
     WSAgentActionExecuteResponse,
     WSAgentActionValidateRequest,
@@ -7,6 +8,7 @@ import type {
 import type {
     AnnotationBeforeSnapshot,
     AnnotationEditGroup,
+    AnnotationRelocation,
     EditAnnotationsPatch,
     EditAnnotationsProposedData,
     NativeAnnotationColor,
@@ -22,20 +24,18 @@ import {
     resolveLibraryRef,
 } from "../../../utils/libraryIdentity";
 import { saveItem } from "../../../utils/zoteroUtils";
+import { applyAnnotationPlacement, type AnnotationPlacement } from "../../annotations/createAnnotation";
+import { unsetTrashedAnnotationsInOpenReaders } from "../../annotations/readerSync";
 import { checkLibraryExcluded, getDeferredToolPreference } from "../utils";
 import { checkAborted, TimeoutContext, TimeoutError } from "../timeout";
 import {
-    resolveAnnotationRelocation,
+    prepareRelocation,
     type RelocatableAnnotationType,
-    type ResolvedRelocationTarget,
-} from "./annotationRelocation";
+} from "./annotationPlacement";
 
 const MAX_ANNOTATIONS = 50;
-// Total budget for resolving every target during validation. Individual
-// document extractions carry their own timeouts, but a batch of relocations
-// across distinct attachments would otherwise add up without bound.
-const VALIDATE_RESOLUTION_BUDGET_MS = 60_000;
 const MAX_EDIT_GROUPS = 25;
+const VALIDATE_RELOCATION_BUDGET_MS = 60_000;
 const ALLOWED_KEYS = new Set([
     "operation",
     "edits",
@@ -80,6 +80,28 @@ function normalizeTags(tags: unknown): string[] | null | undefined | false {
     if (!Array.isArray(tags) || tags.some((tag) => typeof tag !== "string"))
         return false;
     return [...new Set(tags.map((tag) => tag.trim()).filter(Boolean))];
+}
+
+function normalizeSkipped(value: unknown): SkippedAnnotation[] | DataResult {
+    if (value === undefined) return [];
+    if (!Array.isArray(value))
+        return fail("skipped must be an array", "invalid_skipped");
+    const rows: SkippedAnnotation[] = [];
+    for (const row of value) {
+        if (
+            !row ||
+            typeof row !== "object" ||
+            typeof row.annotation_id !== "string" ||
+            typeof row.reason !== "string"
+        ) {
+            return fail(
+                "Every skipped entry requires annotation_id and reason",
+                "invalid_skipped",
+            );
+        }
+        rows.push({ annotation_id: row.annotation_id, reason: row.reason });
+    }
+    return rows;
 }
 
 function normalizeRefs(value: any): ZoteroItemReference[] | DataResult {
@@ -207,6 +229,70 @@ function normalizeChanges(value: any): EditAnnotationsPatch | DataResult {
     return patch;
 }
 
+const ALLOWED_RELOCATION_KEYS = new Set([
+    "loc_raw",
+    "content_kind",
+    "attachment_ref",
+    "page_locations",
+    "note_position",
+    "text",
+    "page_label",
+    "reading_order_offset",
+    "section_href",
+    "section_ordinal",
+    "anchor_id",
+]);
+
+/**
+ * Accept a destination that was already resolved against the source document.
+ *
+ * Only the shape is checked here: no geometry is recomputed and no locator is
+ * re-resolved, so this stays a structural gate. Whether a given destination
+ * actually fits the annotation being moved is decided later, once the
+ * annotation — and therefore its type — is known.
+ */
+function normalizeRelocation(value: any): AnnotationRelocation | DataResult {
+    if (!value || typeof value !== "object" || Array.isArray(value))
+        return fail("relocation must be an object", "invalid_relocation");
+    const unexpected = Object.keys(value).filter(
+        (key) => !ALLOWED_RELOCATION_KEYS.has(key),
+    );
+    if (unexpected.length)
+        return fail(
+            `Unsupported relocation field(s): ${unexpected.join(", ")}`,
+            "field_restricted",
+        );
+    if (
+        value.content_kind !== "pdf" &&
+        value.content_kind !== "epub" &&
+        value.content_kind !== "snapshot"
+    ) {
+        return fail(
+            "relocation.content_kind must be pdf, epub, or snapshot",
+            "invalid_relocation",
+        );
+    }
+    const attachmentRef = value.attachment_ref;
+    if (
+        !attachmentRef ||
+        typeof attachmentRef !== "object" ||
+        typeof attachmentRef.zotero_key !== "string" ||
+        !attachmentRef.zotero_key
+    ) {
+        return fail(
+            "relocation.attachment_ref is required",
+            "invalid_relocation",
+        );
+    }
+    if (!value.page_locations?.length && !value.note_position && !value.anchor_id && !value.text) {
+        return fail(
+            "relocation carries no destination",
+            "invalid_relocation",
+        );
+    }
+    return value as AnnotationRelocation;
+}
+
 function normalizeGroup(value: any): AnnotationEditGroup | DataResult {
     if (!value || typeof value !== "object" || Array.isArray(value)) {
         return fail("Every entry in edits must be an object", "invalid_edit");
@@ -230,32 +316,17 @@ function normalizeGroup(value: any): AnnotationEditGroup | DataResult {
         changes = normalized;
     }
 
-    let relocation: { locator: string } | undefined;
+    let relocation: AnnotationRelocation | undefined;
     if (value.relocation !== undefined && value.relocation !== null) {
-        if (typeof value.relocation !== "object" || Array.isArray(value.relocation))
-            return fail("relocation must be an object", "invalid_relocation");
-        const unexpectedRelocation = Object.keys(value.relocation).filter(
-            (key) => key !== "locator",
-        );
-        if (unexpectedRelocation.length)
-            return fail(
-                `Unsupported relocation field(s): ${unexpectedRelocation.join(", ")}`,
-                "field_restricted",
-            );
-        const locator =
-            typeof value.relocation.locator === "string"
-                ? value.relocation.locator.trim()
-                : "";
-        if (!locator)
-            return fail("relocation.locator is required", "invalid_locator");
-        // Relocation recreates the annotation at the locator, so one locator
-        // can only stand for one annotation.
+        const normalized = normalizeRelocation(value.relocation);
+        if ("ok" in normalized) return normalized;
+        // One destination places one annotation; sharing it would stack them.
         if (refs.length !== 1)
             return fail(
                 "a relocating edit targets exactly one annotation",
                 "invalid_relocation",
             );
-        relocation = { locator };
+        relocation = normalized;
     }
 
     if (!changes && !relocation)
@@ -285,13 +356,15 @@ function normalizeData(
         );
 
     const operation = value.operation ?? "edit";
+    const skipped = normalizeSkipped(value.skipped);
+    if (!Array.isArray(skipped)) return skipped;
 
     if (operation === "delete") {
         if (value.edits !== undefined)
             return fail("delete does not accept edits", "field_restricted");
         const refs = normalizeRefs(value.annotation_refs);
         if (!Array.isArray(refs)) return refs;
-        return { ok: true, data: { operation, annotation_refs: refs } };
+        return { ok: true, data: { operation, annotation_refs: refs, skipped } };
     }
 
     if (operation !== "edit")
@@ -332,7 +405,7 @@ function normalizeData(
             "too_many_annotations",
         );
 
-    return { ok: true, data: { operation: "edit", edits: groups } };
+    return { ok: true, data: { operation: "edit", edits: groups, skipped } };
 }
 
 /**
@@ -425,50 +498,99 @@ async function resolveTarget(
             comment: item.annotationComment ?? "",
             tags: item.getTags().map((tag: { tag: string }) => tag.tag),
             deleted: false,
+            // Carried on every snapshot, not just moves: the approval card and
+            // the persisted history entry both render from this, and history
+            // must not depend on re-reading Zotero at display time.
+            annotation_type: item.annotationType,
+            page_label: item.annotationPageLabel ?? "",
+            ...(item.annotationType === "highlight"
+                ? { text: item.annotationText ?? "" }
+                : {}),
         },
     };
+}
+
+/**
+ * Capture the coordinates an annotation currently sits at, so a move can be
+ * undone.
+ *
+ * A move overwrites position in place, which leaves no other record of the
+ * original — unlike a color or comment edit, whose previous value the snapshot
+ * already carries. Only taken for targets that actually move, so an ordinary
+ * metadata edit does not carry position JSON. The human-readable fields
+ * (`annotation_type`, `page_label`, `text`) are on every snapshot already,
+ * because the approval card renders from them.
+ */
+function capturePlacement(target: ResolvedTarget): void {
+    // Zotero's upstream typing declares annotationSortIndex as a number; it is
+    // a formatted string, which ZoteroAnnotationItem corrects.
+    const { annotationSortIndex } = target.item as unknown as ZoteroAnnotationItem;
+    target.before.sort_index = annotationSortIndex ?? "";
+    target.before.position = target.item.annotationPosition ?? "";
 }
 
 type Partitioned = {
     targets: ResolvedTarget[];
     skipped: SkippedAnnotation[];
-    /** Relocation target per ResolvedTarget index; undefined when it stays put. */
-    relocations: Array<ResolvedRelocationTarget | undefined>;
-    /** True when at least one skip came from an unusable locator. */
-    locatorFailed: boolean;
-    /** True when at least one skip came from running out of time, not a bad input. */
-    timedOut: boolean;
+    /** Placement per ResolvedTarget index; undefined when the target stays put. */
+    placements: Array<AnnotationPlacement | undefined>;
+    /** True when at least one skip came from a destination that did not fit. */
+    relocationFailed: boolean;
 };
 
+async function awaitWithAbort<T>(
+    promise: Promise<T>,
+    signal: AbortSignal | undefined,
+): Promise<T> {
+    if (!signal) return promise;
+    if (signal.aborted) throw new Error("relocation preparation timed out");
+    let onAbort: (() => void) | undefined;
+    const aborted = new Promise<never>((_, reject) => {
+        onAbort = () => reject(new Error("relocation preparation timed out"));
+        signal.addEventListener("abort", onAbort, { once: true });
+    });
+    try {
+        return await Promise.race([promise, aborted]);
+    } finally {
+        if (onAbort) signal.removeEventListener("abort", onAbort);
+    }
+}
+
 /**
- * Resolve every target and its relocation, dropping the ones that cannot be
+ * Resolve every target and prepare any move, dropping the ones that cannot be
  * applied rather than failing the whole action.
  *
- * A locator only fails for the group that supplied it, so one bad locator
- * costs that annotation and nothing else. Everything that survives here is
- * exactly what the approval card shows and what execution applies.
+ * A destination only fails for the group that named it, so one bad move costs
+ * that annotation and nothing else. Everything that survives here is exactly
+ * what the approval card shows and what execution applies.
+ *
+ * Preparation deliberately happens here, before any transaction is opened:
+ * placing a move can read the attachment and run a PDF page analysis, which
+ * must not happen while holding Zotero's global write lock.
  */
 async function partitionTargets(
     data: EditAnnotationsProposedData,
     signal?: AbortSignal,
 ): Promise<Partitioned> {
-    const groups: Array<{ refs: ZoteroItemReference[]; locator?: string }> =
+    const groups: Array<{
+        refs: ZoteroItemReference[];
+        relocation?: AnnotationRelocation;
+    }> =
         data.operation === "delete"
             ? [{ refs: data.annotation_refs ?? [] }]
             : (data.edits ?? []).map((group) => ({
                   refs: group.annotation_refs ?? [],
-                  locator: group.relocation?.locator,
+                  relocation: group.relocation,
               }));
 
     const targets: ResolvedTarget[] = [];
-    const relocations: Array<ResolvedRelocationTarget | undefined> = [];
+    const placements: Array<AnnotationPlacement | undefined> = [];
     const skipped: SkippedAnnotation[] = [];
     const seen = new Set<string>();
-    let locatorFailed = false;
-    let timedOut = false;
+    let relocationFailed = false;
 
     for (let groupIndex = 0; groupIndex < groups.length; groupIndex++) {
-        const { refs, locator } = groups[groupIndex];
+        const { refs, relocation } = groups[groupIndex];
         for (const refInput of refs) {
             // Skips are reported back to the model, so they must echo the id
             // it supplied rather than the client's internal portable form.
@@ -478,16 +600,16 @@ async function partitionTargets(
                 skipped.push({ annotation_id: label, reason: resolved });
                 continue;
             }
-            if (!locator) {
+            if (!relocation) {
                 targets.push(resolved);
-                relocations.push(undefined);
+                placements.push(undefined);
                 continue;
             }
             if (
                 resolved.annotationType !== "highlight" &&
                 resolved.annotationType !== "note"
             ) {
-                locatorFailed = true;
+                relocationFailed = true;
                 skipped.push({
                     annotation_id: label,
                     reason: `annotations of type '${resolved.annotationType}' cannot be moved`,
@@ -495,29 +617,18 @@ async function partitionTargets(
                 continue;
             }
             try {
-                const relocation = await resolveAnnotationRelocation(
-                    resolved.attachment,
-                    resolved.annotationType as RelocatableAnnotationType,
-                    locator,
+                const placement = await awaitWithAbort(
+                    prepareRelocation(
+                        resolved.attachment,
+                        resolved.annotationType as RelocatableAnnotationType,
+                        relocation,
+                    ),
                     signal,
                 );
                 targets.push(resolved);
-                relocations.push(relocation);
+                placements.push(placement);
             } catch (error) {
-                // An aborted resolution means we ran out of time, not that the
-                // model gave a bad locator. Reporting it as a locator failure
-                // would send the model back to "copy an exact locator" advice
-                // for a locator that was already correct.
-                if (signal?.aborted) {
-                    timedOut = true;
-                    skipped.push({
-                        annotation_id: label,
-                        reason:
-                            "could not be prepared in time; move fewer annotations per call",
-                    });
-                    continue;
-                }
-                locatorFailed = true;
+                relocationFailed = true;
                 skipped.push({
                     annotation_id: label,
                     reason: String(
@@ -527,7 +638,7 @@ async function partitionTargets(
             }
         }
     }
-    return { targets, skipped, relocations, locatorFailed, timedOut };
+    return { targets, skipped, placements, relocationFailed };
 }
 
 /** Rebuild the proposal from the targets that survived validation. */
@@ -535,9 +646,15 @@ function survivingData(
     data: EditAnnotationsProposedData,
     partition: Partitioned,
 ): EditAnnotationsProposedData {
-    const skipped = partition.skipped.length
-        ? { skipped: partition.skipped }
-        : { skipped: [] };
+    const combinedSkips = [...(data.skipped ?? []), ...partition.skipped].filter(
+        (row, index, all) =>
+            all.findIndex(
+                (candidate) =>
+                    candidate.annotation_id === row.annotation_id &&
+                    candidate.reason === row.reason,
+            ) === index,
+    );
+    const skipped = { skipped: combinedSkips };
     if (data.operation === "delete") {
         return {
             operation: "delete",
@@ -558,14 +675,17 @@ function survivingData(
 
 /**
  * An edit that overwrites content the user wrote (a comment, or a tag set
- * being replaced wholesale) always goes to the user, whatever their
- * standing preference for annotation edits is. So does any move.
+ * being replaced wholesale) always goes to the user, whatever their standing
+ * preference for annotation edits is. So does any move.
+ *
+ * Deletion is not handled here: it lives in its own approval group with no
+ * persisted preference, so it already resolves to "always ask" on its own.
  */
 function requiresApproval(
     data: EditAnnotationsProposedData,
     targets: ResolvedTarget[],
 ): boolean {
-    if (data.operation === "delete") return true;
+    if (data.operation === "delete") return false;
     // MUST be called with the ORIGINAL proposal: `groupIndex` is assigned
     // against `data.edits` as received, while `survivingData` compacts the
     // list. Passing the compacted form shifts every group after a dropped one
@@ -606,6 +726,42 @@ function requiresApproval(
     });
 }
 
+/**
+ * The approval preference this action should run under.
+ *
+ * Both model-facing tools share one action type, so the operation decides
+ * which approval group applies. Deletion has its own group with no
+ * Preferences row, which makes "always apply" unreachable for it except
+ * through an explicit per-run grant.
+ *
+ * Only the auto-apply preference is ever overridden. A user who chose
+ * "continue without applying" asked not to be interrupted, and that mode never
+ * applies anything on its own, so raising a card buys no safety — which is why
+ * a delete inherits that choice from the annotations group rather than
+ * defaulting to a prompt the user opted out of.
+ */
+function resolvePreference(
+    data: EditAnnotationsProposedData,
+    targets: ResolvedTarget[],
+): DeferredToolPreference {
+    if (data.operation === "delete") {
+        const granted = getDeferredToolPreference("delete_annotations");
+        // No preference is persisted for the deletion group, so this can only
+        // be a per-run grant the user gave for deletions specifically.
+        if (granted === "always_apply") return granted;
+        const annotations = getDeferredToolPreference(
+            "create_highlight_annotations",
+        );
+        return annotations === "continue_without_applying"
+            ? annotations
+            : "always_ask";
+    }
+    const stored = getDeferredToolPreference("edit_annotations");
+    return stored === "always_apply" && requiresApproval(data, targets)
+        ? "always_ask"
+        : stored;
+}
+
 function invalidValidation(
     requestId: string,
     error: string,
@@ -629,8 +785,7 @@ function describeSkips(skipped: SkippedAnnotation[]): string {
 
 export async function validateEditAnnotationsAction(
     request: WSAgentActionValidateRequest,
-    // Overridable so tests can exercise the deadline without waiting it out.
-    resolutionBudgetMs: number = VALIDATE_RESOLUTION_BUDGET_MS,
+    relocationBudgetMs: number = VALIDATE_RELOCATION_BUDGET_MS,
 ): Promise<WSAgentActionValidateResponse> {
     const normalized = normalizeData(request.action_data);
     if (!normalized.ok)
@@ -640,12 +795,8 @@ export async function validateEditAnnotationsAction(
             normalized.code,
         );
 
-    // Validation resolves every relocation target, and each one can extract a
-    // document (25s apiece for a PDF, unbounded for EPUB/snapshot). With
-    // relocations spread across distinct attachments that is otherwise an
-    // unbounded, uncancellable wait, and nothing upstream imposes a deadline.
     const deadline = new AbortController();
-    const timer = setTimeout(() => deadline.abort(), resolutionBudgetMs);
+    const timer = setTimeout(() => deadline.abort(), relocationBudgetMs);
     let partition: Partitioned;
     try {
         partition = await partitionTargets(normalized.data, deadline.signal);
@@ -657,24 +808,14 @@ export async function validateEditAnnotationsAction(
             request.request_id,
             describeSkips(partition.skipped) ||
                 "No annotations could be resolved",
-            partition.timedOut
-                ? "resolution_timed_out"
-                : partition.locatorFailed
-                  ? "relocation_validation_failed"
-                  : "annotation_validation_failed",
+            partition.relocationFailed
+                ? "relocation_validation_failed"
+                : "annotation_validation_failed",
         );
     }
 
     const surviving = survivingData(normalized.data, partition);
-    // F5: only the auto-apply preference is overridden. A user who chose
-    // "continue without applying" asked not to be interrupted, and that mode
-    // never applies anything on its own, so forcing a card buys no safety.
-    const stored = getDeferredToolPreference("edit_annotations");
-    const preference =
-        stored === "always_apply" &&
-        requiresApproval(normalized.data, partition.targets)
-            ? "always_ask"
-            : stored;
+    const preference = resolvePreference(normalized.data, partition.targets);
 
     return {
         type: "agent_action_validate_response",
@@ -690,21 +831,30 @@ export async function validateEditAnnotationsAction(
     };
 }
 
+/**
+ * Put the in-memory items back the way they were after a rolled-back
+ * transaction, so a cached Zotero.Item never outlives the write it was part of
+ * carrying values that were never committed.
+ */
 function restoreSnapshots(targets: ResolvedTarget[]): void {
     for (const target of targets) {
         target.item.annotationColor = target.before.color;
         target.item.annotationComment = target.before.comment;
         target.item.setTags(target.before.tags);
         target.item.deleted = target.before.deleted ?? false;
+        // Only a move captures placement, so its presence marks the items
+        // whose position was overwritten before the rollback.
+        if (target.before.position !== undefined) {
+            applyAnnotationPlacement(target.item, {
+                ...(target.before.text !== undefined
+                    ? { text: target.before.text }
+                    : {}),
+                pageLabel: target.before.page_label ?? "",
+                sortIndex: target.before.sort_index ?? "",
+                position: target.before.position,
+            });
+        }
     }
-}
-
-function paletteName(hex: string): string {
-    return (
-        Object.entries(ZOTERO_ANNOTATION_PALETTE_COLORS).find(
-            ([, value]) => value === hex,
-        )?.[0] ?? "yellow"
-    );
 }
 
 /** The tag set an annotation ends up with after one patch. */
@@ -746,9 +896,7 @@ export async function executeEditAnnotationsAction(
             error:
                 describeSkips(partition.skipped) ||
                 "No annotations could be resolved",
-            error_code: partition.timedOut
-                ? "resolution_timed_out"
-                : "annotation_validation_failed",
+            error_code: "annotation_validation_failed",
         };
     }
 
@@ -759,10 +907,6 @@ export async function executeEditAnnotationsAction(
         );
     }
 
-    const mappings: Array<{
-        old_ref: ZoteroItemReference;
-        new_ref: ZoteroItemReference;
-    }> = [];
     const appliedRefs: ZoteroItemReference[] = [];
 
     try {
@@ -780,59 +924,47 @@ export async function executeEditAnnotationsAction(
                 }
 
                 const changes = changesByGroup.get(target.groupIndex);
-                const relocation = partition.relocations[index];
+                const placement = partition.placements[index];
                 const tags = nextTags(target.before.tags, changes);
-                const color =
-                    changes?.color != null
-                        ? ZOTERO_ANNOTATION_PALETTE_COLORS[changes.color]
-                        : target.before.color;
-                const comment =
-                    changes?.comment != null
-                        ? changes.comment
-                        : target.before.comment;
 
-                if (!relocation) {
-                    if (changes?.color != null)
-                        target.item.annotationColor = color;
-                    if (changes?.comment != null)
-                        target.item.annotationComment = comment;
-                    if (tags != null) target.item.setTags(tags);
-                    await saveItem(target.item);
-                    appliedRefs.push(target.ref);
-                    continue;
+                if (changes?.color != null)
+                    target.item.annotationColor =
+                        ZOTERO_ANNOTATION_PALETTE_COLORS[changes.color];
+                if (changes?.comment != null)
+                    target.item.annotationComment = changes.comment;
+                if (tags != null) target.item.setTags(tags);
+                if (placement) {
+                    // Moving rewrites the annotation's position on the item
+                    // itself, so its key, author, tags, and any citation
+                    // pointing at it all survive the move. Record both ends —
+                    // nothing else records where it was, and undo needs the
+                    // destination to tell its own write apart from a later
+                    // manual drag.
+                    capturePlacement(target);
+                    target.before.moved_to = {
+                        ...(placement.text !== undefined
+                            ? { text: placement.text }
+                            : {}),
+                        page_label: placement.pageLabel,
+                        sort_index: placement.sortIndex,
+                        position: placement.position,
+                    };
+                    applyAnnotationPlacement(target.item, placement);
                 }
-
-                // Relocation recreates the annotation at the new position and
-                // carries its metadata (patched, if this edit also changes
-                // fields) across; the original is retired only once the
-                // replacement is persisted.
-                const newRef = await relocation.create({
-                    color: paletteName(color),
-                    comment,
-                    tags: tags ?? target.before.tags,
-                });
-                const replacement = await resolveItemReference(newRef);
-                if (
-                    replacement.status !== "found" ||
-                    !replacement.item.isAnnotation()
-                ) {
-                    throw new Error(
-                        `Created replacement for ${target.id} could not be resolved`,
-                    );
-                }
-                // The shared writers accept named palette colors. Restore the
-                // exact hex as well, so a pre-existing custom Zotero color is
-                // copied rather than coerced to yellow.
-                replacement.item.annotationColor = color;
-                replacement.item.annotationComment = comment;
-                replacement.item.setTags(tags ?? target.before.tags);
-                await saveItem(replacement.item);
-                target.item.deleted = true;
                 await saveItem(target.item);
-                mappings.push({ old_ref: target.ref, new_ref: newRef });
-                appliedRefs.push(newRef);
+                appliedRefs.push(target.ref);
             }
         });
+        if (normalized.data.operation === "delete") {
+            // Only after the transaction commits: an open reader keeps showing
+            // trashed annotations otherwise.
+            unsetTrashedAnnotationsInOpenReaders(
+                partition.targets.map((target) => ({
+                    attachmentID: target.attachment.id,
+                    key: target.item.key,
+                })),
+            );
+        }
         return {
             type: "agent_action_execute_response",
             request_id: request.request_id,
@@ -841,7 +973,6 @@ export async function executeEditAnnotationsAction(
                 operation: normalized.data.operation,
                 applied_refs: appliedRefs,
                 before: partition.targets.map((target) => target.before),
-                ...(mappings.length ? { relocated: mappings } : {}),
             },
         };
     } catch (error) {

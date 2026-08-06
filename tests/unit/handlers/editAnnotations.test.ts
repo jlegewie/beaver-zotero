@@ -18,42 +18,62 @@ vi.mock("../../../src/utils/libraryIdentity", () => ({
 }));
 
 let deferredPreference = "always_apply";
+let deletionGrantedForRun = false;
+const preferenceLookups: string[] = [];
 vi.mock("../../../src/services/agentDataProvider/utils", () => ({
     checkLibraryExcluded: () => null,
-    getDeferredToolPreference: () => deferredPreference,
+    // Mirrors the real group resolution: delete_annotations sits in its own
+    // group with no persisted preference, so it resolves to always_ask unless
+    // a per-run grant raises it.
+    getDeferredToolPreference: (toolName: string) => {
+        preferenceLookups.push(toolName);
+        if (toolName === "delete_annotations")
+            return deletionGrantedForRun ? "always_apply" : "always_ask";
+        return deferredPreference;
+    },
 }));
 
-const createReplacement = vi.fn(async () => {
-    items.set("NEWANN01", annotation("NEWANN01"));
-    return {
-        library_id: 1,
-        zotero_key: "NEWANN01",
-        library_ref: "u",
-    };
-});
-const resolveAnnotationRelocation = vi.fn(
-    async (
-        attachment: any,
-        annotationType: string,
-        locator: string,
-        _signal?: AbortSignal,
-    ) => {
-        if (locator === "s999") throw new Error(`Locator '${locator}' was not found`);
-        return {
-            attachment,
-            annotationType,
-            locator,
-            create: createReplacement,
-        };
+/** The placement a successfully prepared move writes onto the annotation. */
+const MOVED_PLACEMENT = {
+    text: "moved text",
+    pageLabel: "12",
+    sortIndex: "00011|000200|00050",
+    position: '{"pageIndex":11,"rects":[[10,20,30,40]]}',
+};
+
+const prepareRelocation = vi.fn(
+    async (_attachment: any, _annotationType: string, relocation: any) => {
+        if (relocation.loc_raw === "s999")
+            throw new Error(`Locator '${relocation.loc_raw}' was not found`);
+        return MOVED_PLACEMENT;
     },
 );
 vi.mock(
-    "../../../src/services/agentDataProvider/actions/annotationRelocation",
+    "../../../src/services/agentDataProvider/actions/annotationPlacement",
     () => ({
-        resolveAnnotationRelocation: (...args: any[]) =>
-            (resolveAnnotationRelocation as any)(...args),
+        prepareRelocation: (...args: any[]) =>
+            (prepareRelocation as any)(...args),
     }),
 );
+
+const unsetTrashedAnnotationsInOpenReaders = vi.fn();
+vi.mock("../../../src/services/annotations/readerSync", () => ({
+    unsetTrashedAnnotationsInOpenReaders: (...args: any[]) =>
+        (unsetTrashedAnnotationsInOpenReaders as any)(...args),
+}));
+
+/** A resolved move destination, as the backend now sends it. */
+const relocation = (loc = "s12") => ({
+    loc_raw: loc,
+    content_kind: "pdf",
+    attachment_ref: { library_id: 1, zotero_key: "ATT00001" },
+    note_position: { page_index: 11, x: 15, y: 30, side: "left" },
+    page_locations: [
+        { page_idx: 11, boxes: [{ l: 10, t: 20, r: 30, b: 40 }], page_label: "12" },
+    ],
+    text: "moved text",
+    page_label: "12",
+});
 
 import {
     executeEditAnnotationsAction,
@@ -95,6 +115,10 @@ function annotation(key: string, save = vi.fn(async () => {})) {
         annotationColor: "#ffd400",
         annotationComment: `comment-${key}`,
         annotationType: "highlight",
+        annotationText: `text-${key}`,
+        annotationPageLabel: `page-${key}`,
+        annotationSortIndex: `sort-${key}`,
+        annotationPosition: `position-${key}`,
         isAnnotation: () => true,
         loadDataType: vi.fn(async () => {}),
         getTags: () => tags.map((tag) => ({ ...tag })),
@@ -149,14 +173,16 @@ const ref = (key: string) => ({
 });
 
 beforeEach(() => {
-    createReplacement.mockClear();
-    resolveAnnotationRelocation.mockClear();
+    prepareRelocation.mockClear();
+    unsetTrashedAnnotationsInOpenReaders.mockClear();
     deferredPreference = "always_apply";
+    deletionGrantedForRun = false;
     items.clear();
     items.set("AAA", annotation("AAA"));
     items.set("BBB", annotation("BBB"));
     const attachment = {
         id: 100,
+        key: "ATT00001",
         parentID: 200,
         deleted: false,
         isAttachment: () => true,
@@ -253,7 +279,7 @@ describe("edit_annotations validation", () => {
                 edits: [
                     {
                         annotation_refs: refs("AAA", "BBB"),
-                        relocation: { locator: "s12" },
+                        relocation: relocation(),
                     },
                 ],
             },
@@ -300,10 +326,55 @@ describe("edit_annotations validation", () => {
         ]);
     });
 
+    it("preserves skips already recorded by backend locator validation", async () => {
+        const response = await validate({
+            skipped: [
+                { annotation_id: "1-OLDMISS", reason: "locator was not found" },
+            ],
+            edits: [
+                {
+                    annotation_refs: refs("AAA", "MISSING"),
+                    changes: { color: "red" },
+                },
+            ],
+        });
+
+        expect(response.valid).toBe(true);
+        expect((response.normalized_action_data as any).skipped).toEqual([
+            { annotation_id: "1-OLDMISS", reason: "locator was not found" },
+            { annotation_id: "1-MISSING", reason: "annotation was not found" },
+        ]);
+    });
+
+    it("bounds aggregate relocation preparation", async () => {
+        prepareRelocation.mockImplementationOnce(
+            () => new Promise(() => undefined),
+        );
+
+        const response = await validateEditAnnotationsAction(
+            {
+                event: "agent_action_validate",
+                request_id: "deadline-test",
+                action_type: "edit_annotations",
+                action_data: {
+                    operation: "edit",
+                    edits: [
+                        { annotation_refs: refs("AAA"), relocation: relocation() },
+                    ],
+                },
+            } as any,
+            5,
+        );
+
+        expect(response.valid).toBe(false);
+        expect(response.error_code).toBe("relocation_validation_failed");
+        expect(response.error).toContain("timed out");
+    });
+
     it("drops only the group whose locator fails", async () => {
         const response = await validate({
             edits: [
-                { annotation_refs: refs("AAA"), relocation: { locator: "s999" } },
+                { annotation_refs: refs("AAA"), relocation: relocation("s999") },
                 { annotation_refs: refs("BBB"), changes: { color: "red" } },
             ],
         });
@@ -316,39 +387,20 @@ describe("edit_annotations validation", () => {
         expect(data.skipped[0].reason).toContain("s999");
     });
 
-    it("reports a deadline as a timeout, not a bad locator", async () => {
-        // The locator is correct; resolution simply ran out of time. Reporting
-        // it as a locator failure sends the model back with the same locator.
-        resolveAnnotationRelocation.mockImplementationOnce(
-            (_attachment: any, _type: string, _locator: string, signal?: AbortSignal) =>
-                new Promise((_resolve, reject) => {
-                    signal?.addEventListener("abort", () =>
-                        reject(new Error("The operation was aborted")),
-                    );
-                }),
-        );
+    it("rejects a destination resolved against another attachment", async () => {
+        // An annotation cannot move between documents, and the coordinates
+        // would come from the wrong page frame.
+        prepareRelocation.mockImplementationOnce(async () => {
+            throw new Error("is not on attachment u-OTHER123");
+        });
 
-        const response = await validateEditAnnotationsAction(
-            {
-                event: "agent_action_validate",
-                request_id: "v1",
-                action_type: "edit_annotations",
-                action_data: {
-                    edits: [
-                        {
-                            annotation_refs: refs("AAA"),
-                            relocation: { locator: "s12" },
-                        },
-                    ],
-                },
-            } as any,
-            5,
-        );
+        const response = await validate({
+            edits: [{ annotation_refs: refs("AAA"), relocation: relocation() }],
+        });
 
         expect(response.valid).toBe(false);
-        expect(response.error_code).toBe("resolution_timed_out");
-        expect(response.error).toContain("in time");
-        expect(response.error).not.toContain("s12");
+        expect(response.error_code).toBe("relocation_validation_failed");
+        expect(response.error).toContain("u-OTHER123");
     });
 
     it("fails only when nothing survives", async () => {
@@ -363,10 +415,10 @@ describe("edit_annotations validation", () => {
         expect(response.error).toContain("1-MISSING");
     });
 
-    it("reports a locator failure with its own error code", async () => {
+    it("reports a relocation failure with its own error code", async () => {
         const response = await validate({
             edits: [
-                { annotation_refs: refs("AAA"), relocation: { locator: "s999" } },
+                { annotation_refs: refs("AAA"), relocation: relocation("s999") },
             ],
         });
 
@@ -403,7 +455,7 @@ describe("edit_annotations approval policy", () => {
     });
 
     it.each([
-        ["a move", { relocation: { locator: "s12" } }],
+        ["a move", { relocation: relocation() }],
         ["overwriting an existing comment", { changes: { comment: "new" } }],
         [
             "replacing an existing tag set",
@@ -465,6 +517,35 @@ describe("edit_annotations approval policy", () => {
         });
 
         expect(response.preference).toBe("always_ask");
+    });
+
+    it("reads a delete's preference from the deletion group", async () => {
+        // Both tools share one action type, so the operation has to pick the
+        // group. Reading edit_annotations here would let an "always apply
+        // annotation edits" preference carry deletions with it.
+        preferenceLookups.length = 0;
+        await validate({ operation: "delete", annotation_refs: refs("AAA") });
+        expect(preferenceLookups[0]).toBe("delete_annotations");
+        expect(preferenceLookups).not.toContain("edit_annotations");
+
+        preferenceLookups.length = 0;
+        await validate({
+            edits: [{ annotation_refs: refs("AAA"), changes: { color: "red" } }],
+        });
+        expect(preferenceLookups).toEqual(["edit_annotations"]);
+    });
+
+    it("lets a per-run deletion grant apply without a card", async () => {
+        // The deletion group has no persisted preference, so always_apply can
+        // only come from a grant the user gave for deletions in this run.
+        deletionGrantedForRun = true;
+
+        const response = await validate({
+            operation: "delete",
+            annotation_refs: refs("AAA"),
+        });
+
+        expect(response.preference).toBe("always_apply");
     });
 });
 
@@ -555,43 +636,73 @@ describe("edit_annotations execution", () => {
         expect(items.get("BBB").deleted).toBe(true);
     });
 
-    it("creates a replacement before retiring the old annotation and maps the ids", async () => {
+    it("moves an annotation in place, keeping its identity", async () => {
         const response = await execute({
-            edits: [
-                { annotation_refs: refs("AAA"), relocation: { locator: "s12" } },
-            ],
+            edits: [{ annotation_refs: refs("AAA"), relocation: relocation() }],
         });
+        const moved = items.get("AAA");
 
         expect(response.success).toBe(true);
-        expect(createReplacement).toHaveBeenCalledWith({
-            color: "yellow",
-            comment: "comment-AAA",
-            tags: ["old-AAA"],
-        });
-        expect(items.get("AAA").deleted).toBe(true);
-        expect(response.result_data?.relocated).toEqual([
-            { old_ref: ref("AAA"), new_ref: ref("NEWANN01") },
-        ]);
-        // applied_refs points at the replacement, never the retired original.
-        expect(response.result_data?.applied_refs).toEqual([ref("NEWANN01")]);
+        // The annotation is rewritten, never replaced: it keeps its key (so
+        // citations pointing at it still resolve) and stays out of the trash.
+        expect(moved.deleted).toBe(false);
+        expect(moved.annotationPosition).toBe(MOVED_PLACEMENT.position);
+        expect(moved.annotationSortIndex).toBe(MOVED_PLACEMENT.sortIndex);
+        expect(moved.annotationText).toBe(MOVED_PLACEMENT.text);
+        expect(moved.annotationPageLabel).toBe(MOVED_PLACEMENT.pageLabel);
+        expect(response.result_data?.applied_refs).toEqual([ref("AAA")]);
     });
 
-    it("carries a patch onto the replacement when a group moves and edits", async () => {
+    it("records both ends of a move so it can be undone", async () => {
+        const response = await execute({
+            edits: [{ annotation_refs: refs("AAA"), relocation: relocation() }],
+        });
+
+        // A move overwrites position in place, so the result is the only
+        // record of where the annotation came from.
+        expect(response.result_data?.before[0]).toMatchObject({
+            annotation_type: "highlight",
+            text: "text-AAA",
+            page_label: "page-AAA",
+            sort_index: "sort-AAA",
+            position: "position-AAA",
+            moved_to: {
+                text: MOVED_PLACEMENT.text,
+                page_label: MOVED_PLACEMENT.pageLabel,
+                sort_index: MOVED_PLACEMENT.sortIndex,
+                position: MOVED_PLACEMENT.position,
+            },
+        });
+    });
+
+    it("leaves placement out of the snapshot when nothing moved", async () => {
+        const response = await execute({
+            edits: [{ annotation_refs: refs("AAA"), changes: { color: "red" } }],
+        });
+
+        const snapshot = response.result_data?.before[0] as any;
+        expect(snapshot.position).toBeUndefined();
+        expect(snapshot.moved_to).toBeUndefined();
+    });
+
+    it("applies a patch and a move to the same annotation", async () => {
         await execute({
             edits: [
                 {
                     annotation_refs: refs("AAA"),
                     changes: { color: "green", add_tags: ["moved"] },
-                    relocation: { locator: "s12" },
+                    relocation: relocation(),
                 },
             ],
         });
+        const moved = items.get("AAA");
 
-        expect(createReplacement).toHaveBeenCalledWith({
-            color: "green",
-            comment: "comment-AAA",
-            tags: ["old-AAA", "moved"],
-        });
+        expect(moved.annotationColor).toBe("#5fb236");
+        expect(moved.getTags().map((tag: any) => tag.tag)).toEqual([
+            "old-AAA",
+            "moved",
+        ]);
+        expect(moved.annotationPosition).toBe(MOVED_PLACEMENT.position);
     });
 
     it("never calls saveTx() inside the transaction", async () => {
@@ -601,7 +712,7 @@ describe("edit_annotations execution", () => {
         const response = await execute({
             edits: [
                 { annotation_refs: refs("AAA"), changes: { color: "red" } },
-                { annotation_refs: refs("BBB"), relocation: { locator: "s12" } },
+                { annotation_refs: refs("BBB"), relocation: relocation() },
             ],
         });
 
@@ -611,24 +722,59 @@ describe("edit_annotations execution", () => {
         expect(items.get("AAA").save).toHaveBeenCalled();
     });
 
+    it("prepares every move before opening the transaction", async () => {
+        // Preparing a move can read the attachment and run a PDF page
+        // analysis. Doing that inside the transaction would hold Zotero's
+        // global write lock for the duration and stall every other write.
+        prepareRelocation.mockImplementationOnce(async (...args: any[]) => {
+            expect((globalThis as any).Zotero.DB.inTransaction()).toBe(false);
+            return MOVED_PLACEMENT;
+        });
+
+        const response = await execute({
+            edits: [{ annotation_refs: refs("AAA"), relocation: relocation() }],
+        });
+
+        expect(response.success).toBe(true);
+        expect(prepareRelocation).toHaveBeenCalled();
+    });
+
     it("mixes a move and an in-place edit in one transaction", async () => {
         const response = await execute({
             edits: [
                 { annotation_refs: refs("AAA"), changes: { color: "red" } },
-                { annotation_refs: refs("BBB"), relocation: { locator: "s12" } },
+                { annotation_refs: refs("BBB"), relocation: relocation() },
             ],
         });
 
         expect(response.success).toBe(true);
         expect(response.result_data?.applied_refs).toEqual([
             ref("AAA"),
-            ref("NEWANN01"),
+            ref("BBB"),
         ]);
         expect(response.result_data?.before).toHaveLength(2);
-        expect(response.result_data?.relocated).toEqual([
-            { old_ref: ref("BBB"), new_ref: ref("NEWANN01") },
-        ]);
         expect(items.get("AAA").deleted).toBe(false);
-        expect(items.get("BBB").deleted).toBe(true);
+        expect(items.get("BBB").deleted).toBe(false);
+        expect(items.get("BBB").annotationPosition).toBe(
+            MOVED_PLACEMENT.position,
+        );
+    });
+
+    it("clears trashed annotations from an open reader", async () => {
+        // Zotero's reader ignores annotation trash events, so a deleted
+        // annotation stays rendered until the tab is reopened.
+        await execute({ operation: "delete", annotation_refs: refs("AAA") });
+
+        expect(unsetTrashedAnnotationsInOpenReaders).toHaveBeenCalledWith([
+            { attachmentID: 100, key: "AAA" },
+        ]);
+    });
+
+    it("does not touch the reader for an edit", async () => {
+        await execute({
+            edits: [{ annotation_refs: refs("AAA"), changes: { color: "red" } }],
+        });
+
+        expect(unsetTrashedAnnotationsInOpenReaders).not.toHaveBeenCalled();
     });
 });

@@ -79,6 +79,11 @@ function loadPreferences(): DeferredToolPreferencesData {
             for (const actionType of Object.keys(RUN_APPROVAL_ACTION_TYPE_ALIASES)) {
                 delete storedToolToGroup[actionType];
             }
+            // Deletion moved out of the shared annotations preference group.
+            // A persisted mapping from an older profile must not override the
+            // new safety boundary and turn annotations=always_apply into an
+            // implicit standing grant to delete annotations.
+            delete storedToolToGroup.delete_annotations;
             return {
                 toolToGroup: { ...DEFAULT_DEFERRED_TOOL_GROUPS, ...storedToolToGroup },
                 groupPreferences: { ...DEFAULT_GROUP_PREFERENCES, ...parsed.groupPreferences },

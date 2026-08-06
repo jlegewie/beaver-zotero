@@ -199,7 +199,14 @@ export const ActionPreview: React.FC<{
         toolName === 'delete_annotations' ||
         previewData.actionType === 'edit_annotations'
     ) {
-        return <EditAnnotationsPreview actionData={previewData.actionData} status={status} />;
+        return (
+            <EditAnnotationsPreview
+                actionData={previewData.actionData}
+                currentValue={previewData.currentValue}
+                resultData={previewData.resultData as any}
+                status={status}
+            />
+        );
     }
 
     if (toolName === 'confirm_extraction' || previewData.actionType === 'confirm_extraction') {

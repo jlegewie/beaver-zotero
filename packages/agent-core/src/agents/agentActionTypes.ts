@@ -23,7 +23,12 @@ import type {
     NoteAnnotationItem,
 } from '../types/agentActions/createAnnotations';
 import { normalizeAnnotationTags } from '../types/agentActions/createAnnotations';
-import type { EditAnnotationsProposedData, EditAnnotationsResultData } from '../types/agentActions/editAnnotations';
+import type {
+    AnnotationPlacementSnapshot,
+    AnnotationRelocation,
+    EditAnnotationsProposedData,
+    EditAnnotationsResultData,
+} from '../types/agentActions/editAnnotations';
 
 // =============================================================================
 // Agent Action Types
@@ -354,6 +359,57 @@ function normalizeCreateAnnotationsResultData(raw: any): Record<string, any> {
     };
 }
 
+function normalizeRelocation(raw: any): AnnotationRelocation | undefined {
+    if (!raw || typeof raw !== 'object') return undefined;
+    const pageLocations = normalizePageLocations({
+        locations: raw.page_locations ?? raw.pageLocations,
+    });
+    const notePosition = normalizeNotePosition({
+        note_position: raw.note_position ?? raw.notePosition,
+    });
+    const attachment = raw.attachment_ref ?? raw.attachmentRef;
+    if (!attachment) return undefined;
+    return {
+        loc_raw: String(raw.loc_raw ?? raw.locRaw ?? ''),
+        content_kind: raw.content_kind ?? raw.contentKind,
+        attachment_ref: normalizeZoteroItemReference(attachment),
+        ...(pageLocations ? { page_locations: pageLocations } : {}),
+        ...(notePosition ? { note_position: notePosition } : {}),
+        ...(raw.text !== undefined ? { text: raw.text } : {}),
+        ...(raw.page_label !== undefined || raw.pageLabel !== undefined
+            ? { page_label: raw.page_label ?? raw.pageLabel }
+            : {}),
+        ...(raw.reading_order_offset !== undefined || raw.readingOrderOffset !== undefined
+            ? { reading_order_offset: raw.reading_order_offset ?? raw.readingOrderOffset }
+            : {}),
+        ...(raw.section_href !== undefined || raw.sectionHref !== undefined
+            ? { section_href: raw.section_href ?? raw.sectionHref }
+            : {}),
+        ...(raw.section_ordinal !== undefined || raw.sectionOrdinal !== undefined
+            ? { section_ordinal: raw.section_ordinal ?? raw.sectionOrdinal }
+            : {}),
+        ...(raw.anchor_id !== undefined || raw.anchorId !== undefined
+            ? { anchor_id: raw.anchor_id ?? raw.anchorId }
+            : {}),
+    } as AnnotationRelocation;
+}
+
+function normalizePlacementSnapshot(raw: any): AnnotationPlacementSnapshot | undefined {
+    if (!raw || typeof raw !== 'object') return undefined;
+    const position = raw.position;
+    if (typeof position !== 'string') return undefined;
+    return {
+        position,
+        ...(typeof raw.text === 'string' ? { text: raw.text } : {}),
+        ...(raw.page_label !== undefined || raw.pageLabel !== undefined
+            ? { page_label: String(raw.page_label ?? raw.pageLabel ?? '') }
+            : {}),
+        ...(raw.sort_index !== undefined || raw.sortIndex !== undefined
+            ? { sort_index: String(raw.sort_index ?? raw.sortIndex ?? '') }
+            : {}),
+    };
+}
+
 /**
  * Deserializes and normalizes a raw agent action object from the backend
  * into a typed AgentAction object.
@@ -433,13 +489,13 @@ export function toAgentAction(raw: Record<string, any>): AgentAction {
                         ...(changes.add_tags !== undefined ? { add_tags: normalizeAnnotationTags(changes.add_tags) } : {}),
                         ...(changes.remove_tags !== undefined ? { remove_tags: normalizeAnnotationTags(changes.remove_tags) } : {}),
                     };
-                    const locator = group?.relocation?.locator;
+                    const relocation = normalizeRelocation(group?.relocation);
                     return {
                         annotation_refs: Array.isArray(group?.annotation_refs)
                             ? group.annotation_refs.map(normalizeZoteroItemReference)
                             : [],
                         ...(Object.keys(patch).length ? { changes: patch } : {}),
-                        ...(locator ? { relocation: { locator: String(locator) } } : {}),
+                        ...(relocation ? { relocation } : {}),
                     };
                 }),
                 skipped,
@@ -579,14 +635,29 @@ export function toAgentAction(raw: Record<string, any>): AgentAction {
         const appliedRefs = Array.isArray(resultData.applied_refs ?? resultData.appliedRefs)
             ? (resultData.applied_refs ?? resultData.appliedRefs).map(normalizeZoteroItemReference)
             : [];
-        const before = Array.isArray(resultData.before) ? resultData.before.map((snapshot: any) => ({
-            annotation_id: String(snapshot.annotation_id ?? snapshot.annotationId ?? ''),
-            ...normalizeZoteroItemReference(snapshot),
-            color: String(snapshot.color ?? ''),
-            comment: String(snapshot.comment ?? ''),
-            tags: normalizeAnnotationTags(snapshot.tags),
-            ...(typeof snapshot.deleted === 'boolean' ? { deleted: snapshot.deleted } : {}),
-        })) : [];
+        const before = Array.isArray(resultData.before) ? resultData.before.map((snapshot: any) => {
+            const movedTo = normalizePlacementSnapshot(snapshot.moved_to ?? snapshot.movedTo);
+            return {
+                annotation_id: String(snapshot.annotation_id ?? snapshot.annotationId ?? ''),
+                ...normalizeZoteroItemReference(snapshot),
+                color: String(snapshot.color ?? ''),
+                comment: String(snapshot.comment ?? ''),
+                tags: normalizeAnnotationTags(snapshot.tags),
+                ...(typeof snapshot.deleted === 'boolean' ? { deleted: snapshot.deleted } : {}),
+                ...(snapshot.annotation_type !== undefined || snapshot.annotationType !== undefined
+                    ? { annotation_type: String(snapshot.annotation_type ?? snapshot.annotationType ?? '') }
+                    : {}),
+                ...(typeof snapshot.text === 'string' ? { text: snapshot.text } : {}),
+                ...(snapshot.page_label !== undefined || snapshot.pageLabel !== undefined
+                    ? { page_label: String(snapshot.page_label ?? snapshot.pageLabel ?? '') }
+                    : {}),
+                ...(snapshot.sort_index !== undefined || snapshot.sortIndex !== undefined
+                    ? { sort_index: String(snapshot.sort_index ?? snapshot.sortIndex ?? '') }
+                    : {}),
+                ...(typeof snapshot.position === 'string' ? { position: snapshot.position } : {}),
+                ...(movedTo ? { moved_to: movedTo } : {}),
+            };
+        }) : [];
         const relocated = Array.isArray(resultData.relocated) ? resultData.relocated.map((mapping: any) => ({
             old_ref: normalizeZoteroItemReference(mapping.old_ref ?? mapping.oldRef ?? {}),
             new_ref: normalizeZoteroItemReference(mapping.new_ref ?? mapping.newRef ?? {}),

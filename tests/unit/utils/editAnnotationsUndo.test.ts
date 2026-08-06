@@ -23,8 +23,8 @@ vi.mock("../../../src/services/agentDataProvider/utils", () => ({
 }));
 
 vi.mock(
-    "../../../src/services/agentDataProvider/actions/annotationRelocation",
-    () => ({ resolveAnnotationRelocation: vi.fn() }),
+    "../../../src/services/agentDataProvider/actions/annotationPlacement",
+    () => ({ prepareRelocation: vi.fn() }),
 );
 
 import { undoEditAnnotationsAction } from "../../../react/utils/editAnnotationsActions";
@@ -32,6 +32,25 @@ import type { AgentAction } from "../../../react/agents/agentActions";
 
 const YELLOW = "#ffd400";
 const BLUE = "#2ea8e5";
+
+/** Where a move put an annotation, and where it was before. */
+const NEW_POSITION = '{"pageIndex":11,"rects":[[10,20,30,40]]}';
+const OLD_POSITION = '{"pageIndex":2,"rects":[[1,2,3,4]]}';
+
+/** Snapshot fields recording a move: both ends of it. */
+const MOVE_SNAPSHOT = {
+    annotation_type: "highlight",
+    text: "old text",
+    page_label: "3",
+    sort_index: "00002|000010|00005",
+    position: OLD_POSITION,
+    moved_to: {
+        text: "new text",
+        page_label: "12",
+        sort_index: "00011|000200|00050",
+        position: NEW_POSITION,
+    },
+};
 
 function annotation(key: string, overrides: Record<string, any> = {}) {
     let tags: Array<{ tag: string; type?: number }> = [{ tag: "old" }];
@@ -42,6 +61,10 @@ function annotation(key: string, overrides: Record<string, any> = {}) {
         deleted: false,
         annotationColor: BLUE,
         annotationComment: "new comment",
+        annotationText: "new text",
+        annotationPageLabel: "12",
+        annotationSortIndex: "00011|000200|00050",
+        annotationPosition: NEW_POSITION,
         isAnnotation: () => true,
         loadDataType: vi.fn(async (dataType: string) => {
             loaded[dataType] = true;
@@ -114,7 +137,7 @@ function editAction(
     } as unknown as AgentAction;
 }
 
-/** An applied relocation of AAA to a replacement annotation NEW. */
+/** An applied in-place move of AAA. */
 function relocateAction(): AgentAction {
     return {
         id: "action-1",
@@ -126,20 +149,14 @@ function relocateAction(): AgentAction {
             edits: [
                 {
                     annotation_refs: [{ library_id: 1, zotero_key: "AAA" }],
-                    relocation: { locator: "s12" },
+                    relocation: { loc_raw: "s12", content_kind: "pdf" },
                 },
             ],
         },
         result_data: {
             operation: "edit",
-            applied_refs: [{ library_id: 1, zotero_key: "NEW" }],
-            before: [snapshot("AAA", { deleted: false })],
-            relocated: [
-                {
-                    old_ref: { library_id: 1, zotero_key: "AAA" },
-                    new_ref: { library_id: 1, zotero_key: "NEW" },
-                },
-            ],
+            applied_refs: [{ library_id: 1, zotero_key: "AAA" }],
+            before: [snapshot("AAA", { deleted: false, ...MOVE_SNAPSHOT })],
         },
     } as unknown as AgentAction;
 }
@@ -319,49 +336,76 @@ describe("undoEditAnnotationsAction", () => {
         expect(result.fieldsReverted).toBe(1);
     });
 
-    it("restores the original and trashes the replacement on relocate undo", async () => {
-        const original = annotation("AAA", { deleted: true });
-        // A move copies the original's metadata onto the replacement.
-        const replacement = annotation("NEW", {
-            deleted: false,
+    it("puts a moved annotation back where it was", async () => {
+        const moved = annotation("AAA");
+        items.set("AAA", moved);
+
+        const result = await undoEditAnnotationsAction(relocateAction());
+
+        // The annotation was rewritten in place, so undo is a field revert —
+        // nothing is trashed and its key never changed.
+        expect(moved.deleted).toBe(false);
+        expect(moved.annotationPosition).toBe(OLD_POSITION);
+        expect(moved.annotationSortIndex).toBe(MOVE_SNAPSHOT.sort_index);
+        expect(moved.annotationText).toBe(MOVE_SNAPSHOT.text);
+        expect(moved.annotationPageLabel).toBe(MOVE_SNAPSHOT.page_label);
+        expect(result.fieldsReverted).toBe(1);
+    });
+
+    it("still undoes a relocation persisted under the recreate contract", async () => {
+        const original = annotation("OLD", {
+            deleted: true,
             annotationColor: YELLOW,
             annotationComment: "old comment",
         });
-        items.set("AAA", original);
+        const replacement = annotation("NEW");
+        items.set("OLD", original);
         items.set("NEW", replacement);
 
         const action = {
-            id: "action-1",
+            id: "legacy-move",
             run_id: "run-1",
             action_type: "edit_annotations",
             status: "applied",
             proposed_data: {
                 operation: "edit",
-                edits: [
-                    {
-                        annotation_refs: [{ library_id: 1, zotero_key: "AAA" }],
-                        relocation: { locator: "s12" },
-                    },
-                ],
+                edits: [{
+                    annotation_refs: [{ library_id: 1, zotero_key: "OLD" }],
+                    changes: { color: "blue", comment: "new comment" },
+                    relocation: { locator: "s12" },
+                }],
             },
             result_data: {
                 operation: "edit",
                 applied_refs: [{ library_id: 1, zotero_key: "NEW" }],
-                before: [snapshot("AAA", { deleted: false })],
-                relocated: [
-                    {
-                        old_ref: { library_id: 1, zotero_key: "AAA" },
-                        new_ref: { library_id: 1, zotero_key: "NEW" },
-                    },
-                ],
+                before: [snapshot("OLD", { deleted: false })],
+                relocated: [{
+                    old_ref: { library_id: 1, zotero_key: "OLD" },
+                    new_ref: { library_id: 1, zotero_key: "NEW" },
+                }],
             },
         } as unknown as AgentAction;
 
-        await undoEditAnnotationsAction(action);
+        const result = await undoEditAnnotationsAction(action);
 
         expect(original.deleted).toBe(false);
         expect(replacement.deleted).toBe(true);
-        expect(replacement.save).toHaveBeenCalledTimes(1);
+        expect(result.fieldsReverted).toBe(1);
+    });
+
+    it("skips a move already back at its original position", async () => {
+        const moved = annotation("AAA", {
+            annotationPosition: OLD_POSITION,
+            annotationSortIndex: MOVE_SNAPSHOT.sort_index,
+            annotationText: MOVE_SNAPSHOT.text,
+            annotationPageLabel: MOVE_SNAPSHOT.page_label,
+        });
+        items.set("AAA", moved);
+
+        const result = await undoEditAnnotationsAction(relocateAction());
+
+        expect(result.alreadyReverted).toContain("position");
+        expect(moved.save).not.toHaveBeenCalled();
     });
 
     it("reconciles each annotation against its own group's patch", async () => {
@@ -403,15 +447,9 @@ describe("undoEditAnnotationsAction", () => {
 
     it("undoes a batch where only one annotation moved", async () => {
         const edited = annotation("AAA");
-        const movedOriginal = annotation("BBB", { deleted: true });
-        const replacement = annotation("NEW", {
-            deleted: false,
-            annotationColor: YELLOW,
-            annotationComment: "old comment",
-        });
+        const moved = annotation("BBB");
         items.set("AAA", edited);
-        items.set("BBB", movedOriginal);
-        items.set("NEW", replacement);
+        items.set("BBB", moved);
 
         const action = {
             id: "action-1",
@@ -427,7 +465,7 @@ describe("undoEditAnnotationsAction", () => {
                     },
                     {
                         annotation_refs: [{ library_id: 1, zotero_key: "BBB" }],
-                        relocation: { locator: "s12" },
+                        relocation: { loc_raw: "s12", content_kind: "pdf" },
                     },
                 ],
             },
@@ -435,62 +473,49 @@ describe("undoEditAnnotationsAction", () => {
                 operation: "edit",
                 applied_refs: [
                     { library_id: 1, zotero_key: "AAA" },
-                    { library_id: 1, zotero_key: "NEW" },
+                    { library_id: 1, zotero_key: "BBB" },
                 ],
-                before: [snapshot("AAA"), snapshot("BBB", { deleted: false })],
-                relocated: [
-                    {
-                        old_ref: { library_id: 1, zotero_key: "BBB" },
-                        new_ref: { library_id: 1, zotero_key: "NEW" },
-                    },
+                before: [
+                    snapshot("AAA"),
+                    snapshot("BBB", { deleted: false, ...MOVE_SNAPSHOT }),
                 ],
             },
         } as unknown as AgentAction;
 
         await undoEditAnnotationsAction(action);
 
-        // The edited annotation reverts field-by-field; the moved one comes
-        // back out of the trash and its replacement goes in.
+        // Each annotation reverts only what its own group changed: the first
+        // its color, the second its position.
         expect(edited.annotationColor).toBe(YELLOW);
-        expect(movedOriginal.deleted).toBe(false);
-        expect(replacement.deleted).toBe(true);
+        expect(edited.annotationPosition).toBe(NEW_POSITION);
+        expect(moved.annotationPosition).toBe(OLD_POSITION);
     });
 
-    it("does not discard edits made to a replacement after a move", async () => {
-        const original = annotation("AAA", { deleted: true });
-        // The user recoloured the moved annotation afterwards.
-        const replacement = annotation("NEW", {
-            deleted: false,
-            annotationColor: "#5fb236",
-            annotationComment: "old comment",
+    it("does not discard a move the user made themselves", async () => {
+        // The user dragged the annotation somewhere else after Beaver moved it.
+        const moved = annotation("AAA", {
+            annotationPosition: '{"pageIndex":30,"rects":[[9,9,9,9]]}',
         });
-        items.set("AAA", original);
-        items.set("NEW", replacement);
+        items.set("AAA", moved);
 
         const result = await undoEditAnnotationsAction(relocateAction());
 
-        // All-or-nothing: restoring the original while leaving an edited
-        // replacement in place would duplicate the annotation.
-        expect(original.deleted).toBe(true);
-        expect(replacement.deleted).toBe(false);
-        expect(result.manuallyModified).toEqual(["color"]);
+        expect(moved.annotationPosition).toBe(
+            '{"pageIndex":30,"rects":[[9,9,9,9]]}',
+        );
+        expect(result.manuallyModified).toEqual(["position"]);
         expect(result.needsConfirmation).toBe(true);
     });
 
-    it("completes a moved-annotation undo once the user confirms", async () => {
-        const original = annotation("AAA", { deleted: true });
-        const replacement = annotation("NEW", {
-            deleted: false,
-            annotationColor: "#5fb236",
-            annotationComment: "old comment",
+    it("overwrites the user's own move once they confirm", async () => {
+        const moved = annotation("AAA", {
+            annotationPosition: '{"pageIndex":30,"rects":[[9,9,9,9]]}',
         });
-        items.set("AAA", original);
-        items.set("NEW", replacement);
+        items.set("AAA", moved);
 
         await undoEditAnnotationsAction(relocateAction(), true);
 
-        expect(original.deleted).toBe(false);
-        expect(replacement.deleted).toBe(true);
+        expect(moved.annotationPosition).toBe(OLD_POSITION);
     });
 
     it("refuses to write to a library excluded since the action was applied", async () => {

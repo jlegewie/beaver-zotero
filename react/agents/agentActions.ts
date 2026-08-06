@@ -96,8 +96,8 @@ export const validateAppliedAgentAction = async (action: AgentAction): Promise<A
         const updated = action.result_data?.applied_refs ?? [];
         // A delete keeps its applied_refs pointing at the (soft-deleted)
         // originals, so the applied state is "still in the trash". An edit's
-        // applied_refs are live annotations, including the replacements
-        // created for anything that moved.
+        // applied_refs are live annotations — a move rewrites them in place,
+        // so identity is stable there too.
         const mustBeTrashed = action.result_data?.operation === 'delete';
         let unverifiable = false;
         for (const ref of updated) {

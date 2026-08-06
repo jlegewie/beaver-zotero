@@ -556,20 +556,39 @@ describe('toAgentAction edit_annotations normalized contract', () => {
         expect(action.result_data?.operation).toBe('delete');
     });
 
-    it('preserves relocation locators and old-to-new mappings', () => {
+    it('preserves resolved relocation payloads, placement snapshots, and legacy mappings', () => {
         const action = toAgentAction({
             id: 'edit-annotations-3', run_id: 'run-1', action_type: 'edit_annotations', status: 'applied',
             proposed_data: {
                 operation: 'edit',
                 edits: [{
                     annotation_refs: [{ library_id: 1, zotero_key: 'AAAAAAA1', library_ref: 'u' }],
-                    relocation: { locator: 'heading3' },
+                    relocation: {
+                        loc_raw: 'heading3',
+                        content_kind: 'pdf',
+                        attachment_ref: { library_id: 1, zotero_key: 'ATTACH01', library_ref: 'u' },
+                        page_locations: [{
+                            page_idx: 3,
+                            boxes: [{ l: 1, t: 2, r: 3, b: 4, coord_origin: 't' }],
+                            page_label: 'iv',
+                        }],
+                        text: 'Moved text',
+                    },
                 }],
             },
             result_data: {
                 operation: 'edit',
                 applied_refs: [{ library_id: 1, zotero_key: 'BBBBBBB2', library_ref: 'u' }],
-                before: [],
+                before: [{
+                    annotation_id: 'u-AAAAAAA1', library_id: 1, zotero_key: 'AAAAAAA1', library_ref: 'u',
+                    color: '#ffd400', comment: 'old', tags: [], annotation_type: 'highlight',
+                    text: 'Old text', page_label: 'iii', sort_index: '00002|000001|00002',
+                    position: '{"pageIndex":2}',
+                    moved_to: {
+                        text: 'Moved text', page_label: 'iv', sort_index: '00003|000002|00003',
+                        position: '{"pageIndex":3}',
+                    },
+                }],
                 relocated: [{
                     old_ref: { library_id: 1, zotero_key: 'AAAAAAA1', library_ref: 'u' },
                     new_ref: { library_id: 1, zotero_key: 'BBBBBBB2', library_ref: 'u' },
@@ -577,7 +596,25 @@ describe('toAgentAction edit_annotations normalized contract', () => {
             },
         });
 
-        expect((action.proposed_data as any).edits[0].relocation).toEqual({ locator: 'heading3' });
+        expect((action.proposed_data as any).edits[0].relocation).toMatchObject({
+            loc_raw: 'heading3',
+            content_kind: 'pdf',
+            attachment_ref: { library_id: 1, zotero_key: 'ATTACH01', library_ref: 'u' },
+            text: 'Moved text',
+        });
+        expect(action.result_data?.before[0]).toMatchObject({
+            annotation_type: 'highlight',
+            text: 'Old text',
+            page_label: 'iii',
+            sort_index: '00002|000001|00002',
+            position: '{"pageIndex":2}',
+            moved_to: {
+                text: 'Moved text',
+                page_label: 'iv',
+                sort_index: '00003|000002|00003',
+                position: '{"pageIndex":3}',
+            },
+        });
         expect(action.result_data?.relocated).toEqual([{
             old_ref: { library_id: 1, zotero_key: 'AAAAAAA1', library_ref: 'u' },
             new_ref: { library_id: 1, zotero_key: 'BBBBBBB2', library_ref: 'u' },

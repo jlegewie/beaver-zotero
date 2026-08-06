@@ -23,7 +23,11 @@ export const DEFAULT_DEFERRED_TOOL_GROUPS: Record<string, string> = {
     create_highlight_annotations: 'annotations',
     create_note_annotations: 'annotations',
     edit_annotations: 'annotations',
-    delete_annotations: 'annotations',
+    // Deletion is its own group so approving annotation edits never carries
+    // deletions with it. It has no Preferences row on purpose: with nothing to
+    // persist a preference against it always resolves to `always_ask`, so the
+    // only way to relax it is the per-run grant, which dies with the run.
+    delete_annotations: 'annotation_deletion',
     create_item: 'create_items',
     create_items: 'create_items',
 };
@@ -52,11 +56,32 @@ export const TOOL_GROUP_RUN_LABELS: Record<string, string> = {
     library_modifications: 'item organization and collection creation',
     library_structure: 'library-wide tag and collection changes',
     annotations: 'annotation creation and editing',
+    annotation_deletion: 'annotation deletion',
     create_items: 'item creation',
 };
 
 export function getToolGroup(toolName: string): string | null {
     return RUN_APPROVAL_TOOL_GROUPS[toolName] ?? null;
+}
+
+/**
+ * Resolve the authorization group for an action record.
+ *
+ * edit_annotations is a shared wire action type: the delete_annotations tool
+ * emits it with operation=delete. Authorization must therefore use the
+ * payload as well as the action type or deletion cards are mistaken for edits.
+ */
+export function getActionToolGroup(
+    actionType: string,
+    actionData?: Record<string, any>,
+): string | null {
+    if (
+        actionType === 'edit_annotations' &&
+        actionData?.operation === 'delete'
+    ) {
+        return getToolGroup('delete_annotations');
+    }
+    return getToolGroup(actionType);
 }
 
 export function getToolGroupRunApprovalLabel(toolName: string): string | null {
@@ -72,14 +97,18 @@ export function getToolGroupRunApprovalScope(toolName: string): string | null {
 }
 
 export function getPendingApprovalIdsForToolGroup(
-    approvals: Iterable<{ actionId: string; actionType: string }>,
+    approvals: Iterable<{
+        actionId: string;
+        actionType: string;
+        actionData?: Record<string, any>;
+    }>,
     toolName: string,
 ): string[] {
     const group = getToolGroup(toolName);
     if (!group) return [];
     const ids: string[] = [];
     for (const approval of approvals) {
-        if (getToolGroup(approval.actionType) === group) {
+        if (getActionToolGroup(approval.actionType, approval.actionData) === group) {
             ids.push(approval.actionId);
         }
     }
@@ -193,7 +222,8 @@ export function isActionApprovedForRun(
     actionData?: Record<string, any>,
 ): boolean {
     if (policy.runId !== runId) return false;
-    if (isToolGroupApprovedForRun(policy, runId, toolName)) return true;
+    const group = getActionToolGroup(toolName, actionData);
+    if (group !== null && policy.approvedGroups.has(group)) return true;
     if (toolName !== 'edit_note' && toolName !== 'edit_note_batch') return false;
     const target = getNoteEditTarget(actionData);
     return target !== null && policy.approvedResources.has(

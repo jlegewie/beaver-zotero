@@ -2,10 +2,15 @@ import type { AgentAction } from "../agents/agentActions";
 import type { WSAgentActionExecuteRequest } from "@beaver/agent-core/protocol/agentProtocol";
 import type {
     AnnotationBeforeSnapshot,
+    AnnotationPlacementSnapshot,
     EditAnnotationsPatch,
     EditAnnotationsProposedData,
     EditAnnotationsResultData,
 } from "@beaver/agent-core/types/agentActions/editAnnotations";
+import {
+    applyAnnotationPlacement,
+    type AnnotationPlacement,
+} from "../../src/services/annotations/createAnnotation";
 import {
     executeEditAnnotationsAction as executeHandler,
     loadAnnotationEditData,
@@ -56,6 +61,8 @@ type CurrentState = {
     // Normalized to setTags()'s input shape so the rollback path can write it back.
     tags: Array<{ tag: string; type: number }>;
     deleted: boolean;
+    /** Present only when the action moved this annotation. */
+    placement?: AnnotationPlacement;
 };
 
 type ResolvedAnnotation = {
@@ -63,6 +70,53 @@ type ResolvedAnnotation = {
     snapshot: AnnotationBeforeSnapshot;
     current: CurrentState;
 };
+
+function toPlacement(
+    recorded: Partial<AnnotationPlacementSnapshot> | undefined,
+): AnnotationPlacement | null {
+    if (!recorded?.position) return null;
+    return {
+        ...(recorded.text !== undefined ? { text: recorded.text } : {}),
+        pageLabel: recorded.page_label ?? "",
+        sortIndex: recorded.sort_index ?? "",
+        position: recorded.position,
+    };
+}
+
+/**
+ * Where the annotation sat before the action moved it, if it moved one.
+ * `position` is written only by a move, so its presence is what marks a
+ * snapshot as carrying somewhere to go back to.
+ */
+function snapshotPlacement(
+    snapshot: AnnotationBeforeSnapshot,
+): AnnotationPlacement | null {
+    return toPlacement(snapshot);
+}
+
+/** Where an annotation sits right now, for comparison against a snapshot. */
+function currentPlacement(item: Zotero.Item, isHighlight: boolean): AnnotationPlacement {
+    const { annotationSortIndex } = item as unknown as ZoteroAnnotationItem;
+    return {
+        ...(isHighlight ? { text: item.annotationText ?? "" } : {}),
+        pageLabel: item.annotationPageLabel ?? "",
+        sortIndex: annotationSortIndex ?? "",
+        position: item.annotationPosition ?? "",
+    };
+}
+
+function placementsEqual(
+    a: AnnotationPlacement | null | undefined,
+    b: AnnotationPlacement | null | undefined,
+): boolean {
+    if (!a || !b) return a === b;
+    return (
+        a.position === b.position &&
+        a.sortIndex === b.sortIndex &&
+        normalizeText(a.pageLabel) === normalizeText(b.pageLabel) &&
+        normalizeText(a.text) === normalizeText(b.text)
+    );
+}
 
 /** Zotero normalizes annotation strings on write (trim + NFC, empty -> null). */
 function normalizeText(value: unknown): string {
@@ -183,15 +237,6 @@ function patchesByAnnotation(
     return patches;
 }
 
-/**
- * Fields the user changed on a relocated annotation's replacement since the
- * move.
- *
- * The move copied the original's metadata (patched, where the same edit also
- * changed fields) onto the replacement. Anything that no longer matches is the
- * user's own later work — trashing the replacement would discard it, so undo
- * must ask first, exactly as it does for an in-place edit.
- */
 function replacementDrift(
     current: CurrentState,
     snapshot: AnnotationBeforeSnapshot,
@@ -253,11 +298,14 @@ function reconcileText(
 /**
  * Restore the pre-edit state of an applied edit_annotations action.
  *
- * Field edits are reconciled three ways per field: a field still holding the
- * applied value is reverted, a field already back at its original value is
- * skipped, and a field the user has since changed by hand is preserved unless
- * `forceRevert` is set. Deletions and moves only put items in and out of the
- * trash, so they are simply reapplied idempotently.
+ * Every field is reconciled three ways: one still holding the applied value is
+ * reverted, one already back at its original value is skipped, and one the
+ * user has since changed by hand is preserved unless `forceRevert` is set.
+ * Position is reconciled the same way as color, comment, and tags — a move
+ * rewrites the annotation in place, so putting it back is just another field
+ * revert, and a user who has since dragged it somewhere else is not overruled.
+ * Deletions only move items in and out of the trash and are reapplied
+ * idempotently.
  *
  * @param action The applied action to undo
  * @param forceRevert Overwrite fields the user changed after the edit
@@ -277,9 +325,7 @@ export async function undoEditAnnotationsAction(
         | EditAnnotationsProposedData
         | undefined;
     const patches = patchesByAnnotation(proposed);
-    // Only the annotations that were moved changed identity; the rest were
-    // edited in place and reconcile field by field.
-    const relocatedOldIds = new Set(
+    const legacyRelocatedIds = new Set(
         (result?.relocated ?? []).map((mapping) =>
             annotationKey(mapping.old_ref),
         ),
@@ -308,35 +354,41 @@ export async function undoEditAnnotationsAction(
                     .getTags()
                     .map((tag) => ({ tag: tag.tag, type: tag.type ?? 0 })),
                 deleted: found.item.deleted,
+                ...(snapshot.position
+                    ? {
+                          placement: currentPlacement(
+                              found.item,
+                              snapshot.annotation_type === "highlight",
+                          ),
+                      }
+                    : {}),
             },
         });
     }
 
-    // Keyed by the OLD annotation id so each snapshot finds its replacement
-    // even when only part of the batch moved.
-    const replacements = new Map<
+    const legacyReplacements = new Map<
         string,
         { item: Zotero.Item; deleted: boolean; current: CurrentState }
     >();
     for (const mapping of result?.relocated ?? []) {
         assertAnnotationLibraryNotExcluded(mapping.new_ref);
-        const replacement = await resolveItemReference(mapping.new_ref);
-        if (replacement.status !== "found" || !replacement.item.isAnnotation()) {
+        const found = await resolveItemReference(mapping.new_ref);
+        if (found.status !== "found" || !found.item.isAnnotation()) {
             throw new Error(
                 `Replacement annotation ${mapping.new_ref.zotero_key} is no longer available`,
             );
         }
-        await loadAnnotationEditData(replacement.item);
-        replacements.set(annotationKey(mapping.old_ref), {
-            item: replacement.item,
-            deleted: replacement.item.deleted,
+        await loadAnnotationEditData(found.item);
+        legacyReplacements.set(annotationKey(mapping.old_ref), {
+            item: found.item,
+            deleted: found.item.deleted,
             current: {
-                color: replacement.item.annotationColor,
-                comment: replacement.item.annotationComment,
-                tags: replacement.item
+                color: found.item.annotationColor,
+                comment: found.item.annotationComment,
+                tags: found.item
                     .getTags()
                     .map((tag) => ({ tag: tag.tag, type: tag.type ?? 0 })),
-                deleted: replacement.item.deleted,
+                deleted: found.item.deleted,
             },
         });
     }
@@ -349,24 +401,24 @@ export async function undoEditAnnotationsAction(
         await Zotero.DB.executeTransaction(async () => {
             for (let index = 0; index < resolved.length; index++) {
                 const { item, snapshot, current } = resolved[index];
-                const wasRelocated = relocatedOldIds.has(snapshot.annotation_id);
                 const applied = appliedValues(
                     patches.get(snapshot.annotation_id),
                     snapshot,
                 );
-                const replacement = replacements.get(snapshot.annotation_id);
+                const legacyRelocation = legacyRelocatedIds.has(
+                    snapshot.annotation_id,
+                );
+                const replacement = legacyReplacements.get(
+                    snapshot.annotation_id,
+                );
 
-                if (wasRelocated && replacement && !replacement.deleted) {
+                if (legacyRelocation && replacement && !replacement.deleted) {
                     const drifted = replacementDrift(
                         replacement.current,
                         snapshot,
                         applied,
                     );
                     if (drifted.length && !forceRevert) {
-                        // Undoing a move is all-or-nothing: restoring the
-                        // original while leaving the edited replacement in
-                        // place would duplicate the annotation. Leave the pair
-                        // untouched and let the caller confirm.
                         drifted.forEach((field) => manuallyModified.add(field));
                         continue;
                     }
@@ -374,7 +426,7 @@ export async function undoEditAnnotationsAction(
 
                 let dirty = false;
 
-                if (operation === "edit" && !wasRelocated) {
+                if (operation === "edit" && !legacyRelocation) {
                     // Only fields the action actually wrote are reconciled;
                     // everything else on the annotation is left alone.
                     const revert = (apply: () => void) => {
@@ -423,8 +475,28 @@ export async function undoEditAnnotationsAction(
                             revert(() => item.setTags(snapshot.tags));
                         else record("tags", outcome);
                     }
+                    // A move is reverted like any other field: the snapshot
+                    // holds where the annotation was, and the placement the
+                    // action wrote is still on the item unless the user has
+                    // since moved it themselves.
+                    const original = snapshotPlacement(snapshot);
+                    if (original && current.placement) {
+                        const outcome = reconcile(
+                            placementsEqual(current.placement, original),
+                            placementsEqual(
+                                current.placement,
+                                toPlacement(snapshot.moved_to),
+                            ),
+                            forceRevert,
+                        );
+                        if (outcome === "revert")
+                            revert(() =>
+                                applyAnnotationPlacement(item, original),
+                            );
+                        else record("position", outcome);
+                    }
                 } else {
-                    // A deletion or a move only trashed the original.
+                    // A deletion only trashed the annotation.
                     const target = snapshot.deleted ?? false;
                     if (current.deleted === target) {
                         alreadyReverted.add("deleted");
@@ -436,7 +508,6 @@ export async function undoEditAnnotationsAction(
                 }
 
                 if (dirty) await saveItem(item);
-
                 if (replacement && !replacement.deleted) {
                     replacement.item.deleted = true;
                     await saveItem(replacement.item);
@@ -449,8 +520,10 @@ export async function undoEditAnnotationsAction(
             item.annotationComment = current.comment;
             item.setTags(current.tags);
             item.deleted = current.deleted;
+            if (current.placement)
+                applyAnnotationPlacement(item, current.placement);
         }
-        for (const replacement of replacements.values()) {
+        for (const replacement of legacyReplacements.values()) {
             replacement.item.annotationColor = replacement.current.color;
             replacement.item.annotationComment = replacement.current.comment;
             replacement.item.setTags(replacement.current.tags);

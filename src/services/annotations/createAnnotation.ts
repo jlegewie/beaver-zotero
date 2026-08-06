@@ -365,6 +365,107 @@ export function highlightPartComment(
 }
 
 /**
+ * Where an annotation sits in its document: everything Zotero needs to place
+ * it, and nothing about what it says.
+ */
+export interface AnnotationPlacement {
+    /** Zotero rejects `annotationText` on anything but a highlight/underline. */
+    text?: string;
+    pageLabel: string;
+    sortIndex: string;
+    /** Serialized `annotationPosition`. */
+    position: string;
+}
+
+/**
+ * Write a placement onto an annotation item.
+ *
+ * The caller owns the transaction and the save. `annotationDeferred` must be
+ * loaded on an existing item before this runs, since `annotationPosition`
+ * lives in that data type.
+ */
+export function applyAnnotationPlacement(
+    item: Zotero.Item,
+    placement: AnnotationPlacement,
+): void {
+    if (placement.text !== undefined) item.annotationText = placement.text;
+    item.annotationPageLabel = placement.pageLabel;
+    const sortIndexField: Pick<ZoteroAnnotationItem, "annotationSortIndex"> = {
+        annotationSortIndex: placement.sortIndex,
+    };
+    Object.assign(item, sortIndexField);
+    item.annotationPosition = placement.position;
+}
+
+/** Placement of a PDF highlight over the given boxes. */
+export function buildHighlightPlacement(
+    input: Pick<
+        CreateHighlightInput,
+        "pageIndex" | "boxes" | "text" | "pageLabel" | "readingOrderOffset"
+    >,
+    geometry: PageGeometry,
+): AnnotationPlacement {
+    const rects = convertHighlightBoxesToRects(input.boxes, geometry);
+    if (rects.length === 0) {
+        throw new Error("Highlight annotation produced no rects");
+    }
+    return {
+        text: input.text ?? "",
+        pageLabel: resolvedAnnotationPageLabel(input.pageIndex, input.pageLabel),
+        sortIndex: buildSortIndex({
+            pageIndex: input.pageIndex,
+            viewBox: geometry.viewBox,
+            rect: rects[0],
+            readingOrderOffset: input.readingOrderOffset,
+        }),
+        position: JSON.stringify({ pageIndex: input.pageIndex, rects }),
+    };
+}
+
+/** Placement of a PDF note icon in the margin beside its anchor. */
+export function buildNotePlacement(
+    input: Pick<
+        CreateNoteInput,
+        "notePosition" | "pageLabel" | "readingOrderOffset"
+    >,
+    geometry: PageGeometry,
+): AnnotationPlacement {
+    const pageIndex = input.notePosition.page_index;
+    const rect = computeNoteRect(input.notePosition, geometry);
+    return {
+        pageLabel:
+            firstNonBlankPageLabel(input.pageLabel) ?? String(pageIndex + 1),
+        sortIndex: buildSortIndex({
+            pageIndex,
+            viewBox: geometry.viewBox,
+            rect,
+            readingOrderOffset: input.readingOrderOffset,
+        }),
+        position: JSON.stringify({ pageIndex, rects: [rect] }),
+    };
+}
+
+/**
+ * Placement of an EPUB or snapshot annotation.
+ *
+ * Both resolvers already return a persistable `position` (an epubcfi or a CSS
+ * selector) and `sortIndex`, so this only picks the page label and decides
+ * whether the resolved text is carried as `annotationText`.
+ */
+export function buildDomPlacement(
+    resolved: { position: unknown; sortIndex: string; text: string },
+    options: { isHighlight: boolean; pageLabel?: string | null },
+): AnnotationPlacement {
+    return {
+        ...(options.isHighlight ? { text: resolved.text } : {}),
+        // Snapshots have no printed pages; the reader stores an empty label.
+        pageLabel: firstNonBlankPageLabel(options.pageLabel) ?? "",
+        sortIndex: resolved.sortIndex,
+        position: JSON.stringify(resolved.position),
+    };
+}
+
+/**
  * Create a headless Zotero PDF highlight annotation from cached geometry.
  */
 export async function createHighlightAnnotation(
@@ -382,33 +483,14 @@ export async function createHighlightAnnotation(
     const geometry =
         preparedGeometry ??
         (await getPageGeometryForAttachment(attachment, input.pageIndex));
-    const rects = convertHighlightBoxesToRects(input.boxes, geometry);
-    if (rects.length === 0) {
-        throw new Error("Highlight annotation produced no rects");
-    }
 
-    const sortIndex = buildSortIndex({
-        pageIndex: input.pageIndex,
-        viewBox: geometry.viewBox,
-        rect: rects[0],
-        readingOrderOffset: input.readingOrderOffset,
-    });
     const item = new Zotero.Item("annotation");
     item.libraryID = attachment.libraryID;
     item.parentID = attachment.id;
     item.annotationType = "highlight";
-    item.annotationText = input.text ?? "";
     item.annotationComment = input.comment ?? "";
     item.annotationColor = resolveBeaverAnnotationColor(input.color);
-    item.annotationPageLabel = resolvedAnnotationPageLabel(input.pageIndex, input.pageLabel);
-    const sortIndexField: Pick<ZoteroAnnotationItem, "annotationSortIndex"> = {
-        annotationSortIndex: sortIndex,
-    };
-    Object.assign(item, sortIndexField);
-    item.annotationPosition = JSON.stringify({
-        pageIndex: input.pageIndex,
-        rects,
-    });
+    applyAnnotationPlacement(item, buildHighlightPlacement(input, geometry));
     item.annotationAuthorName = BEAVER_ANNOTATION_AUTHOR;
     // addTag calls setTags internally, so tags persist in the same write.
     if (input.tags?.length) {
@@ -433,17 +515,12 @@ export async function createNoteAnnotation(
         throw new Error("createNoteAnnotation: attachment is not a PDF");
     }
 
-    const pageIndex = input.notePosition.page_index;
     const geometry =
         preparedGeometry ??
-        (await getPageGeometryForAttachment(attachment, pageIndex));
-    const rect = computeNoteRect(input.notePosition, geometry);
-    const sortIndex = buildSortIndex({
-        pageIndex,
-        viewBox: geometry.viewBox,
-        rect,
-        readingOrderOffset: input.readingOrderOffset,
-    });
+        (await getPageGeometryForAttachment(
+            attachment,
+            input.notePosition.page_index,
+        ));
 
     const item = new Zotero.Item("annotation");
     item.libraryID = attachment.libraryID;
@@ -451,13 +528,7 @@ export async function createNoteAnnotation(
     item.annotationType = "note";
     item.annotationComment = input.comment;
     item.annotationColor = resolveBeaverAnnotationColor(input.color);
-    item.annotationPageLabel =
-        firstNonBlankPageLabel(input.pageLabel) ?? String(pageIndex + 1);
-    const sortIndexField: Pick<ZoteroAnnotationItem, "annotationSortIndex"> = {
-        annotationSortIndex: sortIndex,
-    };
-    Object.assign(item, sortIndexField);
-    item.annotationPosition = JSON.stringify({ pageIndex, rects: [rect] });
+    applyAnnotationPlacement(item, buildNotePlacement(input, geometry));
     item.annotationAuthorName = BEAVER_ANNOTATION_AUTHOR;
     // addTag calls setTags internally, so tags persist in the same write.
     if (input.tags?.length) {
@@ -582,15 +653,15 @@ export async function createEpubHighlightAnnotation(
     item.libraryID = attachment.libraryID;
     item.parentID = attachment.id;
     item.annotationType = "highlight";
-    item.annotationText = resolved.text;
     item.annotationComment = input.comment ?? "";
     item.annotationColor = resolveBeaverAnnotationColor(input.color);
-    item.annotationPageLabel = firstNonBlankPageLabel(input.pageLabel) ?? "";
-    const sortIndexField: Pick<ZoteroAnnotationItem, "annotationSortIndex"> = {
-        annotationSortIndex: resolved.sortIndex,
-    };
-    Object.assign(item, sortIndexField);
-    item.annotationPosition = JSON.stringify(resolved.position);
+    applyAnnotationPlacement(
+        item,
+        buildDomPlacement(resolved, {
+            isHighlight: true,
+            pageLabel: input.pageLabel,
+        }),
+    );
     item.annotationAuthorName = BEAVER_ANNOTATION_AUTHOR;
     if (input.tags?.length) {
         for (const tag of input.tags) item.addTag(tag);
@@ -627,12 +698,13 @@ export async function createEpubNoteAnnotation(
     item.annotationType = "note";
     item.annotationComment = input.comment;
     item.annotationColor = resolveBeaverAnnotationColor(input.color);
-    item.annotationPageLabel = firstNonBlankPageLabel(input.pageLabel) ?? "";
-    const sortIndexField: Pick<ZoteroAnnotationItem, "annotationSortIndex"> = {
-        annotationSortIndex: resolved.sortIndex,
-    };
-    Object.assign(item, sortIndexField);
-    item.annotationPosition = JSON.stringify(resolved.position);
+    applyAnnotationPlacement(
+        item,
+        buildDomPlacement(resolved, {
+            isHighlight: false,
+            pageLabel: input.pageLabel,
+        }),
+    );
     item.annotationAuthorName = BEAVER_ANNOTATION_AUTHOR;
     if (input.tags?.length) {
         for (const tag of input.tags) item.addTag(tag);
@@ -737,6 +809,23 @@ export async function prepareSnapshotAnnotationDocument(
 }
 
 /**
+ * Resolve a snapshot locator to its persistable position ahead of time.
+ *
+ * The snapshot counterpart of {@link prepareEpubAnnotationTarget}: callers that
+ * need the placement without creating an item (annotation relocation) use this
+ * so the read + parse stays outside their transaction. Throws
+ * SnapshotAnnotationError when the file is unavailable or the locator cannot
+ * be resolved.
+ */
+export async function prepareSnapshotAnnotationTarget(
+    attachment: Zotero.Item,
+    locator: SnapshotAnnotationLocator,
+    preparedDoc?: Document,
+): Promise<ResolvedSnapshotAnnotation> {
+    return resolveSnapshotAnnotationOrThrow(attachment, locator, preparedDoc);
+}
+
+/**
  * Create a headless Zotero snapshot highlight annotation. The CSS-selector
  * `position` and `sortIndex` are computed from the snapshot's own HTML (no open
  * reader); the reader renders the saved item via the notifier if the page is open.
@@ -755,16 +844,12 @@ export async function createSnapshotHighlightAnnotation(
     item.libraryID = attachment.libraryID;
     item.parentID = attachment.id;
     item.annotationType = "highlight";
-    item.annotationText = resolved.text;
     item.annotationComment = input.comment ?? "";
     item.annotationColor = resolveBeaverAnnotationColor(input.color);
-    // Snapshots have no printed pages; the reader stores an empty page label.
-    item.annotationPageLabel = "";
-    const highlightSortIndex: Pick<ZoteroAnnotationItem, "annotationSortIndex"> = {
-        annotationSortIndex: resolved.sortIndex,
-    };
-    Object.assign(item, highlightSortIndex);
-    item.annotationPosition = JSON.stringify(resolved.position);
+    applyAnnotationPlacement(
+        item,
+        buildDomPlacement(resolved, { isHighlight: true }),
+    );
     item.annotationAuthorName = BEAVER_ANNOTATION_AUTHOR;
     if (input.tags?.length) {
         for (const tag of input.tags) item.addTag(tag);
@@ -798,12 +883,10 @@ export async function createSnapshotNoteAnnotation(
     item.annotationType = "note";
     item.annotationComment = input.comment;
     item.annotationColor = resolveBeaverAnnotationColor(input.color);
-    item.annotationPageLabel = "";
-    const noteSortIndex: Pick<ZoteroAnnotationItem, "annotationSortIndex"> = {
-        annotationSortIndex: resolved.sortIndex,
-    };
-    Object.assign(item, noteSortIndex);
-    item.annotationPosition = JSON.stringify(resolved.position);
+    applyAnnotationPlacement(
+        item,
+        buildDomPlacement(resolved, { isHighlight: false }),
+    );
     item.annotationAuthorName = BEAVER_ANNOTATION_AUTHOR;
     if (input.tags?.length) {
         for (const tag of input.tags) item.addTag(tag);
