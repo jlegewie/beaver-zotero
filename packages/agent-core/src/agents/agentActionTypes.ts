@@ -25,6 +25,7 @@ import type {
 import { normalizeAnnotationTags } from '../types/agentActions/createAnnotations';
 import type {
     AnnotationPlacementSnapshot,
+    AnnotationPreviewSnapshot,
     AnnotationRelocation,
     EditAnnotationsProposedData,
     EditAnnotationsResultData,
@@ -269,6 +270,23 @@ function normalizeZoteroItemReference(raw: any): ZoteroItemReference {
     };
 }
 
+/** Pre-change display state of the annotations an edit_annotations action targets. */
+function normalizeAnnotationPreviews(raw: any): AnnotationPreviewSnapshot[] {
+    if (!Array.isArray(raw)) return [];
+    return raw.map((row: any) => ({
+        ...normalizeZoteroItemReference(row ?? {}),
+        annotation_id: String(row?.annotation_id ?? row?.annotationId ?? ''),
+        ...(typeof row?.annotation_type === 'string' && row.annotation_type
+            ? { annotation_type: row.annotation_type }
+            : {}),
+        color: typeof row?.color === 'string' ? row.color : '',
+        comment: typeof row?.comment === 'string' ? row.comment : '',
+        tags: normalizeAnnotationTags(row?.tags) ?? [],
+        ...(typeof row?.page_label === 'string' ? { page_label: row.page_label } : {}),
+        ...(typeof row?.text === 'string' ? { text: row.text } : {}),
+    }));
+}
+
 function normalizeCreateAnnotationBaseItem(item: any) {
     return {
         index: typeof item?.index === 'number' ? item.index : Number(item?.index ?? 0),
@@ -470,13 +488,24 @@ export function toAgentAction(raw: Record<string, any>): AgentAction {
                 reason: String(row?.reason ?? ''),
             }))
             : [];
+        // The card renders its annotations from these, and they are the only
+        // copy left once the action resolves and its result data is cleared.
+        // This normalizer rebuilds proposed_data field by field, so anything
+        // not carried here is dropped before the card ever sees it.
+        const previews = normalizeAnnotationPreviews(
+            proposedData.annotation_previews ?? proposedData.annotationPreviews,
+        );
+        const carried = {
+            skipped,
+            ...(previews.length ? { annotation_previews: previews } : {}),
+        };
         if (proposedData.operation === 'delete') {
             proposedData = {
                 operation: 'delete',
                 annotation_refs: Array.isArray(proposedData.annotation_refs ?? proposedData.annotationRefs)
                     ? (proposedData.annotation_refs ?? proposedData.annotationRefs).map(normalizeZoteroItemReference)
                     : [],
-                skipped,
+                ...carried,
             } as EditAnnotationsProposedData;
         } else {
             proposedData = {
@@ -498,7 +527,7 @@ export function toAgentAction(raw: Record<string, any>): AgentAction {
                         ...(relocation ? { relocation } : {}),
                     };
                 }),
-                skipped,
+                ...carried,
             } as EditAnnotationsProposedData;
         }
     } else if (actionType === 'zotero_note') {

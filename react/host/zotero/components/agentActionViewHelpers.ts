@@ -149,13 +149,21 @@ export function getOverallStatus(actions: AgentAction[]): ActionStatus {
 
 /**
  * Annotations targeted by an edit_annotations action. A delete carries a flat
- * ref list; an edit carries them inside its per-group `edits` entries.
+ * list; an edit carries them inside its per-group `edits` entries.
+ *
+ * Both shapes are counted: an approved action carries resolved
+ * `annotation_refs`, while streaming tool arguments still hold the model's
+ * `annotation_ids`.
  */
+function countAnnotationTargets(value: any): number {
+    return value?.annotation_refs?.length ?? value?.annotation_ids?.length ?? 0;
+}
+
 function countEditAnnotationTargets(actionData?: Record<string, any>): number {
-    if (actionData?.operation === 'delete')
-        return actionData?.annotation_refs?.length ?? 0;
+    const flat = countAnnotationTargets(actionData);
+    if (flat) return flat;
     return (actionData?.edits ?? []).reduce(
-        (sum: number, group: any) => sum + (group?.annotation_refs?.length ?? 0),
+        (sum: number, group: any) => sum + countAnnotationTargets(group),
         0,
     );
 }
@@ -189,13 +197,17 @@ export function getActionLabel(
                 ? `${count} Sticky Notes`
                 : 'Sticky Note';
         }
-        // Both annotation-mutation tools share one action type, so the
-        // operation (not the tool name) decides the wording. The label carries
-        // the whole headline here — these actions have no separate title.
+        // Both annotation-mutation tools share one action type. The tool name is
+        // what settles the verb: streaming tool arguments carry no `operation`,
+        // so a deletion would otherwise read as an edit until its action row
+        // arrives. The label carries the whole headline here — these actions
+        // have no separate title.
         case 'edit_annotations':
         case 'delete_annotations': {
             const count = countEditAnnotationTargets(actionData);
-            const verb = actionData?.operation === 'delete' ? 'Delete' : 'Edit';
+            const verb = toolName === 'delete_annotations' || actionData?.operation === 'delete'
+                ? 'Delete'
+                : 'Edit';
             return count > 1
                 ? `${verb} ${count} Annotations`
                 : `${verb} Annotation`;

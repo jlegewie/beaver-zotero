@@ -621,3 +621,128 @@ describe('toAgentAction edit_annotations normalized contract', () => {
         }]);
     });
 });
+
+describe('toAgentAction edit_annotations previews', () => {
+    const preview = (key: string) => ({
+        annotation_id: `u-${key}`,
+        library_id: 1,
+        library_ref: 'u',
+        zotero_key: key,
+        annotation_type: 'highlight',
+        color: '#ffd400',
+        comment: 'a comment',
+        tags: ['read'],
+        page_label: '4',
+        text: 'Highlighted passage',
+    });
+
+    /**
+     * proposed_data is rebuilt field by field here, so anything this normalizer
+     * does not carry never reaches the card — and the previews are the only
+     * copy of the pre-change state left once an action is undone or rejected.
+     */
+    it('carries the previews through an edit', () => {
+        const action = toAgentAction({
+            action_type: 'edit_annotations',
+            proposed_data: {
+                operation: 'edit',
+                edits: [
+                    {
+                        annotation_refs: [{ library_id: 1, library_ref: 'u', zotero_key: 'AAAAAAA1' }],
+                        changes: { color: 'blue' },
+                    },
+                ],
+                annotation_previews: [preview('AAAAAAA1')],
+            },
+        });
+
+        expect((action.proposed_data as any).annotation_previews).toEqual([
+            preview('AAAAAAA1'),
+        ]);
+    });
+
+    it('carries the previews through a deletion', () => {
+        const action = toAgentAction({
+            action_type: 'edit_annotations',
+            proposed_data: {
+                operation: 'delete',
+                annotation_refs: [{ library_id: 1, library_ref: 'u', zotero_key: 'AAAAAAA1' }],
+                annotation_previews: [preview('AAAAAAA1')],
+            },
+        });
+
+        expect((action.proposed_data as any).annotation_previews).toEqual([
+            preview('AAAAAAA1'),
+        ]);
+    });
+
+    it('omits the field for an action that has none', () => {
+        const action = toAgentAction({
+            action_type: 'edit_annotations',
+            proposed_data: {
+                operation: 'edit',
+                edits: [
+                    {
+                        annotation_refs: [{ library_id: 1, zotero_key: 'AAAAAAA1' }],
+                        changes: { color: 'blue' },
+                    },
+                ],
+            },
+        });
+
+        expect('annotation_previews' in (action.proposed_data as any)).toBe(false);
+    });
+});
+
+describe('undoAgentActionAtom', () => {
+    const appliedEdit = (): AgentAction => ({
+        id: 'action-1',
+        run_id: 'run-1',
+        toolcall_id: 'tool-1',
+        action_type: 'edit_annotations',
+        status: 'applied',
+        proposed_data: {
+            operation: 'edit',
+            edits: [
+                {
+                    annotation_refs: [{ library_id: 1, library_ref: 'u', zotero_key: 'AAAAAAA1' }],
+                    changes: { color: 'blue' },
+                },
+            ],
+            annotation_previews: [
+                {
+                    annotation_id: 'u-AAAAAAA1',
+                    library_id: 1,
+                    library_ref: 'u',
+                    zotero_key: 'AAAAAAA1',
+                    color: '#ffd400',
+                    comment: '',
+                    tags: [],
+                },
+            ],
+        },
+        result_data: { operation: 'edit', applied_refs: [], before: [] },
+    } as unknown as AgentAction);
+
+    /**
+     * The card renders from the previews on the proposal, so undo must leave
+     * proposed_data exactly as the handler will see it when the action is
+     * applied again — it rejects any field it does not know.
+     */
+    it('leaves the executable payload untouched', async () => {
+        const { createStore } = await import('jotai');
+        const { threadAgentActionsAtom, undoAgentActionAtom } = await import(
+            '../../../react/agents/agentActions'
+        );
+
+        const store = createStore();
+        const before = appliedEdit().proposed_data;
+        store.set(threadAgentActionsAtom, [appliedEdit()]);
+        store.set(undoAgentActionAtom, 'action-1');
+
+        const undone = store.get(threadAgentActionsAtom)[0];
+        expect(undone.status).toBe('undone');
+        expect(undone.result_data).toBeUndefined();
+        expect(undone.proposed_data).toEqual(before);
+    });
+});

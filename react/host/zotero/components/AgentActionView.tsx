@@ -714,7 +714,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                                 <Icon icon={Spinner} />
                             </div>
                             <div className="two-line-header shimmer-text">
-                                <span className="font-color-primary font-medium" style={{ fontWeight: '500' }}>{getActionLabel(toolName)}</span>
+                                <span className="font-color-primary font-medium" style={{ fontWeight: '500' }}>{getActionLabel(toolName, effectiveArgs)}</span>
                                 {streamingTitle && <span className="font-color-secondary ml-15" style={{ fontWeight: '400' }}>{streamingTitle}</span>}
                             </div>
                         </div>

@@ -8,6 +8,7 @@ import type {
 import type {
     AnnotationBeforeSnapshot,
     AnnotationEditGroup,
+    AnnotationPreviewSnapshot,
     AnnotationRelocation,
     EditAnnotationsPatch,
     EditAnnotationsProposedData,
@@ -41,6 +42,9 @@ const ALLOWED_KEYS = new Set([
     "edits",
     "annotation_refs",
     "skipped",
+    // Written by validation and persisted on the proposal, which is replayed
+    // verbatim on execute and on re-apply. Accepted and ignored here.
+    "annotation_previews",
 ]);
 const ALLOWED_GROUP_KEYS = new Set([
     "annotation_refs",
@@ -641,6 +645,44 @@ async function partitionTargets(
     return { targets, skipped, placements, relocationFailed };
 }
 
+/** Longest annotation text or comment stored on the proposal for display. */
+const MAX_PREVIEW_TEXT = 300;
+
+function clip(value: string | undefined): string {
+    const text = value ?? "";
+    return text.length > MAX_PREVIEW_TEXT
+        ? `${text.slice(0, MAX_PREVIEW_TEXT)}…`
+        : text;
+}
+
+/**
+ * The display half of a snapshot, for storage on the proposal.
+ *
+ * Text and comments are clipped to what a preview row shows, and the undo
+ * fields (position, sort index, move destination) are left out — those belong
+ * to the result, which is where undo reads them.
+ */
+function previewSnapshot(
+    before: AnnotationBeforeSnapshot,
+): AnnotationPreviewSnapshot {
+    return {
+        annotation_id: before.annotation_id,
+        library_id: before.library_id,
+        zotero_key: before.zotero_key,
+        ...(before.library_ref ? { library_ref: before.library_ref } : {}),
+        ...(before.annotation_type
+            ? { annotation_type: before.annotation_type }
+            : {}),
+        color: before.color,
+        comment: clip(before.comment),
+        tags: before.tags,
+        ...(before.page_label !== undefined
+            ? { page_label: before.page_label }
+            : {}),
+        ...(before.text !== undefined ? { text: clip(before.text) } : {}),
+    };
+}
+
 /** Rebuild the proposal from the targets that survived validation. */
 function survivingData(
     data: EditAnnotationsProposedData,
@@ -654,12 +696,20 @@ function survivingData(
                     candidate.reason === row.reason,
             ) === index,
     );
-    const skipped = { skipped: combinedSkips };
+    // Carried on the proposal so a rejected or undone card can still render the
+    // annotations by content: result data holds the same state, but is cleared
+    // as soon as the action resolves.
+    const common = {
+        skipped: combinedSkips,
+        annotation_previews: partition.targets.map((target) =>
+            previewSnapshot(target.before),
+        ),
+    };
     if (data.operation === "delete") {
         return {
             operation: "delete",
             annotation_refs: partition.targets.map((target) => target.ref),
-            ...skipped,
+            ...common,
         };
     }
     const edits: AnnotationEditGroup[] = [];
@@ -670,7 +720,7 @@ function survivingData(
         if (!refs.length) return;
         edits.push({ ...group, annotation_refs: refs });
     });
-    return { operation: "edit", edits, ...skipped };
+    return { operation: "edit", edits, ...common };
 }
 
 /**

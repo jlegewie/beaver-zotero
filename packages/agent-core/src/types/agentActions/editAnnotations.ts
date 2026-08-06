@@ -83,9 +83,34 @@ export interface SkippedAnnotation {
     reason: string;
 }
 
+/**
+ * What one targeted annotation looked like when the change was proposed.
+ *
+ * Display fields only. A proposal names its targets by reference, but the
+ * approval card and the history entry both render them by content, so this
+ * travels with the proposal — result data is cleared when an action is undone
+ * or rejected, and a snapshot kept only there would leave those cards with
+ * nothing to show.
+ */
+export interface AnnotationPreviewSnapshot extends ZoteroItemReference {
+    annotation_id: string;
+    annotation_type?: string;
+    color: string;
+    comment: string;
+    tags: string[];
+    page_label?: string;
+    /** `annotationText` — highlights only. */
+    text?: string;
+}
+
 interface EditAnnotationsBase {
     /** Targets the client could not act on; recorded, never applied. */
     skipped?: SkippedAnnotation[];
+    /**
+     * Pre-change state of every surviving target, added by validation. Absent
+     * on the payload sent TO validation and on legacy actions.
+     */
+    annotation_previews?: AnnotationPreviewSnapshot[];
 }
 
 export interface EditAnnotationsEditProposedData extends EditAnnotationsBase {
@@ -130,16 +155,8 @@ export interface AnnotationPlacementSnapshot {
  * three-way reconciliation the metadata fields get. Both are captured only for
  * an annotation that actually moved.
  */
-export interface AnnotationBeforeSnapshot extends ZoteroItemReference {
-    annotation_id: string;
-    color: string;
-    comment: string;
-    tags: string[];
+export interface AnnotationBeforeSnapshot extends AnnotationPreviewSnapshot {
     deleted?: boolean;
-    annotation_type?: string;
-    /** `annotationText` before the move (highlights only). */
-    text?: string;
-    page_label?: string;
     sort_index?: string;
     /** `annotationPosition` before the move, verbatim. */
     position?: string;

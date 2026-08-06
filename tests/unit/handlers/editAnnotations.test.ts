@@ -212,7 +212,7 @@ describe("edit_annotations validation", () => {
         });
 
         expect(response.valid).toBe(true);
-        expect(response.normalized_action_data).toEqual({
+        expect(response.normalized_action_data).toMatchObject({
             operation: "edit",
             edits: [
                 {
@@ -229,6 +229,55 @@ describe("edit_annotations validation", () => {
             comment: "comment-AAA",
             tags: ["old-AAA"],
         });
+    });
+
+    /**
+     * The approval card and the history entry render annotations by content,
+     * and result data is cleared when an action resolves — so the display half
+     * of each snapshot rides on the proposal, which is persisted.
+     */
+    it("persists a display snapshot of every target on the proposal", async () => {
+        const response = await validate({
+            edits: [
+                {
+                    annotation_refs: refs("AAA"),
+                    changes: { color: "blue" },
+                },
+            ],
+        });
+
+        const previews = (response.normalized_action_data as any)
+            .annotation_previews;
+        expect(previews).toEqual([
+            {
+                annotation_id: "u-AAA",
+                library_id: 1,
+                library_ref: "u",
+                zotero_key: "AAA",
+                annotation_type: "highlight",
+                color: "#ffd400",
+                comment: "comment-AAA",
+                tags: ["old-AAA"],
+                page_label: "page-AAA",
+                text: "text-AAA",
+            },
+        ]);
+    });
+
+    /**
+     * The proposal is replayed verbatim on execute and on re-apply, so the
+     * handler has to accept back the field validation put there.
+     */
+    it("accepts its own previews when the proposal is replayed", async () => {
+        const validated = await validate({
+            edits: [{ annotation_refs: refs("AAA"), changes: { color: "blue" } }],
+        });
+
+        const response = await execute(
+            validated.normalized_action_data as Record<string, any>,
+        );
+
+        expect(response.success).toBe(true);
     });
 
     it("keeps distinct payloads per group", async () => {

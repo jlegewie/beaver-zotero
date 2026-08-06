@@ -59,4 +59,24 @@ describe("annotation action labels", () => {
             getActionTitle("delete_annotations", deleteData(2), null, []),
         ).toBe(null);
     });
+
+    /**
+     * Streaming tool arguments carry the model's `annotation_ids` and no
+     * `operation`, so the label has to count that shape and take its verb from
+     * the tool name.
+     */
+    it("labels streaming tool arguments", () => {
+        expect(
+            getActionLabel("delete_annotations", {
+                annotation_ids: ["a", "b", "c"],
+            }),
+        ).toBe("Delete 3 Annotations");
+        expect(
+            getActionLabel("edit_annotations", {
+                edits: [
+                    { annotation_ids: ["a", "b"], changes: { color: "blue" } },
+                ],
+            }),
+        ).toBe("Edit 2 Annotations");
+    });
 });
