@@ -3,7 +3,9 @@ import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import {
     annotationTagDelta,
+    commentPillPreview,
     netSummary,
+    noteTooltipComment,
     type EditGroupView,
 } from '../../../react/host/zotero/components/EditAnnotationsPreview';
 import {
@@ -24,6 +26,44 @@ const snapshot = (key: string, tags: string[] = []) =>
     }) as any;
 
 describe('EditAnnotationsPreview', () => {
+    describe('note tooltip comment', () => {
+        it('prefers and truncates the proposed comment', () => {
+            const oldComment = 'Old comment';
+            const newComment = 'N'.repeat(200);
+
+            expect(
+                noteTooltipComment(
+                    { ...snapshot('AAAAAAA1'), comment: oldComment },
+                    { comment: newComment },
+                ),
+            ).toBe(`${'N'.repeat(180)}...`);
+        });
+
+        it('falls back to the existing comment when none is proposed', () => {
+            expect(
+                noteTooltipComment(
+                    { ...snapshot('AAAAAAA1'), comment: 'Existing comment' },
+                    { color: 'blue' },
+                ),
+            ).toBe('Existing comment');
+        });
+
+        it('uses an explicitly cleared comment instead of the old one', () => {
+            expect(
+                noteTooltipComment(
+                    { ...snapshot('AAAAAAA1'), comment: 'Existing comment' },
+                    { comment: '' },
+                ),
+            ).toBe('');
+        });
+    });
+
+    it('uses a shorter preview for the comment change pill', () => {
+        expect(commentPillPreview('N'.repeat(200))).toBe(
+            `${'N'.repeat(60)}...`,
+        );
+    });
+
     it('treats missing legacy snapshot tags as an empty tag set', () => {
         expect(
             annotationTagDelta(

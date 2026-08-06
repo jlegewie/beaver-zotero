@@ -30,7 +30,8 @@ export interface EditGroupView {
     rows: AnnotationPreviewSnapshot[];
 }
 
-const MAX_COMMENT_PREVIEW = 60;
+const MAX_COMMENT_TOOLTIP_PREVIEW = 180;
+const MAX_COMMENT_PILL_PREVIEW = 40;
 /** Short enough that a move chip stays one compact pill. */
 const MAX_RELOCATION_CHIP = 24;
 
@@ -44,6 +45,20 @@ function isNote(snapshot: AnnotationPreviewSnapshot): boolean {
 
 function snapshotComment(snapshot: AnnotationPreviewSnapshot): string {
     return typeof snapshot.comment === 'string' ? snapshot.comment : '';
+}
+
+/** Sticky-note hover copy, preferring the comment this edit will apply. */
+export function noteTooltipComment(
+    snapshot: AnnotationPreviewSnapshot,
+    changes: EditAnnotationsPatch | undefined,
+): string {
+    const comment = changes?.comment ?? snapshotComment(snapshot);
+    return truncateText(comment.trim(), MAX_COMMENT_TOOLTIP_PREVIEW);
+}
+
+/** Proposed comment copy kept short enough for the compact change pill. */
+export function commentPillPreview(comment: string): string {
+    return truncateText(comment.trim(), MAX_COMMENT_PILL_PREVIEW);
 }
 
 function snapshotTags(snapshot: AnnotationPreviewSnapshot): string[] {
@@ -189,7 +204,7 @@ const ChangeDescription: React.FC<{
                 style={{ overflowWrap: 'anywhere' }}
             >
                 {comment
-                    ? `Comment → “${truncateText(comment, MAX_COMMENT_PREVIEW)}”`
+                    ? `Comment → “${commentPillPreview(comment)}”`
                     : 'Comment cleared'}
             </ChangeChip>,
         );
@@ -347,7 +362,14 @@ export const EditAnnotationsPreview: React.FC<{
                                                     : 'Highlight Annotation'
                                             }
                                             pageDisplay={page}
-                                            body={title}
+                                            body={
+                                                note
+                                                    ? noteTooltipComment(
+                                                          snapshot,
+                                                          group.changes,
+                                                      )
+                                                    : title
+                                            }
                                             footerLabel="Click to view in Zotero Reader"
                                             typeIcon={getAnnotationTooltipIcon(
                                                 note ? 'note' : 'highlight',
