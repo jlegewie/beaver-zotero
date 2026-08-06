@@ -31,6 +31,8 @@ export interface EditGroupView {
 }
 
 const MAX_COMMENT_PREVIEW = 60;
+/** Short enough that a move chip stays one compact pill. */
+const MAX_RELOCATION_CHIP = 24;
 
 function plural(count: number): string {
     return count === 1 ? '' : 's';
@@ -89,18 +91,51 @@ function referenceKey(ref: {
 }
 
 /**
- * Where a move puts the annotation, in the user's terms.
+ * Destination page label for a move, matching prepareRelocation's preference:
+ * PDF highlight extent first, then the top-level relocation label.
+ */
+function relocationPageLabel(
+    relocation: AnnotationRelocation,
+): string | null {
+    return pageDisplayFor(
+        relocation.page_locations?.[0]?.page_label ?? relocation.page_label,
+    );
+}
+
+/**
+ * Where a move puts the annotation, for the compact change chip.
  *
- * The locator the model wrote is an internal token and never shown; the
- * destination arrives already resolved, so a page label (or the text at the
- * destination, for EPUB and snapshots) is what identifies it.
+ * Prefer a heavily truncated destination quote — page alone is a weak signal
+ * for same-page sentence moves. Fall back to the page label, then a generic
+ * phrase, when the destination has no text (sticky notes).
  */
 function relocationTarget(relocation: AnnotationRelocation): string {
-    const page = pageDisplayFor(relocation.page_label);
-    if (page) return `page ${page}`;
     const text = (relocation.text ?? '').trim();
-    if (text) return `“${truncateText(text, 40)}”`;
+    if (text) return `“${truncateText(text, MAX_RELOCATION_CHIP)}”`;
+    const page = relocationPageLabel(relocation);
+    if (page) return `page ${page}`;
     return 'a new position';
+}
+
+/**
+ * What the row and hover show for one annotation in a group.
+ *
+ * A relocating highlight shows the destination text and page — that is what
+ * Apply will land — rather than the pre-move snapshot. When the destination
+ * has no page label, omit the page rather than inheriting the source's.
+ */
+function rowDisplay(
+    snapshot: AnnotationPreviewSnapshot,
+    relocation: AnnotationRelocation | undefined,
+): { title: string; page: string | null } {
+    const note = isNote(snapshot);
+    const destText = (relocation?.text ?? '').trim();
+    const title =
+        !note && destText ? destText : rowTitle(snapshot);
+    const page = relocation
+        ? relocationPageLabel(relocation)
+        : pageDisplayFor(snapshot.page_label);
+    return { title, page };
 }
 
 /** Colour swatch shown next to a colour name. */
@@ -318,8 +353,10 @@ export const EditAnnotationsPreview: React.FC<{
                             <div className="edit-annotations-preview-list rounded-md border-quinary overflow-hidden">
                                 {group.rows.map((snapshot, rowIndex) => {
                                     const note = isNote(snapshot);
-                                    const title = rowTitle(snapshot);
-                                    const page = pageDisplayFor(snapshot.page_label);
+                                    const { title, page } = rowDisplay(
+                                        snapshot,
+                                        group.relocation,
+                                    );
                                     return (
                                         <AnnotationTooltip
                                             key={`${group.key}-${referenceKey(snapshot)}`}
