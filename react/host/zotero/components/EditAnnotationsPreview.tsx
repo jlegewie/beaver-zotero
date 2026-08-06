@@ -168,12 +168,7 @@ const ChangeChip: React.FC<{
 const ChangeDescription: React.FC<{
     changes?: EditAnnotationsPatch;
     relocation?: AnnotationRelocation;
-    isDelete: boolean;
-}> = ({ changes, relocation, isDelete }) => {
-    if (isDelete) {
-        return <ChangeChip>Move to trash</ChangeChip>;
-    }
-
+}> = ({ changes, relocation }) => {
     const chips: React.ReactNode[] = [];
 
     if (changes?.color != null) {
@@ -232,7 +227,6 @@ const ChangeDescription: React.FC<{
  */
 export function netSummary(
     groups: EditGroupView[],
-    isDelete: boolean,
 ): string | null {
     const touched = new Set<string>();
     const aspects: string[] = [];
@@ -243,7 +237,6 @@ export function netSummary(
     for (const group of groups) {
         for (const snapshot of group.rows) {
             touched.add(referenceKey(snapshot));
-            if (isDelete) continue;
             if (group.changes?.color != null) note('recolored');
             if (group.changes?.comment != null) note('comment updated');
             const { added, removed } = annotationTagDelta(
@@ -257,12 +250,11 @@ export function netSummary(
 
     if (!touched.size) return null;
     const count = `${touched.size} annotation${plural(touched.size)}`;
-    if (isDelete) return `${count} moved to trash`;
     return aspects.length ? `${count}: ${aspects.join(', ')}` : count;
 }
 
 /**
- * Approval and history card for annotation edits and deletions.
+ * Approval and history card for annotation edits.
  *
  * Laid out per edit rather than per annotation: the group is what the user is
  * approving, so each one states its change once and lists the annotations it
@@ -274,7 +266,6 @@ export const EditAnnotationsPreview: React.FC<{
     resultData?: { before?: AnnotationPreviewSnapshot[] };
     status: ActionStatus | 'awaiting';
 }> = ({ actionData, currentValue, resultData, status }) => {
-    const isDelete = (actionData.operation ?? 'edit') === 'delete';
     const skipped: Array<{ annotation_id: string; reason: string }> =
         Array.isArray(actionData.skipped) ? actionData.skipped : [];
 
@@ -302,11 +293,6 @@ export const EditAnnotationsPreview: React.FC<{
                     Boolean(snapshot),
                 );
 
-        if (isDelete) {
-            return [
-                { key: 'delete', rows: rowsFor(actionData.annotation_refs) },
-            ];
-        }
         return ((actionData.edits ?? []) as AnnotationEditGroup[]).map(
             (group, index) => ({
                 key: `edit-${index}`,
@@ -315,7 +301,7 @@ export const EditAnnotationsPreview: React.FC<{
                 rows: rowsFor(group.annotation_refs),
             }),
         );
-    }, [actionData, isDelete, snapshots]);
+    }, [actionData, snapshots]);
 
     const handleClick = useCallback(
         async (snapshot: AnnotationPreviewSnapshot) => {
@@ -331,10 +317,6 @@ export const EditAnnotationsPreview: React.FC<{
     );
 
     const isDimmed = status === 'rejected' || status === 'undone';
-    // A single group already states its change above its own rows; the net
-    // line only earns its space once the batch does more than one thing.
-    const summary = groups.length > 1 ? netSummary(groups, isDelete) : null;
-
     return (
         <div className="edit-annotations-preview overflow-hidden">
             <div className="display-flex flex-col px-3 py-2 gap-25">
@@ -346,7 +328,6 @@ export const EditAnnotationsPreview: React.FC<{
                         <ChangeDescription
                             changes={group.changes}
                             relocation={group.relocation}
-                            isDelete={isDelete}
                         />
 
                         {group.rows.length > 0 && (
@@ -394,17 +375,7 @@ export const EditAnnotationsPreview: React.FC<{
                                                     }
                                                 />
                                                 <div className="display-flex flex-row min-w-0 flex-1 justify-between gap-3">
-                                                    <div
-                                                        className="truncate"
-                                                        style={
-                                                            isDelete
-                                                                ? {
-                                                                      textDecoration:
-                                                                          'line-through',
-                                                                  }
-                                                                : undefined
-                                                        }
-                                                    >
+                                                    <div className="truncate">
                                                         {title ||
                                                             (note
                                                                 ? 'Sticky note'

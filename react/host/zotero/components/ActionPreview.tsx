@@ -13,6 +13,7 @@ import { ManageTagsPreview } from './ManageTagsPreview';
 import { ManageCollectionsPreview } from './ManageCollectionsPreview';
 import { CreateAnnotationsPreview } from './CreateAnnotationsPreview';
 import { EditAnnotationsPreview } from './EditAnnotationsPreview';
+import { DeleteAnnotationsPreview } from './DeleteAnnotationsPreview';
 import { resolveLibraryRef } from '../../../../src/utils/libraryIdentity';
 import type { ActionStatus, PreviewData } from './agentActionViewHelpers';
 import {
@@ -199,8 +200,14 @@ export const ActionPreview: React.FC<{
         toolName === 'delete_annotations' ||
         previewData.actionType === 'edit_annotations'
     ) {
+        const isDelete =
+            toolName === 'delete_annotations' ||
+            previewData.actionData.operation === 'delete';
+        const AnnotationPreview = isDelete
+            ? DeleteAnnotationsPreview
+            : EditAnnotationsPreview;
         return (
-            <EditAnnotationsPreview
+            <AnnotationPreview
                 actionData={previewData.actionData}
                 currentValue={previewData.currentValue}
                 resultData={previewData.resultData as any}
