@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
         },
         groupPreferences: {
             custom_note_edits: 'always_apply',
+            annotation_deletion: 'always_apply',
         },
     })),
     setPref: vi.fn(),
@@ -20,7 +21,10 @@ const mocks = vi.hoisted(() => ({
 vi.mock('../../../src/utils/prefs', () => mocks);
 vi.mock('@beaver/agent-core/platform/logger', () => ({ logger: vi.fn() }));
 
-import { deferredToolPreferencesAtom } from '../../../react/atoms/deferredToolPreferences';
+import {
+    deferredToolPreferencesAtom,
+    getPreferenceForToolAtom,
+} from '../../../react/atoms/deferredToolPreferences';
 
 describe('deferredToolPreferences', () => {
     it('loads real tool remaps but strips authorization-only action aliases', () => {
@@ -32,5 +36,13 @@ describe('deferredToolPreferences', () => {
         expect(preferences.toolToGroup).not.toHaveProperty('highlight_annotation');
         expect(preferences.toolToGroup).not.toHaveProperty('note_annotation');
         expect(preferences.toolToGroup.delete_annotations).toBe('annotation_deletion');
+    });
+
+    it('retains a manually configured deletion preference for display', () => {
+        const store = createStore();
+
+        expect(store.get(getPreferenceForToolAtom)('delete_annotations')).toBe(
+            'always_apply',
+        );
     });
 });

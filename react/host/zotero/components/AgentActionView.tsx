@@ -853,7 +853,15 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                             ) : isConfirmExternalSearch ? (
                                 <ExternalSearchApprovalButton onAlwaysApprove={handleApprove} />
                             ) : (
-                                <DeferredToolPreferenceButton toolName={toolName} />
+                                <DeferredToolPreferenceButton
+                                    toolName={toolName}
+                                    disabled={toolName === 'delete_annotations'}
+                                    tooltipContent={
+                                        toolName === 'delete_annotations'
+                                            ? 'The approval preference cannot be changed for annotation deletion'
+                                            : undefined
+                                    }
+                                />
                             )
                         )}
                         <div className="flex-1" />

@@ -795,9 +795,10 @@ function requiresApproval(
  * The approval preference this action should run under.
  *
  * Both model-facing tools share one action type, so the operation decides
- * which approval group applies. Deletion has its own group with no
- * Preferences row, which makes "always apply" unreachable for it except
- * through an explicit per-run grant.
+ * which approval group applies. Deletion has its own group with no editable
+ * Preferences row, which keeps "always apply" out of the normal UI except for
+ * an explicit per-run grant. Manually configured underlying preferences remain
+ * supported.
  *
  * Only the auto-apply preference is ever overridden. A user who chose
  * "continue without applying" asked not to be interrupted, and that mode never
@@ -810,10 +811,12 @@ function resolvePreference(
     targets: ResolvedTarget[],
 ): DeferredToolPreference {
     if (data.operation === "delete") {
-        const granted = getDeferredToolPreference("delete_annotations");
-        // No preference is persisted for the deletion group, so this can only
-        // be a per-run grant the user gave for deletions specifically.
-        if (granted === "always_apply") return granted;
+        const deletionPreference = getDeferredToolPreference(
+            "delete_annotations",
+        );
+        // This is normally a per-run grant. Keep honoring an advanced manual
+        // configuration too, even though the UI does not expose one.
+        if (deletionPreference === "always_apply") return deletionPreference;
         const annotations = getDeferredToolPreference(
             "create_highlight_annotations",
         );

@@ -24,9 +24,9 @@ export const DEFAULT_DEFERRED_TOOL_GROUPS: Record<string, string> = {
     create_note_annotations: 'annotations',
     edit_annotations: 'annotations',
     // Deletion is its own group so approving annotation edits never carries
-    // deletions with it. It has no Preferences row on purpose: with nothing to
-    // persist a preference against it always resolves to `always_ask`, so the
-    // only way to relax it is the per-run grant, which dies with the run.
+    // deletions with it. It has no editable Preferences row on purpose, so the
+    // normal UI always asks unless the user grants deletion for the current
+    // run. A manually configured underlying group preference is still read.
     delete_annotations: 'annotation_deletion',
     create_item: 'create_items',
     create_items: 'create_items',
