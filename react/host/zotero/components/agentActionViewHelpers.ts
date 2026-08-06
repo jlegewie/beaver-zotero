@@ -190,14 +190,15 @@ export function getActionLabel(
                 : 'Sticky Note';
         }
         // Both annotation-mutation tools share one action type, so the
-        // operation (not the tool name) decides the wording.
+        // operation (not the tool name) decides the wording. The label carries
+        // the whole headline here — these actions have no separate title.
         case 'edit_annotations':
         case 'delete_annotations': {
             const count = countEditAnnotationTargets(actionData);
-            const noun = actionData?.operation === 'delete'
-                ? 'Annotation Deletion'
-                : 'Annotation Edit';
-            return count > 1 ? `${count} ${noun}s` : noun;
+            const verb = actionData?.operation === 'delete' ? 'Delete' : 'Edit';
+            return count > 1
+                ? `${verb} ${count} Annotations`
+                : `${verb} Annotation`;
         }
         case 'create_item':
         case 'create_items':
@@ -239,12 +240,11 @@ export function getActionTitle(
         case 'create_note_annotations': {
             return itemTitle;
         }
+        // No title: the label already reads "Edit 2 Annotations", and the
+        // preview names the annotations themselves.
         case 'edit_annotations':
-        case 'delete_annotations': {
-            const count = countEditAnnotationTargets(actionData);
-            const verb = actionData?.operation === 'delete' ? 'Delete' : 'Edit';
-            return count ? `${verb} ${count} annotation${count === 1 ? '' : 's'}` : null;
-        }
+        case 'delete_annotations':
+            return null;
         case 'create_collection':
             return actionData?.name ?? actionData?.proposed_data?.name ?? null;
         case 'organize_items': {

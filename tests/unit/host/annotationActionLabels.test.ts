@@ -35,31 +35,28 @@ const deleteData = (count: number) => ({
 describe("annotation action labels", () => {
     it("labels an edit by its target count", () => {
         expect(getActionLabel("edit_annotations", editData(1))).toBe(
-            "Annotation Edit",
+            "Edit Annotation",
         );
         expect(getActionLabel("edit_annotations", editData(3))).toBe(
-            "3 Annotation Edits",
+            "Edit 3 Annotations",
         );
     });
 
     it("labels a deletion by its target count", () => {
         expect(getActionLabel("delete_annotations", deleteData(1))).toBe(
-            "Annotation Deletion",
+            "Delete Annotation",
         );
         expect(getActionLabel("delete_annotations", deleteData(4))).toBe(
-            "4 Annotation Deletions",
+            "Delete 4 Annotations",
         );
     });
 
-    it("titles both tools with the verb and count", () => {
+    it("has no title, so the header never repeats the label", () => {
         expect(getActionTitle("edit_annotations", editData(2), null, [])).toBe(
-            "Edit 2 annotations",
+            null,
         );
         expect(
             getActionTitle("delete_annotations", deleteData(2), null, []),
-        ).toBe("Delete 2 annotations");
-        expect(
-            getActionTitle("delete_annotations", deleteData(1), null, []),
-        ).toBe("Delete 1 annotation");
+        ).toBe(null);
     });
 });

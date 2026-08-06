@@ -756,7 +756,11 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                             <Icon icon={getHeaderIcon()} className={shouldShowStatusIcon() ? config.iconClassName : undefined} />
                         </div>
                         <div className="two-line-header">
-                            <span className="font-color-primary font-medium">{getActionLabel(toolName, action?.proposed_data)}</span>
+                            {/* Label off the same data the preview renders: a
+                                count-carrying label would otherwise read as
+                                singular while an approval is still pending and
+                                no action row exists yet. */}
+                            <span className="font-color-primary font-medium">{getActionLabel(toolName, previewData?.actionData ?? action?.proposed_data)}</span>
                             {actionTitle && <span className="font-color-secondary ml-15">{actionTitle}</span>}
                             {headerLinkAction && (
                                 <>

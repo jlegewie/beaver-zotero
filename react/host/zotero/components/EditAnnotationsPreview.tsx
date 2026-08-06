@@ -1,19 +1,23 @@
-import React, { useCallback } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import type {
     AnnotationBeforeSnapshot,
     AnnotationEditGroup,
     AnnotationRelocation,
     EditAnnotationsPatch,
+    EditAnnotationsProposedData,
 } from '@beaver/agent-core/types/agentActions/editAnnotations';
+import { editAnnotationsTargets } from '@beaver/agent-core/types/agentActions/editAnnotations';
+import type { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { ZoteroIcon, ZOTERO_ICONS } from '../../../components/icons/ZoteroIcon';
-import { ArrowRightIcon, Icon } from '../../../components/icons/icons';
 import { navigateToAnnotation } from '../../../utils/readerUtils';
 import {
     BEAVER_ANNOTATION_COLORS,
     ZOTERO_ANNOTATION_PALETTE_COLORS,
 } from '../../../../src/constants/annotations';
 import { resolveItemReference } from '../../../../src/utils/libraryIdentity';
+import { loadAnnotationEditData } from '../../../../src/services/agentDataProvider/actions/editAnnotations';
+import { truncateText } from '../../../utils/stringUtils';
 import { TagPill } from '../../../components/agentRuns/TagPill';
 import {
     AnnotationTooltip,
@@ -21,12 +25,15 @@ import {
 } from '../../../components/agentRuns/AnnotationTooltip';
 import type { ActionStatus } from './agentActionViewHelpers';
 
-/** One annotation row: its own before-state plus the change it receives. */
-interface AnnotationRow {
-    snapshot: AnnotationBeforeSnapshot;
+/** One edit and the annotations it applies to, in wire order. */
+export interface EditGroupView {
+    key: string;
     changes?: EditAnnotationsPatch;
     relocation?: AnnotationRelocation;
+    rows: AnnotationBeforeSnapshot[];
 }
+
+const MAX_COMMENT_PREVIEW = 60;
 
 function plural(count: number): string {
     return count === 1 ? '' : 's';
@@ -95,11 +102,11 @@ function relocationTarget(relocation: AnnotationRelocation): string {
     const page = pageDisplayFor(relocation.page_label);
     if (page) return `page ${page}`;
     const text = (relocation.text ?? '').trim();
-    if (text) return `“${text.length > 40 ? `${text.slice(0, 40)}…` : text}”`;
+    if (text) return `“${truncateText(text, 40)}”`;
     return 'a new position';
 }
 
-/** Colour swatch shown before/after a recolour. */
+/** Colour swatch shown next to a colour name. */
 const Swatch: React.FC<{ color: string }> = ({ color }) => (
     <span
         className="inline-block rounded-sm border-quinary shrink-0"
@@ -108,88 +115,154 @@ const Swatch: React.FC<{ color: string }> = ({ color }) => (
 );
 
 /**
- * The change one annotation receives, rendered as compact chips rather than
- * prose so a heterogeneous batch stays scannable.
+ * The edit itself, stated once above the annotations it applies to.
+ *
+ * A group can carry several changes at once (recolour plus retag, say), so each
+ * one gets its own line rather than being packed into a sentence.
  */
-const ChangeSummary: React.FC<{
-    row: AnnotationRow;
+const ChangeDescription: React.FC<{
+    changes?: EditAnnotationsPatch;
+    relocation?: AnnotationRelocation;
     isDelete: boolean;
-}> = ({ row, isDelete }) => {
-    const { snapshot, changes, relocation } = row;
+}> = ({ changes, relocation, isDelete }) => {
+    if (isDelete) return <span>Move to trash</span>;
 
-    if (isDelete) {
-        return (
-            <span className="font-color-tertiary text-sm">Move to trash</span>
-        );
-    }
-
-    const parts: React.ReactNode[] = [];
-    const existingComment = snapshotComment(snapshot);
+    const lines: React.ReactNode[] = [];
 
     if (changes?.color != null) {
-        const next = ZOTERO_ANNOTATION_PALETTE_COLORS[changes.color];
-        parts.push(
+        lines.push(
             <span
                 key="color"
-                className="display-flex flex-row items-center gap-1 font-color-tertiary text-sm"
+                className="display-flex flex-row items-center gap-1 flex-wrap"
             >
-                <Swatch color={snapshot.color || BEAVER_ANNOTATION_COLORS.yellow} />
-                <Icon icon={ArrowRightIcon} size={10} />
-                <Swatch color={next} />
-                {changes.color}
+                <span>Change color to</span>
+                <Swatch color={ZOTERO_ANNOTATION_PALETTE_COLORS[changes.color]} />
+                <span>{changes.color}</span>
             </span>,
         );
     }
 
     if (changes?.comment != null) {
-        parts.push(
-            <span key="comment" className="font-color-tertiary text-sm truncate">
-                {changes.comment.trim() === ''
-                    ? 'Clear comment'
-                    : existingComment.trim()
-                      ? `Replace comment: ${changes.comment}`
-                      : `Add comment: ${changes.comment}`}
+        const comment = changes.comment.trim();
+        lines.push(
+            <span key="comment" style={{ overflowWrap: 'anywhere' }}>
+                {comment
+                    ? `Set comment to “${truncateText(comment, MAX_COMMENT_PREVIEW)}”`
+                    : 'Clear comment'}
             </span>,
         );
     }
 
-    const { added, removed } = annotationTagDelta(snapshot, changes);
-    if (added.length || removed.length) {
-        parts.push(
+    const removeTags = changes?.remove_tags ?? [];
+    if (removeTags.length) {
+        lines.push(
             <span
-                key="tags"
+                key="remove-tags"
                 className="display-flex flex-row items-center gap-1 flex-wrap"
             >
-                {removed.map((tag) => (
-                    <TagPill key={`-${tag}`} name={tag} strike />
+                <span>{`Remove tag${plural(removeTags.length)}`}</span>
+                {removeTags.map((tag) => (
+                    <TagPill key={tag} name={tag} strike />
                 ))}
-                {added.map((tag) => (
-                    <TagPill key={`+${tag}`} name={tag} />
+            </span>,
+        );
+    }
+
+    const addTags = changes?.add_tags ?? [];
+    if (addTags.length) {
+        lines.push(
+            <span
+                key="add-tags"
+                className="display-flex flex-row items-center gap-1 flex-wrap"
+            >
+                <span>{`Add tag${plural(addTags.length)}`}</span>
+                {addTags.map((tag) => (
+                    <TagPill key={tag} name={tag} />
                 ))}
             </span>,
         );
     }
 
     if (relocation) {
-        parts.push(
-            <span key="move" className="font-color-tertiary text-sm">
-                {`Move to ${relocationTarget(relocation)}`}
-            </span>,
+        lines.push(
+            <span key="move">{`Move to ${relocationTarget(relocation)}`}</span>,
         );
     }
 
-    if (!parts.length) return null;
-    return (
-        <span className="display-flex flex-col gap-1 min-w-0">{parts}</span>
-    );
+    if (!lines.length) return <span>No changes</span>;
+    return <>{lines}</>;
 };
+
+/**
+ * What the whole action adds up to, for a batch whose groups do different
+ * things. Annotations are counted once even when several groups touch them,
+ * and only changes that actually land on an annotation are named — a tag verb
+ * that is a no-op for every target is not part of the net effect.
+ */
+export function netSummary(
+    groups: EditGroupView[],
+    isDelete: boolean,
+): string | null {
+    const touched = new Set<string>();
+    const aspects: string[] = [];
+    const note = (aspect: string) => {
+        if (!aspects.includes(aspect)) aspects.push(aspect);
+    };
+
+    for (const group of groups) {
+        for (const snapshot of group.rows) {
+            touched.add(referenceKey(snapshot));
+            if (isDelete) continue;
+            if (group.changes?.color != null) note('recolored');
+            if (group.changes?.comment != null) note('comment updated');
+            const { added, removed } = annotationTagDelta(
+                snapshot,
+                group.changes,
+            );
+            if (added.length || removed.length) note('tags updated');
+            if (group.relocation) note('moved');
+        }
+    }
+
+    if (!touched.size) return null;
+    const count = `${touched.size} annotation${plural(touched.size)}`;
+    if (isDelete) return `${count} moved to trash`;
+    return aspects.length ? `${count}: ${aspects.join(', ')}` : count;
+}
+
+/**
+ * A pre-edit snapshot rebuilt from the annotation itself.
+ *
+ * Used only when the action carries none — a rejected or undone action has no
+ * stored snapshots, and in both of those states the annotation is at its
+ * pre-edit values anyway, so reading it back is accurate.
+ */
+function snapshotFromItem(
+    ref: ZoteroItemReference,
+    item: Zotero.Item,
+): AnnotationBeforeSnapshot {
+    return {
+        // Spread the reference rather than rebuilding it from the item so the
+        // snapshot keys exactly like the ref it was resolved from.
+        ...ref,
+        annotation_id: referenceKey(ref),
+        color: item.annotationColor ?? '',
+        comment: item.annotationComment ?? '',
+        tags: item.getTags().map((tag: { tag: string }) => tag.tag),
+        annotation_type: item.annotationType,
+        page_label: item.annotationPageLabel ?? '',
+        ...(item.annotationType === 'highlight'
+            ? { text: item.annotationText ?? '' }
+            : {}),
+    };
+}
 
 /**
  * Approval and history card for annotation edits and deletions.
  *
- * Renders one row per annotation rather than one per edit group: the group is
- * an efficiency of the wire format, but the user is approving changes to
- * individual annotations and needs to see each one.
+ * Laid out per edit rather than per annotation: the group is what the user is
+ * approving, so each one states its change once and lists the annotations it
+ * lands on, with a net line when a batch does several different things.
  */
 export const EditAnnotationsPreview: React.FC<{
     actionData: Record<string, any>;
@@ -201,34 +274,87 @@ export const EditAnnotationsPreview: React.FC<{
     const skipped: Array<{ annotation_id: string; reason: string }> =
         Array.isArray(actionData.skipped) ? actionData.skipped : [];
 
-    // Snapshots come from validation while an approval is pending and from the
-    // stored result afterwards, so a history card renders identically without
-    // reading Zotero again.
-    const snapshots: AnnotationBeforeSnapshot[] =
-        resultData?.before ?? currentValue?.annotations ?? [];
-    const byId = new Map(
-        snapshots.map((snapshot) => [referenceKey(snapshot), snapshot]),
+    const targetRefs = useMemo(
+        () =>
+            editAnnotationsTargets(
+                actionData as unknown as EditAnnotationsProposedData,
+            ),
+        [actionData],
     );
 
-    const rows: AnnotationRow[] = [];
-    if (isDelete) {
-        for (const ref of actionData.annotation_refs ?? []) {
-            const snapshot = byId.get(referenceKey(ref));
-            if (snapshot) rows.push({ snapshot });
+    // Snapshots come from validation while an approval is pending and from the
+    // stored result afterwards, so a history card renders identically without
+    // reading Zotero again. `annotation_snapshots` is where undo parks them:
+    // resolving an action clears its result data.
+    const storedSnapshots: AnnotationBeforeSnapshot[] =
+        resultData?.before ??
+        actionData.annotation_snapshots ??
+        currentValue?.annotations ??
+        [];
+
+    const [recovered, setRecovered] = useState<AnnotationBeforeSnapshot[]>([]);
+    const needsRecovery = storedSnapshots.length === 0 && targetRefs.length > 0;
+    const targetKey = targetRefs.map(referenceKey).join('|');
+
+    useEffect(() => {
+        if (!needsRecovery) {
+            setRecovered((prev) => (prev.length ? [] : prev));
+            return;
         }
-    } else {
-        for (const group of (actionData.edits ?? []) as AnnotationEditGroup[]) {
-            for (const ref of group.annotation_refs ?? []) {
-                const snapshot = byId.get(referenceKey(ref));
-                if (snapshot)
-                    rows.push({
-                        snapshot,
-                        changes: group.changes,
-                        relocation: group.relocation,
-                    });
+        let cancelled = false;
+        (async () => {
+            const found: AnnotationBeforeSnapshot[] = [];
+            for (const ref of targetRefs) {
+                try {
+                    const resolved = await resolveItemReference(ref);
+                    if (resolved.status !== 'found') continue;
+                    if (!resolved.item.isAnnotation()) continue;
+                    // Annotation fields and tags load lazily; reading them off
+                    // a cold item throws.
+                    await loadAnnotationEditData(resolved.item);
+                    found.push(snapshotFromItem(ref, resolved.item));
+                } catch (error) {
+                    logger(
+                        `EditAnnotationsPreview: could not read annotation ${ref.zotero_key}: ${error}`,
+                        1,
+                    );
+                }
             }
+            if (!cancelled) setRecovered(found);
+        })();
+        return () => {
+            cancelled = true;
+        };
+        // Keyed on the refs' identity rather than the array, which is rebuilt
+        // on every render of the parent.
+    }, [needsRecovery, targetKey]);
+
+    const groups: EditGroupView[] = useMemo(() => {
+        const snapshots = storedSnapshots.length ? storedSnapshots : recovered;
+        const byKey = new Map(
+            snapshots.map((snapshot) => [referenceKey(snapshot), snapshot]),
+        );
+        const rowsFor = (refs: ZoteroItemReference[] | undefined) =>
+            (refs ?? [])
+                .map((ref) => byKey.get(referenceKey(ref)))
+                .filter((snapshot): snapshot is AnnotationBeforeSnapshot =>
+                    Boolean(snapshot),
+                );
+
+        if (isDelete) {
+            return [
+                { key: 'delete', rows: rowsFor(actionData.annotation_refs) },
+            ];
         }
-    }
+        return ((actionData.edits ?? []) as AnnotationEditGroup[]).map(
+            (group, index) => ({
+                key: `edit-${index}`,
+                changes: group.changes,
+                relocation: group.relocation,
+                rows: rowsFor(group.annotation_refs),
+            }),
+        );
+    }, [actionData, isDelete, storedSnapshots, recovered]);
 
     const handleClick = useCallback(
         async (snapshot: AnnotationBeforeSnapshot) => {
@@ -244,92 +370,109 @@ export const EditAnnotationsPreview: React.FC<{
     );
 
     const isDimmed = status === 'rejected' || status === 'undone';
-    const verb = isDelete ? 'Delete' : 'Edit';
+    // A single group already states its change above its own rows; the net
+    // line only earns its space once the batch does more than one thing.
+    const summary = groups.length > 1 ? netSummary(groups, isDelete) : null;
 
     return (
         <div className="edit-annotations-preview overflow-hidden">
             <div className="display-flex flex-col px-3 py-2 gap-2">
-                <div className="text-sm font-color-secondary">
-                    {`${verb} ${rows.length} annotation${plural(rows.length)}`}
-                </div>
+                {groups.map((group, index) => (
+                    <div
+                        key={group.key}
+                        className="display-flex flex-col gap-15"
+                    >
+                        {index > 0 && (
+                            <div className="border-top-quinary my-1" />
+                        )}
+                        <div
+                            className={`display-flex flex-col gap-1 text-sm font-color-secondary ${
+                                isDimmed ? 'opacity-60' : ''
+                            }`}
+                        >
+                            <ChangeDescription
+                                changes={group.changes}
+                                relocation={group.relocation}
+                                isDelete={isDelete}
+                            />
+                        </div>
 
-                <div className="display-flex flex-col gap-1">
-                    {rows.map(({ snapshot, changes, relocation }) => {
-                        const note = isNote(snapshot);
-                        const title = rowTitle(snapshot);
-                        const page = pageDisplayFor(snapshot.page_label);
-                        // The swatch previews the colour the annotation ends up
-                        // with, so the row reads as the outcome being approved.
-                        const color =
-                            changes?.color != null
-                                ? ZOTERO_ANNOTATION_PALETTE_COLORS[changes.color]
-                                : snapshot.color ||
-                                  BEAVER_ANNOTATION_COLORS.yellow;
-
-                        return (
-                            <AnnotationTooltip
-                                key={snapshot.annotation_id}
-                                typeLabel={
-                                    note ? 'Sticky Note' : 'Highlight Annotation'
-                                }
-                                pageDisplay={page}
-                                body={title}
-                                footerLabel="Click to view in Zotero Reader"
-                                typeIcon={getAnnotationTooltipIcon(
-                                    note ? 'note' : 'highlight',
-                                )}
-                                stayOpenOnAnchorClick
-                            >
-                                <div
-                                    className={`edit-annotations-preview-row display-flex flex-row items-start gap-2 py-15 cursor-pointer ${
-                                        isDimmed ? 'opacity-60' : ''
-                                    }`}
-                                    onClick={() => handleClick(snapshot)}
-                                >
-                                    <ZoteroIcon
-                                        icon={
+                        <div className="display-flex flex-col gap-1">
+                            {group.rows.map((snapshot) => {
+                                const note = isNote(snapshot);
+                                const title = rowTitle(snapshot);
+                                const page = pageDisplayFor(snapshot.page_label);
+                                return (
+                                    <AnnotationTooltip
+                                        key={`${group.key}-${referenceKey(snapshot)}`}
+                                        typeLabel={
                                             note
-                                                ? ZOTERO_ICONS.ANNOTATION
-                                                : ZOTERO_ICONS.ANNOTATE_HIGHLIGHT
+                                                ? 'Sticky Note'
+                                                : 'Highlight Annotation'
                                         }
-                                        size={14}
-                                        color={color}
-                                        style={{ marginTop: 2 }}
-                                    />
-                                    <div className="display-flex flex-col min-w-0 flex-1 gap-1">
-                                        <div className="display-flex flex-row min-w-0 justify-between gap-3">
-                                            <div
-                                                className="truncate"
-                                                style={
-                                                    isDelete
-                                                        ? {
-                                                              textDecoration:
-                                                                  'line-through',
-                                                          }
-                                                        : undefined
+                                        pageDisplay={page}
+                                        body={title}
+                                        footerLabel="Click to view in Zotero Reader"
+                                        typeIcon={getAnnotationTooltipIcon(
+                                            note ? 'note' : 'highlight',
+                                        )}
+                                        stayOpenOnAnchorClick
+                                    >
+                                        <div
+                                            className={`edit-annotations-preview-row display-flex flex-row items-start gap-2 py-05 cursor-pointer ${
+                                                isDimmed ? 'opacity-60' : ''
+                                            }`}
+                                            onClick={() => handleClick(snapshot)}
+                                        >
+                                            <ZoteroIcon
+                                                icon={
+                                                    note
+                                                        ? ZOTERO_ICONS.ANNOTATION
+                                                        : ZOTERO_ICONS.ANNOTATE_HIGHLIGHT
                                                 }
-                                            >
-                                                {title ||
-                                                    (note
-                                                        ? 'Sticky note'
-                                                        : 'Highlight')}
-                                            </div>
-                                            {page && (
-                                                <div className="font-color-tertiary whitespace-nowrap">
-                                                    {`Page ${page}`}
+                                                size={14}
+                                                color={
+                                                    snapshot.color ||
+                                                    BEAVER_ANNOTATION_COLORS.yellow
+                                                }
+                                                style={{ marginTop: 2 }}
+                                            />
+                                            <div className="display-flex flex-row min-w-0 flex-1 justify-between gap-3">
+                                                <div
+                                                    className="truncate"
+                                                    style={
+                                                        isDelete
+                                                            ? {
+                                                                  textDecoration:
+                                                                      'line-through',
+                                                              }
+                                                            : undefined
+                                                    }
+                                                >
+                                                    {title ||
+                                                        (note
+                                                            ? 'Sticky note'
+                                                            : 'Highlight')}
                                                 </div>
-                                            )}
+                                                {page && (
+                                                    <div className="font-color-tertiary whitespace-nowrap">
+                                                        {`Page ${page}`}
+                                                    </div>
+                                                )}
+                                            </div>
                                         </div>
-                                        <ChangeSummary
-                                            row={{ snapshot, changes, relocation }}
-                                            isDelete={isDelete}
-                                        />
-                                    </div>
-                                </div>
-                            </AnnotationTooltip>
-                        );
-                    })}
-                </div>
+                                    </AnnotationTooltip>
+                                );
+                            })}
+                        </div>
+                    </div>
+                ))}
+
+                {summary && (
+                    <div className="border-top-quinary pt-2 text-sm font-color-tertiary">
+                        {summary}
+                    </div>
+                )}
 
                 {skipped.length > 0 && (
                     <div className="text-sm font-color-tertiary">

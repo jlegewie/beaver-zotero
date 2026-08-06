@@ -432,6 +432,12 @@ export const undoAgentActionAtom = atom(
                 if (action.result_data?.undo_full_html && !proposed_data?.undo_full_html) {
                     proposed_data = { ...proposed_data, undo_full_html: action.result_data.undo_full_html };
                 }
+                // edit_annotations renders every annotation from the pre-edit
+                // snapshots in result_data; without them the undone card has
+                // nothing left to show but the change description.
+                if (isEditAnnotationsAgentAction(action) && action.result_data?.before && !proposed_data?.annotation_snapshots) {
+                    proposed_data = { ...proposed_data, annotation_snapshots: action.result_data.before };
+                }
                 return { ...action, proposed_data, status: 'undone' as ActionStatus, result_data: undefined, error_message: undefined };
             });
         });
