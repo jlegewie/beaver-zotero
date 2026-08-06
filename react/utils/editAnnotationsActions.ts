@@ -17,6 +17,7 @@ import {
 } from "../../src/services/agentDataProvider/actions/editAnnotations";
 import { ZOTERO_ANNOTATION_PALETTE_COLORS } from "../../src/constants/annotations";
 import { saveItem } from "../../src/utils/zoteroUtils";
+import { refreshMovedAnnotationsInOpenReaders } from "../../src/services/annotations/readerSync";
 import {
     modelObjectId,
     resolveItemReference,
@@ -95,7 +96,10 @@ function snapshotPlacement(
 }
 
 /** Where an annotation sits right now, for comparison against a snapshot. */
-function currentPlacement(item: Zotero.Item, isHighlight: boolean): AnnotationPlacement {
+function currentPlacement(
+    item: Zotero.Item,
+    isHighlight: boolean,
+): AnnotationPlacement {
     const { annotationSortIndex } = item as unknown as ZoteroAnnotationItem;
     return {
         ...(isHighlight ? { text: item.annotationText ?? "" } : {}),
@@ -126,7 +130,9 @@ function normalizeText(value: unknown): string {
 function tagNames(tags: AnnotationTag[] | null | undefined): string[] {
     if (!tags) return [];
     return [
-        ...new Set(tags.map((tag) => (typeof tag === "string" ? tag : tag.tag))),
+        ...new Set(
+            tags.map((tag) => (typeof tag === "string" ? tag : tag.tag)),
+        ),
     ].sort();
 }
 
@@ -243,7 +249,10 @@ function replacementDrift(
     applied: { color?: string; comment?: string; tags?: string[] },
 ): string[] {
     const drifted: string[] = [];
-    if (normalizeText(current.color) !== normalizeText(applied.color ?? snapshot.color))
+    if (
+        normalizeText(current.color) !==
+        normalizeText(applied.color ?? snapshot.color)
+    )
         drifted.push("color");
     if (
         normalizeText(current.comment) !==
@@ -396,6 +405,7 @@ export async function undoEditAnnotationsAction(
     const undoResult = emptyResult();
     const alreadyReverted = new Set<string>();
     const manuallyModified = new Set<string>();
+    const movedItems: Array<{ attachmentID: number; item: Zotero.Item }> = [];
 
     try {
         await Zotero.DB.executeTransaction(async () => {
@@ -425,6 +435,7 @@ export async function undoEditAnnotationsAction(
                 }
 
                 let dirty = false;
+                let placementReverted = false;
 
                 if (operation === "edit" && !legacyRelocation) {
                     // Only fields the action actually wrote are reconciled;
@@ -490,9 +501,10 @@ export async function undoEditAnnotationsAction(
                             forceRevert,
                         );
                         if (outcome === "revert")
-                            revert(() =>
-                                applyAnnotationPlacement(item, original),
-                            );
+                            revert(() => {
+                                applyAnnotationPlacement(item, original);
+                                placementReverted = true;
+                            });
                         else record("position", outcome);
                     }
                 } else {
@@ -507,7 +519,12 @@ export async function undoEditAnnotationsAction(
                     }
                 }
 
-                if (dirty) await saveItem(item);
+                if (dirty) {
+                    await saveItem(item);
+                    if (placementReverted && item.parentID) {
+                        movedItems.push({ attachmentID: item.parentID, item });
+                    }
+                }
                 if (replacement && !replacement.deleted) {
                     replacement.item.deleted = true;
                     await saveItem(replacement.item);
@@ -531,6 +548,8 @@ export async function undoEditAnnotationsAction(
         }
         throw error;
     }
+
+    await refreshMovedAnnotationsInOpenReaders(movedItems);
 
     undoResult.alreadyReverted = [...alreadyReverted];
     undoResult.manuallyModified = [...manuallyModified];

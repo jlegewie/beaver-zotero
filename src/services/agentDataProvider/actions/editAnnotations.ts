@@ -25,8 +25,14 @@ import {
     resolveLibraryRef,
 } from "../../../utils/libraryIdentity";
 import { saveItem } from "../../../utils/zoteroUtils";
-import { applyAnnotationPlacement, type AnnotationPlacement } from "../../annotations/createAnnotation";
-import { unsetTrashedAnnotationsInOpenReaders } from "../../annotations/readerSync";
+import {
+    applyAnnotationPlacement,
+    type AnnotationPlacement,
+} from "../../annotations/createAnnotation";
+import {
+    refreshMovedAnnotationsInOpenReaders,
+    unsetTrashedAnnotationsInOpenReaders,
+} from "../../annotations/readerSync";
 import { checkLibraryExcluded, getDeferredToolPreference } from "../utils";
 import { checkAborted, TimeoutContext, TimeoutError } from "../timeout";
 import {
@@ -288,11 +294,13 @@ function normalizeRelocation(value: any): AnnotationRelocation | DataResult {
             "invalid_relocation",
         );
     }
-    if (!value.page_locations?.length && !value.note_position && !value.anchor_id && !value.text) {
-        return fail(
-            "relocation carries no destination",
-            "invalid_relocation",
-        );
+    if (
+        !value.page_locations?.length &&
+        !value.note_position &&
+        !value.anchor_id &&
+        !value.text
+    ) {
+        return fail("relocation carries no destination", "invalid_relocation");
     }
     return value as AnnotationRelocation;
 }
@@ -368,7 +376,10 @@ function normalizeData(
             return fail("delete does not accept edits", "field_restricted");
         const refs = normalizeRefs(value.annotation_refs);
         if (!Array.isArray(refs)) return refs;
-        return { ok: true, data: { operation, annotation_refs: refs, skipped } };
+        return {
+            ok: true,
+            data: { operation, annotation_refs: refs, skipped },
+        };
     }
 
     if (operation !== "edit")
@@ -528,7 +539,8 @@ async function resolveTarget(
 function capturePlacement(target: ResolvedTarget): void {
     // Zotero's upstream typing declares annotationSortIndex as a number; it is
     // a formatted string, which ZoteroAnnotationItem corrects.
-    const { annotationSortIndex } = target.item as unknown as ZoteroAnnotationItem;
+    const { annotationSortIndex } =
+        target.item as unknown as ZoteroAnnotationItem;
     target.before.sort_index = annotationSortIndex ?? "";
     target.before.position = target.item.annotationPosition ?? "";
 }
@@ -688,7 +700,10 @@ function survivingData(
     data: EditAnnotationsProposedData,
     partition: Partitioned,
 ): EditAnnotationsProposedData {
-    const combinedSkips = [...(data.skipped ?? []), ...partition.skipped].filter(
+    const combinedSkips = [
+        ...(data.skipped ?? []),
+        ...partition.skipped,
+    ].filter(
         (row, index, all) =>
             all.findIndex(
                 (candidate) =>
@@ -1013,6 +1028,19 @@ export async function executeEditAnnotationsAction(
                     attachmentID: target.attachment.id,
                     key: target.item.key,
                 })),
+            );
+        } else {
+            await refreshMovedAnnotationsInOpenReaders(
+                partition.targets.flatMap((target, index) =>
+                    partition.placements[index]
+                        ? [
+                              {
+                                  attachmentID: target.attachment.id,
+                                  item: target.item,
+                              },
+                          ]
+                        : [],
+                ),
             );
         }
         return {

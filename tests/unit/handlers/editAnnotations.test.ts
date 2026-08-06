@@ -57,9 +57,12 @@ vi.mock(
 );
 
 const unsetTrashedAnnotationsInOpenReaders = vi.fn();
+const refreshMovedAnnotationsInOpenReaders = vi.fn(async () => {});
 vi.mock("../../../src/services/annotations/readerSync", () => ({
     unsetTrashedAnnotationsInOpenReaders: (...args: any[]) =>
         (unsetTrashedAnnotationsInOpenReaders as any)(...args),
+    refreshMovedAnnotationsInOpenReaders: (...args: any[]) =>
+        (refreshMovedAnnotationsInOpenReaders as any)(...args),
 }));
 
 /** A resolved move destination, as the backend now sends it. */
@@ -69,7 +72,11 @@ const relocation = (loc = "s12") => ({
     attachment_ref: { library_id: 1, zotero_key: "ATT00001" },
     note_position: { page_index: 11, x: 15, y: 30, side: "left" },
     page_locations: [
-        { page_idx: 11, boxes: [{ l: 10, t: 20, r: 30, b: 40 }], page_label: "12" },
+        {
+            page_idx: 11,
+            boxes: [{ l: 10, t: 20, r: 30, b: 40 }],
+            page_label: "12",
+        },
     ],
     text: "moved text",
     page_label: "12",
@@ -132,7 +139,9 @@ function annotation(key: string, save = vi.fn(async () => {})) {
         // inside one is the deadlock this stub exists to surface.
         saveTx: vi.fn(async () => {
             if ((globalThis as any).Zotero.DB.inTransaction())
-                throw new Error("TimeoutError: saveTx inside an open transaction");
+                throw new Error(
+                    "TimeoutError: saveTx inside an open transaction",
+                );
         }),
     };
 }
@@ -175,6 +184,7 @@ const ref = (key: string) => ({
 beforeEach(() => {
     prepareRelocation.mockClear();
     unsetTrashedAnnotationsInOpenReaders.mockClear();
+    refreshMovedAnnotationsInOpenReaders.mockClear();
     deferredPreference = "always_apply";
     deletionGrantedForRun = false;
     items.clear();
@@ -206,7 +216,10 @@ describe("edit_annotations validation", () => {
             edits: [
                 {
                     annotation_refs: refs("AAA", "BBB"),
-                    changes: { color: "blue", add_tags: [" topic ", "topic", ""] },
+                    changes: {
+                        color: "blue",
+                        add_tags: [" topic ", "topic", ""],
+                    },
                 },
             ],
         });
@@ -270,7 +283,9 @@ describe("edit_annotations validation", () => {
      */
     it("accepts its own previews when the proposal is replayed", async () => {
         const validated = await validate({
-            edits: [{ annotation_refs: refs("AAA"), changes: { color: "blue" } }],
+            edits: [
+                { annotation_refs: refs("AAA"), changes: { color: "blue" } },
+            ],
         });
 
         const response = await execute(
@@ -284,7 +299,10 @@ describe("edit_annotations validation", () => {
         const response = await validate({
             edits: [
                 { annotation_refs: refs("AAA"), changes: { comment: "first" } },
-                { annotation_refs: refs("BBB"), changes: { comment: "second" } },
+                {
+                    annotation_refs: refs("BBB"),
+                    changes: { comment: "second" },
+                },
             ],
         });
 
@@ -297,13 +315,23 @@ describe("edit_annotations validation", () => {
     it.each([
         [{ edits: [] }, "no_annotations"],
         [
-            { edits: [{ annotation_refs: refs("AAA"), changes: { color: "pink" } }] },
+            {
+                edits: [
+                    {
+                        annotation_refs: refs("AAA"),
+                        changes: { color: "pink" },
+                    },
+                ],
+            },
             "invalid_color",
         ],
         [
             {
                 edits: [
-                    { annotation_refs: refs("AAA"), changes: { text: "forbidden" } },
+                    {
+                        annotation_refs: refs("AAA"),
+                        changes: { text: "forbidden" },
+                    },
                 ],
             },
             "field_restricted",
@@ -338,7 +366,10 @@ describe("edit_annotations validation", () => {
             {
                 edits: [
                     { annotation_refs: refs("AAA"), changes: { color: "red" } },
-                    { annotation_refs: refs("AAA"), changes: { color: "blue" } },
+                    {
+                        annotation_refs: refs("AAA"),
+                        changes: { color: "blue" },
+                    },
                 ],
             },
             "duplicate_annotation",
@@ -347,7 +378,9 @@ describe("edit_annotations validation", () => {
             {
                 operation: "edit",
                 annotation_refs: refs("AAA"),
-                edits: [{ annotation_refs: refs("AAA"), changes: { color: "red" } }],
+                edits: [
+                    { annotation_refs: refs("AAA"), changes: { color: "red" } },
+                ],
             },
             "field_restricted",
         ],
@@ -408,7 +441,10 @@ describe("edit_annotations validation", () => {
                 action_data: {
                     operation: "edit",
                     edits: [
-                        { annotation_refs: refs("AAA"), relocation: relocation() },
+                        {
+                            annotation_refs: refs("AAA"),
+                            relocation: relocation(),
+                        },
                     ],
                 },
             } as any,
@@ -423,7 +459,10 @@ describe("edit_annotations validation", () => {
     it("drops only the group whose locator fails", async () => {
         const response = await validate({
             edits: [
-                { annotation_refs: refs("AAA"), relocation: relocation("s999") },
+                {
+                    annotation_refs: refs("AAA"),
+                    relocation: relocation("s999"),
+                },
                 { annotation_refs: refs("BBB"), changes: { color: "red" } },
             ],
         });
@@ -467,7 +506,10 @@ describe("edit_annotations validation", () => {
     it("reports a relocation failure with its own error code", async () => {
         const response = await validate({
             edits: [
-                { annotation_refs: refs("AAA"), relocation: relocation("s999") },
+                {
+                    annotation_refs: refs("AAA"),
+                    relocation: relocation("s999"),
+                },
             ],
         });
 
@@ -537,7 +579,10 @@ describe("edit_annotations approval policy", () => {
     it("does not ask for a destructive group whose targets all vanished", async () => {
         const response = await validate({
             edits: [
-                { annotation_refs: refs("MISSING"), changes: { comment: "new" } },
+                {
+                    annotation_refs: refs("MISSING"),
+                    changes: { comment: "new" },
+                },
                 { annotation_refs: refs("AAA"), changes: { color: "red" } },
             ],
         });
@@ -579,7 +624,9 @@ describe("edit_annotations approval policy", () => {
 
         preferenceLookups.length = 0;
         await validate({
-            edits: [{ annotation_refs: refs("AAA"), changes: { color: "red" } }],
+            edits: [
+                { annotation_refs: refs("AAA"), changes: { color: "red" } },
+            ],
         });
         expect(preferenceLookups).toEqual(["edit_annotations"]);
     });
@@ -659,7 +706,11 @@ describe("edit_annotations execution", () => {
             edits: [
                 {
                     annotation_refs: refs("AAA", "BBB"),
-                    changes: { color: "green", comment: "new", add_tags: ["new-tag"] },
+                    changes: {
+                        color: "green",
+                        comment: "new",
+                        add_tags: ["new-tag"],
+                    },
                 },
             ],
         });
@@ -700,6 +751,9 @@ describe("edit_annotations execution", () => {
         expect(moved.annotationText).toBe(MOVED_PLACEMENT.text);
         expect(moved.annotationPageLabel).toBe(MOVED_PLACEMENT.pageLabel);
         expect(response.result_data?.applied_refs).toEqual([ref("AAA")]);
+        expect(refreshMovedAnnotationsInOpenReaders).toHaveBeenCalledWith([
+            { attachmentID: 100, item: moved },
+        ]);
     });
 
     it("records both ends of a move so it can be undone", async () => {
@@ -726,7 +780,9 @@ describe("edit_annotations execution", () => {
 
     it("leaves placement out of the snapshot when nothing moved", async () => {
         const response = await execute({
-            edits: [{ annotation_refs: refs("AAA"), changes: { color: "red" } }],
+            edits: [
+                { annotation_refs: refs("AAA"), changes: { color: "red" } },
+            ],
         });
 
         const snapshot = response.result_data?.before[0] as any;
@@ -819,11 +875,14 @@ describe("edit_annotations execution", () => {
         ]);
     });
 
-    it("does not touch the reader for an edit", async () => {
+    it("does not touch the reader for a metadata-only edit", async () => {
         await execute({
-            edits: [{ annotation_refs: refs("AAA"), changes: { color: "red" } }],
+            edits: [
+                { annotation_refs: refs("AAA"), changes: { color: "red" } },
+            ],
         });
 
         expect(unsetTrashedAnnotationsInOpenReaders).not.toHaveBeenCalled();
+        expect(refreshMovedAnnotationsInOpenReaders).toHaveBeenCalledWith([]);
     });
 });
