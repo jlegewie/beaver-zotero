@@ -16,7 +16,6 @@ import {
     loadAnnotationEditData,
 } from "../../src/services/agentDataProvider/actions/editAnnotations";
 import { ZOTERO_ANNOTATION_PALETTE_COLORS } from "../../src/constants/annotations";
-import { saveItem } from "../../src/utils/zoteroUtils";
 import { refreshMovedAnnotationsInOpenReaders } from "../../src/services/annotations/readerSync";
 import {
     modelObjectId,
@@ -54,7 +53,7 @@ export async function executeEditAnnotationsAction(
     return response.result_data as unknown as EditAnnotationsResultData;
 }
 
-type AnnotationTag = string | { tag: string };
+type AnnotationTag = string | { tag: string; type?: number };
 
 type CurrentState = {
     color: string;
@@ -127,26 +126,60 @@ function normalizeText(value: unknown): string {
     return value == null ? "" : String(value).trim().normalize();
 }
 
-function tagNames(tags: AnnotationTag[] | null | undefined): string[] {
+/**
+ * Identity of a tag for comparison: its name AND its type.
+ *
+ * Filing an automatic tag as manual is a change the user can make on their
+ * own, so a name-only comparison would read it as "still exactly what the
+ * action wrote" and let undo quietly file it back as automatic. A bare string
+ * is a manual tag, which is how `setTags()` reads one.
+ */
+function tagKey(tag: AnnotationTag): string {
+    return typeof tag === "string"
+        ? `0:${tag}`
+        : `${tag.type ?? 0}:${tag.tag}`;
+}
+
+function tagKeys(tags: AnnotationTag[] | null | undefined): string[] {
     if (!tags) return [];
-    return [
-        ...new Set(
-            tags.map((tag) => (typeof tag === "string" ? tag : tag.tag)),
-        ),
-    ].sort();
+    return [...new Set(tags.map(tagKey))].sort();
 }
 
 function tagsEqual(
     a: AnnotationTag[] | null | undefined,
     b: AnnotationTag[] | null | undefined,
 ): boolean {
-    const left = tagNames(a);
-    const right = tagNames(b);
+    const left = tagKeys(a);
+    const right = tagKeys(b);
     return (
         left.length === right.length &&
         left.every((tag, index) => tag === right[index])
     );
 }
+
+/**
+ * The tag set to write back when reverting an annotation, with the automatic
+ * and manual types it carried.
+ *
+ * `snapshot.tags` holds names alone because the cards render from it; passing
+ * those names to `setTags()` would file every automatic tag as a manual one.
+ */
+function snapshotTags(
+    snapshot: AnnotationBeforeSnapshot,
+): Array<{ tag: string; type: number }> {
+    const automatic = new Set(snapshot.automatic_tags ?? []);
+    return snapshot.tags.map((tag) => ({
+        tag,
+        type: automatic.has(tag) ? 1 : 0,
+    }));
+}
+
+/** What one action wrote for a single annotation, per field it changed. */
+type AppliedValues = {
+    color?: string;
+    comment?: string;
+    tags?: Array<{ tag: string; type: number }>;
+};
 
 /**
  * The values the action actually wrote for one annotation, per field it
@@ -157,22 +190,23 @@ function tagsEqual(
 function appliedValues(
     patch: EditAnnotationsPatch | undefined,
     before: AnnotationBeforeSnapshot,
-): {
-    color?: string;
-    comment?: string;
-    tags?: string[];
-} {
+): AppliedValues {
     const color =
         patch?.color != null
             ? ZOTERO_ANNOTATION_PALETTE_COLORS[patch.color]
             : undefined;
-    let tags: string[] | undefined;
+    let tags: Array<{ tag: string; type: number }> | undefined;
     if (patch?.add_tags != null || patch?.remove_tags != null) {
+        // Mirrors what the action wrote: retained tags keep the types they
+        // had, and a newly added tag is manual.
         const removed = new Set(patch.remove_tags ?? []);
-        const kept = before.tags.filter((tag) => !removed.has(tag));
-        const added = (patch.add_tags ?? []).filter(
-            (tag) => !kept.includes(tag),
+        const kept = snapshotTags(before).filter(
+            (tag) => !removed.has(tag.tag),
         );
+        const keptNames = new Set(kept.map((tag) => tag.tag));
+        const added = (patch.add_tags ?? [])
+            .filter((tag) => !keptNames.has(tag))
+            .map((tag) => ({ tag, type: 0 }));
         tags = [...kept, ...added];
     }
     return {
@@ -246,7 +280,7 @@ function patchesByAnnotation(
 function replacementDrift(
     current: CurrentState,
     snapshot: AnnotationBeforeSnapshot,
-    applied: { color?: string; comment?: string; tags?: string[] },
+    applied: AppliedValues,
 ): string[] {
     const drifted: string[] = [];
     if (
@@ -259,7 +293,7 @@ function replacementDrift(
         normalizeText(applied.comment ?? snapshot.comment)
     )
         drifted.push("comment");
-    if (!tagsEqual(current.tags, applied.tags ?? snapshot.tags))
+    if (!tagsEqual(current.tags, applied.tags ?? snapshotTags(snapshot)))
         drifted.push("tags");
     return drifted;
 }
@@ -478,12 +512,12 @@ export async function undoEditAnnotationsAction(
                     }
                     if (applied.tags !== undefined) {
                         const outcome = reconcile(
-                            tagsEqual(current.tags, snapshot.tags),
+                            tagsEqual(current.tags, snapshotTags(snapshot)),
                             tagsEqual(current.tags, applied.tags),
                             forceRevert,
                         );
                         if (outcome === "revert")
-                            revert(() => item.setTags(snapshot.tags));
+                            revert(() => item.setTags(snapshotTags(snapshot)));
                         else record("tags", outcome);
                     }
                     // A move is reverted like any other field: the snapshot
@@ -520,14 +554,19 @@ export async function undoEditAnnotationsAction(
                 }
 
                 if (dirty) {
-                    await saveItem(item);
+                    // save(), not saveTx(): every write joins the transaction
+                    // opened above. saveTx() opens its own, which nested inside
+                    // an open one waits for a transaction that cannot finish
+                    // until this call returns and times out after 30s, rolling
+                    // the whole undo back.
+                    await item.save();
                     if (placementReverted && item.parentID) {
                         movedItems.push({ attachmentID: item.parentID, item });
                     }
                 }
                 if (replacement && !replacement.deleted) {
                     replacement.item.deleted = true;
-                    await saveItem(replacement.item);
+                    await replacement.item.save();
                 }
             }
         });

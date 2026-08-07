@@ -93,9 +93,10 @@ describe("createAnnotation tag application", () => {
     expect(constructedItems[0].saveTx).toHaveBeenCalledTimes(1);
   });
 
-  it("joins an open transaction instead of opening its own", async () => {
-    // Reached this way by annotation relocation, which wraps create + trash in
-    // one transaction. saveTx() there would deadlock and roll the batch back.
+  it("keeps its own transaction while an unrelated one is open", async () => {
+    // Creation is a standalone write, so it must not join whatever transaction
+    // happens to be open (sync, another UI task): joining would report success
+    // for an annotation that a rollback elsewhere then discards.
     inTransaction = true;
 
     await createHighlightAnnotation(mockAttachment(), {
@@ -105,8 +106,8 @@ describe("createAnnotation tag application", () => {
       tags: ["methods"],
     });
 
-    expect(constructedItems[0].saveTx).not.toHaveBeenCalled();
-    expect(constructedItems[0].save).toHaveBeenCalledTimes(1);
+    expect(constructedItems[0].save).not.toHaveBeenCalled();
+    expect(constructedItems[0].saveTx).toHaveBeenCalledTimes(1);
     expect(constructedItems[0].tagsAtSave).toEqual(["methods"]);
   });
 

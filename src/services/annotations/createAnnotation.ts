@@ -8,7 +8,6 @@ import { PageGeometry } from "@beaver/agent-core/extract/types";
 import { getAttachmentFileStatus } from "../agentDataProvider/utils";
 import { isRemoteFilePath } from "../documentFileIdentity";
 import { libraryRefForLibraryID } from "../../utils/libraryIdentity";
-import { saveItem } from "../../utils/zoteroUtils";
 import {
     BEAVER_ANNOTATION_AUTHOR,
     resolveBeaverAnnotationColor,
@@ -471,18 +470,15 @@ export function buildDomPlacement(
 export async function createHighlightAnnotation(
     attachment: Zotero.Item,
     input: CreateHighlightInput,
-    preparedGeometry?: PageGeometry,
 ): Promise<ZoteroItemReference> {
     if (!attachment.isPDFAttachment()) {
         throw new Error("createHighlightAnnotation: attachment is not a PDF");
     }
 
-    // A caller holding a DB transaction (annotation relocation) resolves this
-    // beforehand: on a geometry cache miss the lookup runs a full PDF analysis,
-    // which must not happen under Zotero's global write lock.
-    const geometry =
-        preparedGeometry ??
-        (await getPageGeometryForAttachment(attachment, input.pageIndex));
+    const geometry = await getPageGeometryForAttachment(
+        attachment,
+        input.pageIndex,
+    );
 
     const item = new Zotero.Item("annotation");
     item.libraryID = attachment.libraryID;
@@ -496,9 +492,7 @@ export async function createHighlightAnnotation(
     if (input.tags?.length) {
         for (const tag of input.tags) item.addTag(tag);
     }
-    // Joins an open transaction when a caller (e.g. annotation relocation)
-    // already opened one; opens its own otherwise.
-    await saveItem(item);
+    await item.saveTx();
 
     return createdAnnotationReference(attachment, item);
 }
@@ -509,18 +503,15 @@ export async function createHighlightAnnotation(
 export async function createNoteAnnotation(
     attachment: Zotero.Item,
     input: CreateNoteInput,
-    preparedGeometry?: PageGeometry,
 ): Promise<ZoteroItemReference> {
     if (!attachment.isPDFAttachment()) {
         throw new Error("createNoteAnnotation: attachment is not a PDF");
     }
 
-    const geometry =
-        preparedGeometry ??
-        (await getPageGeometryForAttachment(
-            attachment,
-            input.notePosition.page_index,
-        ));
+    const geometry = await getPageGeometryForAttachment(
+        attachment,
+        input.notePosition.page_index,
+    );
 
     const item = new Zotero.Item("annotation");
     item.libraryID = attachment.libraryID;
@@ -534,9 +525,7 @@ export async function createNoteAnnotation(
     if (input.tags?.length) {
         for (const tag of input.tags) item.addTag(tag);
     }
-    // Joins an open transaction when a caller (e.g. annotation relocation)
-    // already opened one; opens its own otherwise.
-    await saveItem(item);
+    await item.saveTx();
 
     return createdAnnotationReference(attachment, item);
 }
@@ -601,13 +590,7 @@ async function getEpubFilePath(attachment: Zotero.Item): Promise<string> {
 async function resolveEpubAnnotationOrThrow(
     attachment: Zotero.Item,
     locator: EpubAnnotationLocator,
-    prepared?: ResolvedEpubAnnotation,
 ) {
-    // A caller that already resolved this locator (annotation relocation does,
-    // outside its DB transaction) passes the result through so the EPUB zip is
-    // not opened and parsed again — here that would happen while holding
-    // Zotero's global write lock.
-    if (prepared) return prepared;
     assertEpubAttachment(attachment);
     const filePath = await getEpubFilePath(attachment);
     const resolved = await resolveEpubAnnotationTarget(filePath, locator);
@@ -618,12 +601,12 @@ async function resolveEpubAnnotationOrThrow(
 }
 
 /**
- * Resolve an EPUB locator to its persistable position ahead of time.
+ * Resolve an EPUB locator to its persistable position without creating an item.
  *
- * Pass the result to {@link createEpubHighlightAnnotation} /
- * {@link createEpubNoteAnnotation} as `prepared` to keep the zip read + parse
- * out of a surrounding DB transaction. Throws EpubAnnotationError when the
- * file is unavailable or the locator cannot be resolved.
+ * Callers that need the placement on its own (annotation relocation) use this
+ * so the zip read + parse stays outside their transaction. Throws
+ * EpubAnnotationError when the file is unavailable or the locator cannot be
+ * resolved.
  */
 export async function prepareEpubAnnotationTarget(
     attachment: Zotero.Item,
@@ -640,14 +623,13 @@ export async function prepareEpubAnnotationTarget(
 export async function createEpubHighlightAnnotation(
     attachment: Zotero.Item,
     input: CreateEpubHighlightInput,
-    prepared?: ResolvedEpubAnnotation,
 ): Promise<ZoteroItemReference> {
     const resolved = await resolveEpubAnnotationOrThrow(attachment, {
         sectionHref: input.sectionHref,
         sectionOrdinal: input.sectionOrdinal,
         anchorId: input.anchorId,
         text: input.text,
-    }, prepared);
+    });
 
     const item = new Zotero.Item("annotation");
     item.libraryID = attachment.libraryID;
@@ -666,9 +648,7 @@ export async function createEpubHighlightAnnotation(
     if (input.tags?.length) {
         for (const tag of input.tags) item.addTag(tag);
     }
-    // Joins an open transaction when a caller (e.g. annotation relocation)
-    // already opened one; opens its own otherwise.
-    await saveItem(item);
+    await item.saveTx();
 
     return createdAnnotationReference(attachment, item);
 }
@@ -682,7 +662,6 @@ export async function createEpubHighlightAnnotation(
 export async function createEpubNoteAnnotation(
     attachment: Zotero.Item,
     input: CreateEpubNoteInput,
-    prepared?: ResolvedEpubAnnotation,
 ): Promise<ZoteroItemReference> {
     const resolved = await resolveEpubAnnotationOrThrow(attachment, {
         sectionHref: input.sectionHref,
@@ -690,7 +669,7 @@ export async function createEpubNoteAnnotation(
         anchorId: input.anchorId,
         text: input.text,
         anchorToBlock: true,
-    }, prepared);
+    });
 
     const item = new Zotero.Item("annotation");
     item.libraryID = attachment.libraryID;
@@ -709,9 +688,7 @@ export async function createEpubNoteAnnotation(
     if (input.tags?.length) {
         for (const tag of input.tags) item.addTag(tag);
     }
-    // Joins an open transaction when a caller (e.g. annotation relocation)
-    // already opened one; opens its own otherwise.
-    await saveItem(item);
+    await item.saveTx();
 
     return createdAnnotationReference(attachment, item);
 }
@@ -854,9 +831,7 @@ export async function createSnapshotHighlightAnnotation(
     if (input.tags?.length) {
         for (const tag of input.tags) item.addTag(tag);
     }
-    // Joins an open transaction when a caller (e.g. annotation relocation)
-    // already opened one; opens its own otherwise.
-    await saveItem(item);
+    await item.saveTx();
 
     return createdAnnotationReference(attachment, item);
 }
@@ -891,9 +866,7 @@ export async function createSnapshotNoteAnnotation(
     if (input.tags?.length) {
         for (const tag of input.tags) item.addTag(tag);
     }
-    // Joins an open transaction when a caller (e.g. annotation relocation)
-    // already opened one; opens its own otherwise.
-    await saveItem(item);
+    await item.saveTx();
 
     return createdAnnotationReference(attachment, item);
 }

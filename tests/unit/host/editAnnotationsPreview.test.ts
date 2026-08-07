@@ -60,7 +60,7 @@ describe('EditAnnotationsPreview', () => {
 
     it('uses a shorter preview for the comment change pill', () => {
         expect(commentPillPreview('N'.repeat(200))).toBe(
-            `${'N'.repeat(60)}...`,
+            `${'N'.repeat(40)}...`,
         );
     });
 

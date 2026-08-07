@@ -156,6 +156,13 @@ export interface AnnotationPlacementSnapshot {
  * an annotation that actually moved.
  */
 export interface AnnotationBeforeSnapshot extends AnnotationPreviewSnapshot {
+    /**
+     * Which of `tags` Zotero held as automatic rather than manual tags.
+     * `tags` carries names alone because the cards render from it, and
+     * restoring from names alone would turn every automatic tag manual.
+     * Omitted when the annotation had none.
+     */
+    automatic_tags?: string[];
     deleted?: boolean;
     sort_index?: string;
     /** `annotationPosition` before the move, verbatim. */

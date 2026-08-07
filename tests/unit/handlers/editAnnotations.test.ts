@@ -129,9 +129,15 @@ function annotation(key: string, save = vi.fn(async () => {})) {
         isAnnotation: () => true,
         loadDataType: vi.fn(async () => {}),
         getTags: () => tags.map((tag) => ({ ...tag })),
+        // Mirrors Zotero.Tags.cleanData: a string is a manual tag, and type 0
+        // is dropped, so a stored tag carries `type` only when automatic.
         setTags: (next: Array<string | { tag: string; type?: number }>) => {
             tags = next.map((tag) =>
-                typeof tag === "string" ? { tag } : { ...tag },
+                typeof tag === "string"
+                    ? { tag }
+                    : tag.type
+                      ? { tag: tag.tag, type: tag.type }
+                      : { tag: tag.tag },
             );
         },
         save,
@@ -179,6 +185,16 @@ const ref = (key: string) => ({
     library_id: 1,
     zotero_key: key,
     library_ref: "u",
+});
+
+/** A snapshot as validation stores it on the proposal. */
+const preview = (key: string, overrides: Record<string, any> = {}) => ({
+    annotation_id: `u-${key}`,
+    ...ref(key),
+    color: "#ffd400",
+    comment: `comment-${key}`,
+    tags: [`old-${key}`],
+    ...overrides,
 });
 
 beforeEach(() => {
@@ -241,6 +257,27 @@ describe("edit_annotations validation", () => {
             color: "#ffd400",
             comment: "comment-AAA",
             tags: ["old-AAA"],
+        });
+        // No automatic tags here, so the field stays off the snapshot.
+        expect(response.current_value.annotations[0]).not.toHaveProperty(
+            "automatic_tags",
+        );
+    });
+
+    it("records which tags were automatic on the snapshot", async () => {
+        // `tags` is names only, so undo restores from it — without the types
+        // it would file every automatic tag back as a manual one.
+        items.get("AAA").setTags([{ tag: "auto", type: 1 }, { tag: "manual" }]);
+
+        const response = await validate({
+            edits: [
+                { annotation_refs: refs("AAA"), changes: { color: "blue" } },
+            ],
+        });
+
+        expect(response.current_value.annotations[0]).toMatchObject({
+            tags: ["auto", "manual"],
+            automatic_tags: ["auto"],
         });
     });
 
@@ -692,6 +729,198 @@ describe("edit_annotations execution", () => {
         expect(items.get("AAA").getTags()).toEqual([{ tag: "only" }]);
     });
 
+    it("refuses an edit that turned destructive since it was proposed", async () => {
+        // Validation saw no comment, so the edit could be auto-applied without
+        // a card; the user has written one since. Overwriting it now would
+        // skip the approval the guard promises.
+        const response = await execute({
+            edits: [
+                {
+                    annotation_refs: refs("AAA"),
+                    changes: { comment: "model comment" },
+                },
+            ],
+            annotation_previews: [preview("AAA", { comment: "" })],
+        });
+
+        expect(response.success).toBe(false);
+        expect(response.error_code).toBe("annotation_state_changed");
+        expect(items.get("AAA").annotationComment).toBe("comment-AAA");
+        expect(items.get("AAA").save).not.toHaveBeenCalled();
+    });
+
+    it("refuses when one target in an approved group turns destructive", async () => {
+        // AAA already had a comment at validation, so the group was approved
+        // on its account. BBB had none and has gained one since — content the
+        // user wrote that nobody has approved overwriting, and that a
+        // group-level check would let AAA's approval absorb.
+        const response = await execute({
+            edits: [
+                {
+                    annotation_refs: refs("AAA", "BBB"),
+                    changes: { comment: "model comment" },
+                },
+            ],
+            annotation_previews: [
+                preview("AAA"),
+                preview("BBB", { comment: "" }),
+            ],
+        });
+
+        expect(response.success).toBe(false);
+        expect(response.error_code).toBe("annotation_state_changed");
+        expect(items.get("AAA").annotationComment).toBe("comment-AAA");
+        expect(items.get("BBB").annotationComment).toBe("comment-BBB");
+    });
+
+    it("refuses an edit that turned destructive while the batch was prepared", async () => {
+        // The snapshot is taken as each annotation resolves, and preparing the
+        // moves that follow can take seconds. A comment written in THAT window
+        // is invisible to a guard reading the resolve-time snapshot.
+        const drifting = items.get("AAA");
+        drifting.annotationComment = "";
+        prepareRelocation.mockImplementationOnce(async () => {
+            drifting.annotationComment = "user comment";
+            return MOVED_PLACEMENT;
+        });
+
+        const response = await execute({
+            edits: [
+                {
+                    annotation_refs: refs("AAA"),
+                    changes: { comment: "model comment" },
+                },
+                { annotation_refs: refs("BBB"), relocation: relocation() },
+            ],
+            annotation_previews: [
+                preview("AAA", { comment: "" }),
+                preview("BBB"),
+            ],
+        });
+
+        expect(response.success).toBe(false);
+        expect(response.error_code).toBe("annotation_state_changed");
+        expect(drifting.annotationComment).toBe("user comment");
+        // The whole batch is rolled back, including the move in the other
+        // group that was not the one that drifted.
+        expect(items.get("BBB").annotationPosition).toBe("position-BBB");
+    });
+
+    it("snapshots the state the write actually overwrites", async () => {
+        // Undo restores from these snapshots, so they have to describe the
+        // annotation as the write found it, not as resolution first saw it.
+        const drifting = items.get("AAA");
+        prepareRelocation.mockImplementationOnce(async () => {
+            drifting.annotationComment = "written while preparing";
+            drifting.setTags([{ tag: "auto", type: 1 }]);
+            return MOVED_PLACEMENT;
+        });
+
+        const response = await execute({
+            edits: [
+                { annotation_refs: refs("AAA"), changes: { color: "red" } },
+                { annotation_refs: refs("BBB"), relocation: relocation() },
+            ],
+        });
+
+        expect(response.success).toBe(true);
+        expect(response.result_data?.before[0]).toMatchObject({
+            annotation_id: "u-AAA",
+            comment: "written while preparing",
+            tags: ["auto"],
+            automatic_tags: ["auto"],
+        });
+    });
+
+    it("applies an edit that was already destructive when proposed", async () => {
+        // The comment was there at validation, so the card was raised and the
+        // user approved it. Re-running the guard must not refuse that.
+        const response = await execute({
+            edits: [
+                {
+                    annotation_refs: refs("AAA"),
+                    changes: { comment: "model comment" },
+                },
+            ],
+            annotation_previews: [preview("AAA")],
+        });
+
+        expect(response.success).toBe(true);
+        expect(items.get("AAA").annotationComment).toBe("model comment");
+    });
+
+    it("refuses when the tags that would have survived are gone", async () => {
+        // Validation saw two tags, so removing one left the other standing.
+        // Only one is left now, and removing it wipes the annotation's tags.
+        items.get("AAA").setTags([{ tag: "old-AAA" }]);
+
+        const response = await execute({
+            edits: [
+                {
+                    annotation_refs: refs("AAA"),
+                    changes: { remove_tags: ["old-AAA"] },
+                },
+            ],
+            annotation_previews: [
+                preview("AAA", { tags: ["old-AAA", "keeper"] }),
+            ],
+        });
+
+        expect(response.success).toBe(false);
+        expect(response.error_code).toBe("annotation_state_changed");
+        expect(items.get("AAA").getTags()).toEqual([{ tag: "old-AAA" }]);
+    });
+
+    it("keeps a retained tag automatic while other tags change", async () => {
+        // setTags() files a tag passed as a bare name as manual, so a patch
+        // that names other tags must carry the retained ones back with their
+        // types or it silently rewrites the annotation's tag metadata.
+        items
+            .get("AAA")
+            .setTags([{ tag: "auto", type: 1 }, { tag: "old-AAA" }]);
+
+        await execute({
+            edits: [
+                {
+                    annotation_refs: refs("AAA"),
+                    changes: {
+                        add_tags: ["new-tag"],
+                        remove_tags: ["old-AAA"],
+                    },
+                },
+            ],
+        });
+
+        expect(items.get("AAA").getTags()).toEqual([
+            { tag: "auto", type: 1 },
+            { tag: "new-tag" },
+        ]);
+    });
+
+    it("restores tag types when a save fails", async () => {
+        items.get("AAA").setTags([{ tag: "auto", type: 1 }]);
+        items.set(
+            "BBB",
+            annotation(
+                "BBB",
+                vi.fn(async () => {
+                    throw new Error("save failed");
+                }),
+            ),
+        );
+
+        await execute({
+            edits: [
+                {
+                    annotation_refs: refs("AAA", "BBB"),
+                    changes: { add_tags: ["new-tag"] },
+                },
+            ],
+        });
+
+        expect(items.get("AAA").getTags()).toEqual([{ tag: "auto", type: 1 }]);
+    });
+
     it("restores every in-memory annotation when one save fails", async () => {
         items.set(
             "BBB",
@@ -831,7 +1060,7 @@ describe("edit_annotations execution", () => {
         // Preparing a move can read the attachment and run a PDF page
         // analysis. Doing that inside the transaction would hold Zotero's
         // global write lock for the duration and stall every other write.
-        prepareRelocation.mockImplementationOnce(async (...args: any[]) => {
+        prepareRelocation.mockImplementationOnce(async () => {
             expect((globalThis as any).Zotero.DB.inTransaction()).toBe(false);
             return MOVED_PLACEMENT;
         });

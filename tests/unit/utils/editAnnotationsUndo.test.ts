@@ -71,9 +71,15 @@ function annotation(key: string, overrides: Record<string, any> = {}) {
         }),
         loadedDataTypes: loaded,
         getTags: () => tags.map((tag) => ({ ...tag })),
+        // Mirrors Zotero.Tags.cleanData: a string is a manual tag, and type 0
+        // is dropped, so a stored tag carries `type` only when automatic.
         setTags: (next: Array<string | { tag: string; type?: number }>) => {
             tags = next.map((tag) =>
-                typeof tag === "string" ? { tag } : { ...tag },
+                typeof tag === "string"
+                    ? { tag }
+                    : tag.type
+                      ? { tag: tag.tag, type: tag.type }
+                      : { tag: tag.tag },
             );
         },
         save: vi.fn(async () => {}),
@@ -443,6 +449,42 @@ describe("undoEditAnnotationsAction", () => {
 
         expect(item.getTags()).toEqual([{ tag: "old" }]);
         expect(result.fieldsReverted).toBe(1);
+    });
+
+    it("restores automatic tags as automatic", async () => {
+        const item = annotation("AAA");
+        // What add_tags: ["added"] would have produced from an automatic tag.
+        item.setTags([{ tag: "old", type: 1 }, { tag: "added" }]);
+        items.set("AAA", item);
+
+        const result = await undoEditAnnotationsAction(
+            updateAction({ add_tags: ["added"] }, [
+                snapshot("AAA", { automatic_tags: ["old"] }),
+            ]),
+        );
+
+        expect(item.getTags()).toEqual([{ tag: "old", type: 1 }]);
+        expect(result.fieldsReverted).toBe(1);
+    });
+
+    it("leaves tags alone when the user re-filed one as manual", async () => {
+        const item = annotation("AAA");
+        // The action added "added" to an automatic "old". The user has since
+        // made "old" a manual tag — a change to the same field, so undo must
+        // not quietly file it back as automatic.
+        item.setTags([{ tag: "old" }, { tag: "added" }]);
+        items.set("AAA", item);
+
+        const result = await undoEditAnnotationsAction(
+            updateAction({ add_tags: ["added"] }, [
+                snapshot("AAA", { automatic_tags: ["old"] }),
+            ]),
+        );
+
+        expect(item.getTags()).toEqual([{ tag: "old" }, { tag: "added" }]);
+        expect(result.manuallyModified).toEqual(["tags"]);
+        expect(result.fieldsReverted).toBe(0);
+        expect(item.save).not.toHaveBeenCalled();
     });
 
     it("undoes a batch where only one annotation moved", async () => {

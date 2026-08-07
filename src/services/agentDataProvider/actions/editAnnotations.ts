@@ -24,7 +24,6 @@ import {
     resolveItemReference,
     resolveLibraryRef,
 } from "../../../utils/libraryIdentity";
-import { saveItem } from "../../../utils/zoteroUtils";
 import {
     applyAnnotationPlacement,
     type AnnotationPlacement,
@@ -49,7 +48,7 @@ const ALLOWED_KEYS = new Set([
     "annotation_refs",
     "skipped",
     // Written by validation and persisted on the proposal, which is replayed
-    // verbatim on execute and on re-apply. Accepted and ignored here.
+    // verbatim on execute and on re-apply.
     "annotation_previews",
 ]);
 const ALLOWED_GROUP_KEYS = new Set([
@@ -65,6 +64,12 @@ const ALLOWED_CHANGE_KEYS = new Set([
 ]);
 const ALLOWED_REF_KEYS = new Set(["library_id", "zotero_key", "library_ref"]);
 
+/** A tag in the shape `setTags()` accepts; type 0 is a manual tag. */
+type ItemTag = { tag: string; type: number };
+
+/** Zotero's automatic-tag type; everything else is a manual tag. */
+const AUTOMATIC_TAG_TYPE = 1;
+
 type ResolvedTarget = {
     id: string;
     item: Zotero.Item;
@@ -72,6 +77,12 @@ type ResolvedTarget = {
     annotationType: string;
     ref: ZoteroItemReference;
     before: AnnotationBeforeSnapshot;
+    /**
+     * The annotation's tags with their types, for writing back. `before.tags`
+     * is names only (it is display data), and writing names back would file
+     * every automatic tag as a manual one.
+     */
+    beforeTags: ItemTag[];
     /** Index of the group this target belongs to; -1 for a delete. */
     groupIndex: number;
 };
@@ -354,6 +365,32 @@ function normalizeGroup(value: any): AnnotationEditGroup | DataResult {
     };
 }
 
+/**
+ * The snapshots validation stored on the proposal, carried through so
+ * execution can compare what it is about to overwrite against what validation
+ * saw. Read defensively — this is replayed action data, and a row that lost a
+ * field reads as "had nothing there", which can only make the comparison more
+ * cautious.
+ */
+function normalizePreviews(
+    value: unknown,
+): AnnotationPreviewSnapshot[] | undefined {
+    if (!Array.isArray(value)) return undefined;
+    const rows: AnnotationPreviewSnapshot[] = [];
+    for (const row of value) {
+        if (!row || typeof row !== "object") continue;
+        if (typeof row.annotation_id !== "string") continue;
+        rows.push({
+            ...row,
+            comment: typeof row.comment === "string" ? row.comment : "",
+            tags: Array.isArray(row.tags)
+                ? row.tags.filter((tag: unknown) => typeof tag === "string")
+                : [],
+        });
+    }
+    return rows.length ? rows : undefined;
+}
+
 function normalizeData(
     raw: Record<string, any> | null | undefined,
 ): DataResult {
@@ -370,6 +407,8 @@ function normalizeData(
     const operation = value.operation ?? "edit";
     const skipped = normalizeSkipped(value.skipped);
     if (!Array.isArray(skipped)) return skipped;
+    const previews = normalizePreviews(value.annotation_previews);
+    const carried = previews ? { annotation_previews: previews } : {};
 
     if (operation === "delete") {
         if (value.edits !== undefined)
@@ -378,7 +417,7 @@ function normalizeData(
         if (!Array.isArray(refs)) return refs;
         return {
             ok: true,
-            data: { operation, annotation_refs: refs, skipped },
+            data: { operation, annotation_refs: refs, skipped, ...carried },
         };
     }
 
@@ -420,7 +459,10 @@ function normalizeData(
             "too_many_annotations",
         );
 
-    return { ok: true, data: { operation: "edit", edits: groups, skipped } };
+    return {
+        ok: true,
+        data: { operation: "edit", edits: groups, skipped, ...carried },
+    };
 }
 
 /**
@@ -436,6 +478,21 @@ export async function loadAnnotationEditData(item: Zotero.Item): Promise<void> {
     await item.loadDataType?.("annotation");
     await item.loadDataType?.("annotationDeferred");
     await item.loadDataType?.("tags");
+}
+
+function readItemTags(item: Zotero.Item): ItemTag[] {
+    return item
+        .getTags()
+        .map((tag: { tag: string; type?: number }) => ({
+            tag: tag.tag,
+            type: tag.type ?? 0,
+        }));
+}
+
+function automaticTagNames(tags: ItemTag[]): string[] {
+    return tags
+        .filter((tag) => tag.type === AUTOMATIC_TAG_TYPE)
+        .map((tag) => tag.tag);
 }
 
 async function isDeleted(item: any): Promise<boolean> {
@@ -499,19 +556,25 @@ async function resolveTarget(
         zotero_key: item.key,
         ...(libraryRef ? { library_ref: libraryRef } : {}),
     };
+    const beforeTags = readItemTags(item);
+    const automaticTags = automaticTagNames(beforeTags);
     return {
         id,
         item,
         attachment,
         annotationType: item.annotationType,
         ref,
+        beforeTags,
         groupIndex,
         before: {
             annotation_id: id,
             ...ref,
             color: item.annotationColor ?? "",
             comment: item.annotationComment ?? "",
-            tags: item.getTags().map((tag: { tag: string }) => tag.tag),
+            tags: beforeTags.map((tag) => tag.tag),
+            // Undo restores the tag set from the snapshot, so the types have to
+            // travel with it; the names alone would file them all as manual.
+            ...(automaticTags.length ? { automatic_tags: automaticTags } : {}),
             deleted: false,
             // Carried on every snapshot, not just moves: the approval card and
             // the persisted history entry both render from this, and history
@@ -739,56 +802,139 @@ function survivingData(
 }
 
 /**
- * An edit that overwrites content the user wrote (a comment, or a tag set
- * being replaced wholesale) always goes to the user, whatever their standing
- * preference for annotation edits is. So does any move.
+ * The per-annotation state the approval guard reads: what the edit would
+ * overwrite, and which group's patch would overwrite it.
+ */
+type ApprovalState = {
+    annotationId: string;
+    groupIndex: number;
+    comment: string;
+    tags: string[];
+};
+
+/** What the guard sees for targets resolved from the library right now. */
+function currentStates(targets: ResolvedTarget[]): ApprovalState[] {
+    return targets.map((target) => ({
+        annotationId: target.id,
+        groupIndex: target.groupIndex,
+        comment: target.before.comment,
+        tags: target.before.tags,
+    }));
+}
+
+/**
+ * The same states as validation saw, rebuilt from the snapshots it stored on
+ * the proposal.
+ *
+ * Only annotations validation actually resolved have a snapshot; anything
+ * without one keeps its current state, which reports no drift for it. The
+ * stored comment is clipped for display, so it may only be tested for
+ * emptiness — which is all the guard asks of it.
+ */
+function validatedStates(
+    data: EditAnnotationsProposedData,
+    targets: ResolvedTarget[],
+): ApprovalState[] | null {
+    const previews = new Map(
+        (data.annotation_previews ?? []).map((row) => [row.annotation_id, row]),
+    );
+    if (!previews.size) return null;
+    return currentStates(targets).map((state) => {
+        const preview = previews.get(state.annotationId);
+        if (!preview) return state;
+        return { ...state, comment: preview.comment, tags: preview.tags };
+    });
+}
+
+/** Wiping out every tag an annotation carried, as opposed to trimming some. */
+function removesEveryTag(
+    state: ApprovalState,
+    changes: EditAnnotationsPatch,
+): boolean {
+    if (!state.tags.length) return false;
+    const before = state.tags.map((tag) => ({ tag, type: 0 }));
+    const next = nextTags(before, changes) ?? before;
+    const names = new Set(next.map((tag) => tag.tag));
+    return !state.tags.some((tag) => names.has(tag));
+}
+
+/**
+ * Everything about this edit that would overwrite content the user wrote — a
+ * comment, or a tag set being replaced wholesale — plus every move.
+ *
+ * Keyed by group, annotation, and field rather than reported as one flag, so
+ * that comparing two runs of this tells which annotation turned destructive.
+ * A coarser key hides one target behind another: a group that already had to
+ * be approved for annotation A would otherwise absorb a comment B gained since.
  *
  * Deletion is not handled here: it lives in its own approval group with no
  * persisted preference, so it already resolves to "always ask" on its own.
  */
+function destructiveEdits(
+    data: EditAnnotationsProposedData,
+    states: ApprovalState[],
+): Set<string> {
+    const destructive = new Set<string>();
+    if (data.operation === "delete") return destructive;
+    // MUST be called with the proposal whose `edits` the states' `groupIndex`
+    // was assigned against: `survivingData` compacts the list, so mixing the
+    // original proposal with states resolved from the compacted one shifts
+    // every group after a dropped one and silently resolves `members` to the
+    // wrong (empty) set, which can only ever weaken the guard.
+    (data.edits ?? []).forEach((group, groupIndex) => {
+        const changes = group.changes;
+        // A group whose targets were all dropped contributes nothing.
+        for (const state of states) {
+            if (state.groupIndex !== groupIndex) continue;
+            const key = (field: string) =>
+                `${groupIndex}:${state.annotationId}:${field}`;
+            if (group.relocation) destructive.add(key("position"));
+            if (!changes) continue;
+            // Writing a comment onto an annotation that already has one, or
+            // wiping out every tag it carried, destroys something the user
+            // wrote. Adding a comment where there was none, recoloring, and a
+            // targeted tag add/remove that leaves other tags standing are
+            // non-destructive.
+            if (changes.comment != null && state.comment.trim())
+                destructive.add(key("comment"));
+            // Replacing a tag set is spelled as removing the current tags and
+            // adding the new ones, so the destructive case is a removal that
+            // leaves none of an annotation's prior tags behind.
+            if (changes.remove_tags?.length && removesEveryTag(state, changes))
+                destructive.add(key("tags"));
+        }
+    });
+    return destructive;
+}
+
+/**
+ * A destructive edit always goes to the user, whatever their standing
+ * preference for annotation edits is.
+ */
 function requiresApproval(
+    data: EditAnnotationsProposedData,
+    states: ApprovalState[],
+): boolean {
+    return destructiveEdits(data, states).size > 0;
+}
+
+/**
+ * True when this edit would now destroy something on an annotation that it
+ * would not have destroyed at validation time.
+ *
+ * A move is state-independent, so it keys the same on both sides and never
+ * counts as drift on its own — it only ever came with an approval card.
+ */
+function turnedDestructive(
     data: EditAnnotationsProposedData,
     targets: ResolvedTarget[],
 ): boolean {
-    if (data.operation === "delete") return false;
-    // MUST be called with the ORIGINAL proposal: `groupIndex` is assigned
-    // against `data.edits` as received, while `survivingData` compacts the
-    // list. Passing the compacted form shifts every group after a dropped one
-    // and silently resolves `members` to the wrong (empty) set, which can only
-    // ever weaken the guard.
-    return (data.edits ?? []).some((group, groupIndex) => {
-        const members = targets.filter(
-            (target) => target.groupIndex === groupIndex,
-        );
-        // Every target dropped during validation: nothing left to approve.
-        if (!members.length) return false;
-        if (group.relocation) return true;
-        const changes = group.changes;
-        if (!changes) return false;
-        // Writing a comment onto an annotation that already has one, or
-        // wiping out every tag it carried, destroys something the user wrote.
-        // Adding a comment where there was none, recoloring, and a targeted
-        // tag add/remove that leaves other tags standing are non-destructive.
-        if (
-            changes.comment != null &&
-            members.some((target) => target.before.comment.trim())
-        )
-            return true;
-        // Replacing a tag set is spelled as removing the current tags and
-        // adding the new ones, so the destructive case is a removal that
-        // leaves none of an annotation's prior tags behind.
-        if (
-            changes.remove_tags?.length &&
-            members.some((target) => {
-                if (!target.before.tags.length) return false;
-                const next =
-                    nextTags(target.before.tags, changes) ?? target.before.tags;
-                return !target.before.tags.some((tag) => next.includes(tag));
-            })
-        )
-            return true;
-        return false;
-    });
+    const validated = validatedStates(data, targets);
+    if (!validated) return false;
+    const before = destructiveEdits(data, validated);
+    return [...destructiveEdits(data, currentStates(targets))].some(
+        (key) => !before.has(key),
+    );
 }
 
 /**
@@ -825,7 +971,8 @@ function resolvePreference(
             : "always_ask";
     }
     const stored = getDeferredToolPreference("edit_annotations");
-    return stored === "always_apply" && requiresApproval(data, targets)
+    return stored === "always_apply" &&
+        requiresApproval(data, currentStates(targets))
         ? "always_ask"
         : stored;
 }
@@ -908,7 +1055,7 @@ function restoreSnapshots(targets: ResolvedTarget[]): void {
     for (const target of targets) {
         target.item.annotationColor = target.before.color;
         target.item.annotationComment = target.before.comment;
-        target.item.setTags(target.before.tags);
+        target.item.setTags(target.beforeTags);
         target.item.deleted = target.before.deleted ?? false;
         // Only a move captures placement, so its presence marks the items
         // whose position was overwritten before the rollback.
@@ -925,16 +1072,56 @@ function restoreSnapshots(targets: ResolvedTarget[]): void {
     }
 }
 
-/** The tag set an annotation ends up with after one patch. */
+/** Raised inside the transaction to roll it back before anything is written. */
+class AnnotationStateChangedError extends Error {}
+
+/**
+ * Re-read the state a target's write will overwrite.
+ *
+ * `resolveTarget` snapshots each annotation as it resolves it, and preparing
+ * the batch's moves can take seconds after that — long enough for the user or
+ * sync to change an annotation resolved early on. Run inside the transaction,
+ * where no other write can interleave, so what this captures is what the batch
+ * actually overwrites: the undo record and the re-checked approval guard both
+ * read it.
+ *
+ * Placement is left alone — only a move overwrites it, and `capturePlacement`
+ * already records it in the same transaction.
+ */
+function refreshBeforeState(target: ResolvedTarget): void {
+    const item = target.item;
+    target.beforeTags = readItemTags(item);
+    const automatic = automaticTagNames(target.beforeTags);
+    target.before.color = item.annotationColor ?? "";
+    target.before.comment = item.annotationComment ?? "";
+    target.before.tags = target.beforeTags.map((tag) => tag.tag);
+    if (automatic.length) target.before.automatic_tags = automatic;
+    else delete target.before.automatic_tags;
+    target.before.page_label = item.annotationPageLabel ?? "";
+    if (target.annotationType === "highlight")
+        target.before.text = item.annotationText ?? "";
+}
+
+/**
+ * The tag set an annotation ends up with after one patch.
+ *
+ * Retained tags are carried through unchanged, types included: a patch that
+ * names other tags must not silently re-file an annotation's automatic tags as
+ * manual ones. Newly added tags are manual, which is what `addTag()` defaults
+ * to.
+ */
 function nextTags(
-    before: string[],
+    before: ItemTag[],
     changes: EditAnnotationsPatch | undefined,
-): string[] | null {
+): ItemTag[] | null {
     if (!changes) return null;
     if (changes.add_tags == null && changes.remove_tags == null) return null;
     const removed = new Set(changes.remove_tags ?? []);
-    const kept = before.filter((tag) => !removed.has(tag));
-    const added = (changes.add_tags ?? []).filter((tag) => !kept.includes(tag));
+    const kept = before.filter((tag) => !removed.has(tag.tag));
+    const keptNames = new Set(kept.map((tag) => tag.tag));
+    const added = (changes.add_tags ?? [])
+        .filter((tag) => !keptNames.has(tag))
+        .map((tag) => ({ tag, type: 0 }));
     return [...kept, ...added];
 }
 
@@ -980,20 +1167,40 @@ export async function executeEditAnnotationsAction(
     try {
         checkAborted(ctx, "edit_annotations:before_transaction");
         await Zotero.DB.executeTransaction(async () => {
+            // Re-snapshot everything before writing anything: resolving the
+            // batch and preparing its moves can take seconds, and the state
+            // captured back then may no longer be what these writes overwrite.
+            for (const target of partition.targets) refreshBeforeState(target);
+
+            // The approval guard runs at validation, and an edit found
+            // non-destructive there can reach this point auto-applied, with no
+            // card ever shown. Re-check it against what the write would
+            // actually overwrite. This is a comparison, not a re-run: an edit
+            // that was already destructive when the user saw it stays
+            // approved. Inside the transaction, so nothing can slip in between
+            // the check and the writes.
+            if (turnedDestructive(normalized.data, partition.targets))
+                throw new AnnotationStateChangedError();
+
             for (let index = 0; index < partition.targets.length; index++) {
                 const target = partition.targets[index];
                 checkAborted(ctx, `edit_annotations:${target.id}`);
 
                 if (normalized.data.operation === "delete") {
                     target.item.deleted = true;
-                    await saveItem(target.item);
+                    // save(), not saveTx(): every write joins the transaction
+                    // opened above. saveTx() opens its own, which nested inside
+                    // an open one waits for a transaction that cannot finish
+                    // until this call returns and times out after 30s, rolling
+                    // the whole batch back.
+                    await target.item.save();
                     appliedRefs.push(target.ref);
                     continue;
                 }
 
                 const changes = changesByGroup.get(target.groupIndex);
                 const placement = partition.placements[index];
-                const tags = nextTags(target.before.tags, changes);
+                const tags = nextTags(target.beforeTags, changes);
 
                 if (changes?.color != null)
                     target.item.annotationColor =
@@ -1019,7 +1226,7 @@ export async function executeEditAnnotationsAction(
                     };
                     applyAnnotationPlacement(target.item, placement);
                 }
-                await saveItem(target.item);
+                await target.item.save();
                 appliedRefs.push(target.ref);
             }
         });
@@ -1057,6 +1264,21 @@ export async function executeEditAnnotationsAction(
             },
         };
     } catch (error) {
+        if (error instanceof AnnotationStateChangedError) {
+            // Thrown before the first write, so there is nothing to roll back
+            // in memory and the snapshots describe the annotations as they
+            // stand.
+            return {
+                type: "agent_action_execute_response",
+                request_id: request.request_id,
+                success: false,
+                error:
+                    "These annotations changed since the edit was proposed and " +
+                    "it would now overwrite content the user wrote. Read them " +
+                    "again and propose the edit against their current state.",
+                error_code: "annotation_state_changed",
+            };
+        }
         restoreSnapshots(partition.targets);
         if (error instanceof TimeoutError) throw error;
         logger(
