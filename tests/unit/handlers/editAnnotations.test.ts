@@ -767,6 +767,56 @@ describe("edit_annotations execution", () => {
         ]);
     });
 
+    /** Trash a target between the batch being prepared and the writes. */
+    function trashDuringPreparation(key: string) {
+        const db = (globalThis as any).Zotero.DB;
+        const executeTransaction = db.executeTransaction;
+        db.executeTransaction = vi.fn(async (callback: () => Promise<void>) => {
+            items.get(key).deleted = true;
+            return executeTransaction(callback);
+        });
+    }
+
+    it("skips an edit target trashed while the batch was being prepared", async () => {
+        // Resolution rejects an annotation that is already in the trash, so one
+        // trashed since must not be edited either: the write would land on an
+        // annotation the user cannot see and report as applied.
+        trashDuringPreparation("BBB");
+
+        const response = await execute({
+            edits: [
+                {
+                    annotation_refs: refs("AAA", "BBB"),
+                    changes: { color: "red" },
+                },
+            ],
+        });
+
+        expect(response.success).toBe(true);
+        expect(response.result_data?.applied_refs).toEqual([ref("AAA")]);
+        expect(response.result_data?.skipped).toEqual([
+            { annotation_id: "u-BBB", reason: "annotation is in the trash" },
+        ]);
+        expect(items.get("AAA").annotationColor).toBe("#ff6666");
+        expect(items.get("BBB").annotationColor).toBe("#ffd400");
+        // The dropped target must not reach the result snapshots either, or
+        // undo would try to restore an annotation this action never wrote.
+        expect(response.result_data?.before).toHaveLength(1);
+    });
+
+    it("fails when every edit target was trashed while the batch was being prepared", async () => {
+        trashDuringPreparation("AAA");
+
+        const response = await execute({
+            edits: [{ annotation_refs: refs("AAA"), changes: { color: "red" } }],
+        });
+
+        expect(response.success).toBe(false);
+        expect(response.error_code).toBe("annotation_validation_failed");
+        expect(response.error).toContain("annotation is in the trash");
+        expect(items.get("AAA").annotationColor).toBe("#ffd400");
+    });
+
     it("omits the skip list when every target was applied", async () => {
         const response = await execute({
             edits: [{ annotation_refs: refs("AAA"), changes: { color: "red" } }],

@@ -40,6 +40,9 @@ import {
     type RelocatableAnnotationType,
 } from "./annotationPlacement";
 
+/** Skip reason for an annotation that sits in the trash. */
+const TRASHED_REASON = "annotation is in the trash";
+
 const MAX_ANNOTATIONS = 50;
 const MAX_EDIT_GROUPS = 25;
 const VALIDATE_RELOCATION_BUDGET_MS = 60_000;
@@ -548,7 +551,7 @@ async function resolveTarget(
 
     const item = resolved.item;
     if (!item.isAnnotation()) return "item is not an annotation";
-    if (await isDeleted(item)) return "annotation is in the trash";
+    if (await isDeleted(item)) return TRASHED_REASON;
 
     await loadAnnotationEditData(item);
     const attachment = item.parentID
@@ -1111,6 +1114,44 @@ function restoreSnapshots(targets: ResolvedTarget[]): void {
 /** Raised inside the transaction to roll it back before anything is written. */
 class AnnotationStateChangedError extends Error {}
 
+/** Raised inside the transaction when every target was trashed since it resolved. */
+class AllTargetsTrashedError extends Error {}
+
+/**
+ * Drop edit targets that were trashed after they resolved.
+ *
+ * `resolveTarget` rejects an annotation that is already in the trash, and
+ * `refreshBeforeState` re-reads that state inside the transaction. Without this
+ * an annotation the user trashed while the batch was being prepared would still
+ * be edited and saved, reporting a successful edit the user cannot see. Deletes
+ * are left alone: trashing one that is already trashed is a no-op, and the
+ * refreshed `deleted: true` snapshot already keeps undo from pulling it back
+ * out of the trash.
+ *
+ * Mutates the partition so everything downstream — the approval re-check, the
+ * writes, the result snapshots, and the rollback restore — sees only the
+ * targets that are actually written.
+ */
+function dropTrashedTargets(partition: Partitioned): SkippedAnnotation[] {
+    const trashed: SkippedAnnotation[] = [];
+    const targets: ResolvedTarget[] = [];
+    const placements: Array<AnnotationPlacement | undefined> = [];
+    partition.targets.forEach((target, index) => {
+        if (target.before.deleted) {
+            trashed.push({
+                annotation_id: target.id,
+                reason: TRASHED_REASON,
+            });
+            return;
+        }
+        targets.push(target);
+        placements.push(partition.placements[index]);
+    });
+    partition.targets = targets;
+    partition.placements = placements;
+    return trashed;
+}
+
 /**
  * Re-read the state a target's write will overwrite.
  *
@@ -1222,6 +1263,7 @@ export async function executeEditAnnotationsAction(
     }
 
     const appliedRefs: ZoteroItemReference[] = [];
+    let trashedSkips: SkippedAnnotation[] = [];
 
     try {
         checkAborted(ctx, "edit_annotations:before_transaction");
@@ -1231,6 +1273,12 @@ export async function executeEditAnnotationsAction(
             // captured back then may no longer be what these writes overwrite.
             for (const target of partition.targets)
                 await refreshBeforeState(target);
+
+            if (normalized.data.operation !== "delete") {
+                trashedSkips = dropTrashedTargets(partition);
+                if (!partition.targets.length)
+                    throw new AllTargetsTrashedError();
+            }
 
             // The approval guard runs at validation, and an edit found
             // non-destructive there can reach this point auto-applied, with no
@@ -1324,10 +1372,24 @@ export async function executeEditAnnotationsAction(
                 // Re-resolution can drop a target the approval card still
                 // listed, so the result carries the full skip list rather than
                 // letting a partial batch read as an unqualified success.
-                ...(skipped.length ? { skipped } : {}),
+                ...(skipped.length || trashedSkips.length
+                    ? { skipped: mergeSkips(skipped, trashedSkips) }
+                    : {}),
             },
         };
     } catch (error) {
+        if (error instanceof AllTargetsTrashedError) {
+            // Thrown before the first write, so there is nothing to roll back.
+            return {
+                type: "agent_action_execute_response",
+                request_id: request.request_id,
+                success: false,
+                error:
+                    describeSkips(mergeSkips(skipped, trashedSkips)) ||
+                    "No annotations could be resolved",
+                error_code: "annotation_validation_failed",
+            };
+        }
         if (error instanceof AnnotationStateChangedError) {
             // Thrown before the first write, so there is nothing to roll back
             // in memory and the snapshots describe the annotations as they
