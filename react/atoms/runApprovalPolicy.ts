@@ -144,6 +144,29 @@ export function getPendingApprovalIdsForToolGroup(
     return ids;
 }
 
+/**
+ * Whether a run-level group grant can approve every pending action shown by a
+ * grouped approval card. A split-button option must not be offered when it
+ * would leave a narrower action (such as a destructive rewrite) pending.
+ */
+export function canOfferToolGroupRunApproval(
+    approvals: Iterable<{
+        actionType: string;
+        actionData?: Record<string, any>;
+    }>,
+    toolName: string,
+): boolean {
+    const group = getToolGroup(toolName);
+    if (!group) return false;
+
+    for (const approval of approvals) {
+        if (getActionToolGroup(approval.actionType, approval.actionData) !== group) {
+            return false;
+        }
+    }
+    return true;
+}
+
 export interface RunApprovalPolicy {
     /** The single active agent run. A new run grant replaces stale state. */
     runId: string | null;

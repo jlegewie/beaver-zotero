@@ -24,9 +24,9 @@ import {
     setToolExpandedAtom,
 } from '../../../atoms/messageUIState';
 import {
+    canOfferToolGroupRunApproval,
     getToolGroupRunApprovalLabel,
     getToolGroupRunApprovalScope,
-    isDestructiveNoteRewriteAction,
 } from '../../../atoms/runApprovalPolicy';
 import { STATUS_CONFIGS, type ActionStatus } from './agentActionViewHelpers';
 import {
@@ -678,10 +678,8 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
     // so a note-edit run grant neither approves it nor sweeps it up. Offering
     // "Allow all note edits for this run" here would look like it applies the
     // card and then leave it sitting there, so drop to a plain Apply All.
-    const hasDestructiveRewriteApproval = useMemo(
-        () => pendingApprovalsForGroup.some(
-            (pending) => isDestructiveNoteRewriteAction(pending.actionType, pending.actionData),
-        ),
+    const canOfferNoteEditRunApproval = useMemo(
+        () => canOfferToolGroupRunApproval(pendingApprovalsForGroup, 'edit_note'),
         [pendingApprovalsForGroup],
     );
     const showCollapsedHeaderActions =
@@ -900,7 +898,7 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
                             )}
 
                             {showFooterApply && (!isProcessing || clickedButton === 'approve') && (
-                                hasPendingApprovals && !hasDestructiveRewriteApproval ? (
+                                hasPendingApprovals && canOfferNoteEditRunApproval ? (
                                     <SplitApplyButton
                                         onApply={handleApplyAll}
                                         onApplyAll={handleApproveNoteEditsForRun}

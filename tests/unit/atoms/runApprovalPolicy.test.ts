@@ -1,6 +1,7 @@
 import { createStore } from 'jotai';
 import { describe, expect, it } from 'vitest';
 import {
+    canOfferToolGroupRunApproval,
     clearRunApprovalPolicyAtom,
     DEFAULT_DEFERRED_TOOL_GROUPS,
     getPendingApprovalIdsForToolGroup,
@@ -275,6 +276,32 @@ describe('runApprovalPolicy', () => {
             },
         ];
         expect(getPendingApprovalIdsForToolGroup(pending, 'edit_note')).toEqual(['edit-1']);
+    });
+
+    it('hides a note-edit run grant when it cannot approve the whole card', () => {
+        const ordinaryEdit = {
+            actionType: 'edit_note_batch',
+            actionData: { library_id: 1, zotero_key: 'NOTE0001' },
+        };
+        const destructiveRewrite = {
+            actionType: 'edit_note_batch',
+            actionData: {
+                library_id: 1,
+                zotero_key: 'NOTE0001',
+                destructive_rewrite: true,
+            },
+        };
+
+        expect(canOfferToolGroupRunApproval([ordinaryEdit], 'edit_note')).toBe(true);
+        expect(
+            canOfferToolGroupRunApproval(
+                [ordinaryEdit, destructiveRewrite],
+                'edit_note',
+            ),
+        ).toBe(false);
+        expect(
+            canOfferToolGroupRunApproval([destructiveRewrite], 'edit_note'),
+        ).toBe(false);
     });
 
     it('still applies the created-note resource grant to a destructive rewrite', () => {
