@@ -19,6 +19,7 @@ import {
     normalizeNoteHtml,
     type SimplificationMetadata,
 } from '../../../utils/noteHtmlSimplifier';
+import { assessNoteRewrite } from '../../../utils/noteRewriteRisk';
 import {
     checkDuplicateCitations,
     validateNewString,
@@ -541,6 +542,23 @@ async function validateEditNoteBatchAction(
     const totalLines = simplified.split('\n').length;
     const noteTitle = item.getNoteTitle() || '(untitled)';
 
+    // A rewrite that discards or replaces most of the note is the one note edit
+    // that can destroy a user's work in a single approval, so it asks even for
+    // users who let note edits apply automatically. Only validation can judge
+    // this: it is the sole step that holds both the live note and the payload.
+    const rewriteRisk = isSingleRewrite
+        ? assessNoteRewrite(simplified, edits[0].new_string ?? '')
+        : null;
+    const isDestructiveRewrite = rewriteRisk?.isDestructive === true;
+    if (isDestructiveRewrite && rewriteRisk) {
+        logger(
+            `handleEditNoteBatchValidate: destructive rewrite (${rewriteRisk.reason}) of `
+            + `${resolvedLibraryId}-${zotero_key} — removed=${rewriteRisk.removedFraction.toFixed(2)}, `
+            + `retained=${rewriteRisk.retainedFraction.toFixed(2)} — requiring approval`,
+            1,
+        );
+    }
+
     const response: WSAgentActionValidateResponse = {
         type: 'agent_action_validate_response',
         request_id: request.request_id,
@@ -550,16 +568,21 @@ async function validateEditNoteBatchAction(
             total_lines: totalLines,
             ...(isSingleRewrite ? { old_content: simplified } : {}),
         },
-        preference: getDeferredToolPreference('edit_note_batch', {
-            library_id: resolvedLibraryId,
-            zotero_key,
-        }),
+        preference: getDeferredToolPreference(
+            isDestructiveRewrite ? 'destructive_note_rewrite' : 'edit_note_batch',
+            { library_id: resolvedLibraryId, zotero_key },
+        ),
     };
-    if (anyChanged) {
+    // The classification must travel with the action, not just gate the
+    // preference: the approval request that follows still carries the
+    // `edit_note_batch` action type, so without this flag the approval layer
+    // would let an ordinary note-edit run grant authorize the rewrite.
+    if (anyChanged || isDestructiveRewrite) {
         response.normalized_action_data = {
             library_id,
             zotero_key,
             ...(library_ref !== undefined ? { library_ref } : {}),
+            ...(isDestructiveRewrite ? { destructive_rewrite: true } : {}),
             edits: normalizedEdits,
         };
     }

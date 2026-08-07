@@ -15,6 +15,16 @@ export const DEFAULT_DEFERRED_TOOL_GROUPS: Record<string, string> = {
     edit_item: 'metadata_edits',
     edit_note: 'note_edits',
     edit_note_batch: 'note_edits',
+    // A rewrite that discards or replaces most of a note gets its own group, so
+    // approving note edits never carries one with it. Classification happens in
+    // validation (see noteRewriteRisk.ts) — it is the only step holding both the
+    // live note and the payload — and rides along on the action data as
+    // `destructive_rewrite` so later approval steps, which only ever see the
+    // `edit_note_batch` action type, classify it the same way. Like annotation
+    // deletion this has no Preferences row on purpose: with nothing to persist a
+    // preference against it always resolves to `always_ask`, so "apply note
+    // edits automatically" cannot reach it.
+    destructive_note_rewrite: 'note_rewrite',
     create_note: 'note_creation',
     create_collection: 'library_modifications',
     organize_items: 'library_modifications',
@@ -65,11 +75,27 @@ export function getToolGroup(toolName: string): string | null {
 }
 
 /**
+ * True when this action is a whole-note rewrite that validation classified as
+ * destructive. The wire action type stays `edit_note_batch`, so the flag
+ * validation persists in the action data is the only thing separating it from
+ * an ordinary note edit on the approval side.
+ */
+export function isDestructiveNoteRewriteAction(
+    actionType: string,
+    actionData?: Record<string, any>,
+): boolean {
+    return actionType === 'edit_note_batch' && actionData?.destructive_rewrite === true;
+}
+
+/**
  * Resolve the authorization group for an action record.
  *
- * edit_annotations is a shared wire action type: the delete_annotations tool
- * emits it with operation=delete. Authorization must therefore use the
- * payload as well as the action type or deletion cards are mistaken for edits.
+ * Two wire action types are shared by tools with different blast radii, so
+ * authorization must read the payload as well as the action type:
+ * - edit_annotations is emitted by delete_annotations with operation=delete.
+ * - edit_note_batch is emitted for a destructive whole-note rewrite.
+ * Classifying on the action type alone would let the narrower group's grant be
+ * satisfied by an ordinary edit grant.
  */
 export function getActionToolGroup(
     actionType: string,
@@ -80,6 +106,9 @@ export function getActionToolGroup(
         actionData?.operation === 'delete'
     ) {
         return getToolGroup('delete_annotations');
+    }
+    if (isDestructiveNoteRewriteAction(actionType, actionData)) {
+        return getToolGroup('destructive_note_rewrite');
     }
     return getToolGroup(actionType);
 }
@@ -224,7 +253,14 @@ export function isActionApprovedForRun(
     if (policy.runId !== runId) return false;
     const group = getActionToolGroup(toolName, actionData);
     if (group !== null && policy.approvedGroups.has(group)) return true;
-    if (toolName !== 'edit_note' && toolName !== 'edit_note_batch') return false;
+    // The resource grant covers destructive rewrites too: it is only ever
+    // granted for a note Beaver created during this same run, so a rewrite of
+    // one can discard nothing the user wrote.
+    if (
+        toolName !== 'edit_note'
+        && toolName !== 'edit_note_batch'
+        && toolName !== 'destructive_note_rewrite'
+    ) return false;
     const target = getNoteEditTarget(actionData);
     return target !== null && policy.approvedResources.has(
         noteEditResourceKey(target.libraryId, target.zoteroKey),

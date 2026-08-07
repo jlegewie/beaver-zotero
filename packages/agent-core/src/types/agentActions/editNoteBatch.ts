@@ -57,6 +57,13 @@ export interface EditNoteBatchProposedData {
     library_ref?: string;
     /** Ordered list of edits to apply to the note */
     edits: EditNoteBatchEditItem[];
+    /**
+     * Set by validation when a `rewrite` would discard or replace most of the
+     * note. The wire action type stays `edit_note_batch`, so this flag is what
+     * lets the approval layer treat the rewrite as its own authorization group
+     * instead of an ordinary note edit.
+     */
+    destructive_rewrite?: boolean;
 }
 
 /**

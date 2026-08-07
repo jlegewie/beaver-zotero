@@ -596,6 +596,54 @@ describe('validateEditNoteBatchAction — success', () => {
             old_content: NOTE_HTML,
         });
     });
+
+    it('routes a rewrite that discards most of the note to the destructive group', async () => {
+        const paragraphs = Array.from(
+            { length: 40 },
+            (_, i) => `<p>Paragraph ${i} of a long research note about corrugator activity.</p>`,
+        );
+        useNote(`<div data-schema-version="9">${paragraphs.join('')}</div>`);
+
+        const response = await handleAgentActionValidateRequest(makeValidateRequest([
+            { index: 0, operation: 'rewrite', new_string: paragraphs[3] },
+        ]));
+
+        expect(response.valid).toBe(true);
+        expect(getDeferredToolPreference).toHaveBeenCalledWith(
+            'destructive_note_rewrite',
+            expect.objectContaining({ zotero_key: 'NOTE0001' }),
+        );
+        // The flag must ride along on the action, or the approval that follows
+        // (which only sees the edit_note_batch action type) would fall back to
+        // the ordinary note-edit group.
+        expect(response.normalized_action_data).toMatchObject({
+            zotero_key: 'NOTE0001',
+            destructive_rewrite: true,
+        });
+    });
+
+    it('leaves a rewrite that preserves the note on the ordinary note-edit group', async () => {
+        const paragraphs = Array.from(
+            { length: 40 },
+            (_, i) => `<p>Paragraph ${i} of a long research note about corrugator activity.</p>`,
+        );
+        useNote(`<div data-schema-version="9">${paragraphs.join('')}</div>`);
+
+        const response = await handleAgentActionValidateRequest(makeValidateRequest([
+            {
+                index: 0,
+                operation: 'rewrite',
+                new_string: `${paragraphs.join('')}<p>One appended closing paragraph.</p>`,
+            },
+        ]));
+
+        expect(response.valid).toBe(true);
+        expect(getDeferredToolPreference).toHaveBeenCalledWith(
+            'edit_note_batch',
+            expect.objectContaining({ zotero_key: 'NOTE0001' }),
+        );
+        expect(response.normalized_action_data?.destructive_rewrite).toBeUndefined();
+    });
 });
 
 
