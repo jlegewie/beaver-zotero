@@ -9,7 +9,7 @@
 
 import { logger } from '@beaver/agent-core/platform/logger';
 
-import { batchFindExistingReferences, BatchReferenceCheckItem } from '../../../react/utils/batchFindExistingReferences';
+import { batchFindExistingReferences, BatchReferenceCheckItem, BatchReferenceCheckResult } from '../../../react/utils/batchFindExistingReferences';
 import {
     WSExternalReferenceCheckRequest,
     WSExternalReferenceCheckResponse,
@@ -44,6 +44,29 @@ export async function handleExternalReferenceCheckRequest(request: WSExternalRef
         : searchableLibraryIds;
     const libraryIds: number[] = requestedLibraryIds.filter(id => searchableLibraryIds.includes(id));
 
+    // Nothing left to search (every requested library is excluded, or none are
+    // available). Report no results rather than "not found" for every item: a
+    // missing result means "not checked", so the reference keeps an unknown
+    // library status instead of being treated as confirmed absent.
+    if (libraryIds.length === 0) {
+        logger('AgentService: External reference check has no searchable libraries to search', 1);
+        return {
+            type: 'external_reference_check',
+            request_id: request.request_id,
+            results: [],
+            timing: {
+                total_ms: Date.now() - startTime,
+                item_count: request.items.length,
+                phase1_identifier_lookup_ms: 0,
+                phase2_title_candidates_ms: 0,
+                phase3_fuzzy_matching_ms: 0,
+                candidates_fetched: 0,
+                matches_by_identifier: 0,
+                matches_by_fuzzy: 0,
+            }
+        };
+    }
+
     // Convert request items to batch format
     const batchItems: BatchReferenceCheckItem[] = request.items.map(item => ({
         id: item.id,
@@ -57,7 +80,7 @@ export async function handleExternalReferenceCheckRequest(request: WSExternalRef
     }));
 
     // Use batch lookup for all items at once
-    let batchResults;
+    let batchResults: BatchReferenceCheckResult[];
     let timing;
     try {
         const batchOutput = await batchFindExistingReferences(batchItems, libraryIds);
@@ -65,8 +88,11 @@ export async function handleExternalReferenceCheckRequest(request: WSExternalRef
         timing = batchOutput.timing;
     } catch (error) {
         logger(`AgentService: Batch reference check failed: ${error}`, 1);
-        // Return all as not found on error
-        batchResults = batchItems.map(item => ({ id: item.id, item: null }));
+        // Report nothing rather than a fabricated "not found" for every item.
+        // A result missing from the response means "not checked", so the
+        // reference keeps an unknown library status instead of being treated
+        // as confirmed absent.
+        batchResults = [];
         timing = {
             total_ms: Date.now() - startTime,
             phase1_identifier_lookup_ms: 0,

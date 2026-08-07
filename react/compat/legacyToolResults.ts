@@ -540,6 +540,7 @@ function buildExternalSearchView(part: ToolReturnPart): ExternalReferenceListVie
         view_type: "external_reference_list",
         tool_name: part.tool_name,
         references: data.references,
+        library_check_completed: data.references.every((ref) => !ref.library_status_unknown),
     };
 }
 
@@ -550,6 +551,7 @@ function buildLookupWorkView(part: ToolReturnPart): ExternalReferenceListView | 
         view_type: "external_reference_list",
         tool_name: part.tool_name,
         references: data.references,
+        library_check_completed: data.references.every((ref) => !ref.library_status_unknown),
         found_count: data.foundCount,
         not_found_queries: data.notFoundQueries,
         unavailable_queries: data.temporarilyUncheckedQueries,

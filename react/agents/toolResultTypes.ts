@@ -281,7 +281,8 @@ export interface FindInAttachmentsResultSummary {
  */
 export interface ExternalReferenceResultContent {
     external_id: string;
-    already_in_library?: boolean;
+    /** null when the in-library check did not complete for this reference. */
+    already_in_library?: boolean | null;
     title?: string;
     authors?: string[];
     year?: number;
@@ -1068,6 +1069,9 @@ export function mergeExternalReferenceContents(
             reference_count: supp?.reference_count,
             journal: supp?.journal ?? (ref.journal ? { name: ref.journal } : undefined),
             library_items: supp?.library_items ?? [],
+            // Mirror backend: null already_in_library means the check did not
+            // cover this reference, so empty library_items is unknown.
+            library_status_unknown: ref.already_in_library === null,
         };
     });
 }

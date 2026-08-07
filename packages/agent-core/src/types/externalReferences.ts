@@ -64,6 +64,13 @@ export interface ExternalReference {
 
     // User library identifiers
     library_items: LibraryItem[]; // List of existing items in user's library
+    /**
+     * True when this reference's in-library status was never established — no
+     * check ran, or the check failed / skipped it. Empty `library_items` then
+     * means unknown, not confirmed absent: do not offer Import until a local
+     * check confirms absence.
+     */
+    library_status_unknown?: boolean;
 
     // Publication metadata
     raw_publication_types?: string[]; // Raw publication types from source API

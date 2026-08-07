@@ -185,6 +185,12 @@ export interface ExternalReferenceListView {
     tool_name: string;
     /** Already fully hydrated. */
     references: ExternalReference[];
+    /**
+     * False when the Zotero in-library check did not cover every reference.
+     * Per reference, `library_status_unknown` marks which ones: their empty
+     * `library_items` is unknown, not absent.
+     */
+    library_check_completed?: boolean;
     // lookup_work-only extras (absent/empty for external_search):
     found_count?: number | null;
     not_found_queries?: string[];

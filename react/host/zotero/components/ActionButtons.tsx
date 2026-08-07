@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import {
     ArrowUpRightIcon,
@@ -72,10 +72,16 @@ const ActionButtons: React.FC<ExternalReferenceActionsProps> = ({
         ? externalReferenceCache[sourceId]
         : undefined;
 
+    const hasLibraryItems = Boolean(item.library_items && item.library_items.length > 0);
+    // Backend confirmed absence (empty library_items and check completed).
+    // When library_status_unknown, empty library_items means unknown — do not
+    // offer Import until a local check confirms absence (cache entry null).
+    const backendConfirmedAbsent = !item.library_status_unknown && !hasLibraryItems;
+
     // Track the actual item existence state
-    const [itemExists, setItemExists] = useState(item.library_items && item.library_items.length > 0);
+    const [itemExists, setItemExists] = useState(hasLibraryItems);
     const [zoteroItemRef, setZoteroItemRef] = useState<ZoteroItemReference | null>(
-        item.library_items && item.library_items.length > 0
+        hasLibraryItems
             ? {
                 library_id: item.library_items[0].library_id,
                 zotero_key: item.library_items[0].zotero_key,
@@ -83,9 +89,34 @@ const ActionButtons: React.FC<ExternalReferenceActionsProps> = ({
             }
             : null
     );
-    const [isLoading, setIsLoading] = useState(false);
+    // Start loading when we still need a local check (avoids an Import flash).
+    const [isLoading, setIsLoading] = useState(
+        Boolean(sourceId) && cachedRef === undefined && !hasLibraryItems
+    );
     const [isImporting, setIsImporting] = useState(false);
     const [bestAttachment, setBestAttachment] = useState<Zotero.Item | null>(null);
+    // source_id of the reference we already ran a local check for. A check that
+    // fails writes no cache entry, so without this guard the check effect would
+    // restart it on every re-render caused by the checking-set changing.
+    const attemptedCheckRef = useRef<string | null>(null);
+    const isMountedRef = useRef(true);
+
+    useEffect(() => {
+        isMountedRef.current = true;
+        return () => { isMountedRef.current = false; };
+    }, []);
+
+    const isResolvingUnknown =
+        Boolean(item.library_status_unknown) &&
+        !itemExists &&
+        cachedRef === undefined &&
+        (isLoading || isChecking(item));
+    // Import only when absence is known: backend-confirmed, locally confirmed
+    // (cache null), or while a local re-check of an unknown status is in flight
+    // (disabled spinner). Hide once that re-check fails without caching.
+    const showImportButton =
+        !itemExists &&
+        (cachedRef === null || backendConfirmedAbsent || isResolvingUnknown);
 
     /**
      * Handle importing the external reference to Zotero.
@@ -93,6 +124,8 @@ const ActionButtons: React.FC<ExternalReferenceActionsProps> = ({
      */
     const handleImport = useCallback(async () => {
         if (isImporting || isLoading) return;
+        // Refuse when library status is still unknown (empty items + failed check).
+        if (item.library_status_unknown && cachedRef === undefined) return;
 
         setIsImporting(true);
         try {
@@ -203,7 +236,7 @@ const ActionButtons: React.FC<ExternalReferenceActionsProps> = ({
         } finally {
             setIsImporting(false);
         }
-    }, [item, isImporting, isLoading, threadId, markExternalReferenceImported, getPendingCreateItemAction, ackAgentActions]);
+    }, [item, isImporting, isLoading, cachedRef, threadId, markExternalReferenceImported, getPendingCreateItemAction, ackAgentActions]);
 
     // React to cache changes (e.g., when item is deleted and cache is invalidated)
     useEffect(() => {
@@ -253,11 +286,21 @@ const ActionButtons: React.FC<ExternalReferenceActionsProps> = ({
 
         // If we have cached data, the above effect handles it
         if (cachedRef !== undefined) {
+            // Allow a fresh check if the cache entry is invalidated later
+            attemptedCheckRef.current = null;
             return;
         }
 
         // If not cached and not currently checking, start a check
         if (!isChecking(item)) {
+            // The previous check finished without caching a result (search
+            // failed); do not retry in a loop. Clear the spinner here too — a
+            // failed check writes no cache entry, so the effect below can't.
+            if (attemptedCheckRef.current === sourceId) {
+                setIsLoading(false);
+                return;
+            }
+            attemptedCheckRef.current = sourceId;
             setIsLoading(true);
             checkReference(item).then(async result => {
                 setItemExists(result !== null);
@@ -283,9 +326,12 @@ const ActionButtons: React.FC<ExternalReferenceActionsProps> = ({
                 } else {
                     if (!cancelled) setBestAttachment(null);
                 }
-                if (!cancelled) setIsLoading(false);
+                // Not gated on `cancelled`: the effect re-runs as soon as the
+                // checking set changes, and a check that caches nothing would
+                // otherwise leave a permanent spinner.
+                if (isMountedRef.current) setIsLoading(false);
             }).catch(() => {
-                if (!cancelled) setIsLoading(false);
+                if (isMountedRef.current) setIsLoading(false);
             });
         } else {
             setIsLoading(true);
@@ -298,11 +344,14 @@ const ActionButtons: React.FC<ExternalReferenceActionsProps> = ({
         const checking = isChecking(item);
         if (checking) {
             setIsLoading(true);
-        } else if (cachedRef !== undefined) {
-            // Checking completed and we have cached data
+        } else if (cachedRef !== undefined || attemptedCheckRef.current === sourceId) {
+            // Nothing in flight and either the cache answered or this component
+            // already ran its own check. The second condition matters because a
+            // failed check caches nothing, so waiting on the cache alone would
+            // leave the spinner up forever.
             setIsLoading(false);
         }
-    }, [isChecking(item), cachedRef, item]);
+    }, [isChecking(item), cachedRef, item, sourceId]);
 
     // Helper to render a button in different modes
     const renderButton = (
@@ -414,7 +463,7 @@ const ActionButtons: React.FC<ExternalReferenceActionsProps> = ({
             )}
             {((
                 (itemExists && zoteroItemRef) && revealButtonMode !== 'none') ||
-                (!itemExists && importButtonMode !== 'none')
+                (showImportButton && importButtonMode !== 'none')
             ) &&
                 <div className="flex-1"/>
             }
@@ -430,10 +479,12 @@ const ActionButtons: React.FC<ExternalReferenceActionsProps> = ({
                 'Reveal in Zotero'
             )}
 
-            {/* Import button - shown when item doesn't exist in library */}
-            {!itemExists && renderButton(
+            {/* Import — only when absence is known (or while resolving unknown) */}
+            {showImportButton && renderButton(
                 importButtonMode,
-                'Import to Zotero',
+                isResolvingUnknown
+                    ? 'Checking whether this item is already in your library'
+                    : 'Import to Zotero',
                 'Import',
                 (isLoading || isImporting) ? () => <Spinner className="scale-14 -mr-1" /> : DownloadIcon,
                 handleImport,

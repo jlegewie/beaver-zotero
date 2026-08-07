@@ -94,4 +94,36 @@ describe("checkExternalReferencesAtom", () => {
       zotero_key: "USER1234",
     });
   });
+
+  it("caches null when a local search confirms absence", async () => {
+    mocks.findExistingReference.mockResolvedValue(null);
+    const store = createStore();
+    const ref: ExternalReference = {
+      source: "openalex",
+      source_id: "W-absent",
+      title: "Missing paper",
+      library_items: [],
+      library_status_unknown: true,
+    };
+
+    await store.set(checkExternalReferencesAtom, [ref]);
+
+    expect(store.get(externalReferenceItemMappingAtom)["W-absent"]).toBeNull();
+  });
+
+  it("does not cache a null absence when the local search fails", async () => {
+    mocks.findExistingReference.mockRejectedValue(new Error("db locked"));
+    const store = createStore();
+    const ref: ExternalReference = {
+      source: "openalex",
+      source_id: "W-unknown",
+      title: "Unchecked paper",
+      library_items: [],
+      library_status_unknown: true,
+    };
+
+    await store.set(checkExternalReferencesAtom, [ref]);
+
+    expect("W-unknown" in store.get(externalReferenceItemMappingAtom)).toBe(false);
+  });
 });

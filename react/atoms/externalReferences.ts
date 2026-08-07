@@ -69,6 +69,10 @@ export const checkExternalReferenceAtom = atom(
         try {
             let result: ZoteroItemReference | null = null;
             let foundItem: Zotero.Item | null = null;
+            // Only cache when the check completed. A failed search must leave
+            // the entry absent so empty library_items stays "unknown" rather
+            // than being treated as confirmed absence.
+            let checkCompleted = false;
             
             // First, validate backend data if library_items exist
             if (externalRef.library_items && externalRef.library_items.length > 0) {
@@ -89,6 +93,7 @@ export const checkExternalReferenceAtom = atom(
                             library_ref: firstItem.library_ref ?? libraryRefForLibraryID(item.libraryID) ?? undefined,
                         };
                         foundItem = item;
+                        checkCompleted = true;
                         logger(`checkExternalReference: Backend data validated for ${refId}`, 1);
                     } else if (resolved.status === 'library_unavailable') {
                         logger(`checkExternalReference: Library unavailable for ${refId}`, 1);
@@ -123,6 +128,7 @@ export const checkExternalReferenceAtom = atom(
                     } else {
                         logger(`checkExternalReference: No match found for ${refId}`, 1);
                     }
+                    checkCompleted = true;
                 } catch (searchError) {
                     logger(`checkExternalReference: Search failed for ${refId}: ${searchError}`, 2);
                 }
@@ -133,11 +139,12 @@ export const checkExternalReferenceAtom = atom(
                 await loadFullItemDataWithAllTypes([foundItem]);
             }
             
-            // Update cache (even on error, cache null to prevent repeated failed attempts)
-            set(externalReferenceItemMappingAtom, {
-                ...get(externalReferenceItemMappingAtom),
-                [refId]: result
-            });
+            if (checkCompleted) {
+                set(externalReferenceItemMappingAtom, {
+                    ...get(externalReferenceItemMappingAtom),
+                    [refId]: result
+                });
+            }
             
             return result;
         } finally {
@@ -194,6 +201,10 @@ export const checkExternalReferencesAtom = atom(
                     
                     try {
                         let result: ZoteroItemReference | null = null;
+                        // Only return a cache update when the check completed.
+                        // Search failures leave the entry absent so unknown
+                        // library status is not treated as confirmed absence.
+                        let checkCompleted = false;
                         
                         // Validate backend data first
                         if (ref.library_items && ref.library_items.length > 0) {
@@ -220,6 +231,7 @@ export const checkExternalReferencesAtom = atom(
                                             library_ref: itemRef.library_ref ?? libraryRefForLibraryID(item.libraryID) ?? undefined,
                                         };
                                         foundItems.push(item);
+                                        checkCompleted = true;
                                         logger(`checkExternalReferences: Backend data validated for ${refId}: ${result.library_id}-${result.zotero_key}`, 1);
                                         break;
                                     }
@@ -249,16 +261,17 @@ export const checkExternalReferencesAtom = atom(
                                     foundItems.push(existingItem);
                                     logger(`checkExternalReferences: Found match for ${refId}: ${result.library_id}-${result.zotero_key}`, 1);
                                 }
+                                checkCompleted = true;
                             } catch (searchError) {
                                 logger(`checkExternalReferences: Search failed for ${refId}: ${searchError}`, 2);
                             }
                         }
                         
-                        return [refId, result];
+                        return checkCompleted ? [refId, result] : null;
                     } catch (error) {
-                        // Catch any unexpected errors and return null for this reference
+                        // Leave uncached — unknown is safer than false absence
                         logger(`checkExternalReferences: Unexpected error for ${refId}: ${error}`, 2);
-                        return [refId, null];
+                        return null;
                     }
                 })
             );
@@ -268,12 +281,14 @@ export const checkExternalReferencesAtom = atom(
                 await loadFullItemDataWithAllTypes(foundItems);
             }
             
-            // Update cache with all results (including failed ones as null)
+            // Update cache only for completed checks (null = confirmed absent)
             const updates = Object.fromEntries(results.filter((r): r is [string, ZoteroItemReference | null] => r !== null));
-            set(externalReferenceItemMappingAtom, {
-                ...get(externalReferenceItemMappingAtom),
-                ...updates
-            });
+            if (Object.keys(updates).length > 0) {
+                set(externalReferenceItemMappingAtom, {
+                    ...get(externalReferenceItemMappingAtom),
+                    ...updates
+                });
+            }
             
         } finally {
             // Remove all from checking set

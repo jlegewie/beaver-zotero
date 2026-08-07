@@ -167,13 +167,37 @@ describe('handleExternalReferenceCheckRequest', () => {
         );
     });
 
-    it('returns all items as not found and zero timing on batch failure', async () => {
+    it('reports no results without searching when every requested library is excluded', async () => {
+        // The batch finder answers `item: null` for every entry when given an
+        // empty library list, which the handler would report as confirmed
+        // absence. Nothing was searched, so it must report nothing instead.
+        mockGetSearchableLibraryIds.mockReturnValue([42]);
+
+        const req = { ...baseRequest, library_ids: [1] };
+        const response = await handleExternalReferenceCheckRequest(req as any);
+
+        expect(mockBatchFindExistingReferences).not.toHaveBeenCalled();
+        expect(response.results).toEqual([]);
+        expect(response.timing.item_count).toBe(baseRequest.items.length);
+    });
+
+    it('reports no results when no library is searchable at all', async () => {
+        mockGetSearchableLibraryIds.mockReturnValue([]);
+
+        const response = await handleExternalReferenceCheckRequest(baseRequest as any);
+
+        expect(mockBatchFindExistingReferences).not.toHaveBeenCalled();
+        expect(response.results).toEqual([]);
+    });
+
+    it('reports no results and zero timing on batch failure', async () => {
         mockBatchFindExistingReferences.mockRejectedValue(new Error('boom'));
 
         const response = await handleExternalReferenceCheckRequest(baseRequest as any);
 
-        expect(response.results).toHaveLength(baseRequest.items.length);
-        expect(response.results.every(r => r.exists === false)).toBe(true);
+        // A missing result means "not checked"; fabricating exists: false would
+        // report confirmed absence for every item.
+        expect(response.results).toEqual([]);
         expect(response.timing.phase1_identifier_lookup_ms).toBe(0);
         expect(response.timing.phase2_title_candidates_ms).toBe(0);
         expect(response.timing.phase3_fuzzy_matching_ms).toBe(0);

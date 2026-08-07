@@ -6,6 +6,29 @@ import { extractExternalSearchData, extractLookupWorkData, isExternalSearchResul
 import { ToolReturnPart, isUnsuccessfulToolReturn } from "@beaver/agent-core/agents/types";
 import { extractZoteroReferences } from "./toolResultTypes";
 import { logger } from "@beaver/agent-core/platform/logger";
+import {
+    isExternalReferenceListView,
+    isToolResultView,
+} from "../types/toolResultViews";
+import type { ExternalReference } from "@beaver/agent-core/types/externalReferences";
+
+/**
+ * Prefer the hydrated view's references (includes library_status_unknown);
+ * fall back to content+supplement merge for legacy tool returns.
+ */
+function externalReferencesFromToolReturn(part: ToolReturnPart): ExternalReference[] | null {
+    const view = part.metadata?.view;
+    if (isToolResultView(view) && isExternalReferenceListView(view)) {
+        return view.references;
+    }
+    if (isExternalSearchResult(part.tool_name, part.content, part.metadata)) {
+        return extractExternalSearchData(part.content, part.metadata)?.references ?? null;
+    }
+    if (isLookupWorkResult(part.tool_name, part.content, part.metadata)) {
+        return extractLookupWorkData(part.content, part.metadata)?.references ?? null;
+    }
+    return null;
+}
 
 /**
  * Process tool return results: extract and cache external references,
@@ -22,27 +45,12 @@ export async function processToolReturnResults(
     // payload would be, so there are no references to cache or items to preload.
     if (isUnsuccessfulToolReturn(part)) return;
 
-    // Check for external references and populate cache
-    if (
-        part.metadata &&
-        isExternalSearchResult(part.tool_name, part.content, part.metadata)
-    ) {
-        const externalReferences = extractExternalSearchData(part.content, part.metadata)?.references;
-        if (externalReferences) {
-            logger(`processToolReturnResults: Adding ${externalReferences.length} external references to mapping`, 1);
-            set(addExternalReferencesToMappingAtom, externalReferences);
-            set(checkExternalReferencesAtom, externalReferences);
-        }
-    } else if (
-        part.metadata &&
-        isLookupWorkResult(part.tool_name, part.content, part.metadata)
-    ) {
-        const externalReferences = extractLookupWorkData(part.content, part.metadata)?.references;
-        if (externalReferences && externalReferences.length > 0) {
-            logger(`processToolReturnResults: Adding ${externalReferences.length} lookup references to mapping`, 1);
-            set(addExternalReferencesToMappingAtom, externalReferences);
-            set(checkExternalReferencesAtom, externalReferences);
-        }
+    const externalReferences = externalReferencesFromToolReturn(part);
+    if (externalReferences && externalReferences.length > 0) {
+        logger(`processToolReturnResults: Adding ${externalReferences.length} external references to mapping`, 1);
+        set(addExternalReferencesToMappingAtom, externalReferences);
+        // Local re-check resolves library_status_unknown / empty library_items.
+        set(checkExternalReferencesAtom, externalReferences);
     }
 
     // Load item data
