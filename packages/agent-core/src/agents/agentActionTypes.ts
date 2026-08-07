@@ -666,12 +666,17 @@ export function toAgentAction(raw: Record<string, any>): AgentAction {
             : [];
         const before = Array.isArray(resultData.before) ? resultData.before.map((snapshot: any) => {
             const movedTo = normalizePlacementSnapshot(snapshot.moved_to ?? snapshot.movedTo);
+            // Undo reads `tags` unconditionally and restores the automatic ones
+            // by name, so an untagged annotation must keep an empty array and
+            // `automatic_tags` has to survive the round trip through history.
+            const automaticTags = normalizeAnnotationTags(snapshot.automatic_tags ?? snapshot.automaticTags);
             return {
                 annotation_id: String(snapshot.annotation_id ?? snapshot.annotationId ?? ''),
                 ...normalizeZoteroItemReference(snapshot),
                 color: String(snapshot.color ?? ''),
                 comment: String(snapshot.comment ?? ''),
-                tags: normalizeAnnotationTags(snapshot.tags),
+                tags: normalizeAnnotationTags(snapshot.tags) ?? [],
+                ...(automaticTags ? { automatic_tags: automaticTags } : {}),
                 ...(typeof snapshot.deleted === 'boolean' ? { deleted: snapshot.deleted } : {}),
                 ...(snapshot.annotation_type !== undefined || snapshot.annotationType !== undefined
                     ? { annotation_type: String(snapshot.annotation_type ?? snapshot.annotationType ?? '') }

@@ -534,6 +534,43 @@ describe('toAgentAction edit_annotations normalized contract', () => {
         });
     });
 
+    it('keeps the undo tag snapshot intact for an untagged annotation', () => {
+        const action = toAgentAction({
+            id: 'edit-annotations-tags', run_id: 'run-1', action_type: 'edit_annotations', status: 'applied',
+            result_data: {
+                operation: 'edit',
+                applied_refs: [{ library_id: 1, zotero_key: 'AAAAAAA1', library_ref: 'u' }],
+                before: [{
+                    annotation_id: 'u-AAAAAAA1', library_id: 1, zotero_key: 'AAAAAAA1', library_ref: 'u',
+                    color: '#ffd400', comment: '', tags: [],
+                }],
+            },
+        });
+
+        expect(action.result_data?.before[0].tags).toEqual([]);
+        expect(action.result_data?.before[0]).not.toHaveProperty('automatic_tags');
+    });
+
+    it('carries automatic tag types through a history round trip', () => {
+        const action = toAgentAction({
+            id: 'edit-annotations-auto-tags', run_id: 'run-1', action_type: 'edit_annotations', status: 'applied',
+            result_data: {
+                operation: 'edit',
+                applied_refs: [{ library_id: 1, zotero_key: 'AAAAAAA1', library_ref: 'u' }],
+                before: [{
+                    annotation_id: 'u-AAAAAAA1', library_id: 1, zotero_key: 'AAAAAAA1', library_ref: 'u',
+                    color: '#ffd400', comment: '', tags: ['manual', 'auto'],
+                    automatic_tags: ['auto'],
+                }],
+            },
+        });
+
+        expect(action.result_data?.before[0]).toMatchObject({
+            tags: ['manual', 'auto'],
+            automatic_tags: ['auto'],
+        });
+    });
+
     it('preserves a delete payload and its flat target list', () => {
         const action = toAgentAction({
             id: 'edit-annotations-2', run_id: 'run-1', action_type: 'edit_annotations', status: 'applied',
