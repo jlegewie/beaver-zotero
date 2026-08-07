@@ -161,8 +161,7 @@ function validate(actionData: Record<string, any>) {
     } as any);
 }
 
-function execute(actionData: Record<string, any>) {
-    const controller = new AbortController();
+function execute(actionData: Record<string, any>, signal?: AbortSignal) {
     return executeEditAnnotationsAction(
         {
             event: "agent_action_execute",
@@ -171,11 +170,17 @@ function execute(actionData: Record<string, any>) {
             action_data: actionData,
         } as any,
         {
-            signal: controller.signal,
+            signal: signal ?? new AbortController().signal,
             timeoutSeconds: 25,
             startTime: Date.now(),
         },
     );
+}
+
+function abortedSignal(): AbortSignal {
+    const controller = new AbortController();
+    controller.abort();
+    return controller.signal;
 }
 
 const refs = (...keys: string[]) =>
@@ -983,6 +988,18 @@ describe("edit_annotations execution", () => {
         expect(refreshMovedAnnotationsInOpenReaders).toHaveBeenCalledWith([
             { attachmentID: 100, item: moved },
         ]);
+    });
+
+    it("reports a deadline that fired while preparing a move as a timeout", async () => {
+        // Preparation turns the abort into a skip, so without a check of its
+        // own the empty partition would surface as a resolution failure and the
+        // caller would lose its timeout diagnostics.
+        await expect(
+            execute(
+                { edits: [{ annotation_refs: refs("AAA"), relocation: relocation() }] },
+                abortedSignal(),
+            ),
+        ).rejects.toMatchObject({ name: "TimeoutError" });
     });
 
     it("records both ends of a move so it can be undone", async () => {

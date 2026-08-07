@@ -11,6 +11,11 @@ vi.mock('../../../src/utils/zoteroUtils', () => ({
     loadFullItemDataWithAllTypes: vi.fn(),
     getZoteroUserIdentifier: vi.fn(() => ({ userID: undefined, localUserKey: 'test' })),
 }));
+const checkLibraryExcluded = vi.hoisted(() => vi.fn(() => null as { message: string } | null));
+vi.mock('../../../src/services/agentDataProvider/utils', async (importOriginal) => ({
+    ...(await importOriginal<Record<string, unknown>>()),
+    checkLibraryExcluded,
+}));
 
 import type { AgentAction } from '../../../react/agents/agentActions';
 import { toAgentAction, validateAppliedAgentAction } from '../../../react/agents/agentActions';
@@ -37,6 +42,7 @@ describe('validateAppliedAgentAction', () => {
 
     beforeEach(() => {
         getByLibraryAndKeyAsync.mockReset();
+        checkLibraryExcluded.mockReturnValue(null);
         zotero.Items = { ...zotero.Items, getByLibraryAndKeyAsync };
         zotero.Libraries = { ...zotero.Libraries, userLibraryID: 1 };
         zotero.Groups = {
@@ -89,6 +95,21 @@ describe('validateAppliedAgentAction', () => {
         getByLibraryAndKeyAsync.mockResolvedValue(null);
         expect(await validateAppliedAgentAction(appliedAction(5))).toBe('unverifiable');
         expect(getByLibraryAndKeyAsync).toHaveBeenCalledWith(5, 'AAAAAAA1');
+    });
+
+    it('returns unverifiable without reading an excluded library', async () => {
+        // Validation can flip an action to "undone" on the backend, so it must
+        // not resolve items in a library the user excluded after the run.
+        checkLibraryExcluded.mockReturnValue({ message: 'excluded' });
+        const action = appliedAction(1, {
+            action_type: 'edit_annotations',
+            result_data: {
+                operation: 'edit',
+                applied_refs: [{ library_id: 1, zotero_key: 'AAAAAAA1', library_ref: 'u' }],
+            },
+        } as Partial<AgentAction>);
+        expect(await validateAppliedAgentAction(action)).toBe('unverifiable');
+        expect(getByLibraryAndKeyAsync).not.toHaveBeenCalled();
     });
 
     it('returns invalid when an annotation action resolves to a non-annotation', async () => {

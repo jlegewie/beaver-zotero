@@ -1143,6 +1143,10 @@ export async function executeEditAnnotationsAction(
     // change while the approval card is open. Anything that has since become
     // unusable is dropped the same way it would have been at validate time.
     const partition = await partitionTargets(normalized.data, ctx.signal);
+    // A deadline that fired during preparation turns every pending move into a
+    // skip, which would otherwise be reported as a resolution failure and lose
+    // the timeout diagnostics the caller relies on.
+    checkAborted(ctx, "edit_annotations:after_partition");
     if (!partition.targets.length) {
         return {
             type: "agent_action_execute_response",

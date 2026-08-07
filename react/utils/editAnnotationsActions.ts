@@ -16,6 +16,7 @@ import {
     loadAnnotationEditData,
 } from "../../src/services/agentDataProvider/actions/editAnnotations";
 import { ZOTERO_ANNOTATION_PALETTE_COLORS } from "../../src/constants/annotations";
+import { createAbortController } from "../../src/utils/abortController";
 import { refreshMovedAnnotationsInOpenReaders } from "../../src/services/annotations/readerSync";
 import {
     modelObjectId,
@@ -31,23 +32,38 @@ import type { UndoResult } from "./editMetadataActions";
 /** Undo errors carry a separate user-facing message for the sidebar. */
 type UndoUserFacingError = Error & { userMessage?: string };
 
+/** Deadline for a locally applied edit, matching the backend-driven default. */
+const LOCAL_EXECUTE_TIMEOUT_SECONDS = 25;
+
 export async function executeEditAnnotationsAction(
     action: AgentAction,
 ): Promise<EditAnnotationsResultData> {
-    const controller = new AbortController();
-    const response = await executeHandler(
-        {
-            event: "agent_action_execute",
-            request_id: action.id,
-            action_type: "edit_annotations",
-            action_data: action.proposed_data,
-        } as WSAgentActionExecuteRequest,
-        {
-            signal: controller.signal,
-            timeoutSeconds: 25,
-            startTime: Date.now(),
-        },
+    // The signal has to fire on its own: preparing a move can read an
+    // attachment and analyze a page, and those waits are interruptible only by
+    // the signal — the handler's elapsed-time checkpoints run after they return.
+    const controller = createAbortController();
+    const timer = setTimeout(
+        () => controller.abort(),
+        LOCAL_EXECUTE_TIMEOUT_SECONDS * 1000,
     );
+    let response;
+    try {
+        response = await executeHandler(
+            {
+                event: "agent_action_execute",
+                request_id: action.id,
+                action_type: "edit_annotations",
+                action_data: action.proposed_data,
+            } as WSAgentActionExecuteRequest,
+            {
+                signal: controller.signal,
+                timeoutSeconds: LOCAL_EXECUTE_TIMEOUT_SECONDS,
+                startTime: Date.now(),
+            },
+        );
+    } finally {
+        clearTimeout(timer);
+    }
     if (!response.success)
         throw new Error(response.error ?? "Failed to edit annotations");
     return response.result_data as unknown as EditAnnotationsResultData;

@@ -1,6 +1,7 @@
 import { atom } from 'jotai';
 import { logger } from '@beaver/agent-core/platform/logger';
-import { isLibraryReferencePortable, resolveItemReference } from '../../src/utils/libraryIdentity';
+import { isLibraryReferencePortable, resolveItemReference, resolveLibraryRef } from '../../src/utils/libraryIdentity';
+import { checkLibraryExcluded } from '../../src/services/agentDataProvider/utils';
 import { dismissDiffPreview } from '../utils/noteEditorDiffPreview';
 import { updateDiffPreviewForNote, diffPreviewNoteKeyAtom } from '../utils/diffPreviewCoordinator';
 import { agentActionsService, AckActionLink } from '@beaver/agent-core/transport/clients/agentActionsService';
@@ -54,6 +55,12 @@ const checkAppliedReference = async (
     // it from the trash is the user reverting the action.
     mustBeTrashed: boolean = false
 ): Promise<AppliedActionValidity> => {
+    // Validation reads live Zotero state and can flip the action to "undone"
+    // both locally and on the backend, so it stays behind the exclusion
+    // boundary — unlike rendering persisted history, which is allowed. An
+    // excluded library is simply not checkable; the status is left alone.
+    const libraryId = resolveLibraryRef(ref);
+    if (libraryId !== null && checkLibraryExcluded(libraryId)) return 'unverifiable';
     const resolved = await resolveItemReference(ref);
     if (resolved.status === 'library_unavailable') return 'unverifiable';
     if (resolved.status === 'not_found') {
