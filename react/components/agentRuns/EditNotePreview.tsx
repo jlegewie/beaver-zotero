@@ -181,8 +181,8 @@ export function formatRewriteScope(scope: RewriteScope | null): string {
         ? `about ${Math.round(scope.removedFraction * 100)}% of the text is deleted`
         : `about ${Math.round((1 - scope.retainedFraction) * 100)}% of the text is replaced`;
     return scope.reason === null
-        ? `Replaces the entire note — ${lines}`
-        : `Replaces the entire note — ${lines}, ${detail}`;
+        ? `Replaces the entire note: ${lines}`
+        : `Replaces the entire note: ${lines}, ${detail}`;
 }
 
 // ---- Component ----
