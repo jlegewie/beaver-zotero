@@ -15,6 +15,7 @@ import type {
     NativeAnnotationColor,
     SkippedAnnotation,
 } from "@beaver/agent-core/types/agentActions/editAnnotations";
+import { editAnnotationsTargets } from "@beaver/agent-core/types/agentActions/editAnnotations";
 import type { ZoteroItemReference } from "@beaver/agent-core/types/zotero";
 import { logger } from "@beaver/agent-core/platform/logger";
 import { ZOTERO_ANNOTATION_PALETTE_COLORS } from "../../../constants/annotations";
@@ -501,6 +502,26 @@ async function isDeleted(item: any): Promise<boolean> {
         "SELECT 1 FROM deletedItems WHERE itemID = ? LIMIT 1",
         [item.id],
     ));
+}
+
+/**
+ * The exclusion message for the first target in a library the user excluded
+ * from Beaver, or null when the whole batch is allowed.
+ *
+ * Runs before anything is resolved or written: an excluded library is an
+ * access boundary, so a batch that names one is rejected outright rather than
+ * partially applied with that target dropped as an ordinary skip.
+ */
+function excludedTargetMessage(
+    data: EditAnnotationsProposedData,
+): string | null {
+    for (const ref of editAnnotationsTargets(data)) {
+        const libraryId = resolveLibraryRef(ref);
+        if (libraryId == null) continue; // not on this device; skipped later
+        const excluded = checkLibraryExcluded(libraryId);
+        if (excluded) return excluded.message;
+    }
+    return null;
 }
 
 /**
@@ -1017,6 +1038,14 @@ export async function validateEditAnnotationsAction(
             normalized.code,
         );
 
+    const excluded = excludedTargetMessage(normalized.data);
+    if (excluded)
+        return invalidValidation(
+            request.request_id,
+            excluded,
+            "library_not_searchable",
+        );
+
     const deadline = new AbortController();
     const timer = setTimeout(() => deadline.abort(), relocationBudgetMs);
     let partition: Partitioned;
@@ -1092,11 +1121,17 @@ class AnnotationStateChangedError extends Error {}
  * actually overwrites: the undo record and the re-checked approval guard both
  * read it.
  *
+ * The trash state is re-read too: `resolveTarget` rejects an annotation that is
+ * already trashed, so a stale `false` would let a delete record an annotation
+ * the user trashed themselves as one this action deleted — and undo would then
+ * pull it back out of the trash.
+ *
  * Placement is left alone — only a move overwrites it, and `capturePlacement`
  * already records it in the same transaction.
  */
-function refreshBeforeState(target: ResolvedTarget): void {
+async function refreshBeforeState(target: ResolvedTarget): Promise<void> {
     const item = target.item;
+    target.before.deleted = await isDeleted(item);
     target.beforeTags = readItemTags(item);
     const automatic = automaticTagNames(target.beforeTags);
     target.before.color = item.annotationColor ?? "";
@@ -1146,6 +1181,18 @@ export async function executeEditAnnotationsAction(
             error_code: normalized.code,
         };
 
+    // Re-checked here, not just at validation: a library can be excluded while
+    // the approval card is open.
+    const excluded = excludedTargetMessage(normalized.data);
+    if (excluded)
+        return {
+            type: "agent_action_execute_response",
+            request_id: request.request_id,
+            success: false,
+            error: excluded,
+            error_code: "library_not_searchable",
+        };
+
     // Re-resolve rather than trusting the validate pass: the library can
     // change while the approval card is open. Anything that has since become
     // unusable is dropped the same way it would have been at validate time.
@@ -1182,7 +1229,8 @@ export async function executeEditAnnotationsAction(
             // Re-snapshot everything before writing anything: resolving the
             // batch and preparing its moves can take seconds, and the state
             // captured back then may no longer be what these writes overwrite.
-            for (const target of partition.targets) refreshBeforeState(target);
+            for (const target of partition.targets)
+                await refreshBeforeState(target);
 
             // The approval guard runs at validation, and an edit found
             // non-destructive there can reach this point auto-applied, with no

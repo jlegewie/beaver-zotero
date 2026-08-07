@@ -7,7 +7,7 @@ vi.mock("../../../src/utils/libraryIdentity", () => ({
         const match = /^1-(.+)$/.exec(id);
         return match ? { library_id: 1, zotero_key: match[1] } : null;
     },
-    resolveLibraryRef: () => 1,
+    resolveLibraryRef: (ref: any) => ref?.library_id ?? 1,
     resolveItemReference: async (ref: any) => {
         const item = items.get(ref.zotero_key);
         return item ? { status: "found", item } : { status: "not_found" };
@@ -19,9 +19,13 @@ vi.mock("../../../src/utils/libraryIdentity", () => ({
 
 let deferredPreference = "always_apply";
 let deletionGrantedForRun = false;
+let excludedLibraryId: number | null = null;
 const preferenceLookups: string[] = [];
 vi.mock("../../../src/services/agentDataProvider/utils", () => ({
-    checkLibraryExcluded: () => null,
+    checkLibraryExcluded: (libraryId: number) =>
+        libraryId === excludedLibraryId
+            ? { message: "The library is excluded from Beaver." }
+            : null,
     // Mirrors the real group resolution: delete_annotations sits in its own
     // group with no persisted preference, so it resolves to always_ask unless
     // a per-run grant raises it.
@@ -208,6 +212,7 @@ beforeEach(() => {
     refreshMovedAnnotationsInOpenReaders.mockClear();
     deferredPreference = "always_apply";
     deletionGrantedForRun = false;
+    excludedLibraryId = null;
     items.clear();
     items.set("AAA", annotation("AAA"));
     items.set("BBB", annotation("BBB"));
@@ -229,6 +234,39 @@ beforeEach(() => {
         },
         DB: makeDB(),
     };
+});
+
+describe("edit_annotations library exclusion", () => {
+    // An excluded library is an access boundary, so one target inside one
+    // fails the whole batch: dropping it as a skip would apply the rest.
+    /** One target in an allowed library, one in an excluded library. */
+    const mixedRefs = () => [
+        ...refs("AAA"),
+        { library_id: 2, zotero_key: "BBB" },
+    ];
+
+    it("rejects a mixed batch at validation", async () => {
+        excludedLibraryId = 2;
+        const response = await validate({
+            edits: [{ annotation_refs: mixedRefs(), changes: { color: "blue" } }],
+        });
+
+        expect(response.valid).toBe(false);
+        expect(response.error_code).toBe("library_not_searchable");
+    });
+
+    it("rejects a mixed batch at execution and writes nothing", async () => {
+        excludedLibraryId = 2;
+        const response = await execute({
+            edits: [{ annotation_refs: mixedRefs(), changes: { color: "red" } }],
+        });
+
+        expect(response.success).toBe(false);
+        expect(response.error_code).toBe("library_not_searchable");
+        expect(items.get("AAA").annotationColor).toBe("#ffd400");
+        expect(items.get("AAA").save).not.toHaveBeenCalled();
+        expect(items.get("BBB").save).not.toHaveBeenCalled();
+    });
 });
 
 describe("edit_annotations validation", () => {
@@ -1000,6 +1038,28 @@ describe("edit_annotations execution", () => {
         expect(response.result_data?.operation).toBe("delete");
         expect(items.get("AAA").deleted).toBe(true);
         expect(items.get("BBB").deleted).toBe(true);
+    });
+
+    it("records an annotation trashed while the batch was being prepared", async () => {
+        // Preparing a batch takes time, so the user can trash a target after it
+        // resolved. Recording it as untouched would make undo pull it back out
+        // of the trash on an action that never deleted it.
+        const db = (globalThis as any).Zotero.DB;
+        const executeTransaction = db.executeTransaction;
+        db.executeTransaction = vi.fn(async (callback: () => Promise<void>) => {
+            items.get("BBB").deleted = true;
+            return executeTransaction(callback);
+        });
+
+        const response = await execute({
+            operation: "delete",
+            annotation_refs: refs("AAA", "BBB"),
+        });
+
+        expect(response.success).toBe(true);
+        const before = response.result_data?.before ?? [];
+        expect(before.find((row: any) => row.zotero_key === "AAA")?.deleted).toBe(false);
+        expect(before.find((row: any) => row.zotero_key === "BBB")?.deleted).toBe(true);
     });
 
     it("moves an annotation in place, keeping its identity", async () => {
