@@ -515,6 +515,22 @@ const versionUpdateMessageList: VersionUpdateMessageConfig[] = [
    
         inPanel: true,
     },
+    {
+        version: "0.23.0",
+        title: "Version 0.23: Agent redesign and annotation editing",
+        featureList: [
+            {
+                title: "Under-the-hood agent redesign",
+                description: "Redesigned agent that rolled out over the last weeks. More efficient under the hood, and a stronger foundation for what's next.",
+            },
+            {
+                title: "Edit annotations",
+                description: "Beaver can now update existing PDF annotations: change color, edit comment, change position and more.",
+            },
+        ],
+        inPanel: true,
+        footer: `<a href="https://github.com/jlegewie/beaver-zotero/releases/tag/v0.23.0" target='_blank'>Full changelog</a>`,
+    },
 
 ];
 
