@@ -26,6 +26,7 @@ import {
 import {
     getToolGroupRunApprovalLabel,
     getToolGroupRunApprovalScope,
+    isDestructiveNoteRewriteAction,
 } from '../../../atoms/runApprovalPolicy';
 import { STATUS_CONFIGS, type ActionStatus } from './agentActionViewHelpers';
 import {
@@ -661,7 +662,28 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
         : (!isHovered && (baseConfig.icon !== null || aggregateStatus !== 'awaiting')
             ? baseConfig.iconClassName
             : undefined);
-    const groupLabel = editCount === 1 ? 'Note Edit' : `${editCount} Note Edits`;
+    // A whole-note rewrite must not be labelled like an ordinary edit: it is the
+    // one operation that can delete a note's contents in a single approval, and
+    // the header is what the user reads before deciding.
+    const isWholeNoteRewrite = useMemo(
+        () => partStates.length === 1
+            && partStates[0].rows.length === 1
+            && partStates[0].rows[0].operation === 'rewrite',
+        [partStates],
+    );
+    const groupLabel = isWholeNoteRewrite
+        ? 'Rewrite Note'
+        : (editCount === 1 ? 'Note Edit' : `${editCount} Note Edits`);
+    // A rewrite validation classified as destructive is authorized on its own,
+    // so a note-edit run grant neither approves it nor sweeps it up. Offering
+    // "Allow all note edits for this run" here would look like it applies the
+    // card and then leave it sitting there, so drop to a plain Apply All.
+    const hasDestructiveRewriteApproval = useMemo(
+        () => pendingApprovalsForGroup.some(
+            (pending) => isDestructiveNoteRewriteAction(pending.actionType, pending.actionData),
+        ),
+        [pendingApprovalsForGroup],
+    );
     const showCollapsedHeaderActions =
         !isProcessing && !hasStreamingChild && (aggregateStatus === 'awaiting' || aggregateStatus === 'pending') && !isExpanded;
     const rejectableActionCount = useMemo(
@@ -878,7 +900,7 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
                             )}
 
                             {showFooterApply && (!isProcessing || clickedButton === 'approve') && (
-                                hasPendingApprovals ? (
+                                hasPendingApprovals && !hasDestructiveRewriteApproval ? (
                                     <SplitApplyButton
                                         onApply={handleApplyAll}
                                         onApplyAll={handleApproveNoteEditsForRun}
