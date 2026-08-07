@@ -4,6 +4,7 @@ import {
     clearRunApprovalPolicyAtom,
     DEFAULT_DEFERRED_TOOL_GROUPS,
     getPendingApprovalIdsForToolGroup,
+    getActionToolGroup,
     getToolGroup,
     getToolGroupRunApprovalLabel,
     getToolGroupRunApprovalScope,
@@ -184,6 +185,59 @@ describe('runApprovalPolicy', () => {
             'note-batch-1',
         ]);
         expect(getToolGroup('edit_note_batch')).toBe('note_edits');
+    });
+
+    it('classifies the shared edit_annotations action by operation', () => {
+        expect(
+            getActionToolGroup('edit_annotations', { operation: 'delete' }),
+        ).toBe('annotation_deletion');
+        expect(
+            getActionToolGroup('edit_annotations', { operation: 'edit' }),
+        ).toBe('annotations');
+
+        const pending = [
+            {
+                actionId: 'delete-1',
+                actionType: 'edit_annotations',
+                actionData: { operation: 'delete' },
+            },
+            {
+                actionId: 'edit-1',
+                actionType: 'edit_annotations',
+                actionData: { operation: 'edit' },
+            },
+        ];
+        expect(
+            getPendingApprovalIdsForToolGroup(pending, 'delete_annotations'),
+        ).toEqual(['delete-1']);
+        expect(
+            getPendingApprovalIdsForToolGroup(pending, 'edit_annotations'),
+        ).toEqual(['edit-1']);
+    });
+
+    it('uses a deletion grant for late shared-action approval events', () => {
+        const policy = {
+            runId: 'run-1',
+            approvedGroups: new Set(['annotation_deletion']),
+            approvedResources: new Set<string>(),
+        };
+
+        expect(
+            isActionApprovedForCurrentRun(
+                policy,
+                'run-1',
+                'edit_annotations',
+                { operation: 'delete' },
+            ),
+        ).toBe(true);
+        expect(
+            isActionApprovedForCurrentRun(
+                policy,
+                'run-1',
+                'edit_annotations',
+                { operation: 'edit' },
+            ),
+        ).toBe(false);
     });
 
     it('uses explicit and distinguishable run-scoped labels', () => {

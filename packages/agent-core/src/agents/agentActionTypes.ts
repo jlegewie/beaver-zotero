@@ -23,6 +23,13 @@ import type {
     NoteAnnotationItem,
 } from '../types/agentActions/createAnnotations';
 import { normalizeAnnotationTags } from '../types/agentActions/createAnnotations';
+import type {
+    AnnotationPlacementSnapshot,
+    AnnotationPreviewSnapshot,
+    AnnotationRelocation,
+    EditAnnotationsProposedData,
+    EditAnnotationsResultData,
+} from '../types/agentActions/editAnnotations';
 
 // =============================================================================
 // Agent Action Types
@@ -88,6 +95,9 @@ export const isCreateNoteAnnotationsAgentAction = (action: AgentAction): action 
 export const isCreateAnnotationsAgentAction = (action: AgentAction): action is CreateHighlightAnnotationsAgentAction | CreateNoteAnnotationsAgentAction => {
     return isCreateHighlightAnnotationsAgentAction(action) || isCreateNoteAnnotationsAgentAction(action);
 };
+
+export const isEditAnnotationsAgentAction = (action: AgentAction): action is EditAnnotationsAgentAction =>
+    action.action_type === 'edit_annotations';
 
 /**
  * Type guard for zotero note actions
@@ -207,6 +217,12 @@ export type CreateNoteAnnotationsAgentAction = AgentAction & {
     result_data?: CreateNoteAnnotationsResultData;
 };
 
+export type EditAnnotationsAgentAction = AgentAction & {
+    action_type: 'edit_annotations';
+    proposed_data: EditAnnotationsProposedData;
+    result_data?: EditAnnotationsResultData;
+};
+
 /**
  * Check if an agent action has been applied and has a Zotero item reference
  */
@@ -252,6 +268,23 @@ function normalizeZoteroItemReference(raw: any): ZoteroItemReference {
         zotero_key: typeof zoteroKey === 'string' ? zoteroKey : String(zoteroKey ?? ''),
         ...(typeof libraryRef === 'string' && libraryRef ? { library_ref: libraryRef } : {}),
     };
+}
+
+/** Pre-change display state of the annotations an edit_annotations action targets. */
+function normalizeAnnotationPreviews(raw: any): AnnotationPreviewSnapshot[] {
+    if (!Array.isArray(raw)) return [];
+    return raw.map((row: any) => ({
+        ...normalizeZoteroItemReference(row ?? {}),
+        annotation_id: String(row?.annotation_id ?? row?.annotationId ?? ''),
+        ...(typeof row?.annotation_type === 'string' && row.annotation_type
+            ? { annotation_type: row.annotation_type }
+            : {}),
+        color: typeof row?.color === 'string' ? row.color : '',
+        comment: typeof row?.comment === 'string' ? row.comment : '',
+        tags: normalizeAnnotationTags(row?.tags) ?? [],
+        ...(typeof row?.page_label === 'string' ? { page_label: row.page_label } : {}),
+        ...(typeof row?.text === 'string' ? { text: row.text } : {}),
+    }));
 }
 
 function normalizeCreateAnnotationBaseItem(item: any) {
@@ -344,6 +377,57 @@ function normalizeCreateAnnotationsResultData(raw: any): Record<string, any> {
     };
 }
 
+function normalizeRelocation(raw: any): AnnotationRelocation | undefined {
+    if (!raw || typeof raw !== 'object') return undefined;
+    const pageLocations = normalizePageLocations({
+        locations: raw.page_locations ?? raw.pageLocations,
+    });
+    const notePosition = normalizeNotePosition({
+        note_position: raw.note_position ?? raw.notePosition,
+    });
+    const attachment = raw.attachment_ref ?? raw.attachmentRef;
+    if (!attachment) return undefined;
+    return {
+        loc_raw: String(raw.loc_raw ?? raw.locRaw ?? ''),
+        content_kind: raw.content_kind ?? raw.contentKind,
+        attachment_ref: normalizeZoteroItemReference(attachment),
+        ...(pageLocations ? { page_locations: pageLocations } : {}),
+        ...(notePosition ? { note_position: notePosition } : {}),
+        ...(raw.text !== undefined ? { text: raw.text } : {}),
+        ...(raw.page_label !== undefined || raw.pageLabel !== undefined
+            ? { page_label: raw.page_label ?? raw.pageLabel }
+            : {}),
+        ...(raw.reading_order_offset !== undefined || raw.readingOrderOffset !== undefined
+            ? { reading_order_offset: raw.reading_order_offset ?? raw.readingOrderOffset }
+            : {}),
+        ...(raw.section_href !== undefined || raw.sectionHref !== undefined
+            ? { section_href: raw.section_href ?? raw.sectionHref }
+            : {}),
+        ...(raw.section_ordinal !== undefined || raw.sectionOrdinal !== undefined
+            ? { section_ordinal: raw.section_ordinal ?? raw.sectionOrdinal }
+            : {}),
+        ...(raw.anchor_id !== undefined || raw.anchorId !== undefined
+            ? { anchor_id: raw.anchor_id ?? raw.anchorId }
+            : {}),
+    } as AnnotationRelocation;
+}
+
+function normalizePlacementSnapshot(raw: any): AnnotationPlacementSnapshot | undefined {
+    if (!raw || typeof raw !== 'object') return undefined;
+    const position = raw.position;
+    if (typeof position !== 'string') return undefined;
+    return {
+        position,
+        ...(typeof raw.text === 'string' ? { text: raw.text } : {}),
+        ...(raw.page_label !== undefined || raw.pageLabel !== undefined
+            ? { page_label: String(raw.page_label ?? raw.pageLabel ?? '') }
+            : {}),
+        ...(raw.sort_index !== undefined || raw.sortIndex !== undefined
+            ? { sort_index: String(raw.sort_index ?? raw.sortIndex ?? '') }
+            : {}),
+    };
+}
+
 /**
  * Deserializes and normalizes a raw agent action object from the backend
  * into a typed AgentAction object.
@@ -397,6 +481,55 @@ export function toAgentAction(raw: Record<string, any>): AgentAction {
                 : [],
             tags: normalizeAnnotationTags(proposedData.tags),
         } as CreateNoteAnnotationsProposedData;
+    } else if (actionType === 'edit_annotations') {
+        const skipped = Array.isArray(proposedData.skipped)
+            ? proposedData.skipped.map((row: any) => ({
+                annotation_id: String(row?.annotation_id ?? row?.annotationId ?? ''),
+                reason: String(row?.reason ?? ''),
+            }))
+            : [];
+        // The card renders its annotations from these, and they are the only
+        // copy left once the action resolves and its result data is cleared.
+        // This normalizer rebuilds proposed_data field by field, so anything
+        // not carried here is dropped before the card ever sees it.
+        const previews = normalizeAnnotationPreviews(
+            proposedData.annotation_previews ?? proposedData.annotationPreviews,
+        );
+        const carried = {
+            skipped,
+            ...(previews.length ? { annotation_previews: previews } : {}),
+        };
+        if (proposedData.operation === 'delete') {
+            proposedData = {
+                operation: 'delete',
+                annotation_refs: Array.isArray(proposedData.annotation_refs ?? proposedData.annotationRefs)
+                    ? (proposedData.annotation_refs ?? proposedData.annotationRefs).map(normalizeZoteroItemReference)
+                    : [],
+                ...carried,
+            } as EditAnnotationsProposedData;
+        } else {
+            proposedData = {
+                operation: 'edit',
+                edits: (Array.isArray(proposedData.edits) ? proposedData.edits : []).map((group: any) => {
+                    const changes = group?.changes ?? {};
+                    const patch = {
+                        ...(changes.color !== undefined ? { color: changes.color } : {}),
+                        ...(changes.comment !== undefined ? { comment: changes.comment } : {}),
+                        ...(changes.add_tags !== undefined ? { add_tags: normalizeAnnotationTags(changes.add_tags) } : {}),
+                        ...(changes.remove_tags !== undefined ? { remove_tags: normalizeAnnotationTags(changes.remove_tags) } : {}),
+                    };
+                    const relocation = normalizeRelocation(group?.relocation);
+                    return {
+                        annotation_refs: Array.isArray(group?.annotation_refs)
+                            ? group.annotation_refs.map(normalizeZoteroItemReference)
+                            : [],
+                        ...(Object.keys(patch).length ? { changes: patch } : {}),
+                        ...(relocation ? { relocation } : {}),
+                    };
+                }),
+                ...carried,
+            } as EditAnnotationsProposedData;
+        }
     } else if (actionType === 'zotero_note') {
         const libraryIdRaw = proposedData.library_id ?? proposedData.libraryId;
         const zoteroKeyRaw = proposedData.zotero_key ?? proposedData.zoteroKey;
@@ -527,6 +660,55 @@ export function toAgentAction(raw: Record<string, any>): AgentAction {
         }
     } else if (resultData && (actionType === 'create_highlight_annotations' || actionType === 'create_note_annotations')) {
         resultData = normalizeCreateAnnotationsResultData(resultData);
+    } else if (resultData && actionType === 'edit_annotations') {
+        const appliedRefs = Array.isArray(resultData.applied_refs ?? resultData.appliedRefs)
+            ? (resultData.applied_refs ?? resultData.appliedRefs).map(normalizeZoteroItemReference)
+            : [];
+        const before = Array.isArray(resultData.before) ? resultData.before.map((snapshot: any) => {
+            const movedTo = normalizePlacementSnapshot(snapshot.moved_to ?? snapshot.movedTo);
+            // Undo reads `tags` unconditionally and restores the automatic ones
+            // by name, so an untagged annotation must keep an empty array and
+            // `automatic_tags` has to survive the round trip through history.
+            const automaticTags = normalizeAnnotationTags(snapshot.automatic_tags ?? snapshot.automaticTags);
+            return {
+                annotation_id: String(snapshot.annotation_id ?? snapshot.annotationId ?? ''),
+                ...normalizeZoteroItemReference(snapshot),
+                color: String(snapshot.color ?? ''),
+                comment: String(snapshot.comment ?? ''),
+                tags: normalizeAnnotationTags(snapshot.tags) ?? [],
+                ...(automaticTags ? { automatic_tags: automaticTags } : {}),
+                ...(typeof snapshot.deleted === 'boolean' ? { deleted: snapshot.deleted } : {}),
+                ...(snapshot.annotation_type !== undefined || snapshot.annotationType !== undefined
+                    ? { annotation_type: String(snapshot.annotation_type ?? snapshot.annotationType ?? '') }
+                    : {}),
+                ...(typeof snapshot.text === 'string' ? { text: snapshot.text } : {}),
+                ...(snapshot.page_label !== undefined || snapshot.pageLabel !== undefined
+                    ? { page_label: String(snapshot.page_label ?? snapshot.pageLabel ?? '') }
+                    : {}),
+                ...(snapshot.sort_index !== undefined || snapshot.sortIndex !== undefined
+                    ? { sort_index: String(snapshot.sort_index ?? snapshot.sortIndex ?? '') }
+                    : {}),
+                ...(typeof snapshot.position === 'string' ? { position: snapshot.position } : {}),
+                ...(movedTo ? { moved_to: movedTo } : {}),
+            };
+        }) : [];
+        const relocated = Array.isArray(resultData.relocated) ? resultData.relocated.map((mapping: any) => ({
+            old_ref: normalizeZoteroItemReference(mapping.old_ref ?? mapping.oldRef ?? {}),
+            new_ref: normalizeZoteroItemReference(mapping.new_ref ?? mapping.newRef ?? {}),
+        })) : undefined;
+        const skipped = Array.isArray(resultData.skipped)
+            ? resultData.skipped.map((row: any) => ({
+                annotation_id: String(row?.annotation_id ?? row?.annotationId ?? ''),
+                reason: String(row?.reason ?? ''),
+            }))
+            : undefined;
+        resultData = {
+            operation: resultData.operation === 'delete' ? 'delete' : 'edit',
+            applied_refs: appliedRefs,
+            before,
+            ...(skipped?.length ? { skipped } : {}),
+            ...(relocated?.length ? { relocated } : {}),
+        } as EditAnnotationsResultData;
     } else if (resultData && actionType === 'zotero_note') {
         const zoteroKey = resultData.zotero_key ?? resultData.zoteroKey;
         const libraryId = resultData.library_id ?? resultData.libraryId;

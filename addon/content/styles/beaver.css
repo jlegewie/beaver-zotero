@@ -795,8 +795,9 @@
     margin-top: 5px;
 }
 
-/* Create Annotations Preview — clickable row hover */
-[id^="beaver-pane-"] .create-annotations-preview-row {
+/* Annotation previews — clickable row hover */
+[id^="beaver-pane-"] .create-annotations-preview-row,
+[id^="beaver-pane-"] .edit-annotations-preview-row {
     border-radius: 4px;
     padding-left: 6px;
     padding-right: 6px;
@@ -805,7 +806,17 @@
     transition: background-color 0.15s ease;
 }
 
-[id^="beaver-pane-"] .create-annotations-preview-row:hover {
+/* Bordered edit list: keep hover inside the thin outline */
+[id^="beaver-pane-"] .edit-annotations-preview-list .edit-annotations-preview-row {
+    border-radius: 0;
+    margin-left: 0;
+    margin-right: 0;
+    margin-top: 2px;
+    padding: 8px 10px;
+}
+
+[id^="beaver-pane-"] .create-annotations-preview-row:hover,
+[id^="beaver-pane-"] .edit-annotations-preview-row:hover {
     background-color: var(--material-mix-quarternary);
 }
 

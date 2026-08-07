@@ -148,6 +148,27 @@ export function getOverallStatus(actions: AgentAction[]): ActionStatus {
 }
 
 /**
+ * Annotations targeted by an edit_annotations action. A delete carries a flat
+ * list; an edit carries them inside its per-group `edits` entries.
+ *
+ * Both shapes are counted: an approved action carries resolved
+ * `annotation_refs`, while streaming tool arguments still hold the model's
+ * `annotation_ids`.
+ */
+function countAnnotationTargets(value: any): number {
+    return value?.annotation_refs?.length ?? value?.annotation_ids?.length ?? 0;
+}
+
+function countEditAnnotationTargets(actionData?: Record<string, any>): number {
+    const flat = countAnnotationTargets(actionData);
+    if (flat) return flat;
+    return (actionData?.edits ?? []).reduce(
+        (sum: number, group: any) => sum + countAnnotationTargets(group),
+        0,
+    );
+}
+
+/**
  * Get human-readable label for the action
  */
 export function getActionLabel(
@@ -175,6 +196,21 @@ export function getActionLabel(
             return count > 1
                 ? `${count} Sticky Notes`
                 : 'Sticky Note';
+        }
+        // Both annotation-mutation tools share one action type. The tool name is
+        // what settles the verb: streaming tool arguments carry no `operation`,
+        // so a deletion would otherwise read as an edit until its action row
+        // arrives. The label carries the whole headline here — these actions
+        // have no separate title.
+        case 'edit_annotations':
+        case 'delete_annotations': {
+            const count = countEditAnnotationTargets(actionData);
+            const verb = toolName === 'delete_annotations' || actionData?.operation === 'delete'
+                ? 'Delete'
+                : 'Edit';
+            return count > 1
+                ? `${verb} ${count} Annotations`
+                : `${verb} Annotation`;
         }
         case 'create_item':
         case 'create_items':
@@ -216,6 +252,11 @@ export function getActionTitle(
         case 'create_note_annotations': {
             return itemTitle;
         }
+        // No title: the label already reads "Edit 2 Annotations", and the
+        // preview names the annotations themselves.
+        case 'edit_annotations':
+        case 'delete_annotations':
+            return null;
         case 'create_collection':
             return actionData?.name ?? actionData?.proposed_data?.name ?? null;
         case 'organize_items': {

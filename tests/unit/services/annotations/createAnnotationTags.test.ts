@@ -31,6 +31,10 @@ class MockAnnotationItem {
   saveTx = vi.fn(async () => {
     this.tagsAtSave = [...this.tags];
   });
+  /** In-transaction write; the writers pick this when one is already open. */
+  save = vi.fn(async () => {
+    this.tagsAtSave = [...this.tags];
+  });
 
   constructor(public readonly itemType: string) {
     constructedItems.push(this);
@@ -53,13 +57,16 @@ function mockAttachment() {
 
 describe("createAnnotation tag application", () => {
   let previousZotero: any;
+  let inTransaction = false;
 
   beforeEach(() => {
     vi.clearAllMocks();
     constructedItems = [];
+    inTransaction = false;
     previousZotero = (globalThis as any).Zotero;
     (globalThis as any).Zotero = {
       Item: MockAnnotationItem,
+      DB: { inTransaction: () => inTransaction },
       Beaver: {
         documentCache: {
           getMetadata: vi.fn().mockResolvedValue({ pages: [geometry] }),
@@ -84,6 +91,24 @@ describe("createAnnotation tag application", () => {
     expect(constructedItems[0].tags).toEqual(["methods", "important"]);
     expect(constructedItems[0].tagsAtSave).toEqual(["methods", "important"]);
     expect(constructedItems[0].saveTx).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps its own transaction while an unrelated one is open", async () => {
+    // Creation is a standalone write, so it must not join whatever transaction
+    // happens to be open (sync, another UI task): joining would report success
+    // for an annotation that a rollback elsewhere then discards.
+    inTransaction = true;
+
+    await createHighlightAnnotation(mockAttachment(), {
+      pageIndex: 0,
+      boxes: [{ l: 10, t: 20, r: 110, b: 50, coord_origin: CoordOrigin.TOPLEFT }],
+      text: "highlighted text",
+      tags: ["methods"],
+    });
+
+    expect(constructedItems[0].save).not.toHaveBeenCalled();
+    expect(constructedItems[0].saveTx).toHaveBeenCalledTimes(1);
+    expect(constructedItems[0].tagsAtSave).toEqual(["methods"]);
   });
 
   it("applies note tags before saveTx", async () => {

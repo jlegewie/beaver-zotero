@@ -107,7 +107,7 @@ const PermissionsSection: React.FC = () => {
                     <DeferredToolPreferenceSetting
                         toolName="create_highlight_annotations"
                         label="PDF Annotations"
-                        description="Creating highlight and note annotations on PDF attachments"
+                        description="Creating and editing annotations. Deleting annotations always asks for confirmation."
                     />
                 </div>
                 <div className="border-top-quinary" style={{ padding: '8px 12px' }}>

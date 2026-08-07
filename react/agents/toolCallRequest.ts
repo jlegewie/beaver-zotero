@@ -101,6 +101,8 @@ export const TOOL_BASE_LABELS: Record<string, string> = {
     // Annotation tools
     get_annotations: 'Get annotations',
     find_annotations: 'Find annotations',
+    edit_annotations: 'Edit annotations',
+    delete_annotations: 'Delete annotations',
 
     // Note tools
     read_note: 'Reading note',

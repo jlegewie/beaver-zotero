@@ -58,6 +58,7 @@ import { undoCreateNoteAction } from '../../utils/createNoteActions';
 import { undoEditNoteAction, undoEditNoteBatchAction } from '../../utils/editNoteActions';
 import { undoCreateAnnotationsAction } from '../../utils/createAnnotationsActions';
 import { undoCreateItemActions } from '../../utils/createItemActions';
+import { undoEditAnnotationsAction } from '../../utils/editAnnotationsActions';
 
 // ---------------------------------------------------------------------------
 // Shared helpers
@@ -409,6 +410,10 @@ export async function handleTestUndoActionHttpRequest(request: any) {
                 break;
             case 'edit_note_batch':
                 await undoEditNoteBatchAction(action);
+                break;
+            // Both edit_annotations and delete_annotations share this action type.
+            case 'edit_annotations':
+                await undoEditAnnotationsAction(action);
                 break;
             case 'create_highlight_annotations':
             case 'create_note_annotations':

@@ -1457,7 +1457,7 @@ export interface WSListLibrariesResponse {
 export type DeferredToolPreference = 'always_ask' | 'always_apply' | 'continue_without_applying';
 
 /** Agent action type for deferred tools */
-export type AgentActionType = 'highlight_annotation' | 'note_annotation' | 'create_highlight_annotations' | 'create_note_annotations' | 'zotero_note' | 'create_item' | 'edit_metadata' | 'create_collection' | 'organize_items' | 'manage_tags' | 'manage_collections' | 'confirm_extraction' | 'confirm_external_search' | 'edit_note' | 'edit_note_batch' | 'create_note';
+export type AgentActionType = 'highlight_annotation' | 'note_annotation' | 'create_highlight_annotations' | 'create_note_annotations' | 'edit_annotations' | 'zotero_note' | 'create_item' | 'edit_metadata' | 'create_collection' | 'organize_items' | 'manage_tags' | 'manage_collections' | 'confirm_extraction' | 'confirm_external_search' | 'edit_note' | 'edit_note_batch' | 'create_note';
 
 /** Request from backend to validate an agent action */
 export interface WSAgentActionValidateRequest extends WSBaseEvent {
@@ -1813,6 +1813,8 @@ export const CLIENT_FEATURES = {
     CREATE_NOTE_TAGS_COLLECTIONS: 'create_note_tags_collections',
     /** Batch multi-edit note editing (edit_note_batch action type). */
     EDIT_NOTE_BATCH: 'edit_note_batch',
+    /** Atomic common-field editing for annotations returned by find_annotations. */
+    EDIT_ANNOTATIONS: 'edit_annotations',
     /**
      * Citations arrive on their own `run_citations` event instead of inside
      * `run_complete`, so the run is reported finished as soon as it is durable
