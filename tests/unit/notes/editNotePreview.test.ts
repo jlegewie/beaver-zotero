@@ -24,8 +24,8 @@ beforeEach(() => {
         Items: {
             getByLibraryAndKey: vi.fn((libraryID: number, key: string) => {
                 if (libraryID !== 1) return false;
-                if (key === 'ATTACH') return { kind: 'attachment', parentItemID: 10, isAttachment: () => true };
-                if (key === 'PARENT') return { kind: 'parent-direct', isAttachment: () => false };
+                if (key === 'ATTACH') return { kind: 'attachment', parentItemID: 10, isAttachment: (): boolean => true };
+                if (key === 'PARENT') return { kind: 'parent-direct', isAttachment: (): boolean => false };
                 return false;
             }),
             get: vi.fn((itemID: number) => itemID === 10 ? { kind: 'parent' } : false),
@@ -77,7 +77,7 @@ describe('rewrite scope summary', () => {
 
         expect(scope).toMatchObject({ oldLines: 115, newLines: 22, isDestructive: true });
         expect(formatRewriteScope(scope)).toBe(
-            'Replaces the entire note — 115 → 22 lines, about 81% of the text is deleted',
+            'Replaces the entire note: 115 → 22 lines, about 81% of the text is deleted',
         );
     });
 
@@ -97,7 +97,7 @@ describe('rewrite scope summary', () => {
         const scope = computeRewriteScope(oldHtml, newHtml);
 
         expect(scope?.isDestructive).toBe(false);
-        expect(formatRewriteScope(scope)).toBe('Replaces the entire note — 115 → 140 lines');
+        expect(formatRewriteScope(scope)).toBe('Replaces the entire note: 115 → 140 lines');
     });
 
     it('claims no magnitude while the old body is still unknown', () => {
