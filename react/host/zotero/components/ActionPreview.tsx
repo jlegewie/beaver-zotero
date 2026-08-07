@@ -292,10 +292,13 @@ export const ActionPreview: React.FC<{
                         <div key={`edit-${editIndex}`} className="flex flex-col gap-1">
                             {/* Row labels only separate STACKED diffs (full edits[]
                                 render). Group rows slice to one edit each and are
-                                already delimited by row borders — no label there. */}
-                            {edits.length > 1 && (
+                                already delimited by row borders — no label there.
+                                A rewrite needs no label here: it is always the only
+                                edit in its batch, and EditNotePreview heads it with
+                                its own scope line. */}
+                            {edits.length > 1 && !isRewrite && (
                                 <div className="text-sm font-color-secondary px-3 py-1">
-                                    {isRewrite ? 'Full rewrite' : `Edit ${position + 1}`}
+                                    {`Edit ${position + 1}`}
                                 </div>
                             )}
                             <EditNotePreview

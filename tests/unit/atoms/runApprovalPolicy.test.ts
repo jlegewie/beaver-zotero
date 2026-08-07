@@ -1,6 +1,7 @@
 import { createStore } from 'jotai';
 import { describe, expect, it } from 'vitest';
 import {
+    canOfferToolGroupRunApproval,
     clearRunApprovalPolicyAtom,
     DEFAULT_DEFERRED_TOOL_GROUPS,
     getPendingApprovalIdsForToolGroup,
@@ -213,6 +214,127 @@ describe('runApprovalPolicy', () => {
         expect(
             getPendingApprovalIdsForToolGroup(pending, 'edit_annotations'),
         ).toEqual(['edit-1']);
+    });
+
+    it('keeps a destructive note rewrite out of the note_edits group', () => {
+        expect(getToolGroup('destructive_note_rewrite')).toBe('note_rewrite');
+
+        const policy = {
+            runId: 'run-1',
+            approvedGroups: new Set(['note_edits']),
+            approvedResources: new Set<string>(),
+        };
+        // A run grant for ordinary note edits must not carry a rewrite with it.
+        expect(
+            isActionApprovedForCurrentRun(policy, 'run-1', 'destructive_note_rewrite', {
+                library_id: 1,
+                zotero_key: 'NOTE0001',
+            }),
+        ).toBe(false);
+    });
+
+    it('classifies a flagged edit_note_batch action as a destructive rewrite', () => {
+        // The approval event carries the edit_note_batch action type, so the
+        // flag validation put on the action data is what separates it from an
+        // ordinary note edit here.
+        expect(
+            getActionToolGroup('edit_note_batch', { destructive_rewrite: true }),
+        ).toBe('note_rewrite');
+        expect(getActionToolGroup('edit_note_batch', {})).toBe('note_edits');
+
+        const policy = {
+            runId: 'run-1',
+            approvedGroups: new Set(['note_edits']),
+            approvedResources: new Set<string>(),
+        };
+        expect(
+            isActionApprovedForCurrentRun(policy, 'run-1', 'edit_note_batch', {
+                library_id: 1,
+                zotero_key: 'NOTE0001',
+                destructive_rewrite: true,
+            }),
+        ).toBe(false);
+        expect(
+            isActionApprovedForCurrentRun(policy, 'run-1', 'edit_note_batch', {
+                library_id: 1,
+                zotero_key: 'NOTE0001',
+            }),
+        ).toBe(true);
+    });
+
+    it('leaves a flagged rewrite out of a note_edits pending-approval sweep', () => {
+        const pending = [
+            {
+                actionId: 'rewrite-1',
+                actionType: 'edit_note_batch',
+                actionData: { library_id: 1, zotero_key: 'NOTE0001', destructive_rewrite: true },
+            },
+            {
+                actionId: 'edit-1',
+                actionType: 'edit_note_batch',
+                actionData: { library_id: 1, zotero_key: 'NOTE0002' },
+            },
+        ];
+        expect(getPendingApprovalIdsForToolGroup(pending, 'edit_note')).toEqual(['edit-1']);
+    });
+
+    it('hides a note-edit run grant when it cannot approve the whole card', () => {
+        const ordinaryEdit = {
+            actionType: 'edit_note_batch',
+            actionData: { library_id: 1, zotero_key: 'NOTE0001' },
+        };
+        const destructiveRewrite = {
+            actionType: 'edit_note_batch',
+            actionData: {
+                library_id: 1,
+                zotero_key: 'NOTE0001',
+                destructive_rewrite: true,
+            },
+        };
+
+        expect(canOfferToolGroupRunApproval([ordinaryEdit], 'edit_note')).toBe(true);
+        expect(
+            canOfferToolGroupRunApproval(
+                [ordinaryEdit, destructiveRewrite],
+                'edit_note',
+            ),
+        ).toBe(false);
+        expect(
+            canOfferToolGroupRunApproval([destructiveRewrite], 'edit_note'),
+        ).toBe(false);
+    });
+
+    it('still applies the created-note resource grant to a destructive rewrite', () => {
+        const store = createStore();
+        store.set(grantCreatedNoteEditsForRunAtom, {
+            runId: 'run-1',
+            libraryId: 1,
+            zoteroKey: 'NOTE0001',
+        });
+        const policy = store.get(runApprovalPolicyAtom);
+
+        // Beaver wrote this note during the same run, so a rewrite of it can
+        // discard nothing the user authored.
+        expect(
+            isActionApprovedForCurrentRun(policy, 'run-1', 'destructive_note_rewrite', {
+                library_id: 1,
+                zotero_key: 'NOTE0001',
+            }),
+        ).toBe(true);
+        expect(
+            isActionApprovedForCurrentRun(policy, 'run-1', 'destructive_note_rewrite', {
+                library_id: 1,
+                zotero_key: 'OTHERKEY',
+            }),
+        ).toBe(false);
+        // Same grant, reached through the approval event's action type.
+        expect(
+            isActionApprovedForCurrentRun(policy, 'run-1', 'edit_note_batch', {
+                library_id: 1,
+                zotero_key: 'NOTE0001',
+                destructive_rewrite: true,
+            }),
+        ).toBe(true);
     });
 
     it('uses a deletion grant for late shared-action approval events', () => {

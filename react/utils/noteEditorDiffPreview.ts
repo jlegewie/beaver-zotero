@@ -501,7 +501,11 @@ export async function showDiffPreview(
             if (view?.dom) view.dom.contentEditable = 'false';
         } catch { /* best effort */ }
         injectPreviewStyles(inst._iframeWindow);
-        injectPreviewBanner(inst._iframeWindow, edits.length > 1);
+        injectPreviewBanner(
+            inst._iframeWindow,
+            edits.length > 1,
+            edits.some((e) => e.operation === 'rewrite'),
+        );
         clearIframeAction(inst._iframeWindow);
 
         activePreview = {
@@ -933,7 +937,11 @@ function removePreviewStyles(iframeWindow: any): void {
     catch { /* ignore */ }
 }
 
-function injectPreviewBanner(iframeWindow: any, multipleEdits: boolean): void {
+function injectPreviewBanner(
+    iframeWindow: any,
+    multipleEdits: boolean,
+    isRewrite: boolean,
+): void {
     try {
         const doc = iframeWindow?.wrappedJSObject?.document ?? iframeWindow?.document;
         if (!doc) return;
@@ -953,7 +961,12 @@ function injectPreviewBanner(iframeWindow: any, multipleEdits: boolean): void {
 
         const title = doc.createElement('span');
         title.className = 'banner-title';
-        title.textContent = 'Preview of Note Edits';
+        // A rewrite replaces the whole body, so everything struck through below
+        // disappears on approval. Name that in the banner rather than calling it
+        // an ordinary edit preview.
+        title.textContent = isRewrite
+            ? 'Preview: Replacing the Entire Note'
+            : 'Preview of Note Edits';
 
         const suffix = multipleEdits ? ' All' : '';
 
