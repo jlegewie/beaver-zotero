@@ -606,7 +606,9 @@ async function executeEditNoteBatchAction(
     request: WSAgentActionExecuteRequest,
     ctx: TimeoutContext,
 ): Promise<WSAgentActionExecuteResponse> {
-    const { library_id, library_ref, zotero_key, edits } = request.action_data as EditNoteBatchProposedData;
+    const {
+        library_id, library_ref, zotero_key, edits, destructive_rewrite,
+    } = request.action_data as EditNoteBatchProposedData;
 
     const shapeError = checkBatchShape(edits);
     if (shapeError) return executeError(request.request_id, shapeError.error, shapeError.errorCode);
@@ -685,6 +687,34 @@ async function executeEditNoteBatchAction(
 
     // ── Single-rewrite batch: v1 rewrite tail semantics, batch envelope ──
     if (edits.length === 1 && opOf(edits[0]) === 'rewrite') {
+        // Re-classify against the note as it stands NOW. Validation's verdict is
+        // what decided whether this rewrite needed its own approval, and the note
+        // can gain content in between (a concurrent action — validation is not
+        // serialized against execution — or the user typing), so a rewrite that
+        // was cleared as ordinary must not silently discard whatever arrived
+        // afterwards. Fail closed: re-issuing runs validation again, which
+        // classifies the rewrite against the current note and asks for approval.
+        if (destructive_rewrite !== true) {
+            const currentRisk = assessNoteRewrite(simplified, edits[0].new_string ?? '');
+            if (currentRisk.isDestructive) {
+                logger(
+                    `executeEditNoteBatchAction: rewrite of ${noteId} became destructive `
+                    + `(${currentRisk.reason}) after validation — removed=`
+                    + `${currentRisk.removedFraction.toFixed(2)}, retained=`
+                    + `${currentRisk.retainedFraction.toFixed(2)} — refusing unapproved rewrite`,
+                    1,
+                );
+                return executeError(
+                    request.request_id,
+                    'The note changed after this rewrite was checked, and the rewrite would now discard '
+                    + 'most of its content. A rewrite that destructive needs the user\'s approval, so it '
+                    + 'was not applied. Read the note again and either re-issue the rewrite against its '
+                    + 'current content or express the change as targeted str_replace edits.',
+                    'note_changed',
+                );
+            }
+        }
+
         return await executeSingleRewrite(
             request, ctx, item, edits[0], resolvedLibraryId, zotero_key,
             oldHtml, strippedHtml, existingCitationCache, metadata, externalRefContext,

@@ -1032,6 +1032,42 @@ describe('executeEditNoteBatchAction — atomicity and failures', () => {
         expect(item.saveTx).not.toHaveBeenCalled();
     });
 
+    it('refuses a rewrite that only became destructive after validation cleared it', async () => {
+        // The note grew after validation classified the rewrite as ordinary, so
+        // the payload now discards content that was never covered by approval.
+        const paragraphs = Array.from(
+            { length: 40 },
+            (_, i) => `<p>Paragraph ${i} of a long research note about corrugator activity.</p>`,
+        );
+        const item = useNote(`<div data-schema-version="9">${paragraphs.join('')}</div>`);
+
+        const response = await handleAgentActionExecuteRequest(makeExecuteRequest([
+            { index: 0, operation: 'rewrite', new_string: paragraphs[3] },
+        ]));
+
+        expect(response.success).toBe(false);
+        expect(response.error_code).toBe('note_changed');
+        expect(item.setNote).not.toHaveBeenCalled();
+        expect(item.saveTx).not.toHaveBeenCalled();
+    });
+
+    it('applies a destructive rewrite that was approved as one', async () => {
+        const paragraphs = Array.from(
+            { length: 40 },
+            (_, i) => `<p>Paragraph ${i} of a long research note about corrugator activity.</p>`,
+        );
+        const item = useNote(`<div data-schema-version="9">${paragraphs.join('')}</div>`);
+
+        const response = await handleAgentActionExecuteRequest(makeExecuteRequest(
+            [{ index: 0, operation: 'rewrite', new_string: paragraphs[3] }],
+            { destructive_rewrite: true },
+        ));
+
+        expect(response.success).toBe(true);
+        expect(item.setNote).toHaveBeenCalledTimes(1);
+        expect(item.saveTx).toHaveBeenCalledTimes(1);
+    });
+
     it('rolls back with setNote(oldHtml) and reports save_failed when saveTx throws', async () => {
         const item = makeMockItem({
             saveTx: vi.fn().mockRejectedValue(new Error('DB write failed')),
