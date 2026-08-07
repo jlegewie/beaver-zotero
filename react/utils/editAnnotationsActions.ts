@@ -84,7 +84,6 @@ type CurrentState = {
 type ResolvedAnnotation = {
     item: Zotero.Item;
     snapshot: AnnotationBeforeSnapshot;
-    current: CurrentState;
 };
 
 function toPlacement(
@@ -121,6 +120,29 @@ function currentPlacement(
         pageLabel: item.annotationPageLabel ?? "",
         sortIndex: annotationSortIndex ?? "",
         position: item.annotationPosition ?? "",
+    };
+}
+
+/** The annotation's live values, as the undo write would overwrite them. */
+function readCurrentState(
+    item: Zotero.Item,
+    snapshot: AnnotationBeforeSnapshot,
+): CurrentState {
+    return {
+        color: item.annotationColor,
+        comment: item.annotationComment,
+        tags: item
+            .getTags()
+            .map((tag) => ({ tag: tag.tag, type: tag.type ?? 0 })),
+        deleted: item.deleted,
+        ...(snapshot.position
+            ? {
+                  placement: currentPlacement(
+                      item,
+                      snapshot.annotation_type === "highlight",
+                  ),
+              }
+            : {}),
     };
 }
 
@@ -403,32 +425,10 @@ export async function undoEditAnnotationsAction(
         // from persisted history (after a restart, or once the item has been
         // evicted) would otherwise throw here.
         await loadAnnotationEditData(found.item);
-        resolved.push({
-            item: found.item,
-            snapshot,
-            current: {
-                color: found.item.annotationColor,
-                comment: found.item.annotationComment,
-                tags: found.item
-                    .getTags()
-                    .map((tag) => ({ tag: tag.tag, type: tag.type ?? 0 })),
-                deleted: found.item.deleted,
-                ...(snapshot.position
-                    ? {
-                          placement: currentPlacement(
-                              found.item,
-                              snapshot.annotation_type === "highlight",
-                          ),
-                      }
-                    : {}),
-            },
-        });
+        resolved.push({ item: found.item, snapshot });
     }
 
-    const legacyReplacements = new Map<
-        string,
-        { item: Zotero.Item; deleted: boolean; current: CurrentState }
-    >();
+    const legacyReplacements = new Map<string, Zotero.Item>();
     for (const mapping of result?.relocated ?? []) {
         assertAnnotationLibraryNotExcluded(mapping.new_ref);
         const found = await resolveItemReference(mapping.new_ref);
@@ -438,29 +438,29 @@ export async function undoEditAnnotationsAction(
             );
         }
         await loadAnnotationEditData(found.item);
-        legacyReplacements.set(annotationKey(mapping.old_ref), {
-            item: found.item,
-            deleted: found.item.deleted,
-            current: {
-                color: found.item.annotationColor,
-                comment: found.item.annotationComment,
-                tags: found.item
-                    .getTags()
-                    .map((tag) => ({ tag: tag.tag, type: tag.type ?? 0 })),
-                deleted: found.item.deleted,
-            },
-        });
+        legacyReplacements.set(annotationKey(mapping.old_ref), found.item);
     }
 
     const undoResult = emptyResult();
     const alreadyReverted = new Set<string>();
     const manuallyModified = new Set<string>();
     const movedItems: Array<{ attachmentID: number; item: Zotero.Item }> = [];
+    // Live state per item, read inside the transaction and immediately before
+    // that item is written. Resolving the batch awaits once per annotation, so
+    // reusing what it saw would both miss a manual edit that landed in that
+    // window and restore stale values after a rollback.
+    const capturedState = new Map<Zotero.Item, CurrentState>();
+    const capture = (item: Zotero.Item, snapshot: AnnotationBeforeSnapshot) => {
+        const current = readCurrentState(item, snapshot);
+        if (!capturedState.has(item)) capturedState.set(item, current);
+        return current;
+    };
 
     try {
         await Zotero.DB.executeTransaction(async () => {
             for (let index = 0; index < resolved.length; index++) {
-                const { item, snapshot, current } = resolved[index];
+                const { item, snapshot } = resolved[index];
+                const current = capture(item, snapshot);
                 const applied = appliedValues(
                     patches.get(snapshot.annotation_id),
                     snapshot,
@@ -474,7 +474,7 @@ export async function undoEditAnnotationsAction(
 
                 if (legacyRelocation && replacement && !replacement.deleted) {
                     const drifted = replacementDrift(
-                        replacement.current,
+                        capture(replacement, snapshot),
                         snapshot,
                         applied,
                     );
@@ -581,25 +581,23 @@ export async function undoEditAnnotationsAction(
                     }
                 }
                 if (replacement && !replacement.deleted) {
-                    replacement.item.deleted = true;
-                    await replacement.item.save();
+                    capture(replacement, snapshot);
+                    replacement.deleted = true;
+                    await replacement.save();
                 }
             }
         });
     } catch (error) {
-        for (const { item, current } of resolved) {
+        // Put the in-memory items back the way the transaction found them, so a
+        // cached Zotero.Item never outlives the rolled-back write still
+        // carrying values that were never committed.
+        for (const [item, current] of capturedState) {
             item.annotationColor = current.color;
             item.annotationComment = current.comment;
             item.setTags(current.tags);
             item.deleted = current.deleted;
             if (current.placement)
                 applyAnnotationPlacement(item, current.placement);
-        }
-        for (const replacement of legacyReplacements.values()) {
-            replacement.item.annotationColor = replacement.current.color;
-            replacement.item.annotationComment = replacement.current.comment;
-            replacement.item.setTags(replacement.current.tags);
-            replacement.item.deleted = replacement.deleted;
         }
         throw error;
     }

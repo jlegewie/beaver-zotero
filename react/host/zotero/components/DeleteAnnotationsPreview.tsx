@@ -56,7 +56,10 @@ export function deleteAnnotationRow(
 export const DeleteAnnotationsPreview: React.FC<{
     actionData: Record<string, any>;
     currentValue?: { annotations?: AnnotationPreviewSnapshot[] };
-    resultData?: { before?: AnnotationPreviewSnapshot[] };
+    resultData?: {
+        before?: AnnotationPreviewSnapshot[];
+        skipped?: Array<{ annotation_id: string; reason: string }>;
+    };
     status: ActionStatus | 'awaiting';
 }> = ({ actionData, currentValue, resultData, status }) => {
     const snapshots: AnnotationPreviewSnapshot[] =
@@ -68,8 +71,11 @@ export const DeleteAnnotationsPreview: React.FC<{
         actionData.annotation_refs,
         snapshots,
     ).map(deleteAnnotationRow);
+    // The result's list supersedes the proposal's: it is the same validation
+    // skips plus anything execution dropped when it re-resolved the batch.
     const skipped: Array<{ annotation_id: string; reason: string }> =
-        Array.isArray(actionData.skipped) ? actionData.skipped : [];
+        (Array.isArray(resultData?.skipped) ? resultData.skipped : null) ??
+        (Array.isArray(actionData.skipped) ? actionData.skipped : []);
     const isDimmed = status === 'rejected' || status === 'undone';
 
     if (rows.length === 0 && skipped.length === 0) return null;

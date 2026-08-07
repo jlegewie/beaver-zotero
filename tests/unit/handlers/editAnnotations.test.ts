@@ -705,6 +705,38 @@ describe("edit_annotations execution", () => {
         expect(items.get("BBB").annotationColor).toBe("#ffd400");
     });
 
+    it("reports targets dropped when execution re-resolves the batch", async () => {
+        // The approval card listed both, but one is gone by the time the user
+        // approves. The result has to say so: only applied_refs shrinks
+        // otherwise, and the proposal still names the full set.
+        const response = await execute({
+            edits: [
+                {
+                    annotation_refs: refs("AAA", "GONE"),
+                    changes: { color: "red" },
+                },
+            ],
+            skipped: [{ annotation_id: "1-EARLIER", reason: "was not found" }],
+        });
+
+        expect(response.success).toBe(true);
+        expect(response.result_data?.applied_refs).toEqual([ref("AAA")]);
+        // Validation-time skips travel alongside the new one, so the card shows
+        // every target the change never reached.
+        expect(response.result_data?.skipped).toEqual([
+            { annotation_id: "1-EARLIER", reason: "was not found" },
+            { annotation_id: "1-GONE", reason: expect.any(String) },
+        ]);
+    });
+
+    it("omits the skip list when every target was applied", async () => {
+        const response = await execute({
+            edits: [{ annotation_refs: refs("AAA"), changes: { color: "red" } }],
+        });
+
+        expect(response.result_data).not.toHaveProperty("skipped");
+    });
+
     it("adds and removes tags without discarding the rest", async () => {
         await execute({
             edits: [

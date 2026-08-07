@@ -696,10 +696,17 @@ export function toAgentAction(raw: Record<string, any>): AgentAction {
             old_ref: normalizeZoteroItemReference(mapping.old_ref ?? mapping.oldRef ?? {}),
             new_ref: normalizeZoteroItemReference(mapping.new_ref ?? mapping.newRef ?? {}),
         })) : undefined;
+        const skipped = Array.isArray(resultData.skipped)
+            ? resultData.skipped.map((row: any) => ({
+                annotation_id: String(row?.annotation_id ?? row?.annotationId ?? ''),
+                reason: String(row?.reason ?? ''),
+            }))
+            : undefined;
         resultData = {
             operation: resultData.operation === 'delete' ? 'delete' : 'edit',
             applied_refs: appliedRefs,
             before,
+            ...(skipped?.length ? { skipped } : {}),
             ...(relocated?.length ? { relocated } : {}),
         } as EditAnnotationsResultData;
     } else if (resultData && actionType === 'zotero_note') {

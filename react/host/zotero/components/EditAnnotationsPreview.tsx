@@ -278,11 +278,17 @@ export function netSummary(
 export const EditAnnotationsPreview: React.FC<{
     actionData: Record<string, any>;
     currentValue?: { annotations?: AnnotationPreviewSnapshot[] };
-    resultData?: { before?: AnnotationPreviewSnapshot[] };
+    resultData?: {
+        before?: AnnotationPreviewSnapshot[];
+        skipped?: Array<{ annotation_id: string; reason: string }>;
+    };
     status: ActionStatus | 'awaiting';
 }> = ({ actionData, currentValue, resultData, status }) => {
+    // The result's list supersedes the proposal's: it is the same validation
+    // skips plus anything execution dropped when it re-resolved the batch.
     const skipped: Array<{ annotation_id: string; reason: string }> =
-        Array.isArray(actionData.skipped) ? actionData.skipped : [];
+        (Array.isArray(resultData?.skipped) ? resultData.skipped : null) ??
+        (Array.isArray(actionData.skipped) ? actionData.skipped : []);
 
     // Where the annotations' pre-change state comes from, in order of how
     // closely it matches what ran: the execution result, the validation pass

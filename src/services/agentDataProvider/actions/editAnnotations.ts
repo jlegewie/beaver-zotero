@@ -758,15 +758,15 @@ function previewSnapshot(
     };
 }
 
-/** Rebuild the proposal from the targets that survived validation. */
-function survivingData(
-    data: EditAnnotationsProposedData,
-    partition: Partitioned,
-): EditAnnotationsProposedData {
-    const combinedSkips = [
-        ...(data.skipped ?? []),
-        ...partition.skipped,
-    ].filter(
+/**
+ * Skips already on the proposal plus the ones this pass found, deduplicated.
+ * Execution re-resolves the batch, so it can drop targets validation accepted.
+ */
+function mergeSkips(
+    existing: SkippedAnnotation[] | undefined,
+    found: SkippedAnnotation[],
+): SkippedAnnotation[] {
+    return [...(existing ?? []), ...found].filter(
         (row, index, all) =>
             all.findIndex(
                 (candidate) =>
@@ -774,11 +774,18 @@ function survivingData(
                     candidate.reason === row.reason,
             ) === index,
     );
+}
+
+/** Rebuild the proposal from the targets that survived validation. */
+function survivingData(
+    data: EditAnnotationsProposedData,
+    partition: Partitioned,
+): EditAnnotationsProposedData {
     // Carried on the proposal so a rejected or undone card can still render the
     // annotations by content: result data holds the same state, but is cleared
     // as soon as the action resolves.
     const common = {
-        skipped: combinedSkips,
+        skipped: mergeSkips(data.skipped, partition.skipped),
         annotation_previews: partition.targets.map((target) =>
             previewSnapshot(target.before),
         ),
@@ -1147,6 +1154,7 @@ export async function executeEditAnnotationsAction(
     // skip, which would otherwise be reported as a resolution failure and lose
     // the timeout diagnostics the caller relies on.
     checkAborted(ctx, "edit_annotations:after_partition");
+    const skipped = mergeSkips(normalized.data.skipped, partition.skipped);
     if (!partition.targets.length) {
         return {
             type: "agent_action_execute_response",
@@ -1265,6 +1273,10 @@ export async function executeEditAnnotationsAction(
                 operation: normalized.data.operation,
                 applied_refs: appliedRefs,
                 before: partition.targets.map((target) => target.before),
+                // Re-resolution can drop a target the approval card still
+                // listed, so the result carries the full skip list rather than
+                // letting a partial batch read as an unqualified success.
+                ...(skipped.length ? { skipped } : {}),
             },
         };
     } catch (error) {

@@ -77,7 +77,7 @@ export interface AnnotationEditGroup {
     relocation?: AnnotationRelocation;
 }
 
-/** One annotation dropped during validation, with the reason why. */
+/** One annotation dropped before the change reached it, with the reason why. */
 export interface SkippedAnnotation {
     annotation_id: string;
     reason: string;
@@ -186,6 +186,13 @@ export interface EditAnnotationsResultData {
     operation: EditAnnotationsProposedData["operation"];
     applied_refs: ZoteroItemReference[];
     before: AnnotationBeforeSnapshot[];
+    /**
+     * Every target the change never reached, validation-time and execution-time
+     * alike. Execution re-resolves the batch, so an annotation the user deleted
+     * while the approval card was open is dropped there rather than at
+     * validation; without this the applied card would keep claiming it.
+     */
+    skipped?: SkippedAnnotation[];
     /** Present only on results persisted by the legacy relocation contract. */
     relocated?: AnnotationRelocationMapping[];
 }

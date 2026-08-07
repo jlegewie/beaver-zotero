@@ -255,6 +255,29 @@ describe("undoEditAnnotationsAction", () => {
         expect(item.save).not.toHaveBeenCalled();
     });
 
+    it("preserves a change that lands between resolution and the transaction", async () => {
+        const item = annotation("AAA");
+        items.set("AAA", item);
+        // Resolving the batch awaits per annotation, so a manual edit can land
+        // after the state was first read. Reconciling against that stale read
+        // would revert the annotation on top of the user's change.
+        const db = (globalThis as any).Zotero.DB;
+        const executeTransaction = db.executeTransaction;
+        db.executeTransaction = vi.fn(async (callback: () => Promise<void>) => {
+            item.annotationColor = "#5fb236";
+            return executeTransaction(callback);
+        });
+
+        const result = await undoEditAnnotationsAction(
+            updateAction({ color: "blue" }, [snapshot("AAA")]),
+        );
+
+        expect(item.annotationColor).toBe("#5fb236");
+        expect(result.manuallyModified).toEqual(["color"]);
+        expect(result.fieldsReverted).toBe(0);
+        expect(item.save).not.toHaveBeenCalled();
+    });
+
     it("overwrites manual changes when forced", async () => {
         const item = annotation("AAA", { annotationColor: "#5fb236" });
         items.set("AAA", item);
