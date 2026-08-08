@@ -84,7 +84,7 @@ import {
     updateRunWithToolCallArgsStream,
     allUserAttachmentKeysAtom,
     resetRunMessages,
-} from '../agents/atoms';
+} from '@beaver/agent-core/run-state/atoms';
 import { userIdAtom } from './auth';
 import { citationsAtom, processCitationsAtom, resetCitationMarkersAtom, mergePageLabelsByAttachmentIdAtom } from './citations';
 import type { Citation } from '@beaver/agent-core/types/citations';
@@ -125,7 +125,7 @@ import {
     addPendingQuestionAtom,
     removePendingQuestionAtom,
     clearAllPendingQuestionsAtom,
-} from '../agents/pendingQuestions';
+} from '@beaver/agent-core/run-state/pendingQuestions';
 import { getAppliedPdfAnnotationCount } from '../agents/agentActionCounts';
 import { undoEditMetadataAction } from '../utils/editMetadataActions';
 import { undoCreateItemAction } from '../utils/createItemActions';
@@ -139,12 +139,12 @@ import { undoCreateAnnotationsAction } from '../utils/createAnnotationsActions';
 import { undoEditAnnotationsAction } from '../utils/editAnnotationsActions';
 import { processToolReturnResults } from '../agents/toolResultProcessing';
 import { upgradeToolReturn } from '../compat/legacyToolResults';
-import { isToolResultView } from '../types/toolResultViews';
+import { isToolResultView } from '@beaver/agent-core/run-state/toolResultViews';
 import { addWarningAtom, clearWarningsAtom } from './warnings';
 import { backendHighTokenUsageRunsAtom, softCapTriggeredRunsAtom } from './messageUIState';
 import { currentThreadNameAtom } from './threads';
 import { loadItemDataForAgentActions, autoApplyAnnotationAgentActions, autoCreateNoteAgentActions } from '../utils/agentActionUtils';
-import { extractZoteroReferencesFromToolCall } from '../agents/toolLabels';
+import { extractZoteroReferencesFromToolCall } from '@beaver/agent-core/run-state/toolLabels';
 import {
     clearRunApprovalPolicyAtom,
     getPendingApprovalIdsForToolGroup,
@@ -166,7 +166,7 @@ import { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import { createZoteroItemReference } from '../utils/zoteroReferences';
 import { markExternalReferenceImportedAtom } from './externalReferences';
 import type { CreateItemProposedData, CreateItemResultData } from '@beaver/agent-core/types/agentActions/items';
-import { appendRunIfMissing, findResumeChainRoot, findRunForResume, hasOnlyThinkingParts, lingeringCompletedRun, resolveErrorRunId, toRunError } from '../agents/runResumeHelpers';
+import { appendRunIfMissing, findResumeChainRoot, findRunForResume, hasOnlyThinkingParts, lingeringCompletedRun, resolveErrorRunId, toRunError } from '@beaver/agent-core/run-state/runResumeHelpers';
 import {
     planRetryRollback,
     resolveRetryTarget,

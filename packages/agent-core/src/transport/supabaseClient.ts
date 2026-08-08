@@ -35,6 +35,40 @@ export function setSupabaseStorageAdapter(adapter: SupabaseStorageAdapter): void
     injectedStorageAdapter = adapter;
 }
 
+/** How the auth client's token-refresh ticker is driven. */
+export interface SupabaseAuthPolicy {
+    /**
+     * `true` (the default) runs the ticker unconditionally; `false` leaves the
+     * SDK's visibility-driven refresh in place, so a hidden document does not
+     * refresh. See the comment above the `startAutoRefresh()` call in
+     * `createSupabaseClient` for the mechanics and for which hosts want which.
+     *
+     * Note that `false` reduces how many runtimes refresh concurrently but does
+     * not serialize them: a host whose runtimes share one stored session across
+     * separate realms still needs cross-realm coordination of its own.
+     */
+    forceAutoRefresh: boolean;
+}
+
+const DEFAULT_AUTH_POLICY: SupabaseAuthPolicy = { forceAutoRefresh: true };
+
+let authPolicy: SupabaseAuthPolicy = DEFAULT_AUTH_POLICY;
+
+/**
+ * Register the auth-refresh policy. Optional: a host that registers nothing
+ * gets `forceAutoRefresh: true`.
+ *
+ * Throws once a client exists, because the policy is read when the client is
+ * created and never again — accepting a later call would leave the caller with
+ * a client whose behavior silently contradicts the policy it just registered.
+ */
+export function setSupabaseAuthPolicy(policy: SupabaseAuthPolicy): void {
+    if (supabaseInstance) {
+        throw new Error('Supabase auth policy must be set before the Supabase client is first used');
+    }
+    authPolicy = policy;
+}
+
 /** Stops a Supabase client: marks it disposed and stops its auto-refresh ticker. */
 export type SupabaseDisposer = () => Promise<void>;
 
@@ -368,30 +402,40 @@ function createSupabaseClient(): SupabaseClientInstance {
     // correct bad values and retry.
     markSupabaseConfigInUse({ url, anonKey });
 
-    // Force-start auto-refresh and remove the visibility-change listener.
+    const { forceAutoRefresh } = authPolicy;
+
+    // Initialize the auth client, and under the default policy force-start
+    // auto-refresh so the SDK's visibility handling is removed.
     //
     // The Supabase SDK registers a `visibilitychange` listener during
     // _initialize() (inside _handleVisibilityChange, in the `finally` block).
     // That listener stops the auto-refresh ticker when the document becomes
     // "hidden" and calls _recoverAndRefresh() when it becomes "visible" again.
-    // In Zotero this is harmful: if the window is briefly obscured the ticker
-    // stops, the access token can expire, and _recoverAndRefresh may hit a
-    // stale refresh token → "Invalid Refresh Token" → unexpected logout.
     //
-    // startAutoRefresh() removes the visibility listener and runs the ticker
-    // unconditionally.  We must call it AFTER initialize() resolves, because
-    // _initialize()'s finally block re-registers the listener.  Calling it
-    // earlier is a no-op — the listener doesn't exist yet and gets registered
-    // right after.
-    // Guard: if the client is disposed (plugin reload / shutdown) before
-    // initialize() resolves, skip startAutoRefresh() so we don't resurrect
-    // the old client's ticker alongside the new one.
+    // With `forceAutoRefresh` (the default), startAutoRefresh() removes that
+    // listener and runs the ticker unconditionally. This is what a host with a
+    // single window wants: if the window is briefly obscured the ticker would
+    // otherwise stop, the access token can expire, and _recoverAndRefresh may
+    // hit a stale refresh token → "Invalid Refresh Token" → unexpected logout.
+    // It must be called AFTER initialize() resolves, because _initialize()'s
+    // finally block re-registers the listener; calling it earlier is a no-op.
+    //
+    // Without `forceAutoRefresh` the SDK's listener stays, so a hidden document
+    // stops refreshing — what a host wants when several runtimes on one origin
+    // share a stored session.
+    //
+    // Guard: if the client is disposed (host reload / shutdown) before
+    // initialize() resolves, stop auto-refresh instead. That both avoids
+    // resurrecting the old client's ticker alongside the new one and removes
+    // the listener initialize() just re-registered, under either policy.
     client.auth.initialize().then(async () => {
         if (disposed) {
             await stopDisposedSupabaseClient(client);
             return;
         }
-        await client.auth.startAutoRefresh();
+        if (forceAutoRefresh) {
+            await client.auth.startAutoRefresh();
+        }
     }).catch(async (e) => {
         if (disposed) {
             await stopDisposedSupabaseClient(client);

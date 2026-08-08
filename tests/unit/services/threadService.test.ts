@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 // ThreadService's import chain reaches supabaseClient, which throws at module
 // load without Supabase env. Stub it (we spy on `get` and never hit the network).
@@ -6,7 +6,11 @@ vi.mock('@beaver/agent-core/transport/supabaseClient', () => ({
     supabase: { auth: { getSession: vi.fn() } },
 }));
 
-import { ThreadService } from '@beaver/agent-core/transport/threadService';
+import {
+    isThreadAgentMismatch,
+    setThreadAgentName,
+    ThreadService,
+} from '@beaver/agent-core/transport/threadService';
 
 /**
  * Unit tests for ThreadService.findThreadsByItem — the library arrives as a DTO
@@ -148,5 +152,75 @@ describe('ThreadService instance scoping', () => {
                 expected_user_id: 'beaver-user-uuid',
             });
         });
+    });
+});
+
+/**
+ * Thread lists are per agent, so the client scopes every list request to the
+ * agent it registered. The by-item route takes no such param — its rows carry
+ * the thread's agent instead and callers filter them client-side.
+ */
+describe('ThreadService agent scoping', () => {
+    let service: ThreadService;
+    let lastEndpoint: string;
+
+    beforeEach(() => {
+        service = new ThreadService('https://example.test');
+        vi.spyOn(service as any, 'get').mockImplementation(async (endpoint: string) => {
+            lastEndpoint = endpoint;
+            return { data: [], next_cursor: null, has_more: false };
+        });
+        lastEndpoint = '';
+        setThreadAgentName('beaver');
+    });
+
+    afterEach(() => {
+        setThreadAgentName(null);
+    });
+
+    function params(): URLSearchParams {
+        return new URLSearchParams(lastEndpoint.split('?')[1] ?? '');
+    }
+
+    it('scopes the paginated list to the registered agent', async () => {
+        await service.getPaginatedThreads(10);
+        expect(params().get('agent_name')).toBe('beaver');
+    });
+
+    it('scopes search to the registered agent', async () => {
+        await service.searchThreads('draft', 10);
+        expect(params().get('agent_name')).toBe('beaver');
+    });
+
+    it('scopes the starred list to the registered agent', async () => {
+        await service.getStarredThreads();
+        expect(params().get('agent_name')).toBe('beaver');
+    });
+
+    it('leaves lists unscoped when no host registered an agent', async () => {
+        setThreadAgentName(null);
+        await service.getPaginatedThreads(10);
+        expect(params().has('agent_name')).toBe(false);
+        await service.getStarredThreads();
+        expect(lastEndpoint).toBe('/api/v1/threads/starred');
+    });
+
+    it('does not scope by-item lookups server-side', async () => {
+        await service.findThreadsByItem({ libraryId: 1, libraryRef: 'u' }, ['K1']);
+        expect(params().has('agent_name')).toBe(false);
+    });
+
+    it('flags by-item rows belonging to another agent', () => {
+        expect(isThreadAgentMismatch({ agent_name: 'beaver_word' })).toBe(true);
+        expect(isThreadAgentMismatch({ agent_name: 'beaver' })).toBe(false);
+    });
+
+    it('keeps rows with no agent, and every row when unregistered', () => {
+        // A backend older than the column reports none; hiding those would
+        // empty the list.
+        expect(isThreadAgentMismatch({ agent_name: null })).toBe(false);
+        expect(isThreadAgentMismatch({})).toBe(false);
+        setThreadAgentName(null);
+        expect(isThreadAgentMismatch({ agent_name: 'beaver_word' })).toBe(false);
     });
 });

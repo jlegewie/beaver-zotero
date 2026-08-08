@@ -1,14 +1,17 @@
 /**
- * Pure, client-agnostic helpers derived from a tool-call's request side
- * (`ToolCallPart.args`) — no Zotero loads, no `getHost()`. Split out of
- * `toolLabels.ts` (which is Zotero-coupled via `getToolCallLabel`) so the shared
- * render layer (e.g. the generic agent-action fallback) can reuse the base
- * labels and arg-derived references without pulling Zotero into guarded code.
+ * Helpers derived from a tool-call's request side (`ToolCallPart.args`): arg
+ * parsing, the base per-tool labels, and the item references an in-flight call
+ * names before any result exists.
+ *
+ * Kept apart from `toolLabels`, which composes a finished header out of a
+ * result view model and host-resolved display data, so a caller that only needs
+ * the request side (e.g. the generic agent-action fallback) does not pull that
+ * machinery in.
  */
 
-import { ToolCallPart } from '@beaver/agent-core/agents/types';
-import { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
-import { resolveObjectId } from '../../src/utils/libraryIdentity';
+import { ToolCallPart } from '../agents/types';
+import { ZoteroItemReference } from '../types/zotero';
+import { resolveObjectIdReference } from '../identity/libraryRef';
 
 /**
  * Parse args from a {@link ToolCallPart} — handles both string and object formats.
@@ -27,7 +30,7 @@ export function parseArgs(part: ToolCallPart): Record<string, unknown> {
 
 function zoteroReferenceFromCompoundId(id: string): ZoteroItemReference | null {
     // Portable ("u-KEY" / "g<groupID>-KEY") or legacy numeric compound id.
-    return resolveObjectId(id);
+    return resolveObjectIdReference(id);
 }
 
 /**

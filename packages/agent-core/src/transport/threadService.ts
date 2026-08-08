@@ -19,12 +19,20 @@ export interface ThreadModel {
     // Both null/absent for unattributed threads (visible on every instance).
     zotero_user_id?: string | null;
     zotero_local_id?: string | null;
+    // Agent the thread belongs to, set server-side from the creating client
+    // (see `setThreadAgentName`). Absent on responses from a backend that
+    // predates the field.
+    agent_name?: string | null;
 }
 
 
 /**
  * Thread+run match from findThreadsByItem.
  * One per (thread, run_id, match_type); same thread may appear multiple times.
+ *
+ * The by-item route takes no agent scope, so these rows carry every agent's
+ * threads and callers must drop the foreign ones themselves — see
+ * {@link isThreadAgentMismatch}.
  */
 export interface ThreadRunMatch extends ThreadModel {
     run_id: string;
@@ -73,6 +81,41 @@ export interface ThreadItemLibraryRef {
 function appendInstanceScopeParams(params: URLSearchParams, scope: ZoteroInstanceRef | undefined): void {
     if (scope?.zoteroUserId) params.set('zotero_user_id', scope.zoteroUserId);
     if (scope?.zoteroLocalId) params.set('zotero_local_id', scope.zoteroLocalId);
+}
+
+let clientAgentName: string | null = null;
+
+/**
+ * Register the agent whose threads this client owns (the backend stamps the
+ * same name on threads the client creates). Every thread-list request is then
+ * scoped to it, so a user running two clients sees each client's own threads
+ * rather than one merged list.
+ *
+ * Call once at host bundle init; `null` clears the scope. Hosts that do not
+ * register a name keep the unscoped behavior of a client released before
+ * per-agent thread lists existed: the list shows threads of every agent.
+ */
+export function setThreadAgentName(name: string | null): void {
+    clientAgentName = name || null;
+}
+
+/** Appends the agent-scope query param when a host has registered a name. */
+function appendAgentScopeParam(params: URLSearchParams): void {
+    if (clientAgentName) params.set('agent_name', clientAgentName);
+}
+
+/**
+ * Whether a thread belongs to a different agent than this client's, and so
+ * must be hidden from results the backend did not scope (findThreadsByItem).
+ *
+ * `false` when this client registered no agent name, or when the thread has no
+ * `agent_name` — a backend older than the field reports none, and hiding every
+ * thread in that case would empty the list.
+ */
+export function isThreadAgentMismatch(thread: Pick<ThreadModel, 'agent_name'>): boolean {
+    if (!clientAgentName) return false;
+    if (!thread.agent_name) return false;
+    return thread.agent_name !== clientAgentName;
 }
 
 /**
@@ -169,6 +212,7 @@ export class ThreadService extends ApiService {
             params.set('after', after);
         }
         appendInstanceScopeParams(params, scope);
+        appendAgentScopeParam(params);
         return this.get<PaginatedThreadsResponse>(`/api/v1/threads/search?${params.toString()}`);
     }
 
@@ -193,6 +237,7 @@ export class ThreadService extends ApiService {
             params.set('after', after);
         }
         appendInstanceScopeParams(params, scope);
+        appendAgentScopeParam(params);
         if (includeOtherCount) {
             params.set('include_other_count', 'true');
         }
@@ -234,7 +279,10 @@ export class ThreadService extends ApiService {
      * @returns Promise with the list of starred threads
      */
     async getStarredThreads(): Promise<ThreadModel[]> {
-        return this.get<ThreadModel[]>('/api/v1/threads/starred');
+        const params = new URLSearchParams();
+        appendAgentScopeParam(params);
+        const query = params.toString();
+        return this.get<ThreadModel[]>(`/api/v1/threads/starred${query ? `?${query}` : ''}`);
     }
 
     /**

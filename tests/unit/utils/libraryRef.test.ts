@@ -1,8 +1,10 @@
 /**
- * Registry contract for the object-id resolver seam used by citation and
- * note-reference parsing (citationGrammar.ts).
+ * Registry contract for the library-identity resolver seams: the object-id
+ * resolver used by citation and note-reference parsing (citationGrammar.ts),
+ * and the library-ref resolver that stamps a device-local library id with its
+ * portable ref.
  *
- * `tests/setup.ts` registers the real Zotero resolver globally so the rest of
+ * `tests/setup.ts` registers the real Zotero resolvers globally so the rest of
  * the suite sees production behavior, so every test here resets the module
  * registry before importing — a plain static import would already be
  * registered by the time the test body runs.
@@ -68,5 +70,53 @@ describe('object-id resolver registry', () => {
 
         expect(resolveObjectIdReference('g42-ABCD1234')).toBe(resolved);
         expect(resolver).toHaveBeenCalledWith('g42-ABCD1234');
+    });
+});
+
+describe('library-ref resolver registry', () => {
+    let originalLibraries: unknown;
+
+    beforeEach(() => {
+        vi.resetModules();
+        // Give the personal library a real id, so library 1 resolves to 'u'
+        // through the Zotero resolver and to null without it. The two paths are
+        // indistinguishable otherwise, and the unregistered test would pass
+        // whether or not the module registry was actually reset.
+        originalLibraries = (globalThis as any).Zotero?.Libraries;
+        (globalThis as any).Zotero.Libraries = {
+            ...(originalLibraries as object),
+            userLibraryID: 1,
+        };
+    });
+
+    afterEach(() => {
+        (globalThis as any).Zotero.Libraries = originalLibraries;
+    });
+
+    // Both states are asserted against one module instance: the unregistered
+    // null is only meaningful because the same instance answers 'u' once the
+    // Zotero resolver is registered.
+    it('returns null until the Zotero resolver is registered', async () => {
+        const { resolveLibraryRefForLibraryID } = await import('@beaver/agent-core/identity/libraryRef');
+        const { registerZoteroLibraryIdentity } = await import('../../../src/utils/libraryIdentity');
+
+        expect(resolveLibraryRefForLibraryID(1)).toBeNull();
+
+        registerZoteroLibraryIdentity();
+
+        expect(resolveLibraryRefForLibraryID(1)).toBe('u');
+    });
+
+    it('uses the registered resolver', async () => {
+        const { setLibraryRefResolver, resolveLibraryRefForLibraryID } = await import(
+            '@beaver/agent-core/identity/libraryRef'
+        );
+        const resolver = vi.fn((libraryID: number) => (libraryID === 1 ? 'u' : null));
+
+        setLibraryRefResolver(resolver);
+
+        expect(resolveLibraryRefForLibraryID(1)).toBe('u');
+        expect(resolveLibraryRefForLibraryID(7)).toBeNull();
+        expect(resolver).toHaveBeenCalledWith(1);
     });
 });

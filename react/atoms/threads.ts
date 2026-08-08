@@ -15,7 +15,7 @@ import { ApiError } from "@beaver/agent-core/types/apiErrors";
 import { resetMessageUIStateAtom } from "./messageUIState";
 import { checkExternalReferencesAtom, clearExternalReferenceCacheAtom, addExternalReferencesToMappingAtom } from "./externalReferences";
 import { ExternalReference } from "@beaver/agent-core/types/externalReferences";
-import { threadRunsAtom, activeRunAtom } from "../agents/atoms";
+import { threadRunsAtom, activeRunAtom, currentThreadIdAtom } from "@beaver/agent-core/run-state/atoms";
 import { isWSChatPendingAtom, isWSConnectedAtom, isWSReadyAtom } from "./agentRunAtoms";
 import { AgentRun } from "@beaver/agent-core/agents/types";
 import { 
@@ -26,7 +26,7 @@ import {
     undoAgentActionAtom,
     clearAllPendingApprovalsAtom,
 } from "../agents/agentActions";
-import { clearAllPendingQuestionsAtom } from "../agents/pendingQuestions";
+import { clearAllPendingQuestionsAtom } from "@beaver/agent-core/run-state/pendingQuestions";
 import { processToolReturnResults } from "../agents/toolResultProcessing";
 import { upgradeToolReturn } from "../compat/legacyToolResults";
 import { loadItemDataForAgentActions } from "../utils/agentActionUtils";
@@ -128,7 +128,9 @@ export interface ThreadData {
 }
 
 // Thread messages and attachments
-export const currentThreadIdAtom = atom<string | null>(null);
+// currentThreadIdAtom is defined alongside the run state in the shared core and
+// re-exported here so thread consumers can import it from either module.
+export { currentThreadIdAtom };
 export const currentThreadNameAtom = atom<string | null>(null);
 
 /**

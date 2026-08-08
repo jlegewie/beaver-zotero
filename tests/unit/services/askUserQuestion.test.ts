@@ -57,7 +57,7 @@ import {
     clearAllPendingQuestionsAtom,
     pendingQuestionsAtom,
     removePendingQuestionAtom,
-} from '../../../react/agents/pendingQuestions';
+} from '@beaver/agent-core/run-state/pendingQuestions';
 
 class MockWebSocket {
     static CONNECTING = 0;

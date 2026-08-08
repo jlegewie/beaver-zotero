@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import {
     AnnotationListView,
     AnnotationRowView,
-} from '../../../types/toolResultViews';
+} from '@beaver/agent-core/run-state/toolResultViews';
 import { AnnotationResultRow } from './AnnotationResultRow';
 
 /**

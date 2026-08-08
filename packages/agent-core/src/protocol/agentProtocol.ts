@@ -1829,6 +1829,13 @@ export const CLIENT_FEATURES = {
 export const ZOTERO_PLUGIN_CLIENT_TYPE = 'zotero-plugin';
 
 /**
+ * Agent the backend runs for, and stamps on threads created by, the Zotero
+ * plugin. Threads are listed per agent, so this is what scopes the plugin's
+ * thread list to its own threads.
+ */
+export const ZOTERO_AGENT_NAME = 'beaver';
+
+/**
  * Features the current Zotero plugin build supports, declared explicitly in the
  * auth handshake. This build supports the full set, which equals what the
  * backend would otherwise derive from this plugin version — so declaring it is

@@ -10,7 +10,7 @@ import { isSidebarVisibleAtom, isLibraryTabAtom, isPreferencePageVisibleAtom, sh
 import { store } from "../store"
 
 // Agent-related atoms
-import { threadRunsAtom, activeRunAtom, allRunsAtom, isStreamingAtom as isAgentStreamingAtom, toolResultsMapAtom } from "../agents/atoms"
+import { threadRunsAtom, activeRunAtom, allRunsAtom, isStreamingAtom as isAgentStreamingAtom, toolResultsMapAtom } from "@beaver/agent-core/run-state/atoms"
 import { threadAgentActionsAtom, agentActionsByToolcallAtom, agentActionsByRunAtom } from "../agents/agentActions"
 import { isWSChatPendingAtom, isWSConnectedAtom, isWSReadyAtom, wsReadyDataAtom, wsRequestAckDataAtom, wsErrorAtom, wsWarningAtom } from "../atoms/agentRunAtoms"
 

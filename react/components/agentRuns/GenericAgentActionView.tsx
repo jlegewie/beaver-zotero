@@ -1,6 +1,6 @@
 import React from 'react';
 import { ToolCallPart, AgentRunStatus } from '@beaver/agent-core/agents/types';
-import { TOOL_BASE_LABELS, parseArgs } from '../../agents/toolCallRequest';
+import { TOOL_BASE_LABELS, parseArgs } from '@beaver/agent-core/run-state/toolCallRequest';
 
 /**
  * Client-agnostic fallback for agent-action tool calls.

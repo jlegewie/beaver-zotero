@@ -36,6 +36,7 @@
   "files": [
     "./src/globals.d.ts",
     "./src/protocol/agentProtocol.ts",
+    "./src/protocol/wordProtocol.ts",
     "./src/transport/connectionFailure.ts",
     "./src/extract/document/dom/schema.ts",
     "./src/extract/document/epub/schema.ts",
@@ -93,6 +94,16 @@
     "./src/platform/runtime.ts",
     "./src/platform/logger.ts",
     "./src/types/models.ts",
-    "./src/types/apiErrors.ts"
+    "./src/types/apiErrors.ts",
+
+    // Run-state: the wire-shape guards, view models and run-lifecycle helpers a
+    // client needs to turn an agent run into render state.
+    "./src/run-state/toolResultViews.ts",
+    "./src/run-state/toolResultTypes.ts",
+    "./src/run-state/toolCallRequest.ts",
+    "./src/run-state/runResumeHelpers.ts",
+    "./src/run-state/atoms.ts",
+    "./src/run-state/pendingQuestions.ts",
+    "./src/run-state/toolLabels.ts"
   ]
 }

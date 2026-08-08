@@ -18,7 +18,7 @@ import {
     removeApprovalResponseIntentAtom,
     sendApprovalResponseAtom,
 } from '../../../atoms/agentRunAtoms';
-import { getToolCallStatus, toolResultsMapAtom, type ToolCallStatus } from '../../../agents/atoms';
+import { getToolCallStatus, toolResultsMapAtom, type ToolCallStatus } from '@beaver/agent-core/run-state/atoms';
 import {
     executeEditNoteOrBatchAction,
     getUserFacingErrorMessage,

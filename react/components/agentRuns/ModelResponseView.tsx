@@ -3,7 +3,7 @@ import { AgentRunStatus, ModelResponse, ToolCallPart } from '@beaver/agent-core/
 import { TextPartView } from './TextPartView';
 import { ThinkingPartView } from './ThinkingPartView';
 import { ToolCallPartView } from './ToolCallPartView';
-import { isAnnotationToolResult } from '../../agents/toolResultTypes';
+import { isAnnotationToolResult } from '@beaver/agent-core/run-state/toolResultTypes';
 import ContextMenu from '../ui/menu/ContextMenu';
 import useSelectionContextMenu from '../../hooks/useSelectionContextMenu';
 import { buildEditNoteRenderItems, getEditNoteGroupInstanceId } from './editNoteShared';

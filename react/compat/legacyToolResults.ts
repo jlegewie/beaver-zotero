@@ -2,7 +2,7 @@
  * Legacy tool-result compatibility layer.
  *
  * The shared render layer understands ONLY the hydrated `ToolResultView` models
- * (`react/types/toolResultViews.ts`). New backends ship those on
+ * (`@beaver/agent-core/run-state/toolResultViews`). New backends ship those on
  * `ToolReturnMetadata.view`. But two row shapes predate them:
  *
  *  1. Old threads, whose tool returns carry only the reference-only `summary`
@@ -35,7 +35,7 @@ import {
     AttachmentSearchRowView,
     AttachmentMatchView,
     isToolResultView,
-} from "../types/toolResultViews";
+} from "@beaver/agent-core/run-state/toolResultViews";
 import {
     // type guards
     isZoteroSearchResult,
@@ -82,7 +82,7 @@ import {
     LineReference,
     AttachmentSearchReference,
     AttachmentMatchSummary,
-} from "../agents/toolResultTypes";
+} from "@beaver/agent-core/run-state/toolResultTypes";
 
 const NOTE_TITLE_MAX_LENGTH = 100;
 /** Maximum annotation text/comment preview stored in legacy view rows. */

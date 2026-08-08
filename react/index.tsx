@@ -35,9 +35,12 @@ import { BeaverTemporaryAnnotations } from './utils/annotationUtils';
 import { setTransportConfig } from '@beaver/agent-core/transport/config';
 import { registerZoteroHost } from './host/zotero';
 import { registerZoteroDataProvider } from '../src/services/zoteroDataProvider';
-import { registerZoteroObjectIdResolver } from '../src/utils/libraryIdentity';
+import { registerZoteroLibraryIdentity } from '../src/utils/libraryIdentity';
 import { registerZoteroClientIdentity } from '../src/services/zoteroClientIdentity';
+import { setThreadAgentName } from '@beaver/agent-core/transport/threadService';
+import { ZOTERO_AGENT_NAME } from '@beaver/agent-core/protocol/agentProtocol';
 import { registerZoteroSupabaseStorage, registerZoteroSupabaseReloadBridge } from '../src/services/zoteroSupabaseStorage';
+import { setSupabaseAuthPolicy } from '@beaver/agent-core/transport/supabaseClient';
 import { registerZoteroBusyContext } from '../src/services/busyContext';
 import { registerZoteroSyncPause } from '../src/services/syncPause';
 import { notifyWorkerStartFailure } from './utils/workerUnavailableNotice';
@@ -72,20 +75,33 @@ registerZoteroHost();
 // this only needs to land before that point, not before module load).
 registerZoteroDataProvider();
 
-// Register the Zotero object-id resolver used by citation and note-reference
-// parsing (citationGrammar.ts) to resolve a portable library_ref to this
-// device's local library_id. Must run before any note or citation is read.
-registerZoteroObjectIdResolver();
+// Register the Zotero library-identity resolvers: the object-id resolver used
+// by citation and note-reference parsing (citationGrammar.ts) to resolve a
+// portable library_ref to this device's local library_id, and the reverse
+// lookup that stamps a local library_id with its portable ref. Must run before
+// any note or citation is read.
+registerZoteroLibraryIdentity();
 
 // Register the Zotero client identity provider used to build the auth
 // handshake's frontend_version/client_type/client_features/zotero_instance
 // fields. Must run before ProviderConnection opens its first connection.
 registerZoteroClientIdentity();
 
+// Scope every thread list to the Zotero agent, matching the agent name the
+// backend stamps on threads this client creates. Without it the list would
+// also show threads created by the user's other Beaver clients.
+setThreadAgentName(ZOTERO_AGENT_NAME);
+
 // Register the Zotero encrypted-storage adapter the Supabase auth session
 // persists into. Must run before the exported `supabase` client is first
 // used (the client is created lazily on first property access).
 registerZoteroSupabaseStorage();
+
+// Zotero runs a single window that may sit obscured for long stretches while
+// its session must stay alive, so the auth client refreshes on its own ticker
+// rather than only while the window is visible. Must run before the client is
+// first used; this restates the default explicitly.
+setSupabaseAuthPolicy({ forceAutoRefresh: true });
 
 // Register the window-scoped bridge to Supabase state that survives a plugin
 // reload. Registering is what stops a previous bundle instance's auto-refresh

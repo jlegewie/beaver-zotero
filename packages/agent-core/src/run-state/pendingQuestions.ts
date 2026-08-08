@@ -1,21 +1,18 @@
 /**
  * Pending user-question state (ask_user_question tool).
  *
- * Deliberately separate from the agent-action state in `agentActions.ts`:
- * a question is NOT an agent action — it has no apply/undo/validate lifecycle
- * and no AgentActionType. It is a run-blocking request for user input,
- * answered through a dedicated WS event pair (`ask_user_question_request` /
+ * Deliberately separate from the host's agent-action state: a question is NOT
+ * an agent action — it has no apply/undo/validate lifecycle and no
+ * AgentActionType. It is a run-blocking request for user input, answered
+ * through a dedicated WS event pair (`ask_user_question_request` /
  * `ask_user_question_response`) correlated by `question_id`.
- *
- * This module is client-agnostic (jotai + wire types only), so a non-Zotero
- * shell can reuse it without pulling in the Zotero-coupled action machinery.
  */
 
-import { atom } from 'jotai';
+import { atom } from 'jotai/vanilla';
 import type {
     AskUserQuestionItem,
     WSAskUserQuestionRequest,
-} from '@beaver/agent-core/protocol/agentProtocol';
+} from '../protocol/agentProtocol';
 
 /**
  * Pending ask_user_question request from the backend.

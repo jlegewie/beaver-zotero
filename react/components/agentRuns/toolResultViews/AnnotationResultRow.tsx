@@ -1,7 +1,7 @@
 import React from 'react';
 import { ZoteroIcon, ZOTERO_ICONS } from '../../icons/ZoteroIcon';
 import { AnnotationTooltip, getAnnotationTooltipIcon, getAnnotationTypeLabel } from '../AnnotationTooltip';
-import { AnnotationRowView } from '../../../types/toolResultViews';
+import { AnnotationRowView } from '@beaver/agent-core/run-state/toolResultViews';
 import { getHost } from '../../../host';
 
 /**

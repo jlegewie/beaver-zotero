@@ -5,7 +5,7 @@ import {
     AttachmentSearchView,
     AttachmentSearchRowView,
     AttachmentMatchView,
-} from '../../../types/toolResultViews';
+} from '@beaver/agent-core/run-state/toolResultViews';
 import { getHost } from '../../../host';
 
 /**

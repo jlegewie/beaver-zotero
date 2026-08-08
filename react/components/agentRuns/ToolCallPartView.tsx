@@ -1,14 +1,14 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { AgentRunStatus, ToolCallPart, isUnsuccessfulToolReturn } from '@beaver/agent-core/agents/types';
-import { toolResultsMapAtom, getToolCallStatus } from '../../agents/atoms';
-import { getToolCallLabel, getLabelEnrichmentNeeds, type ToolCallLabelEnrich } from '../../agents/toolLabels';
-import { extractZoteroReferencesFromToolCall, parseArgs } from '../../agents/toolCallRequest';
+import { toolResultsMapAtom, getToolCallStatus } from '@beaver/agent-core/run-state/atoms';
+import { getToolCallLabel, getLabelEnrichmentNeeds, type ToolCallLabelEnrich } from '@beaver/agent-core/run-state/toolLabels';
+import { extractZoteroReferencesFromToolCall, parseArgs } from '@beaver/agent-core/run-state/toolCallRequest';
 import {
     isToolResultView,
     getToolResultRenderableCount,
     type ToolResultView as ToolResultViewModel,
-} from '../../types/toolResultViews';
+} from '@beaver/agent-core/run-state/toolResultViews';
 import { ToolResultView } from './ToolResultView';
 import { GenericAgentActionView } from './GenericAgentActionView';
 import { getHost } from '../../host';

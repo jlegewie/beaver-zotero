@@ -145,9 +145,20 @@ if (!parsed.options.lib || nonEsLibs.length > 0) {
 // each backend client a host calls directly, and the three standalone helpers
 // (`threadService`, `agentActionQueue`, `attachmentLimits`). Everything else in
 // transport/ is reached from one of them.
+//
+// `protocol/wordProtocol.ts` is a root for the same reason: it declares the op
+// envelope a Word client serves and the backend mirrors, so nothing inside the
+// package imports it.
+//
+// The run-state roots follow the same rule: each is a leaf a client calls to
+// turn an agent run into render state, and nothing else in the package imports
+// them. `run-state/atoms.ts` is deliberately absent — `toolLabels` imports it,
+// so listing it as a root would only cost the orphan signal that catches it
+// dropping out of the closure.
 const entryPaths = [
   "src/globals.d.ts",
   "src/protocol/agentProtocol.ts",
+  "src/protocol/wordProtocol.ts",
   "src/transport/providerConnection.ts",
   "src/transport/threadService.ts",
   "src/transport/agentActionQueue.ts",
@@ -158,6 +169,12 @@ const entryPaths = [
   "src/transport/clients/embeddingsService.ts",
   "src/transport/clients/searchService.ts",
   "src/transport/clients/diagnosticsService.ts",
+  "src/run-state/toolResultViews.ts",
+  "src/run-state/toolResultTypes.ts",
+  "src/run-state/toolCallRequest.ts",
+  "src/run-state/runResumeHelpers.ts",
+  "src/run-state/toolLabels.ts",
+  "src/run-state/pendingQuestions.ts",
 ].map((p) => path.join(pkgDir, p));
 
 const listed = parsed.fileNames.map((f) => path.resolve(f));

@@ -5,7 +5,7 @@ import { citationMapAtom } from '../../../../react/atoms/citations';
 import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '../../../../react/atoms/externalReferences';
 import { currentThreadIdAtom } from '../../../../react/atoms/threads';
 import { grantCreatedNoteEditsForRunAtom } from '../../../../react/atoms/runApprovalPolicy';
-import { activeRunAtom } from '../../../../react/agents/atoms';
+import { activeRunAtom } from '@beaver/agent-core/run-state/atoms';
 import { renderToHTML } from '../../../../react/utils/citationRenderers';
 import { prepareCitationRenderContext } from '../../../../react/utils/citationRenderContext';
 import { wrapWithSchemaVersion, getBeaverNoteFooterHTML } from '../../../../react/utils/noteActions';

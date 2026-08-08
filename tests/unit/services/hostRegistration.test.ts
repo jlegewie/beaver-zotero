@@ -36,7 +36,7 @@ const REQUIRED_REGISTRATIONS = [
     'setTransportConfig',
     'registerZoteroHost',
     'registerZoteroDataProvider',
-    'registerZoteroObjectIdResolver',
+    'registerZoteroLibraryIdentity',
     'registerZoteroClientIdentity',
     'registerZoteroSupabaseStorage',
     'registerZoteroSupabaseReloadBridge',

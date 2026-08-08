@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, forwardRef, useLayoutEffect, useCallback } from "react";
 import { useAtomValue, useSetAtom } from "jotai";
-import { allRunsAtom } from "../../agents/atoms";
+import { allRunsAtom } from "@beaver/agent-core/run-state/atoms";
 import { AgentRunView } from "./AgentRunView";
 import { scrollToBottom } from "../../utils/scrollToBottom";
 import { userScrolledAtom, windowUserScrolledAtom } from "../../atoms/ui";

@@ -20,7 +20,7 @@ import HighTokenUsageWarningBar from './HighTokenUsageWarningBar';
 import SoftCapWarningBar from './SoftCapWarningBar';
 import NextStepsPanel from '../pages/firstRun/NextStepsPanel';
 import BackToSuggestions, { FirstRunBackTarget } from '../pages/firstRun/BackToSuggestions';
-import { allRunsAtom } from '../../agents/atoms';
+import { allRunsAtom } from '@beaver/agent-core/run-state/atoms';
 import { PromptOrigin } from '@beaver/agent-core/agents/types';
 import { firstRunNextStepsDismissedAtom } from '../../atoms/firstRun';
 import { dismissHighTokenWarningForThreadAtom, dismissedHighTokenWarningByThreadAtom, dismissSoftCapWarningForThreadAtom, dismissedSoftCapWarningByThreadAtom, backendHighTokenUsageRunsAtom, softCapTriggeredRunsAtom } from '../../atoms/messageUIState';

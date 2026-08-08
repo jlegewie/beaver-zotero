@@ -3,9 +3,9 @@ import { useAtomValue, useSetAtom } from 'jotai';
 import { userAtom } from '../atoms/auth';
 import { isThreadListViewAtom, isLibraryTabAtom, selectedZoteroTabIdAtom, hasPopupMessagesAtom, threadListFilterAtom, ThreadItemFilter } from '../atoms/ui';
 import { ThreadData, loadThreadAtom } from '../atoms/threads';
-import { currentThreadIdAtom } from '../agents/atoms';
+import { currentThreadIdAtom } from '@beaver/agent-core/run-state/atoms';
 import { searchableLibraryIdsAtom } from '../atoms/profile';
-import { threadService } from '@beaver/agent-core/transport/threadService';
+import { threadService, isThreadAgentMismatch } from '@beaver/agent-core/transport/threadService';
 import { convertUTCToLocal } from '../utils/dateUtils';
 import { deduplicateByThread, threadModelToThreadData, isThreadInstanceMismatch } from '../utils/threadMatches';
 import { currentZoteroInstanceRef } from '../../src/utils/zoteroUtils';
@@ -183,9 +183,11 @@ const RecentChats: React.FC = () => {
                         'both'
                     );
                     if (isCancelled()) return;
-                    // By-item results are scoped client-side from the identity
-                    // columns (bounded set; no server-side by-item scoping).
-                    const deduped = deduplicateByThread(matches).filter(t =>
+                    // By-item results are scoped client-side from the agent and
+                    // identity columns (bounded set; no server-side by-item
+                    // scoping).
+                    const ownAgent = matches.filter(m => !isThreadAgentMismatch(m));
+                    const deduped = deduplicateByThread(ownAgent).filter(t =>
                         !isThreadInstanceMismatch(instanceScope ?? null, {
                             zoteroUserId: t.zoteroUserId, zoteroLocalId: t.zoteroLocalId,
                         })

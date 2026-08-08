@@ -40,7 +40,7 @@ vi.mock('../../../src/utils/agentItemSupport', () => ({
 vi.mock('../../../react/store', () => ({
     store: { get: vi.fn(() => [1, 100]) },
 }));
-vi.mock('../../../react/agents/atoms', () => ({
+vi.mock('@beaver/agent-core/run-state/atoms', () => ({
     activeRunAtom: Symbol('activeRunAtom'),
 }));
 vi.mock('../../../react/atoms/profile', () => ({

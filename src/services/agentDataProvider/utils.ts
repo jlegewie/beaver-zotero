@@ -29,7 +29,7 @@ import {
     isActionApprovedForCurrentRun,
     runApprovalPolicyAtom,
 } from '../../../react/atoms/runApprovalPolicy';
-import { activeRunAtom } from '../../../react/agents/atoms';
+import { activeRunAtom } from '@beaver/agent-core/run-state/atoms';
 import { isAgentSupportedItem } from '../../utils/agentItemSupport';
 import { store } from '../../../react/store';
 import { searchableLibraryIdsAtom } from '../../../react/atoms/profile';

@@ -2,9 +2,9 @@ import { Setter } from "jotai";
 import { addExternalReferencesToMappingAtom, checkExternalReferencesAtom } from "../atoms/externalReferences";
 import { loadFullItemDataWithAllTypes } from "../../src/utils/zoteroUtils";
 import { resolveItemReference } from "../../src/utils/libraryIdentity";
-import { extractExternalSearchData, extractLookupWorkData, isExternalSearchResult, isLookupWorkResult } from "./toolResultTypes";
+import { extractExternalSearchData, extractLookupWorkData, isExternalSearchResult, isLookupWorkResult } from "@beaver/agent-core/run-state/toolResultTypes";
 import { ToolReturnPart, isUnsuccessfulToolReturn } from "@beaver/agent-core/agents/types";
-import { extractZoteroReferences } from "./toolResultTypes";
+import { extractZoteroReferences } from "@beaver/agent-core/run-state/toolResultTypes";
 import { logger } from "@beaver/agent-core/platform/logger";
 
 /**

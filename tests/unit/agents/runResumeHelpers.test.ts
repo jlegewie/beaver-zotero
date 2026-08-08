@@ -9,7 +9,7 @@ import {
     lingeringCompletedRun,
     resolveErrorRunId,
     toRunError,
-} from '../../../react/agents/runResumeHelpers';
+} from '@beaver/agent-core/run-state/runResumeHelpers';
 import type { WSErrorEvent } from '@beaver/agent-core/protocol/agentProtocol';
 
 function makeRun(id: string, status: AgentRun['status'] = 'error'): AgentRun {
