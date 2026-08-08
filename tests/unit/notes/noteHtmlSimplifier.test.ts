@@ -71,6 +71,7 @@ import {
     stripDataCitationItems,
     extractDataCitationItems,
     stripNoteWrapperDiv,
+    findNoteWrapperBounds,
     rebuildDataCitationItems,
 } from '../../../src/utils/noteWrapper';
 import { createCitationHTML } from '../../../src/utils/zoteroUtils';
@@ -1697,6 +1698,147 @@ describe('stripNoteWrapperDiv', () => {
         const html = '<div><div><p>nested</p></div></div>';
         // Inner has 1 open and 1 close — balanced, so it strips the outer
         expect(stripNoteWrapperDiv(html)).toBe('<div><p>nested</p></div>');
+    });
+
+    // The cases below pin the behavior `edit_note` / `edit_note_batch` depend
+    // on, now that this is a thin wrapper over `findNoteWrapperBounds`.
+    it('really is unbalanced when a closer is missing', () => {
+        const html = '<div><div><p>nested</p></div>';
+        // Doesn't end with </div>? It does — inner is `<div><p>nested</p>`,
+        // which has 1 open and 0 closes, so nothing is stripped.
+        expect(stripNoteWrapperDiv(html)).toBe(html);
+    });
+
+    it('preserves leading and trailing whitespace outside the wrapper', () => {
+        expect(stripNoteWrapperDiv('\n  <div data-schema-version="9"><p>c</p></div>'))
+            .toBe('<p>c</p>');
+        expect(stripNoteWrapperDiv('<div data-schema-version="9"><p>c</p></div>\n  '))
+            .toBe('<p>c</p>');
+    });
+
+    it('is a no-op when the HTML does not end with </div>', () => {
+        const html = '<div data-schema-version="9"><p>c</p>';
+        expect(stripNoteWrapperDiv(html)).toBe(html);
+    });
+
+    it('is a no-op when the opening tag is never closed before the terminator', () => {
+        const html = '<div class="a" </div>';
+        expect(stripNoteWrapperDiv(html)).toBe(html);
+    });
+});
+
+describe('findNoteWrapperBounds', () => {
+    /** Every non-null result must slice out exactly what stripping returns. */
+    function expectAgreesWithStrip(html: string): void {
+        const bounds = findNoteWrapperBounds(html);
+        expect(bounds).not.toBeNull();
+        expect(html.slice(bounds!.bodyStart, bounds!.bodyEnd)).toBe(stripNoteWrapperDiv(html));
+    }
+
+    it('finds the body of a normal note', () => {
+        const html = '<div data-schema-version="9"><p>content</p></div>';
+        const bounds = findNoteWrapperBounds(html);
+        expect(bounds).toEqual({
+            bodyStart: '<div data-schema-version="9">'.length,
+            bodyEnd: html.length - '</div>'.length,
+        });
+        expectAgreesWithStrip(html);
+        expect(html.slice(bounds!.bodyStart, bounds!.bodyEnd)).toBe('<p>content</p>');
+    });
+
+    it('finds the body of a bare wrapper div', () => {
+        const html = '<div><p>content</p></div>';
+        expect(findNoteWrapperBounds(html)).toEqual({ bodyStart: 5, bodyEnd: html.length - 6 });
+        expectAgreesWithStrip(html);
+    });
+
+    it('returns offsets in ORIGINAL coordinates when the note has leading whitespace', () => {
+        // The trimmed-coordinate trap: detection runs on html.trim(), so the
+        // leading-whitespace prefix must be added back or every splice shifts.
+        const prefix = '\n  ';
+        const html = `${prefix}<div data-schema-version="9"><p>content</p></div>`;
+        const bounds = findNoteWrapperBounds(html);
+        expect(bounds).not.toBeNull();
+        expect(bounds!.bodyStart).toBe(prefix.length + '<div data-schema-version="9">'.length);
+        expect(bounds!.bodyEnd).toBe(html.length - '</div>'.length);
+        expect(html.slice(bounds!.bodyStart, bounds!.bodyEnd)).toBe('<p>content</p>');
+        expectAgreesWithStrip(html);
+    });
+
+    it('returns offsets in ORIGINAL coordinates with trailing whitespace', () => {
+        const html = '<div data-schema-version="9"><p>content</p></div>\n  ';
+        const bounds = findNoteWrapperBounds(html);
+        expect(html.slice(bounds!.bodyStart, bounds!.bodyEnd)).toBe('<p>content</p>');
+        expectAgreesWithStrip(html);
+    });
+
+    it('returns offsets in ORIGINAL coordinates with whitespace on both sides', () => {
+        const html = '  \n<div><h1>Title</h1>\n<p>Text</p>\n</div>\t\n';
+        const bounds = findNoteWrapperBounds(html);
+        expect(html.slice(bounds!.bodyStart, bounds!.bodyEnd)).toBe('<h1>Title</h1>\n<p>Text</p>\n');
+        expectAgreesWithStrip(html);
+    });
+
+    it('returns bounds for balanced nested inner divs', () => {
+        const html = '<div><div><p>nested</p></div></div>';
+        const bounds = findNoteWrapperBounds(html);
+        expect(bounds).not.toBeNull();
+        expect(html.slice(bounds!.bodyStart, bounds!.bodyEnd)).toBe('<div><p>nested</p></div>');
+        expectAgreesWithStrip(html);
+    });
+
+    it('returns bounds for an empty body', () => {
+        const html = '<div data-schema-version="9"></div>';
+        const bounds = findNoteWrapperBounds(html);
+        expect(bounds).not.toBeNull();
+        expect(html.slice(bounds!.bodyStart, bounds!.bodyEnd)).toBe('');
+        expectAgreesWithStrip(html);
+    });
+
+    it('refuses when there is no <div prefix', () => {
+        expect(findNoteWrapperBounds('<p>just a paragraph</p>')).toBeNull();
+        expect(stripNoteWrapperDiv('<p>just a paragraph</p>')).toBe('<p>just a paragraph</p>');
+    });
+
+    it('refuses on an empty string', () => {
+        expect(findNoteWrapperBounds('')).toBeNull();
+        expect(stripNoteWrapperDiv('')).toBe('');
+    });
+
+    it('refuses when there is no </div> suffix', () => {
+        const html = '<div data-schema-version="9"><p>content</p>';
+        expect(findNoteWrapperBounds(html)).toBeNull();
+        expect(stripNoteWrapperDiv(html)).toBe(html);
+    });
+
+    it('refuses when the opening tag has no closing > of its own', () => {
+        // The only `>` belongs to the trailing `</div>`, so there is no real
+        // opening tag to strip.
+        const html = '<div class="a" </div>';
+        expect(findNoteWrapperBounds(html)).toBeNull();
+        expect(stripNoteWrapperDiv(html)).toBe(html);
+    });
+
+    it('refuses when inner divs are unbalanced', () => {
+        const openHeavy = '<div><div><p>nested</p></div>';
+        expect(findNoteWrapperBounds(openHeavy)).toBeNull();
+        expect(stripNoteWrapperDiv(openHeavy)).toBe(openHeavy);
+
+        const closeHeavy = '<div><p>a</p></div><p>b</p></div>';
+        expect(findNoteWrapperBounds(closeHeavy)).toBeNull();
+        expect(stripNoteWrapperDiv(closeHeavy)).toBe(closeHeavy);
+    });
+
+    it('always yields bodyStart <= bodyEnd when it returns bounds', () => {
+        for (const html of [
+            '<div><p>a</p></div>',
+            '  <div></div>  ',
+            '<div data-schema-version="9">\n</div>',
+        ]) {
+            const bounds = findNoteWrapperBounds(html);
+            expect(bounds).not.toBeNull();
+            expect(bounds!.bodyStart).toBeLessThanOrEqual(bounds!.bodyEnd);
+        }
     });
 });
 

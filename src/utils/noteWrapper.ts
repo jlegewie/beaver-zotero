@@ -5,6 +5,7 @@
  * data-citation-items="…">…</div>` wrapper around the real content. This
  * module handles stripping, inspecting, and rebuilding that wrapper.
  *
+ *   - `findNoteWrapperBounds`     locate the wrapper's body, or refuse
  *   - `stripNoteWrapperDiv`       remove the outer wrapper entirely
  *   - `hasSchemaVersionWrapper`   predicate on the root element
  *   - `stripDataCitationItems`    remove only the cache attribute
@@ -15,6 +16,71 @@
 // =============================================================================
 // Wrapper Div
 // =============================================================================
+
+/** Offsets delimiting the body of a note's outer wrapper `<div>`. */
+export interface NoteWrapperBounds {
+    /** Offset in the INPUT string just past the wrapper's opening `<div …>` tag. */
+    bodyStart: number;
+    /** Offset in the INPUT string of the wrapper's closing `</div>`. */
+    bodyEnd: number;
+}
+
+// Length of the closing `</div>` terminator.
+const CLOSING_DIV_LEN = 6;
+
+/**
+ * Locate the body of the outer wrapper `<div data-schema-version="N">…</div>`,
+ * or return `null` when this HTML has no strippable wrapper.
+ *
+ * WHY THIS EXISTS: `stripNoteWrapperDiv` returns the input UNCHANGED in every
+ * case where it declines to strip, so a caller cannot tell "there was nothing to
+ * strip" from "I refused". Block addressing must be able to refuse — it splices
+ * by offset into the raw note, and an unrecognized wrapper means every offset it
+ * would compute is meaningless. This helper is the refusal-capable form: the
+ * detection logic is identical, only the failure signal differs.
+ *
+ * COORDINATE SPACE: the returned offsets are valid in the ORIGINAL, untrimmed
+ * `html`. Detection runs on `html.trim()` (as it always has), so the leading
+ * whitespace length is added back before returning. `html.slice(bodyStart,
+ * bodyEnd)` is therefore always exactly what `stripNoteWrapperDiv(html)`
+ * returns — including for notes that begin with whitespace, where forgetting
+ * the offset would shift every subsequent splice.
+ */
+export function findNoteWrapperBounds(html: string): NoteWrapperBounds | null {
+    const trimmed = html.trim();
+    // Must start with <div and end with </div>
+    if (!trimmed.startsWith('<div') || !trimmed.endsWith('</div>')) {
+        return null;
+    }
+    // Find the end of the opening <div ...> tag
+    const closeAngle = trimmed.indexOf('>');
+    if (closeAngle === -1) return null;
+
+    // Inner content spans (opening tag end, closing `</div>`) in TRIMMED
+    // coordinates. `String.prototype.substring` — which the original
+    // implementation used — SWAPS its arguments when start > end, which happens
+    // for degenerate input whose only `>` is the one in the trailing `</div>`
+    // (e.g. `<div class="a" </div>`). min/max reproduces that exactly, so this
+    // helper and `stripNoteWrapperDiv` stay byte-identical on such input.
+    const rawStart = closeAngle + 1;
+    const rawEnd = trimmed.length - CLOSING_DIV_LEN;
+    const lo = Math.min(rawStart, rawEnd);
+    const hi = Math.max(rawStart, rawEnd);
+    const inner = trimmed.slice(lo, hi);
+
+    // Only strip if the inner content doesn't have unmatched div nesting
+    // (i.e., there's exactly one wrapper div, not nested divs where removing
+    // the outer one would break structure)
+    const innerDivOpens = (inner.match(/<div[\s>]/g) || []).length;
+    const innerDivCloses = (inner.match(/<\/div>/g) || []).length;
+    if (innerDivOpens !== innerDivCloses) {
+        return null; // Unbalanced inner divs — don't strip
+    }
+
+    // Translate back into the ORIGINAL string's coordinates.
+    const leadingWhitespace = html.length - html.trimStart().length;
+    return { bodyStart: leadingWhitespace + lo, bodyEnd: leadingWhitespace + hi };
+}
 
 /**
  * Strip the outer wrapper `<div data-schema-version="N">...</div>` from note HTML.
@@ -27,27 +93,18 @@
  *
  * Only strips when the HTML starts with `<div` and ends with `</div>` to avoid
  * accidentally stripping content from fragments or non-note HTML.
+ *
+ * This is a thin wrapper over {@link findNoteWrapperBounds}. Its TOLERANT
+ * signature — `string → string`, returning the input unchanged whenever there is
+ * nothing to strip — is deliberately preserved: `edit_note` and
+ * `edit_note_batch` depend on byte-identical behavior. Callers that need to
+ * distinguish "nothing to strip" from "refused" must call
+ * {@link findNoteWrapperBounds} directly.
  */
 export function stripNoteWrapperDiv(html: string): string {
-    const trimmed = html.trim();
-    // Must start with <div and end with </div>
-    if (!trimmed.startsWith('<div') || !trimmed.endsWith('</div>')) {
-        return html;
-    }
-    // Find the end of the opening <div ...> tag
-    const closeAngle = trimmed.indexOf('>');
-    if (closeAngle === -1) return html;
-    // Extract inner content (between opening tag and closing </div>)
-    const inner = trimmed.substring(closeAngle + 1, trimmed.length - 6);
-    // Only strip if the inner content doesn't have unmatched div nesting
-    // (i.e., there's exactly one wrapper div, not nested divs where removing
-    // the outer one would break structure)
-    const innerDivOpens = (inner.match(/<div[\s>]/g) || []).length;
-    const innerDivCloses = (inner.match(/<\/div>/g) || []).length;
-    if (innerDivOpens !== innerDivCloses) {
-        return html; // Unbalanced inner divs — don't strip
-    }
-    return inner;
+    const bounds = findNoteWrapperBounds(html);
+    if (!bounds) return html;
+    return html.slice(bounds.bodyStart, bounds.bodyEnd);
 }
 
 /**

@@ -1036,11 +1036,13 @@ export interface WSReadNoteResponse {
      *
      * Format: `'h:' + <digest> + ':' + <length> + ':' + <from> + '-' + <to>`.
      *
-     * `<digest>` is a 64-bit non-cryptographic hash and `<length>` the character
-     * length, both taken over the SAME input: the simplified note projection
-     * (the exact string whose `split('\n')` defines the block numbering), with
-     * volatile citation locator values masked, concatenated with `'|'` and the
-     * window. Producer and comparator must agree byte-for-byte on that input —
+     * `<digest>` is a 64-bit non-cryptographic hash over the simplified note
+     * projection (the exact string whose `split('\n')` defines the block
+     * numbering) with volatile citation locator values masked, concatenated
+     * with `'|'` and the window. `<length>` is the character length of that
+     * masked projection alone (no window, no separator) — an independent term,
+     * not a second view of the digest input. Producer and comparator must agree
+     * byte-for-byte on both —
      * see `src/utils/noteSnapshot.ts`, which is the single implementation of
      * both directions. Comparison is whole-token equality of the recomputed
      * token; the window is additionally parsed out to bound numeric addressing.
