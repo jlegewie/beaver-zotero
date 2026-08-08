@@ -86,19 +86,19 @@ export interface WSWordResponseFor<Op extends WordOp> {
 }
 
 /**
- * Reply to a request whose op this client does not implement. `op` echoes
- * whatever was asked for, which need not be an op this build knows — a backend
- * can be ahead of a client, and the client still has to answer.
+ * Reply to a request that failed before it produced data. `op` echoes whatever
+ * was asked for, which need not be an op this build knows — a backend can be
+ * ahead of a client, and the client still has to answer.
  */
-export interface WSWordUnsupportedOpResponse {
+export interface WSWordErrorResponse {
     type: typeof WORD_RESPONSE_TYPE;
     request_id: string;
     op: string;
     error: string;
-    error_code: 'unsupported_op';
+    error_code: WordOpErrorCode;
 }
 
 /** Response to a Word op request */
 export type WSWordResponse =
     | { [Op in WordOp]: WSWordResponseFor<Op> }[WordOp]
-    | WSWordUnsupportedOpResponse;
+    | WSWordErrorResponse;
