@@ -75,6 +75,10 @@ export const toolResultsMapAtom = atom((get) => {
         for (const msg of run.model_messages) {
             if (msg.kind === 'request') {
                 for (const part of msg.parts) {
+                    // Allowlist, not a filter: request messages also carry
+                    // model-facing user-prompt parts that must not reach the UI
+                    // (see `isRenderableMessage`). Only add a part kind here
+                    // after deciding it is displayable.
                     if (part.part_kind === 'tool-return' || part.part_kind === 'retry-prompt') {
                         map.set(part.tool_call_id, part as ToolReturnPart | RetryPromptPart);
                     }

@@ -46,6 +46,7 @@
     "./src/extract/types.ts",
     "./src/extract/schema.ts",
     "./src/agents/types.ts",
+    "./src/agents/messageVisibility.ts",
     "./src/types/actions.ts",
     "./src/types/attachments/apiTypes.ts",
     "./src/types/citations.ts",

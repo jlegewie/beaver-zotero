@@ -1,5 +1,6 @@
 import React from 'react';
 import { ModelMessage, AgentRunStatus } from '@beaver/agent-core/agents/types';
+import { isRenderableMessage } from '@beaver/agent-core/agents/messageVisibility';
 import { ModelResponseView } from './ModelResponseView';
 import { RunStatusIndicator } from './RunStatusIndicator';
 import { ContextCompressionIndicator } from './ContextCompressionIndicator';
@@ -16,8 +17,11 @@ interface ModelMessagesViewProps {
 
 /**
  * Renders the model messages in an agent run.
- * Only renders ModelResponse messages (kind='response').
- * ModelRequest messages (user prompts or tool returns) are handled via toolResultsMapAtom.
+ *
+ * Only ModelResponse messages are rendered — see `isRenderableMessage` for why
+ * a ModelRequest never is. Their tool-return parts surface elsewhere, inline
+ * with the matching tool call via `toolResultsMapAtom`; their user-prompt parts
+ * have no consumer by design.
  */
 export const ModelMessagesView: React.FC<ModelMessagesViewProps> = React.memo(function ModelMessagesView({
     messages,
@@ -46,10 +50,10 @@ export const ModelMessagesView: React.FC<ModelMessagesViewProps> = React.memo(fu
                 //     return <ContextCompressionIndicator key={`${runId}-context-compression-${index}`} message={message} />;
                 // }
 
-                // Only render response messages - request messages are either displayed
-                // separately (user prompts) or inline with their corresponding
-                // tool calls (tool returns)
-                if (message.kind === 'response') {
+                // Narrows to ModelResponse. The check stays inside the loop so
+                // `index` keeps pointing into the full message array, which
+                // `previousMessageHasToolCall` and `responseIndex` rely on.
+                if (isRenderableMessage(message)) {
                     const isLastMessage = index === messages.length - 1;
                     const previousMessageHasToolCall =
                         index > 0 &&

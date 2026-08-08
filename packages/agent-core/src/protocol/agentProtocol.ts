@@ -11,6 +11,8 @@ import type { ExtractContentKind } from '../extract/document/shared/contentKinds
 import type { DocumentExtractResult } from '../extract/document/shared/documentExtractResult';
 import type { ConnectionFailureEvidence } from '../transport/connectionFailure';
 
+export { isRenderableMessage } from '../agents/messageVisibility';
+
 // =============================================================================
 // WebSocket Event Types (matching backend ws_events.py)
 // =============================================================================

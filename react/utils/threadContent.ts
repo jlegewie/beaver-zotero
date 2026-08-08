@@ -1,4 +1,5 @@
 import { AgentRun, TextPart, ToolCallPart } from '@beaver/agent-core/agents/types';
+import { isRenderableMessage } from '@beaver/agent-core/agents/messageVisibility';
 import { getToolCallLabel } from '../agents/toolLabels';
 import { isToolResultView } from '../types/toolResultViews';
 
@@ -60,7 +61,9 @@ export function extractRunResponseContent(
     const parts: string[] = [];
 
     for (const message of run.model_messages) {
-        if (message.kind === 'response') {
+        // Copied/saved content is user-facing, so the same rule applies here as
+        // on screen (see `isRenderableMessage`).
+        if (isRenderableMessage(message)) {
             const textContent = message.parts
                 .filter((part): part is TextPart => part.part_kind === 'text')
                 .map(part => part.content)
