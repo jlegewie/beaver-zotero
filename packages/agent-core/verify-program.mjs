@@ -145,9 +145,14 @@ if (!parsed.options.lib || nonEsLibs.length > 0) {
 // each backend client a host calls directly, and the three standalone helpers
 // (`threadService`, `agentActionQueue`, `attachmentLimits`). Everything else in
 // transport/ is reached from one of them.
+//
+// `protocol/wordProtocol.ts` is a root for the same reason: it declares the op
+// envelope a Word client serves and the backend mirrors, so nothing inside the
+// package imports it.
 const entryPaths = [
   "src/globals.d.ts",
   "src/protocol/agentProtocol.ts",
+  "src/protocol/wordProtocol.ts",
   "src/transport/providerConnection.ts",
   "src/transport/threadService.ts",
   "src/transport/agentActionQueue.ts",

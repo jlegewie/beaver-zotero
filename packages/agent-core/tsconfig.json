@@ -36,6 +36,7 @@
   "files": [
     "./src/globals.d.ts",
     "./src/protocol/agentProtocol.ts",
+    "./src/protocol/wordProtocol.ts",
     "./src/transport/connectionFailure.ts",
     "./src/extract/document/dom/schema.ts",
     "./src/extract/document/epub/schema.ts",
