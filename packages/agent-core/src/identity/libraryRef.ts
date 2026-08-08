@@ -17,14 +17,16 @@
  * This module only parses and formats strings — it has no Zotero dependency.
  * Resolving a `library_ref` against this device's local libraries (and
  * everything else that touches `Zotero.*`) lives in `libraryIdentity.ts`,
- * which also re-exports everything here. `resolveObjectIdReference` exposes
- * that resolution through an injectable seam (`setObjectIdResolver`) so
- * callers that must stay Zotero-free, like `citationGrammar.ts`, can still
- * reach it.
+ * which also re-exports everything here. `resolveObjectIdReference` and
+ * `resolveLibraryRefForLibraryID` expose that resolution through injectable
+ * seams (`setObjectIdResolver` / `setLibraryRefResolver`) so callers that must
+ * stay Zotero-free can still reach it.
  *
  * This module is esbuild-safe (no `react/*` imports, no Jotai, no
  * supabase) so it can be used from both the esbuild and webpack bundles.
  */
+
+import { logger } from '../platform/logger';
 
 /** Sentinel library id used for user-attached external files (mirrors `EXTERNAL_LIBRARY_ID` in `src/services/externalFiles.ts`). Never a real Zotero library. */
 export const EXTERNAL_FILE_LIBRARY_SENTINEL = -1;
@@ -83,7 +85,7 @@ export type ObjectIdReference = { library_id: number; library_ref?: string; zote
  * Resolves a model-facing object id (`u-KEY`, `g<groupID>-KEY`, or legacy
  * `<libraryID>-KEY`) to a device-local reference. Registered by a host that
  * can resolve `library_ref` against local Zotero libraries — see
- * `registerZoteroObjectIdResolver()` in `libraryIdentity.ts`.
+ * `registerZoteroLibraryIdentity()` in `libraryIdentity.ts`.
  */
 export type ObjectIdResolver = (objectId: string) => ObjectIdReference | null;
 
@@ -91,7 +93,7 @@ let objectIdResolver: ObjectIdResolver | null = null;
 
 /**
  * Register the resolver used by `resolveObjectIdReference`. Call once at
- * bundle init (e.g. `registerZoteroObjectIdResolver()` from `react/index.tsx`),
+ * bundle init (e.g. `registerZoteroLibraryIdentity()` from `react/index.tsx`),
  * before any citation or note reference is parsed. Unregistered — or on a
  * non-Zotero host that never registers one — `resolveObjectIdReference` falls
  * back to a pure parse rather than throwing, since citation parsing runs on
@@ -118,6 +120,49 @@ export function resolveObjectIdReference(objectId: string): ObjectIdReference | 
         return { library_id: UNRESOLVED_LIBRARY_ID, library_ref: parsed.library_ref, zotero_key: parsed.zotero_key };
     }
     return { library_id: parsed.library_id!, zotero_key: parsed.zotero_key };
+}
+
+/**
+ * Computes the portable `library_ref` for a device-local `library_id`, or
+ * `null` when that library has no portable identity (an unknown library, or
+ * one whose kind has no `library_ref` form). Registered by a host that can
+ * inspect its local libraries — see `registerZoteroLibraryIdentity()` in
+ * `libraryIdentity.ts`.
+ */
+export type LibraryRefResolver = (libraryID: number) => string | null;
+
+let libraryRefResolver: LibraryRefResolver | null = null;
+let warnedUnregistered = false;
+
+/**
+ * Register the resolver used by `resolveLibraryRefForLibraryID`. Call once at
+ * bundle init (e.g. `registerZoteroLibraryIdentity()` from `react/index.tsx`),
+ * before any reference is stamped with a portable ref.
+ */
+export function setLibraryRefResolver(resolver: LibraryRefResolver): void {
+    libraryRefResolver = resolver;
+}
+
+/**
+ * Computes the portable `library_ref` for a device-local `library_id` via the
+ * registered resolver. This runs on hot render/read paths, so an unregistered
+ * seam returns `null` rather than throwing — the same value a resolver returns
+ * for a library with no portable identity, so callers need no separate "no
+ * host" branch.
+ *
+ * A host that HAS local libraries but never registered is a wiring bug, not a
+ * data case: every reference it emits silently loses its portable ref. The two
+ * are indistinguishable from here, so log the first unregistered call.
+ */
+export function resolveLibraryRefForLibraryID(libraryID: number): string | null {
+    if (!libraryRefResolver) {
+        if (!warnedUnregistered) {
+            warnedUnregistered = true;
+            logger('No library-ref resolver registered; references will carry no library_ref', 2);
+        }
+        return null;
+    }
+    return libraryRefResolver(libraryID);
 }
 
 /**

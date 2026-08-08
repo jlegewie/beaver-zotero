@@ -17,6 +17,7 @@ import {
     LIBRARY_REF_PATTERN,
     parseItemReference,
     parseLibraryRef,
+    setLibraryRefResolver,
     setObjectIdResolver,
     UNRESOLVED_LIBRARY_ID,
 } from '@beaver/agent-core/identity/libraryRef';
@@ -30,6 +31,8 @@ export {
     modelObjectIdFromReference,
     resolveObjectIdReference,
     setObjectIdResolver,
+    resolveLibraryRefForLibraryID,
+    setLibraryRefResolver,
     writeTargetLibraryError,
 } from '@beaver/agent-core/identity/libraryRef';
 export type {
@@ -37,6 +40,7 @@ export type {
     ParsedItemReference,
     ObjectIdReference,
     ObjectIdResolver,
+    LibraryRefResolver,
     WriteTargetLibraryResolution,
 } from '@beaver/agent-core/identity/libraryRef';
 
@@ -279,13 +283,21 @@ export async function resolveItemReference(
 }
 
 /**
- * Register this module's `resolveObjectId` with `resolveObjectIdReference`
- * (see `libraryRef.ts`), which citation parsing in `citationGrammar.ts` goes
- * through. Without it that falls back to a pure parse, leaving every portable
- * ref unresolved. Call once at webpack bundle init (from `react/index.tsx`),
- * alongside the other `register*` calls, before any note or citation is read.
+ * Register this module's Zotero resolution behind the library-identity seams
+ * in `libraryRef.ts`, which Zotero-free callers go through:
+ *
+ * - `resolveObjectId` backs `resolveObjectIdReference`, used by citation
+ *   parsing in `citationGrammar.ts`. Without it that falls back to a pure
+ *   parse, leaving every portable ref unresolved.
+ * - `libraryRefForLibraryID` backs `resolveLibraryRefForLibraryID`. Without it
+ *   no local library gets a portable ref stamped.
+ *
+ * Both are registered together so a host cannot wire up half the identity
+ * surface. Call once at webpack bundle init (from `react/index.tsx`), alongside
+ * the other `register*` calls, before any note or citation is read.
  */
-export function registerZoteroObjectIdResolver(): void {
+export function registerZoteroLibraryIdentity(): void {
     setObjectIdResolver(resolveObjectId);
+    setLibraryRefResolver(libraryRefForLibraryID);
 }
 

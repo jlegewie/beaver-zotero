@@ -35,7 +35,7 @@ import { BeaverTemporaryAnnotations } from './utils/annotationUtils';
 import { setTransportConfig } from '@beaver/agent-core/transport/config';
 import { registerZoteroHost } from './host/zotero';
 import { registerZoteroDataProvider } from '../src/services/zoteroDataProvider';
-import { registerZoteroObjectIdResolver } from '../src/utils/libraryIdentity';
+import { registerZoteroLibraryIdentity } from '../src/utils/libraryIdentity';
 import { registerZoteroClientIdentity } from '../src/services/zoteroClientIdentity';
 import { registerZoteroSupabaseStorage, registerZoteroSupabaseReloadBridge } from '../src/services/zoteroSupabaseStorage';
 import { setSupabaseAuthPolicy } from '@beaver/agent-core/transport/supabaseClient';
@@ -73,10 +73,12 @@ registerZoteroHost();
 // this only needs to land before that point, not before module load).
 registerZoteroDataProvider();
 
-// Register the Zotero object-id resolver used by citation and note-reference
-// parsing (citationGrammar.ts) to resolve a portable library_ref to this
-// device's local library_id. Must run before any note or citation is read.
-registerZoteroObjectIdResolver();
+// Register the Zotero library-identity resolvers: the object-id resolver used
+// by citation and note-reference parsing (citationGrammar.ts) to resolve a
+// portable library_ref to this device's local library_id, and the reverse
+// lookup that stamps a local library_id with its portable ref. Must run before
+// any note or citation is read.
+registerZoteroLibraryIdentity();
 
 // Register the Zotero client identity provider used to build the auth
 // handshake's frontend_version/client_type/client_features/zotero_instance
