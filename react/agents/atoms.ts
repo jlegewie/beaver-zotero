@@ -31,9 +31,12 @@ export const threadRunsAtom = atom<AgentRun[]>([]);
 /** The currently streaming run (null when not streaming) */
 export const activeRunAtom = atom<AgentRun | null>(null);
 
-// Note: currentThreadIdAtom is defined in threads.ts and re-exported here for convenience
-// This ensures scroll position and other thread-related state stay in sync
-export { currentThreadIdAtom } from "../atoms/threads";
+/**
+ * ID of the thread the runs above belong to (null before a thread is opened).
+ * Lives here with the run state so run-state code has no dependency on the
+ * thread module, and is re-exported from `atoms/threads` for thread consumers.
+ */
+export const currentThreadIdAtom = atom<string | null>(null);
 
 // =============================================================================
 // Derived Atoms

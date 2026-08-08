@@ -100,6 +100,8 @@ vi.mock('../../../react/agents/atoms', async () => {
     return {
         threadRunsAtom: atom<unknown[]>([]),
         activeRunAtom: atom<unknown | null>(null),
+        // threads.ts re-exports this from agents/atoms, so the stub must provide it
+        currentThreadIdAtom: atom<string | null>(null),
     };
 });
 

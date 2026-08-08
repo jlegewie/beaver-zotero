@@ -15,7 +15,7 @@ import { ApiError } from "@beaver/agent-core/types/apiErrors";
 import { resetMessageUIStateAtom } from "./messageUIState";
 import { checkExternalReferencesAtom, clearExternalReferenceCacheAtom, addExternalReferencesToMappingAtom } from "./externalReferences";
 import { ExternalReference } from "@beaver/agent-core/types/externalReferences";
-import { threadRunsAtom, activeRunAtom } from "../agents/atoms";
+import { threadRunsAtom, activeRunAtom, currentThreadIdAtom } from "../agents/atoms";
 import { isWSChatPendingAtom, isWSConnectedAtom, isWSReadyAtom } from "./agentRunAtoms";
 import { AgentRun } from "@beaver/agent-core/agents/types";
 import { 
@@ -128,7 +128,9 @@ export interface ThreadData {
 }
 
 // Thread messages and attachments
-export const currentThreadIdAtom = atom<string | null>(null);
+// currentThreadIdAtom is defined alongside the run state in agents/atoms and
+// re-exported here so thread consumers can import it from either module.
+export { currentThreadIdAtom };
 export const currentThreadNameAtom = atom<string | null>(null);
 
 /**
