@@ -28,7 +28,7 @@ import {
     AttachmentSearchView,
     ItemRowView,
     AnnotationRowView,
-} from '../../../react/types/toolResultViews';
+} from '@beaver/agent-core/run-state/toolResultViews';
 import { ToolReturnPart } from '@beaver/agent-core/agents/types';
 
 // ---------------------------------------------------------------------------

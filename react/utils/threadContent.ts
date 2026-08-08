@@ -1,7 +1,7 @@
 import { AgentRun, TextPart, ToolCallPart } from '@beaver/agent-core/agents/types';
 import { isRenderableMessage } from '@beaver/agent-core/agents/messageVisibility';
 import { getToolCallLabel } from '../agents/toolLabels';
-import { isToolResultView } from '../types/toolResultViews';
+import { isToolResultView } from '@beaver/agent-core/run-state/toolResultViews';
 
 /**
  * Parse args from a ToolCallPart, handling both string and object formats.

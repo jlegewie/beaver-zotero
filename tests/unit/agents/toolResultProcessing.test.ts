@@ -16,7 +16,7 @@ vi.mock('../../../src/utils/zoteroUtils', () => ({
     loadFullItemDataWithAllTypes: (...args: unknown[]) => mockLoadFullItemDataWithAllTypes(...args),
 }));
 
-vi.mock('../../../react/agents/toolResultTypes', () => ({
+vi.mock('@beaver/agent-core/run-state/toolResultTypes', () => ({
     extractZoteroReferences: (...args: unknown[]) => mockExtractZoteroReferences(...args),
     isExternalSearchResult: vi.fn(() => false),
     isLookupWorkResult: vi.fn(() => false),

@@ -7,8 +7,8 @@
  * models that ship on `ToolReturnMetadata.view`.
  */
 
-import type { ContentKind, PartLocation } from "@beaver/agent-core/types/citations";
-import type { ExternalReference } from "@beaver/agent-core/types/externalReferences";
+import type { ContentKind, PartLocation } from "../types/citations";
+import type { ExternalReference } from "../types/externalReferences";
 
 // ---------------------------------------------------------------------------
 // Shared row sub-models
@@ -313,8 +313,8 @@ export function isAnnotationRow(row: ItemListRow): row is AnnotationRowView {
  *
  * This is deliberately NOT a label-formatting helper — labels need per-tool,
  * per-view-type wording (locator text vs "N matches" vs "N found"), which lives
- * in `getToolResultLabelSuffix` (react/agents/toolLabels.ts). Returns null when
- * the view has no meaningful count (don't block expansion).
+ * in the client's `getToolResultLabelSuffix`. Returns null when the view has no
+ * meaningful count (don't block expansion).
  */
 export function getToolResultRenderableCount(view: ToolResultView): number | null {
     switch (view.view_type) {

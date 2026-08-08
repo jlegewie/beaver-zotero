@@ -45,7 +45,7 @@ import {
     setAnnotationPanelStateAtom,
     toggleAnnotationPanelVisibilityAtom
 } from '../../../atoms/messageUIState';
-import { isNoteAnnotationToolResult, isHighlightAnnotationToolResult } from '../../../agents/toolResultTypes';
+import { isNoteAnnotationToolResult, isHighlightAnnotationToolResult } from '@beaver/agent-core/run-state/toolResultTypes';
 
 // =============================================================================
 // Types

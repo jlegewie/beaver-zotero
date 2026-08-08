@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ExternalReferenceListView } from '../../../types/toolResultViews';
+import { ExternalReferenceListView } from '@beaver/agent-core/run-state/toolResultViews';
 import ExternalReferenceListItem from '../../externalReferences/ExternalReferenceListItem';
 
 /**

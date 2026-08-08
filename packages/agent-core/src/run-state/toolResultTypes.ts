@@ -6,11 +6,11 @@
  * - `metadata.summary`: Summary data for frontend rendering (required)
  */
 
-import { ExternalReference } from "@beaver/agent-core/types/externalReferences";
-import { ZoteroItemReference, CollectionReference, AttachmentInfo } from "@beaver/agent-core/types/zotero";
-import { ToolReturnPart } from "@beaver/agent-core/agents/types";
-import { logger } from "@beaver/agent-core/platform/logger";
-import { libraryRefForLibraryID, resolveObjectId } from "../../src/utils/libraryIdentity";
+import { ExternalReference } from "../types/externalReferences";
+import { ZoteroItemReference, CollectionReference, AttachmentInfo } from "../types/zotero";
+import { ToolReturnPart } from "../agents/types";
+import { logger } from "../platform/logger";
+import { resolveLibraryRefForLibraryID, resolveObjectIdReference } from "../identity/libraryRef";
 
 // ============================================================================
 // Summary Types (from backend)
@@ -1317,7 +1317,7 @@ function isZoteroItemReference(value: unknown): value is ZoteroItemReference {
  * `null` for `ext-<KEY>` external-file ids and other malformed input.
  */
 function parseZoteroUniqueKey(uniqueKey: string): ZoteroItemReference | null {
-    return resolveObjectId(uniqueKey);
+    return resolveObjectIdReference(uniqueKey);
 }
 
 /**
@@ -1953,7 +1953,7 @@ export interface ZoteroSearchViewData {
  * `library_ref` field on the row wins over the ref derived from the id.
  */
 function referenceFromResultRowId(itemId: string, explicitLibraryRef?: unknown): ZoteroItemReference | null {
-    const parsed = resolveObjectId(itemId);
+    const parsed = resolveObjectIdReference(itemId);
     if (!parsed) return null;
     const library_ref = typeof explicitLibraryRef === 'string' && explicitLibraryRef
         ? explicitLibraryRef
@@ -2095,7 +2095,7 @@ export interface ListCollectionsViewData {
 function parseCompoundCollectionKey(
     collectionKey: string
 ): ZoteroItemReference | null {
-    const parsed = resolveObjectId(collectionKey);
+    const parsed = resolveObjectIdReference(collectionKey);
     if (!parsed || !/^[A-Z0-9]{8}$/.test(parsed.zotero_key)) return null;
     return {
         library_id: parsed.library_id,
@@ -2143,10 +2143,10 @@ function normalizeBackendCollection(
         ? containerLibraryRef
         : undefined;
     const libraryRef = compound
-        ? (compound.library_ref ?? libraryRefForLibraryID(libraryId) ?? undefined)
+        ? (compound.library_ref ?? resolveLibraryRefForLibraryID(libraryId) ?? undefined)
         : (coll.library_ref
             ?? containerLibraryRefForResolvedLibrary
-            ?? libraryRefForLibraryID(libraryId)
+            ?? resolveLibraryRefForLibraryID(libraryId)
             ?? undefined);
 
     return {

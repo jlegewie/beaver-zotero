@@ -16,14 +16,14 @@ import {
     getToolResultLabelSuffix,
     getLabelEnrichmentNeeds,
 } from '../../../react/agents/toolLabels';
-import { getToolResultRenderableCount } from '../../../react/types/toolResultViews';
+import { getToolResultRenderableCount } from '@beaver/agent-core/run-state/toolResultViews';
 import type {
     ItemListView,
     AnnotationListView,
     CollectionListView,
     AttachmentSearchView,
     ExternalReferenceListView,
-} from '../../../react/types/toolResultViews';
+} from '@beaver/agent-core/run-state/toolResultViews';
 import type { ToolCallPart } from '@beaver/agent-core/agents/types';
 
 function tc(tool_name: string, args: Record<string, unknown> = {}): ToolCallPart {

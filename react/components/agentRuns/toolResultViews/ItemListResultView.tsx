@@ -6,7 +6,7 @@ import {
     ItemListView,
     ItemRowView,
     isItemRow,
-} from '../../../types/toolResultViews';
+} from '@beaver/agent-core/run-state/toolResultViews';
 import { getHost } from '../../../host';
 import { EXTERNAL_LIBRARY_ID } from '../../../../src/services/externalFiles';
 import { AnnotationResultRow } from './AnnotationResultRow';

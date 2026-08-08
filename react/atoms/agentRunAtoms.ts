@@ -139,7 +139,7 @@ import { undoCreateAnnotationsAction } from '../utils/createAnnotationsActions';
 import { undoEditAnnotationsAction } from '../utils/editAnnotationsActions';
 import { processToolReturnResults } from '../agents/toolResultProcessing';
 import { upgradeToolReturn } from '../compat/legacyToolResults';
-import { isToolResultView } from '../types/toolResultViews';
+import { isToolResultView } from '@beaver/agent-core/run-state/toolResultViews';
 import { addWarningAtom, clearWarningsAtom } from './warnings';
 import { backendHighTokenUsageRunsAtom, softCapTriggeredRunsAtom } from './messageUIState';
 import { currentThreadNameAtom } from './threads';
@@ -166,7 +166,7 @@ import { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import { createZoteroItemReference } from '../utils/zoteroReferences';
 import { markExternalReferenceImportedAtom } from './externalReferences';
 import type { CreateItemProposedData, CreateItemResultData } from '@beaver/agent-core/types/agentActions/items';
-import { appendRunIfMissing, findResumeChainRoot, findRunForResume, hasOnlyThinkingParts, lingeringCompletedRun, resolveErrorRunId, toRunError } from '../agents/runResumeHelpers';
+import { appendRunIfMissing, findResumeChainRoot, findRunForResume, hasOnlyThinkingParts, lingeringCompletedRun, resolveErrorRunId, toRunError } from '@beaver/agent-core/run-state/runResumeHelpers';
 import {
     planRetryRollback,
     resolveRetryTarget,

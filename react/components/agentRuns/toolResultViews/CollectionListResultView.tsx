@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { CollectionListView } from '../../../types/toolResultViews';
+import { CollectionListView } from '@beaver/agent-core/run-state/toolResultViews';
 import { CSSIcon } from '../../icons/icons';
 import { getHost } from '../../../host';
 

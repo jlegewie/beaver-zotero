@@ -214,8 +214,10 @@ function testRemoveDiacritics(s: string): string {
 // instance via `vi.resetModules()` + a dynamic import.
 //
 // Because the reference is captured here, `vi.mock` of `libraryIdentity` in a
-// test file does not reach citation parsing. A test that needs to control how
-// refs resolve should register its own resolver rather than mock the module.
+// test file does not reach anything that resolves through these seams — that
+// now includes citation parsing and the `run-state` modules. A test that needs
+// to control how refs resolve should register its own resolver rather than mock
+// the module, which would otherwise pass while exercising the real one.
 // ---------------------------------------------------------------------------
 registerZoteroLibraryIdentity();
 

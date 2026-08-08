@@ -2,7 +2,7 @@ import { BEAVER_CITATION_ANNOTATION_AUTHOR } from '../../src/constants/annotatio
 import { logger } from '@beaver/agent-core/platform/logger';
 import { getPref } from '../../src/utils/prefs';
 import { selectItemById } from '../../src/utils/selectItem';
-import type { AttachmentMatchTarget } from '../agents/toolResultTypes';
+import type { AttachmentMatchTarget } from '@beaver/agent-core/run-state/toolResultTypes';
 import { CoordOrigin, type BoundingBox, type SymbolicLocation } from '@beaver/agent-core/types/citations';
 import type { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import {

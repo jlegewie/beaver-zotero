@@ -2,7 +2,7 @@ import React from 'react';
 import type { AnnotationPreviewSnapshot } from '@beaver/agent-core/types/agentActions/editAnnotations';
 import type { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import { AnnotationResultList } from '../../../components/agentRuns/toolResultViews/AnnotationListResultView';
-import type { AnnotationRowView } from '../../../types/toolResultViews';
+import type { AnnotationRowView } from '@beaver/agent-core/run-state/toolResultViews';
 import type { ActionStatus } from './agentActionViewHelpers';
 
 function plural(count: number): string {
