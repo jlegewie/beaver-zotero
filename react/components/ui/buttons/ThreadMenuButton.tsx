@@ -7,7 +7,7 @@ import { copyToClipboard } from '../../../utils/clipboard';
 import { renderToMarkdown, renderToHTML, preprocessNoteContent } from '../../../utils/citationRenderers';
 import { getBeaverNoteFooterHTML } from '../../../utils/noteActions';
 import { extractThreadContent, ExtractThreadContentOptions } from '../../../utils/threadContent';
-import { allRunsAtom, toolResultsMapAtom } from '../../../agents/atoms';
+import { allRunsAtom, toolResultsMapAtom } from '@beaver/agent-core/run-state/atoms';
 import { currentThreadIdAtom, currentThreadNameAtom, newThreadAtom, recentThreadsAtom, ThreadData } from '../../../atoms/threads';
 import { citationMapAtom } from '../../../atoms/citations';
 import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '../../../atoms/externalReferences';

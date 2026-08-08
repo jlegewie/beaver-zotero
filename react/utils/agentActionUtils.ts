@@ -7,7 +7,7 @@ import { AgentAction, isAnnotationAgentAction, isZoteroNoteAgentAction, isCreate
 import { NoteProposedData } from '@beaver/agent-core/types/agentActions/base';
 import { AgentRun, ModelMessage } from '@beaver/agent-core/agents/types';
 import { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
-import { activeRunAtom, threadRunsAtom } from '../agents/atoms';
+import { activeRunAtom, threadRunsAtom } from '@beaver/agent-core/run-state/atoms';
 import { loadFullItemDataWithAllTypes, isLibraryEditable } from '../../src/utils/zoteroUtils';
 import { getLibraryByIdOrName, getCollectionByIdOrName, isLibrarySearchable } from '../../src/services/agentDataProvider/utils';
 import { getPref } from '../../src/utils/prefs';

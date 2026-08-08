@@ -3,7 +3,7 @@ import { useAtomValue, useSetAtom } from 'jotai';
 import { userAtom } from '../atoms/auth';
 import { isThreadListViewAtom, isLibraryTabAtom, selectedZoteroTabIdAtom, hasPopupMessagesAtom, threadListFilterAtom, ThreadItemFilter } from '../atoms/ui';
 import { ThreadData, loadThreadAtom } from '../atoms/threads';
-import { currentThreadIdAtom } from '../agents/atoms';
+import { currentThreadIdAtom } from '@beaver/agent-core/run-state/atoms';
 import { searchableLibraryIdsAtom } from '../atoms/profile';
 import { threadService } from '@beaver/agent-core/transport/threadService';
 import { convertUTCToLocal } from '../utils/dateUtils';

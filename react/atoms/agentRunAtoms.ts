@@ -84,7 +84,7 @@ import {
     updateRunWithToolCallArgsStream,
     allUserAttachmentKeysAtom,
     resetRunMessages,
-} from '../agents/atoms';
+} from '@beaver/agent-core/run-state/atoms';
 import { userIdAtom } from './auth';
 import { citationsAtom, processCitationsAtom, resetCitationMarkersAtom, mergePageLabelsByAttachmentIdAtom } from './citations';
 import type { Citation } from '@beaver/agent-core/types/citations';
@@ -125,7 +125,7 @@ import {
     addPendingQuestionAtom,
     removePendingQuestionAtom,
     clearAllPendingQuestionsAtom,
-} from '../agents/pendingQuestions';
+} from '@beaver/agent-core/run-state/pendingQuestions';
 import { getAppliedPdfAnnotationCount } from '../agents/agentActionCounts';
 import { undoEditMetadataAction } from '../utils/editMetadataActions';
 import { undoCreateItemAction } from '../utils/createItemActions';
@@ -144,7 +144,7 @@ import { addWarningAtom, clearWarningsAtom } from './warnings';
 import { backendHighTokenUsageRunsAtom, softCapTriggeredRunsAtom } from './messageUIState';
 import { currentThreadNameAtom } from './threads';
 import { loadItemDataForAgentActions, autoApplyAnnotationAgentActions, autoCreateNoteAgentActions } from '../utils/agentActionUtils';
-import { extractZoteroReferencesFromToolCall } from '../agents/toolLabels';
+import { extractZoteroReferencesFromToolCall } from '@beaver/agent-core/run-state/toolLabels';
 import {
     clearRunApprovalPolicyAtom,
     getPendingApprovalIdsForToolGroup,

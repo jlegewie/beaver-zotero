@@ -27,7 +27,7 @@ import {
     allUserAttachmentsAtom,
     getToolCallStatus,
     threadRunsAtom,
-} from '../../../react/agents/atoms';
+} from '@beaver/agent-core/run-state/atoms';
 
 function run(id: string, attachments: MessageAttachment[]): AgentRun {
     return {

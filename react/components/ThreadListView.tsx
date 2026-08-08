@@ -5,7 +5,7 @@ import Spinner from './icons/Spinner';
 import IconButton from './ui/IconButton';
 import { isThreadListViewAtom, threadListFilterAtom, showAllThreadInstancesAtom } from '../atoms/ui';
 import { ThreadData, loadThreadAtom, newThreadAtom } from '../atoms/threads';
-import { currentThreadIdAtom } from '../agents/atoms';
+import { currentThreadIdAtom } from '@beaver/agent-core/run-state/atoms';
 import { userAtom } from '../atoms/auth';
 import { searchableLibraryIdsAtom } from '../atoms/profile';
 import { threadService } from '@beaver/agent-core/transport/threadService';

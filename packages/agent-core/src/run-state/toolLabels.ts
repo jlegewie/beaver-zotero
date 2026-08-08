@@ -1,11 +1,11 @@
 import { ToolCallStatus } from './atoms';
-import { ToolCallPart } from '@beaver/agent-core/agents/types';
-import { parseArgs, TOOL_BASE_LABELS } from '@beaver/agent-core/run-state/toolCallRequest';
-import { isItemRow, type ToolResultView } from '@beaver/agent-core/run-state/toolResultViews';
+import { ToolCallPart } from '../agents/types';
+import { parseArgs, TOOL_BASE_LABELS } from './toolCallRequest';
+import { isItemRow, type ToolResultView } from './toolResultViews';
 
-// Request-side, Zotero-free helpers live in the shared core's `toolCallRequest`;
-// re-exported here so existing importers (e.g. agentRunAtoms) keep their import path.
-export { extractZoteroReferencesFromToolCall } from '@beaver/agent-core/run-state/toolCallRequest';
+// The request-side reference extraction lives in `toolCallRequest`; re-exported
+// here so label consumers can take it from this module.
+export { extractZoteroReferencesFromToolCall } from './toolCallRequest';
 
 /**
  * Host-resolved display data folded into a tool-call header label for calls that

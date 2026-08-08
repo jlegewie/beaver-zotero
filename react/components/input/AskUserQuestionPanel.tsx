@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useSetAtom } from 'jotai';
-import type { PendingQuestion } from '../../agents/pendingQuestions';
+import type { PendingQuestion } from '@beaver/agent-core/run-state/pendingQuestions';
 import type {
     AskUserQuestionAnswer,
     AskUserQuestionItem,

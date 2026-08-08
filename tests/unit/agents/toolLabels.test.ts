@@ -1,6 +1,6 @@
 /**
  * Unit tests for the (now pure) tool-call label layer
- * (`react/agents/toolLabels.ts`).
+ * (`@beaver/agent-core/run-state/toolLabels`).
  *
  * `getToolCallLabel` formats a tool-call header label from the request args plus
  * either the hydrated tool-result `view` (completed calls) or host-resolved
@@ -15,7 +15,7 @@ import {
     getViewDisplayName,
     getToolResultLabelSuffix,
     getLabelEnrichmentNeeds,
-} from '../../../react/agents/toolLabels';
+} from '@beaver/agent-core/run-state/toolLabels';
 import { getToolResultRenderableCount } from '@beaver/agent-core/run-state/toolResultViews';
 import type {
     ItemListView,

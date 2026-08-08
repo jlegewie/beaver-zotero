@@ -6,7 +6,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { createStore } from 'jotai';
-import { currentThreadIdAtom as fromRunState } from '../../../react/agents/atoms';
+import { currentThreadIdAtom as fromRunState } from '@beaver/agent-core/run-state/atoms';
 import { currentThreadIdAtom as fromThreads } from '../../../react/atoms/threads';
 
 describe('currentThreadIdAtom', () => {

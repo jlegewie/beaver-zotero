@@ -14,7 +14,7 @@ import { citationMapAtom, citationsByRunIdAtom, citationKeyToMarkerAtom } from '
 import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '../../atoms/externalReferences';
 import { CitedSource, getCitationKey } from '@beaver/agent-core/types/citations';
 import { messageSourcesVisibilityAtom, toggleMessageSourcesVisibilityAtom, setMessageSourcesVisibilityAtom } from '../../atoms/messageUIState';
-import { toolResultsMapAtom, allRunsAtom } from '../../agents/atoms';
+import { toolResultsMapAtom, allRunsAtom } from '@beaver/agent-core/run-state/atoms';
 import { extractRunResponseContent } from '../../utils/threadContent';
 import TokenUsageDisplay from './TokenUsageDisplay';
 import { regenerateFromRunAtom, streamingDoneRunIdsAtom } from '../../atoms/agentRunAtoms';

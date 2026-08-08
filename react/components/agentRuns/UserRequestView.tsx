@@ -10,7 +10,7 @@ import ModelSelectionButton from '../ui/buttons/ModelSelectionButton';
 import SearchMenu from '../ui/menus/SearchMenu';
 import { regenerateWithEditedPromptAtom, isWSChatPendingAtom } from '../../atoms/agentRunAtoms';
 import { selectedModelAtom } from '../../atoms/models';
-import { isStreamingAtom } from '../../agents/atoms';
+import { isStreamingAtom } from '@beaver/agent-core/run-state/atoms';
 import { actionsAtom, buildEditedPromptActionsAtom } from '../../atoms/actions';
 import { ensurePromptActionTokens, promptActionsToDescriptors, type SlashCommandDescriptor } from '../../utils/slashCommands';
 import { renderContentWithSlashPills } from './slashCommandRendering';

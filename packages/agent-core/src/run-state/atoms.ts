@@ -1,5 +1,5 @@
-import { atom } from "jotai";
-import { logger } from "@beaver/agent-core/platform/logger";
+import { atom } from "jotai/vanilla";
+import { logger } from "../platform/logger";
 import {
     AgentRun,
     ModelMessage,
@@ -11,15 +11,15 @@ import {
     RetryPromptPart,
     AgentRunStatus,
     isUnsuccessfulToolReturn,
-} from "@beaver/agent-core/agents/types";
+} from "../agents/types";
 import {
     WSPartEvent,
     WSToolReturnEvent,
     WSRunCompleteEvent,
     WSToolCallProgressEvent,
     WSToolCallArgsStreamEvent,
-} from "@beaver/agent-core/protocol/agentProtocol";
-import { MessageAttachment, messageAttachmentKey, messageAttachmentsHaveSameIdentity } from "@beaver/agent-core/types/attachments/apiTypes";
+} from "../protocol/agentProtocol";
+import { MessageAttachment, messageAttachmentKey, messageAttachmentsHaveSameIdentity } from "../types/attachments/apiTypes";
 
 // =============================================================================
 // Core Atoms
@@ -34,7 +34,7 @@ export const activeRunAtom = atom<AgentRun | null>(null);
 /**
  * ID of the thread the runs above belong to (null before a thread is opened).
  * Lives here with the run state so run-state code has no dependency on the
- * thread module, and is re-exported from `atoms/threads` for thread consumers.
+ * thread module; a client may re-export it from its own thread module.
  */
 export const currentThreadIdAtom = atom<string | null>(null);
 
@@ -231,7 +231,7 @@ export function updateRunWithPart(run: AgentRun, event: WSPartEvent): AgentRun {
     const message = messages[event.message_index];
     if (message.kind !== 'response') {
         // This shouldn't happen for part events, but handle gracefully
-        console.warn('Part event received for non-response message');
+        logger('Part event received for non-response message', 1);
         return run;
     }
 

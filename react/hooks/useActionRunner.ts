@@ -1,6 +1,6 @@
 import { useCallback } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { isStreamingAtom } from '../agents/atoms';
+import { isStreamingAtom } from '@beaver/agent-core/run-state/atoms';
 import { isWSChatPendingAtom } from '../atoms/agentRunAtoms';
 import { Action } from '@beaver/agent-core/types/actions';
 import { stageActionPillAtom, actionContextAtom } from '../atoms/actions';

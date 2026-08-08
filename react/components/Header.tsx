@@ -5,7 +5,7 @@ import EmbeddingIndexStatusButton from './ui/buttons/EmbeddingIndexStatusButton'
 import { triggerToggleChat } from '../../src/ui/toggleChat';
 import { openBeaverWindow } from '../../src/ui/openBeaverWindow';
 import { newThreadAtom } from '../atoms/threads';
-import { currentThreadIdAtom, runsCountAtom } from '../agents/atoms';
+import { currentThreadIdAtom, runsCountAtom } from '@beaver/agent-core/run-state/atoms';
 import { useAtom, useAtomValue, useSetAtom } from 'jotai';
 import IconButton from './ui/IconButton';
 import Tooltip from './ui/Tooltip';

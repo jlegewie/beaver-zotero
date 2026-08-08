@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useSetAtom, useAtomValue } from 'jotai';
 import { AgentRunStatus, ToolCallPart } from '@beaver/agent-core/agents/types';
-import { toolResultsMapAtom, getToolCallStatus } from '../../../agents/atoms';
+import { toolResultsMapAtom, getToolCallStatus } from '@beaver/agent-core/run-state/atoms';
 import {
     AgentAction,
     getAgentActionsByToolcallAtom,

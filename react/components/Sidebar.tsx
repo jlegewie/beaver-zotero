@@ -2,12 +2,12 @@ import React, { useMemo, useRef, useEffect, type ReactNode } from 'react';
 import InputArea from "./input/InputArea"
 import AskUserQuestionPanel from "./input/AskUserQuestionPanel"
 import { pendingApprovalsAtom } from '../agents/agentActions';
-import { pendingQuestionsAtom } from '../agents/pendingQuestions';
+import { pendingQuestionsAtom } from '@beaver/agent-core/run-state/pendingQuestions';
 import Header from "./Header"
 import { useEventSubscription } from '../hooks/useEventSubscription';
 import { ThreadView } from "./agentRuns";
 import { currentThreadScrollPositionAtom, windowScrollPositionAtom } from '../atoms/threads';
-import { allRunsAtom } from '../agents/atoms';
+import { allRunsAtom } from '@beaver/agent-core/run-state/atoms';
 import { isFirstRunOrigin } from '@beaver/agent-core/agents/types';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { ScrollDownButton } from './ui/buttons/ScrollDownButton';

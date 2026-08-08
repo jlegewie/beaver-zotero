@@ -36,6 +36,26 @@ const l1CoreGlobals = [
  * `**` prefix because the package always reaches the app graph through a
  * path that carries a `react/` segment.
  */
+/**
+ * Packages the L1 core must never import by bare name. `jotai` is allowed only
+ * through `jotai/vanilla`: its default entry re-exports the React bindings, and
+ * the core has to run in clients that have no React.
+ */
+const l1CorePackageBans = [
+    {
+        name: "jotai",
+        message: "L1 core must import from 'jotai/vanilla', not the React-bearing default entry.",
+    },
+    {
+        name: "react",
+        message: "L1 core must not import React — it has to run in clients that have no React.",
+    },
+    {
+        name: "react-dom",
+        message: "L1 core must not import React — it has to run in clients that have no React.",
+    },
+];
+
 const l1CoreImportBans = [
     {
         group: ["**/agentDataProvider*", "**/agentDataProvider/**"],
@@ -63,6 +83,11 @@ const l1CoreImportBans = [
     {
         group: ["**/react/atoms/*", "**/react/atoms/**"],
         message: "L1 core must not import Jotai atoms (react/atoms).",
+    },
+    {
+        group: ["jotai/react", "jotai/react/**"],
+        message:
+            "L1 core must import from 'jotai/vanilla' — jotai's React entries pull in React, which the core must not require.",
     },
     {
         group: ["**/react/store"],
@@ -262,11 +287,10 @@ export default tseslint.config(
             "react/components/agentRuns/slashCommandRendering.tsx",
             "react/components/agentRuns/requestChips/**/*.{ts,tsx}",
             "react/components/messages/NoteDisplay.tsx",
-            // The tool-call header label is now pure (Zotero data arrives via the
-            // view model / itemData host slice); ToolCallPartView resolves request-
-            // side display names through getHost(), not the Zotero global.
+            // ToolCallPartView resolves request-side display names through
+            // getHost(), not the Zotero global. The label layer it calls lives in
+            // the core and is covered by the stricter block below.
             "react/components/agentRuns/ToolCallPartView.tsx",
-            "react/agents/toolLabels.ts",
             // Pure thread-list helpers incl. the instance-mismatch check —
             // identities are passed in, never read from the Zotero global.
             "react/utils/threadMatches.ts",
@@ -311,7 +335,10 @@ export default tseslint.config(
         files: ["packages/agent-core/src/**/*.ts"],
         rules: {
             "no-restricted-globals": ["error", ...l1CoreGlobals],
-            "no-restricted-imports": ["error", { patterns: l1CoreImportBans }],
+            "no-restricted-imports": [
+                "error",
+                { paths: l1CorePackageBans, patterns: l1CoreImportBans },
+            ],
             "no-restricted-syntax": ["error", ...l1CoreAmbientTypeBan],
         },
     },

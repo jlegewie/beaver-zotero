@@ -95,12 +95,12 @@ vi.mock('../../../react/atoms/externalReferences', async () => {
     };
 });
 
-vi.mock('../../../react/agents/atoms', async () => {
+vi.mock('@beaver/agent-core/run-state/atoms', async () => {
     const { atom } = await import('jotai');
     return {
         threadRunsAtom: atom<unknown[]>([]),
         activeRunAtom: atom<unknown | null>(null),
-        // threads.ts re-exports this from agents/atoms, so the stub must provide it
+        // threads.ts re-exports this from the run state, so the stub must provide it
         currentThreadIdAtom: atom<string | null>(null),
     };
 });
@@ -129,7 +129,7 @@ vi.mock('../../../react/agents/agentActions', async () => {
     };
 });
 
-vi.mock('../../../react/agents/pendingQuestions', async () => {
+vi.mock('@beaver/agent-core/run-state/pendingQuestions', async () => {
     const { atom } = await import('jotai');
     return { clearAllPendingQuestionsAtom: atom(null, () => {}) };
 });

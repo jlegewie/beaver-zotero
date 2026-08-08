@@ -18,7 +18,7 @@ import {
 import { getPref, setPref } from '../../src/utils/prefs';
 import { addPopupMessageAtom } from '../utils/popupMessageUtils';
 import { isFirstRunVisibleAtom } from './firstRun';
-import { activeRunAtom, threadRunsAtom } from '../agents/atoms';
+import { activeRunAtom, threadRunsAtom } from '@beaver/agent-core/run-state/atoms';
 import { isFirstRunOrigin } from '@beaver/agent-core/agents/types';
 
 /**

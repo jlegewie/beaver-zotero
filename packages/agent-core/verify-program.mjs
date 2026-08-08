@@ -150,8 +150,11 @@ if (!parsed.options.lib || nonEsLibs.length > 0) {
 // envelope a Word client serves and the backend mirrors, so nothing inside the
 // package imports it.
 //
-// The run-state modules are roots too: each is a leaf a client calls to turn an
-// agent run into render state, and nothing else in the package imports them.
+// The run-state roots follow the same rule: each is a leaf a client calls to
+// turn an agent run into render state, and nothing else in the package imports
+// them. `run-state/atoms.ts` is deliberately absent — `toolLabels` imports it,
+// so listing it as a root would only cost the orphan signal that catches it
+// dropping out of the closure.
 const entryPaths = [
   "src/globals.d.ts",
   "src/protocol/agentProtocol.ts",
@@ -170,6 +173,8 @@ const entryPaths = [
   "src/run-state/toolResultTypes.ts",
   "src/run-state/toolCallRequest.ts",
   "src/run-state/runResumeHelpers.ts",
+  "src/run-state/toolLabels.ts",
+  "src/run-state/pendingQuestions.ts",
 ].map((p) => path.join(pkgDir, p));
 
 const listed = parsed.fileNames.map((f) => path.resolve(f));

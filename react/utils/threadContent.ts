@@ -1,6 +1,6 @@
 import { AgentRun, TextPart, ToolCallPart } from '@beaver/agent-core/agents/types';
 import { isRenderableMessage } from '@beaver/agent-core/agents/messageVisibility';
-import { getToolCallLabel } from '../agents/toolLabels';
+import { getToolCallLabel } from '@beaver/agent-core/run-state/toolLabels';
 import { isToolResultView } from '@beaver/agent-core/run-state/toolResultViews';
 
 /**

@@ -31,7 +31,7 @@ import {
     currentThreadIdAtom,
     currentThreadNameAtom,
 } from '../../atoms/threads';
-import { activeRunAtom, threadRunsAtom } from '../../agents/atoms';
+import { activeRunAtom, threadRunsAtom } from '@beaver/agent-core/run-state/atoms';
 import { isWSChatPendingAtom, sendApprovalResponseAtom } from '../../atoms/agentRunAtoms';
 import {
     pendingApprovalsAtom,
@@ -40,7 +40,7 @@ import {
     type PendingApproval,
     type AgentAction,
 } from '../../agents/agentActions';
-import { pendingQuestionsAtom } from '../../agents/pendingQuestions';
+import { pendingQuestionsAtom } from '@beaver/agent-core/run-state/pendingQuestions';
 import {
     currentMessageItemsAtom,
     currentMessageCollectionsAtom,
