@@ -1030,6 +1030,30 @@ export interface WSReadNoteResponse {
     next_offset?: number;
     /** Range of lines returned, e.g. '1-50' */
     lines_returned?: string;
+    /**
+     * Address snapshot token pinning the block numbering this response shows,
+     * for later use by `edit_note_blocks`.
+     *
+     * Format: `'h:' + <digest> + ':' + <length> + ':' + <from> + '-' + <to>`.
+     *
+     * `<digest>` is a 64-bit non-cryptographic hash and `<length>` the character
+     * length, both taken over the SAME input: the simplified note projection
+     * (the exact string whose `split('\n')` defines the block numbering), with
+     * volatile citation locator values masked, concatenated with `'|'` and the
+     * window. Producer and comparator must agree byte-for-byte on that input —
+     * see `src/utils/noteSnapshot.ts`, which is the single implementation of
+     * both directions. Comparison is whole-token equality of the recomputed
+     * token; the window is additionally parsed out to bound numeric addressing.
+     *
+     * The trailing `<from>-<to>` is the read window, and it records what was
+     * actually SHOWN rather than what was asked for; the canonical empty window
+     * is the literal `0-0`.
+     *
+     * The token is OPAQUE to the backend: it is echoed back on an edit request
+     * verbatim and never parsed, rewritten or synthesized there. Only the
+     * client that issued it interprets it.
+     */
+    snapshot?: string;
     /** Items cited in the note content (resolved from citation tags) */
     cited_items?: ItemSummary[];
 }
@@ -1459,7 +1483,7 @@ export interface WSListLibrariesResponse {
 export type DeferredToolPreference = 'always_ask' | 'always_apply' | 'continue_without_applying';
 
 /** Agent action type for deferred tools */
-export type AgentActionType = 'highlight_annotation' | 'note_annotation' | 'create_highlight_annotations' | 'create_note_annotations' | 'edit_annotations' | 'zotero_note' | 'create_item' | 'edit_metadata' | 'create_collection' | 'organize_items' | 'manage_tags' | 'manage_collections' | 'confirm_extraction' | 'confirm_external_search' | 'edit_note' | 'edit_note_batch' | 'create_note';
+export type AgentActionType = 'highlight_annotation' | 'note_annotation' | 'create_highlight_annotations' | 'create_note_annotations' | 'edit_annotations' | 'zotero_note' | 'create_item' | 'edit_metadata' | 'create_collection' | 'organize_items' | 'manage_tags' | 'manage_collections' | 'confirm_extraction' | 'confirm_external_search' | 'edit_note' | 'edit_note_batch' | 'edit_note_blocks' | 'create_note';
 
 /** Request from backend to validate an agent action */
 export interface WSAgentActionValidateRequest extends WSBaseEvent {
@@ -1501,6 +1525,12 @@ export interface EditValidationError {
     error: string;
     error_code?: string | null;
     error_candidates?: ErrorCandidate[];
+    /**
+     * Whitespace-collapsed text of the block actually at the addressed position
+     * (~80 chars, pre-truncated by the sender — the backend must not
+     * re-truncate). Present only for edit_note_blocks skips.
+     */
+    actual?: string;
 }
 
 /** Response to agent action validation request */
@@ -1524,7 +1554,16 @@ export interface WSAgentActionValidateResponse {
      * fail; the whole batch is rejected (fail-closed).
      */
     edit_errors?: EditValidationError[];
-    /** Current value for before/after tracking. Shape depends on action_type. */
+    /**
+     * Current value for before/after tracking. Shape depends on action_type.
+     *
+     * For `edit_note_blocks`, a validate-time snapshot mismatch rides here as
+     * `{ kind: 'snapshot_mismatch', snapshot, total_lines, note }` — the fresh
+     * address snapshot plus the current simplified note, so the model can
+     * re-address without another read_note round trip. The `kind` discriminant
+     * exists so consumers that merely gate on `current_value` being truthy can
+     * branch safely instead of mistaking a mismatch payload for a before-value.
+     */
     current_value?: any;
     /**
      * Optional normalized action payload returned by validation.
@@ -1572,8 +1611,54 @@ export interface WSAgentActionExecuteResponse {
      */
     error_candidates?: ErrorCandidate[];
     result_data?: Record<string, any>;
+    /**
+     * Post-edit note state returned by an `edit_note_blocks` execution so the
+     * model can address the new numbering without a follow-up read_note.
+     *
+     * TRANSPORT-ONLY: this rides on the execute response and is folded into the
+     * tool result. It must NEVER be persisted into `proposed_data` or
+     * `result_data` — a stored copy of the note body would go stale on the next
+     * edit and become a second, wrong source of truth.
+     */
+    refreshed_note?: RefreshedNoteState;
     /** Optional timing breakdown for diagnostics (e.g. create_item latency) */
     timing?: FrontendTimingMetadata;
+}
+
+/**
+ * Current state of a note after an edit, used to re-anchor block addressing.
+ * See `WSAgentActionExecuteResponse.refreshed_note` — transport-only, never
+ * persisted.
+ */
+export interface RefreshedNoteState {
+    /**
+     * Address snapshot token for the note in this state.
+     *
+     * Its read window records what this payload actually SHOWS, not what the
+     * note contains: `1-<total_lines>` when `note` is present, and the
+     * canonical empty window `0-0` when it is absent. That is what keeps the
+     * large-note path from handing the model a token licensing it to address
+     * blocks it was never shown; with an empty window every numeric address
+     * fails closed with `address_outside_read_window` until it re-reads.
+     * `block: 'all'` needs no window and stays available either way.
+     */
+    snapshot: string;
+    /** Total line count of the simplified note */
+    total_lines: number;
+    /**
+     * The FULL current (post-edit) simplified note, UN-numbered. Present only
+     * when the note is under the size cap; omitted otherwise, with `truncated`
+     * set instead.
+     *
+     * UN-numbered is deliberate: the backend renders the block numbers when it
+     * folds this into the tool result, from the same shared renderer `read_note`
+     * uses, so there is exactly one numbering implementation. Never hand this
+     * string to a model without numbering it — counting lines by eye is the
+     * addressing error block numbers exist to remove.
+     */
+    note?: string;
+    /** True when `note` was omitted because the note exceeds the size cap */
+    truncated?: boolean;
 }
 
 /** Request from backend for user approval of a deferred action */
@@ -1815,6 +1900,12 @@ export const CLIENT_FEATURES = {
     CREATE_NOTE_TAGS_COLLECTIONS: 'create_note_tags_collections',
     /** Batch multi-edit note editing (edit_note_batch action type). */
     EDIT_NOTE_BATCH: 'edit_note_batch',
+    // Block-addressed note editing (`'edit_note_blocks'`) is deliberately NOT
+    // declared here yet. ZOTERO_PLUGIN_FEATURES = Object.values(CLIENT_FEATURES),
+    // so adding an entry here *is* the declaration — the backend would start
+    // offering the tool to every build that ships this constant. Flipping the
+    // feature on is its own release step per the rollout plan; add the entry
+    // then, not when the protocol types land.
     /** Atomic common-field editing for annotations returned by find_annotations. */
     EDIT_ANNOTATIONS: 'edit_annotations',
     /**

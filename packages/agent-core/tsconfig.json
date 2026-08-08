@@ -65,6 +65,7 @@
     "./src/types/agentActions/items.ts",
     "./src/types/agentActions/editNote.ts",
     "./src/types/agentActions/editNoteBatch.ts",
+    "./src/types/agentActions/editNoteBlocks.ts",
     "./src/types/agentActions/annotations.ts",
     "./src/types/agentActions/createAnnotations.ts",
     "./src/types/agentActions/editAnnotations.ts",

@@ -169,9 +169,19 @@ export const isEditNoteBatchAgentAction = (action: AgentAction): boolean => {
     return action.action_type === 'edit_note_batch';
 };
 
-/** edit_note OR edit_note_batch — any note-edit action against a single note. */
+/**
+ * Type guard for block-addressed edit note actions
+ */
+export const isEditNoteBlocksAgentAction = (action: AgentAction): boolean => {
+    return action.action_type === 'edit_note_blocks';
+};
+
+/**
+ * edit_note OR edit_note_batch OR edit_note_blocks — any note-edit action
+ * against a single note.
+ */
 export const isAnyEditNoteAgentAction = (action: AgentAction): boolean =>
-    isEditNoteAgentAction(action) || isEditNoteBatchAgentAction(action);
+    isEditNoteAgentAction(action) || isEditNoteBatchAgentAction(action) || isEditNoteBlocksAgentAction(action);
 
 /**
  * Type guard for confirm extraction actions
