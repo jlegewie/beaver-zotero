@@ -8,7 +8,7 @@ import { ThreadData, loadThreadAtom, newThreadAtom } from '../atoms/threads';
 import { currentThreadIdAtom } from '@beaver/agent-core/run-state/atoms';
 import { userAtom } from '../atoms/auth';
 import { searchableLibraryIdsAtom } from '../atoms/profile';
-import { threadService } from '@beaver/agent-core/transport/threadService';
+import { threadService, isThreadAgentMismatch } from '@beaver/agent-core/transport/threadService';
 import { currentZoteroInstanceRef } from '../../src/utils/zoteroUtils';
 import { getDateGroup } from '../utils/dateUtils';
 import { formatTimeAgo } from '../utils/formatTimeAgo';
@@ -190,7 +190,9 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
                     filter.keys,
                     'both'
                 );
-                const deduped = deduplicateByThread(matches);
+                // The by-item route takes no agent scope, so drop another
+                // client's threads here (the other lists are scoped server-side).
+                const deduped = deduplicateByThread(matches.filter(m => !isThreadAgentMismatch(m)));
                 if (seq === fetchSeqRef.current) {
                     setThreads(deduped);
                     setHasMore(false);

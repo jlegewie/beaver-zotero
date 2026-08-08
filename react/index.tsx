@@ -37,6 +37,8 @@ import { registerZoteroHost } from './host/zotero';
 import { registerZoteroDataProvider } from '../src/services/zoteroDataProvider';
 import { registerZoteroLibraryIdentity } from '../src/utils/libraryIdentity';
 import { registerZoteroClientIdentity } from '../src/services/zoteroClientIdentity';
+import { setThreadAgentName } from '@beaver/agent-core/transport/threadService';
+import { ZOTERO_AGENT_NAME } from '@beaver/agent-core/protocol/agentProtocol';
 import { registerZoteroSupabaseStorage, registerZoteroSupabaseReloadBridge } from '../src/services/zoteroSupabaseStorage';
 import { setSupabaseAuthPolicy } from '@beaver/agent-core/transport/supabaseClient';
 import { registerZoteroBusyContext } from '../src/services/busyContext';
@@ -84,6 +86,11 @@ registerZoteroLibraryIdentity();
 // handshake's frontend_version/client_type/client_features/zotero_instance
 // fields. Must run before ProviderConnection opens its first connection.
 registerZoteroClientIdentity();
+
+// Scope every thread list to the Zotero agent, matching the agent name the
+// backend stamps on threads this client creates. Without it the list would
+// also show threads created by the user's other Beaver clients.
+setThreadAgentName(ZOTERO_AGENT_NAME);
 
 // Register the Zotero encrypted-storage adapter the Supabase auth session
 // persists into. Must run before the exported `supabase` client is first
