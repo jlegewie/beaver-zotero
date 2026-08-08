@@ -234,6 +234,84 @@ describe('supabaseClient auth lock reload handling', () => {
     });
 });
 
+describe('supabaseClient auth policy', () => {
+    /** The auth surface of the most recently created mock client. */
+    function lastClientAuth(): {
+        initialize: ReturnType<typeof vi.fn>;
+        startAutoRefresh: ReturnType<typeof vi.fn>;
+        stopAutoRefresh: ReturnType<typeof vi.fn>;
+    } {
+        return (mockCreateClient.mock.results.at(-1)!.value as any).auth;
+    }
+
+    it('force-starts auto-refresh by default', async () => {
+        const module = await import('@beaver/agent-core/transport/supabaseClient');
+        module.setSupabaseStorageAdapter(createMockStorageAdapter());
+
+        module.supabase.auth;
+        await flushAsync();
+
+        expect(lastClientAuth().initialize).toHaveBeenCalledTimes(1);
+        expect(lastClientAuth().startAutoRefresh).toHaveBeenCalledTimes(1);
+    });
+
+    it('skips the forced start when the host opts out, but still initializes', async () => {
+        const module = await import('@beaver/agent-core/transport/supabaseClient');
+        module.setSupabaseStorageAdapter(createMockStorageAdapter());
+        module.setSupabaseAuthPolicy({ forceAutoRefresh: false });
+
+        module.supabase.auth;
+        await flushAsync();
+
+        expect(lastClientAuth().initialize).toHaveBeenCalledTimes(1);
+        expect(lastClientAuth().startAutoRefresh).not.toHaveBeenCalled();
+    });
+
+    // initialize()'s finally block re-registers the SDK's visibility listener,
+    // so a client disposed while initialize() is in flight must still be
+    // stopped afterwards — under either policy.
+    it('stops a client disposed mid-initialize when the host opts out', async () => {
+        const initialized = createDeferred<undefined>();
+        mockCreateClient.mockImplementationOnce((_url: string, _key: string, options: any) => {
+            capturedLocks.push(options.auth.lock);
+            return {
+                auth: {
+                    initialize: vi.fn().mockReturnValue(initialized.promise),
+                    startAutoRefresh: vi.fn().mockResolvedValue(undefined),
+                    stopAutoRefresh: vi.fn().mockResolvedValue(undefined),
+                },
+            };
+        });
+
+        const module = await import('@beaver/agent-core/transport/supabaseClient');
+        module.setSupabaseStorageAdapter(createMockStorageAdapter());
+        module.setSupabaseAuthPolicy({ forceAutoRefresh: false });
+
+        module.supabase.auth;
+        await module.disposeSupabaseClient();
+        const stopsBeforeInitializeSettles = lastClientAuth().stopAutoRefresh.mock.calls.length;
+
+        initialized.resolve(undefined);
+        await flushAsync();
+
+        expect(lastClientAuth().startAutoRefresh).not.toHaveBeenCalled();
+        // The stop that matters is the one after initialize() settles: the
+        // disposer's own stop ran before the listener was re-registered.
+        expect(lastClientAuth().stopAutoRefresh.mock.calls.length)
+            .toBeGreaterThan(stopsBeforeInitializeSettles);
+    });
+
+    it('rejects policy registration after the exported client has been used', async () => {
+        const module = await import('@beaver/agent-core/transport/supabaseClient');
+        module.setSupabaseStorageAdapter(createMockStorageAdapter());
+
+        module.supabase.auth;
+
+        expect(() => module.setSupabaseAuthPolicy({ forceAutoRefresh: false }))
+            .toThrow('Supabase auth policy must be set before the Supabase client is first used');
+    });
+});
+
 describe('supabaseClient reload bridge', () => {
     it('creates a working client and touches no host state when no bridge is registered', async () => {
         const module = await import('@beaver/agent-core/transport/supabaseClient');

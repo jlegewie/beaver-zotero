@@ -38,6 +38,7 @@ import { registerZoteroDataProvider } from '../src/services/zoteroDataProvider';
 import { registerZoteroObjectIdResolver } from '../src/utils/libraryIdentity';
 import { registerZoteroClientIdentity } from '../src/services/zoteroClientIdentity';
 import { registerZoteroSupabaseStorage, registerZoteroSupabaseReloadBridge } from '../src/services/zoteroSupabaseStorage';
+import { setSupabaseAuthPolicy } from '@beaver/agent-core/transport/supabaseClient';
 import { registerZoteroBusyContext } from '../src/services/busyContext';
 import { registerZoteroSyncPause } from '../src/services/syncPause';
 import { notifyWorkerStartFailure } from './utils/workerUnavailableNotice';
@@ -86,6 +87,12 @@ registerZoteroClientIdentity();
 // persists into. Must run before the exported `supabase` client is first
 // used (the client is created lazily on first property access).
 registerZoteroSupabaseStorage();
+
+// Zotero runs a single window that may sit obscured for long stretches while
+// its session must stay alive, so the auth client refreshes on its own ticker
+// rather than only while the window is visible. Must run before the client is
+// first used; this restates the default explicitly.
+setSupabaseAuthPolicy({ forceAutoRefresh: true });
 
 // Register the window-scoped bridge to Supabase state that survives a plugin
 // reload. Registering is what stops a previous bundle instance's auto-refresh
