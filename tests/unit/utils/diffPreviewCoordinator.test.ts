@@ -194,6 +194,70 @@ describe('diffPreviewCoordinator — handleBannerAction', () => {
         }]);
     });
 
+    it('previews a block-addressed approval and drops its skipped edits', async () => {
+        seedApprovals(makePendingApproval({
+            actionId: 'blocks-1',
+            actionType: 'edit_note_blocks',
+            edits: [
+                {
+                    index: 0,
+                    op: 'replace',
+                    block: 5,
+                    operation: 'str_replace',
+                    old_string: '<p>Five</p>',
+                    new_string: '<p>Five, revised</p>',
+                    target_before_context: '<p>four</p>',
+                    target_after_context: '<p>six</p>',
+                },
+                {
+                    index: 1,
+                    op: 'replace',
+                    block: 9,
+                    skip_reason_code: 'expect_mismatch',
+                    skip_reason: 'The text at block 9 did not match `expect`.',
+                },
+            ],
+        }));
+
+        updateDiffPreviewForNote(1, 'AAAA1111');
+        await Promise.resolve();
+
+        expect(mockShowDiffPreview).toHaveBeenCalledWith(1, 'AAAA1111', [{
+            oldString: '<p>Five</p>',
+            newString: '<p>Five, revised</p>',
+            operation: 'str_replace',
+            targetBeforeContext: '<p>four</p>',
+            targetAfterContext: '<p>six</p>',
+        }]);
+    });
+
+    it('banner approveAll acts on a block-addressed approval for the previewed note', async () => {
+        capturedHandlers.previewNoteKey = { libraryId: 1, zoteroKey: 'NOTE_A' };
+        seedApprovals(
+            makePendingApproval({
+                actionId: 'blocks-1',
+                actionType: 'edit_note_blocks',
+                library_id: 1,
+                zotero_key: 'NOTE_A',
+                edits: [{ index: 0, op: 'replace', block: 5, operation: 'str_replace', old_string: 'x', new_string: 'X' }],
+            }),
+            makePendingApproval({
+                actionId: 'blocks-2',
+                actionType: 'edit_note_blocks',
+                library_id: 1,
+                zotero_key: 'NOTE_B',
+                edits: [{ index: 0, op: 'replace', block: 5, operation: 'str_replace', old_string: 'y', new_string: 'Y' }],
+            }),
+        );
+
+        await capturedHandlers.bannerAction!('approveAll');
+
+        expect(getApprovalResponses()).toEqual([{ actionId: 'blocks-1', approved: true }]);
+        const remaining = storeRef.current.get(pendingApprovalsAtom);
+        expect(remaining.has('blocks-1')).toBe(false);
+        expect(remaining.has('blocks-2')).toBe(true);
+    });
+
     it('registers a banner action handler on module load', () => {
         expect(capturedHandlers.bannerAction).toBeTypeOf('function');
     });

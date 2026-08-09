@@ -437,9 +437,11 @@ export function useEditNoteActions({
     }, [resolvedTarget, action, pendingApproval]);
 
     /**
-     * Open the note and jump to ONE edit of an edit_note_batch action. The
-     * row descriptor carries the edit's own strings; disambiguation anchors
-     * and undo contexts are joined from the action payload by edit index.
+     * Open the note and jump to ONE edit of a multi-edit note action
+     * (edit_note_batch or edit_note_blocks). The row descriptor carries the
+     * edit's own strings and, when validation supplied them, its disambiguation
+     * anchors; anything the row lacks is joined from the action payload by edit
+     * index, and undo contexts always come from the result data.
      */
     const handleOpenNoteForRow = useCallback(async (row: EditNoteRowDescriptor) => {
         if (!resolvedTarget) return;
@@ -463,8 +465,8 @@ export function useEditNoteActions({
             action?.status === 'applied',
             undoRecord?.undo_before_context,
             undoRecord?.undo_after_context,
-            fullEdit?.target_before_context,
-            fullEdit?.target_after_context,
+            row.targetBeforeContext ?? fullEdit?.target_before_context,
+            row.targetAfterContext ?? fullEdit?.target_after_context,
             row.operation as EditNoteOperation,
         );
     }, [resolvedTarget, action, pendingApproval]);

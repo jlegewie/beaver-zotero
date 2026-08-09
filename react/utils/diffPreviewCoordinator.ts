@@ -27,6 +27,7 @@ import {
     type EditOperation,
 } from './noteEditorDiffPreview';
 import { logger } from '@beaver/agent-core/platform/logger';
+import { isAnyEditNoteActionType } from '@beaver/agent-core/agents/agentActionTypes';
 import { getPref } from '../../src/utils/prefs';
 import { store } from '../store';
 import { pendingApprovalsAtom } from '../agents/agentActions';
@@ -91,7 +92,7 @@ export function updateDiffPreviewForNote(libraryId: number, zoteroKey: string): 
 
     const edits: EditOperation[] = [];
     for (const [, pa] of allApprovals) {
-        if (pa.actionType !== 'edit_note' && pa.actionType !== 'edit_note_batch') continue;
+        if (!isAnyEditNoteActionType(pa.actionType)) continue;
         const paLib = pa.actionData?.library_id;
         const paKey = pa.actionData?.zotero_key;
         if (paLib == null || !paKey || makeNoteKey(paLib, paKey) !== noteKey) continue;
@@ -138,14 +139,14 @@ async function handleBannerAction(action: string): Promise<void> {
     await dismissDiffPreview();
     store.set(diffPreviewNoteKeyAtom, null);
 
-    // Collect matching edit_note / edit_note_batch action IDs, send responses,
-    // then batch-remove from the map in one update. Using removePendingApprovalAtom
-    // per item would trigger updateDiffPreviewForNote on each removal, which
-    // re-shows the preview for the remaining (already-handled) edits.
+    // Collect matching note-edit action IDs, send responses, then batch-remove
+    // from the map in one update. Using removePendingApprovalAtom per item would
+    // trigger updateDiffPreviewForNote on each removal, which re-shows the
+    // preview for the remaining (already-handled) edits.
     const allApprovals: Map<string, any> = store.get(pendingApprovalsAtom);
     const editNoteIds: string[] = [];
     for (const [, pa] of allApprovals) {
-        if (pa.actionType !== 'edit_note' && pa.actionType !== 'edit_note_batch') continue;
+        if (!isAnyEditNoteActionType(pa.actionType)) continue;
         // Only act on approvals for the previewed note
         if (previewKey) {
             const paLib = pa.actionData?.library_id;

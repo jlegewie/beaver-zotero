@@ -40,6 +40,26 @@ export interface EditNoteRowDescriptor {
     oldString: string;
     newString: string;
     occurrencesReplaced?: number;
+    /**
+     * Short human label for how this edit addresses the note, e.g.
+     * `replace · block 5`. Set only for `edit_note_blocks` rows: the other two
+     * variants address by matched text, which the diff itself already shows,
+     * whereas a block number is invisible in the diff and is the whole point of
+     * the call. See {@link describeBlockEdit}.
+     */
+    label?: string;
+    /**
+     * Present if and only if validation skipped this edit (blocks only). The
+     * row renders the reason instead of a diff — execute will not apply it.
+     */
+    skippedReason?: string;
+    /**
+     * Validation-supplied anchors for locating this edit's target region in the
+     * note, so "jump to edit" lands on the right occurrence. Copied verbatim
+     * from the persisted edit's `target_before_context` / `target_after_context`.
+     */
+    targetBeforeContext?: string;
+    targetAfterContext?: string;
 }
 
 /** Which of the three note-edit call shapes a row/preview is looking at. */
@@ -87,6 +107,46 @@ export function getEditNoteCallVariant({
 }
 
 /**
+ * Human label for how one block edit addresses the note, e.g.
+ * `replace · block 5`, `insert · after 12`, `delete · blocks 4-7`,
+ * `replace · whole note`.
+ *
+ * Reads ONLY the persisted addressing fields, which is why it can live in the
+ * render layer: nothing here consults the note, prefs, or the editor.
+ *
+ * `after: 0` and `after: 'end'` name a seam rather than a block, so they get
+ * their own wording — "after 0" would read as a block number that does not
+ * exist. An edit whose addressing field is missing or malformed degrades to the
+ * bare op rather than inventing an address.
+ */
+export function describeBlockEdit(edit: Record<string, any> | null | undefined): string {
+    const op = typeof edit?.op === 'string' ? edit.op : '';
+    switch (op) {
+        case 'replace': {
+            const block = edit!.block;
+            if (block === 'all') return 'replace · whole note';
+            return typeof block === 'number' ? `replace · block ${block}` : 'replace';
+        }
+        case 'insert': {
+            const after = edit!.after;
+            if (after === 'end') return 'insert · at end';
+            if (after === 0) return 'insert · at start';
+            return typeof after === 'number' ? `insert · after ${after}` : 'insert';
+        }
+        case 'delete': {
+            const from = edit!.from_block;
+            const to = edit!.to_block;
+            if (typeof from !== 'number') return 'delete';
+            return typeof to === 'number' && to > from
+                ? `delete · blocks ${from}-${to}`
+                : `delete · block ${from}`;
+        }
+        default:
+            return op || 'edit';
+    }
+}
+
+/**
  * Derive the row(s) a single edit_note / edit_note_batch / edit_note_blocks
  * tool-call part contributes to the group view. A v1 call always yields exactly
  * one row built from its flat fields. A batch or blocks call (classified by
@@ -97,6 +157,12 @@ export function getEditNoteCallVariant({
  * `actionData` (the authoritative proposed_data from a stored action or
  * pending approval) takes precedence over `toolArgs` (streaming/finalized
  * tool-call args) wherever both are available.
+ *
+ * DECOUPLING BOUNDARY. This is render-layer code and consumes only the
+ * SELF-CONTAINED persisted metadata — which is precisely why validation writes
+ * `operation`/`old_string`/`new_string`/`skip_reason*`/`target_*_context` onto
+ * each block edit. It must gain no Zotero import and no pref read; editor
+ * interaction stays host-side.
  */
 export function deriveEditNoteRows({
     toolArgs,
@@ -130,6 +196,8 @@ export function deriveEditNoteRows({
             }
         }
 
+        const isBlocks = variant === 'blocks';
+
         return edits.map((edit, position) => {
             const editIndex = typeof edit?.index === 'number' ? edit.index : position;
             return {
@@ -138,6 +206,27 @@ export function deriveEditNoteRows({
                 oldString: edit?.old_string ?? '',
                 newString: edit?.new_string ?? '',
                 occurrencesReplaced: appliedByIndex.get(editIndex),
+                ...(isBlocks ? { label: describeBlockEdit(edit) } : {}),
+                // Skipped-ness is derived from `skip_reason_code`, never stored
+                // separately; `skip_reason` is only its human wording. An edit
+                // skipped without a wording still renders as skipped.
+                ...(isBlocks && edit?.skip_reason_code
+                    ? { skippedReason: edit.skip_reason ?? String(edit.skip_reason_code) }
+                    : {}),
+                // Blocks only. Batch rows must keep producing NO anchor keys:
+                // batch validation routinely writes `target_*_context` onto its
+                // edits, so spreading them here unconditionally would change
+                // every batch row's shape — and `useEditNoteActions` reads
+                // `row.targetBeforeContext ?? fullEdit?.target_before_context`,
+                // so the two paths diverge exactly where a row falls back to
+                // positional lookup. Keeping this blocks-scoped preserves the
+                // "batch untouched" invariant the rollback path rests on.
+                ...(isBlocks && edit?.target_before_context !== undefined
+                    ? { targetBeforeContext: edit.target_before_context }
+                    : {}),
+                ...(isBlocks && edit?.target_after_context !== undefined
+                    ? { targetAfterContext: edit.target_after_context }
+                    : {}),
             };
         });
     }

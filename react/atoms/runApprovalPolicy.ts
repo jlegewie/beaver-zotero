@@ -1,5 +1,6 @@
 import { atom } from 'jotai';
 import type { AgentActionType } from '@beaver/agent-core/protocol/agentProtocol';
+import { isAnyEditNoteActionType } from '@beaver/agent-core/agents/agentActionTypes';
 
 /**
  * Stable groups for actual deferred tool names. These seed persistent
@@ -15,12 +16,14 @@ export const DEFAULT_DEFERRED_TOOL_GROUPS: Record<string, string> = {
     edit_item: 'metadata_edits',
     edit_note: 'note_edits',
     edit_note_batch: 'note_edits',
+    edit_note_blocks: 'note_edits',
     // A rewrite that discards or replaces most of a note gets its own group, so
     // approving note edits never carries one with it. Classification happens in
     // validation (see noteRewriteRisk.ts) — it is the only step holding both the
     // live note and the payload — and rides along on the action data as
     // `destructive_rewrite` so later approval steps, which only ever see the
-    // `edit_note_batch` action type, classify it the same way. Like annotation
+    // `edit_note_batch` / `edit_note_blocks` action type, classify it the same
+    // way. Like annotation
     // deletion this has no Preferences row on purpose: with nothing to persist a
     // preference against it always resolves to `always_ask`, so "apply note
     // edits automatically" cannot reach it.
@@ -76,15 +79,22 @@ export function getToolGroup(toolName: string): string | null {
 
 /**
  * True when this action is a whole-note rewrite that validation classified as
- * destructive. The wire action type stays `edit_note_batch`, so the flag
- * validation persists in the action data is the only thing separating it from
- * an ordinary note edit on the approval side.
+ * destructive. The wire action type stays `edit_note_batch` or
+ * `edit_note_blocks`, so the flag validation persists in the action data is the
+ * only thing separating it from an ordinary note edit on the approval side.
+ *
+ * BOTH multi-edit variants stamp `destructive_rewrite`. `edit_note_blocks` in
+ * fact reaches the classification by a second route the batch variant cannot —
+ * `delete from_block:1 to_block:<total>`, or an edit set that guts the note —
+ * so leaving it out here would let an ordinary note-edit run grant authorize a
+ * destructive block rewrite.
  */
 export function isDestructiveNoteRewriteAction(
     actionType: string,
     actionData?: Record<string, any>,
 ): boolean {
-    return actionType === 'edit_note_batch' && actionData?.destructive_rewrite === true;
+    return (actionType === 'edit_note_batch' || actionType === 'edit_note_blocks')
+        && actionData?.destructive_rewrite === true;
 }
 
 /**
@@ -93,7 +103,8 @@ export function isDestructiveNoteRewriteAction(
  * Two wire action types are shared by tools with different blast radii, so
  * authorization must read the payload as well as the action type:
  * - edit_annotations is emitted by delete_annotations with operation=delete.
- * - edit_note_batch is emitted for a destructive whole-note rewrite.
+ * - edit_note_batch / edit_note_blocks are emitted for a destructive
+ *   whole-note rewrite.
  * Classifying on the action type alone would let the narrower group's grant be
  * satisfied by an ordinary edit grant.
  */
@@ -280,8 +291,7 @@ export function isActionApprovedForRun(
     // granted for a note Beaver created during this same run, so a rewrite of
     // one can discard nothing the user wrote.
     if (
-        toolName !== 'edit_note'
-        && toolName !== 'edit_note_batch'
+        !isAnyEditNoteActionType(toolName)
         && toolName !== 'destructive_note_rewrite'
     ) return false;
     const target = getNoteEditTarget(actionData);

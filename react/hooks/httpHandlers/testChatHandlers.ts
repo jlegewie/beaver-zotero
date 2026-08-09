@@ -55,7 +55,7 @@ import { undoOrganizeItemsAction } from '../../utils/organizeItemsActions';
 import { undoManageTagsAction } from '../../utils/manageTagsActions';
 import { undoManageCollectionsAction } from '../../utils/manageCollectionsActions';
 import { undoCreateNoteAction } from '../../utils/createNoteActions';
-import { undoEditNoteAction, undoEditNoteBatchAction } from '../../utils/editNoteActions';
+import { undoEditNoteVariantAction } from '../../utils/editNoteActions';
 import { undoCreateAnnotationsAction } from '../../utils/createAnnotationsActions';
 import { undoCreateItemActions } from '../../utils/createItemActions';
 import { undoEditAnnotationsAction } from '../../utils/editAnnotationsActions';
@@ -405,11 +405,13 @@ export async function handleTestUndoActionHttpRequest(request: any) {
             case 'create_note':
                 await undoCreateNoteAction(action);
                 break;
+            // All three note-edit variants go through the shared variant router
+            // rather than naming their undo function here, so the only thing
+            // this switch has to know is which action types are note edits.
             case 'edit_note':
-                await undoEditNoteAction(action);
-                break;
             case 'edit_note_batch':
-                await undoEditNoteBatchAction(action);
+            case 'edit_note_blocks':
+                await undoEditNoteVariantAction(action);
                 break;
             // Both edit_annotations and delete_annotations share this action type.
             case 'edit_annotations':

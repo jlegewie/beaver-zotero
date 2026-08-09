@@ -177,11 +177,23 @@ export const isEditNoteBlocksAgentAction = (action: AgentAction): boolean => {
 };
 
 /**
+ * True for the `action_type` of any of the three note-edit variants.
+ *
+ * The string form exists because most note-edit branch points hold only an
+ * action type (a pending approval, a WS event, a stored action's
+ * `action_type`), not a whole {@link AgentAction}. Every such site used to
+ * spell out `=== 'edit_note' || === 'edit_note_batch'`, which is exactly the
+ * shape that silently omits a newly added variant.
+ */
+export const isAnyEditNoteActionType = (actionType: string | null | undefined): boolean =>
+    actionType === 'edit_note' || actionType === 'edit_note_batch' || actionType === 'edit_note_blocks';
+
+/**
  * edit_note OR edit_note_batch OR edit_note_blocks — any note-edit action
  * against a single note.
  */
 export const isAnyEditNoteAgentAction = (action: AgentAction): boolean =>
-    isEditNoteAgentAction(action) || isEditNoteBatchAgentAction(action) || isEditNoteBlocksAgentAction(action);
+    isAnyEditNoteActionType(action.action_type);
 
 /**
  * Type guard for confirm extraction actions

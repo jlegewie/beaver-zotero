@@ -16,6 +16,7 @@ import {
     isCreateAnnotationsAgentAction,
     isEditAnnotationsAgentAction,
     isAnnotationAgentAction,
+    isAnyEditNoteActionType,
     hasAppliedZoteroItem,
     hasAppliedBulkAnnotations,
     getZoteroItemReferenceFromAgentAction,
@@ -523,8 +524,8 @@ export const addPendingApprovalAtom = atom(
             return next;
         });
 
-        // Trigger in-editor diff preview for edit_note / edit_note_batch approvals
-        if (event.action_type === 'edit_note' || event.action_type === 'edit_note_batch') {
+        // Trigger the in-editor diff preview for any note-edit approval.
+        if (isAnyEditNoteActionType(event.action_type)) {
             const { library_id, zotero_key } = event.action_data || {};
             if (library_id != null && zotero_key) {
                 updateDiffPreviewForNote(library_id, zotero_key);
@@ -552,7 +553,7 @@ export const removePendingApprovalsAtom = atom(
         const affectedNotes = new Map<string, { libraryId: number; zoteroKey: string }>();
         for (const actionId of ids) {
             const removed = prev.get(actionId);
-            if (removed?.actionType !== 'edit_note' && removed?.actionType !== 'edit_note_batch') continue;
+            if (!removed || !isAnyEditNoteActionType(removed.actionType)) continue;
             const libraryId = removed.actionData?.library_id;
             const zoteroKey = removed.actionData?.zotero_key;
             if (libraryId == null || !zoteroKey) continue;
@@ -685,8 +686,9 @@ export async function buildPendingApprovalFromAction(action: AgentAction): Promi
     } else if (actionType === 'confirm_external_search') {
         // No Zotero data fetching needed — cost info is entirely in proposed_data
         currentValue = undefined;
-    } else if (actionType === 'edit_note' || actionType === 'edit_note_batch') {
-        // No extra Zotero data fetching needed — old_string/new_string are in proposed_data
+    } else if (isAnyEditNoteActionType(actionType)) {
+        // No extra Zotero data fetching needed — the preview strings are already
+        // in proposed_data (block edits carry the same display-only triple).
         currentValue = undefined;
     }
 

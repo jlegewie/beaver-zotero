@@ -102,6 +102,7 @@ function describeApproval(event: WSDeferredApprovalRequest): { title: string; bo
             return { title, body: "Approve an external literature search to let the task continue." };
         case "edit_note":
         case "edit_note_batch":
+        case "edit_note_blocks":
             return { title, body: "Review a note edit to let the task continue." };
         case "edit_annotations":
             return { title, body: "Review an annotation change to let the task continue." };

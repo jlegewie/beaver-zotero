@@ -262,6 +262,90 @@ describe('runApprovalPolicy', () => {
         ).toBe(true);
     });
 
+    it('puts block-addressed note edits in the shared note_edits group', () => {
+        expect(DEFAULT_DEFERRED_TOOL_GROUPS.edit_note_blocks).toBe('note_edits');
+        expect(getToolGroup('edit_note_blocks')).toBe('note_edits');
+        expect(getActionToolGroup('edit_note_blocks', {})).toBe('note_edits');
+        expect(getToolGroupRunApprovalScope('edit_note_blocks')).toBe('note edits');
+
+        const store = createStore();
+        store.set(grantToolGroupForRunAtom, { runId: 'run-1', toolName: 'edit_note' });
+        const policy = store.get(runApprovalPolicyAtom);
+        expect(
+            isActionApprovedForCurrentRun(policy, 'run-1', 'edit_note_blocks', {
+                library_id: 1,
+                zotero_key: 'NOTE0001',
+            }),
+        ).toBe(true);
+    });
+
+    it('classifies a flagged edit_note_blocks action as a destructive rewrite', () => {
+        // Block addressing reaches the destructive classification by a route
+        // edit_note_batch cannot (a full-range delete, or an edit set that guts
+        // the note), and the approval event still carries the ordinary
+        // edit_note_blocks action type — so without reading the flag, an
+        // ordinary note-edit run grant would authorize it.
+        expect(
+            getActionToolGroup('edit_note_blocks', { destructive_rewrite: true }),
+        ).toBe('note_rewrite');
+
+        const store = createStore();
+        store.set(grantToolGroupForRunAtom, { runId: 'run-1', toolName: 'edit_note' });
+        const policy = store.get(runApprovalPolicyAtom);
+        expect(policy.approvedGroups.has('note_edits')).toBe(true);
+        expect(
+            isActionApprovedForCurrentRun(policy, 'run-1', 'edit_note_blocks', {
+                library_id: 1,
+                zotero_key: 'NOTE0001',
+                destructive_rewrite: true,
+            }),
+        ).toBe(false);
+    });
+
+    it('sweeps and offers run approval for blocks edits the same way as batch edits', () => {
+        const ordinaryBlocks = {
+            actionId: 'blocks-1',
+            actionType: 'edit_note_blocks',
+            actionData: { library_id: 1, zotero_key: 'NOTE0001' },
+        };
+        const destructiveBlocks = {
+            actionId: 'blocks-2',
+            actionType: 'edit_note_blocks',
+            actionData: { library_id: 1, zotero_key: 'NOTE0001', destructive_rewrite: true },
+        };
+
+        expect(
+            getPendingApprovalIdsForToolGroup([ordinaryBlocks, destructiveBlocks], 'edit_note'),
+        ).toEqual(['blocks-1']);
+        expect(canOfferToolGroupRunApproval([ordinaryBlocks], 'edit_note')).toBe(true);
+        expect(
+            canOfferToolGroupRunApproval([ordinaryBlocks, destructiveBlocks], 'edit_note'),
+        ).toBe(false);
+    });
+
+    it('applies the created-note resource grant to a block-addressed edit', () => {
+        const store = createStore();
+        store.set(grantCreatedNoteEditsForRunAtom, {
+            runId: 'run-1',
+            libraryId: 1,
+            zoteroKey: 'NOTE0001',
+        });
+        const policy = store.get(runApprovalPolicyAtom);
+
+        expect(
+            isActionApprovedForRun(policy, 'run-1', 'edit_note_blocks', {
+                library_id: 1,
+                zotero_key: 'NOTE0001',
+            }),
+        ).toBe(true);
+        expect(
+            isActionApprovedForRun(policy, 'run-1', 'edit_note_blocks', {
+                library_id: 1,
+                zotero_key: 'NOTE0002',
+            }),
+        ).toBe(false);
+    });
+
     it('leaves a flagged rewrite out of a note_edits pending-approval sweep', () => {
         const pending = [
             {

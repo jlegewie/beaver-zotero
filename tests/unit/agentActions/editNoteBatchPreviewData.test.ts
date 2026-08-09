@@ -98,4 +98,96 @@ describe('edit note preview routing', () => {
     it('continues to route legacy edit_note actions to the legacy preview', () => {
         expect(getEditNotePreviewKind('edit_note', 'edit_note')).toBe('legacy');
     });
+
+    it('routes the model-facing edit_note tool to the blocks preview when the action is block-addressed', () => {
+        expect(getEditNotePreviewKind('edit_note', 'edit_note_blocks')).toBe('blocks');
+    });
+
+    it('lets the action type override a batch tool name, so a sliced blocks row still renders as blocks', () => {
+        // EditNoteRowView labels multi-edit rows from the action type; this
+        // pins the most-specific-first ordering that makes any residual
+        // 'edit_note_batch' tool name harmless.
+        expect(getEditNotePreviewKind('edit_note_batch', 'edit_note_blocks')).toBe('blocks');
+    });
+
+    it('returns null for a non-note tool', () => {
+        expect(getEditNotePreviewKind('edit_metadata', 'edit_metadata')).toBeNull();
+    });
+});
+
+describe('buildBatchRowPreviewData — edit_note_blocks rows', () => {
+    const blockEdit = {
+        index: 1,
+        op: 'delete',
+        from_block: 4,
+        to_block: 7,
+        operation: 'str_replace',
+        old_string: '<p>Four</p>',
+        new_string: '',
+        target_before_context: '<p>three</p>',
+        target_after_context: '<p>eight</p>',
+    };
+
+    const base = {
+        actionType: 'edit_note_blocks',
+        actionData: {
+            library_id: 1,
+            zotero_key: 'AAAAA',
+            snapshot: 'snap-token',
+            edits: [{ index: 0, op: 'replace', block: 2, operation: 'str_replace', old_string: 'a', new_string: 'A' }, blockEdit],
+        },
+    };
+
+    const row = {
+        editIndex: 1,
+        operation: 'str_replace',
+        oldString: '<p>Four</p>',
+        newString: '',
+        label: 'delete · blocks 4-7',
+    };
+
+    it('keeps the blocks variant on the scoped copy', () => {
+        expect(buildBatchRowPreviewData(base, row).actionType).toBe('edit_note_blocks');
+    });
+
+    it('passes the addressed edit through verbatim so the row keeps its addressing and skip fields', () => {
+        const scoped = buildBatchRowPreviewData(base, row);
+        expect(scoped.actionData.edits).toEqual([blockEdit]);
+        expect(scoped.actionData.edits[0]).toBe(blockEdit);
+    });
+
+    it('scopes a blocks row to its own undo record', () => {
+        const undoRecord = { index: 1, op: 'delete', undo_old_html: '<p>Four</p>', undo_new_html: '' };
+        const scoped = buildBatchRowPreviewData(
+            base,
+            row,
+            buildUndoByIndex({ undo: [{ index: 0, op: 'replace' }, undoRecord] }),
+        );
+        expect(scoped.resultData?.undo).toEqual([undoRecord]);
+    });
+
+    it('still rebuilds the edit for a batch row', () => {
+        const batchBase = {
+            actionType: 'edit_note_batch',
+            actionData: {
+                library_id: 1,
+                zotero_key: 'AAAAA',
+                edits: [{ index: 0, operation: 'str_replace', old_string: 'a', new_string: 'A' }],
+            },
+        };
+        const scoped = buildBatchRowPreviewData(batchBase, {
+            editIndex: 0,
+            operation: 'str_replace',
+            oldString: 'a',
+            newString: 'A',
+        });
+
+        expect(scoped.actionType).toBe('edit_note_batch');
+        expect(scoped.actionData.edits).toEqual([{
+            index: 0,
+            operation: 'str_replace',
+            old_string: 'a',
+            new_string: 'A',
+        }]);
+    });
 });

@@ -139,7 +139,13 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
                 actionData: action?.proposed_data ?? pendingApproval?.actionData,
                 resultData: action?.result_data,
             });
-            const isBatch = actionType === 'edit_note_batch'
+            // True when this part contributes one row PER EDIT rather than a
+            // single v1 row. Both multi-edit variants qualify; while the call is
+            // still streaming there is no action type yet, and an `edits[]`
+            // array is enough to know it is one of them (which one only matters
+            // to the preview, which classifies it itself).
+            const isMultiEdit = actionType === 'edit_note_batch'
+                || actionType === 'edit_note_blocks'
                 || (actionType == null && Array.isArray(toolArgs?.edits));
             // Derivations identical for every sibling row of this toolcall,
             // computed once here and passed to each EditNoteRowView so the rows
@@ -156,7 +162,7 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
                 toolCallStatus,
                 effectiveStatus,
                 rows,
-                isBatch,
+                isMultiEdit,
                 precomputed,
                 undoByIndex,
             };
@@ -821,9 +827,9 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
                         {partStates.map((state, idx) => {
                             const { part } = state;
                             // A v1 part always derives exactly one row with editIndex
-                            // null; only render it as a distinct batch row when it's
-                            // genuinely part of an edit_note_batch action.
-                            const rows: (EditNoteRowDescriptor | undefined)[] = state.isBatch
+                            // null; only render it as a distinct per-edit row when
+                            // it's genuinely part of a multi-edit action.
+                            const rows: (EditNoteRowDescriptor | undefined)[] = state.isMultiEdit
                                 ? state.rows
                                 : [undefined];
                             return rows.map((row, rowIdx) => (

@@ -26,10 +26,11 @@ interface EditNoteRowViewProps {
     externalUndoError?: string | null;
     onUndoErrorChange?: (toolcallId: string, error: string | null) => void;
     /**
-     * Present when this row renders a single edit within an edit_note_batch
-     * action's edits[] rather than a v1 (single-edit) part. Drives the
-     * preview from the edit's own fields and suppresses per-row action
-     * buttons, since a batch applies/undoes atomically at the group level.
+     * Present when this row renders a single edit within a multi-edit action's
+     * edits[] (edit_note_batch or edit_note_blocks) rather than a v1
+     * (single-edit) part. Drives the preview from the edit's own fields and
+     * suppresses per-row action buttons, since such an action applies/undoes
+     * atomically at the group level.
      */
     rowDescriptor?: EditNoteRowDescriptor;
     /**
@@ -86,21 +87,28 @@ const EditNoteRowViewComponent: React.FC<EditNoteRowViewProps> = ({
         precomputed,
     });
 
-    const isBatchRow = rowDescriptor !== undefined;
+    const isMultiEditRow = rowDescriptor !== undefined;
     const previewData = useMemo(
-        () => (isBatchRow
+        () => (isMultiEditRow
             ? buildBatchRowPreviewData(hookPreviewData, rowDescriptor, undoByIndex)
             : hookPreviewData),
-        [isBatchRow, hookPreviewData, rowDescriptor, undoByIndex],
+        [isMultiEditRow, hookPreviewData, rowDescriptor, undoByIndex],
     );
+    // The scoped preview keeps the action's own variant, so the row's tool name
+    // must follow it rather than assuming batch — otherwise a blocks row would
+    // be announced to the dispatcher as a batch row.
+    const previewToolName = isMultiEditRow
+        ? (previewData?.actionType === 'edit_note_blocks' ? 'edit_note_blocks' : 'edit_note_batch')
+        : 'edit_note';
 
-    // A batch (edit_note_batch) is applied/undone atomically for the whole
-    // action — only the group-level Apply All / Undo All / Retry All buttons
-    // may act, so per-row controls are suppressed for a batch row.
-    const showApply = !isBatchRow && hookShowApply;
-    const showReject = !isBatchRow && hookShowReject;
-    const showUndo = !isBatchRow && hookShowUndo;
-    const showRetry = !isBatchRow && hookShowRetry;
+    // A multi-edit action (edit_note_batch or edit_note_blocks) is
+    // applied/undone atomically for the whole action — only the group-level
+    // Apply All / Undo All / Retry All buttons may act, so per-row controls are
+    // suppressed for such a row.
+    const showApply = !isMultiEditRow && hookShowApply;
+    const showReject = !isMultiEditRow && hookShowReject;
+    const showUndo = !isMultiEditRow && hookShowUndo;
+    const showRetry = !isMultiEditRow && hookShowRetry;
 
     const actionButtonsDisabled = disabled || isProcessing;
     const onApply = previewStatus === 'awaiting' ? handleApprove : handleApplyPending;
@@ -112,7 +120,7 @@ const EditNoteRowViewComponent: React.FC<EditNoteRowViewProps> = ({
                 {/* Batch rows skip the status-icon gutter: the group header
                     already carries the batch's status, so the column would
                     only render an invisible placeholder and waste width. */}
-                {!isBatchRow && (
+                {!isMultiEditRow && (
                     <div className="display-flex flex-col items-center gap-25 px-2 py-2 flex-shrink-0" style={{ marginLeft: '0.225rem' }}>
                         {isStreamingPlaceholder ? (
                             <div className="display-flex items-center mt-010">
@@ -135,7 +143,7 @@ const EditNoteRowViewComponent: React.FC<EditNoteRowViewProps> = ({
                 <div className="flex-1 min-w-0">
                     {previewData ? (
                         <ActionPreview
-                            toolName={isBatchRow ? 'edit_note_batch' : 'edit_note'}
+                            toolName={previewToolName}
                             previewData={previewData}
                             status={previewStatus}
                             actions={actions}
@@ -146,9 +154,12 @@ const EditNoteRowViewComponent: React.FC<EditNoteRowViewProps> = ({
                     )}
                 </div>
 
-                {/* Batch rows get a single navigation affordance on the right:
-                    open the note and jump to THIS edit's position. */}
-                {isBatchRow && !isStreamingPlaceholder && previewData && showOpenNoteAction && (
+                {/* Multi-edit rows get a single navigation affordance on the
+                    right: open the note and jump to THIS edit's position. A
+                    skipped block edit is excluded — it has no target strings to
+                    search for, so the jump would land arbitrarily. */}
+                {isMultiEditRow && !isStreamingPlaceholder && previewData && showOpenNoteAction
+                    && !rowDescriptor.skippedReason && (
                     <div className="display-flex flex-col py-2 mr-2 flex-shrink-0">
                         <Tooltip content="Open note and jump to edit" showArrow singleLine>
                             <IconButton
@@ -161,12 +172,12 @@ const EditNoteRowViewComponent: React.FC<EditNoteRowViewProps> = ({
                     </div>
                 )}
 
-                {/* A batch row never shows action buttons or its own processing
-                    spinner — the whole edit_note_batch action applies/undoes
+                {/* A multi-edit row never shows action buttons or its own
+                    processing spinner — the whole action applies/undoes
                     atomically via the group's Apply All / Undo All / Retry All —
                     so the button column is omitted entirely to give the diff
                     its full width. */}
-                {!isBatchRow && (
+                {!isMultiEditRow && (
                 <div className="display-flex flex-col gap-25 py-2 mr-2">
                     {(isProcessing ? (
                         <>

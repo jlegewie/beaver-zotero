@@ -8,6 +8,7 @@ import { CreateItemsPreview } from './CreateItemsPreview';
 import { ConfirmExtractionPreview } from './ConfirmExtractionPreview';
 import { ConfirmExternalSearchPreview } from './ConfirmExternalSearchPreview';
 import { EditNotePreview } from '../../../components/agentRuns/EditNotePreview';
+import { deriveEditNoteRows } from '../../../components/agentRuns/editNoteShared';
 import { CreateNotePreview } from './CreateNotePreview';
 import { ManageTagsPreview } from './ManageTagsPreview';
 import { ManageCollectionsPreview } from './ManageCollectionsPreview';
@@ -255,6 +256,71 @@ export const ActionPreview: React.FC<{
                 actions={actions}
                 status={status}
             />
+        );
+    }
+
+    if (editNotePreviewKind === 'blocks') {
+        // One row per edit, exactly as derived for the group view — the labels,
+        // skip reasons and diff strings all come from the same render-layer
+        // helper, so a stacked render and a group row can never disagree.
+        const rows = deriveEditNoteRows({
+            actionType: previewData.actionType,
+            actionData: previewData.actionData,
+            resultData: previewData.resultData,
+        });
+
+        // Resolve the portable library_ref to a local id, same as the other two
+        // branches — EditNotePreview needs it to fetch note context.
+        const resolvedNoteLibraryId = resolveLibraryRef({
+            library_ref: previewData.actionData.library_ref,
+            library_id: previewData.actionData.library_id,
+        });
+        const noteLibraryId = resolvedNoteLibraryId ?? undefined;
+
+        return (
+            <div className="flex flex-col gap-3">
+                {rows.map((row, position) => {
+                    const op = (row.operation ?? 'str_replace') as import('@beaver/agent-core/types/agentActions/editNote').EditNoteOperation;
+                    const isRewrite = op === 'rewrite';
+                    const editIndex = row.editIndex ?? position;
+
+                    return (
+                        <div key={`block-edit-${editIndex}`} className="flex flex-col gap-1">
+                            {/* Unlike a batch row, a block row is always labelled:
+                                the address it edits (block 5, after 12, blocks
+                                4-7) is invisible in the diff and is the only
+                                thing distinguishing two otherwise similar edits. */}
+                            {row.label && (
+                                <div className="text-sm font-color-secondary px-3 py-1">
+                                    {row.label}
+                                </div>
+                            )}
+                            {row.skippedReason ? (
+                                // A skipped edit gets NO diff: validation withheld
+                                // the preview strings precisely because execute
+                                // will not apply it, and showing an empty or
+                                // half-populated diff would read as "nothing
+                                // changes here" rather than "this was refused".
+                                <div className="text-sm font-color-secondary px-3 pb-1">
+                                    {`Skipped — ${row.skippedReason}`}
+                                </div>
+                            ) : (
+                                <EditNotePreview
+                                    oldString={isRewrite ? '' : row.oldString}
+                                    newString={row.newString}
+                                    operation={op}
+                                    oldContent={isRewrite
+                                        ? getBatchRewriteOldContent(previewData, editIndex)
+                                        : undefined}
+                                    status={status}
+                                    libraryId={noteLibraryId}
+                                    zoteroKey={previewData.actionData.zotero_key}
+                                />
+                            )}
+                        </div>
+                    );
+                })}
+            </div>
         );
     }
 
