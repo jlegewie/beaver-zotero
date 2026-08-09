@@ -102,6 +102,10 @@ import {
   executeEditNoteBatchAction,
   validateEditNoteBatchAction,
 } from "../../../src/services/agentDataProvider/actions/editNoteBatch";
+import {
+  executeEditNoteBlocksAction,
+  validateEditNoteBlocksAction,
+} from "../../../src/services/agentDataProvider/actions/editNoteBlocks";
 
 const reference = {
   library_id: 1,
@@ -127,6 +131,17 @@ const editNoteBatchData = {
   edits: [{ index: 0, old_string: "before", new_string: "after" }],
 };
 
+// Well-formed edits[] AND a snapshot: edit_note_blocks' shape guard (which also
+// enforces the snapshot requirement) runs before the exclusion gate, so both
+// must be present for the exclusion gate to be the thing under test.
+const editNoteBlocksData = {
+  ...reference,
+  snapshot: "h:00000000000000000:10:1-3",
+  edits: [
+    { index: 0, op: "replace", block: 1, expect: "before", content: "after" },
+  ],
+};
+
 const validationCases = [
   [
     "create_highlight_annotations",
@@ -145,6 +160,7 @@ const validationCases = [
   ],
   ["edit_note", validateEditNoteAction, editNoteData],
   ["edit_note_batch", validateEditNoteBatchAction, editNoteBatchData],
+  ["edit_note_blocks", validateEditNoteBlocksAction, editNoteBlocksData],
 ] as const;
 
 const executionCases = [
@@ -165,6 +181,7 @@ const executionCases = [
   ],
   ["edit_note", executeEditNoteAction, editNoteData],
   ["edit_note_batch", executeEditNoteBatchAction, editNoteBatchData],
+  ["edit_note_blocks", executeEditNoteBlocksAction, editNoteBlocksData],
 ] as const;
 
 describe("agent action library-exclusion ordering", () => {

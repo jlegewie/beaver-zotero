@@ -854,6 +854,29 @@ export function buildUndoList(drafts: BatchUndoDraft[]): EditNoteBatchUndoRecord
 }
 
 /**
+ * Replace a note's whole body while PRESERVING its `<div data-schema-version…>`
+ * wrapper, by slicing the wrapper off the stripped body and re-attaching it
+ * around the replacement.
+ *
+ * Extracted so the whole-body rewrite path has exactly ONE implementation:
+ * `edit_note_blocks`' `block: "all"` needs the same semantics but a completely
+ * different result envelope, so it reuses this core rather than
+ * `executeSingleRewrite` (whose signature is bound to the batch shapes) and
+ * rather than copy-pasting the wrapper-slicing logic.
+ */
+export function buildRewrittenNoteBody(strippedHtml: string, expandedNew: string): string {
+    const trimmed = strippedHtml.trim();
+    let wrapperOpen = '';
+    let wrapperClose = '';
+    if (trimmed.startsWith('<div') && trimmed.endsWith('</div>')) {
+        const closeAngle = trimmed.indexOf('>');
+        wrapperOpen = trimmed.substring(0, closeAngle + 1);
+        wrapperClose = '</div>';
+    }
+    return wrapperOpen + expandedNew + wrapperClose;
+}
+
+/**
  * Apply a single-rewrite batch using the same wrapper-preserving semantics as
  * the single-edit rewrite path, wrapped in the batch result envelope. The undo
  * record carries the FULL pre-edit stripped body in undo_old_html.
@@ -884,17 +907,7 @@ async function executeSingleRewrite(
         return executeError(request.request_id, e?.message || String(e), 'expansion_failed');
     }
 
-    // Preserve wrapper div by slicing it off the stripped body.
-    const trimmed = strippedHtml.trim();
-    let wrapperOpen = '';
-    let wrapperClose = '';
-    if (trimmed.startsWith('<div') && trimmed.endsWith('</div>')) {
-        const closeAngle = trimmed.indexOf('>');
-        wrapperOpen = trimmed.substring(0, closeAngle + 1);
-        wrapperClose = '</div>';
-    }
-
-    let newHtml = wrapperOpen + expandedNew + wrapperClose;
+    let newHtml = buildRewrittenNoteBody(strippedHtml, expandedNew);
     if (threadId) newHtml = addOrUpdateEditFooter(newHtml, threadId);
     newHtml = rebuildDataCitationItems(newHtml, existingCitationCache);
 
