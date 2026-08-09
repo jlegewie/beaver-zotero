@@ -170,7 +170,7 @@ import {
     executeEditNoteVariantAction,
     undoEditNoteVariantAction,
 } from '../../../react/utils/editNoteActions';
-import { getEditNoteCallVariant } from '../../../react/components/agentRuns/editNoteShared';
+import { deriveEditNoteRows, getEditNoteCallVariant } from '../../../react/components/agentRuns/editNoteShared';
 import { buildAddressSnapshot } from '../../../src/utils/noteSnapshot';
 import { stripBeaverEditFooter } from '../../../src/utils/noteEditFooter';
 import { checkLibraryExcluded } from '../../../src/services/agentDataProvider/utils';
@@ -686,6 +686,16 @@ describe('getEditNoteCallVariant', () => {
         expect(getEditNoteCallVariant({ actionType: 'edit_note_blocks' })).toBe('blocks');
     });
 
+    // PRESENCE of the array is what makes a call multi-edit, not its length.
+    // Classifying an empty one as legacy makes callers derive a blank row from
+    // the absent flat fields instead of no rows at all.
+    it('classifies an empty edits[] as multi-edit, not legacy', () => {
+        expect(getEditNoteCallVariant({ toolArgs: { edits: [] } })).toBe('batch');
+        expect(getEditNoteCallVariant({ actionData: { edits: [] } })).toBe('batch');
+        // No edits key at all is still legacy.
+        expect(getEditNoteCallVariant({ toolArgs: { old_string: 'a', new_string: 'b' } })).toBe('legacy');
+    });
+
     it('classifies STREAMING block-op args as blocks, not batch', () => {
         expect(getEditNoteCallVariant({
             toolArgs: { edits: [{ op: 'replace', block: 2, content: '<p>x</p>' }] },
@@ -712,8 +722,17 @@ describe('getEditNoteCallVariant', () => {
         expect(getEditNoteCallVariant({ toolArgs: { old_string: 'a', new_string: 'b' } })).toBe('legacy');
         expect(getEditNoteCallVariant({ toolArgs: {} })).toBe('legacy');
         expect(getEditNoteCallVariant({})).toBe('legacy');
-        // A half-streamed `edits: []` carries no evidence either way.
-        expect(getEditNoteCallVariant({ toolArgs: { edits: [] } })).toBe('legacy');
+    });
+
+    // A half-streamed `edits: []` carries no evidence of WHICH multi-edit
+    // variant it is — but it is still multi-edit, and that is the part that
+    // matters. main classified it multi-edit too (`isBatch` tested
+    // `Array.isArray(toolArgs?.edits)`), yielding zero rows from `[].map(...)`.
+    // Calling it 'legacy' instead derives one blank row from the absent flat
+    // fields, which is a visible regression on the legacy path.
+    it('classifies a half-streamed empty edits[] as multi-edit, matching main', () => {
+        expect(getEditNoteCallVariant({ toolArgs: { edits: [] } })).toBe('batch');
+        expect(deriveEditNoteRows({ toolArgs: { edits: [] } })).toEqual([]);
     });
 
     it('prefers actionData over toolArgs, and `op` over a display-only `operation`', () => {

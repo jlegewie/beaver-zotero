@@ -1670,7 +1670,7 @@ export function applyBatchUndoRecord(
             + 'Neither the applied text nor the original text could be found.',
     });
     if (restore.kind === 'already-undone') {
-        logger(`undoEditNoteBatchAction: edit ${record.index} already undone, skipping`, 1);
+        logger(`${logPrefix}: edit ${record.index} already undone, skipping`, 1);
         return strippedHtml;
     }
     return restore.html;

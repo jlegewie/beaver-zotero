@@ -120,12 +120,16 @@ export async function undoEditNote(action: {
 // Agent-action HTTP wrappers (typed for edit_note)
 // ---------------------------------------------------------------------------
 
+// Mirrors `EditNoteOperation` in
+// `@beaver/agent-core/types/agentActions/editNote` — `append` included (live
+// tests use it as the HTTP-reachable stand-in for a user edit).
 export type EditNoteOperation =
     | 'str_replace'
     | 'str_replace_all'
     | 'insert_after'
     | 'insert_before'
-    | 'rewrite';
+    | 'rewrite'
+    | 'append';
 
 export interface EditNoteActionData {
     library_id: number;

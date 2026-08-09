@@ -99,7 +99,13 @@ export function getEditNoteCallVariant({
     const edits: unknown = Array.isArray(actionData?.edits)
         ? actionData!.edits
         : (Array.isArray(toolArgs?.edits) ? toolArgs!.edits : null);
-    if (!Array.isArray(edits) || edits.length === 0) return 'legacy';
+    // The PRESENCE of an `edits` array is what makes a call multi-edit, not its
+    // length. An empty one must still classify as multi-edit: the previous
+    // `Array.isArray(toolArgs?.edits)` test did, and callers map over `edits`,
+    // so falling back to 'legacy' here makes a degenerate `{edits: []}` derive
+    // one blank row from the (absent) flat fields instead of no rows at all.
+    if (!Array.isArray(edits)) return 'legacy';
+    if (edits.length === 0) return 'batch';
 
     const hasOp = edits.some((edit: any) => edit && typeof edit === 'object' && edit.op !== undefined);
     if (hasOp) return 'blocks';
@@ -203,8 +209,17 @@ export function deriveEditNoteRows({
             return {
                 editIndex,
                 operation: edit?.operation ?? 'str_replace',
-                oldString: edit?.old_string ?? '',
-                newString: edit?.new_string ?? '',
+                // The preview triple is written by VALIDATION, so a block edit
+                // only has it once an action exists. Fall back to the raw tool
+                // args (`expect` / `content`) so a card whose validation FAILED
+                // still shows what the model meant. That is a settled state,
+                // not just a streaming flicker: on `snapshot_mismatch` or
+                // `no_applicable_edits` there is no action at all, and the
+                // group auto-expands on error — so without this the user sees
+                // an expanded "3 Note Edits" card whose every row is an empty
+                // diff box, which reads as "nothing changes here".
+                oldString: edit?.old_string ?? (isBlocks ? edit?.expect ?? '' : ''),
+                newString: edit?.new_string ?? (isBlocks ? edit?.content ?? '' : ''),
                 occurrencesReplaced: appliedByIndex.get(editIndex),
                 ...(isBlocks ? { label: describeBlockEdit(edit) } : {}),
                 // Skipped-ness is derived from `skip_reason_code`, never stored

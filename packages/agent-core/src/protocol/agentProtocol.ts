@@ -1551,9 +1551,22 @@ export interface WSAgentActionValidateResponse {
      */
     error_candidates?: ErrorCandidate[];
     /**
-     * Per-edit validation failures for batch actions (e.g. edit_note_batch).
-     * Present only when validating a multi-edit payload and one or more edits
-     * fail; the whole batch is rejected (fail-closed).
+     * Per-edit validation failures for multi-edit actions.
+     *
+     * The two multi-edit variants use this field with DIFFERENT semantics, and
+     * a consumer must branch on `valid` rather than on the field's presence:
+     *
+     * - `edit_note_batch` sets it only alongside `valid: false`. The batch is
+     *   all-or-nothing, so any failing edit rejects the whole call (fail-closed)
+     *   and this is the per-edit diagnostic for that rejection.
+     * - `edit_note_blocks` applies partially. It sets this on the SUCCESS path
+     *   (`valid: true`) as an ADVISORY list of the edits that will be skipped
+     *   while the rest apply, each carrying `actual` — the text really at the
+     *   addressed block. It only returns `valid: false` when EVERY edit fails,
+     *   with `error_code: 'no_applicable_edits'`.
+     *
+     * So for blocks, a non-empty `edit_errors` with `valid: true` means "the
+     * note WAS changed, and here is what was left out" — not a failure.
      */
     edit_errors?: EditValidationError[];
     /**

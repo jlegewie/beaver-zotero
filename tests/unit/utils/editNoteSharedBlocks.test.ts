@@ -238,4 +238,57 @@ describe('deriveEditNoteRows — edit_note_blocks', () => {
         expect(getEditNoteCallVariant({ toolArgs })).toBe('blocks');
         expect(deriveEditNoteRows({ toolArgs })[0].label).toBe('delete · blocks 3-5');
     });
+
+    // The preview triple is written by validation, so a card whose validation
+    // FAILED (snapshot_mismatch / no_applicable_edits — no action is created at
+    // all) has only the raw tool args. Without a fallback every row renders an
+    // empty diff box, which reads as "nothing changes here" — and the group
+    // auto-expands on error, so the user is looking straight at it.
+    it('falls back to expect/content when validation never wrote the preview triple', () => {
+        const rows = deriveEditNoteRows({
+            toolArgs: {
+                edits: [
+                    { index: 0, op: 'replace', block: 12, expect: '<p>Old twelve</p>', content: '<p>New twelve</p>' },
+                    { index: 1, op: 'insert', after: 3, content: '<p>Inserted</p>' },
+                ],
+            },
+        });
+
+        expect(rows).toHaveLength(2);
+        expect(rows[0].oldString).toBe('<p>Old twelve</p>');
+        expect(rows[0].newString).toBe('<p>New twelve</p>');
+        expect(rows[0].label).toBe('replace · block 12');
+        // An insert overwrites nothing, so it legitimately has no old side.
+        expect(rows[1].oldString).toBe('');
+        expect(rows[1].newString).toBe('<p>Inserted</p>');
+    });
+
+    it('prefers the validated triple over the raw args when both are present', () => {
+        const rows = deriveEditNoteRows({
+            actionType: 'edit_note_blocks',
+            actionData: {
+                edits: [{
+                    index: 0, op: 'replace', block: 12,
+                    expect: '<p>Raw expect</p>', content: '<p>Raw content</p>',
+                    operation: 'str_replace',
+                    old_string: '<p>Resolved old</p>', new_string: '<p>Resolved new</p>',
+                }],
+            },
+        });
+
+        expect(rows[0].oldString).toBe('<p>Resolved old</p>');
+        expect(rows[0].newString).toBe('<p>Resolved new</p>');
+    });
+
+    // The fallback must be blocks-only: a legacy/batch edit has no `expect` or
+    // `content`, and reading them would be a shape change on the rollback path.
+    it('does not apply the fallback to batch rows', () => {
+        const rows = deriveEditNoteRows({
+            actionType: 'edit_note_batch',
+            actionData: { edits: [{ index: 0, operation: 'str_replace', expect: 'x', content: 'y' } as any] },
+        });
+
+        expect(rows[0].oldString).toBe('');
+        expect(rows[0].newString).toBe('');
+    });
 });

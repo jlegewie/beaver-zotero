@@ -179,7 +179,17 @@ export async function handleTestNoteUndoHttpRequest(request: any) {
         return { error: 'action with proposed_data is required' };
     }
     try {
-        await undoEditNoteVariantAction(action);
+        // This endpoint has always accepted an action WITHOUT an `action_type`
+        // and treated it as a v1 single edit — the router it calls used to be a
+        // ternary on `=== 'edit_note_batch'` that fell through to the v1 path.
+        // That router is now an exhaustive switch that THROWS on an unknown
+        // type (so a missing registration fails loudly instead of silently
+        // mis-dispatching), which would otherwise turn every existing
+        // `action_type`-less caller into an error. Default here rather than
+        // loosening the router: production callers always carry a real type.
+        await undoEditNoteVariantAction(
+            action.action_type ? action : { ...action, action_type: 'edit_note' },
+        );
         return { ok: true };
     } catch (e: any) {
         return { ok: false, error: e?.message || String(e) };
