@@ -107,6 +107,7 @@ import {
     isManageCollectionsAgentAction,
     isEditNoteAgentAction,
     isEditNoteBatchAgentAction,
+    isEditNoteBlocksAgentAction,
     isAnyEditNoteAgentAction,
     isCreateNoteAgentAction,
     hasAppliedZoteroItem,
@@ -134,6 +135,7 @@ import { undoOrganizeItemsAction } from '../utils/organizeItemsActions';
 import { undoManageTagsAction } from '../utils/manageTagsActions';
 import { undoManageCollectionsAction } from '../utils/manageCollectionsActions';
 import { undoEditNoteAction, undoEditNoteBatchAction } from '../utils/editNoteActions';
+import { undoEditNoteBlocksAction } from '../utils/editNoteBlocksActions';
 import { undoCreateNoteAction } from '../utils/createNoteActions';
 import { undoCreateAnnotationsAction } from '../utils/createAnnotationsActions';
 import { undoEditAnnotationsAction } from '../utils/editAnnotationsActions';
@@ -851,9 +853,13 @@ async function startAutoRetryRun(
  *
  * Returns the ids of the actions actually reverted, so a retry that has to put
  * its removed runs back can restore those actions as undone rather than as
- * still applied.
+ * still applied. An action type with no undo branch is deliberately NOT in that
+ * list; see the `else` at the bottom of the dispatch chain.
+ *
+ * Exported for unit tests — the atoms that call it are far too heavy to drive
+ * for what is really a dispatch table.
  */
-async function undoAppliedActionsInReverse(actions: AgentAction[]): Promise<string[]> {
+export async function undoAppliedActionsInReverse(actions: AgentAction[]): Promise<string[]> {
     // Filter applied actions, keeping their original array position as the
     // tiebreaker for chronological ordering.
     const indexed = actions
@@ -899,6 +905,8 @@ async function undoAppliedActionsInReverse(actions: AgentAction[]): Promise<stri
                 await undoEditNoteAction(action);
             } else if (isEditNoteBatchAgentAction(action)) {
                 await undoEditNoteBatchAction(action);
+            } else if (isEditNoteBlocksAgentAction(action)) {
+                await undoEditNoteBlocksAction(action);
             } else if (isCreateItemAgentAction(action)) {
                 await undoCreateItemAction(action);
             } else if (isCreateCollectionAgentAction(action)) {
@@ -911,6 +919,27 @@ async function undoAppliedActionsInReverse(actions: AgentAction[]): Promise<stri
                 await undoManageCollectionsAction(action);
             } else if (isCreateNoteAgentAction(action)) {
                 await undoCreateNoteAction(action);
+            } else {
+                // No branch matched, so nothing was reverted. Recording the action
+                // as undone anyway would report a success that never happened, and
+                // silently — nothing threw, so the catch below never fired and no
+                // log line was written. Skip the push and say so.
+                //
+                // This is reachable in normal operation, not only by a registration
+                // mistake: `confirm_extraction` / `confirm_external_search` are
+                // applied-status actions with nothing to revert. Leaving them out of
+                // `undoneActionIds` is the accurate outcome for them too — on a
+                // failed-retry restore they stay 'applied' instead of being flipped
+                // to 'undone' by an undo that never ran (see the
+                // `removed.undoneActionIds` replay in `restoreRemovedThreadTail`).
+                //
+                // Logged rather than thrown, and left here rather than pushed into
+                // each branch: the `isAnnotationAgentAction` branch legitimately
+                // `continue`s when it has no ref to erase and already skips the push
+                // that way, so duplicating the push across eleven branches would
+                // change nothing but the diff size.
+                logger(`undoAppliedActionsInReverse: no undo handler for action ${action.id} (${action.action_type}); not recording it as undone`, 1);
+                continue;
             }
             undoneActionIds.push(action.id);
         } catch (error) {

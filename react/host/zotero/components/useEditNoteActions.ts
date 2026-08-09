@@ -20,9 +20,9 @@ import {
 } from '../../../atoms/agentRunAtoms';
 import { getToolCallStatus, toolResultsMapAtom, type ToolCallStatus } from '@beaver/agent-core/run-state/atoms';
 import {
-    executeEditNoteOrBatchAction,
+    executeEditNoteVariantAction,
     getUserFacingErrorMessage,
-    undoEditNoteOrBatchAction,
+    undoEditNoteVariantAction,
 } from '../../../utils/editNoteActions';
 import { openNoteAndSearchEdit, openNoteByKey } from '../../../utils/sourceUtils';
 import {
@@ -41,6 +41,7 @@ import {
     EditNoteDisplayStatus,
     EditNoteResolvedTarget,
     findPendingApprovalForToolcall,
+    getEditNoteCallVariant,
     getEditNoteDisplayStatus,
     getEffectiveEditNotePendingApproval,
     isEditNoteOrphaned,
@@ -50,6 +51,13 @@ import {
     type EditNoteRowDescriptor,
 } from '../../../components/agentRuns/editNoteShared';
 import type { EditNoteOperation } from '@beaver/agent-core/types/agentActions/editNote';
+
+/** Wire action_type for each note-edit call variant, for the streaming fallback. */
+const STREAMING_ACTION_TYPE = {
+    legacy: 'edit_note',
+    batch: 'edit_note_batch',
+    blocks: 'edit_note_blocks',
+} as const;
 
 export async function dismissActiveEditNotePreview(): Promise<void> {
     // A deferred re-render (the revision guard's bounce) is pending-but-not-
@@ -288,12 +296,13 @@ export function useEditNoteActions({
         pendingApproval,
         action,
     );
-    // Before any action/pendingApproval exists (pure streaming), detect a
-    // batch call from its args shape (`edits[]`) so the preview dispatches to
-    // the batch branch instead of defaulting to the v1 type.
-    const streamingActionType = parsedArgs && Array.isArray((parsedArgs as any).edits)
-        ? 'edit_note_batch'
-        : 'edit_note';
+    // Before any action/pendingApproval exists (pure streaming), classify the
+    // call from its args shape so the preview dispatches to the right branch
+    // instead of defaulting to the v1 type. `edits[]` alone is NOT enough —
+    // batch and blocks both have one; see getEditNoteCallVariant.
+    const streamingActionType = STREAMING_ACTION_TYPE[
+        getEditNoteCallVariant({ toolArgs: parsedArgs ?? undefined })
+    ];
     const previewData = basePreviewData
         ?? (parsedArgs && Object.keys(parsedArgs).length > 0
             ? { actionType: streamingActionType, actionData: parsedArgs }
@@ -315,7 +324,7 @@ export function useEditNoteActions({
         setClickedButton(button);
         try {
             await dismissActiveEditNotePreview();
-            const result = await executeEditNoteOrBatchAction(action);
+            const result = await executeEditNoteVariantAction(action);
             await ackAgentActions(runId, [{
                 action_id: action.id,
                 result_data: result,
@@ -382,7 +391,7 @@ export function useEditNoteActions({
         setClickedButton('undo');
         try {
             await dismissActiveEditNotePreview();
-            await undoEditNoteOrBatchAction(action);
+            await undoEditNoteVariantAction(action);
             undoAgentAction(action.id);
             logger(`useEditNoteActions: Undone ${action.action_type} action ${action.id}`, 1);
         } catch (error: any) {

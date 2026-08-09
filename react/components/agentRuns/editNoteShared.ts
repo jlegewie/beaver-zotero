@@ -42,14 +42,57 @@ export interface EditNoteRowDescriptor {
     occurrencesReplaced?: number;
 }
 
+/** Which of the three note-edit call shapes a row/preview is looking at. */
+export type EditNoteCallVariant = 'legacy' | 'batch' | 'blocks';
+
 /**
- * Derive the row(s) a single edit_note / edit_note_batch tool-call part
- * contributes to the group view. A v1 call always yields exactly one row
- * built from its flat fields. A batch call (recognized by `action_type ===
- * 'edit_note_batch'`, or — while still streaming and no action/pendingApproval
- * exists yet — by the tool args carrying an `edits` array) yields one row per
- * edit, in request order, with `occurrencesReplaced` joined from
- * `resultData.applied[]` by `index`.
+ * Classify a note-edit call into its variant.
+ *
+ * `actionType` is authoritative whenever it is known (a stored action or a
+ * pending approval). It is NOT known while the tool call is still streaming, and
+ * that is the case this helper exists for: the previous inline test was
+ * `Array.isArray(toolArgs.edits)` → batch, which classifies EVERY `edits[]` call
+ * as batch and would therefore select the batch UI for a streaming
+ * `edit_note_blocks` call.
+ *
+ * The streaming discriminant is the per-edit field name, which the two array
+ * shapes do not share: a batch edit carries `operation`, a block edit carries
+ * `op`. `op` is checked first because validation writes a display-only
+ * `operation` onto persisted BLOCK edits as well (for the diff preview), so a
+ * finalized-args block call has both.
+ *
+ * RENDER-LAYER PURE: no Zotero, no prefs, no atoms.
+ */
+export function getEditNoteCallVariant({
+    toolArgs,
+    actionType,
+    actionData,
+}: {
+    toolArgs?: Record<string, any>;
+    actionType?: string;
+    actionData?: Record<string, any>;
+}): EditNoteCallVariant {
+    if (actionType === 'edit_note_blocks') return 'blocks';
+    if (actionType === 'edit_note_batch') return 'batch';
+    if (actionType === 'edit_note') return 'legacy';
+
+    const edits: unknown = Array.isArray(actionData?.edits)
+        ? actionData!.edits
+        : (Array.isArray(toolArgs?.edits) ? toolArgs!.edits : null);
+    if (!Array.isArray(edits) || edits.length === 0) return 'legacy';
+
+    const hasOp = edits.some((edit: any) => edit && typeof edit === 'object' && edit.op !== undefined);
+    if (hasOp) return 'blocks';
+    return 'batch';
+}
+
+/**
+ * Derive the row(s) a single edit_note / edit_note_batch / edit_note_blocks
+ * tool-call part contributes to the group view. A v1 call always yields exactly
+ * one row built from its flat fields. A batch or blocks call (classified by
+ * {@link getEditNoteCallVariant}) yields one row per edit, in request order,
+ * with `occurrencesReplaced` joined from `resultData.applied[]` by `index` —
+ * absent for blocks, which has no such concept.
  *
  * `actionData` (the authoritative proposed_data from a stored action or
  * pending approval) takes precedence over `toolArgs` (streaming/finalized
@@ -66,10 +109,13 @@ export function deriveEditNoteRows({
     actionData?: Record<string, any>;
     resultData?: Record<string, any>;
 }): EditNoteRowDescriptor[] {
-    const isBatch = actionType === 'edit_note_batch'
-        || (actionType == null && Array.isArray(toolArgs?.edits));
+    // Both multi-edit variants render one row per entry of `edits[]`; only the
+    // legacy single-edit call uses the flat fields below. Block edits carry the
+    // same display-only `operation`/`old_string`/`new_string` triple, written
+    // onto them by validation for exactly this.
+    const variant = getEditNoteCallVariant({ toolArgs, actionType, actionData });
 
-    if (isBatch) {
+    if (variant !== 'legacy') {
         const edits: any[] = Array.isArray(actionData?.edits)
             ? actionData!.edits
             : (Array.isArray(toolArgs?.edits) ? toolArgs!.edits : []);

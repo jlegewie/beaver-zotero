@@ -23,7 +23,7 @@
  *      double-undo idempotency.
  *
  * Undo-path note: `/beaver/test/note-undo` dispatches
- * `undoEditNoteOrBatchAction`, which routes to the production batch undo
+ * `undoEditNoteVariantAction`, which routes to the production batch undo
  * (`undoEditNoteBatchAction`) when the posted action's `action_type` is
  * `edit_note_batch`, or to the v1 single-edit undo otherwise. Section 6 below
  * exercises the batch path directly: it posts the whole batch action
@@ -245,7 +245,7 @@ async function applyBatch(
 
 /**
  * Undo an applied batch through the production batch-undo path
- * (`undoEditNoteOrBatchAction` → `undoEditNoteBatchAction`), dispatched by
+ * (`undoEditNoteVariantAction` → `undoEditNoteBatchAction`), dispatched by
  * `/beaver/test/note-undo` when the posted action's `action_type` is
  * `edit_note_batch`.
  */

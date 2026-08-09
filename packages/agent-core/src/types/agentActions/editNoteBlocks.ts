@@ -286,6 +286,21 @@ export interface EditNoteBlocksUndoRecord {
     /** Operation that was applied for this edit */
     op: EditNoteBlocksOp;
     /**
+     * Present, and set to `'whole_body'`, ONLY on the record for a
+     * `block: 'all'` rewrite — the one record whose `undo_old_html` is the
+     * entire pre-edit body rather than a bounded fragment, and which undo must
+     * therefore restore wholesale instead of relocating.
+     *
+     * This is a POSITIVE marker on purpose. The obvious alternative — infer the
+     * whole-body case from `undo_new_html` being absent — is a negative test on
+     * an optional field that round-trips through the backend verbatim, so any
+     * schema drift or omitting dump that dropped `undo_new_html` would silently
+     * promote an ordinary fragment record to a whole-body restore and replace
+     * the entire note with that fragment. A marker that must be present to
+     * trigger the destructive path fails the safe way instead.
+     */
+    undo_scope?: 'whole_body';
+    /**
      * Exact raw HTML fragment that was removed by the applied edit
      * (data-citation-items already stripped). For a `block: 'all'` rewrite this
      * carries the FULL pre-edit stripped note body rather than a fragment.

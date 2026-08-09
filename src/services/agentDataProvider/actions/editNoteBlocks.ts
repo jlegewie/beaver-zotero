@@ -278,7 +278,7 @@ function toBlockEditSpecs(edits: EditNoteBlocksEditItem[]): BlockEditSpec[] {
  * and {@link EMPTY_READ_WINDOW} when it does not — the rule that keeps a
  * large-note response from licensing addresses the model was never shown.
  */
-function buildInlineNoteState(simplified: string): RefreshedNoteState {
+export function buildInlineNoteState(simplified: string): RefreshedNoteState {
     const totalLines = simplified.split('\n').length;
     const fits = totalLines <= MAX_INLINE_NOTE_LINES && simplified.length <= MAX_INLINE_NOTE_CHARS;
     const window: ReadWindow = fits ? { from: 1, to: totalLines } : EMPTY_READ_WINDOW;
@@ -512,7 +512,7 @@ export async function preloadBlockLabels(edits: EditNoteBlocksEditItem[]): Promi
 }
 
 /** Every string an edit contributes that can contain a citation tag. */
-function editContents(edits: EditNoteBlocksEditItem[]): string[] {
+export function editContents(edits: EditNoteBlocksEditItem[]): string[] {
     return edits.map((e) => e.content ?? '').filter((c) => c !== '');
 }
 
@@ -1164,6 +1164,311 @@ const EXECUTE_DESTRUCTIVE_REFUSAL =
     + 'content. An edit that destructive needs the user\'s approval, so it was not applied. Read '
     + 'the note again and re-issue the change against its current content.';
 
+/** Everything {@link planBlockEditsExecution} needs, all of it already awaited. */
+export interface BlockExecutionInputs {
+    /** AUTHORITATIVE pre-edit note HTML, read immediately before this call. */
+    oldHtml: string;
+    /** `${libraryId}-${zoteroKey}`, for the simplification cache and logs. */
+    noteId: string;
+    libraryId: number;
+    edits: EditNoteBlocksEditItem[];
+    /** Address snapshot token; absent only for a sole `block: 'all'` rewrite. */
+    snapshot?: string;
+    /** `proposed_data.destructive_rewrite` — true when the destructive shape was approved. */
+    destructiveRewrite?: boolean;
+    pageLabelsByItemId: Awaited<ReturnType<typeof preloadNotePageLabels>>;
+    labels: PreloadedLabels;
+    externalRefContext: ExternalRefContext;
+    degrades: Map<string, CitationDegrade>;
+    threadId: string | null;
+}
+
+/** Refusal or fully-built write, from {@link planBlockEditsExecution}. */
+export type BlockExecutionPlan =
+    | {
+        ok: false;
+        error: string;
+        errorCode: string;
+        /**
+         * Simplified projection of the CURRENT note, present only when the
+         * refusal happened after simplification. The `snapshot_mismatch`
+         * recovery payload is built from it.
+         */
+        simplified?: string;
+    }
+    | {
+        ok: true;
+        /** Pre-edit body, data-citation-items stripped (rollback + undo baseline). */
+        strippedHtml: string;
+        /** Post-edit body before footer/citation-item rebuild (undo-context baseline). */
+        newStrippedHtml: string;
+        /** Exactly what to hand `item.setNote()`. */
+        newHtml: string;
+        addressPreSnapshot: string;
+        undoDrafts: BatchUndoDraft[];
+        undo: EditNoteBlocksUndoRecord[];
+        appliedIdentities: Array<{ index: number; client_item_id?: string }>;
+        /** Advisory post-edit block ranges, resolved once the post-edit line count is known. */
+        resolveAppliedBlocks: (postTotalLines: number) => Map<number, string>;
+        skipped: EditNoteBlocksSkippedEdit[];
+        warnings: string[];
+    };
+
+/**
+ * The whole no-await critical section of an `edit_note_blocks` apply, as ONE
+ * synchronous function: simplify → verify snapshot → build index → select →
+ * apply → footer → citation-item rebuild → wrapper guard.
+ *
+ * FULLY SYNCHRONOUS BY CONTRACT. See the critical-section rule on
+ * {@link executeEditNoteBlocksAction} for why; being a sync function is what
+ * makes the rule structural instead of a comment a maintainer can violate.
+ *
+ * Shared by the WS executor and the React-side local re-apply
+ * (`react/utils/editNoteBlocksActions.ts`). They differ only in how they resolve
+ * the note, how they report failure (response object vs thrown error) and what
+ * they do after the save — never in how an edit is addressed or applied, which
+ * is exactly the part that must not drift between the two.
+ */
+export function planBlockEditsExecution(inputs: BlockExecutionInputs): BlockExecutionPlan {
+    const {
+        oldHtml, noteId, libraryId, edits, snapshot, destructiveRewrite,
+        pageLabelsByItemId, labels, externalRefContext, degrades, threadId,
+    } = inputs;
+
+    const normalizedOldHtml = normalizeNoteHtml(oldHtml);
+    const existingCitationCache = extractDataCitationItems(normalizedOldHtml);
+    const strippedHtml = stripDataCitationItems(normalizedOldHtml);
+    const { simplified, metadata } = getOrSimplify(noteId, oldHtml, libraryId, pageLabelsByItemId);
+
+    const soleRewrite = isSoleWholeBodyRewrite(edits);
+    const preWindow: ReadWindow | null = soleRewrite
+        ? EMPTY_READ_WINDOW
+        : verifyAddressSnapshot(snapshot as string, simplified);
+    if (!preWindow) {
+        // Approval-delay drift. The caller hands back the CURRENT note so the
+        // model can re-address without a follow-up read_note round trip.
+        return {
+            ok: false,
+            error: SNAPSHOT_MISMATCH_MESSAGE,
+            errorCode: 'snapshot_mismatch',
+            simplified,
+        };
+    }
+
+    // `address_pre_snapshot` reproduces the token the edits were addressed
+    // against (same window), so a consumer can confirm the action ran on the
+    // numbering the model used. For a `block: 'all'` rewrite there is no token,
+    // so the canonical empty window is used.
+    const addressPreSnapshot = buildAddressSnapshot(simplified, preWindow);
+
+    let newStrippedHtml: string;
+    let undoDrafts: BatchUndoDraft[];
+    let skippedOut: EditNoteBlocksSkippedEdit[] = [];
+    let undo: EditNoteBlocksUndoRecord[];
+
+    // `applied[]` has ONE construction site (in the caller, after the post-edit
+    // re-simplification), because its two inputs become available at different
+    // times: the numeric path derives `blocks` from pre-edit arithmetic, while a
+    // whole-body rewrite cannot know its own block count until the note has been
+    // written and re-simplified. Each branch therefore contributes the identities
+    // plus a resolver for the advisory ranges, and neither builds the array or
+    // patches it afterwards.
+    let appliedIdentities: Array<{ index: number; client_item_id?: string }>;
+    let resolveAppliedBlocks: (postTotalLines: number) => Map<number, string>;
+    const warnings: string[] = [...labels.locatorWarnings];
+    const degrade = makeCitationDegrader(degrades, metadata);
+
+    if (soleRewrite) {
+        const edit = edits[0];
+        const rawContent = edit.content ?? '';
+        const pre = degrade(rawContent);
+        warnings.push(...pre.warnings);
+        let expandedNew: string;
+        try {
+            expandedNew = expandToRawHtml(
+                pre.content, metadata, 'new', externalRefContext,
+                labels.pageLabels, labels.resolvedLocatorPages,
+            );
+        } catch (e: any) {
+            return { ok: false, error: e?.message || String(e), errorCode: 'expansion_failed' };
+        }
+        newStrippedHtml = buildRewrittenNoteBody(strippedHtml, expandedNew);
+
+        // Re-classify against the note as it stands NOW (same TOCTOU rule the
+        // batch executor applies at its rewrite gate).
+        if (destructiveRewrite !== true) {
+            const currentRisk = assessNoteRewrite(strippedHtml, newStrippedHtml);
+            if (currentRisk.isDestructive) {
+                logger(
+                    `planBlockEditsExecution: block:"all" rewrite of ${noteId} became destructive `
+                    + `(${currentRisk.reason}) after validation — refusing unapproved rewrite`,
+                    1,
+                );
+                return { ok: false, error: EXECUTE_DESTRUCTIVE_REFUSAL, errorCode: 'note_changed' };
+            }
+        }
+
+        // A whole-body rewrite has no bounded region to diff against, so undo
+        // stores the FULL pre-edit stripped body.
+        undoDrafts = [];
+        appliedIdentities = [{
+            index: edit.index,
+            ...(edit.client_item_id !== undefined ? { client_item_id: edit.client_item_id } : {}),
+        }];
+        // The rewrite produced the whole new body, so its advisory range is the
+        // whole post-edit note — knowable only after the re-simplification.
+        resolveAppliedBlocks = (postTotalLines: number) => new Map([
+            [edit.index, postTotalLines > 0 ? `1-${postTotalLines}` : ''],
+        ]);
+        undo = [{
+            index: edit.index,
+            ...(edit.client_item_id !== undefined ? { client_item_id: edit.client_item_id } : {}),
+            op: 'replace',
+            // POSITIVE marker for the one record undo must restore wholesale.
+            // Inferring it from an absent `undo_new_html` would make a dropped
+            // optional field silently replace the note with a fragment.
+            undo_scope: 'whole_body',
+            undo_old_html: strippedHtml,
+        }];
+        const dup = checkDuplicateCitations(rawContent, metadata);
+        if (dup) warnings.push(dup);
+    } else {
+        const selection = runBlockSelection(
+            simplified, strippedHtml, metadata, edits, preWindow,
+            externalRefContext, labels, degrades,
+        );
+        if ('refusal' in selection) {
+            return { ok: false, error: selection.refusal.error, errorCode: selection.refusal.errorCode };
+        }
+        if (selection.applied.length === 0) {
+            return {
+                ok: false,
+                error: `None of the ${edits.length} edit(s) could be applied to the note as it now stands `
+                    + `(edit ${selection.skipped[0]?.index}: ${selection.skipped[0]?.reason ?? 'no reason recorded'}).`,
+                errorCode: 'no_applicable_edits',
+            };
+        }
+        warnings.push(...selection.warnings);
+
+        const applyResult = applyResolvedEdits(strippedHtml, selection.resolvedEdits);
+        newStrippedHtml = applyResult.newStrippedHtml;
+        undoDrafts = applyResult.undoDrafts;
+
+        // TOCTOU destructiveness re-check on THIS selection.
+        if (destructiveRewrite !== true) {
+            const currentRisk = assessNoteRewrite(strippedHtml, newStrippedHtml);
+            if (currentRisk.isDestructive) {
+                logger(
+                    `planBlockEditsExecution: block edit set on ${noteId} became destructive `
+                    + `(${currentRisk.reason}) after validation — refusing unapproved edit`,
+                    1,
+                );
+                return { ok: false, error: EXECUTE_DESTRUCTIVE_REFUSAL, errorCode: 'note_changed' };
+            }
+        }
+
+        const shifts = buildBlockShiftModel(selection.applied);
+        appliedIdentities = selection.applied.map((a) => ({
+            index: a.resolved.index,
+            ...(a.resolved.client_item_id !== undefined ? { client_item_id: a.resolved.client_item_id } : {}),
+        }));
+        // Pre-edit arithmetic — computed here, while the pre-edit index is still
+        // in scope, and simply handed over to the single construction site.
+        const producedRanges = new Map<number, string>(
+            selection.applied.map((a) => [a.resolved.index, formatBlockRange(shifts.producedRange(a))]),
+        );
+        resolveAppliedBlocks = () => producedRanges;
+
+        const editByIndex = new Map<number, EditNoteBlocksEditItem>();
+        for (const edit of edits) editByIndex.set(edit.index, edit);
+        skippedOut = selection.skipped.map((s) => {
+            const address = addressedBlocks(editByIndex.get(s.index)!);
+            const hint = address
+                ? { from: shifts.shift(address.from), to: shifts.shift(address.to) }
+                : null;
+            const hintString = hint && (hint.from !== address!.from || hint.to !== address!.to)
+                ? formatBlockRange(hint)
+                : '';
+            return {
+                index: s.index,
+                ...(s.client_item_id !== undefined ? { client_item_id: s.client_item_id } : {}),
+                reason_code: s.reason_code,
+                reason: s.reason,
+                ...(s.actual !== undefined ? { actual: s.actual } : {}),
+                ...(hintString ? { block_hint: hintString } : {}),
+            };
+        });
+
+        undo = undoDrafts.map((d) => ({
+            index: d.index,
+            ...(d.client_item_id !== undefined ? { client_item_id: d.client_item_id } : {}),
+            op: (editByIndex.get(d.index)?.op ?? 'replace'),
+            undo_old_html: d.undo_old_html,
+            undo_new_html: d.undo_new_html,
+            ...(d.undo_before_context !== undefined ? { undo_before_context: d.undo_before_context } : {}),
+            ...(d.undo_after_context !== undefined ? { undo_after_context: d.undo_after_context } : {}),
+        }));
+
+        for (const edit of edits) {
+            if (typeof edit.content !== 'string') continue;
+            const dup = checkDuplicateCitations(edit.content, metadata);
+            if (dup) warnings.push(dup);
+        }
+    }
+
+    let newHtml = newStrippedHtml;
+    if (threadId) newHtml = addOrUpdateEditFooter(newHtml, threadId);
+    newHtml = rebuildDataCitationItems(newHtml, existingCitationCache);
+
+    const hadSchemaVersion = hasSchemaVersionWrapper(strippedHtml);
+    if (hadSchemaVersion && !hasSchemaVersionWrapper(newHtml)) {
+        return {
+            ok: false,
+            error: 'The note wrapper <div data-schema-version="..."> must not be removed.',
+            errorCode: 'wrapper_removed',
+        };
+    }
+
+    return {
+        ok: true,
+        strippedHtml,
+        newStrippedHtml,
+        newHtml,
+        addressPreSnapshot,
+        undoDrafts,
+        undo,
+        appliedIdentities,
+        resolveAppliedBlocks,
+        skipped: skippedOut,
+        warnings,
+    };
+}
+
+/**
+ * Rebuild the undo records from the drafts once `captureUndoContexts` has
+ * refreshed them against the final (post-footer, PM-normalized) note.
+ *
+ * Shared with the React re-apply path so both persist the same record shape.
+ * A whole-body rewrite produces no drafts and keeps its records untouched.
+ */
+export function refreshBlockUndoRecords(
+    undo: EditNoteBlocksUndoRecord[],
+    undoDrafts: BatchUndoDraft[],
+    finalStrippedHtml: string,
+    newStrippedHtml: string,
+): EditNoteBlocksUndoRecord[] {
+    if (undoDrafts.length === 0) return undo;
+    captureUndoContexts(finalStrippedHtml, undoDrafts, newStrippedHtml);
+    const priorUndo = new Map(undo.map((u) => [u.index, u]));
+    return undoDrafts.map((d) => ({
+        ...(priorUndo.get(d.index) ?? { index: d.index, op: 'replace' as const }),
+        undo_old_html: d.undo_old_html,
+        undo_new_html: d.undo_new_html,
+        ...(d.undo_before_context !== undefined ? { undo_before_context: d.undo_before_context } : {}),
+        ...(d.undo_after_context !== undefined ? { undo_after_context: d.undo_after_context } : {}),
+    }));
+}
+
 /**
  * Execute an edit_note_blocks action.
  *
@@ -1281,198 +1586,37 @@ async function executeEditNoteBlocksAction(
     const oldHtml: string = item.getNote();
 
     // ── STEP 3: NO AWAITS BELOW THIS LINE UNTIL AFTER setNote() ─────────────
-    const normalizedOldHtml = normalizeNoteHtml(oldHtml);
-    const existingCitationCache = extractDataCitationItems(normalizedOldHtml);
-    const strippedHtml = stripDataCitationItems(normalizedOldHtml);
-    const { simplified, metadata } = getOrSimplify(noteId, oldHtml, resolvedLibraryId, pageLabelsByItemId);
-
-    const soleRewrite = isSoleWholeBodyRewrite(edits);
-    const preWindow: ReadWindow | null = soleRewrite
-        ? EMPTY_READ_WINDOW
-        : verifyAddressSnapshot(snapshot as string, simplified);
-    if (!preWindow) {
-        // Approval-delay drift. Hand back the CURRENT note so the model can
-        // re-address without a follow-up read_note round trip.
+    // The whole step-3 pipeline is one synchronous call by construction.
+    const plan = planBlockEditsExecution({
+        oldHtml,
+        noteId,
+        libraryId: resolvedLibraryId,
+        edits,
+        snapshot,
+        destructiveRewrite: destructive_rewrite,
+        pageLabelsByItemId,
+        labels,
+        externalRefContext,
+        degrades,
+        threadId,
+    });
+    if (!plan.ok) {
         return executeError(
-            request.request_id, SNAPSHOT_MISMATCH_MESSAGE, 'snapshot_mismatch',
-            buildInlineNoteState(simplified),
+            request.request_id, plan.error, plan.errorCode,
+            plan.errorCode === 'snapshot_mismatch' && plan.simplified !== undefined
+                ? buildInlineNoteState(plan.simplified)
+                : undefined,
         );
-    }
-
-    // `address_pre_snapshot` reproduces the token the edits were addressed
-    // against (same window), so a consumer can confirm the action ran on the
-    // numbering the model used. For a `block: 'all'` rewrite there is no token,
-    // so the canonical empty window is used.
-    const addressPreSnapshot = buildAddressSnapshot(simplified, preWindow);
-
-    let newStrippedHtml: string;
-    let undoDrafts: BatchUndoDraft[];
-    let skippedOut: EditNoteBlocksSkippedEdit[] = [];
-    let undo: EditNoteBlocksUndoRecord[];
-
-    // `applied[]` has ONE construction site (below, after the post-edit
-    // re-simplification), because its two inputs become available at different
-    // times: the numeric path derives `blocks` from pre-edit arithmetic, while a
-    // whole-body rewrite cannot know its own block count until the note has been
-    // written and re-simplified. Each branch therefore contributes the identities
-    // plus a resolver for the advisory ranges, and neither builds the array or
-    // patches it afterwards.
-    let appliedIdentities: Array<{ index: number; client_item_id?: string }>;
-    let resolveAppliedBlocks: (postTotalLines: number) => Map<number, string>;
-    const warnings: string[] = [...labels.locatorWarnings];
-    const degrade = makeCitationDegrader(degrades, metadata);
-
-    if (soleRewrite) {
-        const edit = edits[0];
-        const rawContent = edit.content ?? '';
-        const pre = degrade(rawContent);
-        warnings.push(...pre.warnings);
-        let expandedNew: string;
-        try {
-            expandedNew = expandToRawHtml(
-                pre.content, metadata, 'new', externalRefContext,
-                labels.pageLabels, labels.resolvedLocatorPages,
-            );
-        } catch (e: any) {
-            return executeError(request.request_id, e?.message || String(e), 'expansion_failed');
-        }
-        newStrippedHtml = buildRewrittenNoteBody(strippedHtml, expandedNew);
-
-        // Re-classify against the note as it stands NOW (same TOCTOU rule the
-        // batch executor applies at its rewrite gate).
-        if (destructive_rewrite !== true) {
-            const currentRisk = assessNoteRewrite(strippedHtml, newStrippedHtml);
-            if (currentRisk.isDestructive) {
-                logger(
-                    `executeEditNoteBlocksAction: block:"all" rewrite of ${noteId} became destructive `
-                    + `(${currentRisk.reason}) after validation — refusing unapproved rewrite`,
-                    1,
-                );
-                return executeError(request.request_id, EXECUTE_DESTRUCTIVE_REFUSAL, 'note_changed');
-            }
-        }
-
-        // A whole-body rewrite has no bounded region to diff against, so undo
-        // stores the FULL pre-edit stripped body.
-        undoDrafts = [];
-        appliedIdentities = [{
-            index: edit.index,
-            ...(edit.client_item_id !== undefined ? { client_item_id: edit.client_item_id } : {}),
-        }];
-        // The rewrite produced the whole new body, so its advisory range is the
-        // whole post-edit note — knowable only after the re-simplification.
-        resolveAppliedBlocks = (postTotalLines: number) => new Map([
-            [edit.index, postTotalLines > 0 ? `1-${postTotalLines}` : ''],
-        ]);
-        undo = [{
-            index: edit.index,
-            ...(edit.client_item_id !== undefined ? { client_item_id: edit.client_item_id } : {}),
-            op: 'replace',
-            undo_old_html: strippedHtml,
-        }];
-        const dup = checkDuplicateCitations(rawContent, metadata);
-        if (dup) warnings.push(dup);
-    } else {
-        const selection = runBlockSelection(
-            simplified, strippedHtml, metadata, edits, preWindow,
-            externalRefContext, labels, degrades,
-        );
-        if ('refusal' in selection) {
-            return executeError(request.request_id, selection.refusal.error, selection.refusal.errorCode);
-        }
-        if (selection.applied.length === 0) {
-            return executeError(
-                request.request_id,
-                `None of the ${edits.length} edit(s) could be applied to the note as it now stands `
-                + `(edit ${selection.skipped[0]?.index}: ${selection.skipped[0]?.reason ?? 'no reason recorded'}).`,
-                'no_applicable_edits',
-            );
-        }
-        warnings.push(...selection.warnings);
-
-        const applyResult = applyResolvedEdits(strippedHtml, selection.resolvedEdits);
-        newStrippedHtml = applyResult.newStrippedHtml;
-        undoDrafts = applyResult.undoDrafts;
-
-        // TOCTOU destructiveness re-check on THIS selection.
-        if (destructive_rewrite !== true) {
-            const currentRisk = assessNoteRewrite(strippedHtml, newStrippedHtml);
-            if (currentRisk.isDestructive) {
-                logger(
-                    `executeEditNoteBlocksAction: block edit set on ${noteId} became destructive `
-                    + `(${currentRisk.reason}) after validation — refusing unapproved edit`,
-                    1,
-                );
-                return executeError(request.request_id, EXECUTE_DESTRUCTIVE_REFUSAL, 'note_changed');
-            }
-        }
-
-        const shifts = buildBlockShiftModel(selection.applied);
-        appliedIdentities = selection.applied.map((a) => ({
-            index: a.resolved.index,
-            ...(a.resolved.client_item_id !== undefined ? { client_item_id: a.resolved.client_item_id } : {}),
-        }));
-        // Pre-edit arithmetic — computed here, while the pre-edit index is still
-        // in scope, and simply handed over to the single construction site.
-        const producedRanges = new Map<number, string>(
-            selection.applied.map((a) => [a.resolved.index, formatBlockRange(shifts.producedRange(a))]),
-        );
-        resolveAppliedBlocks = () => producedRanges;
-
-        const editByIndex = new Map<number, EditNoteBlocksEditItem>();
-        for (const edit of edits) editByIndex.set(edit.index, edit);
-        skippedOut = selection.skipped.map((s) => {
-            const address = addressedBlocks(editByIndex.get(s.index)!);
-            const hint = address
-                ? { from: shifts.shift(address.from), to: shifts.shift(address.to) }
-                : null;
-            const hintString = hint && (hint.from !== address!.from || hint.to !== address!.to)
-                ? formatBlockRange(hint)
-                : '';
-            return {
-                index: s.index,
-                ...(s.client_item_id !== undefined ? { client_item_id: s.client_item_id } : {}),
-                reason_code: s.reason_code,
-                reason: s.reason,
-                ...(s.actual !== undefined ? { actual: s.actual } : {}),
-                ...(hintString ? { block_hint: hintString } : {}),
-            };
-        });
-
-        undo = undoDrafts.map((d) => ({
-            index: d.index,
-            ...(d.client_item_id !== undefined ? { client_item_id: d.client_item_id } : {}),
-            op: (editByIndex.get(d.index)?.op ?? 'replace'),
-            undo_old_html: d.undo_old_html,
-            undo_new_html: d.undo_new_html,
-            ...(d.undo_before_context !== undefined ? { undo_before_context: d.undo_before_context } : {}),
-            ...(d.undo_after_context !== undefined ? { undo_after_context: d.undo_after_context } : {}),
-        }));
-
-        for (const edit of edits) {
-            if (typeof edit.content !== 'string') continue;
-            const dup = checkDuplicateCitations(edit.content, metadata);
-            if (dup) warnings.push(dup);
-        }
-    }
-
-    let newHtml = newStrippedHtml;
-    if (threadId) newHtml = addOrUpdateEditFooter(newHtml, threadId);
-    newHtml = rebuildDataCitationItems(newHtml, existingCitationCache);
-
-    const hadSchemaVersion = hasSchemaVersionWrapper(strippedHtml);
-    if (hadSchemaVersion && !hasSchemaVersionWrapper(newHtml)) {
-        return executeError(request.request_id, 'The note wrapper <div data-schema-version="..."> must not be removed.', 'wrapper_removed');
     }
 
     checkAborted(ctx, 'edit_note_blocks:before_save');
 
     try {
-        assertNoPreviewMarkers(newHtml, 'editNoteBlocks:apply');
-        item.setNote(newHtml);
+        assertNoPreviewMarkers(plan.newHtml, 'editNoteBlocks:apply');
+        item.setNote(plan.newHtml);
         // ── END OF THE NO-AWAIT CRITICAL SECTION ────────────────────────────
         await item.saveTx();
-        logger(`executeEditNoteBlocksAction: Saved ${appliedIdentities.length} block edit(s) to ${noteId}`, 1);
+        logger(`executeEditNoteBlocksAction: Saved ${plan.appliedIdentities.length} block edit(s) to ${noteId}`, 1);
     } catch (error) {
         try {
             assertNoPreviewMarkers(oldHtml, 'editNoteBlocks:rollback');
@@ -1482,23 +1626,15 @@ async function executeEditNoteBlocksAction(
         return executeError(request.request_id, `Failed to save note: ${error}`, 'save_failed');
     }
 
-    await waitForNoteSaveStabilization(item, newHtml);
+    await waitForNoteSaveStabilization(item, plan.newHtml);
     clearNoteEditorSelection(resolvedLibraryId, zotero_key);
     invalidateSimplificationCache(noteId);
 
     // Refresh undo contexts against the final (post-footer, PM-normalized) HTML.
     const finalRawHtml = getLatestNoteHtml(item);
-    if (undoDrafts.length > 0) {
-        captureUndoContexts(stripDataCitationItems(finalRawHtml), undoDrafts, newStrippedHtml);
-        const priorUndo = new Map(undo.map((u) => [u.index, u]));
-        undo = undoDrafts.map((d) => ({
-            ...(priorUndo.get(d.index) ?? { index: d.index, op: 'replace' as const }),
-            undo_old_html: d.undo_old_html,
-            undo_new_html: d.undo_new_html,
-            ...(d.undo_before_context !== undefined ? { undo_before_context: d.undo_before_context } : {}),
-            ...(d.undo_after_context !== undefined ? { undo_after_context: d.undo_after_context } : {}),
-        }));
-    }
+    const undo = refreshBlockUndoRecords(
+        plan.undo, plan.undoDrafts, stripDataCitationItems(finalRawHtml), plan.newStrippedHtml,
+    );
 
     // Re-simplify for the post-edit numbering.
     const postPageLabels = await preloadNotePageLabels(finalRawHtml, resolvedLibraryId, { extractOnCacheMiss: true });
@@ -1506,8 +1642,8 @@ async function executeEditNoteBlocksAction(
     const refreshedNote = buildInlineNoteState(postSimplified);
 
     // The single construction site for `applied[]` (see `appliedIdentities`).
-    const appliedBlocks = resolveAppliedBlocks(refreshedNote.total_lines);
-    const applied: EditNoteBlocksAppliedEdit[] = appliedIdentities.map((identity) => ({
+    const appliedBlocks = plan.resolveAppliedBlocks(refreshedNote.total_lines);
+    const applied: EditNoteBlocksAppliedEdit[] = plan.appliedIdentities.map((identity) => ({
         ...identity,
         blocks: appliedBlocks.get(identity.index) ?? '',
     }));
@@ -1516,11 +1652,11 @@ async function executeEditNoteBlocksAction(
         library_id: resolvedLibraryId,
         zotero_key,
         library_ref: libraryRefForLibraryID(resolvedLibraryId) ?? undefined,
-        address_pre_snapshot: addressPreSnapshot,
+        address_pre_snapshot: plan.addressPreSnapshot,
         address_post_snapshot: refreshedNote.snapshot,
         applied,
-        skipped: skippedOut,
-        ...(warnings.length > 0 ? { warnings } : {}),
+        skipped: plan.skipped,
+        ...(plan.warnings.length > 0 ? { warnings: plan.warnings } : {}),
         undo,
     };
 

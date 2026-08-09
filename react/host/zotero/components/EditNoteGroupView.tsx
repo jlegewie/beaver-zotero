@@ -48,9 +48,9 @@ import Tooltip from '../../../components/ui/Tooltip';
 import SplitApplyButton from '../../../components/ui/buttons/SplitApplyButton';
 import { openNoteByKey } from '../../../utils/sourceUtils';
 import {
-    executeEditNoteOrBatchAction,
+    executeEditNoteVariantAction,
     getUserFacingErrorMessage,
-    undoEditNoteOrBatchAction,
+    undoEditNoteVariantAction,
 } from '../../../utils/editNoteActions';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { UNRESOLVED_LIBRARY_ID } from '../../../../src/utils/libraryIdentity';
@@ -363,7 +363,7 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
 
             for (const action of reapplicableActions) {
                 try {
-                    const result = await executeEditNoteOrBatchAction(action);
+                    const result = await executeEditNoteVariantAction(action);
                     await ackAgentActions(runId, [{
                         action_id: action.id,
                         result_data: result,
@@ -496,7 +496,7 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
 
             for (const action of [...appliedActions].reverse()) {
                 try {
-                    await undoEditNoteOrBatchAction(action);
+                    await undoEditNoteVariantAction(action);
                     undoAgentAction(action.id);
                     logger(`EditNoteGroupView: Undone ${action.action_type} action ${action.id}`, 1);
                 } catch (error: any) {
@@ -537,7 +537,7 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
 
             for (const action of errorActions) {
                 try {
-                    const result = await executeEditNoteOrBatchAction(action);
+                    const result = await executeEditNoteVariantAction(action);
                     await ackAgentActions(runId, [{
                         action_id: action.id,
                         result_data: result,

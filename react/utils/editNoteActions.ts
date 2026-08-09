@@ -11,6 +11,11 @@ import type {
     EditNoteBatchUndoRecord,
     EditNoteBatchEditItem,
 } from '@beaver/agent-core/types/agentActions/editNoteBatch';
+import type { EditNoteBlocksResultData } from '@beaver/agent-core/types/agentActions/editNoteBlocks';
+// Cyclic by design: the blocks module reuses this file's exclusion assert and
+// batch undo replay, and the routers below dispatch back into it. Both sides are
+// hoisted function declarations used only at call time, so the cycle resolves.
+import { executeEditNoteBlocksAction, undoEditNoteBlocksAction } from './editNoteBlocksActions';
 import { logger } from '@beaver/agent-core/platform/logger';
 import {
     libraryRefForLibraryID,
@@ -289,7 +294,7 @@ export function getUserFacingErrorMessage(error: unknown, fallback: string): str
 }
 
 /** Reject a local note mutation before any item lookup crosses the boundary. */
-function assertNoteLibraryNotExcluded(
+export function assertNoteLibraryNotExcluded(
     ref: { library_id?: number | null; library_ref?: string | null },
 ): void {
     const libraryId = resolveLibraryRef(ref);
@@ -1583,11 +1588,17 @@ export async function executeEditNoteBatchAction(
  *                                        and replace it with `undo_old_html`
  *                                        (empty for insert/append, restoring
  *                                        to "nothing was there").
+ *
+ * Also serves `edit_note_blocks` undo, whose records are this same shape with a
+ * different discriminant; `react/utils/editNoteBlocksActions.ts` maps them (in
+ * particular `block: 'all'` → `rewrite`) before calling in, and passes its own
+ * `logPrefix` so the diagnostic lines name the variant that is actually running.
  */
-function applyBatchUndoRecord(
+export function applyBatchUndoRecord(
     strippedHtml: string,
     record: EditNoteBatchUndoRecord,
     libraryId: number,
+    logPrefix = 'undoEditNoteBatchAction',
 ): string {
     const operation = record.operation ?? 'str_replace';
     const undoOldHtml = record.undo_old_html ?? '';
@@ -1614,7 +1625,7 @@ function applyBatchUndoRecord(
         // reliable presence check for removed text needs more than a bare
         // substring search, so double-undo of a deletion stays an error.
         if (undoNewHtml !== '' && isBatchReplaceAllAlreadyUndone(strippedHtml, undoOldHtml, undoNewHtml, libraryId)) {
-            logger(`undoEditNoteBatchAction: edit ${record.index} already undone, skipping`, 1);
+            logger(`${logPrefix}: edit ${record.index} already undone, skipping`, 1);
             return strippedHtml;
         }
 
@@ -1633,10 +1644,10 @@ function applyBatchUndoRecord(
             );
         }
         if (restored === strippedHtml) {
-            logger(`undoEditNoteBatchAction: edit ${record.index} already undone, skipping`, 1);
+            logger(`${logPrefix}: edit ${record.index} already undone, skipping`, 1);
             return strippedHtml;
         }
-        logger(`undoEditNoteBatchAction: restored ${occCtxs.length} replace_all occurrence(s) via contexts for edit ${record.index}`, 1);
+        logger(`${logPrefix}: restored ${occCtxs.length} replace_all occurrence(s) via contexts for edit ${record.index}`, 1);
         return restored;
     }
 
@@ -1648,7 +1659,7 @@ function applyBatchUndoRecord(
         beforeCtx: record.undo_before_context,
         afterCtx: record.undo_after_context,
         libraryId,
-        logPrefix: 'undoEditNoteBatchAction',
+        logPrefix,
         logLabel: `edit ${record.index}`,
         noContextError: `Cannot undo edit ${record.index}: no surrounding context stored for this deletion.`,
         seamNotFoundError:
@@ -1743,27 +1754,60 @@ export async function undoEditNoteBatchAction(action: AgentAction): Promise<void
 }
 
 // =============================================================================
-// Dispatchers: route by action_type to the single-edit or batch variant
+// Dispatchers: route by action_type to the matching note-edit variant
 // =============================================================================
 
 /**
- * Apply an edit_note or edit_note_batch action, routing by `action_type` to the
- * matching variant.
+ * EXHAUSTIVE, and deliberately so.
+ *
+ * These used to be a ternary on `=== 'edit_note_batch'` that fell through to the
+ * single-edit path for everything else. With a third variant that is a silent
+ * mis-dispatch: an `edit_note_blocks` action would be handed to
+ * `executeEditNoteAction`, which reads `old_string`/`new_string` off
+ * `proposed_data` — fields a block action does not have — and fails somewhere
+ * downstream with an unrelated message, or worse, matches something. Registering
+ * a fourth variant and forgetting one of these switches is the single most
+ * likely mistake here, so it throws instead.
  */
-export async function executeEditNoteOrBatchAction(
-    action: AgentAction,
-): Promise<EditNoteResultData | EditNoteBatchResultData> {
-    return action.action_type === 'edit_note_batch'
-        ? executeEditNoteBatchAction(action)
-        : executeEditNoteAction(action);
+function unknownEditNoteVariant(action: AgentAction): never {
+    throw new Error(
+        `Unsupported note-edit action type '${action.action_type}'. Expected one of `
+        + 'edit_note, edit_note_batch, edit_note_blocks.'
+    );
 }
 
 /**
- * Undo an edit_note or edit_note_batch action, routing by `action_type` to the
- * matching variant.
+ * Apply an edit_note / edit_note_batch / edit_note_blocks action, routing by
+ * `action_type` to the matching variant. Throws on any other type.
  */
-export async function undoEditNoteOrBatchAction(action: AgentAction): Promise<void> {
-    return action.action_type === 'edit_note_batch'
-        ? undoEditNoteBatchAction(action)
-        : undoEditNoteAction(action);
+export async function executeEditNoteVariantAction(
+    action: AgentAction,
+): Promise<EditNoteResultData | EditNoteBatchResultData | EditNoteBlocksResultData> {
+    switch (action.action_type) {
+        case 'edit_note':
+            return executeEditNoteAction(action);
+        case 'edit_note_batch':
+            return executeEditNoteBatchAction(action);
+        case 'edit_note_blocks':
+            return executeEditNoteBlocksAction(action);
+        default:
+            return unknownEditNoteVariant(action);
+    }
+}
+
+/**
+ * Undo an edit_note / edit_note_batch / edit_note_blocks action, routing by
+ * `action_type` to the matching variant. Throws on any other type.
+ */
+export async function undoEditNoteVariantAction(action: AgentAction): Promise<void> {
+    switch (action.action_type) {
+        case 'edit_note':
+            return undoEditNoteAction(action);
+        case 'edit_note_batch':
+            return undoEditNoteBatchAction(action);
+        case 'edit_note_blocks':
+            return undoEditNoteBlocksAction(action);
+        default:
+            return unknownEditNoteVariant(action);
+    }
 }
