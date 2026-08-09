@@ -10,6 +10,8 @@ import { getOrSimplify } from '../../utils/noteHtmlSimplifier';
 import { preloadNotePageLabels } from '../../utils/noteCitationExpand';
 import { getNoteHtmlForRead } from '../../utils/noteEditorIO';
 import { containsPreviewMarkers, stripPreviewMarkers } from '../../utils/notePreviewGuard';
+import { buildAddressSnapshot, EMPTY_READ_WINDOW } from '../../utils/noteSnapshot';
+import type { ReadWindow } from '../../utils/noteSnapshot';
 import {
     WSReadNoteRequest,
     WSReadNoteResponse,
@@ -317,6 +319,30 @@ export async function handleReadNoteRequest(
         const linesReturned = slice.length === 0 ? undefined
             : (startLine === end ? String(startLine) : `${startLine}-${end}`);
 
+        // Address snapshot for edit_note_blocks. The digest covers the WHOLE-note
+        // `simplified` string — that is the string whose split('\n') defines the
+        // block numbering — while the window records only what this response
+        // actually SHOWED, because the edit engine refuses numeric addresses the
+        // model never saw. Do not "fix" this to 1-totalLines: on a paginated read
+        // that would license edits to unseen blocks.
+        //
+        // The window falls back to the canonical empty one whenever it would not
+        // describe a real shown range. `offset`/`limit` are unvalidated `number?`
+        // on the wire and reach us verbatim from the MCP and HTTP entry points,
+        // so a negative or fractional `limit` can produce a non-empty slice with
+        // a nonsensical `end` (`limit: -1` → `end: -1` with 4 lines returned).
+        // `buildAddressSnapshot` refuses such a window by throwing, and a throw
+        // here would be caught below and turn a read that has always succeeded
+        // into a failed tool call. Failing closed instead costs only a re-read
+        // before the first numeric edit, which is the designed recovery.
+        const windowIsShowable = slice.length > 0
+            && Number.isSafeInteger(startLine) && Number.isSafeInteger(end)
+            && startLine >= 1 && end >= startLine;
+        const readWindow: ReadWindow = windowIsShowable
+            ? { from: startLine, to: end }
+            : EMPTY_READ_WINDOW;
+        const snapshot = buildAddressSnapshot(simplified, readWindow);
+
         // 8. Gather parent metadata
         let parentItemId: string | undefined;
         let parentTitle: string | undefined;
@@ -350,6 +376,7 @@ export async function handleReadNoteRequest(
             has_more: hasMore,
             next_offset: nextOffset,
             lines_returned: linesReturned,
+            snapshot,
             cited_items: citedItems.length > 0 ? citedItems : undefined,
         };
     } catch (error) {

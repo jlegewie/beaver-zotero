@@ -73,6 +73,7 @@ vi.mock('../../../react/store', () => ({
 import { handleReadNoteRequest } from '../../../src/services/agentDataProvider/handleReadNoteRequest';
 import { getOrSimplify } from '../../../src/utils/noteHtmlSimplifier';
 import { getLatestNoteHtml, getNoteHtmlForRead } from '../../../src/utils/noteEditorIO';
+import { verifyAddressSnapshot } from '../../../src/utils/noteSnapshot';
 import type { WSReadNoteRequest } from '@beaver/agent-core/protocol/agentProtocol';
 
 
@@ -291,6 +292,105 @@ describe('handleReadNoteRequest — pagination', () => {
         expect(response.lines_returned).toBe('3');
         expect(response.has_more).toBe(true);
         expect(response.next_offset).toBe(4);
+    });
+});
+
+// =============================================================================
+// Address snapshot
+// =============================================================================
+
+// The simplified projection the default getOrSimplify mock returns; the digest
+// is defined over exactly this whole-note string, never over a paginated slice.
+const WHOLE_NOTE = 'Line one\nLine two\nLine three\nLine four\nLine five';
+
+describe('handleReadNoteRequest — address snapshot', () => {
+    it('emits a snapshot whose window is 1-<total_lines> for a whole-note read', async () => {
+        const response = await handleReadNoteRequest(makeRequest());
+
+        expect(response.success).toBe(true);
+        expect(response.snapshot).toBeTypeOf('string');
+        expect(response.snapshot).toMatch(/:1-5$/);
+        expect(verifyAddressSnapshot(response.snapshot!, WHOLE_NOTE)).toEqual({ from: 1, to: 5 });
+    });
+
+    it('windows a paginated read to what was SHOWN while digesting the whole note', async () => {
+        const response = await handleReadNoteRequest(makeRequest({ offset: 2, limit: 2 }));
+
+        expect(response.success).toBe(true);
+        expect(response.lines_returned).toBe('2-3');
+        // The window is the shown range, NOT 1-total_lines...
+        expect(response.snapshot).toMatch(/:2-3$/);
+        // ...and the token still verifies against the WHOLE simplified note,
+        // proving the digest input is the whole note and not the slice.
+        expect(verifyAddressSnapshot(response.snapshot!, WHOLE_NOTE)).toEqual({ from: 2, to: 3 });
+        expect(verifyAddressSnapshot(response.snapshot!, 'Line two\nLine three')).toBeNull();
+    });
+
+    it('uses the canonical empty window when the offset is beyond the end', async () => {
+        const response = await handleReadNoteRequest(makeRequest({ offset: 100 }));
+
+        // An out-of-range read is harmless, not a failed tool call: building the
+        // snapshot must not throw on the inverted `100-5` it would otherwise form.
+        expect(response.success).toBe(true);
+        expect(response.content).toBe('');
+        expect(response.snapshot).toMatch(/:0-0$/);
+        expect(verifyAddressSnapshot(response.snapshot!, WHOLE_NOTE)).toEqual({ from: 0, to: 0 });
+    });
+
+    // `offset`/`limit` are unvalidated `number?` on the wire and reach the
+    // handler verbatim from the MCP and HTTP entry points. A malformed one must
+    // never turn a read that has always succeeded into a failed tool call.
+    it.each([
+        ['negative limit', { limit: -1 }],
+        ['fractional offset', { offset: 2.5 }],
+        ['fractional limit', { limit: 2.5 }],
+        ['NaN offset', { offset: NaN }],
+    ])('falls back to the empty window rather than throwing: %s', async (_name, args) => {
+        const response = await handleReadNoteRequest(makeRequest(args));
+
+        expect(response.success).toBe(true);
+        expect(response.error).toBeUndefined();
+        expect(response.snapshot).toMatch(/:0-0$/);
+        expect(verifyAddressSnapshot(response.snapshot!, WHOLE_NOTE)).toEqual({ from: 0, to: 0 });
+    });
+
+    // `limit: NaN` is falsy, so it takes the "no limit" branch and is an
+    // ordinary whole-note read — not a fail-closed case. Pinned so the
+    // distinction stays deliberate.
+    it('treats a NaN limit as no limit at all', async () => {
+        const response = await handleReadNoteRequest(makeRequest({ limit: NaN }));
+
+        expect(response.success).toBe(true);
+        expect(verifyAddressSnapshot(response.snapshot!, WHOLE_NOTE)).toEqual({ from: 1, to: 5 });
+    });
+
+    it('is stable across identical reads and changes when the note content changes', async () => {
+        const first = await handleReadNoteRequest(makeRequest());
+        const second = await handleReadNoteRequest(makeRequest());
+        expect(first.snapshot).toBe(second.snapshot);
+
+        vi.mocked(getOrSimplify).mockReturnValueOnce({
+            simplified: 'Line one\nLine two CHANGED\nLine three\nLine four\nLine five',
+            metadata: { elements: new Map() },
+            isStale: false,
+        });
+        const afterEdit = await handleReadNoteRequest(makeRequest());
+
+        expect(afterEdit.success).toBe(true);
+        // Same window, different content ⇒ different token.
+        expect(afterEdit.snapshot).toMatch(/:1-5$/);
+        expect(afterEdit.snapshot).not.toBe(first.snapshot);
+    });
+
+    it('fails verification when the window is hand-widened (forgery guard)', async () => {
+        const response = await handleReadNoteRequest(makeRequest({ limit: 2 }));
+        expect(response.snapshot).toMatch(/:1-2$/);
+
+        const widened = response.snapshot!.replace(/:1-2$/, ':1-999');
+        expect(verifyAddressSnapshot(widened, WHOLE_NOTE)).toBeNull();
+        // The unmodified token still verifies, so the failure is the widening
+        // and not something wrong with the token itself.
+        expect(verifyAddressSnapshot(response.snapshot!, WHOLE_NOTE)).toEqual({ from: 1, to: 2 });
     });
 });
 
