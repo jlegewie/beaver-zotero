@@ -222,6 +222,12 @@ export interface SelectBlockEditsContext {
     };
 }
 
+// Shared tail for every rewrite fallback: `op:"rewrite"` permanently deletes
+// whatever `content` omits, so a partially-read note must not be rewritten.
+const REWRITE_FALLBACK =
+    'read the FULL note with read_note first, then send a sole op:"rewrite" edit '
+    + 'carrying the entire note body';
+
 // =============================================================================
 // PART 1 — index construction
 // =============================================================================
@@ -276,7 +282,7 @@ function checkNoRewrittenElementSpansNewline(
             `Cannot address this note by block number: the note element "${key}" spans a line `
             + 'break in the stored note HTML, which the simplified projection does not preserve, '
             + 'so simplified line numbers cannot be mapped back to the note reliably. '
-            + 'Use a sole op:"rewrite" edit to rewrite the whole note body instead.'
+            + `Instead: ${REWRITE_FALLBACK}.`
         );
     }
     return null;
@@ -330,8 +336,7 @@ export function buildBlockRawIndex(
         return refuse(
             'Cannot address this note by block number: its stored HTML has no recognizable '
             + '<div data-schema-version="…"> wrapper, so the editable body cannot be located. '
-            + 'Use a sole op:"rewrite" edit to rewrite the whole note body instead — it preserves the '
-            + 'wrapper and needs no block numbering.',
+            + `Instead: ${REWRITE_FALLBACK}.`,
         );
     }
     const { bodyStart, bodyEnd } = bounds;
@@ -415,7 +420,7 @@ export function buildBlockRawIndex(
             'Cannot address this note by block number: the note\'s stored HTML has '
             + `${rawLineRanges.length} addressable line(s) but the simplified view has `
             + `${simplifiedLines.length}, so block numbers cannot be mapped back to the note `
-            + 'reliably. Use a sole op:"rewrite" edit to rewrite the whole note body instead.',
+            + `reliably. Instead: ${REWRITE_FALLBACK}.`,
         );
     }
 
@@ -1109,7 +1114,8 @@ function checkShape(spec: BlockEditSpec): SkipDraft | null {
 function checkBounds(spec: BlockEditSpec, total: number): SkipDraft | null {
     const oor = (n: number, field: string) => skip(
         'block_out_of_range',
-        `${field} ${n} does not exist; this note has ${total} block(s). Call read_note again for current block numbers.`,
+        `${field} ${n} does not exist; this note has ${total} block(s). `
+        + `Address a block between 1 and ${total}.`,
     );
     if (spec.op === 'replace') {
         const block = spec.block as number;
@@ -1131,6 +1137,16 @@ function checkBounds(spec: BlockEditSpec, total: number): SkipDraft | null {
 
 /** Gate 2b — the read window carried by the verified snapshot token. */
 function checkReadWindow(spec: BlockEditSpec, window: ReadWindow, total: number): SkipDraft | null {
+    // EMPTY_READ_WINDOW: the response that issued this token showed no note
+    // lines, so there is no range to name and nothing is addressable.
+    if (window.from === 0 && window.to === 0) {
+        return skip(
+            'address_outside_read_window',
+            'No block can be addressed with this snapshot: the read it came from showed no note '
+            + 'lines. Call read_note for this note (omit offset/limit to get the whole note) and '
+            + 'address blocks from that listing, echoing its snapshot.',
+        );
+    }
     const outside = (what: string) => skip(
         'address_outside_read_window',
         `${what} is outside the range you last read (${window.from}–${window.to}); `
@@ -1233,7 +1249,7 @@ function checkSpanRules(index: BlockRawIndex, spec: BlockEditSpec): SkipDraft | 
             `Block ${block} is part of ${label} that spans blocks ${span.startLine}–${span.endLine}. `
             + (span.kind === 'annotation'
                 ? 'Annotation text cannot be edited; annotations may only be moved or deleted whole.'
-                : 'Replace the whole span in one edit, or use a sole op:"rewrite" edit.'),
+                : `Replace the whole span in one edit, or rewrite the note: ${REWRITE_FALLBACK}.`),
             block,
         );
     }
@@ -1337,7 +1353,9 @@ function checkExpect(index: BlockRawIndex, spec: BlockEditSpec): SkipDraft | nul
             ? `\`${field}\` matches block ${block} but is too short to confirm it: copy a longer `
               + 'piece of the block\'s visible text — at least 8 non-space characters, or the '
               + 'block\'s ENTIRE visible text when it is shorter than that.'
-            : `\`${field}\` does not match block ${block}. Call read_note for the current content of that block.`;
+            : `\`${field}\` does not match block ${block} — the text actually there is shown as `
+              + '`actual`. Either the expect text came from a different block or the block number '
+              + 'is wrong; check both against the read_note listing you already have.';
 
     if (spec.op === 'insert') {
         // Only numbered anchors carry an expect; 0 / "end" name a seam. The
@@ -1571,8 +1589,7 @@ export function selectBlockEdits(
         }
         return refuse(
             'Cannot address this note by block number: the note\'s stored HTML and its simplified '
-            + `view do not line up (${check.detail}). Use a sole op:"rewrite" edit to rewrite the whole note `
-            + 'body instead.',
+            + `view do not line up (${check.detail}). Instead: ${REWRITE_FALLBACK}.`,
         );
     };
 
@@ -1606,7 +1623,7 @@ export function selectBlockEdits(
                 emit(skip(
                     'invalid_edit',
                     `Block ${total} is the note's trailing empty line and cannot be deleted. `
-                    + `Delete up to block ${total - 1} instead, or use a sole op:"rewrite" edit to rewrite the note.`,
+                    + `Delete up to block ${total - 1} instead, or rewrite the note: ${REWRITE_FALLBACK}.`,
                     total,
                 ));
                 continue;

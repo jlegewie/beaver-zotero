@@ -414,6 +414,18 @@ describe('buildBlockRawIndex — body boundaries', () => {
         expect(refusal.errorCode).toBe('address_resolution_failed');
         expect(refusal.error).toMatch(/op:"rewrite"/);
     });
+
+    // A rewrite whose `content` omits part of the note deletes that part, so a
+    // model that read a slice must not obey a rewrite suggestion literally.
+    it('tells the model to read the FULL note before falling back to a rewrite', () => {
+        const refusal = refusalOf({
+            simplified: '<div><p>a</p>\n',
+            strippedHtml: `${WRAPPER_OPEN}<div><p>a</p>\n</div>`,
+            metadata: { elements: new Map() },
+        });
+        expect(refusal.error).toMatch(/read the FULL note with read_note first/);
+        expect(refusal.error).toMatch(/entire note body/);
+    });
 });
 
 describe('buildBlockRawIndex — footer matrix', () => {
@@ -1492,6 +1504,22 @@ describe('selectBlockEdits — read window', () => {
             .toEqual(['address_outside_read_window']);
     });
 
+    // `{from: 0, to: 0}` means "this response showed no note lines", so the
+    // generic branch would format it as a "(0–0)" range the model cannot use.
+    it('gives the empty window its own message, with no (0–0) range', () => {
+        const index = buildIndex(f());
+        const result = select(index, [replaceEdit(index, 1, '<p>x</p>')], {
+            readWindow: { from: 0, to: 0 },
+        });
+        expect(skipCodes(result)).toEqual(['address_outside_read_window']);
+        const reason = expectOk(result).skipped[0].reason;
+        expect(reason).toMatch(/showed no note lines/);
+        expect(reason).not.toMatch(/0–0/);
+        expect(reason).not.toMatch(/range you last read/);
+        // Here a re-read genuinely IS the fix: nothing was shown to address.
+        expect(reason).toMatch(/read_note/);
+    });
+
     it('reports out-of-range before out-of-window', () => {
         const index = buildIndex(f());
         expect(skipCodes(select(index, [replaceEdit(index, 1, 'x')].map((e) => ({ ...e, block: 999 })), {
@@ -1564,6 +1592,16 @@ describe('selectBlockEdits — shape validation', () => {
         const result = select(i, [{ index: 0, op: 'replace', block: 99, content: 'x', expect: 'y' }]);
         expect(skipCodes(result)).toEqual(['block_out_of_range']);
         expect(expectOk(result).skipped[0].reason).toMatch(/this note has 4 block\(s\)/);
+    });
+
+    // The snapshot verified, so the note has NOT drifted: a re-read would be a
+    // wasted round trip and would blame a cause that did not happen.
+    it('does not order a re-read for an out-of-range address', () => {
+        const i = index();
+        const result = select(i, [{ index: 0, op: 'replace', block: 99, content: 'x', expect: 'y' }]);
+        const reason = expectOk(result).skipped[0].reason;
+        expect(reason).toMatch(/Address a block between 1 and 4\./);
+        expect(reason).not.toMatch(/read_note/);
     });
 
     // Without the bounds gate these index past `rawLineRanges` and throw a
