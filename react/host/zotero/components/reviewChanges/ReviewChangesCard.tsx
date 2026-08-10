@@ -9,7 +9,6 @@ import {
     defaultAnnotationPanelState,
     markReviewToolcallResolvedAtom,
     setAnnotationBusyStateAtom,
-    setAnnotationPanelStateAtom,
     toggleAnnotationPanelVisibilityAtom,
 } from '../../../../atoms/messageUIState';
 import { applyAgentActionsAtom, rejectAgentActionsAtom } from '../../agentActionExecution';
@@ -46,6 +45,7 @@ interface ReviewChangesCardProps {
 export const ReviewChangesCard: React.FC<ReviewChangesCardProps> = ({ run, rows }) => {
     const [isHovered, setIsHovered] = useState(false);
     const [showAllRows, setShowAllRows] = useState(false);
+    const [isBulkRunning, setIsBulkRunning] = useState(false);
 
     const applyAgentActions = useSetAtom(applyAgentActionsAtom);
     const rejectAgentActions = useSetAtom(rejectAgentActionsAtom);
@@ -55,19 +55,18 @@ export const ReviewChangesCard: React.FC<ReviewChangesCardProps> = ({ run, rows 
     // the bulk loop sees each tool call's status as of its turn, not of the click.
     const getActionsByToolcall = useAtomValue(getAgentActionsByToolcallAtom);
 
-    // Expansion and the in-flight flags live in the global panel state so they
-    // survive pane switches and the separate window, like the other action cards.
-    // The busy flags must be shared, not component state: two windows on the same
-    // run would otherwise each believe nothing is in flight and both dispatch.
+    // Expansion lives in the global panel state so it survives pane switches and
+    // the separate window, like the other action cards.
     const groupId = `${run.id}:review`;
     const panelStates = useAtomValue(annotationPanelStateAtom);
-    const panelState = panelStates[groupId] ?? defaultAnnotationPanelState;
-    const isExpanded = panelState.resultsVisible;
-    const isBulkRunning = panelState.isApplying;
+    const isExpanded = (panelStates[groupId] ?? defaultAnnotationPanelState).resultsVisible;
     const togglePanelVisibility = useSetAtom(toggleAnnotationPanelVisibilityAtom);
-    const setPanelState = useSetAtom(setAnnotationPanelStateAtom);
 
-    // Rows with a Zotero write in flight, from their own button or from a bulk apply.
+    // Which rows have a Zotero write in flight is shared state, unlike the flags
+    // above: two panes on the same run would otherwise each believe nothing is in
+    // flight and both dispatch the same tool call. Whether *this* card is running a
+    // bulk apply stays local — a shared flag left set by a pane that went away
+    // would disable the card for good, since loading a thread does not reset it.
     const busyRows = useAtomValue(annotationBusyAtom)[groupId] ?? {};
     const setRowBusy = useSetAtom(setAnnotationBusyStateAtom);
     const hasBusyRow = Object.values(busyRows).some(Boolean);
@@ -93,7 +92,7 @@ export const ReviewChangesCard: React.FC<ReviewChangesCardProps> = ({ run, rows 
         const rowsToApply = rows.filter((row) => row.bulkApplicable && !row.resolved);
         if (rowsToApply.length === 0) return;
 
-        setPanelState({ key: groupId, updates: { isApplying: true } });
+        setIsBulkRunning(true);
         try {
             // Sequential on purpose: a 50-action apply must not hammer the Zotero
             // DB, and in-order application keeps multi-step changes (create a
@@ -125,9 +124,9 @@ export const ReviewChangesCard: React.FC<ReviewChangesCardProps> = ({ run, rows 
                 }
             }
         } finally {
-            setPanelState({ key: groupId, updates: { isApplying: false } });
+            setIsBulkRunning(false);
         }
-    }, [applyAgentActions, getActionsByToolcall, groupId, hasBusyRow, isBulkRunning, markResolved, rows, run.id, setPanelState, setRowBusy]);
+    }, [applyAgentActions, getActionsByToolcall, groupId, hasBusyRow, isBulkRunning, markResolved, rows, run.id, setRowBusy]);
 
     const handleBulkReject = useCallback(() => {
         if (isBulkRunning || hasBusyRow) return;
@@ -173,13 +172,14 @@ export const ReviewChangesCard: React.FC<ReviewChangesCardProps> = ({ run, rows 
     const { text: headerText, tone } = getReviewHeaderCopy(rows);
     const hasPendingRows = rows.some((row) => !row.resolved);
     const allApplied = rows.every((row) => row.actions.every((action) => action.status === 'applied'));
-    // A row applying on its own must finish before a bulk run can start, or the
-    // same tool call would be written to Zotero twice.
-    const bulkAvailable = !isBulkRunning && !hasBusyRow;
-    const showBulkReject = hasPendingRows && bulkAvailable;
+    // A row applying on its own must finish before a bulk run starts, or the same
+    // tool call would be written to Zotero twice. Disabled rather than unmounted:
+    // the buttons keep their place, and a write that never reports back leaves the
+    // card looking busy instead of looking like it has no controls at all.
+    const bulkDisabled = isBulkRunning || hasBusyRow;
     // Nothing left for the header ✓ once only non-bulk-applicable rows are pending;
     // showing it then would be a dead click.
-    const showBulkApply = bulkAvailable && rows.some((row) => !row.resolved && row.bulkApplicable);
+    const showBulkApply = rows.some((row) => !row.resolved && row.bulkApplicable);
     const visibleRows = showAllRows ? rows : rows.slice(0, MAX_VISIBLE_ROWS);
 
     const headerIcon = (() => {
@@ -221,18 +221,17 @@ export const ReviewChangesCard: React.FC<ReviewChangesCardProps> = ({ run, rows 
 
                 <div className="flex-1" />
 
-                {(showBulkReject || showBulkApply) && (
+                {hasPendingRows && (
                     <div className="display-flex flex-row items-center gap-25 mr-3 mt-015">
-                        {showBulkReject && (
-                            <Tooltip content="Reject all" showArrow singleLine>
-                                <IconButton
-                                    icon={CancelIcon}
-                                    variant="ghost-secondary"
-                                    iconClassName="font-color-red"
-                                    onClick={handleBulkReject}
-                                />
-                            </Tooltip>
-                        )}
+                        <Tooltip content="Reject all" showArrow singleLine>
+                            <IconButton
+                                icon={CancelIcon}
+                                variant="ghost-secondary"
+                                iconClassName="font-color-red"
+                                onClick={handleBulkReject}
+                                disabled={bulkDisabled}
+                            />
+                        </Tooltip>
                         {showBulkApply && (
                             <Tooltip content="Apply all" showArrow singleLine>
                                 <IconButton
@@ -240,6 +239,7 @@ export const ReviewChangesCard: React.FC<ReviewChangesCardProps> = ({ run, rows 
                                     variant="ghost-secondary"
                                     iconClassName="font-color-green scale-14"
                                     onClick={handleBulkApply}
+                                    disabled={bulkDisabled}
                                 />
                             </Tooltip>
                         )}

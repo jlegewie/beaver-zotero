@@ -13,6 +13,7 @@ import {
 import {
     ActionStatus,
     STATUS_CONFIGS,
+    getCreateAnnotationsDisplayStatus,
     getOverallStatus,
     getActionLabel,
     getActionTitle,
@@ -86,9 +87,10 @@ export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
     const isBusy = isProcessing || isApplying;
     const isDisabled = isBusy || isBulkRunning;
     // A write this row did not click (a bulk apply, or its own from before a
-    // remount) still reads as an apply, so the ✓ stays mounted with its spinner
-    // instead of the row briefly losing its buttons.
-    const activeButton = clickedButton ?? (isApplying ? 'approve' : null);
+    // remount) keeps its button mounted with a spinner instead of the row briefly
+    // losing its buttons. An applied row can only be undoing.
+    const externalButton = row.actions.some((action) => action.status === 'applied') ? 'undo' : 'approve';
+    const activeButton = clickedButton ?? (isApplying ? externalButton : null);
 
     // 'awaiting' while busy: its STATUS_CONFIGS entry carries the spinner icon
     // and keeps the apply/reject vocabulary the in-stream card uses.
@@ -96,7 +98,7 @@ export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
         ? 'awaiting'
         : row.actions.length > 1
             ? getOverallStatus(row.actions)
-            : firstAction.status;
+            : (getCreateAnnotationsDisplayStatus(firstAction) ?? firstAction.status);
     const config = STATUS_CONFIGS[status];
 
     // Pin before dispatching, never after: an apply flips the action's status
@@ -207,7 +209,6 @@ export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
                         variant="ghost"
                         onClick={toggleExpanded}
                         aria-expanded={isExpanded}
-                        disabled={isDisabled}
                         style={GHOST_BUTTON_STYLE}
                     >
                         Review

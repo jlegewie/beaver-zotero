@@ -70,6 +70,7 @@ import {
     buildPreviewData,
     PreviewData,
     getActionCardResolutionStatus,
+    getCreateAnnotationsDisplayStatus,
     shouldAutoCollapseResolvedApproval,
 } from './agentActionViewHelpers';
 import { ActionPreview } from './ActionPreview';
@@ -101,17 +102,6 @@ type HeaderLinkAction = {
 type HeaderLinkActionRule = HeaderLinkAction & {
     matches: () => boolean;
 };
-
-function getCreateAnnotationsDisplayStatus(action: AgentAction): ActionStatus | null {
-    if (!isCreateAnnotationsAgentAction(action) || action.status !== 'applied') return null;
-    const createdCount = Array.isArray(action.result_data?.created)
-        ? action.result_data.created.length
-        : 0;
-    const failedCount = Array.isArray(action.result_data?.failed)
-        ? action.result_data.failed.length
-        : 0;
-    return createdCount === 0 && failedCount > 0 ? 'error' : null;
-}
 
 export const AgentActionView: React.FC<AgentActionViewProps> = ({
     toolcallId,

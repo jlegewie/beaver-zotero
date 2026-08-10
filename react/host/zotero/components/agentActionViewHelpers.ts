@@ -1,5 +1,5 @@
 import React from 'react';
-import { AgentAction, PendingApproval } from '../../../agents/agentActions';
+import { AgentAction, PendingApproval, isCreateAnnotationsAgentAction } from '../../../agents/agentActions';
 import {
     CheckmarkCircleIcon,
     CancelCircleIcon,
@@ -156,6 +156,21 @@ export function getOverallStatus(actions: AgentAction[]): ActionStatus {
     if (statuses.every(s => s === 'rejected' || s === 'undone')) return 'rejected';
 
     return 'pending';
+}
+
+/**
+ * A bulk annotation apply that acked with nothing created reads as an error, not
+ * as the `applied` its action record claims.
+ */
+export function getCreateAnnotationsDisplayStatus(action: AgentAction): ActionStatus | null {
+    if (!isCreateAnnotationsAgentAction(action) || action.status !== 'applied') return null;
+    const createdCount = Array.isArray(action.result_data?.created)
+        ? action.result_data.created.length
+        : 0;
+    const failedCount = Array.isArray(action.result_data?.failed)
+        ? action.result_data.failed.length
+        : 0;
+    return createdCount === 0 && failedCount > 0 ? 'error' : null;
 }
 
 /**
