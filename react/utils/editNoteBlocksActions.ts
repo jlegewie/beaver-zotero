@@ -176,7 +176,10 @@ export async function executeEditNoteBlocksAction(
         threadId,
     });
     if (!plan.ok) {
-        throw new Error(plan.error);
+        // The per-edit reasons ride in `plan.skipped` for the model; this path has
+        // only the thrown message to show on the card, so name the first one.
+        const first = plan.skipped?.[0];
+        throw new Error(first ? `${plan.error} (edit ${first.index}: ${first.reason})` : plan.error);
     }
 
     // 6. Save ONCE.

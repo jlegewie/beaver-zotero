@@ -375,6 +375,17 @@ describe('executeEditNoteBlocksAction (local re-apply)', () => {
         expect(mockItem.setNote).not.toHaveBeenCalled();
     });
 
+    it('names the failing edit when a local re-apply skips every edit', async () => {
+        // The card has only the thrown message to show, so it must not lose the
+        // reason the model-facing payload carries in `skipped`.
+        await expect(
+            executeEditNoteBlocksAction(blocksAction([
+                { index: 0, op: 'replace', block: 2, expect: '<p>Not this text at all.</p>', content: '<p>X</p>' },
+            ])),
+        ).rejects.toThrow(/edit 0: .*does not match block 2/);
+        expect(mockItem.setNote).not.toHaveBeenCalled();
+    });
+
     it('enforces the library exclusion BEFORE any item lookup', async () => {
         vi.mocked(checkLibraryExcluded).mockReturnValue({ message: 'Library 1 is excluded from Beaver.' } as any);
 
