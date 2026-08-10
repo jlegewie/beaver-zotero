@@ -165,7 +165,9 @@ export async function handleItemSearchByMetadataRequest(
             item_type: request.item_type_filter,
             tags: request.tags_filter,
             collection_keys: collectionKeys ? Array.from(collectionKeys) : undefined,
-            limit: request.limit,
+            // The page slice happens after the search, so fetch enough to cover it.
+            // A non-positive limit means unlimited and is passed through as-is.
+            limit: request.limit > 0 ? offset + request.limit : request.limit,
             join_mode: 'all', // AND logic between query params
         };
 
