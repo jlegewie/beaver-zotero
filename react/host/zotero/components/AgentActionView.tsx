@@ -219,7 +219,9 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     const markExternalReferenceImported = useSetAtom(markExternalReferenceImportedAtom);
     const markExternalReferenceDeleted = useSetAtom(markExternalReferenceDeletedAtom);
 
-    const itemTitleKey = `${responseIndex}:${toolcallId}`;
+    // Keyed on the tool call id alone: surfaces without a responseIndex then
+    // share the same resolved title and the same fetch.
+    const itemTitleKey = toolcallId;
     const itemTitleMap = useAtomValue(agentActionItemTitlesAtom);
     const itemTitle = itemTitleMap[itemTitleKey] ?? null;
     const setItemTitle = useSetAtom(setAgentActionItemTitleAtom);
