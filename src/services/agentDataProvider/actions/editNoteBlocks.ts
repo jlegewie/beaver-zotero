@@ -168,11 +168,17 @@ function validateError(
     };
 }
 
+interface ExecuteErrorExtras {
+    refreshed_note?: RefreshedNoteState;
+    /** Per-edit detail the backend turns into the model-facing retry message. */
+    result_data?: Record<string, any>;
+}
+
 function executeError(
     requestId: string,
     error: string,
     error_code: string,
-    refreshed_note?: RefreshedNoteState,
+    extras: ExecuteErrorExtras = {},
 ): WSAgentActionExecuteResponse {
     return {
         type: 'agent_action_execute_response',
@@ -180,7 +186,8 @@ function executeError(
         success: false,
         error,
         error_code,
-        ...(refreshed_note ? { refreshed_note } : {}),
+        ...(extras.refreshed_note ? { refreshed_note: extras.refreshed_note } : {}),
+        ...(extras.result_data ? { result_data: extras.result_data } : {}),
     };
 }
 
@@ -1208,6 +1215,8 @@ export type BlockExecutionPlan =
          * recovery payload is built from it.
          */
         simplified?: string;
+        /** Per-edit reasons for a whole-call refusal, so the model can see why each edit failed. */
+        skipped?: EditNoteBlocksSkippedEdit[];
     }
     | {
         ok: true;
@@ -1356,11 +1365,18 @@ export function planBlockEditsExecution(inputs: BlockExecutionInputs): BlockExec
             return { ok: false, error: selection.refusal.error, errorCode: selection.refusal.errorCode };
         }
         if (selection.applied.length === 0) {
+            // No `block_hint`: nothing was applied, so there is no shift to report.
             return {
                 ok: false,
-                error: `None of the ${edits.length} edit(s) could be applied to the note as it now stands `
-                    + `(edit ${selection.skipped[0]?.index}: ${selection.skipped[0]?.reason ?? 'no reason recorded'}).`,
+                error: `None of the ${edits.length} edit(s) could be applied to the note as it now stands.`,
                 errorCode: 'no_applicable_edits',
+                skipped: selection.skipped.map((s) => ({
+                    index: s.index,
+                    ...(s.client_item_id !== undefined ? { client_item_id: s.client_item_id } : {}),
+                    reason_code: s.reason_code,
+                    reason: s.reason,
+                    ...(s.actual !== undefined ? { actual: s.actual } : {}),
+                })),
             };
         }
         warnings.push(...selection.warnings);
@@ -1616,12 +1632,12 @@ async function executeEditNoteBlocksAction(
         threadId,
     });
     if (!plan.ok) {
-        return executeError(
-            request.request_id, plan.error, plan.errorCode,
-            plan.errorCode === 'snapshot_mismatch' && plan.simplified !== undefined
-                ? buildInlineNoteState(plan.simplified)
-                : undefined,
-        );
+        return executeError(request.request_id, plan.error, plan.errorCode, {
+            ...(plan.errorCode === 'snapshot_mismatch' && plan.simplified !== undefined
+                ? { refreshed_note: buildInlineNoteState(plan.simplified) }
+                : {}),
+            ...(plan.skipped?.length ? { result_data: { skipped: plan.skipped } } : {}),
+        });
     }
 
     checkAborted(ctx, 'edit_note_blocks:before_save');

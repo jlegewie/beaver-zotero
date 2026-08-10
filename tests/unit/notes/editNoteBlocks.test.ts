@@ -664,6 +664,26 @@ describe('executeEditNoteBlocksAction', () => {
         });
     });
 
+    it('ships per-edit reasons in result_data when every edit is skipped', async () => {
+        const response = await handleAgentActionExecuteRequest(executeRequest([
+            { index: 0, op: 'replace', block: 2, expect: '<p>Nothing like this at all.</p>', content: '<p>X</p>' },
+            { index: 1, op: 'replace', block: 99, expect: LINE_3, content: '<p>Y</p>' },
+        ]));
+
+        expect(response).toMatchObject({ success: false, error_code: 'no_applicable_edits' });
+        expect(mockItem.setNote).not.toHaveBeenCalled();
+
+        const result = response.result_data as unknown as EditNoteBlocksResultData;
+        expect(result.skipped).toHaveLength(2);
+        expect(result.skipped[0]).toMatchObject({ index: 0, reason_code: 'expect_mismatch', actual: LINE_2 });
+        expect(result.skipped[0].reason).toContain('expect');
+        expect(result.skipped[1]).toMatchObject({ index: 1, reason_code: 'block_out_of_range' });
+        expect(result.skipped[1].reason).toBeTruthy();
+        // Nothing was applied, so there is no shift to advise on.
+        expect(result.skipped[0]).not.toHaveProperty('block_hint');
+        expect(result.skipped[1]).not.toHaveProperty('block_hint');
+    });
+
     it('performs the authoritative note read AFTER every preload and takes no await before setNote', async () => {
         const response = await handleAgentActionExecuteRequest(executeRequest([replaceBlock2]));
         expect(response.success).toBe(true);
@@ -996,8 +1016,11 @@ describe('edit_note_blocks citation rejection', () => {
         expect(response.success).toBe(false);
         expect(noteHtml).toBe(before);
         expect(noteHtml).not.toContain('1-MISSING1');
-        expect(String(response.error)).toContain('does not exist');
-        expect(String(response.error)).toContain('1-MISSING1');
+        // The per-edit reason rides in result_data, not in the flat error.
+        const result = response.result_data as unknown as EditNoteBlocksResultData;
+        expect(result.skipped[0]).toMatchObject({ index: 0, reason_code: 'expansion_failed' });
+        expect(result.skipped[0].reason).toContain('does not exist');
+        expect(result.skipped[0].reason).toContain('1-MISSING1');
     });
 
     it('rejects only the offending edit and applies its sound sibling', async () => {
@@ -1060,7 +1083,8 @@ describe('edit_note_blocks citation rejection', () => {
 
         expect(response.success).toBe(false);
         expect(noteHtml).toBe(before);
-        expect(String(response.error)).toContain('Library 99 is excluded from Beaver.');
+        const result = response.result_data as unknown as EditNoteBlocksResultData;
+        expect(result.skipped[0].reason).toContain('Library 99 is excluded from Beaver.');
 
         // The privacy boundary: no lookup in the excluded library, at all.
         const lookups = vi.mocked((globalThis as any).Zotero.Items.getByLibraryAndKeyAsync).mock.calls;
@@ -1081,6 +1105,7 @@ describe('edit_note_blocks citation rejection', () => {
         expect(response.success).toBe(false);
         expect(noteHtml).toBe(before);
         expect(noteHtml).not.toContain('W123456789');
-        expect(String(response.error)).toContain('external_id="W123456789"');
+        const result = response.result_data as unknown as EditNoteBlocksResultData;
+        expect(result.skipped[0].reason).toContain('external_id="W123456789"');
     });
 });
