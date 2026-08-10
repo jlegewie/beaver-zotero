@@ -915,6 +915,87 @@ export { safeIsInTrash, getItemDetailsForLogging } from "./zoteroItemUtils";
 export { safeFileExists, isLinkedUrlAttachment } from "./attachmentFiles";
 
 /**
+ * The fields duplicate detection compares, extracted and normalized once per item.
+ * Field access and diacritic stripping dominate the cost of an all-pairs comparison,
+ * so callers that compare many items should build these up front.
+ */
+interface ItemDuplicateSignature {
+    id: number;
+    itemTypeID: number;
+    /** Whether the raw field was set, which is what gates the DOI/ISBN comparisons. */
+    hasDoi: boolean;
+    hasIsbn: boolean;
+    doi: string;
+    /** cleanISBN returns false for an unparseable ISBN. */
+    isbn: string | false;
+    /** Normalized title; empty when the item has no title. */
+    title: string;
+    /** Leading year of the raw date field, or NaN. */
+    year: number;
+    /** "<lastname>|<first initial>" per creator, diacritic-free and lowercased. */
+    creators: string[];
+}
+
+function normalizeDuplicateTitle(title: string): string {
+    return Zotero.Utilities.removeDiacritics(title)
+        .replace(/[ !-/:-@[-`{-~]+/g, ' ')
+        .trim()
+        .toLowerCase();
+}
+
+function buildItemDuplicateSignature(item: Zotero.Item): ItemDuplicateSignature {
+    const doi = (item.getField('DOI') as string) || '';
+    const isbnRaw = (item.getField('ISBN') as string) || '';
+    const titleRaw = (item.getField('title', false, true) as string) || '';
+
+    return {
+        id: item.id,
+        itemTypeID: item.itemTypeID,
+        hasDoi: !!doi,
+        hasIsbn: !!isbnRaw,
+        doi: doi.trim().toUpperCase(),
+        isbn: isbnRaw ? Zotero.Utilities.cleanISBN(isbnRaw) : '',
+        title: titleRaw ? normalizeDuplicateTitle(titleRaw) : '',
+        year: parseInt(item.getField('date', false, true) as string),
+        creators: item.getCreators().map((c) => {
+            const lastName = Zotero.Utilities.removeDiacritics(c.lastName || '').toLowerCase();
+            const firstInitial = c.firstName
+                ? Zotero.Utilities.removeDiacritics(c.firstName[0]).toLowerCase()
+                : '';
+            return `${lastName}|${firstInitial}`;
+        }),
+    };
+}
+
+/**
+ * Compare two precomputed signatures. See areItemsDuplicates for the rules.
+ */
+function areSignaturesDuplicates(a: ItemDuplicateSignature, b: ItemDuplicateSignature): boolean {
+    // Same item
+    if (a.id === b.id) return true;
+
+    // Different item types are not duplicates
+    if (a.itemTypeID !== b.itemTypeID) return false;
+
+    // DOI is authoritative when both items have one
+    if (a.hasDoi && b.hasDoi) return a.doi === b.doi;
+
+    // ISBN is authoritative when both items have one
+    if (a.hasIsbn && b.hasIsbn) return a.isbn === b.isbn;
+
+    // Fall back to title plus a corroborating year or creator
+    if (!a.title || a.title !== b.title) return false;
+
+    // Year match (within 1 year)
+    if (!isNaN(a.year) && !isNaN(b.year) && Math.abs(a.year - b.year) <= 1) {
+        return true;
+    }
+
+    // Creator match (at least one last name + first initial)
+    return a.creators.some((c) => b.creators.includes(c));
+}
+
+/**
  * Check if two Zotero items are duplicates based on metadata similarity.
  * Uses logic similar to Zotero's built-in duplicate detection:
  * 1. Same ID = duplicate
@@ -922,78 +1003,16 @@ export { safeFileExists, isLinkedUrlAttachment } from "./attachmentFiles";
  * 3. Matching DOI (case-insensitive) = duplicate
  * 4. Matching ISBN (cleaned) = duplicate
  * 5. Matching normalized title + (year within 1 OR matching creator) = duplicate
- * 
+ *
  * @param item1 First Zotero item to compare
  * @param item2 Second Zotero item to compare
  * @returns true if items are considered duplicates
  */
 export function areItemsDuplicates(item1: Zotero.Item, item2: Zotero.Item): boolean {
-    // Same item
-    if (item1.id === item2.id) return true;
-    
-    // Different item types are not duplicates
-    if (item1.itemTypeID !== item2.itemTypeID) return false;
-    
-    // DOI match (case-insensitive)
-    const doi1 = item1.getField('DOI') as string;
-    const doi2 = item2.getField('DOI') as string;
-    if (doi1 && doi2) {
-        return doi1.trim().toUpperCase() === doi2.trim().toUpperCase();
-    }
-    
-    // ISBN match (cleaned)
-    const isbn1 = item1.getField('ISBN') as string;
-    const isbn2 = item2.getField('ISBN') as string;
-    if (isbn1 && isbn2) {
-        return Zotero.Utilities.cleanISBN(isbn1) === Zotero.Utilities.cleanISBN(isbn2);
-    }
-    
-    // Title normalization and comparison
-    const title1Raw = item1.getField('title', false, true) as string;
-    const title2Raw = item2.getField('title', false, true) as string;
-    
-    if (!title1Raw || !title2Raw) return false;
-    
-    const normalizeTitle = (title: string): string => {
-        return Zotero.Utilities.removeDiacritics(title)
-            .replace(/[ !-/:-@[-`{-~]+/g, ' ')
-            .trim()
-            .toLowerCase();
-    };
-    
-    const title1 = normalizeTitle(title1Raw);
-    const title2 = normalizeTitle(title2Raw);
-    
-    if (title1 !== title2 || !title1) return false;
-    
-    // Year match (within 1 year)
-    const year1 = parseInt(item1.getField('date', false, true) as string);
-    const year2 = parseInt(item2.getField('date', false, true) as string);
-    if (!isNaN(year1) && !isNaN(year2) && Math.abs(year1 - year2) <= 1) {
-        return true;
-    }
-    
-    // Creator match (at least one last name + first initial)
-    const creators1 = item1.getCreators();
-    const creators2 = item2.getCreators();
-    
-    for (const c1 of creators1) {
-        const ln1 = Zotero.Utilities.removeDiacritics(c1.lastName || '').toLowerCase();
-        const fi1 = c1.firstName 
-            ? Zotero.Utilities.removeDiacritics(c1.firstName[0]).toLowerCase() 
-            : '';
-        
-        for (const c2 of creators2) {
-            const ln2 = Zotero.Utilities.removeDiacritics(c2.lastName || '').toLowerCase();
-            const fi2 = c2.firstName 
-                ? Zotero.Utilities.removeDiacritics(c2.firstName[0]).toLowerCase() 
-                : '';
-            
-            if (ln1 === ln2 && fi1 === fi2) return true;
-        }
-    }
-    
-    return false;
+    return areSignaturesDuplicates(
+        buildItemDuplicateSignature(item1),
+        buildItemDuplicateSignature(item2)
+    );
 }
 
 /**
@@ -1009,34 +1028,37 @@ export function deduplicateItems(
     preferredLibraryId: number = 1
 ): Zotero.Item[] {
     if (items.length <= 1) return items;
-    
+
+    // Comparison is all-pairs, so extract each item's fields once instead of on
+    // every comparison. This keeps deep result pages cheap.
+    const signatures = items.map(buildItemDuplicateSignature);
+
     const result: Zotero.Item[] = [];
     const processedIndices = new Set<number>();
-    
+
     for (let i = 0; i < items.length; i++) {
         if (processedIndices.has(i)) continue;
-        
-        const item = items[i];
-        let bestItem = item;
-        
+
+        let bestItem = items[i];
+
         // Find all duplicates of this item
         for (let j = i + 1; j < items.length; j++) {
             if (processedIndices.has(j)) continue;
-            
+
             const otherItem = items[j];
-            if (areItemsDuplicates(item, otherItem)) {
+            if (areSignaturesDuplicates(signatures[i], signatures[j])) {
                 processedIndices.add(j);
-                
+
                 // Prefer item from preferred library
                 if (otherItem.libraryID === preferredLibraryId && bestItem.libraryID !== preferredLibraryId) {
                     bestItem = otherItem;
                 }
             }
         }
-        
+
         result.push(bestItem);
     }
-    
+
     return result;
 }
 
