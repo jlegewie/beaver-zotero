@@ -1591,7 +1591,7 @@ export async function executeEditNoteBatchAction(
  *
  * Also serves `edit_note_blocks` undo, whose records are this same shape with a
  * different discriminant; `react/utils/editNoteBlocksActions.ts` maps them (in
- * particular `block: 'all'` → `rewrite`) before calling in, and passes its own
+ * particular `op: 'rewrite'` → `rewrite`) before calling in, and passes its own
  * `logPrefix` so the diagnostic lines name the variant that is actually running.
  */
 export function applyBatchUndoRecord(

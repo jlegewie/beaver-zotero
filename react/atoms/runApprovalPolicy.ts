@@ -85,7 +85,7 @@ export function getToolGroup(toolName: string): string | null {
  *
  * BOTH multi-edit variants stamp `destructive_rewrite`. `edit_note_blocks` in
  * fact reaches the classification by a second route the batch variant cannot —
- * `delete from_block:1 to_block:<total>`, or an edit set that guts the note —
+ * `delete block:1 to:<total>`, or an edit set that guts the note —
  * so leaving it out here would let an ordinary note-edit run grant authorize a
  * destructive block rewrite.
  */

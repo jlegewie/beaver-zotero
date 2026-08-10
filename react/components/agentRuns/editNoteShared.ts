@@ -115,7 +115,7 @@ export function getEditNoteCallVariant({
 /**
  * Human label for how one block edit addresses the note, e.g.
  * `replace · block 5`, `insert · after 12`, `delete · blocks 4-7`,
- * `replace · whole note`.
+ * `rewrite · whole note`.
  *
  * Reads ONLY the persisted addressing fields, which is why it can live in the
  * render layer: nothing here consults the note, prefs, or the editor.
@@ -128,9 +128,10 @@ export function getEditNoteCallVariant({
 export function describeBlockEdit(edit: Record<string, any> | null | undefined): string {
     const op = typeof edit?.op === 'string' ? edit.op : '';
     switch (op) {
+        case 'rewrite':
+            return 'rewrite · whole note';
         case 'replace': {
             const block = edit!.block;
-            if (block === 'all') return 'replace · whole note';
             return typeof block === 'number' ? `replace · block ${block}` : 'replace';
         }
         case 'insert': {
@@ -140,8 +141,8 @@ export function describeBlockEdit(edit: Record<string, any> | null | undefined):
             return typeof after === 'number' ? `insert · after ${after}` : 'insert';
         }
         case 'delete': {
-            const from = edit!.from_block;
-            const to = edit!.to_block;
+            const from = edit!.block;
+            const to = edit!.to;
             if (typeof from !== 'number') return 'delete';
             return typeof to === 'number' && to > from
                 ? `delete · blocks ${from}-${to}`
@@ -208,7 +209,11 @@ export function deriveEditNoteRows({
             const editIndex = typeof edit?.index === 'number' ? edit.index : position;
             return {
                 editIndex,
-                operation: edit?.operation ?? 'str_replace',
+                // `operation` is written by validation, so a row whose validation
+                // failed has none. `op: 'rewrite'` is a direct discriminant on the
+                // raw tool args, so a failed rewrite still renders as one instead
+                // of an ordinary str_replace.
+                operation: edit?.operation ?? (edit?.op === 'rewrite' ? 'rewrite' : 'str_replace'),
                 // The preview triple is written by VALIDATION, so a block edit
                 // only has it once an action exists. Fall back to the raw tool
                 // args (`expect` / `content`) so a card whose validation FAILED
@@ -218,7 +223,12 @@ export function deriveEditNoteRows({
                 // group auto-expands on error — so without this the user sees
                 // an expanded "3 Note Edits" card whose every row is an empty
                 // diff box, which reads as "nothing changes here".
-                oldString: edit?.old_string ?? (isBlocks ? edit?.expect ?? '' : ''),
+                //
+                // An insert's `expect` is excluded: it confirms the ANCHOR block,
+                // which the insert leaves untouched, so feeding it to `oldString`
+                // would render the anchor as deleted text.
+                oldString: edit?.old_string
+                    ?? (isBlocks && edit?.op !== 'insert' ? edit?.expect ?? '' : ''),
                 newString: edit?.new_string ?? (isBlocks ? edit?.content ?? '' : ''),
                 occurrencesReplaced: appliedByIndex.get(editIndex),
                 ...(isBlocks ? { label: describeBlockEdit(edit) } : {}),

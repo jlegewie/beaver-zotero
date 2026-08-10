@@ -119,8 +119,8 @@ describe('buildBatchRowPreviewData — edit_note_blocks rows', () => {
     const blockEdit = {
         index: 1,
         op: 'delete',
-        from_block: 4,
-        to_block: 7,
+        block: 4,
+        to: 7,
         operation: 'str_replace',
         old_string: '<p>Four</p>',
         new_string: '',

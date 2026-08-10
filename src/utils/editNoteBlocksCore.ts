@@ -153,10 +153,9 @@ export interface BlockEditSpec {
     index: number;
     client_item_id?: string;
     op: EditNoteBlocksOp;
-    block?: number | 'all';
+    block?: number;
     after?: number | 'end';
-    from_block?: number;
-    to_block?: number;
+    to?: number;
     expect?: string;
     expect_end?: string;
     content?: string;
@@ -277,7 +276,7 @@ function checkNoRewrittenElementSpansNewline(
             `Cannot address this note by block number: the note element "${key}" spans a line `
             + 'break in the stored note HTML, which the simplified projection does not preserve, '
             + 'so simplified line numbers cannot be mapped back to the note reliably. '
-            + 'Use block:"all" to rewrite the whole note body instead.'
+            + 'Use a sole op:"rewrite" edit to rewrite the whole note body instead.'
         );
     }
     return null;
@@ -331,7 +330,7 @@ export function buildBlockRawIndex(
         return refuse(
             'Cannot address this note by block number: its stored HTML has no recognizable '
             + '<div data-schema-version="…"> wrapper, so the editable body cannot be located. '
-            + 'Use block:"all" to rewrite the whole note body instead — it preserves the '
+            + 'Use a sole op:"rewrite" edit to rewrite the whole note body instead — it preserves the '
             + 'wrapper and needs no block numbering.',
         );
     }
@@ -416,7 +415,7 @@ export function buildBlockRawIndex(
             'Cannot address this note by block number: the note\'s stored HTML has '
             + `${rawLineRanges.length} addressable line(s) but the simplified view has `
             + `${simplifiedLines.length}, so block numbers cannot be mapped back to the note `
-            + 'reliably. Use block:"all" to rewrite the whole note body instead.',
+            + 'reliably. Use a sole op:"rewrite" edit to rewrite the whole note body instead.',
         );
     }
 
@@ -907,16 +906,22 @@ function outermostTag(line: string): OutermostTag | null {
     return m ? { closing: m[1] === '/', name: m[2].toLowerCase() } : null;
 }
 
+/** Outcome of one `expect`-vs-line comparison. */
+export type ExpectMatchOutcome = 'match' | 'mismatch' | 'too_short';
+
 /**
  * Does `expect` confirm `line`?
  *
  * Two regimes, both in simplified space:
  *
  * 1. LINES WITH VISIBLE TEXT — `expect`'s projection must be a PREFIX of the
- *    line's projection, with a floor of {@link EXPECT_MIN_NON_WHITESPACE}
- *    non-whitespace characters (or the full projection when the projection is
- *    shorter). The model is NEVER required to reproduce a truncation boundary
- *    exactly.
+ *    line's projection (or, with `allowSuffix`, a SUFFIX — insert anchors say
+ *    "after this block", so models naturally quote the END of the anchor's
+ *    text), with a floor of {@link EXPECT_MIN_NON_WHITESPACE} non-whitespace
+ *    characters (or the full projection when the projection is shorter). The
+ *    model is NEVER required to reproduce a truncation boundary exactly. A
+ *    correctly-placed but under-floor `expect` is reported as `too_short`
+ *    rather than `mismatch`, so the skip message can name the actual fix.
  *
  * 2. LINES WITH NO VISIBLE TEXT — 55.9% of all lines in the measured library
  *    (`<li>` 2470, `</li>` 2470, `<td>`/`</td>` 584 each, `<ul>`/`</ul>` 486
@@ -945,30 +950,45 @@ function outermostTag(line: string): OutermostTag | null {
  * here rather than inside {@link projectVisibleText} on purpose:
  * `verifyLineProjection` must stay byte-strict.
  */
-export function matchesExpect(expect: string, line: string): boolean {
+export function matchExpect(
+    expect: string,
+    line: string,
+    opts?: { allowSuffix?: boolean },
+): ExpectMatchOutcome {
     const lineProjection = canonicalizeForExpect(projectVisibleText(line));
     const expectProjection = canonicalizeForExpect(projectVisibleText(expect));
 
     if (lineProjection !== '') {
-        if (!lineProjection.startsWith(expectProjection)) return false;
-        if (expectProjection === lineProjection) return true;
-        return countNonWhitespace(expectProjection) >= EXPECT_MIN_NON_WHITESPACE;
+        // An expect with no visible text (empty, or tag-only) cannot confirm a
+        // line that has some — `startsWith('')` is vacuously true, and calling
+        // it `too_short` would claim a match that was never established and
+        // steer the model toward lengthening a quote instead of re-reading.
+        if (expectProjection === '') return 'mismatch';
+        const placed = lineProjection.startsWith(expectProjection)
+            || (!!opts?.allowSuffix && lineProjection.endsWith(expectProjection));
+        if (!placed) return 'mismatch';
+        if (expectProjection === lineProjection) return 'match';
+        return countNonWhitespace(expectProjection) >= EXPECT_MIN_NON_WHITESPACE
+            ? 'match'
+            : 'too_short';
     }
 
     const lineTag = outermostTag(line);
     const expectTag = outermostTag(expect);
     if (lineTag === null) {
         // Genuinely empty (or whitespace-only) line.
-        return expectTag === null && expectProjection === '';
+        return expectTag === null && expectProjection === '' ? 'match' : 'mismatch';
     }
-    if (expectTag === null) return false;
+    if (expectTag === null) return 'mismatch';
     // An `expect` carrying visible text cannot be confirming a line that has
     // none. Without this, `expect: "<p>some prose I remember</p>"` passes
     // against `<p><citation id=… ref=…/></p>` purely because the outermost tags
     // agree — and on a `replace`, `expect` is the ONLY content guard, so a stale
     // block number pointing at a token-only paragraph would apply silently.
-    if (expectProjection !== '') return false;
-    return expectTag.closing === lineTag.closing && expectTag.name === lineTag.name;
+    if (expectProjection !== '') return 'mismatch';
+    return expectTag.closing === lineTag.closing && expectTag.name === lineTag.name
+        ? 'match'
+        : 'mismatch';
 }
 
 // =============================================================================
@@ -1013,20 +1033,20 @@ function isBlockNumber(v: unknown): v is number {
  */
 function checkShape(spec: BlockEditSpec): SkipDraft | null {
     const { op } = spec;
+    if (op === 'rewrite') {
+        return skip(
+            'invalid_edit',
+            'op:"rewrite" is a whole-body rewrite and is not handled by the block-addressing '
+            + 'engine. It must be sent as the sole edit in the request.',
+        );
+    }
     if (op !== 'replace' && op !== 'insert' && op !== 'delete') {
-        return skip('invalid_edit', `Unknown op "${String(op)}"; expected "replace", "insert" or "delete".`);
+        return skip('invalid_edit', `Unknown op "${String(op)}"; expected "replace", "insert", "delete" or "rewrite".`);
     }
 
     if (op === 'replace') {
-        if (spec.block === 'all') {
-            return skip(
-                'invalid_edit',
-                'block:"all" is a whole-body rewrite and is not handled by the block-addressing '
-                + 'engine. It must be sent as the sole edit in the request.',
-            );
-        }
         if (!isBlockNumber(spec.block)) {
-            return skip('invalid_edit', 'replace requires `block` — a 1-based integer block number (or "all").');
+            return skip('invalid_edit', 'replace requires `block` — a 1-based integer block number.');
         }
         if (typeof spec.content !== 'string') {
             return skip('invalid_edit', 'replace requires `content` (the new text for the block, in simplified format).');
@@ -1047,31 +1067,40 @@ function checkShape(spec: BlockEditSpec): SkipDraft | null {
         if (typeof spec.content !== 'string') {
             return skip('invalid_edit', 'insert requires `content` (the text to insert, in simplified format).');
         }
-        // `expect` is deliberately IGNORED for insert: an insert overwrites no
-        // line, and `after: 0` / `after: "end"` name a seam rather than a block.
+        // An insert overwrites no line, but a numbered anchor still needs its
+        // `expect` so an off-by-one `after` is caught instead of silently
+        // placing content at the wrong seam. `after: 0` / `after: "end"` name a
+        // seam rather than a block, so they take no expect.
+        if (typeof after === 'number' && after >= 1) {
+            if (typeof spec.expect !== 'string') {
+                return skip('invalid_edit', 'insert requires `expect` — the text of the block you are inserting after.');
+            }
+        } else if (spec.expect !== undefined) {
+            return skip('invalid_edit', '`expect` is not valid for after:0 or after:"end" — they address no block.');
+        }
         return null;
     }
 
     // delete
-    if (!isBlockNumber(spec.from_block)) {
-        return skip('invalid_edit', 'delete requires `from_block` — a 1-based integer block number.');
+    if (!isBlockNumber(spec.block)) {
+        return skip('invalid_edit', 'delete requires `block` — a 1-based integer block number.');
     }
-    if (spec.to_block !== undefined && !isBlockNumber(spec.to_block)) {
-        return skip('invalid_edit', '`to_block` must be a 1-based integer block number.');
+    if (spec.to !== undefined && !isBlockNumber(spec.to)) {
+        return skip('invalid_edit', '`to` must be a 1-based integer block number.');
     }
-    const to = spec.to_block ?? spec.from_block;
-    if (to < spec.from_block) {
-        return skip('invalid_edit', `\`to_block\` (${to}) is before \`from_block\` (${spec.from_block}).`);
+    const to = spec.to ?? spec.block;
+    if (to < spec.block) {
+        return skip('invalid_edit', `\`to\` (${to}) is before \`block\` (${spec.block}).`);
     }
     if (typeof spec.expect !== 'string') {
-        return skip('invalid_edit', 'delete requires `expect` — the text you believe is currently at `from_block`.');
+        return skip('invalid_edit', 'delete requires `expect` — the text you believe is currently at `block`.');
     }
-    const isMultiLine = to > spec.from_block;
+    const isMultiLine = to > spec.block;
     if (isMultiLine && typeof spec.expect_end !== 'string') {
-        return skip('invalid_edit', 'a multi-block delete requires `expect_end` — the text you believe is at `to_block`.');
+        return skip('invalid_edit', 'a multi-block delete requires `expect_end` — the text you believe is at `to`.');
     }
     if (!isMultiLine && spec.expect_end !== undefined) {
-        return skip('invalid_edit', '`expect_end` is only valid when `to_block` is greater than `from_block`.');
+        return skip('invalid_edit', '`expect_end` is only valid when `to` is greater than `block`.');
     }
     return null;
 }
@@ -1093,10 +1122,10 @@ function checkBounds(spec: BlockEditSpec, total: number): SkipDraft | null {
         if (after > total) return oor(after, 'after');
         return null;
     }
-    const from = spec.from_block as number;
-    const to = spec.to_block ?? from;
-    if (from > total) return oor(from, 'from_block');
-    if (to > total) return oor(to, 'to_block');
+    const from = spec.block as number;
+    const to = spec.to ?? from;
+    if (from > total) return oor(from, 'block');
+    if (to > total) return oor(to, 'to');
     return null;
 }
 
@@ -1126,10 +1155,10 @@ function checkReadWindow(spec: BlockEditSpec, window: ReadWindow, total: number)
         }
         return inWindow(after) ? null : outside(`after ${after}`);
     }
-    const from = spec.from_block as number;
-    const to = spec.to_block ?? from;
-    if (!inWindow(from)) return outside(`from_block ${from}`);
-    if (!inWindow(to)) return outside(`to_block ${to}`);
+    const from = spec.block as number;
+    const to = spec.to ?? from;
+    if (!inWindow(from)) return outside(`block ${from}`);
+    if (!inWindow(to)) return outside(`to ${to}`);
     return null;
 }
 
@@ -1174,7 +1203,7 @@ function spanSkipCode(kind: OpaqueSpanKind): EditNoteBlocksSkipReasonCode {
  *
  * v1 has NO interior carve-out: no line of a MULTILINE opaque span is editable,
  * interior lines included. What v1 gives up is editing INSIDE multiline math and
- * `<pre>` (multiline annotations are never editable); `block:"all"` remains
+ * `<pre>` (multiline annotations are never editable); `op:"rewrite"` remains
  * available.
  *
  * Whole-element annotation editing is handled by a DIFFERENT mechanism that
@@ -1204,7 +1233,7 @@ function checkSpanRules(index: BlockRawIndex, spec: BlockEditSpec): SkipDraft | 
             `Block ${block} is part of ${label} that spans blocks ${span.startLine}–${span.endLine}. `
             + (span.kind === 'annotation'
                 ? 'Annotation text cannot be edited; annotations may only be moved or deleted whole.'
-                : 'Replace the whole span in one edit, or use block:"all".'),
+                : 'Replace the whole span in one edit, or use a sole op:"rewrite" edit.'),
             block,
         );
     }
@@ -1229,8 +1258,8 @@ function checkSpanRules(index: BlockRawIndex, spec: BlockEditSpec): SkipDraft | 
     // whole-annotation delete is the supported removal path. Containment is
     // decided in SIMPLIFIED SPACE ONLY; because line alignment holds, a range
     // fully covering a span's simplified extent fully covers its raw bytes too.
-    const from = spec.from_block as number;
-    const to = spec.to_block ?? from;
+    const from = spec.block as number;
+    const to = spec.to ?? from;
     for (const span of index.spans) {
         const intersects = span.startLine <= to && from <= span.endLine;
         if (!intersects) continue;
@@ -1261,8 +1290,8 @@ function checkStructuralRules(index: BlockRawIndex, spec: BlockEditSpec): SkipDr
         );
     }
 
-    const from = spec.op === 'replace' ? (spec.block as number) : (spec.from_block as number);
-    const to = spec.op === 'replace' ? from : (spec.to_block ?? from);
+    const from = spec.block as number;
+    const to = spec.op === 'replace' ? from : (spec.to ?? from);
     const text = index.simplifiedLines.slice(from - 1, to).join('\n');
     if (isRangeBalanced(text)) return null;
     return skip(
@@ -1303,28 +1332,39 @@ function checkContentBalance(spec: BlockEditSpec): SkipDraft | null {
 
 /** Gate 6 — `expect` / `expect_end`. */
 function checkExpect(index: BlockRawIndex, spec: BlockEditSpec): SkipDraft | null {
-    if (spec.op === 'insert') return null;
+    const mismatchMessage = (field: string, block: number, outcome: ExpectMatchOutcome): string =>
+        outcome === 'too_short'
+            ? `\`${field}\` matches block ${block} but is too short to confirm it: copy a longer `
+              + 'piece of the block\'s visible text — at least 8 non-space characters, or the '
+              + 'block\'s ENTIRE visible text when it is shorter than that.'
+            : `\`${field}\` does not match block ${block}. Call read_note for the current content of that block.`;
 
-    const first = spec.op === 'replace' ? (spec.block as number) : (spec.from_block as number);
+    if (spec.op === 'insert') {
+        // Only numbered anchors carry an expect; 0 / "end" name a seam. The
+        // anchor is quoted from either end of the block, so suffixes match too.
+        if (typeof spec.after !== 'number' || spec.after < 1) return null;
+        const anchorLine = index.simplifiedLines[spec.after - 1];
+        const outcome = matchExpect(spec.expect as string, anchorLine, { allowSuffix: true });
+        if (outcome !== 'match') {
+            return skip('expect_mismatch', mismatchMessage('expect', spec.after, outcome), spec.after);
+        }
+        return null;
+    }
+
+    const first = spec.block as number;
     const firstLine = index.simplifiedLines[first - 1];
-    if (!matchesExpect(spec.expect as string, firstLine)) {
-        return skip(
-            'expect_mismatch',
-            `\`expect\` does not match block ${first}. Call read_note for the current content of that block.`,
-            first,
-        );
+    const firstOutcome = matchExpect(spec.expect as string, firstLine);
+    if (firstOutcome !== 'match') {
+        return skip('expect_mismatch', mismatchMessage('expect', first, firstOutcome), first);
     }
     if (spec.op === 'delete') {
-        const from = spec.from_block as number;
-        const to = spec.to_block ?? from;
+        const from = spec.block as number;
+        const to = spec.to ?? from;
         if (to > from) {
             const lastLine = index.simplifiedLines[to - 1];
-            if (!matchesExpect(spec.expect_end as string, lastLine)) {
-                return skip(
-                    'expect_end_mismatch',
-                    `\`expect_end\` does not match block ${to}. Call read_note for the current content of that block.`,
-                    to,
-                );
+            const lastOutcome = matchExpect(spec.expect_end as string, lastLine);
+            if (lastOutcome !== 'match') {
+                return skip('expect_end_mismatch', mismatchMessage('expect_end', to, lastOutcome), to);
             }
         }
     }
@@ -1433,8 +1473,8 @@ function buildSplice(
     }
 
     // delete
-    const from = spec.from_block as number;
-    const to = spec.to_block ?? from;
+    const from = spec.block as number;
+    const to = spec.to ?? from;
     const startOffset = rawLineRanges[from - 1].start;
     const endOffset = rawLineRanges[to - 1].end;
     let spliceStart = startOffset;
@@ -1473,7 +1513,7 @@ function rangesIntersect(a: ResolvedRange, b: ResolvedRange): boolean {
  *    model combines them into one `content`.
  * 2. A zero-width insert whose offset equals another edit's range START escapes
  *    strict intersection too — `insert after: 0` resolves to `rawLineRanges[0].start`,
- *    exactly where `replace block 1` / `delete from_block 1` begin. Keeping both
+ *    exactly where `replace block 1` / `delete block 1` begin. Keeping both
  *    is silent corruption, not a cosmetic ordering quirk: `applyResolvedEdits`
  *    splices descending by start and breaks ties by DESCENDING edit index (a
  *    tie-break meant for case 1), so when the insert has the higher request index
@@ -1531,7 +1571,7 @@ export function selectBlockEdits(
         }
         return refuse(
             'Cannot address this note by block number: the note\'s stored HTML and its simplified '
-            + `view do not line up (${check.detail}). Use block:"all" to rewrite the whole note `
+            + `view do not line up (${check.detail}). Use a sole op:"rewrite" edit to rewrite the whole note `
             + 'body instead.',
         );
     };
@@ -1560,13 +1600,13 @@ export function selectBlockEdits(
         if (boundsSkip) { emit(boundsSkip); continue; }
 
         if (spec.op === 'delete') {
-            const from = spec.from_block as number;
-            const to = spec.to_block ?? from;
+            const from = spec.block as number;
+            const to = spec.to ?? from;
             if (to === total && index.simplifiedLines[total - 1] === '') {
                 emit(skip(
                     'invalid_edit',
                     `Block ${total} is the note's trailing empty line and cannot be deleted. `
-                    + `Delete up to block ${total - 1} instead, or use block:"all" to rewrite the note.`,
+                    + `Delete up to block ${total - 1} instead, or use a sole op:"rewrite" edit to rewrite the note.`,
                     total,
                 ));
                 continue;
@@ -1580,8 +1620,8 @@ export function selectBlockEdits(
 
         // 3. a range crossing a footer-skipped line
         if (spec.op === 'delete') {
-            const from = spec.from_block as number;
-            const to = spec.to_block ?? from;
+            const from = spec.block as number;
+            const to = spec.to ?? from;
             const crossSkip = checkSkippedLineCrossing(index, from, to);
             if (crossSkip) { emit(crossSkip); continue; }
         }
@@ -1603,8 +1643,8 @@ export function selectBlockEdits(
         const touched: number[] = [];
         if (spec.op === 'replace') touched.push(spec.block as number);
         else if (spec.op === 'delete') {
-            const from = spec.from_block as number;
-            const to = spec.to_block ?? from;
+            const from = spec.block as number;
+            const to = spec.to ?? from;
             for (let n = from; n <= to; n++) touched.push(n);
         } else if (typeof spec.after === 'number' && spec.after >= 1) touched.push(spec.after);
         for (const block of touched) {

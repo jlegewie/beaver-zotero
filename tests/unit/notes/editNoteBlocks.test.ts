@@ -436,15 +436,15 @@ describe('validateEditNoteBlocksAction', () => {
         expect(response.edit_errors![0].error_code).toBe('block_out_of_range');
     });
 
-    it('rejects a block:"all" edit that shares the request with numbered edits', async () => {
+    it('rejects an op:"rewrite" edit that shares the request with numbered edits', async () => {
         const response = await handleAgentActionValidateRequest(validateRequest([
-            { index: 0, op: 'replace', block: 'all', content: '<p>X</p>' },
+            { index: 0, op: 'rewrite', content: '<p>X</p>' },
             // index 1, so the positional-index invariant (which also returns
             // `invalid_edits`) cannot be what fails first.
             { ...replaceBlock2, index: 1 },
         ]));
         expect(response).toMatchObject({ valid: false, error_code: 'invalid_edits' });
-        expect(response.error).toContain('block:"all"');
+        expect(response.error).toContain('op:"rewrite"');
     });
 
     it('rejects an edit whose index does not match its position', async () => {
@@ -526,7 +526,7 @@ describe('edit_note_blocks destructive escalation', () => {
     it('escalates a block:"all" rewrite that guts the note', async () => {
         useNote(LONG_NOTE_HTML);
         const response = await handleAgentActionValidateRequest(validateRequest(
-            [{ index: 0, op: 'replace', block: 'all', content: '<p>Tiny.</p>' }],
+            [{ index: 0, op: 'rewrite', content: '<p>Tiny.</p>' }],
             { snapshot: undefined },
         ));
 
@@ -541,8 +541,8 @@ describe('edit_note_blocks destructive escalation', () => {
             [{
                 index: 0,
                 op: 'delete',
-                from_block: 1,
-                to_block: LONG_LINES.length,
+                block: 1,
+                to: LONG_LINES.length,
                 expect: LONG_LINES[0],
                 expect_end: LONG_LINES[LONG_LINES.length - 1],
             }],
@@ -558,7 +558,7 @@ describe('edit_note_blocks destructive escalation', () => {
         useNote(LONG_NOTE_HTML);
         const benign = LONG_LINES.map((l) => l.replace('lorem', 'Lorem')).join('\n');
         const response = await handleAgentActionValidateRequest(validateRequest(
-            [{ index: 0, op: 'replace', block: 'all', content: benign }],
+            [{ index: 0, op: 'rewrite', content: benign }],
             { snapshot: undefined },
         ));
 
@@ -570,7 +570,7 @@ describe('edit_note_blocks destructive escalation', () => {
     it('re-checks destructiveness at execute and refuses an unapproved rewrite', async () => {
         useNote(LONG_NOTE_HTML);
         const response = await handleAgentActionExecuteRequest(executeRequest(
-            [{ index: 0, op: 'replace', block: 'all', content: '<p>Tiny.</p>' }],
+            [{ index: 0, op: 'rewrite', content: '<p>Tiny.</p>' }],
             { snapshot: undefined },
         ));
 
@@ -581,7 +581,7 @@ describe('edit_note_blocks destructive escalation', () => {
     it('applies the same rewrite once it carries the destructive_rewrite approval flag', async () => {
         useNote(LONG_NOTE_HTML);
         const response = await handleAgentActionExecuteRequest(executeRequest(
-            [{ index: 0, op: 'replace', block: 'all', content: '<p>Tiny.</p>' }],
+            [{ index: 0, op: 'rewrite', content: '<p>Tiny.</p>' }],
             { snapshot: undefined, destructive_rewrite: true },
         ));
 
@@ -632,7 +632,7 @@ describe('executeEditNoteBlocksAction', () => {
 
     it('applies a block:"all" rewrite through the wrapper-preserving path', async () => {
         const response = await handleAgentActionExecuteRequest(executeRequest(
-            [{ index: 0, op: 'replace', block: 'all', content: '<p>One.</p>\n<p>Two.</p>' }],
+            [{ index: 0, op: 'rewrite', content: '<p>One.</p>\n<p>Two.</p>' }],
             { snapshot: undefined },
         ));
 
@@ -642,13 +642,13 @@ describe('executeEditNoteBlocksAction', () => {
         const result = response.result_data as unknown as EditNoteBlocksResultData;
         expect(result.applied).toEqual([{ index: 0, blocks: '1-2' }]);
         // A whole-body rewrite stores the FULL pre-edit stripped body.
-        expect(result.undo[0]).toMatchObject({ index: 0, op: 'replace', undo_old_html: NOTE_HTML });
+        expect(result.undo[0]).toMatchObject({ index: 0, op: 'rewrite', undo_old_html: NOTE_HTML });
     });
 
     it('emits advisory block_hints for skipped edits using the applied line deltas', async () => {
         const response = await handleAgentActionExecuteRequest(executeRequest([
             // Inserts two lines after block 1, shifting everything below by +2.
-            { index: 0, op: 'insert', after: 1, content: '<p>Inserted A.</p>\n<p>Inserted B.</p>' },
+            { index: 0, op: 'insert', after: 1, expect: LINE_1, content: '<p>Inserted A.</p>\n<p>Inserted B.</p>' },
             // Skipped, but its intended target now lives two blocks lower.
             { index: 1, op: 'replace', block: 3, expect: '<p>Nothing like this at all.</p>', content: '<p>X</p>' },
         ]));
@@ -764,8 +764,8 @@ describe('executeEditNoteBlocksAction', () => {
             [{
                 index: 0,
                 op: 'delete',
-                from_block: 1,
-                to_block: LONG_LINES.length,
+                block: 1,
+                to: LONG_LINES.length,
                 expect: LONG_LINES[0],
                 expect_end: LONG_LINES[LONG_LINES.length - 1],
             }],
@@ -783,8 +783,8 @@ describe('executeEditNoteBlocksAction', () => {
             [{
                 index: 0,
                 op: 'delete',
-                from_block: 1,
-                to_block: LONG_LINES.length,
+                block: 1,
+                to: LONG_LINES.length,
                 expect: LONG_LINES[0],
                 expect_end: LONG_LINES[LONG_LINES.length - 1],
             }],
@@ -818,7 +818,7 @@ describe('edit_note_blocks advisory block ranges', () => {
 
     it('reports the produced range of an insert in the middle of the note', async () => {
         const response = await handleAgentActionExecuteRequest(executeRequest([
-            { index: 0, op: 'insert', after: 1, content: '<p>New A.</p>' },
+            { index: 0, op: 'insert', after: 1, expect: LINE_1, content: '<p>New A.</p>' },
         ]));
         const result = response.result_data as unknown as EditNoteBlocksResultData;
         expect(result.applied).toEqual([{ index: 0, blocks: '2' }]);
@@ -826,7 +826,7 @@ describe('edit_note_blocks advisory block ranges', () => {
 
     it('reports an empty produced range for a delete', async () => {
         const response = await handleAgentActionExecuteRequest(executeRequest([
-            { index: 0, op: 'delete', from_block: 2, expect: LINE_2 },
+            { index: 0, op: 'delete', block: 2, expect: LINE_2 },
         ]));
         const result = response.result_data as unknown as EditNoteBlocksResultData;
         expect(result.applied).toEqual([{ index: 0, blocks: '' }]);
@@ -841,7 +841,7 @@ describe('edit_note_blocks preview pair', () => {
     it('pins the anchor-merge order for insert_after and insert_before', async () => {
         const response = await handleAgentActionValidateRequest(validateRequest([
             { index: 0, op: 'insert', after: 0, content: '<p>Top.</p>' },
-            { index: 1, op: 'insert', after: 2, content: '<p>Middle.</p>' },
+            { index: 1, op: 'insert', after: 2, expect: LINE_2, content: '<p>Middle.</p>' },
         ]));
 
         expect(response.valid).toBe(true);
@@ -901,7 +901,7 @@ describe('edit_note_blocks preview pair', () => {
     it('does not widen a delete into showing borrowed context as deleted', async () => {
         useNote(BLANK_NOTE_HTML);
         const response = await handleAgentActionValidateRequest(validateRequest(
-            [{ index: 0, op: 'delete', from_block: 2, expect: '' }],
+            [{ index: 0, op: 'delete', block: 2, expect: '' }],
             { snapshot: BLANK_SNAPSHOT },
         ));
 
@@ -952,7 +952,7 @@ describe('edit_note_blocks undo', () => {
 
     it('reverts a deletion through the eagerly captured context anchors after drift', async () => {
         const exec = await handleAgentActionExecuteRequest(executeRequest([
-            { index: 0, op: 'delete', from_block: 2, expect: LINE_2 },
+            { index: 0, op: 'delete', block: 2, expect: LINE_2 },
         ]));
         expect(exec.success).toBe(true);
         expect(noteHtml).toBe(`<div data-schema-version="9">${LINE_1}\n${LINE_3}</div>`);

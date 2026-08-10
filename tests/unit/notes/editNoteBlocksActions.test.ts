@@ -353,7 +353,7 @@ describe('executeEditNoteBlocksAction (local re-apply)', () => {
 
     it('rewrites the whole body for a block:"all" edit', async () => {
         const result = await executeEditNoteBlocksAction(blocksAction(
-            [{ index: 0, op: 'replace', block: 'all', content: '<p>An entirely new body.</p>' }],
+            [{ index: 0, op: 'rewrite', content: '<p>An entirely new body.</p>' }],
             { snapshot: undefined },
         ));
 
@@ -402,7 +402,7 @@ describe('undoEditNoteBlocksAction', () => {
         const edits: EditNoteBlocksEditItem[] = [
             { index: 0, op: 'insert', after: 0, content: '<p>Inserted line.</p>' },
             { index: 1, op: 'replace', block: 2, expect: LINE_2, content: '<p>Bravo edited.</p>' },
-            { index: 2, op: 'delete', from_block: 3, expect: LINE_3 },
+            { index: 2, op: 'delete', block: 3, expect: LINE_3 },
         ];
         const result = await executeEditNoteBlocksAction(blocksAction(edits));
         expect(result.applied).toHaveLength(3);
@@ -416,7 +416,7 @@ describe('undoEditNoteBlocksAction', () => {
 
     it('restores the FULL body for a block:"all" record (op/operation mapping gap)', async () => {
         const rewrite: EditNoteBlocksEditItem[] = [
-            { index: 0, op: 'replace', block: 'all', content: '<p>An entirely new body.</p>' },
+            { index: 0, op: 'rewrite', content: '<p>An entirely new body.</p>' },
         ];
         const result = await executeEditNoteBlocksAction(blocksAction(rewrite, { snapshot: undefined }));
         expect(noteHtml).not.toContain(LINE_1);
@@ -439,7 +439,7 @@ describe('undoEditNoteBlocksAction', () => {
     // silently and with no redo.
     it('marks the block:"all" record with undo_scope and only restores wholesale on that marker', async () => {
         const rewrite: EditNoteBlocksEditItem[] = [
-            { index: 0, op: 'replace', block: 'all', content: '<p>An entirely new body.</p>' },
+            { index: 0, op: 'rewrite', content: '<p>An entirely new body.</p>' },
         ];
         const result = await executeEditNoteBlocksAction(blocksAction(rewrite, { snapshot: undefined }));
         expect(result.undo[0].undo_scope).toBe('whole_body');
@@ -489,7 +489,7 @@ describe('undoEditNoteBlocksAction', () => {
 
     it('throws rather than wiping the note when a whole-body record has no pre-edit body', async () => {
         const rewrite: EditNoteBlocksEditItem[] = [
-            { index: 0, op: 'replace', block: 'all', content: '<p>An entirely new body.</p>' },
+            { index: 0, op: 'rewrite', content: '<p>An entirely new body.</p>' },
         ];
         const result = await executeEditNoteBlocksAction(blocksAction(rewrite, { snapshot: undefined }));
         const afterApply = noteHtml;
@@ -630,7 +630,7 @@ describe('executeEditNoteVariantAction', () => {
 
 describe('undoEditNoteVariantAction', () => {
     it('dispatches edit_note_blocks to the blocks undo', async () => {
-        // A `block: 'all'` record: the blocks undo restores the full body, while
+        // An `op: 'rewrite'` record: the blocks undo restores the full body, while
         // the batch replayer would take the deletion-seam path and throw.
         noteHtml = '<div data-schema-version="9"><p>Replaced body.</p></div>';
         await undoEditNoteVariantAction({
@@ -638,7 +638,7 @@ describe('undoEditNoteVariantAction', () => {
             proposed_data: { library_id: 1, zotero_key: 'NOTE0001', edits: [] },
             result_data: {
                 library_id: 1, zotero_key: 'NOTE0001', applied: [], skipped: [],
-                undo: [{ index: 0, op: 'replace', undo_scope: 'whole_body', undo_old_html: NOTE_HTML }],
+                undo: [{ index: 0, op: 'rewrite', undo_scope: 'whole_body', undo_old_html: NOTE_HTML }],
             },
         } as any);
         expect(noteHtml).toBe(NOTE_HTML);
@@ -704,7 +704,7 @@ describe('getEditNoteCallVariant', () => {
             toolArgs: { edits: [{ op: 'insert', after: 0, content: '<p>x</p>' }] },
         })).toBe('blocks');
         expect(getEditNoteCallVariant({
-            toolArgs: { edits: [{ op: 'delete', from_block: 3 }] },
+            toolArgs: { edits: [{ op: 'delete', block: 3 }] },
         })).toBe('blocks');
     });
 

@@ -59,7 +59,7 @@ import {
     buildBlockRawIndex,
     isContainerTag,
     isRangeBalanced,
-    matchesExpect,
+    matchExpect,
     projectVisibleText,
     seamIsStructural,
     selectBlockEdits,
@@ -68,6 +68,11 @@ import {
     type BlockRawIndex,
     type SelectBlockEditsResult,
 } from '../../../src/utils/editNoteBlocksCore';
+
+/** Boolean view of {@link matchExpect}'s prefix regime, for readable asserts. */
+function matchesExpect(expect: string, line: string): boolean {
+    return matchExpect(expect, line) === 'match';
+}
 
 // =============================================================================
 // Fixture helpers — the REAL pipeline
@@ -148,18 +153,26 @@ function deleteEdit(index: BlockRawIndex, from: number, to?: number, i = 0): Blo
     const spec: BlockEditSpec = {
         index: i,
         op: 'delete',
-        from_block: from,
+        block: from,
         expect: index.simplifiedLines[from - 1],
     };
     if (to !== undefined && to !== from) {
-        spec.to_block = to;
+        spec.to = to;
         spec.expect_end = index.simplifiedLines[to - 1];
     }
     return spec;
 }
 
 function select(index: BlockRawIndex, edits: BlockEditSpec[], extra: Record<string, unknown> = {}) {
-    return selectBlockEdits({ index, ...extra } as any, edits);
+    // A numbered insert anchor requires `expect`; fill it from the fixture so
+    // the many tests that target OTHER gates stay readable. Tests exercising
+    // the requirement itself call selectBlockEdits directly.
+    const filled = edits.map((e) => (
+        e.op === 'insert' && typeof e.after === 'number' && e.after >= 1 && e.expect === undefined
+            ? { ...e, expect: index.simplifiedLines[e.after - 1] ?? '' }
+            : e
+    ));
+    return selectBlockEdits({ index, ...extra } as any, filled);
 }
 
 function expectOk(result: SelectBlockEditsResult) {
@@ -278,7 +291,7 @@ describe('buildBlockRawIndex — the walk postcondition', () => {
         const f = fixture('<p>Alpha</p><p>Beta</p>');
         const refusal = refusalOf({ ...f, simplified: `${f.simplified}\n<p>Ghost</p>` });
         expect(refusal.errorCode).toBe('address_resolution_failed');
-        expect(refusal.error).toMatch(/block:"all"/);
+        expect(refusal.error).toMatch(/op:"rewrite"/);
     });
 
     it('refuses when the simplified view has one line FEWER than the note (drift -1)', () => {
@@ -399,7 +412,7 @@ describe('buildBlockRawIndex — body boundaries', () => {
             metadata: { elements: new Map() },
         });
         expect(refusal.errorCode).toBe('address_resolution_failed');
-        expect(refusal.error).toMatch(/block:"all"/);
+        expect(refusal.error).toMatch(/op:"rewrite"/);
     });
 });
 
@@ -558,7 +571,7 @@ describe('verifyLineProjection', () => {
         if (!result.ok) expect(result.errorCode).toBe('address_resolution_failed');
     });
 
-    // A delete verifies EVERY line in its range, not just `from_block` — a guard
+    // A delete verifies EVERY line in its range, not just `block` — a guard
     // that only checked the first line would splice a misaligned tail away.
     it('verifies every line of a multi-block delete, not just the first', () => {
         const f = fixture('<p>Alpha</p><p>Beta</p><p>Gamma</p>');
@@ -650,7 +663,37 @@ describe('seamIsStructural', () => {
 // PART 2e — the expect contract
 // =============================================================================
 
-describe('matchesExpect', () => {
+describe('matchExpect', () => {
+    describe('outcome classification', () => {
+        const line = '<p>Alpha paragraph opens the note.</p>';
+
+        it('reports a correctly-placed but under-floor prefix as too_short', () => {
+            expect(matchExpect('Alpha', line)).toBe('too_short');
+        });
+        it('reports a wrongly-placed expect as mismatch, not too_short', () => {
+            expect(matchExpect('Omega', line)).toBe('mismatch');
+        });
+        it('reports an expect with NO visible text against a text line as mismatch', () => {
+            // startsWith('') is vacuously true; too_short would claim a match
+            // that was never established.
+            expect(matchExpect('', line)).toBe('mismatch');
+            expect(matchExpect('<p>', line)).toBe('mismatch');
+        });
+        it('accepts a suffix only when allowSuffix is set', () => {
+            expect(matchExpect('opens the note.', line, { allowSuffix: true })).toBe('match');
+            expect(matchExpect('opens the note.', line)).toBe('mismatch');
+        });
+        it('applies the floor to suffix matches too', () => {
+            expect(matchExpect('note.', line, { allowSuffix: true })).toBe('too_short');
+        });
+        it('accepts the whole projection of a block shorter than the floor', () => {
+            // The floor never demands more text than the block has: the full
+            // (short) projection is a match, a partial prefix of it is not.
+            expect(matchExpect('Hi.', '<p>Hi.</p>')).toBe('match');
+            expect(matchExpect('Hi', '<p>Hi.</p>')).toBe('too_short');
+        });
+    });
+
     describe('lines with visible text — prefix with a floor', () => {
         const line = '<p>Intro paragraph with <citation id="1-K1" loc="page5" ref="c_K1_0"/> inline.</p>';
 
@@ -898,10 +941,10 @@ describe('selectBlockEdits — splices', () => {
         expect(expectOk(result).applied[0].consumedBlocks).toBe(2);
     });
 
-    it('rejects block:"all" — the action layer routes it elsewhere', () => {
+    it('rejects op:"rewrite" — the action layer routes it elsewhere', () => {
         const f = fixture('<p>Alpha</p>');
         const index = buildIndex(f);
-        const result = select(index, [{ index: 0, op: 'replace', block: 'all', content: 'x', expect: 'y' }]);
+        const result = select(index, [{ index: 0, op: 'rewrite', content: 'x' }]);
         expect(skipCodes(result)).toEqual(['invalid_edit']);
         expect(expectOk(result).skipped[0].reason).toMatch(/whole-body rewrite/);
     });
@@ -1472,20 +1515,48 @@ describe('selectBlockEdits — shape validation', () => {
             { index: 2, op: 'replace', block: 1, content: 'x' },                          // no expect
             { index: 3, op: 'insert', content: 'x' },                                     // no after
             { index: 4, op: 'insert', after: 1 },                                         // no content
-            { index: 5, op: 'delete' },                                                   // no from_block
-            { index: 6, op: 'delete', from_block: 2, to_block: 1, expect: 'y' },          // inverted
-            { index: 7, op: 'delete', from_block: 1, to_block: 2, expect: 'y' },          // no expect_end
-            { index: 8, op: 'delete', from_block: 1, expect: 'y', expect_end: 'z' },      // stray expect_end
+            { index: 5, op: 'delete' },                                                   // no block
+            { index: 6, op: 'delete', block: 2, to: 1, expect: 'y' },          // inverted
+            { index: 7, op: 'delete', block: 1, to: 2, expect: 'y' },          // no expect_end
+            { index: 8, op: 'delete', block: 1, expect: 'y', expect_end: 'z' },      // stray expect_end
             { index: 9, op: 'replace', block: 1.5 as any, content: 'x', expect: 'y' },    // non-integer
-            { index: 10, op: 'insert', after: -1, content: 'x' },                         // negative
+            { index: 10, op: 'insert', after: -1, expect: 'y', content: 'x' },            // negative
+            { index: 11, op: 'insert', after: 0, expect: 'y', content: 'x' },             // expect on a seam
+            { index: 12, op: 'insert', after: 'end', expect: 'y', content: 'x' },         // expect on a seam
         ];
         expect(skipCodes(select(i, cases))).toEqual(cases.map(() => 'invalid_edit'));
     });
 
-    it('ignores `expect` on inserts', () => {
+    it('requires `expect` on a numbered insert anchor', () => {
         const i = index();
-        expect(skipCodes(select(i, [{ index: 0, op: 'insert', after: 1, content: '<p>x</p>', expect: 'nonsense' }])))
-            .toEqual([]);
+        // Direct call: the select() helper auto-fills insert expects.
+        const result = selectBlockEdits(
+            { index: i } as any,
+            [{ index: 0, op: 'insert', after: 1, content: '<p>x</p>' }],
+        );
+        expect(skipCodes(result)).toEqual(['invalid_edit']);
+        expect(expectOk(result).skipped[0].reason).toMatch(/insert requires `expect`/);
+    });
+
+    it('checks an insert anchor `expect` against block `after`, either end', () => {
+        const f = fixture('<p>Alpha paragraph opens</p><p>Beta paragraph closes</p>');
+        const index = buildIndex(f);
+        const at = (expectValue: string) => skipCodes(select(index, [
+            { index: 0, op: 'insert', after: 2, expect: expectValue, content: '<p>x</p>' },
+        ]));
+        expect(at('Beta paragraph')).toEqual([]);            // prefix
+        expect(at('paragraph closes')).toEqual([]);          // suffix
+        expect(at('Something else entirely')).toEqual(['expect_mismatch']);
+    });
+
+    it('reports a correctly-placed but too-short expect as such', () => {
+        const f = fixture('<p>Alpha paragraph opens the note</p>');
+        const index = buildIndex(f);
+        const result = select(index, [
+            { index: 0, op: 'replace', block: 1, expect: 'Alpha', content: '<p>x</p>' },
+        ]);
+        expect(skipCodes(result)).toEqual(['expect_mismatch']);
+        expect(expectOk(result).skipped[0].reason).toMatch(/too short/);
     });
 
     it('reports block_out_of_range with the note size', () => {
@@ -1497,13 +1568,13 @@ describe('selectBlockEdits — shape validation', () => {
 
     // Without the bounds gate these index past `rawLineRanges` and throw a
     // TypeError instead of skipping, so the gate needs its own pin per op.
-    it('bounds-checks insert `after` and delete `to_block`, not just replace', () => {
+    it('bounds-checks insert `after` and delete `to`, not just replace', () => {
         const i = index();
         expect(skipCodes(select(i, [{ index: 0, op: 'insert', after: 99, content: 'x' }])))
             .toEqual(['block_out_of_range']);
-        expect(skipCodes(select(i, [{ index: 0, op: 'delete', from_block: 1, to_block: 99, expect: '<p>A</p>', expect_end: 'z' }])))
+        expect(skipCodes(select(i, [{ index: 0, op: 'delete', block: 1, to: 99, expect: '<p>A</p>', expect_end: 'z' }])))
             .toEqual(['block_out_of_range']);
-        expect(skipCodes(select(i, [{ index: 0, op: 'delete', from_block: 99, expect: 'z' }])))
+        expect(skipCodes(select(i, [{ index: 0, op: 'delete', block: 99, expect: 'z' }])))
             .toEqual(['block_out_of_range']);
     });
 });
@@ -1521,7 +1592,7 @@ describe('selectBlockEdits — expect gate', () => {
         const f = fixture('<p>Alpha paragraph</p><p>Beta paragraph</p><p>Gamma paragraph</p>');
         const index = buildIndex(f);
         const result = select(index, [{
-            index: 0, op: 'delete', from_block: 1, to_block: 2,
+            index: 0, op: 'delete', block: 1, to: 2,
             expect: '<p>Alpha paragraph</p>', expect_end: '<p>Wrong end</p>',
         }]);
         expect(skipCodes(result)).toEqual(['expect_end_mismatch']);

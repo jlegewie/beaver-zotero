@@ -145,7 +145,7 @@ export interface ReadWindow {
  * Builder and validator MUST agree on this literal byte-for-byte — it is part
  * of the digest input, and it is what a response that ships a token WITHOUT the
  * note body carries, so every numeric address against it fails closed until the
- * model re-reads. (`block: 'all'` needs no window and stays available.)
+ * model re-reads. (`op: 'rewrite'` needs no window and stays available.)
  */
 export const EMPTY_READ_WINDOW: ReadWindow = Object.freeze({ from: 0, to: 0 });
 

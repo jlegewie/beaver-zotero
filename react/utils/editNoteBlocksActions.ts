@@ -17,7 +17,7 @@
  * per-edit DISPLAY metadata (`skip_reason_code`, `old_string`, `new_string`,
  * `target_*_context`) written by validation for the card and the diff preview.
  * None of it is execution input: `planBlockEditsExecution` reads only the
- * addressing fields (`op`/`block`/`after`/`from_block`/`to_block`/`expect`/
+ * addressing fields (`op`/`block`/`after`/`to`/`expect`/
  * `expect_end`/`content`) and re-resolves every edit against the note as it
  * stands now. An edit validation marked skipped is re-evaluated and may apply;
  * an edit validation accepted may now be skipped. Partial application, same as
@@ -229,8 +229,8 @@ export async function executeEditNoteBlocksAction(
 }
 
 /**
- * True for the one record shape that restores the WHOLE body: the undo of a
- * `block: 'all'` rewrite.
+ * True for the one record shape that restores the WHOLE body: the undo of an
+ * `op: 'rewrite'` edit.
  *
  * Every other record comes from `applyResolvedEdits`, whose drafts always set
  * `undo_new_html` to a string (`''` for a pure deletion). A missing
@@ -245,7 +245,7 @@ function isWholeBodyRestore(record: EditNoteBlocksUndoRecord): boolean {
     // only disagree if a record was built wrong or mangled in transit, and on
     // this path "guess" means "replace the whole note with a fragment", so
     // refuse instead. The marker is what SELECTS this path; this is the assert.
-    if (record.op !== 'replace' || record.undo_new_html !== undefined) {
+    if (record.op !== 'rewrite' || record.undo_new_html !== undefined) {
         throw new Error(
             `Cannot undo edit ${record.index}: its undo record is marked as a whole-note `
             + 'restore but does not have the shape of one. Refusing rather than risking '
@@ -261,8 +261,8 @@ function isWholeBodyRestore(record: EditNoteBlocksUndoRecord): boolean {
  *
  * THE MAPPING GAP THIS CLOSES. `applyBatchUndoRecord` dispatches on the BATCH
  * `operation` field and defaults a record without one to `str_replace`. A block
- * record has no `operation` at all — it has `op` — so a `block: 'all'` record
- * (`op: 'replace'`, no `undo_new_html`) would otherwise default to
+ * record has no `operation` at all — it has `op` — so a whole-body rewrite record
+ * (`op: 'rewrite'`, no `undo_new_html`) would otherwise default to
  * `str_replace` with an empty `undo_new_html`, take the deletion-seam path, and
  * fail on its missing context anchors instead of restoring the full body. It is
  * mapped to `rewrite` explicitly here.
@@ -302,7 +302,7 @@ function toBatchUndoRecord(record: EditNoteBlocksUndoRecord): EditNoteBatchUndoR
 /**
  * Undo an applied `edit_note_blocks` action by replaying its per-edit undo
  * records in reverse order through the shared relocation machinery. An action
- * whose sole edit was a `block: 'all'` rewrite restores the full pre-edit body
+ * whose sole edit was an `op: 'rewrite'` edit restores the full pre-edit body
  * from `undo_old_html`.
  *
  * The fully-restored HTML is built in memory first (replaying every record

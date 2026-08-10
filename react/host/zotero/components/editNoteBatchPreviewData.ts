@@ -68,7 +68,7 @@ function findSourceEdit(
  * A batch row's edit is REBUILT from the row descriptor — the descriptor holds
  * everything the batch preview reads. A block row's edit is instead passed
  * through VERBATIM: its preview also reads the addressing fields (`op`,
- * `block`/`after`/`from_block`/`to_block`) and the skip reason, none of which
+ * `block`/`after`/`to`) and the skip reason, none of which
  * survive a rebuild, and copying them field by field would just be a second
  * place to forget one.
  */

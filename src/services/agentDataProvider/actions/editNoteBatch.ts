@@ -859,7 +859,7 @@ export function buildUndoList(drafts: BatchUndoDraft[]): EditNoteBatchUndoRecord
  * around the replacement.
  *
  * Extracted so the whole-body rewrite path has exactly ONE implementation:
- * `edit_note_blocks`' `block: "all"` needs the same semantics but a completely
+ * `edit_note_blocks`' `op: "rewrite"` needs the same semantics but a completely
  * different result envelope, so it reuses this core rather than
  * `executeSingleRewrite` (whose signature is bound to the batch shapes) and
  * rather than copy-pasting the wrapper-slicing logic.

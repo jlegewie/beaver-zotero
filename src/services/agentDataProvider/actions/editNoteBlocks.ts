@@ -190,10 +190,10 @@ function executeError(
 
 /** True for the one edit shape that needs no snapshot and no block numbering. */
 function isWholeBodyRewrite(edit: EditNoteBlocksEditItem | undefined): boolean {
-    return !!edit && edit.op === 'replace' && edit.block === 'all';
+    return !!edit && edit.op === 'rewrite';
 }
 
-/** True when the request is a lone `block: 'all'` rewrite. */
+/** True when the request is a lone `op: 'rewrite'` edit. */
 function isSoleWholeBodyRewrite(edits: EditNoteBlocksEditItem[]): boolean {
     return edits.length === 1 && isWholeBodyRewrite(edits[0]);
 }
@@ -204,7 +204,7 @@ function isSoleWholeBodyRewrite(edits: EditNoteBlocksEditItem[]): boolean {
  * Besides the batch-style positional-index invariant (the engine orders edits by
  * `index`, and `applyResolvedEdits` groups undo drafts by it, so duplicate or
  * out-of-order indices are not safe to accept), this enforces the two rules the
- * addressing design rests on: `block: 'all'` is a whole-body rewrite and cannot
+ * addressing design rests on: `op: 'rewrite'` is a whole-body rewrite and cannot
  * share a request with numeric addresses, and any request that addresses by
  * number must carry the snapshot token pinning that numbering.
  */
@@ -218,7 +218,7 @@ export function checkBlocksShape(
     if (edits.length > MAX_BATCH_EDITS) {
         return {
             error: `edit_note_blocks supports at most ${MAX_BATCH_EDITS} edits per call; received ${edits.length}. `
-                + 'Split the changes into multiple calls, or use a single block:"all" edit for dense whole-note changes.',
+                + 'Split the changes into multiple calls, or use a single op:"rewrite" edit for dense whole-note changes.',
             errorCode: 'invalid_edits',
         };
     }
@@ -236,7 +236,7 @@ export function checkBlocksShape(
     const wholeBodyCount = edits.filter((e) => isWholeBodyRewrite(e)).length;
     if (wholeBodyCount > 0 && edits.length > 1) {
         return {
-            error: 'A block:"all" edit rewrites the whole note body and must be the only edit in the '
+            error: 'An op:"rewrite" edit rewrites the whole note body and must be the only edit in the '
                 + 'request. Send it on its own, or express the changes as numbered replace/insert/delete edits.',
             errorCode: 'invalid_edits',
         };
@@ -259,8 +259,7 @@ function toBlockEditSpecs(edits: EditNoteBlocksEditItem[]): BlockEditSpec[] {
         op: edit.op,
         block: edit.block,
         after: edit.after,
-        from_block: edit.from_block,
-        to_block: edit.to_block,
+        to: edit.to,
         expect: edit.expect,
         expect_end: edit.expect_end,
         content: edit.content,
@@ -593,9 +592,9 @@ function addressedBlocks(edit: EditNoteBlocksEditItem): { from: number; to: numb
     if (edit.op === 'replace' && typeof edit.block === 'number') {
         return { from: edit.block, to: edit.block };
     }
-    if (edit.op === 'delete' && typeof edit.from_block === 'number') {
-        const to = typeof edit.to_block === 'number' ? edit.to_block : edit.from_block;
-        return { from: edit.from_block, to };
+    if (edit.op === 'delete' && typeof edit.block === 'number') {
+        const to = typeof edit.to === 'number' ? edit.to : edit.block;
+        return { from: edit.block, to };
     }
     if (edit.op === 'insert' && typeof edit.after === 'number' && edit.after >= 1) {
         return { from: edit.after, to: edit.after };
@@ -725,8 +724,8 @@ function buildPresentationFields(
 
     if (spec.op === 'delete') {
         operation = 'str_replace';
-        targetFrom = spec.from_block as number;
-        targetTo = spec.to_block ?? targetFrom;
+        targetFrom = spec.block as number;
+        targetTo = spec.to ?? targetFrom;
         replacementLines = [];
     } else if (spec.op === 'replace') {
         operation = 'str_replace';
@@ -781,8 +780,7 @@ function baseNormalizedEdit(edit: EditNoteBlocksEditItem): EditNoteBlocksEditIte
     if (edit.client_item_id !== undefined) out.client_item_id = edit.client_item_id;
     if (edit.block !== undefined) out.block = edit.block;
     if (edit.after !== undefined) out.after = edit.after;
-    if (edit.from_block !== undefined) out.from_block = edit.from_block;
-    if (edit.to_block !== undefined) out.to_block = edit.to_block;
+    if (edit.to !== undefined) out.to = edit.to;
     if (edit.expect !== undefined) out.expect = edit.expect;
     if (edit.expect_end !== undefined) out.expect_end = edit.expect_end;
     if (edit.content !== undefined) out.content = edit.content;
@@ -969,12 +967,12 @@ async function validateEditNoteBlocksAction(
     const totalLines = simplified.split('\n').length;
     const warnings: string[] = [...labels.locatorWarnings];
 
-    // ── Sole `block: 'all'` rewrite — no numbering, no snapshot ──────────────
+    // ── Sole `op: 'rewrite'` edit — no numbering, no snapshot ────────────────
     if (isSoleWholeBodyRewrite(edits)) {
         const edit = edits[0];
         const rawContent = edit.content;
         if (typeof rawContent !== 'string' || rawContent.trim() === '') {
-            return validateError(request.request_id, 'block:"all" requires `content` — the new note body.', 'invalid_edits');
+            return validateError(request.request_id, 'op:"rewrite" requires `content` — the ENTIRE new note body.', 'invalid_edits');
         }
         const contentError = validateNewString(rawContent, metadata);
         if (contentError) return validateError(request.request_id, contentError, 'invalid_new_string');
@@ -1000,7 +998,7 @@ async function validateEditNoteBlocksAction(
         const risk = assessNoteRewrite(strippedHtml, newStripped);
         if (risk.isDestructive) {
             logger(
-                `validateEditNoteBlocksAction: destructive block:"all" rewrite (${risk.reason}) of ${noteId} — `
+                `validateEditNoteBlocksAction: destructive whole-body rewrite (${risk.reason}) of ${noteId} — `
                 + `removed=${risk.removedFraction.toFixed(2)}, retained=${risk.retainedFraction.toFixed(2)} — requiring approval`,
                 1,
             );
@@ -1081,7 +1079,7 @@ async function validateEditNoteBlocksAction(
     // simplified-vs-simplified. Running it over the whole applied result (not
     // just a single-rewrite payload, which is all `edit_note_batch` can see)
     // catches the second destructive shape block addressing makes reachable:
-    // `delete from_block:1 to_block:<total>`, or an edit set that guts the note.
+    // `delete block:1 to:<total>`, or an edit set that guts the note.
     const { newStrippedHtml } = applyResolvedEdits(strippedHtml, selection.resolvedEdits);
     const risk = assessNoteRewrite(strippedHtml, newStrippedHtml);
     if (risk.isDestructive) {
@@ -1187,7 +1185,7 @@ export interface BlockExecutionInputs {
     noteId: string;
     libraryId: number;
     edits: EditNoteBlocksEditItem[];
-    /** Address snapshot token; absent only for a sole `block: 'all'` rewrite. */
+    /** Address snapshot token; absent only for a sole `op: 'rewrite'` edit. */
     snapshot?: string;
     /** `proposed_data.destructive_rewrite` — true when the destructive shape was approved. */
     destructiveRewrite?: boolean;
@@ -1272,7 +1270,7 @@ export function planBlockEditsExecution(inputs: BlockExecutionInputs): BlockExec
 
     // `address_pre_snapshot` reproduces the token the edits were addressed
     // against (same window), so a consumer can confirm the action ran on the
-    // numbering the model used. For a `block: 'all'` rewrite there is no token,
+    // numbering the model used. For an `op: 'rewrite'` edit there is no token,
     // so the canonical empty window is used.
     const addressPreSnapshot = buildAddressSnapshot(simplified, preWindow);
 
@@ -1317,7 +1315,7 @@ export function planBlockEditsExecution(inputs: BlockExecutionInputs): BlockExec
             const currentRisk = assessNoteRewrite(strippedHtml, newStrippedHtml);
             if (currentRisk.isDestructive) {
                 logger(
-                    `planBlockEditsExecution: block:"all" rewrite of ${noteId} became destructive `
+                    `planBlockEditsExecution: whole-body rewrite of ${noteId} became destructive `
                     + `(${currentRisk.reason}) after validation — refusing unapproved rewrite`,
                     1,
                 );
@@ -1340,7 +1338,7 @@ export function planBlockEditsExecution(inputs: BlockExecutionInputs): BlockExec
         undo = [{
             index: edit.index,
             ...(edit.client_item_id !== undefined ? { client_item_id: edit.client_item_id } : {}),
-            op: 'replace',
+            op: 'rewrite',
             // POSITIVE marker for the one record undo must restore wholesale.
             // Inferring it from an absent `undo_new_html` would make a dropped
             // optional field silently replace the note with a fragment.

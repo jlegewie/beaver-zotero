@@ -19,17 +19,18 @@ import type { ProposedAction } from './base';
  * One block edit. `op` discriminates which of the field groups on
  * {@link EditNoteBlocksEditItem} apply.
  *
- * - replace: overwrite the addressed block (or, with `block: 'all'`, the whole body)
+ * - replace: overwrite the addressed block
  * - insert: splice new content after an addressed position
  * - delete: remove a block, or an inclusive range of blocks
+ * - rewrite: replace the whole note body (must be the sole edit)
  */
-export type EditNoteBlocksOp = 'replace' | 'insert' | 'delete';
+export type EditNoteBlocksOp = 'replace' | 'insert' | 'delete' | 'rewrite';
 
 /**
  * Machine-readable reason an edit was skipped during validation.
  *
  * - `expect_mismatch`: `expect` did not match the block at the addressed number
- * - `expect_end_mismatch`: `expect_end` did not match the block at `to_block`
+ * - `expect_end_mismatch`: `expect_end` did not match the block at `to`
  * - `block_out_of_range`: the addressed block number does not exist in the note
  * - `address_outside_read_window`: the address is outside the window the
  *   snapshot token records as actually shown to the model
@@ -44,7 +45,7 @@ export type EditNoteBlocksOp = 'replace' | 'insert' | 'delete';
  * - `span_partial_edit`: the edit touches a line of a MULTILINE opaque span
  *   (display math, `<pre>`), or an insert seam falls strictly inside one. In v1
  *   no line of a multiline span is individually editable — replace the whole
- *   span or use `block: 'all'`.
+ *   span or use a sole `op: 'rewrite'` edit.
  * - `annotation_immutable`: the edit would change annotation text — either it
  *   addresses a line of a multiline `<annotation>`, or the expansion layer found
  *   the annotation's inner text altered. Annotations may be moved or deleted
@@ -94,38 +95,41 @@ export interface EditNoteBlocksEditItem {
 
     // -------------------------------------------------------------------------
     // Addressing, by op:
-    //   replace  → `block` (or `block: 'all'`)
+    //   replace  → `block`
     //   insert   → `after`
-    //   delete   → `from_block` [.. `to_block`]
+    //   delete   → `block` [.. `to`]
+    //   rewrite  → (none)
     // -------------------------------------------------------------------------
     /**
-     * `replace` only. Block to replace (1-based). The literal `'all'` means a
-     * whole-body rewrite; an `'all'` edit must be the sole edit in the request.
+     * `replace` and `delete`. The addressed block (1-based): the block to
+     * replace, or the first block of a deletion.
      */
-    block?: number | 'all';
+    block?: number;
     /**
      * The text the sender believes is currently at the address it is
      * confirming, in simplified format. A mismatch skips the edit with
      * `expect_mismatch`. Which address it confirms, and whether it is required,
      * depends on `op`:
      *
-     * - `replace`: confirms `block`. REQUIRED, except for `block: 'all'` (a
-     *   whole-body rewrite has no single block to confirm).
-     * - `delete`: confirms `from_block`. REQUIRED. A multi-line delete also
+     * - `replace`: confirms `block`. REQUIRED.
+     * - `delete`: confirms `block`. REQUIRED. A multi-line delete also
      *   confirms its far end via `expect_end`.
-     * - `insert`: NOT USED and never required — an insert has no line it is
-     *   overwriting, and `after: 0` / `after: 'end'` name a seam rather than a
-     *   block at all. Requiring it here would make appending impossible.
+     * - `insert`: confirms the anchor block `after`. REQUIRED when `after` is a
+     *   block number (>= 1); NOT allowed for `after: 0` / `after: 'end'`, which
+     *   name a seam rather than a block. Uniquely for insert, matching accepts
+     *   the END of the anchor's visible text as well as its start.
+     * - `rewrite`: not used.
      *
      * Matching is prefix-with-floor against the addressed line's visible-text
-     * projection; lines with no visible text are confirmed by their outermost
-     * attribute-stripped tag (`<ul>`, `</li>`, `<p>`, …).
+     * projection (prefix-or-suffix for insert anchors); lines with no visible
+     * text are confirmed by their outermost attribute-stripped tag (`<ul>`,
+     * `</li>`, `<p>`, …), and blank lines by an empty string.
      */
     expect?: string;
     /**
-     * Payload for `replace` and `insert`, in the simplified format. May be
-     * multiple lines; the engine expands it back into raw HTML. Not used by
-     * `delete`.
+     * Payload for `replace` and `insert` (may be multiple lines; the engine
+     * expands it back into raw HTML), or the ENTIRE new note body for
+     * `rewrite`. Not used by `delete`.
      */
     content?: string;
 
@@ -135,7 +139,6 @@ export interface EditNoteBlocksEditItem {
     /**
      * `insert` only. Position to insert `content` after (1-based). `0` means the
      * very start of the note; the literal `'end'` means the end of the body.
-     * An insert carries no `expect` (see `expect`).
      */
     after?: number | 'end';
 
@@ -143,25 +146,15 @@ export interface EditNoteBlocksEditItem {
     // delete
     // -------------------------------------------------------------------------
     /**
-     * First block of the deletion (1-based, inclusive).
-     *
-     * NOTE: the wire/persisted field is plain `from_block` — it is never
-     * aliased to `from`. The model-facing tool argument alias `from` exists
-     * only on the backend tool layer and is normalized away before an action is
-     * emitted, so nothing on this side has to know about it.
+     * `delete` only. Last block of the deletion (1-based, inclusive). Absent
+     * means a single-line delete of `block`.
      */
-    from_block?: number;
+    to?: number;
     /**
-     * Last block of the deletion (1-based, inclusive). Absent means a
-     * single-line delete of `from_block`. Never aliased to `to` (see
-     * `from_block`).
-     */
-    to_block?: number;
-    /**
-     * The text the sender believes is currently at `to_block`, in simplified
-     * format. Required if and only if `to_block > from_block`: a multi-line
-     * delete confirms both ends of the range, a single-line delete only needs
-     * `expect`. A mismatch skips the edit with `expect_end_mismatch`.
+     * The text the sender believes is currently at `to`, in simplified format.
+     * Required if and only if `to > block`: a multi-line delete confirms both
+     * ends of the range, a single-line delete only needs `expect`. A mismatch
+     * skips the edit with `expect_end_mismatch`.
      */
     expect_end?: string;
 
@@ -220,7 +213,7 @@ export interface EditNoteBlocksProposedData {
     /** Ordered list of block edits to apply to the note */
     edits: EditNoteBlocksEditItem[];
     /**
-     * Set by validation when a `block: 'all'` rewrite would discard or replace
+     * Set by validation when an `op: 'rewrite'` edit would discard or replace
      * most of the note. The wire action type stays `edit_note_blocks`, so this
      * flag is what lets the approval layer treat the rewrite as its own
      * authorization group instead of an ordinary note edit.
@@ -274,7 +267,7 @@ export interface EditNoteBlocksSkippedEdit {
  * This reuses the batch engine's undo record shape — the raw HTML fragment plus
  * its surrounding context — with `{ index, client_item_id?, op }` identifying
  * the edit. Undo therefore stores the changed region rather than a full-note
- * snapshot, except for a `block: 'all'` rewrite, which stores the FULL pre-edit
+ * snapshot, except for an `op: 'rewrite'` edit, which stores the FULL pre-edit
  * stripped note body in `undo_old_html` (a whole-body rewrite has no bounded
  * region to diff against).
  */
@@ -287,7 +280,7 @@ export interface EditNoteBlocksUndoRecord {
     op: EditNoteBlocksOp;
     /**
      * Present, and set to `'whole_body'`, ONLY on the record for a
-     * `block: 'all'` rewrite — the one record whose `undo_old_html` is the
+     * whole-body `op: 'rewrite'` edit — the one record whose `undo_old_html` is the
      * entire pre-edit body rather than a bounded fragment, and which undo must
      * therefore restore wholesale instead of relocating.
      *
@@ -302,7 +295,7 @@ export interface EditNoteBlocksUndoRecord {
     undo_scope?: 'whole_body';
     /**
      * Exact raw HTML fragment that was removed by the applied edit
-     * (data-citation-items already stripped). For a `block: 'all'` rewrite this
+     * (data-citation-items already stripped). For an `op: 'rewrite'` edit this
      * carries the FULL pre-edit stripped note body rather than a fragment.
      */
     undo_old_html?: string;

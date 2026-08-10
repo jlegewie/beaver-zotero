@@ -113,8 +113,7 @@ describe('buildPreviewableEditOperations', () => {
         const operations = buildPreviewableEditOperations([{
             edits: [{
                 index: 0,
-                op: 'replace',
-                block: 'all',
+                op: 'rewrite',
                 skip_reason_code: 'unbalanced_range',
                 operation: 'rewrite',
                 new_string: '<p>Replacement body</p>',
@@ -175,16 +174,15 @@ describe('buildPreviewableEditOperations', () => {
                 {
                     index: 2,
                     op: 'delete',
-                    from_block: 7,
-                    to_block: 9,
+                    block: 7,
+                    to: 9,
                     operation: 'str_replace',
                     old_string: '<p>Seven</p>\n<p>Eight</p>\n<p>Nine</p>',
                     new_string: '',
                 },
                 {
                     index: 3,
-                    op: 'replace',
-                    block: 'all',
+                    op: 'rewrite',
                     operation: 'rewrite',
                     new_string: '<p>Whole new body</p>',
                 },

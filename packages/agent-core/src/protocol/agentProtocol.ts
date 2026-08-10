@@ -1655,7 +1655,7 @@ export interface RefreshedNoteState {
      * large-note path from handing the model a token licensing it to address
      * blocks it was never shown; with an empty window every numeric address
      * fails closed with `address_outside_read_window` until it re-reads.
-     * `block: 'all'` needs no window and stays available either way.
+     * `op: 'rewrite'` needs no window and stays available either way.
      */
     snapshot: string;
     /** Total line count of the simplified note */

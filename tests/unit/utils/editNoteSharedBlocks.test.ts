@@ -15,12 +15,12 @@ import {
 describe('describeBlockEdit', () => {
     it('labels each op by the address it edits', () => {
         expect(describeBlockEdit({ op: 'replace', block: 5 })).toBe('replace · block 5');
-        expect(describeBlockEdit({ op: 'replace', block: 'all' })).toBe('replace · whole note');
+        expect(describeBlockEdit({ op: 'rewrite' })).toBe('rewrite · whole note');
         expect(describeBlockEdit({ op: 'insert', after: 12 })).toBe('insert · after 12');
-        expect(describeBlockEdit({ op: 'delete', from_block: 4, to_block: 7 })).toBe('delete · blocks 4-7');
-        expect(describeBlockEdit({ op: 'delete', from_block: 4 })).toBe('delete · block 4');
-        // to_block === from_block is a single-line delete, not a range.
-        expect(describeBlockEdit({ op: 'delete', from_block: 4, to_block: 4 })).toBe('delete · block 4');
+        expect(describeBlockEdit({ op: 'delete', block: 4, to: 7 })).toBe('delete · blocks 4-7');
+        expect(describeBlockEdit({ op: 'delete', block: 4 })).toBe('delete · block 4');
+        // to === block is a single-line delete, not a range.
+        expect(describeBlockEdit({ op: 'delete', block: 4, to: 4 })).toBe('delete · block 4');
     });
 
     it('names the two insert seams that are not block numbers', () => {
@@ -66,8 +66,8 @@ describe('deriveEditNoteRows — edit_note_blocks', () => {
             {
                 index: 2,
                 op: 'delete',
-                from_block: 4,
-                to_block: 7,
+                block: 4,
+                to: 7,
                 operation: 'str_replace',
                 old_string: '<p>Four</p>\n<p>Five</p>\n<p>Six</p>\n<p>Seven</p>',
                 new_string: '',
@@ -144,7 +144,7 @@ describe('deriveEditNoteRows — edit_note_blocks', () => {
             actionData: {
                 library_id: 1,
                 zotero_key: 'AAAAA',
-                edits: [{ index: 0, op: 'delete', from_block: 2, skip_reason_code: 'unbalanced_range' }],
+                edits: [{ index: 0, op: 'delete', block: 2, skip_reason_code: 'unbalanced_range' }],
             },
         });
 
@@ -160,8 +160,7 @@ describe('deriveEditNoteRows — edit_note_blocks', () => {
                 destructive_rewrite: true,
                 edits: [{
                     index: 0,
-                    op: 'replace',
-                    block: 'all',
+                    op: 'rewrite',
                     operation: 'rewrite',
                     new_string: '<p>Whole new body</p>',
                 }],
@@ -169,7 +168,7 @@ describe('deriveEditNoteRows — edit_note_blocks', () => {
         });
 
         expect(rows).toHaveLength(1);
-        expect(rows[0].label).toBe('replace · whole note');
+        expect(rows[0].label).toBe('rewrite · whole note');
         // The group header keys off this to read "Rewrite Note".
         expect(rows[0].operation).toBe('rewrite');
         expect(rows[0].newString).toBe('<p>Whole new body</p>');
@@ -232,7 +231,7 @@ describe('deriveEditNoteRows — edit_note_blocks', () => {
         const toolArgs = {
             note_id: '1-AAAAA',
             snapshot: 'snap-token',
-            edits: [{ index: 0, op: 'delete', from_block: 3, to_block: 5 }],
+            edits: [{ index: 0, op: 'delete', block: 3, to: 5 }],
         };
 
         expect(getEditNoteCallVariant({ toolArgs })).toBe('blocks');

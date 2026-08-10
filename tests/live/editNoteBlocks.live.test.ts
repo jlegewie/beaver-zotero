@@ -37,9 +37,9 @@
  *      against a fresh read.
  *   8. Citation degrade: content citing a nonexistent id degrades to plain
  *      text with a warning instead of failing the edit.
- *   9. `block: 'all'` rewrite + undo restores the original body and the
+ *   9. `op: 'rewrite'` rewrite + undo restores the original body and the
  *      `data-schema-version` wrapper survives both directions.
- *  10. Destructive escalation: `delete from_block:1 to_block:<last>` over a
+ *  10. Destructive escalation: `delete block:1 to:<last>` over a
  *      long note sets `destructive_rewrite: true` on the normalized action,
  *      and executing it WITHOUT that approval flag is refused.
  *
@@ -102,16 +102,15 @@ const LIBRARY_ID = Number(process.env.ZOTERO_TEST_LIBRARY_ID ?? 1);
 // Block action wire types + HTTP wrappers
 // ---------------------------------------------------------------------------
 
-type BlockOp = 'replace' | 'insert' | 'delete';
+type BlockOp = 'replace' | 'insert' | 'delete' | 'rewrite';
 
 interface BlockEdit {
     index: number;
     client_item_id?: string;
     op: BlockOp;
-    block?: number | 'all';
+    block?: number;
     after?: number | 'end';
-    from_block?: number;
-    to_block?: number;
+    to?: number;
     expect?: string;
     expect_end?: string;
     content?: string;
@@ -878,7 +877,7 @@ describe('edit_note_blocks annotations', () => {
             edits: [{
                 index: 0,
                 op: 'delete',
-                from_block: block,
+                block: block,
                 expect: view.lines[block - 1],
             }],
         };
@@ -1118,7 +1117,7 @@ describe('edit_note_blocks citation rejection', () => {
 });
 
 // ---------------------------------------------------------------------------
-// 9. block:'all' rewrite + undo
+// 9. op:'rewrite' whole-body rewrite + undo
 // ---------------------------------------------------------------------------
 
 describe('edit_note_blocks whole-body rewrite', () => {
@@ -1130,7 +1129,7 @@ describe('edit_note_blocks whole-body rewrite', () => {
         expect(beforeHtml).toContain('data-schema-version');
         const view = await readBlocks(ref);
 
-        // A sole `block: 'all'` edit needs NO snapshot: it addresses no numbers.
+        // A sole `op: 'rewrite'` edit needs NO snapshot: it addresses no numbers.
         // Sent deliberately without one to pin that rule.
         const actionData: BlocksActionData = {
             library_id: ref.library_id,
@@ -1138,8 +1137,7 @@ describe('edit_note_blocks whole-body rewrite', () => {
             edits: [{
                 index: 0,
                 client_item_id: 'w-0',
-                op: 'replace',
-                block: 'all',
+                op: 'rewrite',
                 content: '<p>Wholesale block rewrite body.</p><p>Second rewritten paragraph.</p>',
             }],
         };
@@ -1204,8 +1202,8 @@ describe('edit_note_blocks destructive escalation', () => {
             edits: [{
                 index: 0,
                 op: 'delete',
-                from_block: 1,
-                to_block: last,
+                block: 1,
+                to: last,
                 expect: view.lines[0],
                 expect_end: view.lines[last - 1],
             }],

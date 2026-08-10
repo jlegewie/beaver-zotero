@@ -55,6 +55,7 @@ const DECLARATION_ONLY_FEATURES = [
     'list_items_include_children',
     'create_note_tags_collections',
     'edit_note_batch',
+    'edit_note_blocks',
     'edit_annotations',
     'citations_event',
 ];
