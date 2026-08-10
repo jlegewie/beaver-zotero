@@ -922,12 +922,10 @@ export { safeFileExists, isLinkedUrlAttachment } from "./attachmentFiles";
 interface ItemDuplicateSignature {
     id: number;
     itemTypeID: number;
-    /** Whether the raw field was set, which is what gates the DOI/ISBN comparisons. */
-    hasDoi: boolean;
-    hasIsbn: boolean;
+    /** Normalized DOI; empty when absent. */
     doi: string;
-    /** cleanISBN returns false for an unparseable ISBN. */
-    isbn: string | false;
+    /** Cleaned ISBN; empty when absent or unparseable, so placeholder text never matches. */
+    isbn: string;
     /** Normalized title; empty when the item has no title. */
     title: string;
     /** Leading year of the raw date field, or NaN. */
@@ -951,10 +949,8 @@ function buildItemDuplicateSignature(item: Zotero.Item): ItemDuplicateSignature 
     return {
         id: item.id,
         itemTypeID: item.itemTypeID,
-        hasDoi: !!doi,
-        hasIsbn: !!isbnRaw,
         doi: doi.trim().toUpperCase(),
-        isbn: isbnRaw ? Zotero.Utilities.cleanISBN(isbnRaw) : '',
+        isbn: (isbnRaw && Zotero.Utilities.cleanISBN(isbnRaw)) || '',
         title: titleRaw ? normalizeDuplicateTitle(titleRaw) : '',
         year: parseInt(item.getField('date', false, true) as string),
         creators: item.getCreators().map((c) => {
@@ -978,10 +974,10 @@ function areSignaturesDuplicates(a: ItemDuplicateSignature, b: ItemDuplicateSign
     if (a.itemTypeID !== b.itemTypeID) return false;
 
     // DOI is authoritative when both items have one
-    if (a.hasDoi && b.hasDoi) return a.doi === b.doi;
+    if (a.doi && b.doi) return a.doi === b.doi;
 
     // ISBN is authoritative when both items have one
-    if (a.hasIsbn && b.hasIsbn) return a.isbn === b.isbn;
+    if (a.isbn && b.isbn) return a.isbn === b.isbn;
 
     // Fall back to title plus a corroborating year or creator
     if (!a.title || a.title !== b.title) return false;

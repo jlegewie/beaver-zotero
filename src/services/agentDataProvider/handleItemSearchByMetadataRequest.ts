@@ -153,6 +153,11 @@ export async function handleItemSearchByMetadataRequest(
     // Calculate offset for pagination (default 0, guard against negative values)
     const offset = Math.max(0, request.offset ?? 0);
 
+    // Deduplication and agentItemFilter both run before the page slice, so the
+    // search has to over-fetch to fill a page of `limit` items at `offset`.
+    // A non-positive limit means unlimited and is passed through as-is.
+    const preDedupBuffer = request.limit > 0 ? (offset + request.limit) * 2 : request.limit;
+
     logger('handleItemSearchByMetadataRequest: Metadata search', {
         libraryIds,
         title_query: request.title_query,
@@ -181,10 +186,7 @@ export async function handleItemSearchByMetadataRequest(
             item_type: request.item_type_filter,
             tags: request.tags_filter,
             collection_keys: collectionKeys ? Array.from(collectionKeys) : undefined,
-            // The page slice happens after the search, so fetch enough to cover it.
-            // A non-positive limit means unlimited and is passed through as-is.
-            limit: request.limit > 0 ? offset + request.limit : request.limit,
-            join_mode: 'all', // AND logic between query params
+            limit: preDedupBuffer,
         };
 
         try {
@@ -201,8 +203,7 @@ export async function handleItemSearchByMetadataRequest(
             logger(`handleItemSearchByMetadataRequest: Error searching library ${libraryId}: ${error}`, 1);
         }
 
-        // Early exit if we have enough results (fetch extra to account for cross-library duplicates and pagination offset)
-        const preDedupBuffer = (offset + request.limit) * 2;
+        // Early exit once the buffer is full across libraries
         if (request.limit > 0 && uniqueItems.size >= preDedupBuffer) {
             break;
         }

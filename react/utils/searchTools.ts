@@ -20,16 +20,10 @@ export interface SearchItemsByMetadataOptions {
     year_exact?: number;
     /** Filter by item type (e.g., "journalArticle", "book", "conferencePaper") */
     item_type?: string;
-    /** List of tags to filter by (OR logic - item must have at least one tag) */
+    /** Tags to filter by (item must have all of them) */
     tags?: string[];
     /** Collection keys to search within (OR logic, includes subcollections) */
     collection_keys?: string[];
-    /**
-     * "all" for AND logic, "any" for OR logic.
-     *
-     * Use "any" only when every condition below is genuinely optional.
-     */
-    join_mode?: 'all' | 'any';
     /** Maximum results to return */
     limit?: number;
 }
@@ -39,7 +33,8 @@ export interface SearchItemsByMetadataOptions {
  * 
  * This function creates a Zotero search with conditions based on the provided options.
  * All text searches are case-insensitive substring matches unless specified otherwise.
- * 
+ * Conditions are ANDed; only collection keys are ORed against each other.
+ *
  * @param libraryID - The library to search in
  * @param options - Search parameters
  * @returns Array of matching items with full data loaded
@@ -67,20 +62,17 @@ export const searchItemsByMetadata = async (
         item_type,
         tags = [],
         collection_keys,
-        join_mode = 'all',
         limit = 50
     } = options;
 
     // Builds a search with every condition except the collection scope, so the
     // same query can be run once per collection key.
     const buildSearch = (): Zotero.Search => {
+        // Zotero's default join mode is 'all'. It must stay that way: under 'any' the
+        // collection and itemType conditions below would widen the search instead of
+        // narrowing it.
         const search = new Zotero.Search();
         search.addCondition('libraryID', 'is', String(libraryID));
-
-        // Set join mode
-        if (join_mode === 'any') {
-            search.addCondition('joinMode', 'any');
-        }
 
         // Title search
         if (title_query) {
@@ -115,22 +107,14 @@ export const searchItemsByMetadata = async (
         }
 
         // Exclude standalone attachments, notes, and annotations so the result limit
-        // is applied to regular items only. Negations are only safe under AND join
-        // mode; in 'any' mode they would OR in and match the whole library.
-        if (join_mode === 'all') {
-            search.addCondition('itemType', 'isNot', 'attachment');
-            search.addCondition('itemType', 'isNot', 'note');
-            search.addCondition('itemType', 'isNot', 'annotation');
-        }
+        // is applied to regular items only.
+        search.addCondition('itemType', 'isNot', 'attachment');
+        search.addCondition('itemType', 'isNot', 'note');
+        search.addCondition('itemType', 'isNot', 'annotation');
 
-        // Tag filters (OR logic)
-        if (tags && tags.length > 0) {
-            // For tag OR logic, we need to use a subsearch approach or accept that
-            // multiple tags with 'all' mode means item must have ALL tags
-            // With 'any' mode, we can add multiple tag conditions
-            for (const tag of tags) {
-                search.addCondition('tag', 'is', tag);
-            }
+        // Tag filters. Multiple tags are ANDed: the item must carry all of them.
+        for (const tag of tags) {
+            search.addCondition('tag', 'is', tag);
         }
 
         return search;
