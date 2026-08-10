@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { BeaverDB } from '../../../src/services/database';
 import { MockDBConnection } from '../../mocks/mockDBConnection';
 
@@ -57,9 +57,16 @@ describe('BeaverDB - embedding allowlist lookups', () => {
             await insertEmbedding(itemId, 1);
         }
 
+        // Zotero's SQLite backend rejects statements over 999 bound parameters,
+        // so assert the chunking directly — the test connection accepts far more.
+        const queryAsync = vi.spyOn(conn, 'queryAsync');
         const records = await db.getEmbeddingsByItemIds(itemIds, [1]);
 
         expect(records).toHaveLength(itemIds.length);
         expect(new Set(records.map(r => r.item_id))).toEqual(new Set(itemIds));
+        expect(queryAsync.mock.calls.length).toBeGreaterThan(1);
+        for (const [, params] of queryAsync.mock.calls) {
+            expect((params as unknown[]).length).toBeLessThanOrEqual(999);
+        }
     });
 });
