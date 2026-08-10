@@ -1761,6 +1761,14 @@ describe('selectBlockEdits — content balance (gate 5b)', () => {
         expect(expectOk(result).skipped[0].reason).toMatch(/`content` is not tag-balanced/);
     });
 
+    it('does not quote the addressed block: the payload is what is wrong', () => {
+        const f = fixture('<p>Alpha</p><p>Beta</p>');
+        const index = buildIndex(f);
+        const result = select(index, [replaceEdit(index, 1, '<ul><li>')]);
+        expect(skipCodes(result)).toEqual(['unbalanced_range']);
+        expect(expectOk(result).skipped[0].actual).toBeUndefined();
+    });
+
     it('refuses a dangling closer in replace content', () => {
         const f = fixture('<p>Alpha</p>');
         const index = buildIndex(f);

@@ -1346,12 +1346,13 @@ function checkContentBalance(spec: BlockEditSpec): SkipDraft | null {
     if (spec.op === 'delete') return null;
     const content = spec.content ?? '';
     if (isRangeBalanced(content)) return null;
+    // No `actual`: the payload is at fault, not the addressed block, and quoting
+    // that block's text here reads as if the address were the problem.
     return skip(
         'unbalanced_range',
         '`content` is not tag-balanced: it opens or closes an element whose counterpart is '
         + 'missing. Inserting it would make the note editor restructure the document. Send '
         + 'complete elements (e.g. a whole <li> or a whole list).',
-        spec.op === 'replace' ? (spec.block as number) : undefined,
     );
 }
 
