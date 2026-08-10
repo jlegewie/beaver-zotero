@@ -53,7 +53,8 @@ export async function handleItemSearchByMetadataRequest(
     const hasQuery = !!request.title_query ||
                      !!request.author_query ||
                      !!request.publication_query;
-    const hasFilter = !!(request.collections_filter?.length) ||
+    const collectionsFilter = request.collections_filter ?? [];
+    const hasFilter = collectionsFilter.length > 0 ||
                       !!(request.tags_filter?.length) ||
                       !!(request.libraries_filter?.length) ||
                       !!request.year_min ||
@@ -96,35 +97,42 @@ export async function handleItemSearchByMetadataRequest(
         };
     }
 
-    // Convert collections_filter names to keys if needed (scoped to libraryIds)
-    const collectionKeysSet = new Set<string>();
-    if (request.collections_filter && request.collections_filter.length > 0) {
-        for (const collectionFilter of request.collections_filter) {
+    // Resolve collections_filter to collection keys, bucketed by library.
+    // Keys must stay library-scoped: a Zotero search scoped to library B that is
+    // given a collection key from library A matches nothing, so a shared collection
+    // name (e.g. "Papers") in two libraries would silently empty out both searches.
+    const collectionKeysByLibrary = new Map<number, Set<string>>();
+    const addCollectionKey = (libraryId: number, key: string) => {
+        if (!libraryIds.includes(libraryId)) return;
+        let keys = collectionKeysByLibrary.get(libraryId);
+        if (!keys) {
+            keys = new Set<string>();
+            collectionKeysByLibrary.set(libraryId, keys);
+        }
+        keys.add(key);
+    };
+
+    const hasCollectionsFilter = collectionsFilter.length > 0;
+    if (hasCollectionsFilter) {
+        for (const collectionFilter of collectionsFilter) {
             if (typeof collectionFilter === 'number') {
                 const collection = Zotero.Collections.get(collectionFilter);
-                if (collection && (libraryIds.length === 0 || libraryIds.includes(collection.libraryID))) {
-                    collectionKeysSet.add(collection.key);
+                if (collection) {
+                    addCollectionKey(collection.libraryID, collection.key);
                 }
                 continue;
             }
 
-            // String filter: search within each library
-            if (libraryIds.length > 0) {
-                for (const libId of libraryIds) {
-                    const result = getCollectionByIdOrName(collectionFilter, libId);
-                    if (result) {
-                        collectionKeysSet.add(result.collection.key);
-                    }
-                }
-            } else {
-                const result = getCollectionByIdOrName(collectionFilter);
+            // String filter: resolve within each library. The lookup can fall back to
+            // another library for key-like input, so bucket by the resolved library.
+            for (const libId of libraryIds) {
+                const result = getCollectionByIdOrName(collectionFilter, libId);
                 if (result) {
-                    collectionKeysSet.add(result.collection.key);
+                    addCollectionKey(result.collection.libraryID, result.collection.key);
                 }
             }
         }
     }
-    const collectionKeys = Array.from(collectionKeysSet);
 
     // Calculate offset for pagination (default 0, guard against negative values)
     const offset = Math.max(0, request.offset ?? 0);
@@ -142,6 +150,12 @@ export async function handleItemSearchByMetadataRequest(
 
     // Search each library using searchItemsByMetadata
     for (const libraryId of libraryIds) {
+        const collectionKeys = collectionKeysByLibrary.get(libraryId);
+
+        // A collection-scoped request must not fall back to a library-wide search
+        // in libraries where no collection resolved.
+        if (hasCollectionsFilter && !collectionKeys?.size) continue;
+
         const options: SearchItemsByMetadataOptions = {
             title_query: request.title_query,
             author_query: request.author_query,
@@ -150,7 +164,7 @@ export async function handleItemSearchByMetadataRequest(
             year_max: request.year_max,
             item_type: request.item_type_filter,
             tags: request.tags_filter,
-            collection_keys: collectionKeys.length > 0 ? collectionKeys : undefined,
+            collection_keys: collectionKeys ? Array.from(collectionKeys) : undefined,
             limit: request.limit,
             join_mode: 'all', // AND logic between query params
         };
