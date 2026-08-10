@@ -191,11 +191,12 @@ describe('handleListItemsRequest', () => {
 
         expect(resolveSingleCollection).toHaveBeenCalledWith('COLLECTION', {
             eligibleLibraryIds: [1],
+            nameLibraryIds: [1],
             explicitLibrary: true,
         });
     });
 
-    it('lets a collection resolve in any searchable library when the request omitted the library', async () => {
+    it('lets a key resolve in any searchable library when the request omitted the library, but keeps names local', async () => {
         searchResults.push([]);
 
         await handleListItemsRequest({
@@ -210,8 +211,11 @@ describe('handleListItemsRequest', () => {
             offset: 0,
         });
 
+        // The default library leads the eligible list so it wins a duplicated
+        // key, and names never leave it — "Inbox" exists in many libraries.
         expect(resolveSingleCollection).toHaveBeenCalledWith('COLLECTION', {
             eligibleLibraryIds: [1, 100],
+            nameLibraryIds: [1],
             explicitLibrary: false,
         });
     });
@@ -219,8 +223,8 @@ describe('handleListItemsRequest', () => {
     it('reports a typed collection resolution failure', async () => {
         (resolveSingleCollection as any).mockReturnValue({
             ok: false,
-            code: 'ambiguous_collection',
-            message: 'matches 2 collections',
+            code: 'collection_not_found',
+            message: 'Collection not found: Inbox',
         });
 
         const response = await handleListItemsRequest({
@@ -236,8 +240,8 @@ describe('handleListItemsRequest', () => {
         });
 
         expect(response).toMatchObject({
-            error: 'matches 2 collections',
-            error_code: 'ambiguous_collection',
+            error: 'Collection not found: Inbox',
+            error_code: 'collection_not_found',
             total_count: 0,
         });
     });

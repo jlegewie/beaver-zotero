@@ -555,7 +555,6 @@ export type ItemSearchErrorCode =
     | 'invalid_request'         // Invalid request parameters
     | 'timeout'                 // Operation timed out
     | 'collection_not_found'    // A requested collection filter matched nothing
-    | 'ambiguous_collection'    // A collection filter matched several collections
     | 'library_unavailable'     // A filter named a library this computer does not have
     | 'library_not_searchable'; // A filter named a library excluded from Beaver
 

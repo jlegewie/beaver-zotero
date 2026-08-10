@@ -345,7 +345,7 @@ export async function validateOrganizeItemsAction(
                 const notFound = invalidColls.filter(x => x.code === 'collection_not_found' && x.otherLibraryId === null);
                 const inOtherLib = invalidColls.filter(x => x.code === 'collection_not_found' && x.otherLibraryId !== null);
                 // Everything the resolver already explained precisely (name given
-                // instead of an identifier, ambiguity, scope conflict, excluded or
+                // instead of an identifier, scope conflict, excluded or
                 // unavailable library) is surfaced with its own message.
                 const otherFailures = invalidColls.filter(x => x.code !== 'collection_not_found');
 

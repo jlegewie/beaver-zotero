@@ -76,21 +76,21 @@ describe('topic search HTTP endpoint', () => {
             type: 'item_search_by_topic',
             request_id: 'req-1',
             items: [],
-            error: '"DUPEKEYZ" matches 2 collections.',
-            error_code: 'ambiguous_collection',
+            error: 'Collection not found: No Such Collection',
+            error_code: 'collection_not_found',
         });
 
         const response = await handleTopicSearchHttpRequest({
             topic_query: 'anything',
-            collections_filter: ['DUPEKEYZ'],
+            collections_filter: ['No Such Collection'],
             limit: 10,
         });
 
         expect(response).toMatchObject({
             items: [],
-            error_code: 'ambiguous_collection',
+            error_code: 'collection_not_found',
         });
-        expect(response.error).toContain('matches 2 collections');
+        expect(response.error).toContain('No Such Collection');
     });
 
     it('leaves error fields unset on a successful search', async () => {

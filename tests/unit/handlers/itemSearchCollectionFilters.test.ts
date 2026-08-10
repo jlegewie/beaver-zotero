@@ -481,15 +481,26 @@ describe('handleItemSearchByMetadataRequest collection filters', () => {
         expect(response.error).toContain('No Such Collection');
     });
 
-    it('reports a bare key present in two libraries as ambiguous', async () => {
+    it('ORs both collections when a bare key is present in two libraries', async () => {
+        // A key is unique only within a library. Filters are OR'd, so a key
+        // that hits in two eligible libraries contributes both — searching one
+        // and silently dropping the other would under-report.
+        harness.metadataResults = {
+            [PERSONAL_LIBRARY]: [
+                makeItem({ id: 1, key: 'PITEM222', libraryID: PERSONAL_LIBRARY, collections: [dupePersonal.id] }),
+            ],
+            [GROUP_LIBRARY]: [
+                makeItem({ id: 2, key: 'GITEM222', libraryID: GROUP_LIBRARY, collections: [dupeGroup.id] }),
+            ],
+        };
+
         const response = await handleItemSearchByMetadataRequest(
             metadataRequest({ collections_filter: [dupePersonal.key] })
         );
 
-        expect(searchItemsByMetadata).not.toHaveBeenCalled();
-        expect(response.error_code).toBe('ambiguous_collection');
-        expect(response.error).toContain('u-DUPEKEYZ');
-        expect(response.error).toContain('g12345-DUPEKEYZ');
+        expect(returnedKeys(response).sort()).toEqual(['GITEM222', 'PITEM222']);
+        expect(metadataCallFor(PERSONAL_LIBRARY)).toMatchObject({ collection_key: dupePersonal.key });
+        expect(metadataCallFor(GROUP_LIBRARY)).toMatchObject({ collection_key: dupeGroup.key });
     });
 
     it('reports a scoped identifier from a library this computer does not have', async () => {
@@ -669,12 +680,7 @@ describe('handleItemSearchByTopicRequest collection filters', () => {
         expect(response.error_code).toBe('collection_not_found');
     });
 
-    it('reports ambiguous, unavailable and excluded collection filters', async () => {
-        const ambiguous = await handleItemSearchByTopicRequest(
-            topicRequest({ collections_filter: [dupePersonal.key] })
-        );
-        expect(ambiguous.error_code).toBe('ambiguous_collection');
-
+    it('reports unavailable and excluded collection filters', async () => {
         const unavailable = await handleItemSearchByTopicRequest(
             topicRequest({ collections_filter: ['g99999-ABCD2345'] })
         );

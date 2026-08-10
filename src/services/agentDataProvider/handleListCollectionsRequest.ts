@@ -45,14 +45,18 @@ export async function handleListCollectionsRequest(
         
         // Resolve parent collection if specified (scoped identifier, key, name, or
         // row id), potentially updating library scope. An explicitly requested
-        // library confines resolution to that library; otherwise any searchable
-        // library is eligible.
+        // library confines resolution to that library; otherwise the library in
+        // play is tried first and any other searchable library is eligible. A
+        // *name* never widens: names like "Inbox" are commonly duplicated across
+        // libraries, so a widened name lookup would silently retarget the
+        // request at another library's collection.
         let parentCollectionId: number | null = null;
         if (request.parent_collection_key) {
             const resolved = resolveSingleCollection(request.parent_collection_key, {
                 eligibleLibraryIds: validation.wasExplicitlyRequested
                     ? [library.libraryID]
-                    : getSearchableLibraryIds(),
+                    : [library.libraryID, ...getSearchableLibraryIds().filter(id => id !== library.libraryID)],
+                nameLibraryIds: [library.libraryID],
                 explicitLibrary: validation.wasExplicitlyRequested,
             });
 

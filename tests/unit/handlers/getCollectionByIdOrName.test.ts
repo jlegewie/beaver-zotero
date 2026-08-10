@@ -188,26 +188,32 @@ describe('resolveSingleCollection', () => {
         });
     });
 
-    it('rejects a key that exists in two eligible libraries as ambiguous', () => {
+    it('takes the first eligible library when a key exists in two of them', () => {
         const resolved = resolveSingleCollection(duplicateKeyPersonal.key, { eligibleLibraryIds: searchableIds() });
-        expect(resolved).toMatchObject({ ok: false, code: 'ambiguous_collection' });
-        // The message must let the caller retry with a scoped identifier.
-        expect((resolved as any).message).toContain('u-DUPEKEYZ');
-        expect((resolved as any).message).toContain('g12345-DUPEKEYZ');
+        expect(resolved).toMatchObject({
+            ok: true,
+            matchKind: 'key',
+            match: { collection: duplicateKeyPersonal, libraryID: PERSONAL_LIBRARY },
+        });
     });
 
-    it('rejects a name held by two sibling collections in one library as ambiguous', () => {
+    it('follows the caller-declared library precedence for a duplicated key', () => {
+        // Precedence is the order of eligibleLibraryIds, so reversing it
+        // resolves the same key to the other library.
+        const resolved = resolveSingleCollection(duplicateKeyPersonal.key, {
+            eligibleLibraryIds: [GROUP_LIBRARY, PERSONAL_LIBRARY],
+        });
+        expect(resolved).toMatchObject({ ok: true, matchKind: 'key', match: { libraryID: GROUP_LIBRARY } });
+    });
+
+    it('takes the first of two sibling collections sharing a name in one library', () => {
         const resolved = resolveSingleCollection('Reading', { eligibleLibraryIds: [PERSONAL_LIBRARY] });
-        expect(resolved).toMatchObject({ ok: false, code: 'ambiguous_collection' });
-        expect((resolved as any).message).toContain('u-SIBLAAA2');
-        expect((resolved as any).message).toContain('u-SIBLAAA3');
+        expect(resolved).toMatchObject({ ok: true, matchKind: 'name', match: { libraryID: PERSONAL_LIBRARY } });
     });
 
-    it('rejects a name held by collections under different parents in one library as ambiguous', () => {
+    it('takes the first of two collections sharing a name under different parents', () => {
         const resolved = resolveSingleCollection('Shared Name', { eligibleLibraryIds: [PERSONAL_LIBRARY] });
-        expect(resolved).toMatchObject({ ok: false, code: 'ambiguous_collection' });
-        expect((resolved as any).message).toContain('u-CHLDAAA2');
-        expect((resolved as any).message).toContain('u-CHLDAAA3');
+        expect(resolved).toMatchObject({ ok: true, matchKind: 'name', match: { collection: childA } });
     });
 
     it('resolves a number as a collection row id', () => {
@@ -345,11 +351,12 @@ describe('resolveCollectionMatches', () => {
         expect((resolution as any).matches.map((m: any) => m.collection)).toEqual([childA, childB]);
     });
 
-    it('rejects a key present in two eligible libraries instead of returning both', () => {
-        // A key denotes one object, so expanding it to several would change what
-        // the caller asked for.
+    it('returns both collections when a key is present in two eligible libraries', () => {
+        // A key is unique only within a library. Filters OR every match; a
+        // single-target caller takes the first, in eligible-library order.
         const resolution = resolveCollectionMatches(duplicateKeyPersonal.key, { eligibleLibraryIds: searchableIds() });
-        expect(resolution).toMatchObject({ ok: false, code: 'ambiguous_collection' });
+        expect(resolution).toMatchObject({ ok: true, matchKind: 'key' });
+        expect((resolution as any).matches.map((m: any) => m.libraryID)).toEqual([PERSONAL_LIBRARY, GROUP_LIBRARY]);
     });
 
     it('scopes name matching to nameLibraryIds when it differs from the eligible libraries', () => {
@@ -418,9 +425,16 @@ describe('getCollectionByIdOrName', () => {
         });
     });
 
-    it('returns null when a reference is ambiguous rather than guessing a target', () => {
-        expect(getCollectionByIdOrName(duplicateKeyPersonal.key)).toBeNull();
-        expect(getCollectionByIdOrName('Reading', PERSONAL_LIBRARY)).toBeNull();
+    it('takes the first match when a reference matches more than once', () => {
+        // Searchable-library order decides an un-hinted duplicated key, and a
+        // name repeated inside one library resolves to the first of them.
+        expect(getCollectionByIdOrName(duplicateKeyPersonal.key)).toEqual({
+            collection: duplicateKeyPersonal,
+            libraryID: PERSONAL_LIBRARY,
+        });
+        expect(getCollectionByIdOrName('Reading', PERSONAL_LIBRARY)).toMatchObject({
+            libraryID: PERSONAL_LIBRARY,
+        });
     });
 
     it('returns null for null/undefined input', () => {
@@ -451,8 +465,11 @@ describe('resolveCollectionForWrite', () => {
             .toMatchObject({ ok: false, code: 'collection_not_found' });
         expect(resolveCollectionForWrite(`g67890-${excludedCollection.key}`, { eligibleLibraryIds: searchableIds() }))
             .toMatchObject({ ok: false, code: 'library_not_searchable' });
+    });
+
+    it('takes the first eligible library for a key present in two of them', () => {
         expect(resolveCollectionForWrite(duplicateKeyPersonal.key, { eligibleLibraryIds: searchableIds() }))
-            .toMatchObject({ ok: false, code: 'ambiguous_collection' });
+            .toMatchObject({ ok: true, match: { libraryID: PERSONAL_LIBRARY } });
     });
 });
 
@@ -489,9 +506,14 @@ describe('resolveCollectionForDisplay', () => {
         });
     });
 
-    it('returns null on ambiguity rather than guessing a target', () => {
-        expect(resolveCollectionForDisplay(duplicateKeyPersonal.key)).toBeNull();
-        expect(resolveCollectionForDisplay('Reading', PERSONAL_LIBRARY)).toBeNull();
+    it('takes the first match when a reference matches more than once', () => {
+        expect(resolveCollectionForDisplay(duplicateKeyPersonal.key)).toEqual({
+            collection: duplicateKeyPersonal,
+            libraryID: PERSONAL_LIBRARY,
+        });
+        expect(resolveCollectionForDisplay('Reading', PERSONAL_LIBRARY)).toMatchObject({
+            libraryID: PERSONAL_LIBRARY,
+        });
     });
 
     it('resolves a key shared by two libraries inside the hinted one', () => {
@@ -507,10 +529,8 @@ describe('librariesForCollectionError', () => {
         expect(librariesForCollectionError('library_unavailable')).not.toBeUndefined();
         expect(librariesForCollectionError('library_not_searchable')).not.toBeUndefined();
         expect(librariesForCollectionError('invalid_request')).not.toBeUndefined();
-        // A missing collection and an ambiguous reference are about the
-        // collection, not the library scope: the ambiguity message already
-        // names every candidate, so the library list would be noise.
+        // A missing collection is about the collection, not the library scope,
+        // so the library list would be noise.
         expect(librariesForCollectionError('collection_not_found')).toBeUndefined();
-        expect(librariesForCollectionError('ambiguous_collection')).toBeUndefined();
     });
 });

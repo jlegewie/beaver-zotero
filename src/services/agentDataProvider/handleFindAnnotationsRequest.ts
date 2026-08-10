@@ -605,11 +605,16 @@ export async function handleFindAnnotationsRequest(
         const collectionInput = cleanString(request.collection);
         if (collectionInput) {
             // An explicitly requested library confines resolution to that
-            // library; otherwise any searchable library is eligible.
+            // library; otherwise the library in play is tried first and any
+            // other searchable library is eligible. A *name* never widens:
+            // names like "Inbox" are commonly duplicated across libraries, so a
+            // widened name lookup would silently retarget the request at
+            // another library's collection.
             const resolved = resolveSingleCollection(collectionInput, {
                 eligibleLibraryIds: validation.wasExplicitlyRequested
                     ? [library.libraryID]
-                    : getSearchableLibraryIds(),
+                    : [library.libraryID, ...getSearchableLibraryIds().filter(id => id !== library.libraryID)],
+                nameLibraryIds: [library.libraryID],
                 explicitLibrary: validation.wasExplicitlyRequested,
             });
             if (!resolved.ok) {

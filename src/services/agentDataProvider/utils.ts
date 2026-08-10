@@ -553,7 +553,6 @@ export type CollectionLookupResult = CollectionMatch;
 /** Typed failures of collection resolution. */
 export type CollectionResolutionErrorCode =
     | 'collection_not_found'
-    | 'ambiguous_collection'
     | 'library_unavailable'
     | 'library_not_searchable'
     | 'invalid_request';
@@ -610,29 +609,6 @@ function collectionNotFound(input: string): CollectionResolutionFailure {
 }
 
 /**
- * Ambiguity is an error rather than a silent first-match: a reference denotes
- * one collection, so picking one of several candidates would quietly act on
- * something other than what was asked for. The message names every candidate by
- * scoped identifier so the caller can retry unambiguously.
- */
-function ambiguousCollections(input: string, matches: CollectionMatch[]): CollectionResolutionFailure {
-    const candidates = matches
-        .map(
-            (match) =>
-                `${modelObjectId(match.libraryID, match.collection.key)} ` +
-                `("${match.collection.name}" in library "${libraryDisplayName(match.libraryID)}")`
-        )
-        .join('; ');
-    return {
-        ok: false,
-        code: 'ambiguous_collection',
-        message:
-            `"${input}" matches ${matches.length} collections: ${candidates}. ` +
-            `Retry with the scoped collection identifier of the one you want.`,
-    };
-}
-
-/**
  * Resolve a device-local collection row id. A collection outside the eligible
  * libraries reads as not-found so a row id can never disclose that a collection
  * exists in a library the caller may not see.
@@ -676,11 +652,15 @@ export function parseScopedCollectionId(input: string): ObjectIdReference | null
  *    it resolves in its embedded library or fails, never falling through to a name.
  *    Its library must be eligible, or — for a caller that named no library —
  *    at least not excluded from Beaver.
- * 3. Zotero key — matched across every eligible library. Several hits are an
- *    ambiguity, not a list.
+ * 3. Zotero key — matched across every eligible library. A key is unique only
+ *    within a library, so the same key can hit in several; all of them are
+ *    returned, in `eligibleLibraryIds` order.
  * 4. Name — case-insensitive exact match across `nameLibraryIds`. One library can
  *    legitimately hold several same-named collections (e.g. under different parents),
  *    so all of them are returned.
+ *
+ * Callers that need exactly one target take the first match, so the order of
+ * `eligibleLibraryIds` / `nameLibraryIds` is the caller's precedence order.
  * 5. Digit-only string — row id.
  */
 export function resolveCollectionMatches(
@@ -751,9 +731,8 @@ export function resolveCollectionMatches(
             const collection = Zotero.Collections.getByLibraryAndKey(libraryID, input);
             if (collection) keyMatches.push({ collection, libraryID: collection.libraryID });
         }
-        if (keyMatches.length > 1) return ambiguousCollections(input, keyMatches);
         // A key match wins over a collection whose name merely looks like a key.
-        if (keyMatches.length === 1) return { ok: true, matchKind: 'key', matches: keyMatches };
+        if (keyMatches.length > 0) return { ok: true, matchKind: 'key', matches: keyMatches };
     }
 
     const inputLower = input.toLowerCase();
@@ -775,8 +754,15 @@ export function resolveCollectionMatches(
 }
 
 /**
- * Resolve a collection reference for a single-target caller: exactly one match
- * is required and several candidates are an `ambiguous_collection` failure.
+ * Resolve a collection reference for a single-target caller: the first match in
+ * the caller's precedence order wins.
+ *
+ * A reference can legitimately match more than once — a bare key in two
+ * libraries, a name repeated under different parents — and first-match keeps a
+ * reference that used to resolve resolving. Precedence is the caller's to set
+ * via the order of `eligibleLibraryIds` / `nameLibraryIds`; callers that need a
+ * single unambiguous target pass a one-library scope, and a scoped identifier
+ * (which never matches more than once) is always available to the model.
  */
 export function resolveSingleCollection(
     collectionIdOrName: number | string | null | undefined,
@@ -784,9 +770,6 @@ export function resolveSingleCollection(
 ): SingleCollectionResolution {
     const resolution = resolveCollectionMatches(collectionIdOrName, options);
     if (!resolution.ok) return resolution;
-    if (resolution.matches.length > 1) {
-        return ambiguousCollections(String(collectionIdOrName), resolution.matches);
-    }
     return { ok: true, matchKind: resolution.matchKind, match: resolution.matches[0] };
 }
 
@@ -851,10 +834,10 @@ export function collectionFilterKey(libraryID: number, collectionKey: string): s
  * the caller believes is collection-scoped and hand back items from outside the
  * filter, so a single failure fails the whole search instead.
  *
- * Filters are OR'd, so a *name* matching several collections contributes all of
- * them. A bare *key* denotes one collection, so matching in more than one
- * eligible library is an ambiguity the caller must resolve with a scoped
- * identifier.
+ * Filters are OR'd, so an entry matching several collections contributes all of
+ * them — a *name* repeated across libraries, or a bare *key* that hits in more
+ * than one eligible library. A scoped identifier narrows an entry to exactly
+ * one collection.
  *
  * `eligibleLibraryIds` must already be intersected with the searchable
  * libraries. Pass `explicitLibrary` when the request named its libraries, so a
@@ -927,7 +910,7 @@ export function resolveCollectionFilters(
 /**
  * Libraries to echo alongside a failed collection resolution. Only library-scope
  * failures get the list, since it tells the caller where it may retry; a
- * not-found or ambiguous reference is already fully explained by its message.
+ * not-found reference is already fully explained by its message.
  */
 export function librariesForCollectionError(
     code: CollectionResolutionErrorCode
@@ -946,16 +929,16 @@ export function librariesForCollectionError(
  * Resolve with `libraryId` as a scope *hint*: look inside the hinted library
  * first, and widen to `fallbackLibraryIds` only when nothing matched there, so a
  * key present in both the hint and another library resolves to the one the
- * caller meant. An ambiguity or an unavailable library inside the hinted step is
- * final — widening must not paper it over. A reference that only misses the
- * hint's scope (not found there, or naming a library the hint's caller may not
- * read) falls through to `fallbackLibraryIds`, which decides on its own terms:
- * the searchable set still rejects an excluded library, while the display path
+ * caller meant. An unavailable library inside the hinted step is final —
+ * widening must not paper it over. A reference that only misses the hint's
+ * scope (not found there, or naming a library the hint's caller may not read)
+ * falls through to `fallbackLibraryIds`, which decides on its own terms: the
+ * searchable set still rejects an excluded library, while the display path
  * spans every local library. Names stay scoped to the hint because names like
  * "Inbox" are commonly duplicated across libraries.
  *
- * Every failure, including ambiguity, reads as no-match: these callers must act
- * on (or render) nothing rather than arbitrarily pick one of several targets.
+ * A failure reads as no-match: these callers must act on (or render) nothing
+ * rather than guessing a target.
  */
 function resolveCollectionWithHint(
     collectionIdOrName: number | string | null | undefined,
@@ -985,7 +968,7 @@ function resolveCollectionWithHint(
  * `libraryId` is a scope hint, not a hard scope — see
  * {@link resolveCollectionWithHint}. A scoped identifier ignores the hint and
  * resolves in its own embedded library. Callers that need to report *why* a
- * reference failed (not found vs ambiguous vs excluded library) should use
+ * reference failed (not found vs excluded library vs scope conflict) should use
  * {@link resolveSingleCollection} directly.
  */
 export function getCollectionByIdOrName(
@@ -1005,9 +988,8 @@ export function getCollectionByIdOrName(
  * has. Scoping this to the searchable libraries would also drop the name
  * whenever the profile has not loaded yet, since that set is fail-closed.
  *
- * `libraryId` is a scope hint (see {@link resolveCollectionWithHint}); every
- * failure, ambiguity included, returns null so a label renders nothing rather
- * than guessing a target.
+ * `libraryId` is a scope hint (see {@link resolveCollectionWithHint}); a
+ * failure returns null so a label renders nothing rather than guessing a target.
  */
 export function resolveCollectionForDisplay(
     collectionIdOrName: number | string | null | undefined,

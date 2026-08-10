@@ -53,12 +53,16 @@ export async function handleListItemsRequest(
         
         // Resolve collection if specified (scoped identifier, key, name, or row id).
         // An explicitly requested library confines resolution to that library;
-        // otherwise any searchable library is eligible.
+        // otherwise the library in play is tried first and any other searchable
+        // library is eligible. A *name* never widens: names like "Inbox" are
+        // commonly duplicated across libraries, so a widened name lookup would
+        // silently retarget the request at another library's collection.
         if (request.collection_key) {
             const resolved = resolveSingleCollection(request.collection_key, {
                 eligibleLibraryIds: validation.wasExplicitlyRequested
                     ? [library.libraryID]
-                    : getSearchableLibraryIds(),
+                    : [library.libraryID, ...getSearchableLibraryIds().filter(id => id !== library.libraryID)],
+                nameLibraryIds: [library.libraryID],
                 explicitLibrary: validation.wasExplicitlyRequested,
             });
 

@@ -67,13 +67,21 @@ export function createCollectionResolverFake(state: CollectionResolverFakeState)
         return { ok: true as const, matchKind: 'row_id' as const, match: { collection, libraryID: collection.libraryID } };
     }
 
-    function ambiguous(input: unknown, matches: Match[]): Failure {
-        const candidates = matches.map((m) => modelObjectId(m.libraryID, m.collection.key)).join('; ');
-        return {
-            ok: false,
-            code: 'ambiguous_collection',
-            message: `"${input}" matches ${matches.length} collections: ${candidates}. Retry with the scoped collection identifier of the one you want.`,
-        };
+    /**
+     * Matches in library-precedence order, mirroring the real resolver's walk
+     * over `eligibleLibraryIds` / `nameLibraryIds` rather than fixture order —
+     * single-target callers take the first match, so that order is the result.
+     */
+    function matchesInLibraryOrder(libraryIds: number[], predicate: (c: FakeCollection) => boolean): Match[] {
+        const matches: Match[] = [];
+        for (const libraryID of libraryIds) {
+            for (const collection of state.collections) {
+                if (collection.libraryID === libraryID && predicate(collection)) {
+                    matches.push({ collection, libraryID: collection.libraryID });
+                }
+            }
+        }
+        return matches;
     }
 
     function resolveSingleCollection(input: unknown, options: any) {
@@ -120,19 +128,13 @@ export function createCollectionResolverFake(state: CollectionResolverFakeState)
         }
 
         if (KEY_PATTERN.test(input)) {
-            const keyMatches = state.collections
-                .filter((c) => eligible.includes(c.libraryID) && c.key === input)
-                .map((collection) => ({ collection, libraryID: collection.libraryID }));
-            if (keyMatches.length > 1) return ambiguous(input, keyMatches);
-            if (keyMatches.length === 1) return { ok: true as const, matchKind: 'key' as const, match: keyMatches[0] };
+            const keyMatches = matchesInLibraryOrder(eligible, (c) => c.key === input);
+            if (keyMatches.length > 0) return { ok: true as const, matchKind: 'key' as const, match: keyMatches[0] };
         }
 
         const inputLower = input.toLowerCase();
-        const nameMatches = state.collections
-            .filter((c) => nameLibraryIds.includes(c.libraryID) && c.name.toLowerCase() === inputLower)
-            .map((collection) => ({ collection, libraryID: collection.libraryID }));
-        if (nameMatches.length > 1) return ambiguous(input, nameMatches);
-        if (nameMatches.length === 1) return { ok: true as const, matchKind: 'name' as const, match: nameMatches[0] };
+        const nameMatches = matchesInLibraryOrder(nameLibraryIds, (c) => c.name.toLowerCase() === inputLower);
+        if (nameMatches.length > 0) return { ok: true as const, matchKind: 'name' as const, match: nameMatches[0] };
 
         if (/^\d+$/.test(input)) return resolveRowId(parseInt(input, 10), eligible, input);
 
