@@ -242,7 +242,7 @@ export function getActionLabel(
         case 'create_items':
             return 'Import';
         case 'create_collection':
-            return 'Create';
+            return 'Create Collection';
         case 'organize_items':
             return 'Organize';
         case 'manage_tags':
