@@ -126,7 +126,11 @@ vi.mock('../../../react/utils/searchTools', () => ({
 }));
 
 import { logger } from '@beaver/agent-core/platform/logger';
-import { resolveCollectionFilters } from '../../../src/services/agentDataProvider/utils';
+import { serializeItem } from '../../../src/utils/zoteroSerializers';
+import {
+    prepareAttachmentInfoBatchData,
+    resolveCollectionFilters,
+} from '../../../src/services/agentDataProvider/utils';
 import { handleItemSearchByMetadataRequest } from '../../../src/services/agentDataProvider/handleItemSearchByMetadataRequest';
 import { handleItemSearchByTopicRequest } from '../../../src/services/agentDataProvider/handleItemSearchByTopicRequest';
 import { searchItemsByMetadata } from '../../../react/utils/searchTools';
@@ -408,6 +412,31 @@ describe('resolveCollectionFilters', () => {
 });
 
 describe('handleItemSearchByMetadataRequest collection filters', () => {
+    it('loads later candidate batches to backfill serialization failures', async () => {
+        const members = seedPersonalCollection(30);
+        const serializer = vi.mocked(serializeItem);
+        serializer.mockImplementation(async (item: any) => {
+            if (item.id <= 20) throw new Error('fixture serialization failure');
+            return { library_id: item.libraryID, zotero_key: item.key } as any;
+        });
+
+        let response: any;
+        try {
+            response = await handleItemSearchByMetadataRequest(
+                metadataRequest({ collections_filter: [`u-${personalA.key}`], limit: 10 })
+            );
+        } finally {
+            serializer.mockImplementation(async (item: any) => ({
+                library_id: item.libraryID,
+                zotero_key: item.key,
+            } as any));
+        }
+
+        expect(returnedKeys(response)).toEqual(members.slice(20, 30).map(item => item.key));
+        expect(prepareAttachmentInfoBatchData).toHaveBeenCalledTimes(3);
+        expect((globalThis as any).Zotero.Items.loadDataTypes).toHaveBeenCalledTimes(3);
+    });
+
     it('applies each scoped filter only within its own library', async () => {
         // Both libraries hold a collection with key GRPCAAA2, but only the group
         // one was requested.
