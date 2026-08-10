@@ -85,6 +85,8 @@ import {
     getActionTitle,
     buildPreviewData,
     PreviewData,
+    getActionCardResolutionStatus,
+    shouldAutoCollapseResolvedApproval,
 } from './agentActionViewHelpers';
 import { ActionPreview } from './ActionPreview';
 import { currentThreadIdAtom } from '../../../atoms/threads';
@@ -142,8 +144,10 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     const getAgentActionsByToolcall = useAtomValue(getAgentActionsByToolcallAtom);
     const actions = getAgentActionsByToolcall(toolcallId, (a) => a.run_id === runId);
     const action = actions.length > 0 ? actions[0] : null;
+    const isMultiAction = (toolName === 'create_items' || toolName === 'create_item') && actions.length > 1;
+    const actionResolutionStatus = getActionCardResolutionStatus(actions, isMultiAction, hasToolReturn);
 
-    const actionInFinalState = action && action.status !== 'pending';
+    const actionInFinalState = actionResolutionStatus !== 'pending';
     const pendingApproval = actionInFinalState ? null : pendingApprovalProp;
     const isAwaitingApproval = pendingApproval !== null;
 
@@ -162,6 +166,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     const isExpanded = expansionState[expansionKey] ?? (isAwaitingApproval || neverAutoCollapse);
 
     const prevAwaitingRef = useRef(isAwaitingApproval);
+    const waitingForTerminalStatusRef = useRef(false);
     const hasInitializedRef = useRef(false);
     useEffect(() => {
         if (!hasInitializedRef.current) {
@@ -172,14 +177,25 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
             return;
         }
 
-        if (prevAwaitingRef.current !== isAwaitingApproval) {
+        if (!prevAwaitingRef.current && isAwaitingApproval) {
+            waitingForTerminalStatusRef.current = false;
+            setExpanded({ key: expansionKey, expanded: true });
+        } else if (prevAwaitingRef.current && !isAwaitingApproval) {
+            const shouldCollapse = shouldAutoCollapseResolvedApproval(actionResolutionStatus, neverAutoCollapse);
+            waitingForTerminalStatusRef.current = !shouldCollapse && actionResolutionStatus === 'pending';
             setExpanded({
                 key: expansionKey,
-                expanded: neverAutoCollapse ? true : isAwaitingApproval,
+                expanded: shouldCollapse ? false : true,
             });
+        } else if (
+            waitingForTerminalStatusRef.current
+            && shouldAutoCollapseResolvedApproval(actionResolutionStatus, neverAutoCollapse)
+        ) {
+            waitingForTerminalStatusRef.current = false;
+            setExpanded({ key: expansionKey, expanded: false });
         }
         prevAwaitingRef.current = isAwaitingApproval;
-    }, [isAwaitingApproval, expansionKey, hasExistingState, neverAutoCollapse, setExpanded]);
+    }, [isAwaitingApproval, actionResolutionStatus, expansionKey, hasExistingState, neverAutoCollapse, setExpanded]);
 
     const [isProcessingApproval, setIsProcessingApproval] = useState(false);
     const [isProcessingAction, setIsProcessingAction] = useState(false);
@@ -191,8 +207,6 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
 
     const isRunPending = useAtomValue(isWSChatPendingAtom);
     const approvalResponseIntents = useAtomValue(approvalResponseIntentsAtom);
-    const isMultiAction = (toolName === 'create_items' || toolName === 'create_item') && actions.length > 1;
-
     const sendApprovalResponse = useSetAtom(sendApprovalResponseAtom);
     const approveToolGroupForRun = useSetAtom(approveToolGroupForRunAtom);
     const removeApprovalResponseIntent = useSetAtom(removeApprovalResponseIntentAtom);
