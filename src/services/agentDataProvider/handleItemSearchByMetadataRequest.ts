@@ -159,9 +159,13 @@ export async function handleItemSearchByMetadataRequest(
     // `limit` items at `offset`. Every library is searched with this budget before the
     // union is deduplicated and sliced — stopping early would both hide libraries and
     // rob deduplication of the copies it prefers.
-    // A non-positive limit means unlimited and is passed through as-is. The cap bounds
-    // the work an arbitrarily deep offset can ask for; pages past it come back empty,
-    // which the model reads as the end of the results.
+    // A non-positive limit means unlimited and is passed through as-is.
+    //
+    // The cap bounds pagination depth, because every fetched row costs data loading and
+    // each page re-fetches the whole prefix. It deliberately ends pagination rather than
+    // scaling with an arbitrary offset: a page straddling the cap comes back short and
+    // anything beyond it empty, which the model reads as the end of the results. Raising
+    // it trades a rarely reached depth for a much slower worst case.
     const MAX_ROWS_PER_LIBRARY = 1000;
     const perLibraryLimit = request.limit > 0
         ? Math.min((offset + request.limit) * 2, MAX_ROWS_PER_LIBRARY)
