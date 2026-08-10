@@ -22,8 +22,8 @@ export interface SearchItemsByMetadataOptions {
     item_type?: string;
     /** List of tags to filter by (OR logic - item must have at least one tag) */
     tags?: string[];
-    /** Collection key to search within */
-    collection_key?: string;
+    /** Collection keys to search within (OR logic) */
+    collection_keys?: string[];
     /** If true, search recursively in subcollections */
     recursive?: boolean;
     /**
@@ -68,72 +68,95 @@ export const searchItemsByMetadata = async (
         year_exact,
         item_type,
         tags = [],
-        collection_key,
+        collection_keys,
         recursive = false,
         join_mode = 'all',
         limit = 50
     } = options;
 
-    const search = new Zotero.Search();
-    search.addCondition('libraryID', 'is', String(libraryID));
-    
-    // Set join mode
-    if (join_mode === 'any') {
-        search.addCondition('joinMode', 'any');
-    }
+    // Builds a search with every condition except the collection scope, so the
+    // same query can be run once per collection key.
+    const buildSearch = (): Zotero.Search => {
+        const search = new Zotero.Search();
+        search.addCondition('libraryID', 'is', String(libraryID));
 
-    // Collection scope
-    if (collection_key) {
-        search.addCondition('collection', 'is', collection_key);
-        if (recursive) {
-            search.addCondition('recursive', 'true');
+        // Set join mode
+        if (join_mode === 'any') {
+            search.addCondition('joinMode', 'any');
         }
-    }
 
-    // Title search
-    if (title_query) {
-        search.addCondition('title', 'contains', title_query);
-    }
+        // Title search
+        if (title_query) {
+            search.addCondition('title', 'contains', title_query);
+        }
 
-    // Author/Creator search
-    if (author_query) {
-        search.addCondition('creator', 'contains', author_query);
-    }
+        // Author/Creator search
+        if (author_query) {
+            search.addCondition('creator', 'contains', author_query);
+        }
 
-    // Publication search
-    if (publication_query) {
-        search.addCondition('publicationTitle', 'contains', publication_query);
-    }
+        // Publication search
+        if (publication_query) {
+            search.addCondition('publicationTitle', 'contains', publication_query);
+        }
 
-    // Year filters
-    if (year_exact && year_exact > 0) {
-        search.addCondition('year', 'is', String(year_exact));
+        // Year filters
+        if (year_exact && year_exact > 0) {
+            search.addCondition('year', 'is', String(year_exact));
+        } else {
+            if (year_min && year_min > 0) {
+                search.addCondition('date', 'isAfter', `${year_min - 1}-12-31`);
+            }
+            if (year_max && year_max > 0) {
+                search.addCondition('date', 'isBefore', `${year_max + 1}-01-01`);
+            }
+        }
+
+        // Item type filter
+        if (item_type) {
+            search.addCondition('itemType', 'is', item_type);
+        }
+
+        // Tag filters (OR logic)
+        if (tags && tags.length > 0) {
+            // For tag OR logic, we need to use a subsearch approach or accept that
+            // multiple tags with 'all' mode means item must have ALL tags
+            // With 'any' mode, we can add multiple tag conditions
+            for (const tag of tags) {
+                search.addCondition('tag', 'is', tag);
+            }
+        }
+
+        return search;
+    };
+
+    // One search per collection key, unioned. Zotero 10's groupStart/groupEnd
+    // could express `query AND (collection A OR B)` in a single search, but
+    // addCondition throws on those names in Zotero 7, which is still supported.
+    const itemIDSet = new Set<number>();
+    if (collection_keys && collection_keys.length > 0) {
+        for (const collectionKey of collection_keys) {
+            const search = buildSearch();
+            search.addCondition('collection', 'is', collectionKey);
+            if (recursive) {
+                search.addCondition('recursive', 'true');
+            }
+            const ids: number[] = await search.search();
+            for (const id of ids) {
+                itemIDSet.add(id);
+            }
+        }
     } else {
-        if (year_min && year_min > 0) {
-            search.addCondition('date', 'isAfter', `${year_min - 1}-12-31`);
-        }
-        if (year_max && year_max > 0) {
-            search.addCondition('date', 'isBefore', `${year_max + 1}-01-01`);
+        const ids: number[] = await buildSearch().search();
+        for (const id of ids) {
+            itemIDSet.add(id);
         }
     }
 
-    // Item type filter
-    if (item_type) {
-        search.addCondition('itemType', 'is', item_type);
-    }
-
-    // Tag filters (OR logic)
-    if (tags && tags.length > 0) {
-        // For tag OR logic, we need to use a subsearch approach or accept that
-        // multiple tags with 'all' mode means item must have ALL tags
-        // With 'any' mode, we can add multiple tag conditions
-        for (const tag of tags) {
-            search.addCondition('tag', 'is', tag);
-        }
-    }
-
-    // Execute search
-    const itemIDs: number[] = await search.search();
+    // Zotero returns itemIDs in ascending order; sorting the union preserves
+    // that so a truncated page is deterministic instead of depending on Set
+    // iteration order.
+    const itemIDs = Array.from(itemIDSet).sort((a, b) => a - b);
 
     // Apply limit
     const limitedIDs = limit > 0 ? itemIDs.slice(0, limit) : itemIDs;

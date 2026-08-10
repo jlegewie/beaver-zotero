@@ -150,7 +150,7 @@ export async function handleItemSearchByMetadataRequest(
             year_max: request.year_max,
             item_type: request.item_type_filter,
             tags: request.tags_filter,
-            collection_key: collectionKeys.length > 0 ? collectionKeys[0] : undefined,
+            collection_keys: collectionKeys.length > 0 ? collectionKeys : undefined,
             limit: request.limit,
             join_mode: 'all', // AND logic between query params
         };
