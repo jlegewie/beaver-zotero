@@ -72,9 +72,10 @@ export function buildReviewRows(
         if (!toolcallId || toolcallId === CITATIONS_TOOLCALL_ID) continue;
         if (approvedToolcallIds.has(toolcallId)) continue;
 
-        // An `error` action is not review material (the model retries it), so a
-        // non-pending action is only ever here because the user just resolved
-        // this tool call from the card and the row must not vanish under them.
+        // Only `pending` is review material — an action the run itself failed is
+        // routinely retried by the model. A non-pending action is otherwise here
+        // only because the user just resolved this tool call from the card, and
+        // the row must not vanish out from under them.
         if (action.status !== 'pending' && !resolvedToolcallIds?.has(toolcallId)) continue;
 
         const row = rowsByToolcall.get(toolcallId);

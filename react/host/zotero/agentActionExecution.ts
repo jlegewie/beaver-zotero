@@ -166,7 +166,14 @@ export const applyAgentActionsAtom = atom(
                 }
             } else {
                 const executeAction = APPLY_EXECUTORS.get(actionType);
-                if (!executeAction) return { applied, failed };
+                if (!executeAction) {
+                    // Note edits and the legacy per-annotation types apply through
+                    // their own surfaces. Log it: a caller with a wider set of
+                    // actions than the in-stream card would otherwise see a
+                    // successful-looking no-op.
+                    logger(`agentActionExecution: No apply executor for action type ${actionType}`, 1);
+                    return { applied, failed };
+                }
 
                 const result = await executeAction(action, runId);
                 await set(ackAgentActionsAtom, runId, [{ action_id: action.id, result_data: result }]);
@@ -236,7 +243,10 @@ export const undoAgentActionsAtom = atom(
                 logger(`agentActionExecution: Undone ${actionType} action ${action.id} (${result.fieldsReverted} fields reverted)`, 1);
             } else {
                 const undoAction = UNDO_EXECUTORS.get(actionType);
-                if (!undoAction) return { undone, failed };
+                if (!undoAction) {
+                    logger(`agentActionExecution: No undo executor for action type ${actionType}`, 1);
+                    return { undone, failed };
+                }
 
                 await undoAction(action);
                 set(undoAgentActionAtom, action.id);
