@@ -922,9 +922,15 @@ export { safeFileExists, isLinkedUrlAttachment } from "./attachmentFiles";
 interface ItemDuplicateSignature {
     id: number;
     itemTypeID: number;
-    /** Normalized DOI; empty when absent. */
+    /**
+     * Whether the raw field was set. Two items that both carry an identifier are
+     * decided by it alone, even if one of them fails to parse.
+     */
+    hasDoi: boolean;
+    hasIsbn: boolean;
+    /** Normalized DOI; empty when absent or blank. */
     doi: string;
-    /** Cleaned ISBN; empty when absent or unparseable, so placeholder text never matches. */
+    /** Cleaned ISBN; empty when absent or unparseable. */
     isbn: string;
     /** Normalized title; empty when the item has no title. */
     title: string;
@@ -949,6 +955,8 @@ function buildItemDuplicateSignature(item: Zotero.Item): ItemDuplicateSignature 
     return {
         id: item.id,
         itemTypeID: item.itemTypeID,
+        hasDoi: !!doi,
+        hasIsbn: !!isbnRaw,
         doi: doi.trim().toUpperCase(),
         isbn: (isbnRaw && Zotero.Utilities.cleanISBN(isbnRaw)) || '',
         title: titleRaw ? normalizeDuplicateTitle(titleRaw) : '',
@@ -973,11 +981,11 @@ function areSignaturesDuplicates(a: ItemDuplicateSignature, b: ItemDuplicateSign
     // Different item types are not duplicates
     if (a.itemTypeID !== b.itemTypeID) return false;
 
-    // DOI is authoritative when both items have one
-    if (a.doi && b.doi) return a.doi === b.doi;
-
-    // ISBN is authoritative when both items have one
-    if (a.isbn && b.isbn) return a.isbn === b.isbn;
+    // An identifier both items carry decides the match on its own. Values that fail
+    // to normalize (blank DOI, placeholder text in the ISBN field) never match, not
+    // even each other.
+    if (a.hasDoi && b.hasDoi) return !!a.doi && a.doi === b.doi;
+    if (a.hasIsbn && b.hasIsbn) return !!a.isbn && a.isbn === b.isbn;
 
     // Fall back to title plus a corroborating year or creator
     if (!a.title || a.title !== b.title) return false;

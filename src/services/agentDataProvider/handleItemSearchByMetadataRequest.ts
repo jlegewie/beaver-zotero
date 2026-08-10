@@ -57,6 +57,7 @@ export async function handleItemSearchByMetadataRequest(
     const hasFilter = collectionsFilter.length > 0 ||
                       !!(request.tags_filter?.length) ||
                       !!(request.libraries_filter?.length) ||
+                      !!request.item_type_filter ||
                       !!request.year_min ||
                       !!request.year_max;
 
@@ -156,7 +157,12 @@ export async function handleItemSearchByMetadataRequest(
     // Deduplication runs before the page slice and agentItemFilter after it, so the
     // search has to over-fetch to fill a page of `limit` items at `offset`.
     // A non-positive limit means unlimited and is passed through as-is.
-    const preDedupBuffer = request.limit > 0 ? (offset + request.limit) * 2 : request.limit;
+    // The cap bounds the work an arbitrarily deep offset can ask for; pages past it
+    // come back empty, which the model reads as the end of the results.
+    const MAX_PRE_DEDUP_ROWS = 1000;
+    const preDedupBuffer = request.limit > 0
+        ? Math.min((offset + request.limit) * 2, MAX_PRE_DEDUP_ROWS)
+        : request.limit;
 
     logger('handleItemSearchByMetadataRequest: Metadata search', {
         libraryIds,
