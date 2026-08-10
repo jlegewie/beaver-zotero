@@ -114,6 +114,15 @@ export const searchItemsByMetadata = async (
             search.addCondition('itemType', 'is', item_type);
         }
 
+        // Exclude standalone attachments, notes, and annotations so the result limit
+        // is applied to regular items only. Negations are only safe under AND join
+        // mode; in 'any' mode they would OR in and match the whole library.
+        if (join_mode === 'all') {
+            search.addCondition('itemType', 'isNot', 'attachment');
+            search.addCondition('itemType', 'isNot', 'note');
+            search.addCondition('itemType', 'isNot', 'annotation');
+        }
+
         // Tag filters (OR logic)
         if (tags && tags.length > 0) {
             // For tag OR logic, we need to use a subsearch approach or accept that
