@@ -29,8 +29,7 @@ import {
     getToolGroupRunApprovalScope,
 } from '../../../atoms/runApprovalPolicy';
 import {
-    type ActionCardExpansionSignals,
-    getActionCardExpansionTransition,
+    shouldAutoCollapseResolvedApproval,
     STATUS_CONFIGS,
     type ActionStatus,
 } from './agentActionViewHelpers';
@@ -252,31 +251,18 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
     ), [partStates, resultsMap]);
 
     const aggregateStatus: ActionStatus | 'awaiting' = getOverallEditNoteDisplayStatus(rowStatuses);
-    const hasStoredPendingAction = allActions.some((action) => action.status === 'pending');
-    const outcomeNeedsAttention = errorCount > 0;
 
     const expansionKey = getEditNoteGroupExpansionKey(runId, responseIndex, parts);
     const expansionState = useAtomValue(toolExpandedAtom);
     const setExpanded = useSetAtom(setToolExpandedAtom);
     const hasExistingExpandState = expansionState[expansionKey] !== undefined;
-    const shouldInitiallyExpand = hasPendingApprovals || hasStoredPendingAction || outcomeNeedsAttention;
     const isExpanded = hasStreamingChild
         ? false
         : (expansionState[expansionKey]
-            ?? shouldInitiallyExpand);
+            ?? (hasPendingApprovals || (errorCount > 0 && reapplicableActions.length === 0 && appliedCount === 0)));
 
-    const expansionSignals = useMemo<ActionCardExpansionSignals>(() => ({
-        isAwaitingApproval: hasPendingApprovals,
-        hasStoredPendingAction,
-        resolutionStatus: aggregateStatus,
-        keepExpandedAfterResolution: outcomeNeedsAttention,
-    }), [
-        hasPendingApprovals,
-        hasStoredPendingAction,
-        aggregateStatus,
-        outcomeNeedsAttention,
-    ]);
-    const previousExpansionSignalsRef = useRef(expansionSignals);
+    const prevHasPendingApprovalsRef = useRef(hasPendingApprovals);
+    const waitingForTerminalStatusRef = useRef(false);
     const hasInitializedRef = useRef(false);
     useEffect(() => {
         if (!hasInitializedRef.current) {
@@ -284,27 +270,37 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
             if (!hasExistingExpandState) {
                 setExpanded({
                     key: expansionKey,
-                    expanded: shouldInitiallyExpand,
+                    expanded: hasPendingApprovals || (errorCount > 0 && reapplicableActions.length === 0 && appliedCount === 0),
                 });
             }
-            previousExpansionSignalsRef.current = expansionSignals;
+            prevHasPendingApprovalsRef.current = hasPendingApprovals;
             return;
         }
 
-        const nextExpanded = getActionCardExpansionTransition(
-            previousExpansionSignalsRef.current,
-            expansionSignals,
-        );
-        if (nextExpanded !== null) {
-            setExpanded({ key: expansionKey, expanded: nextExpanded });
+        if (!prevHasPendingApprovalsRef.current && hasPendingApprovals) {
+            waitingForTerminalStatusRef.current = false;
+            setExpanded({ key: expansionKey, expanded: true });
+        } else if (prevHasPendingApprovalsRef.current && !hasPendingApprovals) {
+            const shouldCollapse = shouldAutoCollapseResolvedApproval(aggregateStatus);
+            waitingForTerminalStatusRef.current = !shouldCollapse && aggregateStatus === 'pending';
+            setExpanded({ key: expansionKey, expanded: shouldCollapse ? false : true });
+        } else if (
+            waitingForTerminalStatusRef.current
+            && shouldAutoCollapseResolvedApproval(aggregateStatus)
+        ) {
+            waitingForTerminalStatusRef.current = false;
+            setExpanded({ key: expansionKey, expanded: false });
         }
-        previousExpansionSignalsRef.current = expansionSignals;
+        prevHasPendingApprovalsRef.current = hasPendingApprovals;
     }, [
-        expansionSignals,
+        hasPendingApprovals,
+        aggregateStatus,
+        errorCount,
+        reapplicableActions.length,
+        appliedCount,
         expansionKey,
         hasExistingExpandState,
         setExpanded,
-        shouldInitiallyExpand,
     ]);
 
     useEffect(() => {

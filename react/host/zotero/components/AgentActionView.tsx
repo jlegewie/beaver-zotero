@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { navigateToAnnotation } from '../../../utils/readerUtils';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { AgentRunStatus } from '@beaver/agent-core/agents/types';
@@ -85,11 +85,8 @@ import {
     getActionTitle,
     buildPreviewData,
     PreviewData,
-    actionCardHasBrowsableCreatedArtifacts,
-    actionCardOutcomeNeedsAttention,
-    type ActionCardExpansionSignals,
     getActionCardResolutionStatus,
-    getActionCardExpansionTransition,
+    shouldAutoCollapseResolvedApproval,
 } from './agentActionViewHelpers';
 import { ActionPreview } from './ActionPreview';
 import { currentThreadIdAtom } from '../../../atoms/threads';
@@ -149,9 +146,6 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     const action = actions.length > 0 ? actions[0] : null;
     const isMultiAction = (toolName === 'create_items' || toolName === 'create_item') && actions.length > 1;
     const actionResolutionStatus = getActionCardResolutionStatus(actions, isMultiAction, hasToolReturn);
-    const outcomeNeedsAttention = actionCardOutcomeNeedsAttention(actions);
-    const hasBrowsableCreatedArtifacts = actionCardHasBrowsableCreatedArtifacts(actions);
-    const keepExpandedAfterResolution = outcomeNeedsAttention || hasBrowsableCreatedArtifacts;
 
     const actionInFinalState = actionResolutionStatus !== 'pending';
     const pendingApproval = actionInFinalState ? null : pendingApprovalProp;
@@ -169,53 +163,39 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     const setExpanded = useSetAtom(setToolExpandedAtom);
     const hasExistingState = expansionState[expansionKey] !== undefined;
     const neverAutoCollapse = NEVER_AUTO_COLLAPSE_TOOLS.has(toolName);
-    const hasStoredPendingAction = actions.some((candidate) => candidate.status === 'pending');
-    const shouldInitiallyExpand = isAwaitingApproval
-        || hasStoredPendingAction
-        || neverAutoCollapse
-        || keepExpandedAfterResolution;
-    const isExpanded = expansionState[expansionKey] ?? shouldInitiallyExpand;
+    const isExpanded = expansionState[expansionKey] ?? (isAwaitingApproval || neverAutoCollapse);
 
-    const expansionSignals = useMemo<ActionCardExpansionSignals>(() => ({
-        isAwaitingApproval,
-        hasStoredPendingAction,
-        resolutionStatus: actionResolutionStatus,
-        keepExpandedAfterResolution,
-    }), [
-        isAwaitingApproval,
-        hasStoredPendingAction,
-        actionResolutionStatus,
-        keepExpandedAfterResolution,
-    ]);
-    const previousExpansionSignalsRef = useRef(expansionSignals);
+    const prevAwaitingRef = useRef(isAwaitingApproval);
+    const waitingForTerminalStatusRef = useRef(false);
     const hasInitializedRef = useRef(false);
     useEffect(() => {
         if (!hasInitializedRef.current) {
             hasInitializedRef.current = true;
             if (!hasExistingState) {
-                setExpanded({ key: expansionKey, expanded: shouldInitiallyExpand });
+                setExpanded({ key: expansionKey, expanded: isAwaitingApproval || neverAutoCollapse });
             }
-            previousExpansionSignalsRef.current = expansionSignals;
             return;
         }
 
-        const nextExpanded = getActionCardExpansionTransition(
-            previousExpansionSignalsRef.current,
-            expansionSignals,
-            neverAutoCollapse,
-        );
-        if (nextExpanded !== null) {
-            setExpanded({ key: expansionKey, expanded: nextExpanded });
+        if (!prevAwaitingRef.current && isAwaitingApproval) {
+            waitingForTerminalStatusRef.current = false;
+            setExpanded({ key: expansionKey, expanded: true });
+        } else if (prevAwaitingRef.current && !isAwaitingApproval) {
+            const shouldCollapse = shouldAutoCollapseResolvedApproval(actionResolutionStatus, neverAutoCollapse);
+            waitingForTerminalStatusRef.current = !shouldCollapse && actionResolutionStatus === 'pending';
+            setExpanded({
+                key: expansionKey,
+                expanded: shouldCollapse ? false : true,
+            });
+        } else if (
+            waitingForTerminalStatusRef.current
+            && shouldAutoCollapseResolvedApproval(actionResolutionStatus, neverAutoCollapse)
+        ) {
+            waitingForTerminalStatusRef.current = false;
+            setExpanded({ key: expansionKey, expanded: false });
         }
-        previousExpansionSignalsRef.current = expansionSignals;
-    }, [
-        expansionSignals,
-        expansionKey,
-        hasExistingState,
-        neverAutoCollapse,
-        setExpanded,
-        shouldInitiallyExpand,
-    ]);
+        prevAwaitingRef.current = isAwaitingApproval;
+    }, [isAwaitingApproval, actionResolutionStatus, expansionKey, hasExistingState, neverAutoCollapse, setExpanded]);
 
     const [isProcessingApproval, setIsProcessingApproval] = useState(false);
     const [isProcessingAction, setIsProcessingAction] = useState(false);
