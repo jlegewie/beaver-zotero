@@ -218,16 +218,9 @@ export async function handleItemSearchByMetadataRequest(
     // Timing accumulator for serialization breakdown
     const ta = new TimingAccumulator();
 
-    // Load item data needed for serialization (searchItemsByMetadata only loads itemData/creators/childItems)
-    if (items.length > 0) {
-        await ta.track('data_loading_ms', () =>
-            Zotero.Items.loadDataTypes(items, ["primaryData", "tags", "collections", "relations", "childItems"])
-        );
-    }
-
     // Record search completion time
     searchEndTime = Date.now();
-    
+
     logger('handleItemSearchByMetadataRequest: Final items', {
         libraryIds,
         items: items.length,
@@ -235,15 +228,32 @@ export async function handleItemSearchByMetadataRequest(
 
     // Serialize items in parallel in bounded batches (with backfill on failures to ensure limit is reached)
     const targetLimit = request.limit > 0 ? request.limit : items.length;
+    // `agentItemFilter` only reads primary data, which the search already
+    // loaded, so it can run before the heavier load below.
     const candidates = items.slice(offset).filter(item => agentItemFilter(item));
+    // Only what the page can actually consume is loaded and prepared. A
+    // collection-filtered search unions one search per (library, collection)
+    // pair, so the union reaching this point can be several hundred items —
+    // loading data types and attachment info for all of them would be
+    // main-thread work the page never uses. The loop below stops at
+    // `targetLimit` and reaches further only to backfill items that fail to
+    // serialize, so twice the page is ample headroom.
+    const workingSet = request.limit > 0 ? candidates.slice(0, targetLimit * 2) : candidates;
     const BATCH_SIZE = Math.min(targetLimit, 20);
 
+    // Load item data needed for serialization (searchItemsByMetadata only loads itemData/creators/childItems)
+    if (workingSet.length > 0) {
+        await ta.track('data_loading_ms', () =>
+            Zotero.Items.loadDataTypes(workingSet, ["primaryData", "tags", "collections", "relations", "childItems"])
+        );
+    }
+
     // Batch-fetch best attachments and sync dates for all candidate items
-    const batchAttachmentData = await prepareAttachmentInfoBatchData(candidates, ta);
+    const batchAttachmentData = await prepareAttachmentInfoBatchData(workingSet, ta);
 
     const resultItems: ItemSearchFrontendResultItem[] = [];
-    for (let batchStart = 0; batchStart < candidates.length && resultItems.length < targetLimit; batchStart += BATCH_SIZE) {
-        const batch = candidates.slice(batchStart, batchStart + BATCH_SIZE);
+    for (let batchStart = 0; batchStart < workingSet.length && resultItems.length < targetLimit; batchStart += BATCH_SIZE) {
+        const batch = workingSet.slice(batchStart, batchStart + BATCH_SIZE);
 
         const serialized = await Promise.all(
             batch.map(async (item): Promise<ItemSearchFrontendResultItem | null> => {

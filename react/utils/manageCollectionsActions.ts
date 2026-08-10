@@ -67,6 +67,8 @@ export async function executeManageCollectionsAction(
     const oldName: string = collection.name;
     const oldParentKey: string | null = collection.parentKey ? String(collection.parentKey) : null;
     let itemsAffected: number | null = null;
+    /** Bare key of the move target, resolved from whatever grammar it arrived in. */
+    let resolvedNewParentKey: string | null = null;
     if (op === 'delete') {
         // Mirror the validator: refuse delete when subcollections exist. With
         // soft-delete the subtree would cascade into trash, but each descendant
@@ -94,7 +96,22 @@ export async function executeManageCollectionsAction(
         await collection.saveTx();
         logger(`executeManageCollectionsAction: Renamed collection ${resolvedLibraryID}-${collection_key}`, 1);
     } else if (op === 'move') {
-        (collection as any).parentKey = new_parent_key ? new_parent_key : false;
+        // `new_parent_key` may be a bare key or a scoped identifier, so it is
+        // resolved against the target library like `collection_key` above.
+        // Zotero's parentKey setter runs the value through `checkKey`, which
+        // throws a bare "key is not valid" for anything that isn't an 8-char
+        // key — resolving first turns that into a typed failure and keeps
+        // result_data holding the bare key undo and the backend expect.
+        // Zotero uses `false` to signal top-level (see collection.js).
+        if (new_parent_key) {
+            const parentResolution = resolveCollectionForWrite(new_parent_key, {
+                eligibleLibraryIds: [resolvedLibraryID],
+                explicitLibrary: true,
+            });
+            if (!parentResolution.ok) throw new Error(parentResolution.message);
+            resolvedNewParentKey = parentResolution.match.collection.key;
+        }
+        (collection as any).parentKey = resolvedNewParentKey ?? false;
         await collection.saveTx();
         logger(`executeManageCollectionsAction: Moved collection ${resolvedLibraryID}-${collection_key}`, 1);
     } else if (op === 'delete') {
@@ -111,7 +128,7 @@ export async function executeManageCollectionsAction(
         action: op,
         collection_key,
         new_name: new_name ?? null,
-        new_parent_key: new_parent_key ?? null,
+        new_parent_key: resolvedNewParentKey,
         items_affected: itemsAffected,
         old_name: oldName,
         old_parent_key: oldParentKey,
