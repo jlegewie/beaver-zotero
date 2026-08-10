@@ -154,14 +154,17 @@ export async function handleItemSearchByMetadataRequest(
     // Calculate offset for pagination (default 0, guard against negative values)
     const offset = Math.max(0, request.offset ?? 0);
 
-    // Deduplication runs before the page slice and agentItemFilter after it, so the
-    // search has to over-fetch to fill a page of `limit` items at `offset`.
-    // A non-positive limit means unlimited and is passed through as-is.
-    // The cap bounds the work an arbitrarily deep offset can ask for; pages past it
-    // come back empty, which the model reads as the end of the results.
-    const MAX_PRE_DEDUP_ROWS = 1000;
-    const preDedupBuffer = request.limit > 0
-        ? Math.min((offset + request.limit) * 2, MAX_PRE_DEDUP_ROWS)
+    // Per-library search limit. Deduplication runs before the page slice and
+    // agentItemFilter after it, so each search has to over-fetch to fill a page of
+    // `limit` items at `offset`. Every library is searched with this budget before the
+    // union is deduplicated and sliced — stopping early would both hide libraries and
+    // rob deduplication of the copies it prefers.
+    // A non-positive limit means unlimited and is passed through as-is. The cap bounds
+    // the work an arbitrarily deep offset can ask for; pages past it come back empty,
+    // which the model reads as the end of the results.
+    const MAX_ROWS_PER_LIBRARY = 1000;
+    const perLibraryLimit = request.limit > 0
+        ? Math.min((offset + request.limit) * 2, MAX_ROWS_PER_LIBRARY)
         : request.limit;
 
     logger('handleItemSearchByMetadataRequest: Metadata search', {
@@ -192,7 +195,7 @@ export async function handleItemSearchByMetadataRequest(
             item_type: request.item_type_filter,
             tags: request.tags_filter,
             collection_keys: collectionKeys ? Array.from(collectionKeys) : undefined,
-            limit: preDedupBuffer,
+            limit: perLibraryLimit,
         };
 
         try {
@@ -207,11 +210,6 @@ export async function handleItemSearchByMetadataRequest(
             }
         } catch (error) {
             logger(`handleItemSearchByMetadataRequest: Error searching library ${libraryId}: ${error}`, 1);
-        }
-
-        // Early exit once the buffer is full across libraries
-        if (request.limit > 0 && uniqueItems.size >= preDedupBuffer) {
-            break;
         }
     }
 
