@@ -134,6 +134,22 @@ export async function handleItemSearchByMetadataRequest(
         }
     }
 
+    // Guard: a provided collections_filter that resolves to nothing must narrow the
+    // search to no results, never widen it to the whole library.
+    if (hasCollectionsFilter && collectionKeysByLibrary.size === 0) {
+        logger('handleItemSearchByMetadataRequest: collections_filter resolved to no collections', 1);
+        return {
+            type: 'item_search_by_metadata',
+            request_id: request.request_id,
+            items: [],
+            timing: {
+                total_ms: Date.now() - startTime,
+                item_count: 0,
+                attachment_count: 0,
+            },
+        };
+    }
+
     // Calculate offset for pagination (default 0, guard against negative values)
     const offset = Math.max(0, request.offset ?? 0);
 
