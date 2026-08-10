@@ -191,6 +191,8 @@ vi.mock('../../../react/utils/addItemActions', () => ({
 import { handleAgentActionValidateRequest } from '../../../src/services/agentDataProvider/handleAgentActionValidateRequest';
 import { handleAgentActionExecuteRequest } from '../../../src/services/agentDataProvider/handleAgentActionExecuteRequest';
 import { getNoteHtmlForRead, getLatestNoteHtml } from '../../../src/utils/noteEditorIO';
+import { validateNewString } from '../../../src/utils/editNoteValidation';
+import { expandToRawHtml } from '../../../src/utils/noteCitationExpand';
 import { getDeferredToolPreference, checkLibraryExcluded } from '../../../src/services/agentDataProvider/utils';
 import { store } from '../../../react/store';
 import { searchableLibraryIdsAtom } from '../../../react/atoms/profile';
@@ -456,10 +458,75 @@ describe('validateEditNoteBlocksAction', () => {
         expect(response.error).toContain('zero-based position');
     });
 
-    it('rejects an empty note', async () => {
+    it('rejects a numerically addressed edit on an empty note, and names the way out', async () => {
         useNote('');
         const response = await handleAgentActionValidateRequest(validateRequest([replaceBlock2]));
         expect(response).toMatchObject({ valid: false, error_code: 'empty_note' });
+        expect(response.error).toContain('no blocks to address');
+        expect(response.error).toContain('op:"rewrite"');
+    });
+
+    it('lets a sole op:"rewrite" edit through on an empty note', async () => {
+        useNote('');
+        const response = await handleAgentActionValidateRequest(validateRequest(
+            [{ index: 0, op: 'rewrite', content: '<p>First line.</p>' }],
+            { snapshot: undefined },
+        ));
+
+        expect(response.valid).toBe(true);
+        expect(response.error_code).toBeUndefined();
+        // An empty note is never "worth protecting", so no destructive escalation.
+        expect(response.normalized_action_data!.destructive_rewrite).toBeUndefined();
+    });
+
+    it('reports a malformed snapshot token as malformed, not as note drift', async () => {
+        const response = await handleAgentActionValidateRequest(
+            // Structurally garbage: the digest term is not 16 hex characters.
+            validateRequest([replaceBlock2], { snapshot: 'h:notadigest:75:1-3' }),
+        );
+
+        expect(response).toMatchObject({ valid: false, error_code: 'snapshot_malformed' });
+        // NOT drift: no fresh-listing recovery payload, and no claim of a change.
+        expect(response.current_value).toBeUndefined();
+        expect(response.error).not.toContain('changed');
+        expect(response.error).toContain('verbatim');
+    });
+
+    it('reports a truncated snapshot token as malformed', async () => {
+        const response = await handleAgentActionValidateRequest(
+            validateRequest([replaceBlock2], { snapshot: SNAPSHOT.slice(0, 12) }),
+        );
+        expect(response).toMatchObject({ valid: false, error_code: 'snapshot_malformed' });
+        expect(response.current_value).toBeUndefined();
+    });
+
+    it('strips a leading "Error: " from a per-edit skip reason', async () => {
+        // What the shared `validateNewString` really returns for fabricated
+        // annotation markup; the backend renders the reason verbatim.
+        vi.mocked(validateNewString).mockReturnValueOnce(
+            'Error: New annotations cannot be created. Annotations originate from PDF highlights in the Zotero reader.',
+        );
+        const response = await handleAgentActionValidateRequest(validateRequest([replaceBlock2]));
+
+        expect(response).toMatchObject({ valid: false, error_code: 'no_applicable_edits' });
+        expect(response.edit_errors![0]).toMatchObject({ index: 0, error_code: 'invalid_edit' });
+        expect(response.edit_errors![0].error).toBe(
+            'New annotations cannot be created. Annotations originate from PDF highlights in the Zotero reader.',
+        );
+    });
+
+    it('strips a leading "Error: " from an expansion-failure skip reason', async () => {
+        // Covers the engine's own `skip()` factory rather than the pre-skip site.
+        vi.mocked(expandToRawHtml).mockImplementationOnce(() => {
+            throw new Error('Error: Cannot create new compound citations. Insert individual <citation id="..." /> tags instead.');
+        });
+        const response = await handleAgentActionValidateRequest(validateRequest([replaceBlock2]));
+
+        expect(response).toMatchObject({ valid: false, error_code: 'no_applicable_edits' });
+        expect(response.edit_errors![0].error_code).toBe('expansion_failed');
+        expect(response.edit_errors![0].error).toBe(
+            'Cannot create new compound citations. Insert individual <citation id="..." /> tags instead.',
+        );
     });
 });
 
@@ -628,6 +695,35 @@ describe('executeEditNoteBlocksAction', () => {
         expect(response).toMatchObject({ success: false, error_code: 'snapshot_mismatch' });
         expect(response.refreshed_note).toMatchObject({ total_lines: 3, note: BODY });
         expect(mockItem.setNote).not.toHaveBeenCalled();
+    });
+
+    it('refuses a malformed snapshot token without offering a fresh listing', async () => {
+        const response = await handleAgentActionExecuteRequest(
+            executeRequest([replaceBlock2], { snapshot: 'h:notadigest:75:1-3' }),
+        );
+
+        expect(response).toMatchObject({ success: false, error_code: 'snapshot_malformed' });
+        // NOT drift: a listing cannot fix a fabricated token, so none is shipped.
+        expect(response.refreshed_note).toBeUndefined();
+        expect(response.result_data).toBeUndefined();
+        expect(response.error).not.toContain('changed');
+        expect(mockItem.setNote).not.toHaveBeenCalled();
+        expect(noteHtml).toBe(NOTE_HTML);
+    });
+
+    it('writes an empty note through a sole op:"rewrite" and persists it WRAPPED', async () => {
+        useNote('');
+        const response = await handleAgentActionExecuteRequest(executeRequest(
+            [{ index: 0, op: 'rewrite', content: '<p>First line.</p>' }],
+            { snapshot: undefined },
+        ));
+
+        expect(response.success).toBe(true);
+        // Unwrapped, the note would stay un-addressable forever.
+        expect(noteHtml).toBe('<div data-schema-version="9"><p>First line.</p></div>');
+
+        const result = response.result_data as unknown as EditNoteBlocksResultData;
+        expect(result.applied).toEqual([{ index: 0, blocks: '1-1' }]);
     });
 
     it('applies a block:"all" rewrite through the wrapper-preserving path', async () => {

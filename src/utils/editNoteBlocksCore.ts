@@ -1021,12 +1021,21 @@ interface SkipDraft {
     actualBlock?: number;
 }
 
+/**
+ * Drop one leading `Error: ` from a per-edit reason. The shared validator and
+ * expander prefix their messages, which would render as
+ * `Edit [0] (replace): Error: …`.
+ */
+export function stripErrorPrefix(reason: string): string {
+    return reason.replace(/^\s*Error:\s*/, '');
+}
+
 function skip(
     reason_code: EditNoteBlocksSkipReasonCode,
     reason: string,
     actualBlock?: number,
 ): SkipDraft {
-    return { reason_code, reason, actualBlock };
+    return { reason_code, reason: stripErrorPrefix(reason), actualBlock };
 }
 
 function isBlockNumber(v: unknown): v is number {

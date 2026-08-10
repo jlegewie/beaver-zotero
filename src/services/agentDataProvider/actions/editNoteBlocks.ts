@@ -71,6 +71,7 @@ import {
     rebuildDataCitationItems,
     hasSchemaVersionWrapper,
 } from '../../../utils/noteWrapper';
+import { wrapWithSchemaVersion } from '../../../../react/utils/noteActions';
 import { clearNoteEditorSelection } from '../../../../react/utils/sourceUtils';
 import { store } from '../../../../react/store';
 import { currentThreadIdAtom } from '../../../../react/atoms/threads';
@@ -103,6 +104,7 @@ import {
 import {
     buildBlockRawIndex,
     selectBlockEdits,
+    stripErrorPrefix,
     type BlockEditSkip,
     type BlockEditSpec,
     type BlockRawIndex,
@@ -111,6 +113,7 @@ import {
 import {
     EMPTY_READ_WINDOW,
     buildAddressSnapshot,
+    parseAddressSnapshot,
     verifyAddressSnapshot,
     type ReadWindow,
 } from '../../../utils/noteSnapshot';
@@ -318,6 +321,28 @@ const SNAPSHOT_MISMATCH_MESSAGE =
     'The note changed since the read_note call these block numbers were written against, so the '
     + 'block numbering no longer matches. Re-address the edits against the current note (returned '
     + 'with this error) or call read_note again.';
+
+/**
+ * A token that is not a snapshot token at all. Distinct from
+ * {@link SNAPSHOT_MISMATCH_MESSAGE} because the note did NOT change, so a fresh
+ * listing fixes nothing — only echoing the real token does.
+ */
+const SNAPSHOT_MALFORMED_MESSAGE =
+    'The `snapshot` value is not a valid address snapshot token, so these block numbers cannot be '
+    + 'resolved. Copy the `snapshot` string from the read_note response for this note verbatim — '
+    + 'do not shorten, edit or reconstruct it.';
+
+/**
+ * `buildRewrittenNoteBody` plus a wrapper for a note that has NO wrapper div at
+ * all (an empty note is reachable here, and saving it back unwrapped would leave
+ * it permanently un-addressable). A note whose wrapper the shared helper did
+ * preserve — including a legacy `<div class="zotero-note …">` — is left alone, so
+ * `edit_note` / `edit_note_batch` behavior is unchanged for it too.
+ */
+function buildRewrittenBlocksBody(strippedHtml: string, expandedNew: string): string {
+    const rewritten = buildRewrittenNoteBody(strippedHtml, expandedNew);
+    return rewritten === expandedNew ? wrapWithSchemaVersion(expandedNew) : rewritten;
+}
 
 // =============================================================================
 // Citation rejection
@@ -839,7 +864,9 @@ function runBlockSelection(
                 index: edit.index,
                 ...(edit.client_item_id !== undefined ? { client_item_id: edit.client_item_id } : {}),
                 reason_code: 'invalid_edit',
-                reason: contentError,
+                // Built literally rather than through the engine's `skip()`, so
+                // the prefix strip has to be repeated here.
+                reason: stripErrorPrefix(contentError),
             });
             continue;
         }
@@ -955,8 +982,15 @@ async function validateEditNoteBlocksAction(
         logger(`validateEditNoteBlocksAction: note ${resolvedLibraryId}-${zotero_key} contains persisted diff-preview markup; validating against stripped content`, 1);
         rawHtml = stripPreviewMarkers(rawHtml);
     }
-    if (!rawHtml || rawHtml.trim() === '') {
-        return validateError(request.request_id, `Note ${resolvedLibraryId}-${zotero_key} is empty`, 'empty_note');
+    // An empty note has no blocks to address, but it CAN be written by a sole
+    // `op: 'rewrite'` edit — which is the only way out of this state.
+    if ((!rawHtml || rawHtml.trim() === '') && !isSoleWholeBodyRewrite(edits)) {
+        return validateError(
+            request.request_id,
+            `Note ${resolvedLibraryId}-${zotero_key} is empty, so there are no blocks to address. `
+            + 'Send a single op:"rewrite" edit whose `content` is the entire body the note should have.',
+            'empty_note',
+        );
     }
 
     // Simplify ONCE, strip ONCE.
@@ -1001,7 +1035,7 @@ async function validateEditNoteBlocksAction(
         const dup = checkDuplicateCitations(rawContent, metadata);
         if (dup) warnings.push(dup);
 
-        const newStripped = buildRewrittenNoteBody(strippedHtml, expandedNew);
+        const newStripped = buildRewrittenBlocksBody(strippedHtml, expandedNew);
         const risk = assessNoteRewrite(strippedHtml, newStripped);
         if (risk.isDestructive) {
             logger(
@@ -1047,6 +1081,11 @@ async function validateEditNoteBlocksAction(
     }
 
     // ── Numeric addressing ──────────────────────────────────────────────────
+    // Structural garbage first: `verifyAddressSnapshot` cannot tell a fabricated
+    // token from real drift, and the drift recovery cannot fix a fabricated one.
+    if (!parseAddressSnapshot(snapshot as string)) {
+        return validateError(request.request_id, SNAPSHOT_MALFORMED_MESSAGE, 'snapshot_malformed');
+    }
     const readWindow = verifyAddressSnapshot(snapshot as string, simplified);
     if (!readWindow) {
         return validateError(request.request_id, SNAPSHOT_MISMATCH_MESSAGE, 'snapshot_mismatch', {
@@ -1263,6 +1302,11 @@ export function planBlockEditsExecution(inputs: BlockExecutionInputs): BlockExec
     const { simplified, metadata } = getOrSimplify(noteId, oldHtml, libraryId, pageLabelsByItemId);
 
     const soleRewrite = isSoleWholeBodyRewrite(edits);
+    // Structural garbage is not drift, so it ships no recovery payload (see the
+    // validator). `parseAddressSnapshot` is sync — the no-await contract holds.
+    if (!soleRewrite && !parseAddressSnapshot(snapshot as string)) {
+        return { ok: false, error: SNAPSHOT_MALFORMED_MESSAGE, errorCode: 'snapshot_malformed' };
+    }
     const preWindow: ReadWindow | null = soleRewrite
         ? EMPTY_READ_WINDOW
         : verifyAddressSnapshot(snapshot as string, simplified);
@@ -1316,7 +1360,7 @@ export function planBlockEditsExecution(inputs: BlockExecutionInputs): BlockExec
         } catch (e: any) {
             return { ok: false, error: e?.message || String(e), errorCode: 'expansion_failed' };
         }
-        newStrippedHtml = buildRewrittenNoteBody(strippedHtml, expandedNew);
+        newStrippedHtml = buildRewrittenBlocksBody(strippedHtml, expandedNew);
 
         // Re-classify against the note as it stands NOW (same TOCTOU rule the
         // batch executor applies at its rewrite gate).
@@ -1455,7 +1499,10 @@ export function planBlockEditsExecution(inputs: BlockExecutionInputs): BlockExec
     if (hadSchemaVersion && !hasSchemaVersionWrapper(newHtml)) {
         return {
             ok: false,
-            error: 'The note wrapper <div data-schema-version="..."> must not be removed.',
+            error: 'The edit was NOT applied: it would have removed the note\'s outer '
+                + '<div data-schema-version="..."> element. `content` must be the note BODY only — '
+                + 'that wrapper is managed by Zotero and must never appear in an edit or be removed '
+                + 'by one. Resend the edit with body content only.',
             errorCode: 'wrapper_removed',
         };
     }
@@ -1654,7 +1701,15 @@ async function executeEditNoteBlocksAction(
             item.setNote(oldHtml);
         } catch (_) { /* best-effort */ }
         if (error instanceof TimeoutError) throw error;
-        return executeError(request.request_id, `Failed to save note: ${error}`, 'save_failed');
+        // The rollback above is in-memory only (no save), so the persisted note
+        // may hold either version. Say so instead of promising a restore.
+        return executeError(
+            request.request_id,
+            `Failed to save note: ${error}. The note's current content is unknown — the edited `
+            + 'version may or may not have persisted, and nothing was restored on disk. Call '
+            + 'read_note for this note before resending anything.',
+            'save_failed',
+        );
     }
 
     await waitForNoteSaveStabilization(item, plan.newHtml);
