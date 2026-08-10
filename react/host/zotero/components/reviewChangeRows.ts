@@ -52,12 +52,25 @@ export function buildReviewRows(
     const { liveApprovalActionIds, resolvedToolcallIds } = options;
     const rowsByToolcall = new Map<string, ReviewRow>();
 
+    // A live approval claims its whole tool call, not just the action it names:
+    // the in-stream card renders and applies a call as one unit, so a create_items
+    // approval covering one of five actions must not leave the other four here.
+    const approvedToolcallIds = new Set<string>();
+    if (liveApprovalActionIds) {
+        for (const action of actions) {
+            if (action.toolcall_id && liveApprovalActionIds.has(action.id)) {
+                approvedToolcallIds.add(action.toolcall_id);
+            }
+        }
+    }
+
     for (const action of actions) {
         if (GATING_ACTION_TYPES.has(action.action_type)) continue;
         if (liveApprovalActionIds?.has(action.id)) continue;
 
         const toolcallId = action.toolcall_id;
         if (!toolcallId || toolcallId === CITATIONS_TOOLCALL_ID) continue;
+        if (approvedToolcallIds.has(toolcallId)) continue;
 
         // An `error` action is not review material (the model retries it), so a
         // non-pending action is only ever here because the user just resolved

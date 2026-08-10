@@ -41,6 +41,21 @@ describe('buildReviewRows exclusions', () => {
         expect(rows.map((row) => row.toolcallId)).toEqual(['call-2']);
     });
 
+    it('drops the whole tool call when one of its actions has a live approval', () => {
+        const approved = action({ toolcall_id: 'call-1', action_type: 'create_item' });
+
+        const rows = buildReviewRows([
+            approved,
+            action({ toolcall_id: 'call-1', action_type: 'create_item' }),
+            action({ toolcall_id: 'call-1', action_type: 'create_item' }),
+            action({ toolcall_id: 'call-2' }),
+        ], {
+            liveApprovalActionIds: new Set([approved.id]),
+        });
+
+        expect(rows.map((row) => row.toolcallId)).toEqual(['call-2']);
+    });
+
     it('drops citation imports and actions without a tool call', () => {
         const rows = buildReviewRows([
             action({ toolcall_id: 'citations' }),
