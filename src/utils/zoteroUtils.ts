@@ -981,11 +981,12 @@ function areSignaturesDuplicates(a: ItemDuplicateSignature, b: ItemDuplicateSign
     // Different item types are not duplicates
     if (a.itemTypeID !== b.itemTypeID) return false;
 
-    // An identifier both items carry decides the match on its own. Values that fail
-    // to normalize (blank DOI, placeholder text in the ISBN field) never match, not
-    // even each other.
-    if (a.hasDoi && b.hasDoi) return !!a.doi && a.doi === b.doi;
-    if (a.hasIsbn && b.hasIsbn) return !!a.isbn && a.isbn === b.isbn;
+    // An identifier decides the match on its own when both items set the field and at
+    // least one value parses: equal values are a duplicate, differing values are not,
+    // and unparseable text (a placeholder like "unknown") counts as differing. When
+    // neither value parses there is nothing to compare, so the fallback below applies.
+    if (a.hasDoi && b.hasDoi && (a.doi || b.doi)) return a.doi === b.doi;
+    if (a.hasIsbn && b.hasIsbn && (a.isbn || b.isbn)) return a.isbn === b.isbn;
 
     // Fall back to title plus a corroborating year or creator
     if (!a.title || a.title !== b.title) return false;
