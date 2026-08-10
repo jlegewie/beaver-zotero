@@ -30,6 +30,19 @@ describe('buildReviewRows exclusions', () => {
         expect(rows.map((row) => row.toolcallId)).toEqual(['call-3']);
     });
 
+    it('drops action types the shared executor cannot apply', () => {
+        const rows = buildReviewRows([
+            action({ action_type: 'edit_note', toolcall_id: 'call-1' }),
+            action({ action_type: 'edit_note_batch', toolcall_id: 'call-2' }),
+            action({ action_type: 'zotero_note', toolcall_id: 'call-3' }),
+            action({ action_type: 'highlight_annotation', toolcall_id: 'call-4' }),
+            action({ action_type: 'note_annotation', toolcall_id: 'call-5' }),
+            action({ action_type: 'create_note', toolcall_id: 'call-6' }),
+        ]);
+
+        expect(rows.map((row) => row.toolcallId)).toEqual(['call-6']);
+    });
+
     it('drops actions with a live approval, by action id', () => {
         const live = action({ toolcall_id: 'call-1' });
         const other = action({ toolcall_id: 'call-2' });

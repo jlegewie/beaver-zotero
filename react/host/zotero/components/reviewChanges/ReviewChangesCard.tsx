@@ -1,7 +1,8 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { AgentRun } from '@beaver/agent-core/agents/types';
 import { logger } from '@beaver/agent-core/platform/logger';
+import { getAgentActionsByToolcallAtom } from '../../../../agents/agentActions';
 import {
     annotationPanelStateAtom,
     defaultAnnotationPanelState,
@@ -44,10 +45,18 @@ export const ReviewChangesCard: React.FC<ReviewChangesCardProps> = ({ run, rows 
     const [showAllRows, setShowAllRows] = useState(false);
     const [isBulkRunning, setIsBulkRunning] = useState(false);
     const [bulkApplyingToolcallId, setBulkApplyingToolcallId] = useState<string | null>(null);
+    // Rows with a Zotero write of their own in flight; the bulk buttons wait them out.
+    const [busyToolcallIds, setBusyToolcallIds] = useState<ReadonlySet<string>>(new Set());
 
     const applyAgentActions = useSetAtom(applyAgentActionsAtom);
     const rejectAgentActions = useSetAtom(rejectAgentActionsAtom);
     const markResolved = useSetAtom(markReviewToolcallResolvedAtom);
+
+    // Read through a ref: the bulk loop needs each tool call's status as it is when
+    // its turn comes, not as it was when the loop's closure was created.
+    const getActionsByToolcall = useAtomValue(getAgentActionsByToolcallAtom);
+    const getActionsByToolcallRef = useRef(getActionsByToolcall);
+    getActionsByToolcallRef.current = getActionsByToolcall;
 
     // Expansion lives in the global panel state so it survives pane switches and
     // the separate window, like the other action cards.
@@ -61,14 +70,22 @@ export const ReviewChangesCard: React.FC<ReviewChangesCardProps> = ({ run, rows 
         [markResolved, run.id],
     );
 
+    const handleRowBusyChange = useCallback((toolcallId: string, isBusy: boolean) => {
+        setBusyToolcallIds((current) => {
+            const next = new Set(current);
+            if (isBusy) next.add(toolcallId);
+            else next.delete(toolcallId);
+            return next;
+        });
+    }, []);
+
     const handleBulkApply = useCallback(async () => {
         if (isBulkRunning) return;
-        // Snapshot at click time: every applied row re-renders the card off action
-        // status, so the loop must not read a list that changes underneath it.
-        // Non-bulk-applicable rows (annotation deletions, destructive note
-        // rewrites) are their own approval groups in runApprovalPolicy so that
-        // approving annotation or note edits never carries them along — the bulk
-        // ✓ must not re-open that. They stay in the card with their own ✓.
+        // Snapshot at click time. Non-bulk-applicable rows (annotation deletions,
+        // destructive note rewrites) are their own approval groups in
+        // runApprovalPolicy so that approving annotation or note edits never
+        // carries them along — the bulk ✓ must not re-open that. They stay in the
+        // card with their own ✓.
         const rowsToApply = rows.filter((row) => row.bulkApplicable && !row.resolved);
         if (rowsToApply.length === 0) return;
 
@@ -78,17 +95,27 @@ export const ReviewChangesCard: React.FC<ReviewChangesCardProps> = ({ run, rows 
             // DB, and in-order application keeps multi-step changes (create a
             // collection, then file items into it) coherent.
             for (const row of rowsToApply) {
+                // The snapshot's actions never see a status change, so re-read the
+                // tool call: another surface (its in-stream card, this row's own ✓
+                // just before the click) may have applied it since, and applying
+                // the stale copy would write it to Zotero twice.
+                const actions = getActionsByToolcallRef.current(
+                    row.toolcallId,
+                    (action) => action.run_id === run.id,
+                );
+                if (!actions.some((action) => action.status === 'pending')) continue;
+
+                // Pin before dispatching: an apply flips status synchronously and
+                // only then awaits the ack, so pinning afterwards would drop the
+                // row out of the card for that round trip.
+                markResolved({ runId: run.id, toolcallId: row.toolcallId });
                 setBulkApplyingToolcallId(row.toolcallId);
                 try {
-                    await applyAgentActions({ actions: row.actions, runId: run.id });
+                    await applyAgentActions({ actions, runId: run.id });
                 } catch (error) {
                     // The executor records per-action failures itself; catching
                     // here only keeps one bad row from aborting the rest.
                     logger(`ReviewChangesCard: bulk apply failed for ${row.toolcallId}: ${error}`, 1);
-                } finally {
-                    // Pin as soon as the row returns so it flips to its resolved
-                    // state right away instead of at the end of the whole loop.
-                    markResolved({ runId: run.id, toolcallId: row.toolcallId });
                 }
             }
         } finally {
@@ -105,15 +132,17 @@ export const ReviewChangesCard: React.FC<ReviewChangesCardProps> = ({ run, rows 
         if (rowsToReject.length === 0) return;
 
         for (const row of rowsToReject) {
-            rejectAgentActions({ actions: row.actions });
             markResolved({ runId: run.id, toolcallId: row.toolcallId });
+            rejectAgentActions({ actions: row.actions });
         }
     }, [isBulkRunning, markResolved, rejectAgentActions, rows, run.id]);
 
-    const toggleExpanded = useCallback(() => {
-        if (isBulkRunning) return;
-        togglePanelVisibility(groupId);
-    }, [groupId, isBulkRunning, togglePanelVisibility]);
+    // Expanding stays available during a bulk apply: the per-row spinners are the
+    // only view of how far a long apply has got.
+    const toggleExpanded = useCallback(
+        () => togglePanelVisibility(groupId),
+        [groupId, togglePanelVisibility],
+    );
 
     if (rows.length === 0) return null;
 
@@ -123,7 +152,10 @@ export const ReviewChangesCard: React.FC<ReviewChangesCardProps> = ({ run, rows 
             <ReviewActionRow
                 runId={run.id}
                 row={rows[0]}
+                isBulkApplying={rows[0].toolcallId === bulkApplyingToolcallId}
+                isBulkRunning={isBulkRunning}
                 onResolved={handleRowResolved}
+                onBusyChange={handleRowBusyChange}
                 inGroup={false}
             />
         );
@@ -132,7 +164,13 @@ export const ReviewChangesCard: React.FC<ReviewChangesCardProps> = ({ run, rows 
     const { text: headerText, tone } = getReviewHeaderCopy(rows);
     const hasPendingRows = rows.some((row) => !row.resolved);
     const allApplied = rows.every((row) => row.actions.every((action) => action.status === 'applied'));
-    const showBulkButtons = hasPendingRows && !isBulkRunning;
+    // A row applying on its own must finish before a bulk run can start, or the
+    // same tool call would be written to Zotero twice.
+    const bulkAvailable = !isBulkRunning && busyToolcallIds.size === 0;
+    const showBulkReject = hasPendingRows && bulkAvailable;
+    // Nothing left for the header ✓ once only non-bulk-applicable rows are pending;
+    // showing it then would be a dead click.
+    const showBulkApply = bulkAvailable && rows.some((row) => !row.resolved && row.bulkApplicable);
     const visibleRows = showAllRows ? rows : rows.slice(0, MAX_VISIBLE_ROWS);
 
     const headerIcon = (() => {
@@ -157,7 +195,6 @@ export const ReviewChangesCard: React.FC<ReviewChangesCardProps> = ({ run, rows 
                     style={{ fontSize: '0.95rem', background: 'transparent', border: 0, padding: 0 }}
                     aria-expanded={isExpanded}
                     onClick={toggleExpanded}
-                    disabled={isBulkRunning}
                     onMouseEnter={() => setIsHovered(true)}
                     onMouseLeave={() => setIsHovered(false)}
                 >
@@ -175,26 +212,28 @@ export const ReviewChangesCard: React.FC<ReviewChangesCardProps> = ({ run, rows 
 
                 <div className="flex-1" />
 
-                {showBulkButtons && (
+                {(showBulkReject || showBulkApply) && (
                     <div className="display-flex flex-row items-center gap-25 mr-3 mt-015">
-                        <Tooltip content="Reject all" showArrow singleLine>
-                            <IconButton
-                                icon={CancelIcon}
-                                variant="ghost-secondary"
-                                iconClassName="font-color-red"
-                                onClick={handleBulkReject}
-                                disabled={isBulkRunning}
-                            />
-                        </Tooltip>
-                        <Tooltip content="Apply all" showArrow singleLine>
-                            <IconButton
-                                icon={TickIcon}
-                                variant="ghost-secondary"
-                                iconClassName="font-color-green scale-14"
-                                onClick={handleBulkApply}
-                                disabled={isBulkRunning}
-                            />
-                        </Tooltip>
+                        {showBulkReject && (
+                            <Tooltip content="Reject all" showArrow singleLine>
+                                <IconButton
+                                    icon={CancelIcon}
+                                    variant="ghost-secondary"
+                                    iconClassName="font-color-red"
+                                    onClick={handleBulkReject}
+                                />
+                            </Tooltip>
+                        )}
+                        {showBulkApply && (
+                            <Tooltip content="Apply all" showArrow singleLine>
+                                <IconButton
+                                    icon={TickIcon}
+                                    variant="ghost-secondary"
+                                    iconClassName="font-color-green scale-14"
+                                    onClick={handleBulkApply}
+                                />
+                            </Tooltip>
+                        )}
                     </div>
                 )}
             </div>
@@ -212,6 +251,7 @@ export const ReviewChangesCard: React.FC<ReviewChangesCardProps> = ({ run, rows 
                                 isBulkApplying={row.toolcallId === bulkApplyingToolcallId}
                                 isBulkRunning={isBulkRunning}
                                 onResolved={handleRowResolved}
+                                onBusyChange={handleRowBusyChange}
                                 inGroup
                             />
                         </div>
@@ -222,7 +262,6 @@ export const ReviewChangesCard: React.FC<ReviewChangesCardProps> = ({ run, rows 
                             <Button
                                 variant="ghost-secondary"
                                 onClick={() => setShowAllRows(true)}
-                                disabled={isBulkRunning}
                             >
                                 {`Show all (${rows.length})`}
                             </Button>

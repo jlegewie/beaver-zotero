@@ -38,8 +38,10 @@ interface ReviewActionRowProps {
     isBulkApplying?: boolean;
     /** True while any card-level bulk operation runs — row buttons are disabled. */
     isBulkRunning?: boolean;
-    /** Called after this row resolves from its own buttons, so the card can pin it visible. */
+    /** Pins this row visible; called before its own buttons dispatch anything. */
     onResolved?: (toolcallId: string) => void;
+    /** Reports an in-flight Zotero write, so the card's bulk apply cannot race it. */
+    onBusyChange?: (toolcallId: string, isBusy: boolean) => void;
     /** True when rendered inside the aggregate card; the parent draws the border/background. */
     inGroup?: boolean;
 }
@@ -58,6 +60,7 @@ export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
     isBulkApplying = false,
     isBulkRunning = false,
     onResolved,
+    onBusyChange,
     inGroup = false,
 }) => {
     const [isProcessing, setIsProcessing] = useState(false);
@@ -82,6 +85,9 @@ export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
     const firstAction = row.actions[0];
     const isBusy = isProcessing || isBulkApplying;
     const isDisabled = isBusy || isBulkRunning;
+    // A bulk apply is an apply the row did not click: treat it as one anyway, so
+    // the ✓ stays mounted with its spinner instead of the row losing its buttons.
+    const activeButton = clickedButton ?? (isBulkApplying ? 'approve' : null);
 
     // 'awaiting' while busy: its STATUS_CONFIGS entry carries the spinner icon
     // and keeps the apply/reject vocabulary the in-stream card uses.
@@ -92,27 +98,32 @@ export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
             : firstAction.status;
     const config = STATUS_CONFIGS[status];
 
+    // Pin before dispatching, never after: an apply flips the action's status
+    // synchronously and only then awaits the backend ack, so a row pinned
+    // afterwards would drop out of the card for the length of that round trip.
     const handleApply = useCallback(async () => {
         if (isDisabled) return;
 
         setIsUndoError(false);
         setIsProcessing(true);
         setClickedButton('approve');
+        onResolved?.(row.toolcallId);
+        onBusyChange?.(row.toolcallId, true);
         try {
             await applyAgentActions({ actions: row.actions, runId });
         } finally {
             setIsProcessing(false);
             setClickedButton(null);
-            onResolved?.(row.toolcallId);
+            onBusyChange?.(row.toolcallId, false);
         }
-    }, [isDisabled, row, runId, applyAgentActions, onResolved]);
+    }, [isDisabled, row, runId, applyAgentActions, onResolved, onBusyChange]);
 
     const handleReject = useCallback(() => {
         if (isDisabled) return;
 
         setClickedButton('reject');
-        rejectAgentActions({ actions: row.actions });
         onResolved?.(row.toolcallId);
+        rejectAgentActions({ actions: row.actions });
         setTimeout(() => setClickedButton(null), 100);
     }, [isDisabled, row, rejectAgentActions, onResolved]);
 
@@ -121,15 +132,17 @@ export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
 
         setIsProcessing(true);
         setClickedButton('undo');
+        onResolved?.(row.toolcallId);
+        onBusyChange?.(row.toolcallId, true);
         try {
             const result = await undoAgentActions({ actions: row.actions });
             if (result.fatalError) setIsUndoError(true);
         } finally {
             setIsProcessing(false);
             setClickedButton(null);
-            onResolved?.(row.toolcallId);
+            onBusyChange?.(row.toolcallId, false);
         }
-    }, [isDisabled, row, undoAgentActions, onResolved]);
+    }, [isDisabled, row, undoAgentActions, onResolved, onBusyChange]);
 
     const handleRetry = useCallback(async () => {
         if (isUndoError) {
@@ -194,11 +207,11 @@ export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
                         Review
                     </Button>
 
-                    {(config.showUndo || (isBusy && clickedButton === 'undo')) && (
+                    {(config.showUndo || (isBusy && activeButton === 'undo')) && (
                         <Button
                             variant="ghost"
                             onClick={handleUndo}
-                            loading={isBusy && clickedButton === 'undo'}
+                            loading={isBusy && activeButton === 'undo'}
                             disabled={isDisabled}
                             style={GHOST_BUTTON_STYLE}
                         >
@@ -218,7 +231,7 @@ export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
                         </Button>
                     )}
 
-                    {config.showReject && (!isBusy || clickedButton === 'reject') && (
+                    {config.showReject && (!isBusy || activeButton === 'reject') && (
                         <Tooltip content="Reject" showArrow singleLine>
                             <IconButton
                                 icon={CancelIcon}
@@ -226,12 +239,12 @@ export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
                                 iconClassName="font-color-red"
                                 onClick={handleReject}
                                 disabled={isDisabled}
-                                loading={isBusy && clickedButton === 'reject'}
+                                loading={isBusy && activeButton === 'reject'}
                             />
                         </Tooltip>
                     )}
 
-                    {config.showApply && (!isBusy || clickedButton === 'approve') && (
+                    {config.showApply && (!isBusy || activeButton === 'approve') && (
                         <Tooltip content="Apply" showArrow singleLine>
                             <IconButton
                                 icon={TickIcon}
@@ -239,7 +252,7 @@ export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
                                 iconClassName="font-color-green scale-14"
                                 onClick={handleApply}
                                 disabled={isDisabled}
-                                loading={isBusy && clickedButton === 'approve'}
+                                loading={isBusy && activeButton === 'approve'}
                             />
                         </Tooltip>
                     )}
