@@ -113,10 +113,15 @@ export async function executeCreateNoteAction(action: AgentAction, runId?: strin
                     eligibleLibraryIds: [targetLibraryId],
                     explicitLibrary: true,
                 });
-                // All-or-nothing, same rule as validation: filing the note in
-                // some of the requested collections and not the rest is a
-                // silent wrong answer.
-                if (!resolution.ok) throw new Error(resolution.message);
+                // Validation rejects an unresolvable collection up front, so a
+                // miss here means the collection went away after the action was
+                // proposed. Skip it and still create the note, matching the
+                // agent-side execute path — losing the note's content because
+                // one collection vanished would be the worse outcome.
+                if (!resolution.ok) {
+                    logger(`executeCreateNoteAction: Collection "${entry}" not resolved (${resolution.code}), skipping`, 1);
+                    continue;
+                }
                 const key = resolution.match.collection.key;
                 if (!collectionKeysToApply.includes(key)) collectionKeysToApply.push(key);
             }

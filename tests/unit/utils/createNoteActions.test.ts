@@ -290,18 +290,20 @@ describe('executeCreateNoteAction', () => {
         });
     });
 
-    it('rejects the whole apply when one requested collection does not resolve', async () => {
-        // Filing the note in some of the requested collections and not the rest
-        // would be a silent wrong answer, so nothing is created.
-        await expect(executeCreateNoteAction({
+    it('still creates the note when one requested collection does not resolve', async () => {
+        // Validation rejects an unresolvable collection up front, so a miss here
+        // means it went away after the action was proposed. The note is still
+        // created and filed where it can be, matching the agent execute path.
+        const result = await executeCreateNoteAction({
             proposed_data: {
                 title: 'Title',
                 content: 'Body',
                 collections: ['Reading List', 'NOSUCH'],
             },
-        } as any, 'run-1')).rejects.toThrow(/NOSUCH/);
+        } as any, 'run-1');
 
-        expect(noteInstances).toHaveLength(0);
+        expect(noteInstances).toHaveLength(1);
+        expect(result).toMatchObject({ collection_keys: ['RLKEY234'] });
     });
 
     it('uses the keys validation resolved without re-resolving them', async () => {
