@@ -34,8 +34,8 @@ import Tooltip from '../../../../components/ui/Tooltip';
 interface ReviewActionRowProps {
     runId: string;
     row: ReviewRow;
-    /** True while the card's sequential bulk apply is working on THIS row. */
-    isBulkApplying?: boolean;
+    /** True while a write for this row is in flight — its own, or a bulk apply's. */
+    isApplying?: boolean;
     /** True while any card-level bulk operation runs — row buttons are disabled. */
     isBulkRunning?: boolean;
     /** Pins this row visible; called before its own buttons dispatch anything. */
@@ -57,7 +57,7 @@ const GHOST_BUTTON_STYLE: React.CSSProperties = { padding: '3px 6px' };
 export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
     runId,
     row,
-    isBulkApplying = false,
+    isApplying = false,
     isBulkRunning = false,
     onResolved,
     onBusyChange,
@@ -83,11 +83,12 @@ export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
     const itemTitle = useAtomValue(agentActionItemTitlesAtom)[row.toolcallId] ?? null;
 
     const firstAction = row.actions[0];
-    const isBusy = isProcessing || isBulkApplying;
+    const isBusy = isProcessing || isApplying;
     const isDisabled = isBusy || isBulkRunning;
-    // A bulk apply is an apply the row did not click: treat it as one anyway, so
-    // the ✓ stays mounted with its spinner instead of the row losing its buttons.
-    const activeButton = clickedButton ?? (isBulkApplying ? 'approve' : null);
+    // A write this row did not click (a bulk apply, or its own from before a
+    // remount) still reads as an apply, so the ✓ stays mounted with its spinner
+    // instead of the row briefly losing its buttons.
+    const activeButton = clickedButton ?? (isApplying ? 'approve' : null);
 
     // 'awaiting' while busy: its STATUS_CONFIGS entry carries the spinner icon
     // and keeps the apply/reject vocabulary the in-stream card uses.
@@ -121,9 +122,14 @@ export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
     const handleReject = useCallback(() => {
         if (isDisabled) return;
 
+        // A pinned row carries its non-pending actions too; rejecting an applied one
+        // would clear its result data and orphan what it created.
+        const actions = row.actions.filter((action) => action.status === 'pending');
+        if (actions.length === 0) return;
+
         setClickedButton('reject');
         onResolved?.(row.toolcallId);
-        rejectAgentActions({ actions: row.actions });
+        rejectAgentActions({ actions });
         setTimeout(() => setClickedButton(null), 100);
     }, [isDisabled, row, rejectAgentActions, onResolved]);
 
