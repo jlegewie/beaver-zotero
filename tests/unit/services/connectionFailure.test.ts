@@ -467,6 +467,23 @@ describe('isRetryablePreReadyConnectFailure', () => {
             }),
         ).toBe(false);
     });
+
+    it('retries a run request the socket refused, despite the mid-run stage', () => {
+        // The stage says post-ready, but the socket never took the message, so
+        // no run exists to duplicate — the same property that makes the
+        // pre-ready failures safe. Failing here instead would turn a transient
+        // half-open socket into a failed run.
+        expect(
+            isRetryablePreReadyConnectFailure({
+                ...opening1006,
+                stage: 'mid_run',
+                closeCode: null,
+                socketOpened: true,
+                readyReceived: true,
+                requestNeverSent: true,
+            }),
+        ).toBe(true);
+    });
 });
 
 describe('connectRecoveryAuthFields', () => {

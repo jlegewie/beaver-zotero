@@ -32,6 +32,12 @@ export interface ConnectionFailureEvidence {
      * mid-stream cuts.
      */
     msSinceLastWsMessageMs?: number | null;
+    /**
+     * The run request was never handed to the socket, so the server cannot have
+     * started a run for it. Set when the write is refused outright — the one
+     * post-`ready` failure that is as safe to retry as a pre-`ready` one.
+     */
+    requestNeverSent?: boolean;
 }
 
 /** navigator.onLine when available; null in contexts without a navigator global. */
@@ -78,11 +84,19 @@ export function isAbruptTransportCloseCode(code: number | null): boolean {
 /**
  * Whether a failed connect attempt is worth retrying automatically.
  *
- * Only pre-`ready` transport failures qualify: an abrupt transport drop
- * (1005/1006) while opening, authenticating, or awaiting ready, or a connect
- * attempt that timed out after the socket started opening. These are the
- * failures that a cold-starting instance, a scale event, or a momentary
- * network block produce, and they routinely succeed on a quick retry.
+ * The rule is not really about timing but about whether the server can have
+ * started a run: retrying is safe exactly while the request has not reached it.
+ *
+ * Pre-`ready` transport failures qualify: an abrupt transport drop (1005/1006)
+ * while opening, authenticating, or awaiting ready, or a connect attempt that
+ * timed out after the socket started opening. These are the failures that a
+ * cold-starting instance, a scale event, or a momentary network block produce,
+ * and they routinely succeed on a quick retry.
+ *
+ * A refused write of the run request itself qualifies for the same reason,
+ * even though it happens after `ready` — the socket never took the message, so
+ * no run exists to duplicate, and the half-open channel behind it is usually
+ * transient.
  *
  * Auth-stage failures (the session lookup itself), policy rejections (1008),
  * and application-level errors are excluded — they will not fix themselves
@@ -91,6 +105,7 @@ export function isAbruptTransportCloseCode(code: number | null): boolean {
 export function isRetryablePreReadyConnectFailure(
     evidence: ConnectionFailureEvidence,
 ): boolean {
+    if (evidence.requestNeverSent) return true;
     if (
         evidence.stage !== 'opening' &&
         evidence.stage !== 'authenticating' &&

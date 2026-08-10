@@ -164,11 +164,6 @@ export const CreateCollectionPreview: React.FC<CreateCollectionPreviewProps> = (
                         <span className="text-sm font-color-primary font-medium truncate flex-1">
                             {name}
                         </span>
-                        {status === 'pending' && (
-                            <span className="text-xs px-1.5 py-0.5 rounded bg-green-500/10 text-green-700 border border-green-500/20 whitespace-nowrap ml-2">
-                                New
-                            </span>
-                        )}
                     </div>
                 </div>
 

@@ -37,6 +37,7 @@ import { diffPreviewNoteKeyAtom, isDiffPreviewLive } from '../../../utils/diffPr
 import { logger } from '@beaver/agent-core/platform/logger';
 import { store } from '../../../store';
 import { PreviewData, STATUS_CONFIGS, buildPreviewData } from './agentActionViewHelpers';
+import { useApprovalRecovery } from './useApprovalRecovery';
 import {
     EditNoteDisplayStatus,
     EditNoteResolvedTarget,
@@ -231,6 +232,19 @@ export function useEditNoteActions({
     const [clickedButton, setClickedButton] = useState<'approve' | 'reject' | 'undo' | 'retry' | null>(null);
     const prevPendingApprovalRef = useRef<PendingApproval | null>(pendingApproval);
 
+    const handleApprovalRecovered = useCallback(() => {
+        setIsProcessingApproval(false);
+        setIsExternallyProcessing(false);
+        setClickedButton(null);
+    }, []);
+    const { setProcessingApproval } = useApprovalRecovery({
+        isAwaitingDecision: isProcessingApproval || isExternallyProcessing,
+        hasToolReturn,
+        actionStatus: action?.status,
+        onRecover: handleApprovalRecovered,
+        label: 'useEditNoteActions',
+    });
+
     useEffect(() => {
         const previousPendingApproval = prevPendingApprovalRef.current;
         const wasAwaiting = previousPendingApproval !== null;
@@ -243,6 +257,13 @@ export function useEditNoteActions({
             if (!isProcessingApproval && isRunPending && !hasToolReturn) {
                 setIsExternallyProcessing(true);
                 setClickedButton(previousIntent === false ? 'reject' : 'approve');
+                // Record it for recovery too: a decision made from another
+                // surface (the group's Apply All, the diff-preview banner) can
+                // miss its window exactly like one made here.
+                setProcessingApproval({
+                    actionId: previousActionId,
+                    kind: previousIntent === false ? 'reject' : 'approve',
+                });
             }
 
             if (previousIntent !== undefined) {
@@ -258,19 +279,22 @@ export function useEditNoteActions({
         hasToolReturn,
         approvalResponseIntents,
         removeApprovalResponseIntent,
+        setProcessingApproval,
     ]);
 
     useEffect(() => {
         if ((isProcessingApproval || isExternallyProcessing) && action && action.status !== 'pending') {
             setIsProcessingApproval(false);
+            setProcessingApproval(null);
             setIsExternallyProcessing(false);
             setClickedButton(null);
         }
         if (isExternallyProcessing && (hasToolReturn || !isRunPending)) {
             setIsExternallyProcessing(false);
+            setProcessingApproval(null);
             setClickedButton(null);
         }
-    }, [isProcessingApproval, isExternallyProcessing, action?.status, hasToolReturn, isRunPending, action]);
+    }, [isProcessingApproval, isExternallyProcessing, action?.status, hasToolReturn, isRunPending, action, setProcessingApproval]);
 
     const isProcessing = isProcessingApproval || isProcessingAction || isExternallyProcessing;
     const effectiveStatus: EditNoteDisplayStatus = getEditNoteDisplayStatus({
@@ -339,18 +363,20 @@ export function useEditNoteActions({
     const handleApprove = useCallback(() => {
         if (!pendingApproval) return;
         setIsProcessingApproval(true);
+        setProcessingApproval({ actionId: pendingApproval.actionId, kind: 'approve' });
         setClickedButton('approve');
         sendApprovalResponse({ actionId: pendingApproval.actionId, approved: true });
         removePendingApproval(pendingApproval.actionId);
-    }, [pendingApproval, sendApprovalResponse, removePendingApproval]);
+    }, [pendingApproval, sendApprovalResponse, removePendingApproval, setProcessingApproval]);
 
     const handleReject = useCallback(() => {
         if (!pendingApproval) return;
         setIsProcessingApproval(true);
+        setProcessingApproval({ actionId: pendingApproval.actionId, kind: 'reject' });
         setClickedButton('reject');
         sendApprovalResponse({ actionId: pendingApproval.actionId, approved: false });
         removePendingApproval(pendingApproval.actionId);
-    }, [pendingApproval, sendApprovalResponse, removePendingApproval]);
+    }, [pendingApproval, sendApprovalResponse, removePendingApproval, setProcessingApproval]);
 
     const handleApplyPending = useCallback(async () => {
         await runApply('approve');

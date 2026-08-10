@@ -425,8 +425,24 @@ export class AgentService {
                     logger('AgentService: Server ready, sending agent run request', 1);
                     // Call the original onReady callback first
                     callbacks.onReady(data);
-                    // Send the chat request now that server is ready
-                    this.send(request);
+                    // Send the chat request now that server is ready. A socket
+                    // that reports OPEN can still refuse the write (half-open
+                    // channel); failing the connect here is what surfaces that
+                    // instead of leaving the user on an endless thinking state
+                    // for a run the server never received.
+                    if (!this.send(request)) {
+                        // Reject before close(), matching the timeout path:
+                        // close() settles this same promise, so closing first
+                        // would let the failure resolve as a success. The socket
+                        // must still be torn down — `ready` already marked the
+                        // connection live, so nothing else would reclaim it.
+                        finish(new AgentConnectionError(
+                            'Connection closed before the request could be sent',
+                            attemptEvidence(attempt, { requestNeverSent: true }),
+                        ));
+                        this.close(1000, 'Request could not be sent');
+                        return;
+                    }
                     // Resolve the connect promise
                     finish();
                 },
@@ -545,12 +561,16 @@ export class AgentService {
     }
 
     /**
-     * Send a message to the server
+     * Send a message to the server.
+     *
+     * Returns false when the socket is not open, so callers whose message
+     * carries a user decision can recover locally instead of assuming it went
+     * out. Most callers can ignore the result.
      */
-    send(data: AgentRunRequest | Record<string, any> | PreparedJsonMessage): void {
+    send(data: AgentRunRequest | Record<string, any> | PreparedJsonMessage): boolean {
         if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
             logger('AgentService: Cannot send - WebSocket not connected', 1);
-            return;
+            return false;
         }
 
         // Attach a completion-time busy-context snapshot to request responses
@@ -616,8 +636,14 @@ export class AgentService {
         }
         // Log the sanitized and stripped data
         logger(`AgentService: Sending "${sanitizedData.type}"`, sanitizedData, 1);
-        
-        this.ws.send(message);
+
+        try {
+            this.ws.send(message);
+        } catch (error) {
+            logger(`AgentService: Send failed: ${error}`, 1);
+            return false;
+        }
+        return true;
     }
 
     /**
@@ -809,6 +835,11 @@ export class AgentService {
                     }
                     break;
 
+                case 'deferred_approval_stale':
+                    logger("AgentService: Received deferred_approval_stale", event, 1);
+                    this.callbacks?.onDeferredApprovalStale?.(event);
+                    break;
+
                 case 'ask_user_question_request':
                     logger("AgentService: Received ask_user_question_request", event, 1);
                     // This event is handled by the UI via callback
@@ -839,9 +870,9 @@ export class AgentService {
                     }
                     const dataEvent = event as any;
                     logger(`AgentService: Received ${eventName}`, dataEvent, 1);
-                    const runRequest = () =>
+                    const runRequest = (): Promise<void> =>
                         entry.handle(dataEvent)
-                            .then(res => this.send(res))
+                            .then(res => { this.send(res); })
                             .catch(err => {
                                 logger(`AgentService: ${eventName} failed: ${err}`, 1);
                                 this.send(entry.errorResponse(dataEvent, err));
@@ -962,10 +993,13 @@ export class AgentService {
      * @param actionId The action ID from the approval request
      * @param approved Whether the user approved the action
      * @param userInstructions Optional additional instructions from the user
+     * @returns false if the socket was not open, so the decision never left the
+     *   client. The caller must recover the card rather than wait for a reply
+     *   that cannot come.
      */
-    sendApprovalResponse(actionId: string, approved: boolean, userInstructions?: string | null): void {
+    sendApprovalResponse(actionId: string, approved: boolean, userInstructions?: string | null): boolean {
         logger(`AgentService: Sending approval response for ${actionId}: ${approved}${userInstructions ? ' (with instructions)' : ''}`, 1);
-        this.send({
+        return this.send({
             type: 'deferred_approval_response',
             action_id: actionId,
             approved,
