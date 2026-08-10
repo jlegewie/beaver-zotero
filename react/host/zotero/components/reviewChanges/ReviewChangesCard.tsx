@@ -1,17 +1,15 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { AgentRun } from '@beaver/agent-core/agents/types';
 import { logger } from '@beaver/agent-core/platform/logger';
-import { getAgentActionsByRunAtom, pendingApprovalsAtom } from '../../../../agents/agentActions';
 import {
     annotationPanelStateAtom,
     defaultAnnotationPanelState,
     markReviewToolcallResolvedAtom,
-    resolvedReviewToolcallsAtom,
     toggleAnnotationPanelVisibilityAtom,
 } from '../../../../atoms/messageUIState';
 import { applyAgentActionsAtom, rejectAgentActionsAtom } from '../../agentActionExecution';
-import { buildReviewRows, getReviewHeaderCopy } from '../reviewChangeRows';
+import { getReviewHeaderCopy, ReviewRow } from '../reviewChangeRows';
 import { ReviewActionRow } from './ReviewActionRow';
 import {
     ArrowDownIcon,
@@ -33,21 +31,19 @@ const MAX_VISIBLE_ROWS = 20;
 
 interface ReviewChangesCardProps {
     run: AgentRun;
+    /** From `useReviewRows`; the caller derives them so it can skip an empty card. */
+    rows: ReviewRow[];
 }
 
 /**
  * Bottom-of-thread card for a terminal run's undecided agent actions: one row
  * per tool call, plus a collapsible aggregate header with a bulk reject/apply.
  */
-export const ReviewChangesCard: React.FC<ReviewChangesCardProps> = ({ run }) => {
+export const ReviewChangesCard: React.FC<ReviewChangesCardProps> = ({ run, rows }) => {
     const [isHovered, setIsHovered] = useState(false);
     const [showAllRows, setShowAllRows] = useState(false);
     const [isBulkRunning, setIsBulkRunning] = useState(false);
     const [bulkApplyingToolcallId, setBulkApplyingToolcallId] = useState<string | null>(null);
-
-    const getAgentActionsByRun = useAtomValue(getAgentActionsByRunAtom);
-    const pendingApprovals = useAtomValue(pendingApprovalsAtom);
-    const resolvedToolcalls = useAtomValue(resolvedReviewToolcallsAtom);
 
     const applyAgentActions = useSetAtom(applyAgentActionsAtom);
     const rejectAgentActions = useSetAtom(rejectAgentActionsAtom);
@@ -59,28 +55,6 @@ export const ReviewChangesCard: React.FC<ReviewChangesCardProps> = ({ run }) => 
     const panelStates = useAtomValue(annotationPanelStateAtom);
     const isExpanded = (panelStates[groupId] ?? defaultAnnotationPanelState).resultsVisible;
     const togglePanelVisibility = useSetAtom(toggleAnnotationPanelVisibilityAtom);
-
-    const actions = useMemo(() => getAgentActionsByRun(run.id), [getAgentActionsByRun, run.id]);
-
-    // Keyed by actionId; those actions belong to the in-stream card and PendingActionsBar.
-    const liveApprovalActionIds = useMemo(
-        () => new Set(pendingApprovals.keys()),
-        [pendingApprovals],
-    );
-
-    const resolvedToolcallIds = useMemo(() => {
-        const prefix = `${run.id}:`;
-        const ids = new Set<string>();
-        for (const [key, isResolved] of Object.entries(resolvedToolcalls)) {
-            if (isResolved && key.startsWith(prefix)) ids.add(key.slice(prefix.length));
-        }
-        return ids;
-    }, [resolvedToolcalls, run.id]);
-
-    const rows = useMemo(
-        () => buildReviewRows(actions, { liveApprovalActionIds, resolvedToolcallIds }),
-        [actions, liveApprovalActionIds, resolvedToolcallIds],
-    );
 
     const handleRowResolved = useCallback(
         (toolcallId: string) => markResolved({ runId: run.id, toolcallId }),
