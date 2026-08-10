@@ -138,6 +138,56 @@ describe('deriveEditNoteRows — edit_note_blocks', () => {
         expect(rows.slice(0, 3).every((row) => row.skippedReason === undefined)).toBe(true);
     });
 
+    // Execute re-resolves every edit against the note as it stands, and citation
+    // identity or library exclusion can change while an edit waits for approval —
+    // so after a run the validation marker is a guess, not what happened.
+    it('takes the skipped set from the execute result once there is one', () => {
+        const rows = deriveEditNoteRows({
+            actionType: 'edit_note_blocks',
+            actionData: blocksActionData,
+            resultData: {
+                applied: [{ index: 0 }, { index: 1 }, { index: 3 }],
+                skipped: [{
+                    index: 2,
+                    reason_code: 'expansion_failed',
+                    reason: 'Citation id="1-MISSING1" could not be resolved.',
+                }],
+            },
+        });
+
+        // Index 3 was skipped at validation but applied on execute.
+        expect(rows[3].skippedReason).toBeUndefined();
+        // Index 2 validated cleanly but was skipped on execute.
+        expect(rows[2].skippedReason).toBe('Citation id="1-MISSING1" could not be resolved.');
+        expect(rows.map((row) => !!row.skippedReason)).toEqual([false, false, true, false]);
+    });
+
+    it('reports every row skipped when the execute result applied nothing', () => {
+        const rows = deriveEditNoteRows({
+            actionType: 'edit_note_blocks',
+            actionData: blocksActionData,
+            resultData: {
+                skipped: blocksActionData.edits.map((edit: any) => ({
+                    index: edit.index,
+                    reason_code: 'expect_mismatch',
+                })),
+            },
+        });
+
+        // No wording from the client still renders as skipped.
+        expect(rows.map((row) => row.skippedReason)).toEqual(Array(4).fill('expect_mismatch'));
+    });
+
+    it('keeps the validation marker while the action is still pending', () => {
+        const rows = deriveEditNoteRows({
+            actionType: 'edit_note_blocks',
+            actionData: blocksActionData,
+        });
+
+        expect(rows[3].skippedReason).toBe('The text at block 9 did not match `expect`.');
+        expect(rows[2].skippedReason).toBeUndefined();
+    });
+
     it('falls back to the reason code when validation supplied no wording', () => {
         const rows = deriveEditNoteRows({
             actionType: 'edit_note_blocks',

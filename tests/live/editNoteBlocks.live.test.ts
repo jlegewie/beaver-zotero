@@ -68,12 +68,6 @@
  * way.
  *
  * KNOWN HARNESS GAPS (not worked around, not invented over):
- *   - `handleAgentActionExecuteHttpRequest` forwards only
- *     `{ success, error, error_code, error_candidates, result_data }`. The
- *     execute-side `refreshed_note` (the recovery payload carrying the fresh
- *     note + token on an execute-time `snapshot_mismatch`) is DROPPED by the
- *     HTTP wrapper, so section 2 asserts the fresh-content contract on the
- *     validate path, where `current_value` IS forwarded.
  *   - The `preference` field carries the RESOLVED user preference value
  *     ('always_ask' | 'always_apply' | 'continue_without_applying'), not the
  *     preference GROUP the action was classified into. Section 10 therefore
@@ -597,15 +591,17 @@ describe('edit_note_blocks snapshot mismatch', () => {
         // Body travelled with it, so the fresh token carries the whole-note window.
         expect(validation.current_value?.snapshot?.endsWith(`:1-${validation.current_value?.total_lines}`)).toBe(true);
 
-        // Execute is fail-closed on the same token.
-        //
-        // NOTE: execute's own recovery payload (`refreshed_note`) is NOT
-        // observable here — `handleAgentActionExecuteHttpRequest` does not
-        // forward that field. The fresh-content contract is asserted on the
-        // validate path above; see the harness-gap note in the file header.
+        // Execute is fail-closed on the same token, and carries its own recovery
+        // payload: the fresh note plus a token whose window covers it.
         const exec = await executeBlocks(staleAction);
         expect(exec.success).toBe(false);
         expect(exec.error_code).toBe('snapshot_mismatch');
+        expect(exec.refreshed_note?.note).toContain('OUT OF BAND PARAGRAPH QXZV.');
+        expect(exec.refreshed_note?.snapshot).toBeTruthy();
+        expect(exec.refreshed_note?.snapshot).not.toBe(view.snapshot);
+        expect(
+            exec.refreshed_note?.snapshot?.endsWith(`:1-${exec.refreshed_note?.total_lines}`),
+        ).toBe(true);
 
         const afterRefusal = await readSaved(ref);
         expect(afterRefusal).toBe(driftedHtml);

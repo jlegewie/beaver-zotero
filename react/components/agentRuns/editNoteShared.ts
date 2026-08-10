@@ -205,6 +205,42 @@ export function deriveEditNoteRows({
 
         const isBlocks = variant === 'blocks';
 
+        /**
+         * Execute-time skips, keyed by edit index — AUTHORITATIVE once present.
+         *
+         * Execute re-resolves every edit against the note as it stands, and the
+         * per-edit outcome can differ from validation's advisory marker: citation
+         * identity and library exclusion are resolved again, and either can
+         * change while an edit waits for approval or sits queued for review. So
+         * a row must not be labelled from `skip_reason_code` after the action has
+         * run — that reports a validation-time guess as what happened to the
+         * user's note.
+         *
+         * `null` means no execution result to consult (pending or validate-only),
+         * where the validation marker is the only signal there is. An empty map
+         * means execute applied everything.
+         */
+        const executedSkips: Map<number, any> | null =
+            isBlocks && Array.isArray(resultData?.skipped)
+                ? new Map(
+                    (resultData!.skipped as any[])
+                        .filter((entry) => entry && typeof entry.index === 'number')
+                        .map((entry) => [entry.index as number, entry]),
+                )
+                : null;
+
+        const skipFieldsFor = (edit: any, editIndex: number): { skippedReason?: string } => {
+            if (!isBlocks) return {};
+            if (executedSkips) {
+                const entry = executedSkips.get(editIndex);
+                if (!entry) return {};
+                return { skippedReason: entry.reason ?? String(entry.reason_code ?? 'not applied') };
+            }
+            return edit?.skip_reason_code
+                ? { skippedReason: edit.skip_reason ?? String(edit.skip_reason_code) }
+                : {};
+        };
+
         return edits.map((edit, position) => {
             const editIndex = typeof edit?.index === 'number' ? edit.index : position;
             return {
@@ -232,12 +268,11 @@ export function deriveEditNoteRows({
                 newString: edit?.new_string ?? (isBlocks ? edit?.content ?? '' : ''),
                 occurrencesReplaced: appliedByIndex.get(editIndex),
                 ...(isBlocks ? { label: describeBlockEdit(edit) } : {}),
-                // Skipped-ness is derived from `skip_reason_code`, never stored
-                // separately; `skip_reason` is only its human wording. An edit
-                // skipped without a wording still renders as skipped.
-                ...(isBlocks && edit?.skip_reason_code
-                    ? { skippedReason: edit.skip_reason ?? String(edit.skip_reason_code) }
-                    : {}),
+                // Skipped-ness is derived, never stored separately: from the
+                // execute result once there is one, else from validation's
+                // `skip_reason_code` (see `skipFieldsFor`). An edit skipped
+                // without a wording still renders as skipped.
+                ...skipFieldsFor(edit, editIndex),
                 // Blocks only. Batch rows must keep producing NO anchor keys:
                 // batch validation routinely writes `target_*_context` onto its
                 // edits, so spreading them here unconditionally would change

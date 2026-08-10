@@ -764,6 +764,10 @@ async function handleAgentActionExecuteHttpRequest(request: any) {
         error_code: response.error_code,
         error_candidates: response.error_candidates,
         result_data: response.result_data,
+        // edit_note_blocks ships the post-edit note (and the snapshot-mismatch
+        // recovery listing) here rather than in `result_data`, which is persisted.
+        // Dropping it costs this transport a read_note round trip per edit.
+        refreshed_note: response.refreshed_note,
     };
 }
 
