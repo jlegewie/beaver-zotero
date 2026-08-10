@@ -87,6 +87,7 @@ import {
     PreviewData,
 } from './agentActionViewHelpers';
 import { ActionPreview } from './ActionPreview';
+import { useApprovalRecovery } from './useApprovalRecovery';
 import { currentThreadIdAtom } from '../../../atoms/threads';
 import {
     getToolGroupRunApprovalLabel,
@@ -244,6 +245,19 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
         fetchTitle();
     }, [action, pendingApproval, itemTitle, itemTitleKey, hasAssociatedItem, setItemTitle]);
 
+    const handleApprovalRecovered = useCallback(() => {
+        setIsProcessingApproval(false);
+        setIsExternallyProcessing(false);
+        setClickedButton(null);
+    }, []);
+    const { setProcessingApproval } = useApprovalRecovery({
+        isAwaitingDecision: isProcessingApproval || isExternallyProcessing,
+        hasToolReturn,
+        actionStatus: action?.status,
+        onRecover: handleApprovalRecovered,
+        label: `AgentActionView(${toolName})`,
+    });
+
     useEffect(() => {
         const previousPendingApproval = prevPendingApprovalRef.current;
         const wasAwaiting = previousPendingApproval !== null;
@@ -256,6 +270,13 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
             if (!isProcessingApproval && isRunPending && !hasToolReturn) {
                 setIsExternallyProcessing(true);
                 setClickedButton(previousIntent === false ? 'reject' : 'approve');
+                // Record it for recovery too: a decision made from another
+                // surface (Approve All, the composer, the diff-preview banner)
+                // can miss its window exactly like one made here.
+                setProcessingApproval({
+                    actionId: previousActionId,
+                    kind: previousIntent === false ? 'reject' : 'approve',
+                });
             }
 
             if (previousIntent !== undefined) {
@@ -271,19 +292,22 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
         hasToolReturn,
         approvalResponseIntents,
         removeApprovalResponseIntent,
+        setProcessingApproval,
     ]);
 
     useEffect(() => {
         if ((isProcessingApproval || isExternallyProcessing) && action && action.status !== 'pending') {
             setIsProcessingApproval(false);
+            setProcessingApproval(null);
             setIsExternallyProcessing(false);
             setClickedButton(null);
         }
         if (isExternallyProcessing && (hasToolReturn || !isRunPending)) {
             setIsExternallyProcessing(false);
+            setProcessingApproval(null);
             setClickedButton(null);
         }
-    }, [isProcessingApproval, isExternallyProcessing, action?.status, hasToolReturn, isRunPending, action]);
+    }, [isProcessingApproval, isExternallyProcessing, action?.status, hasToolReturn, isRunPending, action, setProcessingApproval]);
 
     const isProcessing = isProcessingApproval || isProcessingAction || isExternallyProcessing;
     const actionDisplayStatus = action ? getCreateAnnotationsDisplayStatus(action) : null;
@@ -304,6 +328,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     const handleApprove = useCallback(() => {
         if (!pendingApproval) return;
         setIsProcessingApproval(true);
+        setProcessingApproval({ actionId: pendingApproval.actionId, kind: 'approve' });
         setClickedButton('approve');
         sendApprovalResponse({ actionId: pendingApproval.actionId, approved: true });
         removePendingApproval(pendingApproval.actionId);
@@ -312,6 +337,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     const handleReject = useCallback(() => {
         if (!pendingApproval) return;
         setIsProcessingApproval(true);
+        setProcessingApproval({ actionId: pendingApproval.actionId, kind: 'reject' });
         setClickedButton('reject');
         sendApprovalResponse({ actionId: pendingApproval.actionId, approved: false });
         removePendingApproval(pendingApproval.actionId);
@@ -320,6 +346,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     const handleApproveForRun = useCallback(() => {
         if (!pendingApproval) return;
         setIsProcessingApproval(true);
+        setProcessingApproval({ actionId: pendingApproval.actionId, kind: 'approve' });
         setClickedButton('approve');
         approveToolGroupForRun({ runId, toolName });
     }, [pendingApproval, approveToolGroupForRun, runId, toolName]);

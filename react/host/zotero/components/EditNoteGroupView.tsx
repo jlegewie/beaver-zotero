@@ -16,6 +16,7 @@ import {
     approveToolGroupForRunAtom,
     isWSChatPendingAtom,
     sendApprovalResponseAtom,
+    staleApprovalActionIdsAtom,
 } from '../../../atoms/agentRunAtoms';
 import {
     agentActionItemTitlesAtom,
@@ -236,15 +237,22 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
             toolCallStatus: state.toolCallStatus,
         }));
     }, [partStates, isRunStreaming]);
+    // A child is still "processing" only while its tool call has not returned
+    // and its decision can still reach the run. Once the return is in, the call
+    // is settled whatever the action's status — an action left `pending` at that
+    // point had its approval window expire. A child whose approval was marked
+    // stale is settled for the same reason without waiting for a return.
+    // Counting either as unsettled would hold the group's spinner up for the
+    // rest of the run over a decision the backend can no longer act on.
+    const staleApprovalActionIds = useAtomValue(staleApprovalActionIdsAtom);
     const hasUnsettledProcessingChild = useMemo(() => (
         partStates.some((state) => (
             state.pendingApproval === null
-            && (
-                state.action?.status === 'pending'
-                || (!state.action && resultsMap.get(state.part.tool_call_id) === undefined)
-            )
+            && resultsMap.get(state.part.tool_call_id) === undefined
+            && (state.action?.status === 'pending' || !state.action)
+            && !(state.action && staleApprovalActionIds.has(state.action.id))
         ))
-    ), [partStates, resultsMap]);
+    ), [partStates, resultsMap, staleApprovalActionIds]);
 
     const aggregateStatus: ActionStatus | 'awaiting' = getOverallEditNoteDisplayStatus(rowStatuses);
 

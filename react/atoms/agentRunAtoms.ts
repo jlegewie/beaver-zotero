@@ -34,6 +34,7 @@ import {
     WSToolCallArgsStreamEvent,
     WSMissingZoteroDataEvent,
     WSDeferredApprovalRequest,
+    WSDeferredApprovalStale,
     WSAskUserQuestionRequest,
     AskUserQuestionAnswer,
     WSStreamingDoneEvent,
@@ -118,7 +119,6 @@ import {
     removePendingApprovalAtom,
     removePendingApprovalsAtom,
     pendingApprovalsAtom,
-    buildPendingApprovalFromAction,
     clearAllPendingApprovalsAtom,
 } from '../agents/agentActions';
 import {
@@ -1277,6 +1277,7 @@ export const prepareForNewRunAtom = atom(null, (_get, set) => {
     set(clearAllPendingApprovalsAtom);
     set(clearAllPendingQuestionsAtom);
     set(clearApprovalResponseIntentsAtom);
+    set(clearStaleApprovalsAtom);
     set(clearRunApprovalPolicyAtom);
 });
 
@@ -1974,6 +1975,19 @@ function createWSCallbacks(set: Setter): WSCallbacks {
 
             // Default: add to pending approvals map for UI rendering
             set(addPendingApprovalAtom, event);
+        },
+
+        onDeferredApprovalStale: (event: WSDeferredApprovalStale) => {
+            logger('WS onDeferredApprovalStale:', {
+                actionId: event.action_id,
+                reason: event.reason,
+            }, 1);
+            // The decision arrived after the backend stopped waiting, so the run
+            // never saw it. Retire the approval and let the card fall back to
+            // applying the (still valid) proposal locally.
+            set(markApprovalStaleAtom, event.action_id);
+            set(removePendingApprovalAtom, event.action_id);
+            set(removeApprovalResponseIntentAtom, event.action_id);
         },
 
         onAskUserQuestionRequest: (event: WSAskUserQuestionRequest) => {
@@ -3205,8 +3219,49 @@ export const clearApprovalResponseIntentsAtom = atom(
 );
 
 /**
+ * Deferred actions whose approval channel is closed: the user's decision either
+ * never left the client (socket down) or reached a backend that had already
+ * stopped waiting (`deferred_approval_stale`). The run cannot act on it.
+ *
+ * The proposal itself is untouched — still stored, still applicable — so views
+ * use this to drop the "awaiting approval" spinner and restore the local
+ * apply/reject controls. Without it a card waits forever on a reply that the
+ * backend will never send.
+ */
+export const staleApprovalActionIdsAtom = atom<Set<string>>(new Set<string>());
+
+export const markApprovalStaleAtom = atom(
+    null,
+    (_get, set, actionId: string) => {
+        set(staleApprovalActionIdsAtom, (prev) => {
+            if (prev.has(actionId)) return prev;
+            const next = new Set(prev);
+            next.add(actionId);
+            return next;
+        });
+    },
+);
+
+export const clearStaleApprovalsAtom = atom(
+    null,
+    (_get, set) => {
+        set(staleApprovalActionIdsAtom, new Set<string>());
+    },
+);
+
+// Note: clearing `pendingApprovalsAtom` when a run ends does not strand the
+// proposals it was carrying. Every deferred tool emits and persists its action
+// before it starts waiting, so each card falls back to the `status === 'pending'`
+// controls it already has and stays appliable. Recovering a card whose decision
+// was already sent is the view's job — see `useApprovalRecovery`.
+
+/**
  * Send approval response for a deferred action.
  * Called by the UI when user approves/rejects an action.
+ *
+ * A send that never left the client is recorded as stale immediately: the
+ * backend cannot answer a message it never received, so the card would
+ * otherwise sit on a spinner until the thread is reloaded.
  */
 export const sendApprovalResponseAtom = atom(
     null,
@@ -3217,7 +3272,11 @@ export const sendApprovalResponseAtom = atom(
             return next;
         });
         logger(`sendApprovalResponseAtom: Sending approval response for ${actionId}: ${approved}${userInstructions ? ' (with instructions)' : ''}`, 1);
-        agentService.sendApprovalResponse(actionId, approved, userInstructions);
+        const delivered = agentService.sendApprovalResponse(actionId, approved, userInstructions);
+        if (!delivered) {
+            logger(`sendApprovalResponseAtom: Approval response for ${actionId} was not sent; marking stale`, 1);
+            set(markApprovalStaleAtom, actionId);
+        }
     }
 );
 
