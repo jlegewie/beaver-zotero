@@ -153,7 +153,7 @@ export async function handleItemSearchByMetadataRequest(
     // Calculate offset for pagination (default 0, guard against negative values)
     const offset = Math.max(0, request.offset ?? 0);
 
-    // Deduplication and agentItemFilter both run before the page slice, so the
+    // Deduplication runs before the page slice and agentItemFilter after it, so the
     // search has to over-fetch to fill a page of `limit` items at `offset`.
     // A non-positive limit means unlimited and is passed through as-is.
     const preDedupBuffer = request.limit > 0 ? (offset + request.limit) * 2 : request.limit;
