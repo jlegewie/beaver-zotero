@@ -103,31 +103,26 @@ export async function handleItemSearchByTopicRequest(
         };
     }
 
-    // Resolve collections_filter to collection objects (scoped to libraryIds)
+    // Resolve collections_filter to collection objects. Every resolution is
+    // re-checked against libraryIds: a key-like filter resolves through a
+    // cross-library fallback that can land outside the searchable set, and the
+    // scope is read from Zotero before the embedding query narrows by library.
     const collectionsById = new Map<number, Zotero.Collection>();
+    const addCollectionInScope = (collection: Zotero.Collection | null | undefined) => {
+        if (collection && libraryIds.includes(collection.libraryID)) {
+            collectionsById.set(collection.id, collection);
+        }
+    };
     if (request.collections_filter && request.collections_filter.length > 0) {
         for (const collectionFilter of request.collections_filter) {
             if (typeof collectionFilter === 'number') {
-                const collection = Zotero.Collections.get(collectionFilter);
-                if (collection && (libraryIds.length === 0 || libraryIds.includes(collection.libraryID))) {
-                    collectionsById.set(collection.id, collection);
-                }
+                addCollectionInScope(Zotero.Collections.get(collectionFilter));
                 continue;
             }
 
             // String filter: search within each library
-            if (libraryIds.length > 0) {
-                for (const libId of libraryIds) {
-                    const result = getCollectionByIdOrName(collectionFilter, libId);
-                    if (result) {
-                        collectionsById.set(result.collection.id, result.collection);
-                    }
-                }
-            } else {
-                const result = getCollectionByIdOrName(collectionFilter);
-                if (result) {
-                    collectionsById.set(result.collection.id, result.collection);
-                }
+            for (const libId of libraryIds) {
+                addCollectionInScope(getCollectionByIdOrName(collectionFilter, libId)?.collection);
             }
         }
     }

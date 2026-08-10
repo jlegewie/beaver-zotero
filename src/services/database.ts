@@ -1235,21 +1235,30 @@ export class BeaverDB {
         if (libraryIds && libraryIds.length === 0) return [];
 
         const libraryFilter = libraryIds ?? [];
-        const libraryPlaceholders = libraryFilter.map(() => '?').join(',');
 
-        // Stay under SQLite's 999 bound-parameter limit; library params share the budget.
-        const chunkSize = Math.max(1, 999 - libraryFilter.length);
+        // SQLite rejects statements over MAX_BOUND_PARAMS parameters, and the
+        // library IDs share that budget with the item IDs. A library filter too
+        // large to leave room for a useful item chunk is applied in JS instead.
+        const MAX_BOUND_PARAMS = 999;
+        const filterInSql = libraryFilter.length > 0 && libraryFilter.length * 2 <= MAX_BOUND_PARAMS;
+        const chunkSize = MAX_BOUND_PARAMS - (filterInSql ? libraryFilter.length : 0);
+        const libraryPlaceholders = libraryFilter.map(() => '?').join(',');
 
         const records: EmbeddingRecord[] = [];
         for (let i = 0; i < itemIds.length; i += chunkSize) {
             const chunk = itemIds.slice(i, i + chunkSize);
             const itemPlaceholders = chunk.map(() => '?').join(',');
-            const sql = libraryFilter.length > 0
+            const sql = filterInSql
                 ? `SELECT * FROM embeddings WHERE library_id IN (${libraryPlaceholders}) AND item_id IN (${itemPlaceholders})`
                 : `SELECT * FROM embeddings WHERE item_id IN (${itemPlaceholders})`;
 
-            const rows = await this.conn.queryAsync(sql, [...libraryFilter, ...chunk]);
+            const rows = await this.conn.queryAsync(sql, filterInSql ? [...libraryFilter, ...chunk] : chunk);
             records.push(...rows.map((row: any) => BeaverDB.rowToEmbeddingRecord(row)));
+        }
+
+        if (!filterInSql && libraryFilter.length > 0) {
+            const allowed = new Set(libraryFilter);
+            return records.filter(record => allowed.has(record.library_id));
         }
 
         return records;

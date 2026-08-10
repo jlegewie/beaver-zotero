@@ -111,6 +111,22 @@ describe('handleItemSearchByTopicRequest collection scoping', () => {
         expect(searchOptions()).toMatchObject({ itemIds: [11, 22, 33], libraryIds: [1] });
     });
 
+    it('drops a collection resolved outside the searchable libraries', async () => {
+        // Key-like filters resolve through a cross-library fallback that can
+        // land in a library the request is not scoped to.
+        const foreign = { id: 9, key: 'COLL9', libraryID: 42 } as unknown as Zotero.Collection;
+        vi.mocked(getCollectionByIdOrName).mockReturnValue({ collection: foreign, libraryID: 42 });
+        vi.mocked(getCollectionScopeItemIds).mockResolvedValue([]);
+
+        const response = await handleItemSearchByTopicRequest(
+            makeRequest({ collections_filter: ['ABCD1234'] })
+        );
+
+        expect(response.items).toEqual([]);
+        expect(getCollectionScopeItemIds).toHaveBeenCalledWith([]);
+        expect(searchMock).not.toHaveBeenCalled();
+    });
+
     it('deduplicates collections resolved from several filter entries', async () => {
         const collection = { id: 7, key: 'COLL7', libraryID: 1 } as unknown as Zotero.Collection;
         vi.mocked(getCollectionByIdOrName).mockReturnValue({ collection, libraryID: 1 });

@@ -69,4 +69,19 @@ describe('BeaverDB - embedding allowlist lookups', () => {
             expect((params as unknown[]).length).toBeLessThanOrEqual(999);
         }
     });
+
+    it('stays within the parameter limit when the library filter is oversized', async () => {
+        await insertEmbedding(1, 1);
+        await insertEmbedding(2, 2);
+
+        const libraryIds = Array.from({ length: 1200 }, (_, i) => i + 1);
+        const queryAsync = vi.spyOn(conn, 'queryAsync');
+        const records = await db.getEmbeddingsByItemIds([1, 2], libraryIds.filter(id => id !== 2));
+
+        for (const [, params] of queryAsync.mock.calls) {
+            expect((params as unknown[]).length).toBeLessThanOrEqual(999);
+        }
+        // The library restriction still holds even though it is too large for SQL.
+        expect(records.map(r => r.item_id)).toEqual([1]);
+    });
 });
