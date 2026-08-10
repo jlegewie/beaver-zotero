@@ -780,6 +780,77 @@ describe('executeEditNoteBlocksAction', () => {
         expect(result.skipped[1]).not.toHaveProperty('block_hint');
     });
 
+    // THE APPROVAL BOUNDARY. A validation-skipped edit was shown to the user as
+    // "Skipped" with no diff, so execute must not apply it even when the reason it
+    // was skipped for has since cleared — citation identity and library exclusion
+    // are re-resolved here and can change while an edit awaits approval.
+    it('never applies an edit validation skipped, even if it would now succeed', async () => {
+        const response = await handleAgentActionExecuteRequest(executeRequest([
+            {
+                index: 0,
+                op: 'replace',
+                block: 2,
+                expect: LINE_2,
+                content: '<p>Bravo REWRITTEN two.</p>',
+                // Perfectly applicable against this note — only the marker stops it.
+                skip_reason_code: 'expansion_failed',
+                skip_reason: 'Citation references a Zotero item that does not exist.',
+            },
+            {
+                index: 1,
+                op: 'replace',
+                block: 3,
+                expect: LINE_3,
+                content: '<p>Charlie, revised.</p>',
+            },
+        ]));
+
+        expect(response.success).toBe(true);
+        expect(noteHtml).toContain('<p>Charlie, revised.</p>');
+        expect(noteHtml).not.toContain('Bravo REWRITTEN two.');
+        expect(noteHtml).toContain(LINE_2);
+
+        const result = response.result_data as unknown as EditNoteBlocksResultData;
+        expect(result.applied.map((a) => a.index)).toEqual([1]);
+        // Carried over verbatim, so the model and the card keep the reason the
+        // user was shown rather than a fresh one execute invented.
+        expect(result.skipped).toHaveLength(1);
+        expect(result.skipped[0]).toMatchObject({
+            index: 0,
+            reason_code: 'expansion_failed',
+            reason: 'Citation references a Zotero item that does not exist.',
+        });
+    });
+
+    it('reports no applicable edits when every edit was already skipped', async () => {
+        const response = await handleAgentActionExecuteRequest(executeRequest([
+            {
+                index: 0, op: 'replace', block: 2, expect: LINE_2, content: '<p>X</p>',
+                skip_reason_code: 'structural_seam', skip_reason: 'Would land inside a list.',
+            },
+        ]));
+
+        expect(response).toMatchObject({ success: false, error_code: 'no_applicable_edits' });
+        expect(mockItem.setNote).not.toHaveBeenCalled();
+        const result = response.result_data as unknown as EditNoteBlocksResultData;
+        expect(result.skipped[0]).toMatchObject({ index: 0, reason_code: 'structural_seam' });
+    });
+
+    it('does not apply a sole rewrite that validation skipped', async () => {
+        const response = await handleAgentActionExecuteRequest(executeRequest(
+            [{
+                index: 0, op: 'rewrite', content: '<p>Whole new body.</p>',
+                skip_reason_code: 'invalid_edit', skip_reason: 'Refused at validation.',
+            }],
+            { snapshot: undefined },
+        ));
+
+        // Must not be reported as a snapshot problem: the call simply has no work.
+        expect(response).toMatchObject({ success: false, error_code: 'no_applicable_edits' });
+        expect(mockItem.setNote).not.toHaveBeenCalled();
+        expect(noteHtml).toBe(NOTE_HTML);
+    });
+
     it('performs the authoritative note read AFTER every preload and takes no await before setNote', async () => {
         const response = await handleAgentActionExecuteRequest(executeRequest([replaceBlock2]));
         expect(response.success).toBe(true);

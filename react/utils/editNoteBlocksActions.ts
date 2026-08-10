@@ -14,14 +14,18 @@
  *
  * WHY RE-RESOLUTION IS NOT OPTIONAL. This path runs when the user clicks
  * Apply/Retry, which can be long after validation. The persisted edits carry
- * per-edit DISPLAY metadata (`skip_reason_code`, `old_string`, `new_string`,
- * `target_*_context`) written by validation for the card and the diff preview.
- * None of it is execution input: `planBlockEditsExecution` reads only the
- * addressing fields (`op`/`block`/`after`/`to`/`expect`/
- * `expect_end`/`content`) and re-resolves every edit against the note as it
- * stands now. An edit validation marked skipped is re-evaluated and may apply;
- * an edit validation accepted may now be skipped. Partial application, same as
- * the WS executor.
+ * per-edit DISPLAY metadata (`old_string`, `new_string`, `target_*_context`)
+ * written by validation for the card and the diff preview. None of it is
+ * execution input: `planBlockEditsExecution` reads only the addressing fields
+ * (`op`/`block`/`after`/`to`/`expect`/`expect_end`/`content`) and re-resolves
+ * every edit against the note as it stands now, so an edit validation accepted
+ * may now be skipped. Partial application, same as the WS executor.
+ *
+ * `skip_reason_code` is the ONE persisted field that IS honored, and it can only
+ * subtract: an edit validation skipped stays skipped. The card showed it as
+ * "Skipped" and withheld its diff, so applying it here would change the note in
+ * a way the user never approved. See the approval-boundary note in
+ * `planBlockEditsExecution`.
  */
 
 import type { AgentAction } from '../agents/agentActions';

@@ -1301,7 +1301,44 @@ export function planBlockEditsExecution(inputs: BlockExecutionInputs): BlockExec
     const strippedHtml = stripDataCitationItems(normalizedOldHtml);
     const { simplified, metadata } = getOrSimplify(noteId, oldHtml, libraryId, pageLabelsByItemId);
 
-    const soleRewrite = isSoleWholeBodyRewrite(edits);
+    // THE APPROVAL BOUNDARY. An edit validation skipped was shown to the user as
+    // "Skipped" with NO diff, so execute must not apply it — not even if the
+    // condition that skipped it has since cleared. Most skip causes are decided
+    // by the note, which the snapshot pins, but two are not: citation identity
+    // and library exclusion are resolved again here, and either can change while
+    // the action waits for approval or sits queued for review. Re-running such an
+    // edit would write content the user never saw. The skip is therefore carried
+    // over verbatim, keeping the reason the user and the model were both given.
+    const carriedSkips: BlockEditSkip[] = [];
+    const eligibleEdits = edits.filter((edit) => {
+        if (!edit.skip_reason_code) return true;
+        carriedSkips.push({
+            index: edit.index,
+            ...(edit.client_item_id !== undefined ? { client_item_id: edit.client_item_id } : {}),
+            reason_code: edit.skip_reason_code,
+            reason: edit.skip_reason ?? String(edit.skip_reason_code),
+        });
+        return false;
+    });
+
+    // Every edit was already skipped, so there is nothing to address and no
+    // token to check — answer with the carried reasons rather than a
+    // snapshot complaint about a call that has no work left in it.
+    if (eligibleEdits.length === 0) {
+        return {
+            ok: false,
+            error: `None of the ${edits.length} edit(s) could be applied to the note as it now stands.`,
+            errorCode: 'no_applicable_edits',
+            skipped: carriedSkips.map((s) => ({
+                index: s.index,
+                ...(s.client_item_id !== undefined ? { client_item_id: s.client_item_id } : {}),
+                reason_code: s.reason_code,
+                reason: s.reason,
+            })),
+        };
+    }
+
+    const soleRewrite = isSoleWholeBodyRewrite(eligibleEdits);
     // Structural garbage is not drift, so it ships no recovery payload (see the
     // validator). `parseAddressSnapshot` is sync — the no-await contract holds.
     if (!soleRewrite && !parseAddressSnapshot(snapshot as string)) {
@@ -1345,7 +1382,7 @@ export function planBlockEditsExecution(inputs: BlockExecutionInputs): BlockExec
     const citationPrecheck = makeCitationPrecheck(citationRejections, metadata);
 
     if (soleRewrite) {
-        const edit = edits[0];
+        const edit = eligibleEdits[0];
         const rawContent = edit.content ?? '';
         const pre = citationPrecheck(rawContent);
         // Sole-edit rewrite: no per-edit skip to fall back on (see the validator).
@@ -1402,19 +1439,22 @@ export function planBlockEditsExecution(inputs: BlockExecutionInputs): BlockExec
         if (dup) warnings.push(dup);
     } else {
         const selection = runBlockSelection(
-            simplified, strippedHtml, metadata, edits, preWindow,
+            simplified, strippedHtml, metadata, eligibleEdits, preWindow,
             externalRefContext, labels, citationRejections,
         );
         if ('refusal' in selection) {
             return { ok: false, error: selection.refusal.error, errorCode: selection.refusal.errorCode };
         }
+        // Carried skips belong in every skip list this branch produces, so the
+        // result still accounts for all `requested` edits.
+        const allSkips = [...carriedSkips, ...selection.skipped].sort((a, b) => a.index - b.index);
         if (selection.applied.length === 0) {
             // No `block_hint`: nothing was applied, so there is no shift to report.
             return {
                 ok: false,
                 error: `None of the ${edits.length} edit(s) could be applied to the note as it now stands.`,
                 errorCode: 'no_applicable_edits',
-                skipped: selection.skipped.map((s) => ({
+                skipped: allSkips.map((s) => ({
                     index: s.index,
                     ...(s.client_item_id !== undefined ? { client_item_id: s.client_item_id } : {}),
                     reason_code: s.reason_code,
@@ -1456,7 +1496,7 @@ export function planBlockEditsExecution(inputs: BlockExecutionInputs): BlockExec
 
         const editByIndex = new Map<number, EditNoteBlocksEditItem>();
         for (const edit of edits) editByIndex.set(edit.index, edit);
-        skippedOut = selection.skipped.map((s) => {
+        skippedOut = allSkips.map((s) => {
             const address = addressedBlocks(editByIndex.get(s.index)!);
             const hint = address
                 ? { from: shifts.shift(address.from), to: shifts.shift(address.to) }
@@ -1484,7 +1524,9 @@ export function planBlockEditsExecution(inputs: BlockExecutionInputs): BlockExec
             ...(d.undo_after_context !== undefined ? { undo_after_context: d.undo_after_context } : {}),
         }));
 
-        for (const edit of edits) {
+        // Eligible only: a carried-over skip contributes no content to the note,
+        // so warning about its citations would be noise.
+        for (const edit of eligibleEdits) {
             if (typeof edit.content !== 'string') continue;
             const dup = checkDuplicateCitations(edit.content, metadata);
             if (dup) warnings.push(dup);

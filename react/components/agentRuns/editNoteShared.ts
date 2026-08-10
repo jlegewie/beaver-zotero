@@ -208,13 +208,13 @@ export function deriveEditNoteRows({
         /**
          * Execute-time skips, keyed by edit index — AUTHORITATIVE once present.
          *
-         * Execute re-resolves every edit against the note as it stands, and the
-         * per-edit outcome can differ from validation's advisory marker: citation
-         * identity and library exclusion are resolved again, and either can
-         * change while an edit waits for approval or sits queued for review. So
-         * a row must not be labelled from `skip_reason_code` after the action has
-         * run — that reports a validation-time guess as what happened to the
-         * user's note.
+         * Execute re-resolves every edit against the note as it stands, so an
+         * edit validation accepted can still be refused: citation identity and
+         * library exclusion are looked up again and either can change while the
+         * edit waits for approval. Labelling a row from `skip_reason_code` after
+         * the action has run would report a validation-time guess as what
+         * happened to the user's note. (Execute can only ADD skips — a
+         * validation skip is honored there, see `planBlockEditsExecution`.)
          *
          * `null` means no execution result to consult (pending or validate-only),
          * where the validation marker is the only signal there is. An empty map

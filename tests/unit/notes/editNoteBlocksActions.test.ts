@@ -306,11 +306,15 @@ describe('executeEditNoteBlocksAction (local re-apply)', () => {
         expect(noteHtml).toContain('Edited by Beaver');
     });
 
-    it('RE-RESOLVES against the live note and ignores the persisted display metadata', async () => {
+    it('RE-RESOLVES against the live note and ignores the persisted display strings', async () => {
         // Validation's display metadata is deliberately misleading here: a stale
         // `old_string`/`new_string` pair naming text that is not in the note, and
-        // a `skip_reason_code` claiming the edit cannot apply. Only the
-        // addressing fields (`block`/`expect`/`content`) are execution input.
+        // bogus context anchors. Only the addressing fields (`block`/`expect`/
+        // `content`) are execution input.
+        //
+        // `skip_reason_code` is the ONE exception and is covered separately: it is
+        // not a display string but the record of what the user was shown as
+        // excluded from this approval, so execute honors it.
         const staleEdit: EditNoteBlocksEditItem = {
             index: 0,
             op: 'replace',
@@ -320,8 +324,6 @@ describe('executeEditNoteBlocksAction (local re-apply)', () => {
             operation: 'str_replace',
             old_string: '<p>Text that is nowhere in this note.</p>',
             new_string: '<p>A replacement nobody asked for.</p>',
-            skip_reason_code: 'expect_mismatch',
-            skip_reason: 'stale metadata from an earlier validation',
             target_before_context: '<p>bogus before</p>',
             target_after_context: '<p>bogus after</p>',
         };
@@ -334,7 +336,6 @@ describe('executeEditNoteBlocksAction (local re-apply)', () => {
         // …and none of the persisted display strings influenced the write.
         expect(noteHtml).not.toContain('A replacement nobody asked for.');
         expect(noteHtml).not.toContain('bogus before');
-        // The stale skip did not suppress the edit either.
         expect(result.applied).toHaveLength(1);
         expect(result.skipped).toEqual([]);
     });
@@ -373,6 +374,24 @@ describe('executeEditNoteBlocksAction (local re-apply)', () => {
             executeEditNoteBlocksAction(blocksAction([replaceBlock2], { snapshot: staleSnapshot })),
         ).rejects.toThrow(/block numbering no longer matches/);
         expect(mockItem.setNote).not.toHaveBeenCalled();
+    });
+
+    // The user reviews the card and applies it later — the longest window in which
+    // citation identity or library exclusion can change. An edit the card showed
+    // as "Skipped" (with no diff) must not slip into the note on that click.
+    it('honors validation skips when the user applies the action later', async () => {
+        const result = await executeEditNoteBlocksAction(blocksAction([
+            {
+                index: 0, op: 'replace', block: 2, expect: LINE_2, content: '<p>Bravo REWRITTEN.</p>',
+                skip_reason_code: 'expansion_failed', skip_reason: 'Cited item does not exist.',
+            },
+            { index: 1, op: 'replace', block: 3, expect: LINE_3, content: '<p>Charlie, revised.</p>' },
+        ]));
+
+        expect(noteHtml).toContain('<p>Charlie, revised.</p>');
+        expect(noteHtml).not.toContain('Bravo REWRITTEN.');
+        expect(result.applied.map((a) => a.index)).toEqual([1]);
+        expect(result.skipped[0]).toMatchObject({ index: 0, reason_code: 'expansion_failed' });
     });
 
     it('names the failing edit when a local re-apply skips every edit', async () => {
