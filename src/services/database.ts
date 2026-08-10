@@ -1224,6 +1224,38 @@ export class BeaverDB {
     }
 
     /**
+     * Get embeddings restricted to a set of item IDs, optionally also restricted to libraries.
+     * @param itemIds Array of Zotero item IDs; an empty array returns no results
+     * @param libraryIds Optional array of library IDs to additionally restrict results;
+     *                   an empty array returns no results
+     * @returns Array of embedding records
+     */
+    public async getEmbeddingsByItemIds(itemIds: number[], libraryIds?: number[]): Promise<EmbeddingRecord[]> {
+        if (itemIds.length === 0) return [];
+        if (libraryIds && libraryIds.length === 0) return [];
+
+        const libraryFilter = libraryIds ?? [];
+        const libraryPlaceholders = libraryFilter.map(() => '?').join(',');
+
+        // Stay under SQLite's 999 bound-parameter limit; library params share the budget.
+        const chunkSize = Math.max(1, 999 - libraryFilter.length);
+
+        const records: EmbeddingRecord[] = [];
+        for (let i = 0; i < itemIds.length; i += chunkSize) {
+            const chunk = itemIds.slice(i, i + chunkSize);
+            const itemPlaceholders = chunk.map(() => '?').join(',');
+            const sql = libraryFilter.length > 0
+                ? `SELECT * FROM embeddings WHERE library_id IN (${libraryPlaceholders}) AND item_id IN (${itemPlaceholders})`
+                : `SELECT * FROM embeddings WHERE item_id IN (${itemPlaceholders})`;
+
+            const rows = await this.conn.queryAsync(sql, [...libraryFilter, ...chunk]);
+            records.push(...rows.map((row: any) => BeaverDB.rowToEmbeddingRecord(row)));
+        }
+
+        return records;
+    }
+
+    /**
      * Get content hashes for items to check what needs re-indexing.
      * @param itemIds Array of Zotero item IDs
      * @returns Map of item ID to content hash
