@@ -22,10 +22,8 @@ export interface SearchItemsByMetadataOptions {
     item_type?: string;
     /** List of tags to filter by (OR logic - item must have at least one tag) */
     tags?: string[];
-    /** Collection keys to search within (OR logic) */
+    /** Collection keys to search within (OR logic, includes subcollections) */
     collection_keys?: string[];
-    /** If true, search recursively in subcollections */
-    recursive?: boolean;
     /**
      * "all" for AND logic, "any" for OR logic.
      *
@@ -69,7 +67,6 @@ export const searchItemsByMetadata = async (
         item_type,
         tags = [],
         collection_keys,
-        recursive = false,
         join_mode = 'all',
         limit = 50
     } = options;
@@ -138,9 +135,9 @@ export const searchItemsByMetadata = async (
         for (const collectionKey of collection_keys) {
             const search = buildSearch();
             search.addCondition('collection', 'is', collectionKey);
-            if (recursive) {
-                search.addCondition('recursive', 'true');
-            }
+            // Collection scope always includes subcollections, matching the other
+            // library-browsing tools.
+            search.addCondition('recursive', 'true');
             const ids: number[] = await search.search();
             for (const id of ids) {
                 itemIDSet.add(id);
