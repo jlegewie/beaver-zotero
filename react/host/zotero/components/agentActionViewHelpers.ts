@@ -33,8 +33,8 @@ export function confirmOverwriteManualChanges(modifiedFields: string[]): boolean
     return buttonIndex === 0;
 }
 
-/** Tools that should remain expanded after approval resolves (never auto-collapse) */
-export const NEVER_AUTO_COLLAPSE_TOOLS = new Set(['create_note', 'create_highlight_annotations', 'create_note_annotations']);
+/** Full-content cards that remain expanded after a clean resolution. */
+export const NEVER_AUTO_COLLAPSE_TOOLS = new Set(['create_note']);
 
 /**
  * Shorten a backend error_message for inline display in action previews.
@@ -126,8 +126,58 @@ export const STATUS_CONFIGS: Record<ActionStatus | 'awaiting', StatusConfig> = {
 export function shouldAutoCollapseResolvedApproval(
     status: ActionStatus | 'awaiting',
     neverAutoCollapse = false,
+    keepExpanded = false,
 ): boolean {
-    return !neverAutoCollapse && status !== 'pending' && status !== 'awaiting';
+    return !neverAutoCollapse
+        && !keepExpanded
+        && status !== 'pending'
+        && status !== 'awaiting'
+        && status !== 'error';
+}
+
+export interface ActionCardExpansionSignals {
+    isAwaitingApproval: boolean;
+    hasStoredPendingAction: boolean;
+    resolutionStatus: ActionStatus | 'awaiting';
+    keepExpandedAfterResolution: boolean;
+}
+
+/**
+ * Resolve expansion changes caused by live state transitions. Returns null
+ * when the existing expansion value (including a user's manual choice) should
+ * be preserved.
+ */
+export function getActionCardExpansionTransition(
+    previous: ActionCardExpansionSignals,
+    current: ActionCardExpansionSignals,
+    neverAutoCollapse = false,
+): boolean | null {
+    const becameActionable =
+        (!previous.isAwaitingApproval && current.isAwaitingApproval)
+        || (!previous.hasStoredPendingAction && current.hasStoredPendingAction);
+    if (becameActionable) return true;
+
+    const approvalResolved = previous.isAwaitingApproval && !current.isAwaitingApproval;
+    const storedPendingResolved =
+        previous.hasStoredPendingAction && !current.hasStoredPendingAction;
+    const isTerminal =
+        current.resolutionStatus !== 'pending'
+        && current.resolutionStatus !== 'awaiting';
+    const terminalPolicyChanged = isTerminal && (
+        previous.resolutionStatus !== current.resolutionStatus
+        || previous.keepExpandedAfterResolution !== current.keepExpandedAfterResolution
+    );
+
+    if (!approvalResolved && !storedPendingResolved && !terminalPolicyChanged) {
+        return null;
+    }
+    if (!isTerminal) return true;
+
+    return !shouldAutoCollapseResolvedApproval(
+        current.resolutionStatus,
+        neverAutoCollapse,
+        current.keepExpandedAfterResolution,
+    );
 }
 
 /**
@@ -171,6 +221,53 @@ export function getActionCardResolutionStatus(
     if (isMultiAction) return getOverallStatus(actions);
     if (actions.length > 0) return actions[0].status;
     return hasToolReturn ? 'applied' : 'pending';
+}
+
+/**
+ * Whether an action's result contains a failure the user should see. This is
+ * separate from status because partial batches are persisted as `applied`.
+ */
+export function actionOutcomeNeedsAttention(action: AgentAction): boolean {
+    if (action.status === 'error') return true;
+    if (action.status !== 'applied') return false;
+
+    if (
+        action.action_type === 'create_highlight_annotations'
+        || action.action_type === 'create_note_annotations'
+    ) {
+        const failed = action.result_data?.failed;
+        return (Array.isArray(failed) && failed.length > 0)
+            || Number(action.result_data?.total_failed ?? 0) > 0;
+    }
+
+    if (action.action_type === 'edit_annotations') {
+        const resultSkips = action.result_data?.skipped;
+        const proposalSkips = action.proposed_data?.skipped;
+        return (Array.isArray(resultSkips) && resultSkips.length > 0)
+            || (Array.isArray(proposalSkips) && proposalSkips.length > 0);
+    }
+
+    return false;
+}
+
+export function actionCardOutcomeNeedsAttention(actions: AgentAction[]): boolean {
+    return actions.some(actionOutcomeNeedsAttention);
+}
+
+const BROWSABLE_CREATED_ARTIFACT_ACTION_TYPES = new Set<AgentAction['action_type']>([
+    'create_note',
+    'create_highlight_annotations',
+    'create_note_annotations',
+    'create_item',
+    'create_collection',
+]);
+
+/** Applied creation cards remain useful as browsers for their new artifacts. */
+export function actionCardHasBrowsableCreatedArtifacts(actions: AgentAction[]): boolean {
+    return actions.some((action) => (
+        action.status === 'applied'
+        && BROWSABLE_CREATED_ARTIFACT_ACTION_TYPES.has(action.action_type)
+    ));
 }
 
 /**
