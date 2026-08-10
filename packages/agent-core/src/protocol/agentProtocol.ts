@@ -1915,12 +1915,8 @@ export const CLIENT_FEATURES = {
     CREATE_NOTE_TAGS_COLLECTIONS: 'create_note_tags_collections',
     /** Batch multi-edit note editing (edit_note_batch action type). */
     EDIT_NOTE_BATCH: 'edit_note_batch',
-    // Block-addressed note editing (`'edit_note_blocks'`) is deliberately NOT
-    // declared here yet. ZOTERO_PLUGIN_FEATURES = Object.values(CLIENT_FEATURES),
-    // so adding an entry here *is* the declaration — the backend would start
-    // offering the tool to every build that ships this constant. Flipping the
-    // feature on is its own release step per the rollout plan; add the entry
-    // then, not when the protocol types land.
+    /** Block-addressed note editing (edit_note_blocks action type). */
+    EDIT_NOTE_BLOCKS: 'edit_note_blocks',
     /** Atomic common-field editing for annotations returned by find_annotations. */
     EDIT_ANNOTATIONS: 'edit_annotations',
     /**
