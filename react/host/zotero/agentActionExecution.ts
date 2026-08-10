@@ -111,13 +111,35 @@ async function undoWithOverwriteConfirmation(
     return result;
 }
 
-function toFailures(actions: AgentAction[], error: string, errorDetails: Record<string, any>): AgentActionFailure[] {
+function toFailures(actions: AgentAction[], error: string, errorDetails?: Record<string, any>): AgentActionFailure[] {
     return actions.map((action) => ({ actionId: action.id, error, errorDetails }));
 }
 
 /**
+ * Report an action type this executor cannot handle — note edits and the legacy
+ * per-annotation types apply through their own surfaces.
+ *
+ * Reported as per-action failures rather than an empty success, so a caller that
+ * hands over a wider set of actions than the in-stream card can tell "applied
+ * nothing" from "nothing to apply". The action records are left alone: nothing
+ * was attempted, so nothing failed in Zotero. `fatalError` stays unset on
+ * purpose — the in-stream card reads it to switch Retry over to undo, and this
+ * is not a failed attempt it could retry.
+ */
+function unsupportedActionTypeFailures(
+    actions: AgentAction[],
+    actionType: string,
+    operation: 'apply' | 'undo',
+): AgentActionFailure[] {
+    const message = `No ${operation} executor for action type '${actionType}'`;
+    logger(`agentActionExecution: ${message}`, 1);
+    return toFailures(actions, message);
+}
+
+/**
  * Apply a tool call's actions. Single-action types apply `actions[0]`; only
- * create_item is a batch. Unknown action types are a no-op.
+ * create_item is a batch. An action type this executor does not handle comes
+ * back as a per-action failure, never as an empty success.
  */
 export const applyAgentActionsAtom = atom(
     null,
@@ -167,12 +189,7 @@ export const applyAgentActionsAtom = atom(
             } else {
                 const executeAction = APPLY_EXECUTORS.get(actionType);
                 if (!executeAction) {
-                    // Note edits and the legacy per-annotation types apply through
-                    // their own surfaces. Log it: a caller with a wider set of
-                    // actions than the in-stream card would otherwise see a
-                    // successful-looking no-op.
-                    logger(`agentActionExecution: No apply executor for action type ${actionType}`, 1);
-                    return { applied, failed };
+                    return { applied, failed: unsupportedActionTypeFailures(actions, actionType, 'apply') };
                 }
 
                 const result = await executeAction(action, runId);
@@ -195,7 +212,8 @@ export const applyAgentActionsAtom = atom(
 
 /**
  * Undo a tool call's actions. Single-action types undo `actions[0]`; only
- * create_item is a batch. Unknown action types are a no-op.
+ * create_item is a batch. An action type this executor does not handle comes
+ * back as a per-action failure, never as an empty success.
  */
 export const undoAgentActionsAtom = atom(
     null,
@@ -244,8 +262,7 @@ export const undoAgentActionsAtom = atom(
             } else {
                 const undoAction = UNDO_EXECUTORS.get(actionType);
                 if (!undoAction) {
-                    logger(`agentActionExecution: No undo executor for action type ${actionType}`, 1);
-                    return { undone, failed };
+                    return { undone, failed: unsupportedActionTypeFailures(actions, actionType, 'undo') };
                 }
 
                 await undoAction(action);
