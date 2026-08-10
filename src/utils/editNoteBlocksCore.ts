@@ -32,7 +32,7 @@ import type { BatchApplyOp, ResolvedBatchEdit, ResolvedRange } from './editNoteB
 import type { ReadWindow } from './noteSnapshot';
 import { findNoteWrapperBounds } from './noteWrapper';
 import { parseCreatedFooter, parseEditFooter } from './noteEditFooter';
-import { decodeHtmlEntities, normalizeWS, unescapeAttr } from './noteHtmlEntities';
+import { decodeHtmlEntities, foldTypographicQuotes, normalizeWS, unescapeAttr } from './noteHtmlEntities';
 import {
     expandToRawHtml,
     type ExternalRefContext,
@@ -861,10 +861,19 @@ function outermostTag(line: string): OutermostTag | null {
  * requirement and the read-window binding are. On lines WITH visible text it is
  * strong (only 7.5% of notes contain two content lines sharing a 40-character
  * prefix).
+ *
+ * QUOTE FOLDING: both projections additionally fold typographic quotes to ASCII,
+ * because a model writing `"…"` where the note's prose uses `„…“` / `«…»` / `’`
+ * is a drift class the single-string matcher already recovers from
+ * (`editNoteMatcher.ts`, `quote_normalized`). Folding here is comparison-only —
+ * what gets written to the note comes from `content`, never from `expect` — and
+ * both sides fold identically, so it cannot make two lines collide unless they
+ * differ ONLY in quote style. Deliberately NOT folded inside
+ * {@link projectVisibleText}: `verifyLineProjection` must stay byte-strict.
  */
 export function matchesExpect(expect: string, line: string): boolean {
-    const lineProjection = projectVisibleText(line);
-    const expectProjection = projectVisibleText(expect);
+    const lineProjection = foldTypographicQuotes(projectVisibleText(line));
+    const expectProjection = foldTypographicQuotes(projectVisibleText(expect));
 
     if (lineProjection !== '') {
         if (!lineProjection.startsWith(expectProjection)) return false;
