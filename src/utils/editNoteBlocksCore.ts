@@ -32,7 +32,13 @@ import type { BatchApplyOp, ResolvedBatchEdit, ResolvedRange } from './editNoteB
 import type { ReadWindow } from './noteSnapshot';
 import { findNoteWrapperBounds } from './noteWrapper';
 import { parseCreatedFooter, parseEditFooter } from './noteEditFooter';
-import { decodeHtmlEntities, foldTypographicQuotes, normalizeWS, unescapeAttr } from './noteHtmlEntities';
+import {
+    decodeHtmlEntities,
+    foldTypographicQuotes,
+    isCjkChar,
+    normalizeWS,
+    unescapeAttr,
+} from './noteHtmlEntities';
 import {
     expandToRawHtml,
     type ExternalRefContext,
@@ -205,10 +211,16 @@ export interface SelectBlockEditsContext {
     readWindow?: ReadWindow;
     /**
      * Optional caller hook applied to `content` BEFORE expansion, so the action
-     * layer can plug in citation degrade without this module knowing about
-     * Zotero.
+     * layer can plug in Zotero-dependent content checks without this module
+     * knowing about Zotero. Returning `error` rejects the edit — the caller uses
+     * this to refuse a citation whose item cannot be resolved rather than let a
+     * bare identifier reach the note.
      */
-    preprocessContent?: (content: string) => { content: string; warnings: string[] };
+    preprocessContent?: (content: string) => {
+        content: string;
+        warnings: string[];
+        error?: string;
+    };
 }
 
 // =============================================================================
@@ -810,6 +822,71 @@ export function projectVisibleText(s: string): string {
     return normalizeWS(decodeHtmlEntities(s.replace(/<[^>]*>/g, '')));
 }
 
+// `decodeHtmlEntities` deliberately leaves these three encoded so that decoding
+// can never manufacture live markup. The `expect` comparison runs AFTER tags are
+// already stripped and never re-strips, and it decodes BOTH sides identically,
+// so folding them here is safe and closes the `&amp;` ↔ `&` drift class the
+// single-string matcher covers with `entity_decode` / `entity_encode`.
+//
+// ONE ALTERNATION, ONE PASS — never a chain of `.replace()` calls. Sequential
+// passes would decode one entity layer per pass, so `&amp;lt;` (a note that
+// DISPLAYS the text `&lt;`) would collapse first to `&lt;` and then to `<`,
+// making it compare equal to a note that displays `<`. Those are different
+// visible texts, and `expect` is the only content guard on a replace.
+const COMPARISON_ENTITY_RE = /&(amp|lt|gt);/g;
+const COMPARISON_ENTITY_VALUES: Readonly<Record<string, string>> = {
+    amp: '&',
+    lt: '<',
+    gt: '>',
+};
+
+function decodeComparisonEntities(s: string): string {
+    return s.replace(COMPARISON_ENTITY_RE, (_match, name: string) => COMPARISON_ENTITY_VALUES[name]);
+}
+
+/**
+ * Drop "Pangu" spaces — the optional space between an East Asian character and
+ * an adjacent Latin/digit/punctuation character. Language models insert and drop
+ * these silently when reproducing mixed-script text, so `共识 [14]` and
+ * `共识[14]` must compare equal. Only spaces WITH a CJK character on exactly one
+ * side are removed; ordinary word spacing is untouched.
+ */
+function stripPanguSpaces(s: string): string {
+    let out = '';
+    for (let i = 0; i < s.length; i++) {
+        const ch = s.charAt(i);
+        if (ch === ' ' && i > 0 && i < s.length - 1) {
+            const before = s.charAt(i - 1);
+            const after = s.charAt(i + 1);
+            if (isCjkChar(before) !== isCjkChar(after) && !/\s/.test(before) && !/\s/.test(after)) {
+                continue;
+            }
+        }
+        out += ch;
+    }
+    return out;
+}
+
+/**
+ * Canonical form used ONLY to compare an `expect` against a block's projection.
+ *
+ * Each fold mirrors a strategy the single-string matcher needs
+ * (`editNoteMatcher.ts`): entity drift, CJK full-width drift (`nfkc`), quote
+ * style (`quote_normalized`), and Pangu spacing (`whitespace_relaxed`). They are
+ * safe to apply far more freely here than there: that matcher slices the raw
+ * note at the match offset, so every transformation risks a corrupt splice,
+ * whereas this function only ever decides a boolean — nothing is sliced out of
+ * `expect`, and the bytes written to the note come from `content`. The only
+ * thing spent is `expect`'s strength as a guard, and it is applied to both sides
+ * identically, so two lines can only collide if they differ solely by these
+ * folds.
+ */
+function canonicalizeForExpect(projection: string): string {
+    return stripPanguSpaces(
+        foldTypographicQuotes(decodeComparisonEntities(projection).normalize('NFKC')),
+    );
+}
+
 /** Minimum non-whitespace characters an `expect` prefix must carry. */
 const EXPECT_MIN_NON_WHITESPACE = 8;
 
@@ -862,18 +939,15 @@ function outermostTag(line: string): OutermostTag | null {
  * strong (only 7.5% of notes contain two content lines sharing a 40-character
  * prefix).
  *
- * QUOTE FOLDING: both projections additionally fold typographic quotes to ASCII,
- * because a model writing `"…"` where the note's prose uses `„…“` / `«…»` / `’`
- * is a drift class the single-string matcher already recovers from
- * (`editNoteMatcher.ts`, `quote_normalized`). Folding here is comparison-only —
- * what gets written to the note comes from `content`, never from `expect` — and
- * both sides fold identically, so it cannot make two lines collide unless they
- * differ ONLY in quote style. Deliberately NOT folded inside
- * {@link projectVisibleText}: `verifyLineProjection` must stay byte-strict.
+ * Both sides are additionally run through {@link canonicalizeForExpect}, which
+ * folds the drift classes the single-string matcher needs dedicated strategies
+ * for (entities, CJK full-width, quote style, Pangu spacing). That is applied
+ * here rather than inside {@link projectVisibleText} on purpose:
+ * `verifyLineProjection` must stay byte-strict.
  */
 export function matchesExpect(expect: string, line: string): boolean {
-    const lineProjection = foldTypographicQuotes(projectVisibleText(line));
-    const expectProjection = foldTypographicQuotes(projectVisibleText(expect));
+    const lineProjection = canonicalizeForExpect(projectVisibleText(line));
+    const expectProjection = canonicalizeForExpect(projectVisibleText(expect));
 
     if (lineProjection !== '') {
         if (!lineProjection.startsWith(expectProjection)) return false;
@@ -1549,6 +1623,17 @@ export function selectBlockEdits(
             let content = spec.content as string;
             if (ctx.preprocessContent) {
                 const pre = ctx.preprocessContent(content);
+                if (pre.error) {
+                    // Same code the expansion layer would raise for this content
+                    // if the hook had let it through — the hook only intercepts
+                    // earlier so it can say something specific about WHY.
+                    emit(skip(
+                        'expansion_failed',
+                        pre.error,
+                        spec.op === 'replace' ? (spec.block as number) : undefined,
+                    ));
+                    continue;
+                }
                 content = pre.content;
                 warnings.push(...pre.warnings);
             }

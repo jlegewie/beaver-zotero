@@ -1039,11 +1039,12 @@ describe('edit_note_blocks insert after "end"', () => {
 // 8. Citation degrade
 // ---------------------------------------------------------------------------
 
-describe('edit_note_blocks citation degrade', () => {
+describe('edit_note_blocks citation rejection', () => {
     beforeEach((ctx) => skipIfNoZotero(ctx, zoteroAvailable));
 
-    it('degrades a citation to a nonexistent item into plain text with a warning, and still applies the edit', async () => {
+    it('rejects a citation to a nonexistent item rather than writing the identifier into the note', async () => {
         const ref = await seedNote(THREE_PARA_HTML);
+        const before = await readSaved(ref);
         const view = await readBlocks(ref);
         const block = blockOf(view.lines, 'Bravo paragraph about numbered edits.');
 
@@ -1061,23 +1062,58 @@ describe('edit_note_blocks citation degrade', () => {
         };
 
         const validation = await validateBlocks(actionData);
-        expect(validation.valid, validation.error ?? undefined).toBe(true);
-        expect(validation.warnings?.some((w) => /not found .* inserted as plain text/.test(w))).toBe(true);
+        expect(validation.valid).toBe(false);
+        expect(validation.edit_errors?.[0]?.error_code).toBe('expansion_failed');
+        expect(validation.edit_errors?.[0]?.error).toContain('does not exist');
+        expect(validation.edit_errors?.[0]?.error).toContain('ZZZZZZZZ');
 
         const exec = await executeBlocks(actionData);
-        expect(exec.success, exec.error ?? undefined).toBe(true);
-        expect(exec.result_data?.warnings?.some((w) => /not found .* inserted as plain text/.test(w))).toBe(true);
-        expect(exec.result_data?.skipped).toEqual([]);
+        expect(exec.success).toBe(false);
 
-        // The citation became plain text; no citation markup was written.
+        // A bare item key must never reach the user's note.
         const saved = await readSaved(ref);
-        expect(saved).toContain('Bravo now cites (see: ');
-        expect(saved).toContain('ZZZZZZZZ)');
-        expect(saved).not.toContain('data-citation');
+        expect(saved).toBe(before);
+        expect(saved).not.toContain('ZZZZZZZZ');
+        expect(saved).not.toContain('as evidence.');
+    }, 45000);
 
-        const after = await readBlocks(ref);
-        expect(after.lines[block - 1]).not.toContain('<citation');
-        expect(after.lines[block - 1]).toContain('as evidence.');
+    it('rejects only the offending edit and still applies its sound sibling', async () => {
+        const ref = await seedNote(THREE_PARA_HTML);
+        const view = await readBlocks(ref);
+        const bad = blockOf(view.lines, 'Bravo paragraph about numbered edits.');
+        const good = blockOf(view.lines, 'Charlie paragraph about snapshot tokens.');
+
+        const exec = await executeBlocks({
+            library_id: ref.library_id,
+            zotero_key: ref.zotero_key,
+            snapshot: view.snapshot,
+            edits: [
+                {
+                    index: 0,
+                    op: 'replace',
+                    block: bad,
+                    expect: view.lines[bad - 1],
+                    content: `<p>Bravo now cites <citation id="${LIBRARY_ID}-ZZZZZZZZ"/> as evidence.</p>`,
+                },
+                {
+                    index: 1,
+                    op: 'replace',
+                    block: good,
+                    expect: view.lines[good - 1],
+                    content: '<p>Charlie paragraph, revised.</p>',
+                },
+            ],
+        });
+
+        expect(exec.success, exec.error ?? undefined).toBe(true);
+        expect(exec.result_data?.applied?.map((a) => a.index)).toEqual([1]);
+        expect(exec.result_data?.skipped?.map((s) => s.index)).toEqual([0]);
+        expect(exec.result_data?.skipped?.[0]?.reason_code).toBe('expansion_failed');
+        expect(exec.result_data?.skipped?.[0]?.reason).toContain('does not exist');
+
+        const saved = await readSaved(ref);
+        expect(saved).toContain('Charlie paragraph, revised.');
+        expect(saved).not.toContain('ZZZZZZZZ');
     }, 45000);
 });
 

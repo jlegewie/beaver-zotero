@@ -57,7 +57,7 @@ import {
     planBlockEditsExecution,
     preloadBlockLabels,
     refreshBlockUndoRecords,
-    resolveCitationDegrades,
+    resolveCitationRejections,
 } from '../../src/services/agentDataProvider/actions/editNoteBlocks';
 import { getExternalRefContext } from '../../src/services/agentDataProvider/actions/editNote';
 import { applyBatchUndoRecord, assertNoteLibraryNotExcluded } from './editNoteActions';
@@ -155,7 +155,7 @@ export async function executeEditNoteBlocksAction(
     const pageLabelsByItemId = await preloadNotePageLabels(provisionalHtml, library_id, { extractOnCacheMiss: true });
     const labels = await preloadBlockLabels(edits);
     const externalRefContext = getExternalRefContext();
-    const degrades = await resolveCitationDegrades(editContents(edits), externalRefContext);
+    const citationRejections = await resolveCitationRejections(editContents(edits), externalRefContext);
     const threadId = store.get(currentThreadIdAtom);
 
     // 4. AUTHORITATIVE re-read.
@@ -172,7 +172,7 @@ export async function executeEditNoteBlocksAction(
         pageLabelsByItemId,
         labels,
         externalRefContext,
-        degrades,
+        citationRejections,
         threadId,
     });
     if (!plan.ok) {

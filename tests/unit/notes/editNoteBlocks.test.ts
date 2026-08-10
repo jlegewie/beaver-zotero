@@ -977,11 +977,12 @@ describe('edit_note_blocks undo', () => {
 });
 
 // =============================================================================
-// Citation degrade
+// Citation rejection
 // =============================================================================
 
-describe('edit_note_blocks citation degrade', () => {
-    it('degrades a citation whose item does not exist to plain text and still applies', async () => {
+describe('edit_note_blocks citation rejection', () => {
+    it('rejects a citation whose item does not exist instead of writing the id into the note', async () => {
+        const before = noteHtml;
         const response = await handleAgentActionExecuteRequest(executeRequest([{
             index: 0,
             op: 'replace',
@@ -990,11 +991,41 @@ describe('edit_note_blocks citation degrade', () => {
             content: '<p>Bravo, revised <citation id="1-MISSING1"/></p>',
         }]));
 
+        // Sole edit rejected -> nothing applied, and the raw identifier never
+        // reaches the note.
+        expect(response.success).toBe(false);
+        expect(noteHtml).toBe(before);
+        expect(noteHtml).not.toContain('1-MISSING1');
+        expect(String(response.error)).toContain('does not exist');
+        expect(String(response.error)).toContain('1-MISSING1');
+    });
+
+    it('rejects only the offending edit and applies its sound sibling', async () => {
+        const response = await handleAgentActionExecuteRequest(executeRequest([
+            {
+                index: 0,
+                op: 'replace',
+                block: 2,
+                expect: LINE_2,
+                content: '<p>Bravo, revised <citation id="1-MISSING1"/></p>',
+            },
+            {
+                index: 1,
+                op: 'replace',
+                block: 3,
+                expect: LINE_3,
+                content: '<p>Charlie, revised.</p>',
+            },
+        ]));
+
         expect(response.success).toBe(true);
-        expect(noteHtml).toContain('<p>Bravo, revised (see: 1-MISSING1)</p>');
-        expect(noteHtml).not.toContain('<citation');
+        expect(noteHtml).toContain('<p>Charlie, revised.</p>');
+        expect(noteHtml).not.toContain('1-MISSING1');
         const result = response.result_data as unknown as EditNoteBlocksResultData;
-        expect(result.warnings?.join('\n')).toContain('not found — inserted as plain text');
+        expect(result.applied.map((a) => a.index)).toEqual([1]);
+        expect(result.skipped.map((s) => s.index)).toEqual([0]);
+        expect(result.skipped[0].reason_code).toBe('expansion_failed');
+        expect(result.skipped[0].reason).toContain('does not exist');
     });
 
     it('leaves a resolvable citation alone', async () => {
@@ -1012,9 +1043,10 @@ describe('edit_note_blocks citation degrade', () => {
         expect(result.warnings ?? []).toEqual([]);
     });
 
-    it('degrades an excluded-library citation WITHOUT ever looking the item up', async () => {
+    it('rejects an excluded-library citation WITHOUT ever looking the item up', async () => {
         vi.mocked(checkLibraryExcluded).mockImplementation((id: number) =>
             (id === 99 ? { message: 'Library 99 is excluded from Beaver.' } : null));
+        const before = noteHtml;
 
         const response = await handleAgentActionExecuteRequest(executeRequest([{
             index: 0,
@@ -1026,10 +1058,9 @@ describe('edit_note_blocks citation degrade', () => {
             content: '<p>Bravo, revised <citation id="99-EXISTS01"/></p>',
         }]));
 
-        expect(response.success).toBe(true);
-        expect(noteHtml).toContain('(see: 99-EXISTS01)');
-        const result = response.result_data as unknown as EditNoteBlocksResultData;
-        expect(result.warnings?.join('\n')).toContain('Library 99 is excluded from Beaver.');
+        expect(response.success).toBe(false);
+        expect(noteHtml).toBe(before);
+        expect(String(response.error)).toContain('Library 99 is excluded from Beaver.');
 
         // The privacy boundary: no lookup in the excluded library, at all.
         const lookups = vi.mocked((globalThis as any).Zotero.Items.getByLibraryAndKeyAsync).mock.calls;
@@ -1037,7 +1068,8 @@ describe('edit_note_blocks citation degrade', () => {
         expect(callLog.some((e) => e.startsWith('async:getByLibraryAndKeyAsync:99-'))).toBe(false);
     });
 
-    it('degrades an unknown external_id (tier 3) to plain text', async () => {
+    it('rejects an unknown external_id (tier 3)', async () => {
+        const before = noteHtml;
         const response = await handleAgentActionExecuteRequest(executeRequest([{
             index: 0,
             op: 'replace',
@@ -1046,9 +1078,9 @@ describe('edit_note_blocks citation degrade', () => {
             content: '<p>Bravo, revised <citation external_id="W123456789"/></p>',
         }]));
 
-        expect(response.success).toBe(true);
-        expect(noteHtml).toContain('(see: W123456789)');
-        const result = response.result_data as unknown as EditNoteBlocksResultData;
-        expect(result.warnings?.join('\n')).toContain('external_id="W123456789"');
+        expect(response.success).toBe(false);
+        expect(noteHtml).toBe(before);
+        expect(noteHtml).not.toContain('W123456789');
+        expect(String(response.error)).toContain('external_id="W123456789"');
     });
 });

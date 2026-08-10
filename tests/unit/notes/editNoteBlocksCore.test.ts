@@ -724,6 +724,50 @@ describe('matchesExpect', () => {
         });
     });
 
+    describe('comparison folds', () => {
+        it('bridges &amp; drift so a model-written & confirms a note-stored &amp;', () => {
+            const line = '<p>Drift &amp; Selection in small populations here.</p>';
+            expect(matchesExpect('<p>Drift & Selection in small populations here.</p>', line)).toBe(true);
+            expect(matchesExpect(line, line)).toBe(true);
+        });
+
+        it('bridges CJK full-width punctuation drift', () => {
+            expect(matchesExpect(
+                '<p>本文提出了一种框架（LLM），以解决问题</p>',
+                '<p>本文提出了一种框架(LLM),以解决问题</p>',
+            )).toBe(true);
+        });
+
+        it('bridges Pangu spacing at CJK boundaries in both directions', () => {
+            const packed = '<p>研究共识[14]表明该方法有效并且稳定可靠</p>';
+            const spaced = '<p>研究共识 [14] 表明该方法有效并且稳定可靠</p>';
+            expect(matchesExpect(spaced, packed)).toBe(true);
+            expect(matchesExpect(packed, spaced)).toBe(true);
+        });
+
+        // Entity decoding must peel exactly ONE layer. A note DISPLAYING the text
+        // `&lt;div&gt;` is stored as `&amp;lt;div&amp;gt;`; a note displaying
+        // `<div>` is stored as `&lt;div&gt;`. Those are different visible texts,
+        // so an `expect` for one must never confirm the other — a sequential
+        // chain of per-entity replacements would collapse both to `<div>`.
+        it('decodes only one entity layer, so escaped-entity text stays distinct', () => {
+            const displaysEscapedEntity = '<p>Escape the tag as &amp;lt;div&amp;gt; when writing markup.</p>';
+            const displaysRealAngleBrackets = '<p>Escape the tag as &lt;div&gt; when writing markup.</p>';
+            expect(matchesExpect(displaysRealAngleBrackets, displaysEscapedEntity)).toBe(false);
+            expect(matchesExpect(displaysEscapedEntity, displaysRealAngleBrackets)).toBe(false);
+            // Each still confirms itself.
+            expect(matchesExpect(displaysEscapedEntity, displaysEscapedEntity)).toBe(true);
+            expect(matchesExpect(displaysRealAngleBrackets, displaysRealAngleBrackets)).toBe(true);
+        });
+
+        it('does not fold genuinely different prose', () => {
+            expect(matchesExpect(
+                '<p>Bravo paragraph about numbered edits entirely.</p>',
+                '<p>Alpha paragraph about block addressing works.</p>',
+            )).toBe(false);
+        });
+    });
+
     describe('projection order: strip tags, THEN decode entities', () => {
         it('keeps an escaped angle bracket inside code out of the tag stripper', () => {
             const line = '<pre>if (a &lt;p&gt; b) return;</pre>';

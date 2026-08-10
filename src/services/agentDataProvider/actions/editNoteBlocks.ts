@@ -314,22 +314,26 @@ const SNAPSHOT_MISMATCH_MESSAGE =
     + 'with this error) or call read_note again.';
 
 // =============================================================================
-// Citation degrade
+// Citation rejection
 // =============================================================================
 
 /**
- * What to substitute for one unresolvable citation identity.
+ * Why one citation identity cannot be written into the note.
  *
- * `edit_note_blocks` does NOT treat an unresolvable citation as fatal the way
- * `checkNewCitationItemsExist` does for edit_note/edit_note_batch: a block edit
- * that is otherwise perfectly addressed should not be thrown away because one
- * identifier went stale. The citation degrades to plain text and the edit still
- * applies, with a warning naming what was substituted.
+ * An unresolvable citation REJECTS its edit, matching
+ * `checkNewCitationItemsExist` for edit_note / edit_note_batch. Substituting
+ * plain text would put a raw identifier ("(see: u-6PBQEQW)") in front of the
+ * user, which is meaningless to them and hides a model mistake inside content
+ * they are expected to trust.
+ *
+ * Rejecting is cheap here in a way it is not for the other two variants: block
+ * edits apply partially, so a bad citation costs only its own edit rather than
+ * the whole batch. The model gets a per-edit reason and can repair or drop just
+ * that one.
  */
-export interface CitationDegrade {
-    /** Replacement for the whole `<citation …/>` tag, in simplified space. */
-    replacement: string;
-    warning: string;
+export interface CitationRejection {
+    /** Model-facing reason, naming the identifier and what to do about it. */
+    error: string;
 }
 
 /** Every citation identity appearing in `content`, keyed by {@link baseCitationKey}. */
@@ -346,27 +350,27 @@ function* iterateCitationIdentities(content: string): Generator<{ key: string; r
 }
 
 /**
- * Resolve every citation identity in every edit's content into a degrade map,
+ * Resolve every citation identity in every edit's content into a rejection map,
  * BEFORE the synchronous section. Identity resolution is async (`Zotero.Items`),
  * so it cannot happen inside {@link SelectBlockEditsContext.preprocessContent} —
- * the degrade hook consults only this map.
+ * the precheck hook consults only this map.
  *
  * LIBRARY-EXCLUSION BOUNDARY. For each identity the exclusion check runs BEFORE
  * any `Zotero.Items` lookup, and an excluded-library reference returns
  * immediately. Whether the item exists in an excluded library must never be
- * observable, not even through a timing or warning difference.
+ * observable, not even through a timing or message difference.
  *
- * Entries are recorded only for identities that must degrade; a miss means
+ * Entries are recorded only for identities that must be rejected; a miss means
  * "leave the tag alone" and lets `expandToRawHtml` do its normal job (including
  * the tier-1 auto-resolve and tier-2 hyperlink for `external_id`, which it
  * already implements — this function only covers the tiers that would otherwise
  * throw).
  */
-export async function resolveCitationDegrades(
+export async function resolveCitationRejections(
     contents: readonly string[],
     externalRefContext: ExternalRefContext,
-): Promise<Map<string, CitationDegrade>> {
-    const degrades = new Map<string, CitationDegrade>();
+): Promise<Map<string, CitationRejection>> {
+    const citationRejections = new Map<string, CitationRejection>();
     const seen = new Set<string>();
 
     for (const content of contents) {
@@ -382,27 +386,30 @@ export async function resolveCitationDegrades(
                     library_ref: ref.library_ref,
                 });
                 if (libraryId === null || libraryId === UNRESOLVED_LIBRARY_ID) {
-                    degrades.set(key, {
-                        replacement: `(see: ${id})`,
-                        warning: `citation id="${id}" not found — inserted as plain text `
-                            + '(its library is not available on this computer).',
+                    citationRejections.set(key, {
+                        error: `Citation id="${id}" references an item in a library that is not `
+                            + 'available on this computer — most likely a group library this device '
+                            + 'has not joined or synced. The edit was not applied. Cite an item from '
+                            + 'an available library, or remove this citation and resend the edit.',
                     });
                     continue;
                 }
                 // BEFORE any lookup — see the exclusion-boundary note above.
                 const excluded = checkLibraryExcluded(libraryId);
                 if (excluded) {
-                    degrades.set(key, {
-                        replacement: `(see: ${id})`,
-                        warning: `citation id="${id}" not found — inserted as plain text. ${excluded.message}`,
+                    citationRejections.set(key, {
+                        error: `Citation id="${id}": ${excluded.message} The edit was not applied. `
+                            + 'Cite an item from an available library, or remove this citation and '
+                            + 'resend the edit.',
                     });
                     continue;
                 }
                 const item = await Zotero.Items.getByLibraryAndKeyAsync(libraryId, ref.zotero_key);
                 if (!item) {
-                    degrades.set(key, {
-                        replacement: `(see: ${id})`,
-                        warning: `citation id="${id}" not found — inserted as plain text.`,
+                    citationRejections.set(key, {
+                        error: `Citation references a Zotero item that does not exist: id="${id}". `
+                            + 'The edit was not applied. Verify the item ID against read_note or a '
+                            + 'search result and resend the edit, or remove this citation.',
                     });
                 }
                 continue;
@@ -446,9 +453,11 @@ export async function resolveCitationDegrades(
                     continue;
                 }
                 // Tier 3: no usable data.
-                degrades.set(key, {
-                    replacement: `(see: ${externalId})`,
-                    warning: `citation external_id="${externalId}" not found — inserted as plain text.`,
+                citationRejections.set(key, {
+                    error: `Citation external_id="${externalId}" could not be resolved to an item `
+                        + 'or to external reference metadata, so it has no citable target. The edit '
+                        + 'was not applied. Cite a Zotero item by id, or remove this citation and '
+                        + 'resend the edit.',
                 });
                 continue;
             }
@@ -458,35 +467,38 @@ export async function resolveCitationDegrades(
         }
     }
 
-    return degrades;
+    return citationRejections;
 }
 
 /**
- * Build the engine's `preprocessContent` hook from a preloaded degrade map.
- * Purely synchronous by construction — see {@link resolveCitationDegrades}.
+ * Build the engine's `preprocessContent` hook from a preloaded rejection map.
+ * Purely synchronous by construction — see {@link resolveCitationRejections}.
+ *
+ * Reports the FIRST unresolvable citation in the content. One reason per edit is
+ * enough to act on, and the model resends the whole edit anyway.
  */
-export function makeCitationDegrader(
-    degrades: Map<string, CitationDegrade>,
+export function makeCitationPrecheck(
+    rejections: Map<string, CitationRejection>,
     metadata: SimplificationMetadata,
-): (content: string) => { content: string; warnings: string[] } {
+): (content: string) => { content: string; warnings: string[]; error?: string } {
     return (content: string) => {
-        const warnings: string[] = [];
-        if (!content || degrades.size === 0 || content.indexOf('<citation') === -1) {
-            return { content, warnings };
+        if (!content || rejections.size === 0 || content.indexOf('<citation') === -1) {
+            return { content, warnings: [] };
         }
-        const out = content.replace(CITATION_TAG_RE, (match, attrStr: string) => {
+        const re = new RegExp(CITATION_TAG_RE.source, 'g');
+        let m: RegExpExecArray | null;
+        while ((m = re.exec(content)) !== null) {
+            const attrStr = m[1];
             // An existing citation of THIS note is identified by `ref` and is
-            // expanded from stored raw HTML; it is never degraded.
+            // expanded from stored raw HTML; it is never rejected.
             const ref = extractAttr(attrStr, 'ref');
-            if (ref && metadata.elements.has(ref)) return match;
+            if (ref && metadata.elements.has(ref)) continue;
             const normalized = normalizeCitationTag(parseRawCitationAttributes(attrStr));
-            if (!normalized.ok) return match;
-            const degrade = degrades.get(baseCitationKey(normalized.ref));
-            if (!degrade) return match;
-            warnings.push(degrade.warning);
-            return degrade.replacement;
-        });
-        return { content: out, warnings };
+            if (!normalized.ok) continue;
+            const rejection = rejections.get(baseCitationKey(normalized.ref));
+            if (rejection) return { content, warnings: [], error: rejection.error };
+        }
+        return { content, warnings: [] };
     };
 }
 
@@ -804,7 +816,7 @@ function runBlockSelection(
     readWindow: ReadWindow,
     externalRefContext: ExternalRefContext,
     labels: PreloadedLabels,
-    degrades: Map<string, CitationDegrade>,
+    citationRejections: Map<string, CitationRejection>,
 ): BlockSelection | { refusal: { error: string; errorCode: string } } {
     const built = buildBlockRawIndex(simplified, strippedHtml, metadata);
     if (!built.ok) return { refusal: { error: built.error, errorCode: built.errorCode } };
@@ -836,7 +848,7 @@ function runBlockSelection(
             pageLabels: labels.pageLabels,
             resolvedLocatorPages: labels.resolvedLocatorPages,
             readWindow,
-            preprocessContent: makeCitationDegrader(degrades, metadata),
+            preprocessContent: makeCitationPrecheck(citationRejections, metadata),
         },
         toBlockEditSpecs(eligible),
     );
@@ -950,8 +962,8 @@ async function validateEditNoteBlocksAction(
 
     const externalRefContext = getExternalRefContext();
     const labels = await preloadBlockLabels(edits);
-    const degrades = await resolveCitationDegrades(editContents(edits), externalRefContext);
-    const degrade = makeCitationDegrader(degrades, metadata);
+    const citationRejections = await resolveCitationRejections(editContents(edits), externalRefContext);
+    const citationPrecheck = makeCitationPrecheck(citationRejections, metadata);
 
     const noteTitle = item.getNoteTitle() || '(untitled)';
     const totalLines = simplified.split('\n').length;
@@ -967,7 +979,10 @@ async function validateEditNoteBlocksAction(
         const contentError = validateNewString(rawContent, metadata);
         if (contentError) return validateError(request.request_id, contentError, 'invalid_new_string');
 
-        const pre = degrade(rawContent);
+        const pre = citationPrecheck(rawContent);
+        // A whole-body rewrite is the sole edit, so there is no per-edit skip to
+        // fall back on — an unresolvable citation fails the action outright.
+        if (pre.error) return validateError(request.request_id, pre.error, 'expansion_failed');
         warnings.push(...pre.warnings);
         let expandedNew: string;
         try {
@@ -1036,7 +1051,7 @@ async function validateEditNoteBlocksAction(
 
     const selection = runBlockSelection(
         simplified, strippedHtml, metadata, edits, readWindow,
-        externalRefContext, labels, degrades,
+        externalRefContext, labels, citationRejections,
     );
     if ('refusal' in selection) {
         return validateError(request.request_id, selection.refusal.error, selection.refusal.errorCode);
@@ -1179,7 +1194,7 @@ export interface BlockExecutionInputs {
     pageLabelsByItemId: Awaited<ReturnType<typeof preloadNotePageLabels>>;
     labels: PreloadedLabels;
     externalRefContext: ExternalRefContext;
-    degrades: Map<string, CitationDegrade>;
+    citationRejections: Map<string, CitationRejection>;
     threadId: string | null;
 }
 
@@ -1232,7 +1247,7 @@ export type BlockExecutionPlan =
 export function planBlockEditsExecution(inputs: BlockExecutionInputs): BlockExecutionPlan {
     const {
         oldHtml, noteId, libraryId, edits, snapshot, destructiveRewrite,
-        pageLabelsByItemId, labels, externalRefContext, degrades, threadId,
+        pageLabelsByItemId, labels, externalRefContext, citationRejections, threadId,
     } = inputs;
 
     const normalizedOldHtml = normalizeNoteHtml(oldHtml);
@@ -1276,12 +1291,14 @@ export function planBlockEditsExecution(inputs: BlockExecutionInputs): BlockExec
     let appliedIdentities: Array<{ index: number; client_item_id?: string }>;
     let resolveAppliedBlocks: (postTotalLines: number) => Map<number, string>;
     const warnings: string[] = [...labels.locatorWarnings];
-    const degrade = makeCitationDegrader(degrades, metadata);
+    const citationPrecheck = makeCitationPrecheck(citationRejections, metadata);
 
     if (soleRewrite) {
         const edit = edits[0];
         const rawContent = edit.content ?? '';
-        const pre = degrade(rawContent);
+        const pre = citationPrecheck(rawContent);
+        // Sole-edit rewrite: no per-edit skip to fall back on (see the validator).
+        if (pre.error) return { ok: false, error: pre.error, errorCode: 'expansion_failed' };
         warnings.push(...pre.warnings);
         let expandedNew: string;
         try {
@@ -1335,7 +1352,7 @@ export function planBlockEditsExecution(inputs: BlockExecutionInputs): BlockExec
     } else {
         const selection = runBlockSelection(
             simplified, strippedHtml, metadata, edits, preWindow,
-            externalRefContext, labels, degrades,
+            externalRefContext, labels, citationRejections,
         );
         if ('refusal' in selection) {
             return { ok: false, error: selection.refusal.error, errorCode: selection.refusal.errorCode };
@@ -1579,7 +1596,7 @@ async function executeEditNoteBlocksAction(
     const pageLabelsByItemId = await preloadNotePageLabels(provisionalHtml, resolvedLibraryId, { extractOnCacheMiss: true });
     const labels = await preloadBlockLabels(edits);
     const externalRefContext = getExternalRefContext();
-    const degrades = await resolveCitationDegrades(editContents(edits), externalRefContext);
+    const citationRejections = await resolveCitationRejections(editContents(edits), externalRefContext);
     const threadId = store.get(currentThreadIdAtom);
 
     // ── STEP 2: AUTHORITATIVE re-read ───────────────────────────────────────
@@ -1597,7 +1614,7 @@ async function executeEditNoteBlocksAction(
         pageLabelsByItemId,
         labels,
         externalRefContext,
-        degrades,
+        citationRejections,
         threadId,
     });
     if (!plan.ok) {
