@@ -216,24 +216,21 @@ describe('resolveSingleCollection', () => {
         expect(resolved).toMatchObject({ ok: true, matchKind: 'name', match: { collection: childA } });
     });
 
-    it('resolves a number as a collection row id', () => {
-        const resolved = resolveSingleCollection(personalCollection.id, { eligibleLibraryIds: searchableIds() });
-        expect(resolved).toMatchObject({ ok: true, matchKind: 'row_id', match: { collection: personalCollection } });
-    });
-
-    it('resolves a digit-only string as a collection row id', () => {
-        const resolved = resolveSingleCollection(String(personalCollection.id), { eligibleLibraryIds: searchableIds() });
-        expect(resolved).toMatchObject({ ok: true, matchKind: 'row_id', match: { collection: personalCollection } });
-    });
-
     it('prefers a key match over a row id for an 8-character digit-only string', () => {
         const resolved = resolveSingleCollection('23456789', { eligibleLibraryIds: searchableIds() });
         expect(resolved).toMatchObject({ ok: true, matchKind: 'key', match: { collection: numericKeyCollection } });
     });
 
-    it('treats a row id outside the eligible libraries as not found', () => {
+    it('rejects a row id before looking up a collection on data paths', () => {
         const resolved = resolveSingleCollection(excludedCollection.id, { eligibleLibraryIds: searchableIds() });
-        expect(resolved).toMatchObject({ ok: false, code: 'collection_not_found' });
+        expect(resolved).toMatchObject({ ok: false, code: 'invalid_request' });
+        expect((globalThis as any).Zotero.Collections.get).not.toHaveBeenCalled();
+    });
+
+    it('rejects a digit-only row id before looking up a collection on data paths', () => {
+        const resolved = resolveSingleCollection(String(excludedCollection.id), { eligibleLibraryIds: searchableIds() });
+        expect(resolved).toMatchObject({ ok: false, code: 'invalid_request' });
+        expect((globalThis as any).Zotero.Collections.get).not.toHaveBeenCalled();
     });
 
     it('resolves a scoped identifier in its embedded library', () => {
@@ -444,13 +441,14 @@ describe('getCollectionByIdOrName', () => {
 });
 
 describe('resolveCollectionForWrite', () => {
-    it('resolves a scoped identifier, a bare key and a row id like the read resolver', () => {
+    it('resolves scoped and bare identifiers but rejects device-local row ids', () => {
         expect(resolveCollectionForWrite(`u-${personalCollection.key}`, { eligibleLibraryIds: searchableIds() }))
             .toEqual({ ok: true, match: { collection: personalCollection, libraryID: PERSONAL_LIBRARY } });
         expect(resolveCollectionForWrite(personalCollection.key, { eligibleLibraryIds: searchableIds() }))
             .toEqual({ ok: true, match: { collection: personalCollection, libraryID: PERSONAL_LIBRARY } });
         expect(resolveCollectionForWrite(personalCollection.id, { eligibleLibraryIds: searchableIds() }))
-            .toEqual({ ok: true, match: { collection: personalCollection, libraryID: PERSONAL_LIBRARY } });
+            .toMatchObject({ ok: false, code: 'invalid_request' });
+        expect((globalThis as any).Zotero.Collections.get).not.toHaveBeenCalled();
     });
 
     it('rejects a name that resolves to exactly one collection, and names its identifier', () => {
@@ -474,6 +472,17 @@ describe('resolveCollectionForWrite', () => {
 });
 
 describe('resolveCollectionForDisplay', () => {
+    it('keeps row-id compatibility on the explicitly display-only path', () => {
+        expect(resolveCollectionForDisplay(excludedCollection.id)).toEqual({
+            collection: excludedCollection,
+            libraryID: EXCLUDED_LIBRARY,
+        });
+        expect(resolveCollectionForDisplay(String(excludedCollection.id))).toEqual({
+            collection: excludedCollection,
+            libraryID: EXCLUDED_LIBRARY,
+        });
+    });
+
     it('resolves a collection in an excluded library', () => {
         expect(resolveCollectionForDisplay(excludedCollection.key)).toEqual({
             collection: excludedCollection,

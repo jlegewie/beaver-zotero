@@ -26,6 +26,8 @@ vi.mock('../../../react/atoms/profile', () => ({
 
 vi.mock('../../../src/services/agentDataProvider/utils', () => ({
     validateLibraryAccess: vi.fn(),
+    resolveSingleCollection: vi.fn(),
+    librariesForCollectionError: vi.fn(),
     extractYear: vi.fn(() => null),
     formatCreatorsString: vi.fn(() => ''),
     getAttachmentInfoForItem: vi.fn(),
@@ -53,7 +55,12 @@ vi.mock('../../../src/utils/zoteroSerializers', async (importOriginal) => {
 
 import type { WSZoteroSearchResponse } from '@beaver/agent-core/protocol/agentProtocol';
 import { handleZoteroSearchRequest } from '../../../src/services/agentDataProvider/handleZoteroSearchRequest';
-import { getAttachmentInfoForItem, isReadableItemField, validateLibraryAccess } from '../../../src/services/agentDataProvider/utils';
+import {
+    getAttachmentInfoForItem,
+    isReadableItemField,
+    resolveSingleCollection,
+    validateLibraryAccess,
+} from '../../../src/services/agentDataProvider/utils';
 
 type MockItem = {
     id: number;
@@ -125,6 +132,14 @@ describe('handleZoteroSearchRequest', () => {
             valid: true,
             library: { libraryID: 1, name: 'My Library' },
         } as any);
+        vi.mocked(resolveSingleCollection).mockImplementation((value: any) => ({
+            ok: true,
+            matchKind: 'identifier',
+            match: {
+                collection: { key: String(value).replace(/^(?:u|g\d+|\d+)-/, '') },
+                libraryID: 1,
+            },
+        } as any));
         vi.mocked(getAttachmentInfoForItem).mockImplementation(async (item: any, options: any = {}) => ({
             attachment_id: `${item.libraryID}-${item.key}`,
             parent_item_id: options.parentItemId ?? null,
@@ -182,6 +197,59 @@ describe('handleZoteroSearchRequest', () => {
                 }
             }),
         };
+    });
+
+    describe('collection conditions', () => {
+        it('normalizes a scoped collection identifier to the bare key Zotero expects', async () => {
+            searchResultIds = [];
+
+            const response = await handleZoteroSearchRequest({
+                event: 'zotero_search_request',
+                request_id: 'req-scoped-collection',
+                conditions: [{ field: 'collection', operator: 'is', value: 'u-ABCD2345' }],
+                join_mode: 'all',
+                item_category: 'all',
+                include_children: true,
+                recursive: false,
+                limit: 50,
+                offset: 0,
+            });
+
+            expect(response.error).toBeUndefined();
+            expect(resolveSingleCollection).toHaveBeenCalledWith('u-ABCD2345', {
+                eligibleLibraryIds: [1],
+                nameLibraryIds: [1],
+                explicitLibrary: true,
+            });
+            expect(addedConditions()).toContainEqual(['collection', 'is', 'ABCD2345']);
+        });
+
+        it('fails closed when a collection condition cannot be resolved', async () => {
+            vi.mocked(resolveSingleCollection).mockReturnValueOnce({
+                ok: false,
+                code: 'invalid_request',
+                message: 'Collection belongs to another library',
+            });
+
+            const response = await handleZoteroSearchRequest({
+                event: 'zotero_search_request',
+                request_id: 'req-wrong-collection-library',
+                conditions: [{ field: 'collection', operator: 'is', value: 'g42-ABCD2345' }],
+                join_mode: 'all',
+                item_category: 'all',
+                include_children: true,
+                recursive: false,
+                limit: 50,
+                offset: 0,
+            });
+
+            expect(response).toMatchObject({
+                items: [],
+                total_count: 0,
+                error_code: 'invalid_request',
+            });
+            expect(lastSearch).toBeNull();
+        });
     });
 
     it('preserves native search order when filtering annotations before pagination', async () => {

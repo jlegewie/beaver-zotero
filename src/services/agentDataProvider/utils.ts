@@ -608,21 +608,26 @@ function collectionNotFound(input: string): CollectionResolutionFailure {
     return { ok: false, code: 'collection_not_found', message: `Collection not found: ${input}` };
 }
 
+function collectionRowIdNotAllowed(input: string): CollectionResolutionFailure {
+    return {
+        ok: false,
+        code: 'invalid_request',
+        message:
+            `Collection row ID "${input}" is device-local and cannot be used here. ` +
+            'Pass the collection identifier returned by list_collections instead.',
+    };
+}
+
 /**
- * Resolve a device-local collection row id. A collection outside the eligible
- * libraries reads as not-found so a row id can never disclose that a collection
- * exists in a library the caller may not see.
+ * Resolve a device-local collection row id for display enrichment only. This
+ * deliberately lives outside the shared data-path grammar because the row id
+ * cannot be authorized by library before loading the collection.
  */
-function resolveCollectionRowId(
+function resolveCollectionRowIdForDisplay(
     rowId: number,
-    eligibleLibraryIds: number[],
-    input: string
-): CollectionResolution {
+): CollectionMatch | null {
     const collection = Zotero.Collections.get(rowId);
-    if (!collection || !eligibleLibraryIds.includes(collection.libraryID)) {
-        return collectionNotFound(input);
-    }
-    return { ok: true, matchKind: 'row_id', matches: [{ collection, libraryID: collection.libraryID }] };
+    return collection ? { collection, libraryID: collection.libraryID } : null;
 }
 
 /**
@@ -647,7 +652,8 @@ export function parseScopedCollectionId(input: string): ObjectIdReference | null
  * {@link resolveSingleCollection} for the single-target case.
  *
  * Grammars, in precedence order:
- * 1. `number` — device-local collection row id.
+ * 1. `number` — rejected because a device-local row id cannot be authorized
+ *    by library before lookup.
  * 2. Scoped identifier (`u-KEY`, `g<groupID>-KEY`, `<libraryID>-KEY`). Authoritative:
  *    it resolves in its embedded library or fails, never falling through to a name.
  *    Its library must be eligible, or — for a caller that named no library —
@@ -661,7 +667,7 @@ export function parseScopedCollectionId(input: string): ObjectIdReference | null
  *
  * Callers that need exactly one target take the first match, so the order of
  * `eligibleLibraryIds` / `nameLibraryIds` is the caller's precedence order.
- * 5. Digit-only string — row id.
+ * 5. Digit-only string — rejected as a device-local row id.
  */
 export function resolveCollectionMatches(
     collectionIdOrName: number | string | null | undefined,
@@ -674,7 +680,7 @@ export function resolveCollectionMatches(
 
     // A number is always a row id; no other grammar applies.
     if (typeof collectionIdOrName === 'number') {
-        return resolveCollectionRowId(collectionIdOrName, eligibleLibraryIds, String(collectionIdOrName));
+        return collectionRowIdNotAllowed(String(collectionIdOrName));
     }
 
     const input = collectionIdOrName;
@@ -747,7 +753,7 @@ export function resolveCollectionMatches(
     if (nameMatches.length > 0) return { ok: true, matchKind: 'name', matches: nameMatches };
 
     if (/^\d+$/.test(input)) {
-        return resolveCollectionRowId(parseInt(input, 10), eligibleLibraryIds, input);
+        return collectionRowIdNotAllowed(input);
     }
 
     return collectionNotFound(input);
@@ -943,7 +949,7 @@ export function librariesForCollectionError(
 function resolveCollectionWithHint(
     collectionIdOrName: number | string | null | undefined,
     libraryId: number | undefined,
-    fallbackLibraryIds: number[]
+    fallbackLibraryIds: number[],
 ): CollectionMatch | null {
     const hasLibraryId = libraryId !== undefined && Number.isFinite(libraryId);
     if (hasLibraryId) {
@@ -996,7 +1002,19 @@ export function resolveCollectionForDisplay(
     libraryId?: number
 ): CollectionMatch | null {
     const localLibraryIds = Zotero.Libraries.getAll().map((lib: any) => lib.libraryID as number);
-    return resolveCollectionWithHint(collectionIdOrName, libraryId, localLibraryIds);
+    const resolved = resolveCollectionWithHint(collectionIdOrName, libraryId, localLibraryIds);
+    if (resolved) return resolved;
+
+    // Persisted history predating portable collection identifiers may contain
+    // device-local row IDs. Display enrichment is allowed to resolve excluded
+    // libraries, so this compatibility lookup stays isolated to this wrapper.
+    if (typeof collectionIdOrName === 'number') {
+        return resolveCollectionRowIdForDisplay(collectionIdOrName);
+    }
+    if (typeof collectionIdOrName === 'string' && /^\d+$/.test(collectionIdOrName)) {
+        return resolveCollectionRowIdForDisplay(parseInt(collectionIdOrName, 10));
+    }
+    return null;
 }
 
 /**

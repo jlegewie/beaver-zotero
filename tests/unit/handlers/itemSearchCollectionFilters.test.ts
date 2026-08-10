@@ -353,19 +353,20 @@ describe('resolveCollectionFilters', () => {
         });
     });
 
-    it('resolves a numeric row id only inside the eligible libraries', () => {
-        expect(resolveCollectionFilters([personalA.id], { eligibleLibraryIds: eligible() })).toEqual({
-            ok: true,
-            filters: [{ libraryID: PERSONAL_LIBRARY, key: personalA.key }],
+    it('rejects numeric row ids without looking up their collections', () => {
+        expect(resolveCollectionFilters([personalA.id], { eligibleLibraryIds: eligible() })).toMatchObject({
+            ok: false,
+            code: 'invalid_request',
         });
         expect(resolveCollectionFilters([excluded.id], { eligibleLibraryIds: eligible() })).toMatchObject({
             ok: false,
-            code: 'collection_not_found',
+            code: 'invalid_request',
         });
+        expect((globalThis as any).Zotero.Collections.get).not.toHaveBeenCalled();
     });
 
     it('deduplicates filters that resolve to the same collection', () => {
-        const resolved = resolveCollectionFilters([personalA.id, `u-${personalA.key}`, personalA.key], {
+        const resolved = resolveCollectionFilters([`u-${personalA.key}`, personalA.key, personalA.key], {
             eligibleLibraryIds: eligible(),
         });
         expect(resolved).toEqual({ ok: true, filters: [{ libraryID: PERSONAL_LIBRARY, key: personalA.key }] });

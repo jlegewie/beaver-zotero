@@ -19,7 +19,17 @@ import {
 import { ItemStub } from '@beaver/agent-core/types/zotero';
 import { serializeNote, serializeItemStub } from '../../utils/zoteroSerializers';
 import { libraryRefForLibraryID, modelObjectId } from '../../utils/libraryIdentity';
-import { validateLibraryAccess, extractYear, formatCreatorsString, getAttachmentInfoForItem, degradedAttachmentRow, isReadableItemField, readItemField } from './utils';
+import {
+    validateLibraryAccess,
+    extractYear,
+    formatCreatorsString,
+    getAttachmentInfoForItem,
+    degradedAttachmentRow,
+    isReadableItemField,
+    readItemField,
+    librariesForCollectionError,
+    resolveSingleCollection,
+} from './utils';
 
 
 /**
@@ -107,7 +117,42 @@ export async function handleZoteroSearchRequest(
         }
         const library = validation.library!;
 
-        const anyItemTypeCondition = request.conditions.some((condition) => condition.field === 'itemType');
+        // Zotero's native `collection` condition accepts a bare collection key
+        // within `search.libraryID`. The backend may use the scoped identifiers
+        // enabled by COLLECTION_IDS, so resolve those (and legacy names/keys)
+        // inside the already-authorized request library before constructing the
+        // search. A failed filter must stop the request: dropping it would widen
+        // a search the caller intended to collection-scope.
+        const normalizedConditions = [];
+        for (const condition of request.conditions) {
+            if (condition.field !== 'collection' || condition.value == null || condition.value === '') {
+                normalizedConditions.push(condition);
+                continue;
+            }
+
+            const resolution = resolveSingleCollection(condition.value, {
+                eligibleLibraryIds: [library.libraryID],
+                nameLibraryIds: [library.libraryID],
+                explicitLibrary: true,
+            });
+            if (!resolution.ok) {
+                return {
+                    type: 'zotero_search',
+                    request_id: request.request_id,
+                    items: [],
+                    total_count: 0,
+                    error: resolution.message,
+                    error_code: resolution.code,
+                    available_libraries: librariesForCollectionError(resolution.code),
+                };
+            }
+            normalizedConditions.push({
+                ...condition,
+                value: resolution.match.collection.key,
+            });
+        }
+
+        const anyItemTypeCondition = normalizedConditions.some((condition) => condition.field === 'itemType');
         const itemCategory = request.item_category ?? 'regular';
 
         // zotero_search has no annotation result shape, so annotations are always
@@ -141,7 +186,7 @@ export async function handleZoteroSearchRequest(
         const warnings: string[] = [];
 
         // Add search conditions
-        for (const condition of request.conditions) {
+        for (const condition of normalizedConditions) {
             let operator = condition.operator;
             let value = condition.value ?? '';
             const originalOperator = operator;
