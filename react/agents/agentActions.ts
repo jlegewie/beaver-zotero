@@ -618,83 +618,10 @@ export const hasPendingApprovalsAtom = atom(
     (get) => get(pendingApprovalsAtom).size > 0
 );
 
-/**
- * Build a PendingApproval from an AgentAction.
- * Fetches current field values for edit_metadata actions.
- */
-export async function buildPendingApprovalFromAction(action: AgentAction): Promise<PendingApproval | null> {
-    if (!action.toolcall_id) {
-        return null;
-    }
-
-    const actionType = action.action_type as AgentActionType;
-    const actionData = action.proposed_data ?? {};
-    let currentValue: Record<string, any> | undefined;
-
-    if (actionType === 'edit_metadata') {
-        const libraryId = typeof actionData.library_id === 'number'
-            ? actionData.library_id
-            : Number(actionData.library_id ?? 0);
-        const zoteroKey = typeof actionData.zotero_key === 'string'
-            ? actionData.zotero_key
-            : '';
-        const edits = Array.isArray(actionData.edits) ? actionData.edits : [];
-        const hasCreators = Array.isArray(actionData.creators) && actionData.creators.length > 0;
-
-        if (libraryId && zoteroKey && (edits.length > 0 || hasCreators)) {
-            const resolved = await resolveItemReference({
-                library_id: libraryId,
-                library_ref: typeof actionData.library_ref === 'string' ? actionData.library_ref : undefined,
-                zotero_key: zoteroKey,
-            });
-            if (resolved.status === 'found') {
-                const item = resolved.item;
-                const values: Record<string, any> = {};
-                for (const edit of edits) {
-                    const field = typeof edit?.field === 'string' ? edit.field : null;
-                    if (!field) continue;
-                    const value = item.getField(field);
-                    values[field] = value ? String(value) : null;
-                }
-                // Always include current creators for before/after tracking
-                values.current_creators = item.getCreatorsJSON();
-                currentValue = values;
-            }
-        }
-    } else if (actionType === 'create_collection') {
-        const libraryId = typeof actionData.library_id === 'number'
-            ? actionData.library_id
-            : Number(actionData.library_id ?? 0);
-
-        if (libraryId) {
-            const library = Zotero.Libraries.get(libraryId);
-            currentValue = {
-                library_id: libraryId,
-                library_name: library ? library.name : 'Unknown Library',
-                parent_key: actionData.parent_key ?? null,
-                item_count: actionData.item_ids?.length ?? 0,
-            };
-        }
-    } else if (actionType === 'organize_items') {
-        // For organize_items, current_state contains the current tags/collections for each item
-        // We can use it directly from the proposed data if available
-        currentValue = actionData.current_state ?? null;
-    } else if (actionType === 'confirm_extraction') {
-        // No Zotero data fetching needed — cost info is entirely in proposed_data
-        currentValue = undefined;
-    } else if (actionType === 'confirm_external_search') {
-        // No Zotero data fetching needed — cost info is entirely in proposed_data
-        currentValue = undefined;
-    } else if (actionType === 'edit_note' || actionType === 'edit_note_batch') {
-        // No extra Zotero data fetching needed — old_string/new_string are in proposed_data
-        currentValue = undefined;
-    }
-
-    return {
-        actionId: action.id,
-        toolcallId: action.toolcall_id,
-        actionType,
-        actionData,
-        currentValue,
-    };
-}
+// Note: `pendingApprovalsAtom` means "the backend is blocked waiting on this
+// decision". Do not rebuild entries from stored pending actions — an action left
+// pending by a timeout has no waiter, so a re-added entry would show an
+// "awaiting approval" card whose Approve button sends into the void. Such
+// actions are applied locally through the `status === 'pending'` controls
+// instead, and `staleApprovalActionIdsAtom` marks approvals whose channel has
+// closed.

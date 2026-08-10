@@ -1598,6 +1598,28 @@ export interface WSDeferredApprovalResponse {
     user_instructions?: string | null;
 }
 
+/**
+ * The backend is no longer waiting on an approval we responded to.
+ *
+ * Sent when a `deferred_approval_response` arrives after the backend's wait
+ * expired (the tool already returned `pending` and the run moved on). Without
+ * it the client cannot tell a swallowed response from one still being
+ * processed, and would show the card as "awaiting approval" indefinitely.
+ *
+ * The proposal itself is unaffected — it is still stored and still applicable —
+ * so the client should restore the card's local apply/reject controls.
+ */
+export interface WSDeferredApprovalStale extends WSBaseEvent {
+    event: 'deferred_approval_stale';
+    /** The AgentAction ID whose approval response was too late */
+    action_id: string;
+    /**
+     * `timed_out`: the backend was waiting and gave up.
+     * `unknown`: no record of this action on this connection.
+     */
+    reason: 'timed_out' | 'unknown';
+}
+
 /** One selectable option of an ask_user_question item (ids are server-assigned) */
 export interface AskUserQuestionOption {
     /** Server-assigned option id (e.g. 'q0-o1') */
@@ -1706,6 +1728,7 @@ export type WSEvent =
     | WSAgentActionValidateRequest
     | WSAgentActionExecuteRequest
     | WSDeferredApprovalRequest
+    | WSDeferredApprovalStale
     // User interaction events
     | WSAskUserQuestionRequest;
 
@@ -2157,6 +2180,14 @@ export interface WSCallbacks {
      * @param event The deferred approval request with action details
      */
     onDeferredApprovalRequest?: (event: WSDeferredApprovalRequest) => void;
+
+    /**
+     * Called when an approval response we sent arrived too late to be used.
+     * The frontend should stop showing the action as awaiting a decision and
+     * restore its local apply/reject controls.
+     * @param event The stale-approval notice, keyed by action id
+     */
+    onDeferredApprovalStale?: (event: WSDeferredApprovalStale) => void;
 
     /**
      * Called when the backend asks the user structured multiple-choice
