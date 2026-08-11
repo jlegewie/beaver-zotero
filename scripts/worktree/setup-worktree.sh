@@ -9,8 +9,8 @@
 # --lite (seconds, no Zotero):
 #   Bootstraps an existing worktree (default: $PWD) for unit tests / lint /
 #   typecheck / build:dev. Symlinks gitignored fixtures from the main worktree,
-#   recreates extract-public source.pdf links, copies .env / CLAUDE.local.md /
-#   AGENTS.md if missing, and runs npm install when needed.
+#   recreates extract-public source.pdf links, copies .env and symlinks
+#   CLAUDE.local.md / AGENTS.md if missing, and runs npm install when needed.
 #
 # Full mode (minutes):
 #   1. Creates ../beaver-zotero-<branchname> via `git worktree add`
@@ -171,10 +171,57 @@ bootstrap_lite_worktree() {
     echo "    (copy) $rel"
   }
 
-  echo "==> Copying gitignored config files"
+  install_post_checkout_hook() {
+    local src="$MAIN/scripts/worktree/hooks/post-checkout"
+    local hooks_dir dst
+    hooks_dir="$(git -C "$MAIN" rev-parse --path-format=absolute --git-common-dir)/hooks"
+    dst="$hooks_dir/post-checkout"
+
+    [[ -f "$src" ]] || return 0
+    if [[ -e "$dst" ]] && ! cmp -s "$src" "$dst"; then
+      echo "    (skip) post-checkout hook exists and differs; not overwriting"
+      return 0
+    fi
+    mkdir -p "$hooks_dir"
+    cp "$src" "$dst"
+    chmod +x "$dst"
+    echo "    (hook) post-checkout installed"
+  }
+
+  # Agent instruction files are symlinked, not copied: a copy silently drifts
+  # from the main checkout, and every worktree should read the same one.
+  link_if_missing() {
+    local rel="$1"
+    local src="$MAIN/$rel"
+    local dst="$WT/$rel"
+
+    if [[ ! -f "$src" ]]; then
+      echo "    (skip) main has no $rel"
+      return
+    fi
+    if [[ -L "$dst" ]]; then
+      echo "    (ok)   $rel already linked"
+      return
+    fi
+    if [[ -e "$dst" ]]; then
+      echo "    (ok)   $rel present as a real file (not replacing; it will not track main)"
+      return
+    fi
+    ln -s "$src" "$dst"
+    echo "    (link) $rel -> $src"
+  }
+
+  # .env is copied, not linked: full setup rewrites it with this worktree's
+  # profile path and ports.
+  echo "==> Linking gitignored config files"
   copy_if_missing ".env"
-  copy_if_missing "CLAUDE.local.md"
-  copy_if_missing "AGENTS.md"
+  link_if_missing "CLAUDE.local.md"
+  link_if_missing "AGENTS.md"
+
+  # Install the post-checkout hook so worktrees created by other tooling (which
+  # never runs this script) get the same links. The hook dir is shared by every
+  # worktree, so installing it once covers all of them.
+  install_post_checkout_hook
 
   # npm install — require a real install, not just a stray cache dir.
   if [[ -d "$WT/node_modules/.bin" || -f "$WT/node_modules/.package-lock.json" ]]; then
