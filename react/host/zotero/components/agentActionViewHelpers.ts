@@ -5,6 +5,17 @@ import {
     CancelCircleIcon,
     AlertIcon,
     Spinner,
+    ClockIcon,
+    PropertyEditIcon,
+    FolderAddIcon,
+    FolderDetailIcon,
+    TaskDoneIcon,
+    TagIcon,
+    HighlighterIcon,
+    DocumentValidationIcon,
+    DollarCircleIcon,
+    GlobalSearchIcon,
+    NoteIcon,
 } from '../../../components/icons/icons';
 import { truncateText } from '../../../utils/stringUtils';
 
@@ -118,6 +129,23 @@ export const STATUS_CONFIGS: Record<ActionStatus | 'awaiting', StatusConfig> = {
         showRetry: true,
     },
 };
+
+/** Tool-specific icon shared by Zotero agent-action review surfaces. */
+export function getAgentActionToolIcon(toolName: string): React.FC<React.SVGProps<SVGSVGElement>> {
+    if (toolName === 'edit_metadata' || toolName === 'edit_item') return PropertyEditIcon;
+    if (toolName === 'create_note') return NoteIcon;
+    if (toolName === 'create_highlight_annotations') return HighlighterIcon;
+    if (toolName === 'create_note_annotations') return NoteIcon;
+    if (toolName === 'edit_annotations' || toolName === 'delete_annotations') return HighlighterIcon;
+    if (toolName === 'create_collection') return FolderAddIcon;
+    if (toolName === 'organize_items') return TaskDoneIcon;
+    if (toolName === 'manage_tags') return TagIcon;
+    if (toolName === 'manage_collections') return FolderDetailIcon;
+    if (toolName === 'create_items' || toolName === 'create_item') return DocumentValidationIcon;
+    if (toolName === 'confirm_extraction') return DollarCircleIcon;
+    if (toolName === 'confirm_external_search') return GlobalSearchIcon;
+    return ClockIcon;
+}
 
 /**
  * An approval disappearing only closes the live approval channel. The card may

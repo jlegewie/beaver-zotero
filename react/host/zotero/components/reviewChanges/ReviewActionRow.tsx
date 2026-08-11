@@ -20,6 +20,7 @@ import {
     getActionLabel,
     getActionTitle,
     buildPreviewData,
+    getAgentActionToolIcon,
 } from '../agentActionViewHelpers';
 import { ActionPreview } from '../ActionPreview';
 import type { ReviewRow } from '../reviewChangeRows';
@@ -30,6 +31,8 @@ import {
     RepeatIcon,
     UndoIcon,
     Icon,
+    ArrowDownIcon,
+    ArrowRightIcon,
 } from '../../../../components/icons/icons';
 import Button from '../../../../components/ui/Button';
 import IconButton from '../../../../components/ui/IconButton';
@@ -64,6 +67,7 @@ export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
     const [isProcessing, setIsProcessing] = useState(false);
     const [isUndoError, setIsUndoError] = useState(false);
     const [clickedButton, setClickedButton] = useState<'approve' | 'reject' | 'undo' | null>(null);
+    const [isHovered, setIsHovered] = useState(false);
 
     const applyAgentActions = useSetAtom(applyAgentActionsAtom);
     const rejectAgentActions = useSetAtom(rejectAgentActionsAtom);
@@ -106,6 +110,17 @@ export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
             ? getOverallStatus(row.actions)
             : (getCreateAnnotationsDisplayStatus(firstAction) ?? firstAction.status);
     const config = STATUS_CONFIGS[status];
+    const headerIcon = isBusy
+        ? config.icon ?? ClockIcon
+        : isHovered
+            ? (isExpanded ? ArrowDownIcon : ArrowRightIcon)
+            : config.icon ?? getAgentActionToolIcon(row.actionType);
+    // AgentActionView intentionally enlarges its resolved icons. Normalize only
+    // the compact review-row icons without changing that existing surface.
+    const headerIconClassName = config.iconClassName
+        ?.split(/\s+/)
+        .filter((className) => className !== 'scale-11')
+        .join(' ');
 
     const handleApply = useCallback(async () => {
         if (isDisabled) return;
@@ -181,9 +196,17 @@ export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
     return (
         <div className={containerClassName}>
             <div className={headerRowClassName}>
-                <div className="display-flex flex-row ml-3 gap-2 min-w-0">
+                <button
+                    type="button"
+                    className="variant-ghost-secondary display-flex flex-row ml-3 gap-2 min-w-0 text-left"
+                    style={{ fontSize: '0.95rem', background: 'transparent', border: 0, padding: 0 }}
+                    aria-expanded={isExpanded}
+                    onClick={toggleExpanded}
+                    onMouseEnter={() => setIsHovered(true)}
+                    onMouseLeave={() => setIsHovered(false)}
+                >
                     <div className="display-flex mt-015" style={{ flexShrink: 0 }}>
-                        <Icon icon={config.icon ?? ClockIcon} className={config.iconClassName} />
+                        <Icon icon={headerIcon} className={!isHovered ? headerIconClassName : undefined} />
                     </div>
                     <div
                         className="min-w-0"
@@ -199,20 +222,11 @@ export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
                         <span className="font-color-primary font-medium">{label}</span>
                         {title && <span className="font-color-secondary ml-15">{title}</span>}
                     </div>
-                </div>
+                </button>
 
                 <div className="flex-1" />
 
                 <div className="display-flex flex-row items-center gap-1 mr-3 mt-010" style={{ flexShrink: 0 }}>
-                    <Button
-                        variant="ghost"
-                        onClick={toggleExpanded}
-                        aria-expanded={isExpanded}
-                        style={GHOST_BUTTON_STYLE}
-                    >
-                        Review
-                    </Button>
-
                     {(config.showUndo || (isBusy && activeButton === 'undo')) && (
                         <Tooltip content={row.actionType === 'create_note' ? 'Delete' : 'Undo'} showArrow singleLine>
                             <IconButton

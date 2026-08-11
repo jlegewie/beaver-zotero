@@ -196,7 +196,7 @@ export const ReviewChangesCard: React.FC<ReviewChangesCardProps> = ({ run, rows 
         return allApplied ? CheckmarkCircleIcon : CancelCircleIcon;
     })();
     const headerIconClassName = !isBulkRunning && !hasWritingRow && !isHovered && tone === 'resolved'
-        ? `${allApplied ? 'font-color-green' : 'font-color-red'} scale-11`
+        ? (allApplied ? 'font-color-green' : 'font-color-red')
         : undefined;
 
     return (
