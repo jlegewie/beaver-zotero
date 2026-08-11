@@ -2,7 +2,7 @@ import React, { useState, useCallback, useMemo, useRef, useEffect } from "react"
 import Button from "../ui/Button";
 import CopyButton from "../ui/buttons/CopyButton";
 import MenuButton from "../ui/MenuButton";
-import Spinner from "../icons/Spinner";
+import Spinner from "@beaver/agent-ui/icons/Spinner";
 import { MenuItem } from "../ui/menu/ContextMenu";
 import {
     Icon,

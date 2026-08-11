@@ -598,27 +598,55 @@ async function onMainWindowUnload(win: Window): Promise<void> {
     }
 }
 
+/**
+ * Global AUTHOR_SHEETs, in cascade order.
+ *
+ * `agent-ui-theme.css` is the shared React layer's own stylesheet
+ * (`packages/agent-ui/src/theme/`), copied into `addon/content/styles/` at build
+ * time by `scripts/copy-agent-ui-css.mjs`. It is registered *before*
+ * `beaver.css` so the Zotero plugin's own rules win at equal specificity — the
+ * package supplies the shared baseline, this client adapts it.
+ *
+ * Kept as separate sheets rather than concatenated, so provenance stays readable
+ * and the shared file is byte-identical to what the Word add-in imports.
+ */
+const GLOBAL_STYLESHEETS = ["agent-ui-theme.css", "beaver.css"];
+
 function loadStylesheet() {
-    const styleURI = `chrome://${addon.data.config.addonRef}/content/styles/beaver.css`;
     const ssService = Cc["@mozilla.org/content/style-sheet-service;1"]
         .getService(Ci.nsIStyleSheetService);
-    const styleSheet = Services.io.newURI(styleURI);
     const sheetType = Ci.nsIStyleSheetService.AUTHOR_SHEET!;
-    if (ssService.sheetRegistered(styleSheet, sheetType)) {
-        ssService.unregisterSheet(styleSheet, sheetType);
+    for (const name of GLOBAL_STYLESHEETS) {
+        const styleURI = `chrome://${addon.data.config.addonRef}/content/styles/${name}`;
+        const styleSheet = Services.io.newURI(styleURI);
+        // Per sheet, so one missing file cannot cost the others. The agent-ui
+        // sheets are copied in at build time rather than checked in, so a build
+        // that skipped `copy:agent-ui-css` would otherwise take beaver.css down
+        // with it and render the whole plugin unstyled.
+        try {
+            if (ssService.sheetRegistered(styleSheet, sheetType)) {
+                ssService.unregisterSheet(styleSheet, sheetType);
+            }
+            ssService.loadAndRegisterSheet(styleSheet, sheetType);
+        } catch (error) {
+            Zotero.logError(
+                new Error(`Beaver: failed to register ${name}: ${error}`),
+            );
+        }
     }
-    ssService.loadAndRegisterSheet(styleSheet, sheetType);
 }
 
 function unloadStylesheet() {
-    const styleURI = `chrome://${addon.data.config.addonRef}/content/styles/beaver.css`;
     const ssService = Cc["@mozilla.org/content/style-sheet-service;1"]
         .getService(Ci.nsIStyleSheetService);
-    const styleSheet = Services.io.newURI(styleURI);
     const sheetType = Ci.nsIStyleSheetService.AUTHOR_SHEET!;
-    if (ssService.sheetRegistered(styleSheet, sheetType)) {
-        ssService.unregisterSheet(styleSheet, sheetType);
-    }	
+    for (const name of GLOBAL_STYLESHEETS) {
+        const styleURI = `chrome://${addon.data.config.addonRef}/content/styles/${name}`;
+        const styleSheet = Services.io.newURI(styleURI);
+        if (ssService.sheetRegistered(styleSheet, sheetType)) {
+            ssService.unregisterSheet(styleSheet, sheetType);
+        }
+    }
 }
 
 /**

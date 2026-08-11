@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { SearchIcon, EditIcon, DeleteIcon, TickIcon, CancelIcon } from './icons/icons';
-import Spinner from './icons/Spinner';
+import Spinner from '@beaver/agent-ui/icons/Spinner';
 import IconButton from './ui/IconButton';
 import { isThreadListViewAtom, threadListFilterAtom, showAllThreadInstancesAtom } from '../atoms/ui';
 import { ThreadData, loadThreadAtom, newThreadAtom } from '../atoms/threads';

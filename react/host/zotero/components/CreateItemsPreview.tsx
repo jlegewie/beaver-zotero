@@ -7,7 +7,7 @@ import { revealSource } from '../../../utils/sourceUtils';
 import IconButton from '../../../components/ui/IconButton';
 import { ArrowUpRightIcon } from '../../../components/icons/icons';
 import Tooltip from '../../../components/ui/Tooltip';
-import Spinner from '../../../components/icons/Spinner';
+import Spinner from '@beaver/agent-ui/icons/Spinner';
 import { usePdfFetchStatus } from '../../../hooks/useBackgroundTasks';
 
 type ActionStatus = 'pending' | 'applied' | 'rejected' | 'undone' | 'error' | 'awaiting';

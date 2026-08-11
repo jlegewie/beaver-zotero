@@ -21,7 +21,7 @@ import { regenerateFromRunAtom, streamingDoneRunIdsAtom } from '../../atoms/agen
 import { currentThreadIdAtom } from '../../atoms/threads';
 import { store } from '../../store';
 import Tooltip from '../ui/Tooltip';
-import Spinner from '../icons/Spinner';
+import Spinner from '@beaver/agent-ui/icons/Spinner';
 import { prepareCitationRenderContext } from '../../utils/citationRenderContext';
 import { addPopupMessageAtom } from '../../utils/popupMessageUtils';
 import { getHost } from '../../host';

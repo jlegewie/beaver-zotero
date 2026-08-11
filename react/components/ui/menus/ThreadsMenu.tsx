@@ -7,7 +7,7 @@ import { threadService } from '@beaver/agent-core/transport/threadService';
 import { ChattingIcon } from '../../icons/icons';
 import { ZoteroIcon, ZOTERO_ICONS } from '../../icons/ZoteroIcon';
 import { userAtom } from '../../../atoms/auth';
-import Spinner from '../../icons/Spinner';
+import Spinner from '@beaver/agent-ui/icons/Spinner';
 import { getDateGroup } from '../../../utils/dateUtils';
 import { getPref } from '../../../../src/utils/prefs';
 import { clearThreadListCache } from '../../ThreadListView';

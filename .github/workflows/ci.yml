@@ -32,6 +32,11 @@ jobs:
       - name: Typecheck agent-core
         run: npm run typecheck:core --if-present
 
+      # Same pattern for the shared React layer: standalone typecheck plus the
+      # closure gate, with neither zotero-types nor @types/office-js present.
+      - name: Typecheck agent-ui
+        run: npm run typecheck:ui --if-present
+
       # eslint directly rather than lint:check — the prettier half of that
       # script is a separate, repo-wide formatting decision.
       - name: Lint

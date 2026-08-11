@@ -1,6 +1,6 @@
 import React from 'react';
 import { Icon } from '../icons/icons';
-import Spinner from '../icons/Spinner';
+import Spinner from '@beaver/agent-ui/icons/Spinner';
 
 export type ButtonVariant = 'solid' | 'surface' | 'outline' | 'subtle' | 'ghost' | 'surface-light' | 'ghost-secondary' | 'ghost-tertiary' | 'error';
 

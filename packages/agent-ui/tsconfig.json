@@ -1,0 +1,65 @@
+{
+  // Standalone typecheck for the client-agnostic React layer.
+  // These files are compiled WITHOUT the zotero-types ambient globals and
+  // without @types/office-js, so a component that reaches for a host global
+  // fails here rather than in whichever client happens to lack it.
+  //
+  // agent-core starves its program of libs and @types entirely; this package
+  // cannot — React needs both. So three options differ from agent-core's, and
+  // each is asserted by `verify-program.mjs` at its exact allowed value rather
+  // than screened for known-bad entries. Widening any of them is then a
+  // visible, deliberate edit instead of a silent one:
+  //
+  //   - `jsx`: JSX has to compile at all. It is "react" (the classic runtime,
+  //     which requires `React` in scope) and NOT "react-jsx", even though
+  //     "react-jsx" also typechecks. The two clients transform JSX
+  //     differently — beaver-zotero's webpack runs @babel/preset-react in its
+  //     default classic mode, while the Word add-in compiles with
+  //     "react-jsx" — so the only source form that works in both is a file
+  //     that imports React explicitly. "react-jsx" would accept a file that
+  //     omits the import and let it fail at runtime in the Zotero bundle;
+  //     "react" is the intersection of the two consumers, and an explicit
+  //     `import React from 'react'` is valid under the automatic runtime too.
+  //   - `lib`: ES2020 + DOM. A shared component renders into a real document,
+  //     so DOM is part of its contract. It reaches its window/document through
+  //     an element's `ownerDocument`, never through a host global — that is a
+  //     lint rule (see eslint.config.mjs), not something `lib` can express.
+  //   - `types`: exactly react + react-dom. Listing them explicitly is what
+  //     keeps every *other* installed @types package — zotero-types and
+  //     @types/office-js above all — out of the automatic program. Omitting the
+  //     line would make all of them ambient.
+  //
+  // `skipLibCheck: true` mirrors agent-core: dependency declarations are not
+  // checked here, while this package's own code is still fully checked against
+  // their types. `verify-program.mjs` re-checks any declaration file the
+  // package owns with the flag off.
+  //
+  // `paths` maps the one in-repo package this one is allowed to consume.
+  // @beaver/agent-core is a declared peer dependency but is never installed —
+  // it is a sibling directory that every consumer wires up by alias — so the
+  // standalone typecheck has to resolve it the same way. `verify-program.mjs`
+  // asserts this is the only mapping, so it cannot grow into a route back into
+  // the host repo.
+  "compilerOptions": {
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "target": "ES2020",
+    "lib": ["ES2020", "DOM"],
+    "types": ["react", "react-dom"],
+    "jsx": "react",
+    "paths": {
+      "@beaver/agent-core/*": ["../agent-core/src/*"]
+    },
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "isolatedModules": true,
+    "forceConsistentCasingInFileNames": true
+  },
+  // The full transitive closure, listed explicitly so the package surface is
+  // readable. `verify-program.mjs` keeps this list honest. Stylesheets under
+  // src/theme/ are deliberately absent: they are not TypeScript, so they are
+  // not part of this program at all (the verifier's orphan scan skips them).
+  "files": ["./src/icons/Spinner.tsx"]
+}

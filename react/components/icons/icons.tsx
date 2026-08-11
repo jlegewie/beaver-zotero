@@ -3,7 +3,7 @@ import DatabaseIcon from './DatabaseIcon';
 export { default as Icon } from './Icon';
 export { default as CancelIcon } from './CancelIcon';
 export { CSSItemTypeIcon, CSSIcon } from './zotero';
-export { default as Spinner } from './Spinner';
+export { default as Spinner } from '@beaver/agent-ui/icons/Spinner';
 export { default as ClockIcon } from './ClockIcon';
 export { default as FolderAddIcon } from './FolderAddIcon';
 export { default as NoteIcon } from './NoteIcon';

@@ -13,7 +13,7 @@ import { libraryRefForLibraryID } from '../../src/utils/libraryIdentity';
 import { getReaderOrNoteContextItem } from '../utils/zoteroTabContext';
 import { buildThreadItemFilter } from '../utils/threadItemFilter';
 import { buildRecentChatsCacheKey, buildRecentChatsItemLookup } from '../utils/recentChatsLookup';
-import Spinner from './icons/Spinner';
+import Spinner from '@beaver/agent-ui/icons/Spinner';
 import { logger } from '@beaver/agent-core/platform/logger';
 import Button from './ui/Button';
 

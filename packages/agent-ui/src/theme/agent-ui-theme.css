@@ -1,0 +1,27 @@
+/*
+ * Shared styles for @beaver/agent-ui.
+ *
+ * Deliberately (almost) empty: this file exists so the delivery path is wired
+ * and tested before any rule moves into it. The Zotero build copies every
+ * stylesheet in this directory into `addon/content/styles/` and registers it
+ * app-wide alongside `beaver.css` (see `scripts/copy-agent-ui-css.mjs` and
+ * `loadStylesheet()` in `src/hooks.ts`); the Word add-in imports the same file
+ * directly through css-loader.
+ *
+ * Two rules for whatever lands here:
+ *
+ * 1. Scope every selector under `.beaver-root`, the one root class both clients
+ *    add at their mount points. The package must not style a client's chrome.
+ * 2. The package OWNS Beaver's own custom properties and REQUIRES the platform
+ *    ones (`--fill-*`, `--color-border50`, `--accent-*`, `--material-*`,
+ *    `--tag-*`, …). Those names come from the host application's theme — Zotero
+ *    supplies them, including dark and high-contrast; Word's own theme file
+ *    mirrors the same names. So use them freely, but never define a value for
+ *    one here: doing so would freeze the shared layer against one client's
+ *    palette and stop it from following the app it renders inside.
+ */
+
+/* Both clients add this class at their React mount points. */
+.beaver-root {
+    /* No shared declarations yet. */
+}
