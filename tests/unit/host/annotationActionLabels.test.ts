@@ -3,9 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
     getActionLabel,
     getActionTitle,
-    getActionCardResolutionStatus,
     hasFailedUndo,
-    shouldAutoCollapseResolvedApproval,
 } from "../../../react/host/zotero/components/agentActionViewHelpers";
 import type { AgentAction } from "@beaver/agent-core/agents/agentActionTypes";
 
@@ -82,34 +80,6 @@ describe("annotation action labels", () => {
                 ],
             }),
         ).toBe("Edit 2 Annotations");
-    });
-});
-
-describe("pending action visibility", () => {
-    it("only auto-collapses resolved approvals with terminal statuses", () => {
-        expect(shouldAutoCollapseResolvedApproval("pending")).toBe(false);
-        expect(shouldAutoCollapseResolvedApproval("awaiting")).toBe(false);
-        expect(shouldAutoCollapseResolvedApproval("applied")).toBe(true);
-        expect(shouldAutoCollapseResolvedApproval("rejected")).toBe(true);
-        expect(shouldAutoCollapseResolvedApproval("undone")).toBe(true);
-        expect(shouldAutoCollapseResolvedApproval("error")).toBe(true);
-        expect(shouldAutoCollapseResolvedApproval("applied", true)).toBe(false);
-    });
-
-    it("keeps a multi-action card pending until every action resolves", () => {
-        const actions = [
-            { status: "applied" },
-            { status: "pending" },
-        ] as any;
-
-        expect(getActionCardResolutionStatus(actions, true, true)).toBe(
-            "pending",
-        );
-    });
-
-    it("treats a returned actionless confirmation as resolved", () => {
-        expect(getActionCardResolutionStatus([], false, false)).toBe("pending");
-        expect(getActionCardResolutionStatus([], false, true)).toBe("applied");
     });
 });
 

@@ -150,17 +150,6 @@ export function getAgentActionToolIcon(toolName: string): React.FC<React.SVGProp
 }
 
 /**
- * An approval disappearing only closes the live approval channel. The card may
- * auto-collapse once its persisted action reaches a terminal status.
- */
-export function shouldAutoCollapseResolvedApproval(
-    status: ActionStatus | 'awaiting',
-    neverAutoCollapse = false,
-): boolean {
-    return !neverAutoCollapse && status !== 'pending' && status !== 'awaiting';
-}
-
-/**
  * Compute the overall status for a group of actions.
  * Used for batch operations where we need a single status to display.
  * Priority: pending > applied (even partial) > error (only if none applied) > rejected/undone
@@ -216,21 +205,6 @@ export function getCreateAnnotationsDisplayStatus(action: AgentAction): ActionSt
  */
 export function hasFailedUndo(actions: AgentAction[]): boolean {
     return actions.some((action) => action.status === 'error' && action.result_data != null);
-}
-
-/**
- * Status used by the expansion lifecycle after a live approval disappears.
- * Multi-action cards must stay aligned with their displayed aggregate status,
- * while confirmation tools can complete without persisting an AgentAction.
- */
-export function getActionCardResolutionStatus(
-    actions: AgentAction[],
-    isMultiAction: boolean,
-    hasToolReturn: boolean,
-): ActionStatus {
-    if (isMultiAction) return getOverallStatus(actions);
-    if (actions.length > 0) return actions[0].status;
-    return hasToolReturn ? 'applied' : 'pending';
 }
 
 /**

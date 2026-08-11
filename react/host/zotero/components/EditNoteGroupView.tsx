@@ -26,7 +26,6 @@ import {
     getToolGroupRunApprovalScope,
 } from '../../../atoms/runApprovalPolicy';
 import {
-    shouldAutoCollapseResolvedApproval,
     STATUS_CONFIGS,
     hasFailedUndo,
     type ActionStatus,
@@ -269,7 +268,6 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
             ?? (hasPendingApprovals || (errorCount > 0 && reapplicableActions.length === 0 && appliedCount === 0)));
 
     const prevHasPendingApprovalsRef = useRef(hasPendingApprovals);
-    const waitingForTerminalStatusRef = useRef(false);
     const hasInitializedRef = useRef(false);
     useEffect(() => {
         if (!hasInitializedRef.current) {
@@ -284,24 +282,14 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
             return;
         }
 
-        if (!prevHasPendingApprovalsRef.current && hasPendingApprovals) {
-            waitingForTerminalStatusRef.current = false;
-            setExpanded({ key: expansionKey, expanded: true });
-        } else if (prevHasPendingApprovalsRef.current && !hasPendingApprovals) {
-            const shouldCollapse = shouldAutoCollapseResolvedApproval(aggregateStatus);
-            waitingForTerminalStatusRef.current = !shouldCollapse && aggregateStatus === 'pending';
-            setExpanded({ key: expansionKey, expanded: shouldCollapse ? false : true });
-        } else if (
-            waitingForTerminalStatusRef.current
-            && shouldAutoCollapseResolvedApproval(aggregateStatus)
-        ) {
-            waitingForTerminalStatusRef.current = false;
+        if (prevHasPendingApprovalsRef.current && !hasPendingApprovals) {
             setExpanded({ key: expansionKey, expanded: false });
+        } else if (!prevHasPendingApprovalsRef.current && hasPendingApprovals) {
+            setExpanded({ key: expansionKey, expanded: true });
         }
         prevHasPendingApprovalsRef.current = hasPendingApprovals;
     }, [
         hasPendingApprovals,
-        aggregateStatus,
         errorCount,
         reapplicableActions.length,
         appliedCount,
