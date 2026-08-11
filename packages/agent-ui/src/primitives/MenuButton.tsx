@@ -1,8 +1,8 @@
 import React, { useState, useRef, ReactNode, useEffect } from 'react';
-import ContextMenu, { MenuItem, MenuPosition } from './menu/ContextMenu';
-import { Icon } from '../icons/icons';
+import ContextMenu, { MenuItem, MenuPosition } from './ContextMenu';
+import Icon from '../icons/Icon';
 import Tooltip from './Tooltip';
-import { getDocumentFromElement } from '../../utils/windowContext';
+import { getDocumentFromElement } from '../utils/windowContext';
 
 interface MenuButtonProps {
     menuItems: MenuItem[];
@@ -95,7 +95,7 @@ const MenuButton: React.FC<MenuButtonProps> = ({
             // Force any active tooltip to close by triggering a mousedown event on document
             // Use the correct document context for this component
             const doc = getDocumentFromElement(buttonRef.current);
-            doc.dispatchEvent(new MouseEvent('click'));
+            doc?.dispatchEvent(new MouseEvent('click'));
         }
     };
 

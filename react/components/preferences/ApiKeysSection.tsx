@@ -1,5 +1,5 @@
 import React, { useState, useCallback } from "react";
-import Button from "../ui/Button";
+import Button from "@beaver/agent-ui/primitives/Button";
 import {SettingsGroup, SettingsRow, SectionLabel, DocLink, SectionHeader, SectionDescription} from "./components/SettingsElements";
 import ApiKeyInput from "./ApiKeyInput";
 import CustomProviderCard from "./CustomProviderCard";

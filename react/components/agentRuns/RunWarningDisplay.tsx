@@ -1,8 +1,8 @@
 import React from 'react';
 import { useSetAtom } from 'jotai';
 import { Icon, AlertIcon, CancelIcon } from '../icons/icons';
-import Button from '../ui/Button';
-import IconButton from '../ui/IconButton';
+import Button from '@beaver/agent-ui/primitives/Button';
+import IconButton from '@beaver/agent-ui/primitives/IconButton';
 import { parseTextWithLinksAndNewlines } from '../../utils/parseTextWithLinksAndNewlines';
 import { RunWarning, dismissWarningAtom } from '../../atoms/warnings';
 import { setPref } from '../../../src/utils/prefs';

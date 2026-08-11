@@ -2,7 +2,7 @@ import React, { forwardRef } from 'react';
 import { CSSItemTypeIcon, CSSIcon, Spinner, Icon, ArrowUpRightIcon, LibraryIcon, PdfIcon, NoteIcon, FileViewIcon } from "../icons/icons";
 import { useAtomValue } from 'jotai';
 import { useRemoveContextMenu } from '../../hooks/useRemoveContextMenu';
-import { MenuItem } from '../ui/menu/ContextMenu';
+import { MenuItem } from '@beaver/agent-ui/primitives/ContextMenu';
 import { getItemValidationAtom, isHardBlockedValidation } from '../../atoms/itemValidation';
 import { getDisplayNameFromItem } from '../../utils/sourceUtils';
 import { truncateText } from '../../utils/stringUtils';

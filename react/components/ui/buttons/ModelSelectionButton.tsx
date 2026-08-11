@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import MenuButton from '../MenuButton';
-import { MenuItem } from '../menu/ContextMenu';
+import MenuButton from '@beaver/agent-ui/primitives/MenuButton';
+import { MenuItem } from '@beaver/agent-ui/primitives/ContextMenu';
 import { BrainIcon, ArrowDownIcon, Icon } from '../../icons/icons';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { 

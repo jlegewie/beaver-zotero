@@ -1,7 +1,7 @@
 import React, { useState, useCallback } from 'react';
 import { useAtomValue } from 'jotai';
-import MenuButton from '../MenuButton';
-import { MenuItem } from '../menu/ContextMenu';
+import MenuButton from '@beaver/agent-ui/primitives/MenuButton';
+import { MenuItem } from '@beaver/agent-ui/primitives/ContextMenu';
 import { MoreHorizontalIcon } from '../../icons/icons';
 import { copyToClipboard } from '../../../utils/clipboard';
 import { renderToMarkdown, renderToHTML, preprocessNoteContent } from '../../../utils/citationRenderers';

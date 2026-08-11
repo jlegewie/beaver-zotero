@@ -1,5 +1,5 @@
 import React from "react";
-import Button from "../../ui/Button";
+import Button from "@beaver/agent-ui/primitives/Button";
 
 interface UpgradeCardProps {
     /** Title of the upgrade card */

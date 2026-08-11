@@ -1,5 +1,5 @@
 import React from 'react';
-import Tooltip from '../ui/Tooltip';
+import Tooltip from '@beaver/agent-ui/primitives/Tooltip';
 import { useAtomValue } from 'jotai';
 import {
     getCitationBoundingBoxes,

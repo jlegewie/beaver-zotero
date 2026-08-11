@@ -1,5 +1,6 @@
 import React, { forwardRef } from 'react';
-import { Icon, Spinner } from '../icons/icons';
+import Icon from '../icons/Icon';
+import Spinner from '../icons/Spinner';
 import { ButtonVariant } from './Button';
 
 

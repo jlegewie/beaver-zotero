@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAtomValue } from 'jotai';
 import { CSSItemTypeIcon, ExternalLinkIcon, PdfIcon } from '../icons/icons';
-import IconButton from '../ui/IconButton';
+import IconButton from '@beaver/agent-ui/primitives/IconButton';
 import { ZOTERO_ICONS } from '../icons/ZoteroIcon';
 import { ZoteroIcon } from '../icons/ZoteroIcon';
 import {
@@ -13,7 +13,7 @@ import {
     isExternalFileCitation,
     itemTypeToIconName,
 } from '@beaver/agent-core/types/citations';
-import Tooltip from '../ui/Tooltip';
+import Tooltip from '@beaver/agent-ui/primitives/Tooltip';
 import { externalReferenceMappingAtom, externalReferenceItemMappingAtom, formatExternalCitation } from '../../atoms/externalReferences';
 import { ExternalReference } from '@beaver/agent-core/types/externalReferences';
 import { ZoteroItemReference } from '@beaver/agent-core/types/zotero';

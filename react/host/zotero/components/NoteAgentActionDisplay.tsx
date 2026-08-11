@@ -23,8 +23,8 @@ import {
     CheckmarkCircleIcon,
     DeleteIcon,
 } from '../../../components/icons/icons';
-import IconButton from '../../../components/ui/IconButton';
-import Tooltip from '../../../components/ui/Tooltip';
+import IconButton from '@beaver/agent-ui/primitives/IconButton';
+import Tooltip from '@beaver/agent-ui/primitives/Tooltip';
 import { selectItemById } from '../../../../src/utils/selectItem';
 import { revealSource, getCurrentCollectionKeyForItem } from '../../../utils/sourceUtils';
 import { isLibraryEditable } from '../../../../src/utils/zoteroUtils';
@@ -46,7 +46,7 @@ import {
     toggleAnnotationPanelVisibilityAtom,
 } from '../../../atoms/messageUIState';
 import { logger } from '@beaver/agent-core/platform/logger';
-import Button from '../../../components/ui/Button';
+import Button from '@beaver/agent-ui/primitives/Button';
 import { textWithTrailingNoWrap } from '../../../utils/textWithTrailingNoWrap';
 
 interface NoteAgentActionRowProps {

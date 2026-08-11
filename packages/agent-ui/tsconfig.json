@@ -161,6 +161,17 @@
     "./src/icons/UserIcon.tsx",
     "./src/icons/ViewIcon.tsx",
     "./src/icons/ZapIcon.tsx",
-    "./src/icons/propertyEditIcon.tsx"
+    "./src/icons/propertyEditIcon.tsx",
+
+    // The primitive barrel and the components it re-exports, plus the shared
+    // helpers they depend on.
+    "./src/primitives/index.ts",
+    "./src/primitives/Button.tsx",
+    "./src/primitives/ContextMenu.tsx",
+    "./src/primitives/IconButton.tsx",
+    "./src/primitives/MenuButton.tsx",
+    "./src/primitives/Tag.tsx",
+    "./src/primitives/Tooltip.tsx",
+    "./src/utils/windowContext.ts"
   ]
 }

@@ -6,7 +6,7 @@ import {
     emptyLibraryDiscoverSubmittingAtom,
     submitEmptyLibraryDiscoverAtom,
 } from '../../../atoms/firstRun';
-import Button from '../../ui/Button';
+import Button from '@beaver/agent-ui/primitives/Button';
 import { ArrowRightIcon, Spinner } from '../../icons/icons';
 import { logger } from '@beaver/agent-core/platform/logger';
 

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { MenuPosition } from '../components/ui/menu/ContextMenu';
-import { getWindowFromElement, getDocumentFromElement } from '../utils/windowContext';
+import { MenuPosition } from '@beaver/agent-ui/primitives/ContextMenu';
+import { getWindowFromElement, getDocumentFromElement } from '@beaver/agent-ui/utils/windowContext';
 
 interface UseSelectionContextMenuOptions {
     onCopy?: (selectedText: string) => void;
@@ -38,7 +38,8 @@ export default function useSelectionContextMenu(
     const handleContextMenu = (e: React.MouseEvent) => {
         // Get the correct window context from the element ref
         const win = getWindowFromElement(elementRef.current);
-        
+        if (!win) return;
+
         // Check if there's selected text
         const selection = win.getSelection();
         const text = selection?.toString() || '';
@@ -54,10 +55,16 @@ export default function useSelectionContextMenu(
     
     // Close the menu when selection changes or is removed
     useEffect(() => {
-        // Get the correct document context from the element ref
+        // Get the correct document context from the element ref. The element is
+        // absent until the consumer has rendered it, and a consumer may render
+        // nothing at first (ModelResponseView returns null until a response has
+        // content). Skipping the listener on that pass costs nothing: this effect
+        // re-runs when `isMenuOpen` changes, and the menu can only open from a
+        // right-click on the element, so the run that matters always has it.
         const win = getWindowFromElement(elementRef.current);
         const doc = getDocumentFromElement(elementRef.current);
-        
+        if (!win || !doc) return;
+
         const handleSelectionChange = () => {
             const selection = win.getSelection();
             const text = selection?.toString() || '';
@@ -80,7 +87,8 @@ export default function useSelectionContextMenu(
         
         const win = getWindowFromElement(element);
         const doc = getDocumentFromElement(element);
-        
+        if (!win || !doc) return;
+
         const handleKeyDown = (e: KeyboardEvent) => {
             // Check for Cmd+C (Mac) or Ctrl+C (Windows/Linux)
             const isCopyShortcut = (e.metaKey || e.ctrlKey) && e.key === 'c';

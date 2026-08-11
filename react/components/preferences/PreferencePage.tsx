@@ -3,7 +3,7 @@ import { useAtom, useAtomValue } from 'jotai';
 import { logoutAtom, userAtom } from '../../atoms/auth';
 import { getPref, setPref } from '../../../src/utils/prefs';
 import { UserIcon, LogoutIcon, RepeatIcon, SettingsIcon, Icon, SearchIcon, LockIcon, KeyIcon, ZapIcon, ToolsIcon, DollarCircleIcon } from '../icons/icons';
-import Button from "../ui/Button";
+import Button from "@beaver/agent-ui/primitives/Button";
 import { useSetAtom } from 'jotai';
 import { profileWithPlanAtom, creditPlanAtom, hasCreditPlanAtom } from "../../atoms/profile";
 import { activePreferencePageTabAtom, PreferencePageTab } from "../../atoms/ui";

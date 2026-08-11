@@ -2,7 +2,7 @@ import React, { useState, useCallback, useEffect, useMemo } from "react";
 import { useAtom, useAtomValue } from 'jotai';
 import { Icon, TickIcon, ArrowDownIcon, UploadCircleIcon, ImportIcon } from '../icons/icons';
 import PlusSignIcon from '@beaver/agent-ui/icons/PlusSignIcon';
-import Button from "../ui/Button";
+import Button from "@beaver/agent-ui/primitives/Button";
 import { useSetAtom } from 'jotai';
 import { Action, ActionCategory, ActionCategoryFilter, ActionTargetType, generateActionId, TARGET_TYPE_LABELS, CATEGORY_LABELS } from "@beaver/agent-core/types/actions";
 import { actionsAtom, saveActionsAtom, hideActionAtom, restoreActionAtom, resetActionToDefaultAtom, importActionAtom } from "../../atoms/actions";
@@ -12,8 +12,8 @@ import { addPopupMessageAtom } from "../../utils/popupMessageUtils";
 import { getActionCommand } from "../../utils/slashCommands";
 import { isBuiltinAction, getActionCustomizations, getHiddenBuiltinActions, hasOldCustomPrompts } from "../../types/actionStorage";
 import ActionCard from "./ActionCard";
-import MenuButton from "../ui/MenuButton";
-import { MenuItem } from "../ui/menu/ContextMenu";
+import MenuButton from "@beaver/agent-ui/primitives/MenuButton";
+import { MenuItem } from "@beaver/agent-ui/primitives/ContextMenu";
 import {SectionLabel, DocLink, SectionHeader} from "./components/SettingsElements";
 
 // Filter dimensions. `targets` is what an action binds to (the filter matches

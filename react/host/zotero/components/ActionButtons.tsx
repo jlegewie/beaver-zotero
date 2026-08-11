@@ -11,9 +11,9 @@ import {
     isExternalReferenceDetailsDialogVisibleAtom,
     selectedExternalReferenceAtom
 } from '../../../atoms/ui';
-import Button from '../../../components/ui/Button';
-import IconButton from '../../../components/ui/IconButton';
-import Tooltip from '../../../components/ui/Tooltip';
+import Button from '@beaver/agent-ui/primitives/Button';
+import IconButton from '@beaver/agent-ui/primitives/IconButton';
+import Tooltip from '@beaver/agent-ui/primitives/Tooltip';
 import { ZOTERO_ICONS } from '../../../components/icons/ZoteroIcon';
 import { ZoteroIcon } from '../../../components/icons/ZoteroIcon';
 import { revealSource } from '../../../utils/sourceUtils';

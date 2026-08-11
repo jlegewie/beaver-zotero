@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import Button from "../ui/Button";
+import Button from "@beaver/agent-ui/primitives/Button";
 import {SettingsGroup, SettingsRow, DocLink} from "./components/SettingsElements";
 import { dataProviderEnabledAtom, mcpCreateNoteToolEnabledAtom, mcpServerEnabledAtom } from "../../atoms/ui";
 import { isMcpServerSupportedAtom } from "../../atoms/profile";

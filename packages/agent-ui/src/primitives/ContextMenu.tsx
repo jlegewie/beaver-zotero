@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState, ReactNode } from 'react';
 import React from 'react';
 import ReactDOM from 'react-dom';
-import { Icon } from '../../icons/icons';
-import { getWindowFromElement, getDocumentFromElement } from '../../../utils/windowContext';
+import Icon from '../icons/Icon';
+import { getWindowFromElement, getDocumentFromElement } from '../utils/windowContext';
 
 /**
 * Menu item interface
@@ -186,7 +186,8 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
         
         // Get the correct window/document context for this component
         const doc = getDocumentFromElement(menuRef.current);
-        
+        if (!doc) return;
+
         // Prevent scroll on all elements when context menu is open except for the menu itself
         const preventScroll = (e: Event) => {
             // Check if the event originated from within the menu
@@ -227,7 +228,8 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
         
         // Get the correct window context for this component
         const win = getWindowFromElement(menuRef.current);
-        
+        if (!win) return;
+
         // Get viewport dimensions
         const viewportWidth = win.innerWidth;
         const viewportHeight = win.innerHeight;
@@ -303,7 +305,8 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
         
         // Get the correct document context for this component
         const doc = getDocumentFromElement(menuRef.current);
-        
+        if (!doc) return;
+
         const handleClickOutside = (e: MouseEvent) => {
             if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
                 onClose();
@@ -333,7 +336,8 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
         
         // Get the correct document context for this component
         const doc = getDocumentFromElement(menuRef.current);
-        
+        if (!doc) return;
+
         const handleKeyNav = (e: KeyboardEvent) => {
             switch (e.key) {
                 case 'ArrowDown':
@@ -550,13 +554,19 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
     
     // Handle portal rendering if requested
     if (usePortal) {
-        // Using React Portal to render outside the current DOM hierarchy
-        // Use the correct document context for this component
+        // Using React Portal to render outside the current DOM hierarchy.
+        // The document comes from the menu's own ref, which is only attached
+        // once the menu has rendered — so on the first open there is nothing to
+        // portal into yet. Render in place for that pass rather than guessing a
+        // window; the ref lands on this pass and the portal takes over on the
+        // next render, in the window the menu actually belongs to.
         const doc = getDocumentFromElement(menuRef.current);
-        return ReactDOM.createPortal(
-            menuElement,
-            doc.body
-        );
+        if (doc) {
+            return ReactDOM.createPortal(
+                menuElement,
+                doc.body
+            );
+        }
     }
 
     return menuElement;

@@ -1,7 +1,7 @@
 import React, { forwardRef } from 'react';
 import { CSSItemTypeIcon, CSSIcon, Icon } from "../icons/icons";
 import { useRemoveContextMenu } from '../../hooks/useRemoveContextMenu';
-import { MenuItem } from '../ui/menu/ContextMenu';
+import { MenuItem } from '@beaver/agent-ui/primitives/ContextMenu';
 import { truncateText } from '../../utils/stringUtils';
 import { FileViewIcon, ExternalLinkIcon } from '../icons/icons';
 import type { ExternalFileContentKind } from '@beaver/agent-core/types/attachments/apiTypes';

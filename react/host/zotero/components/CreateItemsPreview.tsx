@@ -4,9 +4,9 @@ import { AgentAction } from '../../../agents/agentActions';
 import { CreateItemProposedData, CreateItemResultData } from '@beaver/agent-core/types/agentActions/items';
 import { CheckmarkCircleIcon, CancelCircleIcon, AlertIcon, Icon } from '../../../components/icons/icons';
 import { revealSource } from '../../../utils/sourceUtils';
-import IconButton from '../../../components/ui/IconButton';
+import IconButton from '@beaver/agent-ui/primitives/IconButton';
 import { ArrowUpRightIcon } from '../../../components/icons/icons';
-import Tooltip from '../../../components/ui/Tooltip';
+import Tooltip from '@beaver/agent-ui/primitives/Tooltip';
 import Spinner from '@beaver/agent-ui/icons/Spinner';
 import { usePdfFetchStatus } from '../../../hooks/useBackgroundTasks';
 

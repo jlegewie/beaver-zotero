@@ -1,6 +1,6 @@
 import React from 'react';
-import MenuButton from '../MenuButton';
-import { MenuItem } from '../menu/ContextMenu';
+import MenuButton from '@beaver/agent-ui/primitives/MenuButton';
+import { MenuItem } from '@beaver/agent-ui/primitives/ContextMenu';
 import PdfIcon from '@beaver/agent-ui/icons/PdfIcon';
 import SearchIcon from '@beaver/agent-ui/icons/SearchIcon';
 import ToolsIcon from '@beaver/agent-ui/icons/ToolsIcon';

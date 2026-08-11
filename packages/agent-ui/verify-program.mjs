@@ -234,8 +234,13 @@ if (
 // so all of them are reachable from it. The individual icons are deliberately
 // NOT roots — a client may import one by its own subpath, but the barrel already
 // imports it, and listing it here would only cost the orphan signal that catches
-// it dropping out of the closure.
-const entryPaths = ["src/icons/index.tsx"].map((p) => path.join(pkgDir, p));
+// it dropping out of the closure. The primitive barrel is the same shape: the
+// primitives are imported by subpath in practice, and some import each other,
+// so the barrel is what makes every one of them reachable on purpose rather
+// than by way of a sibling that could stop importing it.
+const entryPaths = ["src/icons/index.tsx", "src/primitives/index.ts"].map((p) =>
+  path.join(pkgDir, p),
+);
 
 const listed = parsed.fileNames.map((f) => path.resolve(f));
 const listedSet = new Set(listed);
