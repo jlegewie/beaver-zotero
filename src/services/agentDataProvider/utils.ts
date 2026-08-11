@@ -657,6 +657,43 @@ function findCollectionInLibrary(
 }
 
 /**
+ * Return the IDs of the items held by the given collections and all of their
+ * subcollections. Trashed subcollections and trashed members are excluded, and
+ * an item that sits in several collections in the scope is returned once.
+ */
+export async function getCollectionScopeItemIds(collections: Zotero.Collection[]): Promise<number[]> {
+    const collectionIds = new Set<number>();
+    for (const collection of collections) {
+        collectionIds.add(collection.id);
+        for (const descendant of collection.getDescendents(false, 'collection')) {
+            collectionIds.add(descendant.id);
+        }
+    }
+    if (collectionIds.size === 0) return [];
+
+    const scopeIds = Array.from(collectionIds);
+    const itemIds = new Set<number>();
+    for (let i = 0; i < scopeIds.length; i += 900) {
+        const chunk = scopeIds.slice(i, i + 900);
+        const placeholders = chunk.map(() => '?').join(', ');
+        await Zotero.DB.queryAsync(
+            `SELECT itemID
+             FROM collectionItems
+             WHERE collectionID IN (${placeholders})
+               AND itemID NOT IN (SELECT itemID FROM deletedItems)`,
+            chunk,
+            {
+                onRow: (row: any) => {
+                    itemIds.add(row.getResultByIndex(0) as number);
+                },
+            },
+        );
+    }
+
+    return Array.from(itemIds);
+}
+
+/**
  * Format creators array into a string for display.
  */
 export function formatCreatorsString(creators: any[] | undefined): string | null {

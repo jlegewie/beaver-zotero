@@ -21,6 +21,7 @@ import { semanticSearchService, SearchResult } from '../semanticSearchService';
 import { BeaverDB } from '../database';
 import {
     getCollectionByIdOrName,
+    getCollectionScopeItemIds,
     getSearchableLibraryIds,
     prepareAttachmentInfoBatchData,
     processAttachmentInfoBatch,
@@ -102,40 +103,56 @@ export async function handleItemSearchByTopicRequest(
         };
     }
 
-    // Convert collections_filter names to keys if needed (scoped to libraryIds)
-    const collectionKeysSet = new Set<string>();
+    // Resolve collections_filter to collection objects. Every resolution is
+    // re-checked against libraryIds: a key-like filter resolves through a
+    // cross-library fallback that can land outside the searchable set, and the
+    // scope is read from Zotero before the embedding query narrows by library.
+    const collectionsById = new Map<number, Zotero.Collection>();
+    const addCollectionInScope = (collection: Zotero.Collection | null | undefined) => {
+        if (collection && libraryIds.includes(collection.libraryID)) {
+            collectionsById.set(collection.id, collection);
+        }
+    };
     if (request.collections_filter && request.collections_filter.length > 0) {
         for (const collectionFilter of request.collections_filter) {
             if (typeof collectionFilter === 'number') {
-                const collection = Zotero.Collections.get(collectionFilter);
-                if (collection && (libraryIds.length === 0 || libraryIds.includes(collection.libraryID))) {
-                    collectionKeysSet.add(collection.key);
-                }
+                addCollectionInScope(Zotero.Collections.get(collectionFilter));
                 continue;
             }
 
             // String filter: search within each library
-            if (libraryIds.length > 0) {
-                for (const libId of libraryIds) {
-                    const result = getCollectionByIdOrName(collectionFilter, libId);
-                    if (result) {
-                        collectionKeysSet.add(result.collection.key);
-                    }
-                }
-            } else {
-                const result = getCollectionByIdOrName(collectionFilter);
-                if (result) {
-                    collectionKeysSet.add(result.collection.key);
-                }
+            for (const libId of libraryIds) {
+                addCollectionInScope(getCollectionByIdOrName(collectionFilter, libId)?.collection);
             }
         }
     }
-    const collectionKeys = Array.from(collectionKeysSet);
+
+    // Resolve the collection scope to an item allowlist before ranking, so the
+    // candidate pool isn't spent on items outside the requested collections.
+    // An empty allowlist returns empty rather than widening scope: a filter that
+    // resolves to nothing must narrow, not silently search the whole library.
+    let collectionItemIds: number[] | undefined;
+    if (request.collections_filter && request.collections_filter.length > 0) {
+        collectionItemIds = await getCollectionScopeItemIds(Array.from(collectionsById.values()));
+        if (collectionItemIds.length === 0) {
+            logger(`handleItemSearchByTopicRequest: collections_filter resolved to ${collectionsById.size} collections holding no items`, 1);
+            return {
+                type: 'item_search_by_topic',
+                request_id: request.request_id,
+                items: [],
+                timing: {
+                    total_ms: Date.now() - startTime,
+                    item_count: 0,
+                    attachment_count: 0,
+                },
+            };
+        }
+    }
 
     logger('handleItemSearchByTopicRequest: Searching by topic', {
         topic_query: request.topic_query,
         libraryIds: libraryIds.length > 0 ? libraryIds : 'all',
-        collectionKeys: collectionKeys.length > 0 ? collectionKeys : 'all',
+        collectionItemIds: collectionItemIds ? collectionItemIds.length : 'all',
         limit: request.limit,
     }, 1);
 
@@ -151,6 +168,7 @@ export async function handleItemSearchByTopicRequest(
             topK: (offset + request.limit) * 4, // Fetch extra to account for filtering and pagination offset
             minSimilarity: 0.3,
             libraryIds,
+            itemIds: collectionItemIds,
         });
     } catch (error) {
         logger(`handleItemSearchByTopicRequest: Semantic search failed: ${error}`, 1);
@@ -264,20 +282,6 @@ export async function handleItemSearchByTopicRequest(
                 itemTags.includes(tag.toLowerCase())
             );
             if (!matchesTag) continue;
-        }
-
-        // Collections filter
-        if (collectionKeys.length > 0) {
-            const itemCollections = item.getCollections();
-            const itemCollectionKeys = itemCollections.map(collectionId => {
-                const collection = Zotero.Collections.get(collectionId);
-                return collection ? collection.key : null;
-            }).filter((key): key is string => key !== null);
-
-            const matchesCollection = collectionKeys.some(key =>
-                itemCollectionKeys.includes(key)
-            );
-            if (!matchesCollection) continue;
         }
 
         // Validate item is regular item and not in trash
