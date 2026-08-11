@@ -34,8 +34,8 @@ import Tooltip from '../../../../components/ui/Tooltip';
 
 /** Rows shown before the `Show all (N)` affordance. */
 const MAX_VISIBLE_ROWS = 20;
-const REVIEW_EXIT_DELAY_MS = 300;
-const REVIEW_FADE_MS = 150;
+const REVIEW_EXIT_DELAY_MS = 600;
+const REVIEW_FADE_MS = 200;
 
 interface ReviewChangesCardProps {
     run: AgentRun;
