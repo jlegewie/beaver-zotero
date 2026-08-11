@@ -2,7 +2,7 @@ import { useMemo } from 'react';
 import { useAtomValue } from 'jotai';
 import { getAgentActionsByRunAtom, pendingApprovalsAtom } from '../../../../agents/agentActions';
 import { retainedReviewActionsAtom } from '../../../../atoms/messageUIState';
-import { buildReviewRows, hasPendingReviewRows, ReviewRow } from '../reviewChangeRows';
+import { buildReviewRows, ReviewRow } from '../reviewChangeRows';
 
 /**
  * The review rows for one run.
@@ -33,10 +33,8 @@ export function useReviewRows(runId: string): ReviewRow[] {
         return ids;
     }, [retainedActions, runId]);
 
-    return useMemo(() => {
-        const rows = buildReviewRows(actions, { liveApprovalActionIds, retainedActionIds });
-        // Retained rows stabilize the card only while work remains. Once the last
-        // pending action settles, remove the entire card in one render.
-        return hasPendingReviewRows(rows) ? rows : [];
-    }, [actions, liveApprovalActionIds, retainedActionIds]);
+    return useMemo(
+        () => buildReviewRows(actions, { liveApprovalActionIds, retainedActionIds }),
+        [actions, liveApprovalActionIds, retainedActionIds],
+    );
 }

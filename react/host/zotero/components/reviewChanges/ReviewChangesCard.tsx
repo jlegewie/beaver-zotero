@@ -1,10 +1,11 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { AgentRun } from '@beaver/agent-core/agents/types';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { getAgentActionsByToolcallAtom } from '../../../../agents/agentActions';
 import {
     annotationPanelStateAtom,
+    clearRetainedReviewActionsForRunAtom,
     defaultAnnotationPanelState,
     retainReviewActionsAtom,
     toggleAnnotationPanelVisibilityAtom,
@@ -14,7 +15,7 @@ import {
     inFlightAgentActionIdsAtom,
     rejectAgentActionsAtom,
 } from '../../agentActionExecution';
-import { getReviewHeaderCopy, ReviewRow } from '../reviewChangeRows';
+import { getReviewHeaderCopy, hasPendingReviewRows, ReviewRow } from '../reviewChangeRows';
 import { ReviewActionRow } from './ReviewActionRow';
 import {
     ArrowDownIcon,
@@ -33,6 +34,8 @@ import Tooltip from '../../../../components/ui/Tooltip';
 
 /** Rows shown before the `Show all (N)` affordance. */
 const MAX_VISIBLE_ROWS = 20;
+const REVIEW_EXIT_DELAY_MS = 300;
+const REVIEW_FADE_MS = 150;
 
 interface ReviewChangesCardProps {
     run: AgentRun;
@@ -48,10 +51,13 @@ export const ReviewChangesCard: React.FC<ReviewChangesCardProps> = ({ run, rows 
     const [isHovered, setIsHovered] = useState(false);
     const [showAllRows, setShowAllRows] = useState(false);
     const [isBulkRunning, setIsBulkRunning] = useState(false);
+    const [isFadingOut, setIsFadingOut] = useState(false);
+    const [isDismissed, setIsDismissed] = useState(false);
 
     const applyAgentActions = useSetAtom(applyAgentActionsAtom);
     const rejectAgentActions = useSetAtom(rejectAgentActionsAtom);
     const retainActions = useSetAtom(retainReviewActionsAtom);
+    const clearRetainedActionsForRun = useSetAtom(clearRetainedReviewActionsForRunAtom);
 
     // The jotai getter this closure carries reads the store when it is called, so
     // the bulk loop sees each tool call's status as of its turn, not of the click.
@@ -71,6 +77,35 @@ export const ReviewChangesCard: React.FC<ReviewChangesCardProps> = ({ run, rows 
     // disable the card for good, since loading a thread does not reset it.
     const inFlightActionIds = useAtomValue(inFlightAgentActionIdsAtom);
     const hasWritingRow = rows.some((row) => row.actions.some((action) => inFlightActionIds.has(action.id)));
+    const hasPendingRows = hasPendingReviewRows(rows);
+
+    useEffect(() => {
+        if (hasPendingRows) {
+            setIsFadingOut(false);
+            setIsDismissed(false);
+            return;
+        }
+
+        // Give the terminal status a brief moment to register, then fade the
+        // complete card as one unit so individual rows never shift the layout.
+        setIsFadingOut(true);
+        const timer = setTimeout(() => {
+            setIsDismissed(true);
+            // Retention is shared by all Beaver React roots. Clearing it makes
+            // dismissal shared too, so a later sidebar/window remount cannot
+            // reconstruct and replay this resolved card.
+            clearRetainedActionsForRun(run.id);
+        }, REVIEW_EXIT_DELAY_MS + REVIEW_FADE_MS);
+        return () => clearTimeout(timer);
+    }, [clearRetainedActionsForRun, hasPendingRows, run.id]);
+
+    const exitStyle: React.CSSProperties = {
+        opacity: isFadingOut ? 0 : 1,
+        transition: isFadingOut
+            ? `opacity ${REVIEW_FADE_MS}ms ease ${REVIEW_EXIT_DELAY_MS}ms`
+            : undefined,
+        pointerEvents: isFadingOut ? 'none' : undefined,
+    };
 
     const handleRowResolved = useCallback(
         (actionIds: string[]) => retainActions({ runId: run.id, actionIds }),
@@ -139,23 +174,24 @@ export const ReviewChangesCard: React.FC<ReviewChangesCardProps> = ({ run, rows 
         [groupId, togglePanelVisibility],
     );
 
-    if (rows.length === 0) return null;
+    if (rows.length === 0 || (isDismissed && !hasPendingRows)) return null;
 
     // A lone row is the whole card: no aggregate header to summarize.
     if (rows.length === 1) {
         return (
-            <ReviewActionRow
-                runId={run.id}
-                row={rows[0]}
-                isBulkRunning={isBulkRunning}
-                onResolved={handleRowResolved}
-                inGroup={false}
-            />
+            <div className="min-w-0" style={exitStyle}>
+                <ReviewActionRow
+                    runId={run.id}
+                    row={rows[0]}
+                    isBulkRunning={isBulkRunning}
+                    onResolved={handleRowResolved}
+                    inGroup={false}
+                />
+            </div>
         );
     }
 
     const { text: headerText, tone } = getReviewHeaderCopy(rows);
-    const hasPendingRows = rows.some((row) => !row.resolved);
     const allApplied = rows.every((row) => row.actions.every((action) => action.status === 'applied'));
     // A row applying on its own must finish before a bulk run starts, or the same
     // tool call would be written to Zotero twice. Disabled rather than unmounted:
@@ -179,7 +215,7 @@ export const ReviewChangesCard: React.FC<ReviewChangesCardProps> = ({ run, rows 
         : undefined;
 
     return (
-        <div className="border-popup rounded-md display-flex flex-col min-w-0">
+        <div className="border-popup rounded-md display-flex flex-col min-w-0" style={exitStyle}>
             <div
                 className={`display-flex flex-row py-15 bg-senary items-start ${isExpanded ? 'border-bottom-quinary' : ''}`}
             >

@@ -28,6 +28,7 @@ import {
     CancelIcon,
     ClockIcon,
     RepeatIcon,
+    UndoIcon,
     Icon,
 } from '../../../../components/icons/icons';
 import Button from '../../../../components/ui/Button';
@@ -213,15 +214,17 @@ export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
                     </Button>
 
                     {(config.showUndo || (isBusy && activeButton === 'undo')) && (
-                        <Button
-                            variant="ghost"
-                            onClick={handleUndo}
-                            loading={isBusy && activeButton === 'undo'}
-                            disabled={isDisabled}
-                            style={GHOST_BUTTON_STYLE}
-                        >
-                            {row.actionType === 'create_note' ? 'Delete' : 'Undo'}
-                        </Button>
+                        <Tooltip content={row.actionType === 'create_note' ? 'Delete' : 'Undo'} showArrow singleLine>
+                            <IconButton
+                                icon={UndoIcon}
+                                variant="ghost-secondary"
+                                iconClassName="font-color-secondary scale-10"
+                                onClick={handleUndo}
+                                loading={isBusy && activeButton === 'undo'}
+                                disabled={isDisabled}
+                                ariaLabel={row.actionType === 'create_note' ? 'Delete' : 'Undo'}
+                            />
+                        </Tooltip>
                     )}
 
                     {config.showRetry && (

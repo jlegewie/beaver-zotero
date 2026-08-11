@@ -272,6 +272,15 @@ export const retainReviewActionsAtom = atom(
     },
 );
 
+/** Remove a completed review snapshot so it cannot replay after a React remount. */
+export const clearRetainedReviewActionsForRunAtom = atom(
+    null,
+    (get, set, runId: string) => {
+        const current = get(retainedReviewActionsAtom);
+        set(retainedReviewActionsAtom, removeEntriesWithPrefix(current, `${runId}:`));
+    },
+);
+
 // ---------------------------------------------------------------------------
 // Note panels (button + visibility)
 // ---------------------------------------------------------------------------
