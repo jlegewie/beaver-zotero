@@ -126,4 +126,20 @@ describe("searchItemsByMetadata", () => {
 
         expect(executedSearches).toHaveLength(1);
     });
+
+    it("treats a null tags value as no tag filter", async () => {
+        // Callers forward `tags` straight from a request payload, where an unset
+        // optional field arrives as an explicit null.
+        await searchItemsByMetadata(4, {
+            collection_keys: ["AAAAAAAA"],
+            tags: null,
+        });
+
+        expect(executedSearches).toHaveLength(1);
+        expect(executedSearches[0].conditions).not.toContainEqual([
+            "tag",
+            "is",
+            expect.anything(),
+        ]);
+    });
 });

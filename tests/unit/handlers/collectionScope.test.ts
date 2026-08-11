@@ -88,7 +88,7 @@ const descendantsByCollectionId = new Map<number, number[]>([
     [20, []],
 ]);
 
-function collection(id: number): Zotero.Collection {
+function collection(id: number) {
     return {
         id,
         getDescendents: vi.fn(() =>
@@ -101,7 +101,7 @@ function collection(id: number): Zotero.Collection {
                 parent: id,
             }))
         ),
-    } as unknown as Zotero.Collection;
+    };
 }
 
 describe('getCollectionScopeItemIds', () => {
@@ -160,7 +160,7 @@ const COLLECTIONS = [
     { id: 11, key: 'AAAAAAAA', name: 'Papers', libraryID: 1 },
     { id: 12, key: 'BBBBBBBB', name: 'Papers', libraryID: 100 },
     { id: 13, key: 'CCCCCCCC', name: 'Private', libraryID: 42 },
-] as unknown as Zotero.Collection[];
+];
 
 const LIBRARY_NAMES = new Map([
     [1, 'My Library'],

@@ -173,6 +173,9 @@ export async function handleItemSearchByMetadataRequest(
     const uniqueItems = new Map<string, Zotero.Item>();
     const makeKey = (libraryId: number, key: string) => `${libraryId}-${key}`;
 
+    let searchedLibraries = 0;
+    let failedLibraries = 0;
+
     // Search each library using searchItemsByMetadata
     for (const libraryId of libraryIds) {
         const collectionKeys = collectionKeysByLibrary.get(libraryId);
@@ -188,11 +191,14 @@ export async function handleItemSearchByMetadataRequest(
             year_min: request.year_min,
             year_max: request.year_max,
             item_type: request.item_type_filter,
-            tags: request.tags_filter,
+            // Unset optional request fields arrive as explicit null, which is not
+            // what an optional search option means.
+            tags: request.tags_filter ?? undefined,
             collection_keys: collectionKeys ? Array.from(collectionKeys) : undefined,
             limit: perLibraryLimit,
         };
 
+        searchedLibraries++;
         try {
             const results = await searchItemsByMetadata(libraryId, options);
             for (const item of results) {
@@ -204,8 +210,29 @@ export async function handleItemSearchByMetadataRequest(
                 }
             }
         } catch (error) {
+            failedLibraries++;
             logger(`handleItemSearchByMetadataRequest: Error searching library ${libraryId}: ${error}`, 1);
         }
+    }
+
+    // A search that failed everywhere is reported as an error rather than an empty
+    // result: "no matches" is an answer the model acts on and stops looking, so a
+    // broken search must not be indistinguishable from an empty library. A partial
+    // failure still returns the libraries that answered — dropping good results
+    // because one library faulted is the worse trade.
+    if (failedLibraries > 0 && failedLibraries === searchedLibraries) {
+        return {
+            type: 'item_search_by_metadata',
+            request_id: request.request_id,
+            items: [],
+            error: 'Searching the Zotero library failed. Please try again.',
+            error_code: 'internal_error',
+            timing: {
+                total_ms: Date.now() - startTime,
+                item_count: 0,
+                attachment_count: 0,
+            },
+        };
     }
 
     // Convert to array

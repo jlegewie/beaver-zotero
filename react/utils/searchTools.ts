@@ -20,8 +20,14 @@ export interface SearchItemsByMetadataOptions {
     year_exact?: number;
     /** Filter by item type (e.g., "journalArticle", "book", "conferencePaper") */
     item_type?: string;
-    /** Tags to filter by (OR logic — item must have at least one) */
-    tags?: string[];
+    /**
+     * Tags to filter by (OR logic — item must have at least one).
+     *
+     * Nullable because callers forward it straight from a request payload, where
+     * an unset optional field arrives as an explicit `null` rather than being
+     * absent.
+     */
+    tags?: string[] | null;
     /** Collection keys to search within (OR logic, includes subcollections) */
     collection_keys?: string[];
     /** Maximum results to return */
@@ -61,10 +67,13 @@ export const searchItemsByMetadata = async (
         year_max,
         year_exact,
         item_type,
-        tags = [],
         collection_keys,
         limit = 50
     } = options;
+
+    // Normalized rather than defaulted in the destructuring above: a default only
+    // fires on `undefined`, and an unset `tags` reaches this function as `null`.
+    const tags = options.tags ?? [];
 
     // Builds a search with every condition except collection and tag scope, so
     // the same query can be run once per collection key and once per tag.

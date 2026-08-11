@@ -126,6 +126,54 @@ describe('handleItemSearchByMetadataRequest library coverage', () => {
         expect(limits).toEqual([0, 0]);
     });
 
+    it('forwards an unset tags_filter as undefined rather than the payload null', async () => {
+        searchItemsByMetadata.mockResolvedValue([]);
+
+        await handleItemSearchByMetadataRequest({
+            type: 'item_search_by_metadata_request',
+            request_id: 'r6',
+            author_query: 'Dean',
+            tags_filter: null,
+            limit: 10,
+        } as any);
+
+        const tags = searchItemsByMetadata.mock.calls.map((c) => c[1].tags);
+        expect(tags).toEqual([undefined, undefined]);
+    });
+
+    it('reports an error when every searched library failed', async () => {
+        searchItemsByMetadata.mockRejectedValue(new Error('boom'));
+
+        const res = await handleItemSearchByMetadataRequest({
+            type: 'item_search_by_metadata_request',
+            request_id: 'r7',
+            author_query: 'Dean',
+            limit: 10,
+        } as any);
+
+        // A failed search must not read as "this library has nothing".
+        expect(res.items).toEqual([]);
+        expect(res.error_code).toBe('internal_error');
+        expect(res.error).toBeTruthy();
+    });
+
+    it('returns the libraries that answered when only some failed', async () => {
+        searchItemsByMetadata.mockImplementation(async (libraryId: number) => {
+            if (libraryId === 3) throw new Error('boom');
+            return hits(1, 2);
+        });
+
+        const res = await handleItemSearchByMetadataRequest({
+            type: 'item_search_by_metadata_request',
+            request_id: 'r8',
+            author_query: 'Dean',
+            limit: 10,
+        } as any);
+
+        expect(res.error).toBeUndefined();
+        expect(res.items.map((i: any) => i.item.library_id)).toEqual([1, 1]);
+    });
+
     it('keeps searching later libraries so their items can fill a later page', async () => {
         searchItemsByMetadata.mockImplementation(async (libraryId: number) =>
             libraryId === 3 ? hits(3, 9) : hits(1, 30)

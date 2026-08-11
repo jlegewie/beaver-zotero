@@ -65,7 +65,7 @@ function makeRequest(overrides: Partial<WSItemSearchByTopicRequest> = {}): WSIte
 /** Options the handler passed to semanticSearchService.search(). */
 const searchOptions = () => searchMock.mock.calls[0]?.[1];
 
-const collection = { id: 7, key: 'COLL7', libraryID: 1 } as unknown as Zotero.Collection;
+const collection = { id: 7, key: 'COLL7', libraryID: 1 };
 
 describe('handleItemSearchByTopicRequest collection scoping', () => {
     beforeEach(() => {
