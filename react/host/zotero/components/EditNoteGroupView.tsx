@@ -7,10 +7,6 @@ import {
     PendingApproval,
     agentActionsByToolcallAtom,
     pendingApprovalsAtom,
-    ackAgentActionsAtom,
-    rejectAgentActionAtom,
-    setAgentActionsToErrorAtom,
-    undoAgentActionAtom,
 } from '../../../agents/agentActions';
 import {
     approveToolGroupForRunAtom,
@@ -32,6 +28,7 @@ import {
 import {
     shouldAutoCollapseResolvedApproval,
     STATUS_CONFIGS,
+    hasFailedUndo,
     type ActionStatus,
 } from './agentActionViewHelpers';
 import {
@@ -52,11 +49,6 @@ import IconButton from '../../../components/ui/IconButton';
 import Tooltip from '../../../components/ui/Tooltip';
 import SplitApplyButton from '../../../components/ui/buttons/SplitApplyButton';
 import { openNoteByKey } from '../../../utils/sourceUtils';
-import {
-    executeEditNoteOrBatchAction,
-    getUserFacingErrorMessage,
-    undoEditNoteOrBatchAction,
-} from '../../../utils/editNoteActions';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { UNRESOLVED_LIBRARY_ID } from '../../../../src/utils/libraryIdentity';
 import { EditNoteRowView } from './EditNoteRowView';
@@ -67,6 +59,12 @@ import {
     showEditNotePreviewForEdits,
 } from './useEditNoteActions';
 import { buildPreviewableEditOperations } from '../../../utils/editNotePreviewOperations';
+import {
+    applyAgentActionsAtom,
+    inFlightAgentActionIdsAtom,
+    rejectAgentActionsAtom,
+    undoAgentActionsAtom,
+} from '../agentActionExecution';
 import {
     deriveEditNoteRows,
     type EditNoteResolvedTarget,
@@ -113,10 +111,10 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
     const setPendingApprovals = useSetAtom(pendingApprovalsAtom);
     const sendApprovalResponse = useSetAtom(sendApprovalResponseAtom);
     const isRunPending = useAtomValue(isWSChatPendingAtom);
-    const ackAgentActions = useSetAtom(ackAgentActionsAtom);
-    const rejectAgentAction = useSetAtom(rejectAgentActionAtom);
-    const setAgentActionsToError = useSetAtom(setAgentActionsToErrorAtom);
-    const undoAgentAction = useSetAtom(undoAgentActionAtom);
+    const rejectAgentActions = useSetAtom(rejectAgentActionsAtom);
+    const applyAgentActions = useSetAtom(applyAgentActionsAtom);
+    const undoAgentActions = useSetAtom(undoAgentActionsAtom);
+    const inFlightActionIds = useAtomValue(inFlightAgentActionIdsAtom);
     const approveToolGroupForRun = useSetAtom(approveToolGroupForRunAtom);
 
     const partStates = useMemo(() => {
@@ -325,10 +323,13 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
                     resolvedTarget.zoteroKey,
                 );
                 if (!item || cancelled) return;
-                setItemTitle({
-                    key: itemTitleKey,
-                    title: item.isNote?.() ? (item.getNoteTitle?.() || '(untitled)') : '(untitled)',
-                });
+                const title = item.isNote?.() ? (item.getNoteTitle?.() || '(untitled)') : '(untitled)';
+                setItemTitle({ key: itemTitleKey, title });
+                // The terminal review rows are keyed by toolcall id. Seed the
+                // same title under those keys so they can reuse this lookup.
+                for (const part of parts) {
+                    setItemTitle({ key: part.tool_call_id, title });
+                }
             } catch {
                 /* best-effort */
             }
@@ -336,13 +337,14 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
         return () => {
             cancelled = true;
         };
-    }, [resolvedTarget, itemTitleKey, noteTitle, setItemTitle]);
+    }, [resolvedTarget, itemTitleKey, noteTitle, parts, setItemTitle]);
 
     const [isLocallyProcessing, setIsLocallyProcessing] = useState(false);
     const [isExternallyProcessing, setIsExternallyProcessing] = useState(false);
     const [clickedButton, setClickedButton] = useState<'approve' | 'reject' | 'undo' | 'retry' | null>(null);
     const [perEditUndoErrors, setPerEditUndoErrors] = useState<Record<string, string>>({});
-    const isProcessing = isLocallyProcessing || isExternallyProcessing;
+    const isWriting = allActions.some((action) => inFlightActionIds.has(action.id));
+    const isProcessing = isLocallyProcessing || isExternallyProcessing || isWriting;
 
     useEffect(() => {
         if (!isExternallyProcessing) return;
@@ -385,22 +387,9 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
             await dismissActiveEditNotePreview();
 
             for (const action of reapplicableActions) {
-                try {
-                    const result = await executeEditNoteOrBatchAction(action);
-                    await ackAgentActions(runId, [{
-                        action_id: action.id,
-                        result_data: result,
-                    }]);
+                const result = await applyAgentActions({ actions: [action], runId });
+                if (result.applied.includes(action.id)) {
                     logger(`EditNoteGroupView: Applied ${action.action_type} action ${action.id}`, 1);
-                } catch (error: any) {
-                    const errorMessage = error?.message || 'Failed to apply edit_note';
-                    const stackTrace = error?.stack || '';
-                    logger(`EditNoteGroupView: Failed to apply ${action.action_type} action ${action.id}: ${errorMessage}\n${stackTrace}`, 1);
-                    setAgentActionsToError([action.id], errorMessage, {
-                        stack_trace: stackTrace,
-                        error_name: error?.name,
-                        error_code: error?.code,
-                    });
                 }
             }
         } finally {
@@ -418,9 +407,8 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
         noteKeyLabel,
         sendApprovalResponse,
         setPendingApprovals,
-        ackAgentActions,
+        applyAgentActions,
         runId,
-        setAgentActionsToError,
     ]);
 
     const handleApproveNoteEditsForRun = useCallback(async () => {
@@ -476,14 +464,9 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
             }
             logger(`EditNoteGroupView: Rejected ${idsToRemove.length} edit_note actions for ${noteKeyLabel}`, 1);
         } else {
-            // Dismiss (or cancel a pending re-render of) the preview before
-            // resolving, mirroring the pending-approvals branch — otherwise a
-            // deferred preview bounce could resurrect a stale preview whose
-            // Apply callback targets the now-rejected action.
-            void dismissActiveEditNotePreview();
-            for (const action of reapplicableActions) {
-                rejectAgentAction(action.id);
-            }
+            // The shared atom checks every action against the in-flight claim
+            // before rejecting and dismisses any active note-edit preview.
+            rejectAgentActions({ actions: reapplicableActions });
             logger(`EditNoteGroupView: Rejected ${reapplicableActions.length} edit_note actions for ${noteKeyLabel}`, 1);
         }
         setTimeout(() => setClickedButton(null), 100);
@@ -495,7 +478,7 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
         sendApprovalResponse,
         setPendingApprovals,
         reapplicableActions,
-        rejectAgentAction,
+        rejectAgentActions,
     ]);
 
     const handleUndoAll = useCallback(async () => {
@@ -518,17 +501,15 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
             await dismissActiveEditNotePreview();
 
             for (const action of [...appliedActions].reverse()) {
-                try {
-                    await undoEditNoteOrBatchAction(action);
-                    undoAgentAction(action.id);
+                const result = await undoAgentActions({ actions: [action] });
+                if (result.undone.includes(action.id)) {
                     logger(`EditNoteGroupView: Undone ${action.action_type} action ${action.id}`, 1);
-                } catch (error: any) {
-                    const errorMessage = getUserFacingErrorMessage(error, 'Failed to undo edit_note');
-                    const stackTrace = error?.stack || '';
-                    logger(`EditNoteGroupView: Failed to undo ${action.action_type} action ${action.id}: ${errorMessage}\n${stackTrace}`, 1);
-                    if (action.toolcall_id) {
-                        newFailures[action.toolcall_id] = errorMessage;
-                    }
+                    continue;
+                }
+                const errorMessage = result.failed[0]?.error ?? result.fatalError ?? 'Failed to undo note edit';
+                logger(`EditNoteGroupView: Failed to undo ${action.action_type} action ${action.id}: ${errorMessage}`, 1);
+                if (action.toolcall_id) {
+                    newFailures[action.toolcall_id] = errorMessage;
                 }
             }
         } finally {
@@ -544,7 +525,7 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
     }, [
         isProcessing,
         allActions,
-        undoAgentAction,
+        undoAgentActions,
         setExpanded,
         expansionKey,
         noteKeyLabel,
@@ -559,29 +540,23 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
             await dismissActiveEditNotePreview();
 
             for (const action of errorActions) {
-                try {
-                    const result = await executeEditNoteOrBatchAction(action);
-                    await ackAgentActions(runId, [{
-                        action_id: action.id,
-                        result_data: result,
-                    }]);
+                if (hasFailedUndo([action])) {
+                    const result = await undoAgentActions({ actions: [action] });
+                    if (result.undone.includes(action.id)) {
+                        logger(`EditNoteGroupView: Retried + undone ${action.action_type} action ${action.id}`, 1);
+                    }
+                    continue;
+                }
+                const result = await applyAgentActions({ actions: [action], runId });
+                if (result.applied.includes(action.id)) {
                     logger(`EditNoteGroupView: Retried + applied ${action.action_type} action ${action.id}`, 1);
-                } catch (error: any) {
-                    const errorMessage = error?.message || 'Failed to retry edit_note';
-                    const stackTrace = error?.stack || '';
-                    logger(`EditNoteGroupView: Retry failed for ${action.action_type} action ${action.id}: ${errorMessage}\n${stackTrace}`, 1);
-                    setAgentActionsToError([action.id], errorMessage, {
-                        stack_trace: stackTrace,
-                        error_name: error?.name,
-                        error_code: error?.code,
-                    });
                 }
             }
         } finally {
             setIsLocallyProcessing(false);
             setClickedButton(null);
         }
-    }, [isProcessing, errorActions, ackAgentActions, runId, setAgentActionsToError]);
+    }, [isProcessing, errorActions, applyAgentActions, undoAgentActions, runId]);
 
     const handleChildUndoErrorChange = useCallback((childToolcallId: string, error: string | null) => {
         setPerEditUndoErrors((prev) => {

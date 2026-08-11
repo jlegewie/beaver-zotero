@@ -23,7 +23,13 @@ import {
     undoCreateAnnotationsAction,
 } from '../../utils/createAnnotationsActions';
 import { executeEditAnnotationsAction, undoEditAnnotationsAction } from '../../utils/editAnnotationsActions';
+import {
+    executeEditNoteOrBatchAction,
+    getUserFacingErrorMessage,
+    undoEditNoteOrBatchAction,
+} from '../../utils/editNoteActions';
 import { confirmOverwriteManualChanges } from './components/agentActionViewHelpers';
+import { dismissActiveEditNotePreview } from './editNotePreviewLifecycle';
 
 /**
  * Apply / undo / reject for stored agent actions, as write atoms so any
@@ -66,6 +72,8 @@ function normalizeActionType(actionType: string): string {
 /** Action types applied by one call whose result is acked as-is. */
 const APPLY_EXECUTORS = new Map<string, (action: AgentAction, runId: string) => Promise<any>>([
     ['edit_metadata', (action) => executeEditMetadataAction(action)],
+    ['edit_note', (action) => executeEditNoteOrBatchAction(action)],
+    ['edit_note_batch', (action) => executeEditNoteOrBatchAction(action)],
     ['create_collection', (action) => executeCreateCollectionAction(action)],
     ['organize_items', (action) => executeOrganizeItemsAction(action)],
     ['manage_tags', (action) => executeManageTagsAction(action)],
@@ -78,6 +86,8 @@ const APPLY_EXECUTORS = new Map<string, (action: AgentAction, runId: string) => 
 
 /** Action types undone by one call with no confirmation step. */
 const UNDO_EXECUTORS = new Map<string, (action: AgentAction) => Promise<void>>([
+    ['edit_note', undoEditNoteOrBatchAction],
+    ['edit_note_batch', undoEditNoteOrBatchAction],
     ['create_collection', undoCreateCollectionAction],
     ['organize_items', undoOrganizeItemsAction],
     ['manage_tags', undoManageTagsAction],
@@ -152,8 +162,8 @@ function releaseActions(get: Getter, set: Setter, actions: AgentAction[]): void 
 }
 
 /**
- * Report an action type this executor cannot handle — note edits and the legacy
- * per-annotation types apply through their own surfaces.
+ * Report an action type this executor cannot handle. The legacy per-annotation
+ * types still apply through their own surfaces.
  *
  * Reported as per-action failures rather than an empty success, so a caller that
  * hands over a wider set of actions than the in-stream card can tell "applied
@@ -206,6 +216,9 @@ async function applyClaimedActions(
     const action = actions[0];
     const actionType = normalizeActionType(action.action_type);
     try {
+        if (actionType === 'edit_note' || actionType === 'edit_note_batch') {
+            await dismissActiveEditNotePreview();
+        }
         if (actionType === 'create_item') {
             const actionsToApply = actions.filter((candidate) => candidate.status !== 'applied');
             if (actionsToApply.length === 0) return { applied, failed };
@@ -256,7 +269,11 @@ async function applyClaimedActions(
         const errorMessage = error?.message || 'Failed to apply action';
         const stackTrace = error?.stack || '';
         logger(`agentActionExecution: Failed to apply actions: ${errorMessage}\nStack trace:\n${stackTrace}`, 1);
-        const errorDetails = { stack_trace: stackTrace, error_name: error?.name };
+        const errorDetails = {
+            stack_trace: stackTrace,
+            error_name: error?.name,
+            ...(error?.code ? { error_code: error.code } : {}),
+        };
         set(setAgentActionsToErrorAtom, actions.map((candidate) => candidate.id), errorMessage, errorDetails);
         return { applied: [], failed: toFailures(actions, errorMessage, errorDetails), fatalError: errorMessage };
     }
@@ -293,6 +310,9 @@ async function undoClaimedActions(set: Setter, actions: AgentAction[]): Promise<
     const action = actions[0];
     const actionType = normalizeActionType(action.action_type);
     try {
+        if (actionType === 'edit_note' || actionType === 'edit_note_batch') {
+            await dismissActiveEditNotePreview();
+        }
         if (actionType === 'create_item') {
             const actionsToUndo = actions.filter((candidate) => candidate.status === 'applied');
             if (actionsToUndo.length === 0) return { undone, failed };
@@ -339,11 +359,17 @@ async function undoClaimedActions(set: Setter, actions: AgentAction[]): Promise<
             logger(`agentActionExecution: Undone ${actionType} action ${action.id}`, 1);
         }
     } catch (error: any) {
-        const errorMessage = error?.message || 'Failed to undo action';
+        const errorMessage = actionType === 'edit_note' || actionType === 'edit_note_batch'
+            ? getUserFacingErrorMessage(error, 'Failed to undo note edit')
+            : error?.message || 'Failed to undo action';
         const stackTrace = error?.stack || '';
         logger(`agentActionExecution: Failed to undo actions: ${errorMessage}\nStack trace:\n${stackTrace}`, 1);
 
-        const errorDetails = { stack_trace: stackTrace, error_name: error?.name };
+        const errorDetails = {
+            stack_trace: stackTrace,
+            error_name: error?.name,
+            ...(error?.code ? { error_code: error.code } : {}),
+        };
         const appliedActions = actions.filter((candidate) => candidate.status === 'applied');
         if (appliedActions.length > 0) {
             set(setAgentActionsToErrorAtom, appliedActions.map((candidate) => candidate.id), errorMessage, errorDetails);
@@ -373,6 +399,9 @@ export const rejectAgentActionsAtom = atom(
             if (inFlight.has(action.id)) {
                 logger(`agentActionExecution: reject skipped for ${action.id}, its write is already running`, 1);
                 continue;
+            }
+            if (action.action_type === 'edit_note' || action.action_type === 'edit_note_batch') {
+                void dismissActiveEditNotePreview();
             }
             set(rejectAgentActionAtom, action.id);
         }

@@ -16,6 +16,7 @@ import {
     DollarCircleIcon,
     GlobalSearchIcon,
     NoteIcon,
+    EditIcon,
 } from '../../../components/icons/icons';
 import { truncateText } from '../../../utils/stringUtils';
 
@@ -133,6 +134,7 @@ export const STATUS_CONFIGS: Record<ActionStatus | 'awaiting', StatusConfig> = {
 /** Tool-specific icon shared by Zotero agent-action review surfaces. */
 export function getAgentActionToolIcon(toolName: string): React.FC<React.SVGProps<SVGSVGElement>> {
     if (toolName === 'edit_metadata' || toolName === 'edit_item') return PropertyEditIcon;
+    if (toolName === 'edit_note' || toolName === 'edit_note_batch') return EditIcon;
     if (toolName === 'create_note') return NoteIcon;
     if (toolName === 'create_highlight_annotations') return HighlighterIcon;
     if (toolName === 'create_note_annotations') return NoteIcon;

@@ -29,13 +29,11 @@ const GATING_ACTION_TYPES = new Set<string>(['confirm_extraction', 'confirm_exte
 const CITATIONS_TOOLCALL_ID = 'citations';
 
 /**
- * Types the shared executor has no apply path for: note edits and inline notes
- * apply through their own surfaces (`EditNoteGroupView`, the notes display), and
- * the per-annotation types are legacy. A row here would offer a dead ✓.
+ * Types the shared executor has no apply path for: inline notes apply through
+ * their own surface, and the per-annotation types are legacy. A row here would
+ * offer a dead ✓.
  */
 const UNAPPLIABLE_ACTION_TYPES = new Set<string>([
-    'edit_note',
-    'edit_note_batch',
     'zotero_note',
     'highlight_annotation',
     'note_annotation',
