@@ -21,10 +21,11 @@ import { searchItemsByMetadata, SearchItemsByMetadataOptions } from '../../../re
 import {
     collectionsFilterError,
     getSearchableLibraryIds,
+    librariesFilterError,
     prepareAttachmentInfoBatchData,
     processAttachmentInfoBatch,
     resolveCollectionsFilter,
-    resolveLibrariesFilterToSearchableIds,
+    resolveLibrariesFilter,
 } from './utils';
 import { TimingAccumulator } from '../../utils/timing';
 
@@ -79,24 +80,32 @@ export async function handleItemSearchByMetadataRequest(
     // Apply libraries_filter if provided, but always intersect with searchable libraries.
     // Accepts portable library refs ("u"/"g<groupID>"), numeric IDs, numeric-ID
     // strings, and library name substrings.
-    const libraryIds: number[] = request.libraries_filter && request.libraries_filter.length > 0
-        ? resolveLibrariesFilterToSearchableIds(request.libraries_filter)
-        : getSearchableLibraryIds();
+    let libraryIds: number[] = getSearchableLibraryIds();
+    if (request.libraries_filter && request.libraries_filter.length > 0) {
+        const resolution = resolveLibrariesFilter(request.libraries_filter);
 
-    // Guard: if libraries_filter was provided but resolved to no searchable libraries,
-    // return empty results instead of potentially widening scope
-    if (request.libraries_filter && request.libraries_filter.length > 0 && libraryIds.length === 0) {
-        logger('handleItemSearchByMetadataRequest: libraries_filter resolved to no searchable libraries', 1);
-        return {
-            type: 'item_search_by_metadata',
-            request_id: request.request_id,
-            items: [],
-            timing: {
-                total_ms: Date.now() - startTime,
-                item_count: 0,
-                attachment_count: 0,
-            },
-        };
+        // A libraries_filter that resolves to nothing must narrow the search to no
+        // results, never widen it to every library — and it is reported as an error
+        // rather than an empty result so a bad library reference is not mistaken for
+        // a library that holds no matching items.
+        const filterError = librariesFilterError(resolution);
+        if (filterError) {
+            logger(`handleItemSearchByMetadataRequest: ${filterError.message}`, 1);
+            return {
+                type: 'item_search_by_metadata',
+                request_id: request.request_id,
+                items: [],
+                error: filterError.message,
+                error_code: filterError.error_code,
+                timing: {
+                    total_ms: Date.now() - startTime,
+                    item_count: 0,
+                    attachment_count: 0,
+                },
+            };
+        }
+
+        libraryIds = resolution.libraryIds;
     }
 
     // Resolve collections_filter to collection keys, bucketed by library.

@@ -23,10 +23,11 @@ import {
     collectionsFilterError,
     getCollectionScopeItemIds,
     getSearchableLibraryIds,
+    librariesFilterError,
     prepareAttachmentInfoBatchData,
     processAttachmentInfoBatch,
     resolveCollectionsFilter,
-    resolveLibrariesFilterToSearchableIds,
+    resolveLibrariesFilter,
 } from '../agentDataProvider/utils';
 import { TimingAccumulator } from '../../utils/timing';
 
@@ -65,9 +66,11 @@ export async function handleItemSearchByTopicRequest(
         };
     }
 
-    // Get searchable library IDs
+    // Get searchable library IDs. An explicit libraries_filter is resolved even
+    // when none are searchable, so the model is told the library is excluded
+    // instead of reading an empty result as "that library holds nothing".
     const searchableLibraryIds = getSearchableLibraryIds();
-    if (searchableLibraryIds.length === 0) {
+    if (searchableLibraryIds.length === 0 && !request.libraries_filter?.length) {
         logger('handleItemSearchByTopicRequest: no searchable libraries available', 1);
         return {
             type: 'item_search_by_topic',
@@ -80,28 +83,36 @@ export async function handleItemSearchByTopicRequest(
             },
         };
     }
-    
+
     // Resolve library IDs from filter, but always intersect with searchable libraries.
     // Accepts portable library refs ("u"/"g<groupID>"), numeric IDs, numeric-ID
     // strings, and library name substrings.
-    const libraryIds: number[] = request.libraries_filter && request.libraries_filter.length > 0
-        ? resolveLibrariesFilterToSearchableIds(request.libraries_filter)
-        : [...searchableLibraryIds];
+    let libraryIds: number[] = [...searchableLibraryIds];
+    if (request.libraries_filter && request.libraries_filter.length > 0) {
+        const resolution = resolveLibrariesFilter(request.libraries_filter);
 
-    // Guard: if libraries_filter was provided but resolved to no searchable libraries,
-    // return empty results instead of widening scope to all libraries
-    if (request.libraries_filter && request.libraries_filter.length > 0 && libraryIds.length === 0) {
-        logger('handleItemSearchByTopicRequest: libraries_filter resolved to no searchable libraries', 1);
-        return {
-            type: 'item_search_by_topic',
-            request_id: request.request_id,
-            items: [],
-            timing: {
-                total_ms: Date.now() - startTime,
-                item_count: 0,
-                attachment_count: 0,
-            },
-        };
+        // A libraries_filter that resolves to nothing must narrow the search to no
+        // results, never widen it to every library — and it is reported as an error
+        // rather than an empty result so a bad library reference is not mistaken for
+        // a library that holds no matching items.
+        const filterError = librariesFilterError(resolution);
+        if (filterError) {
+            logger(`handleItemSearchByTopicRequest: ${filterError.message}`, 1);
+            return {
+                type: 'item_search_by_topic',
+                request_id: request.request_id,
+                items: [],
+                error: filterError.message,
+                error_code: filterError.error_code,
+                timing: {
+                    total_ms: Date.now() - startTime,
+                    item_count: 0,
+                    attachment_count: 0,
+                },
+            };
+        }
+
+        libraryIds = resolution.libraryIds;
     }
 
     // Resolve collections_filter, then turn the scope into an item allowlist

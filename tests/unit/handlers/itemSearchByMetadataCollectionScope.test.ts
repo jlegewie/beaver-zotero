@@ -29,7 +29,8 @@ vi.mock('../../../src/utils/zoteroSerializers', () => ({
 const mocks = vi.hoisted(() => ({
     searchItemsByMetadata: vi.fn(),
     getSearchableLibraryIds: vi.fn(() => [1, 5]),
-    resolveLibrariesFilterToSearchableIds: vi.fn(() => [1, 5]),
+    resolveLibrariesFilter: vi.fn(() => ({ libraryIds: [1, 5], unresolved: [], excluded: [] })),
+    librariesFilterError: vi.fn(() => null),
     resolveCollectionsFilter: vi.fn(),
     collectionsFilterError: vi.fn(() => null),
 }));
@@ -41,7 +42,8 @@ vi.mock('../../../react/utils/searchTools', () => ({
 
 vi.mock('../../../src/services/agentDataProvider/utils', () => ({
     getSearchableLibraryIds: mocks.getSearchableLibraryIds,
-    resolveLibrariesFilterToSearchableIds: mocks.resolveLibrariesFilterToSearchableIds,
+    resolveLibrariesFilter: mocks.resolveLibrariesFilter,
+    librariesFilterError: mocks.librariesFilterError,
     resolveCollectionsFilter: mocks.resolveCollectionsFilter,
     collectionsFilterError: mocks.collectionsFilterError,
     prepareAttachmentInfoBatchData: vi.fn(async () => ({})),

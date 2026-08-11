@@ -554,7 +554,8 @@ export type ItemSearchErrorCode =
     | 'database_error'         // Database/indexing error
     | 'invalid_request'        // Invalid request parameters
     | 'collection_not_found'   // collections_filter matched no collection the search covers
-    | 'library_not_searchable' // collections_filter matched only in a library excluded from Beaver
+    | 'library_not_found'      // libraries_filter matched no library on this device
+    | 'library_not_searchable' // a filter matched only in a library excluded from Beaver
     | 'timeout';               // Operation timed out
 
 /** Response to item metadata search request */

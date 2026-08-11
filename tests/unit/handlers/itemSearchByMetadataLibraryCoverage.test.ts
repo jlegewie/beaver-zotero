@@ -22,9 +22,9 @@ vi.mock('../../../src/utils/zoteroSerializers', () => ({
 const mocks = vi.hoisted(() => ({
     searchItemsByMetadata: vi.fn(),
     getSearchableLibraryIds: vi.fn(() => [3, 1]),
-    resolveLibrariesFilterToSearchableIds: vi.fn(() => [3, 1]),
+    resolveLibrariesFilter: vi.fn(() => ({ libraryIds: [3, 1], unresolved: [], excluded: [] })),
 }));
-const { searchItemsByMetadata, getSearchableLibraryIds, resolveLibrariesFilterToSearchableIds } = mocks;
+const { searchItemsByMetadata, getSearchableLibraryIds, resolveLibrariesFilter } = mocks;
 
 vi.mock('../../../react/utils/searchTools', () => ({
     searchItemsByMetadata: mocks.searchItemsByMetadata,
@@ -32,13 +32,15 @@ vi.mock('../../../react/utils/searchTools', () => ({
 
 vi.mock('../../../src/services/agentDataProvider/utils', () => ({
     getSearchableLibraryIds: mocks.getSearchableLibraryIds,
-    resolveLibrariesFilterToSearchableIds: mocks.resolveLibrariesFilterToSearchableIds,
+    resolveLibrariesFilter: mocks.resolveLibrariesFilter,
+    librariesFilterError: vi.fn(() => null),
     resolveCollectionsFilter: vi.fn(() => ({ collections: [], unresolved: [], outOfScope: [] })),
     collectionsFilterError: vi.fn(() => null),
     prepareAttachmentInfoBatchData: vi.fn(async () => ({})),
     processAttachmentInfoBatch: vi.fn(async () => []),
 }));
 
+import { librariesFilterError } from '../../../src/services/agentDataProvider/utils';
 import { handleItemSearchByMetadataRequest } from '../../../src/services/agentDataProvider/handleItemSearchByMetadataRequest';
 
 /** A regular, non-trashed item the handler will accept. */
@@ -59,7 +61,9 @@ function hits(libraryID: number, count: number) {
 beforeEach(() => {
     vi.clearAllMocks();
     getSearchableLibraryIds.mockReturnValue([3, 1]);
-    resolveLibrariesFilterToSearchableIds.mockReturnValue([3, 1]);
+    resolveLibrariesFilter.mockReturnValue({ libraryIds: [3, 1], unresolved: [], excluded: [] });
+    // clearAllMocks() drops calls but keeps a mockReturnValue set by a prior test.
+    vi.mocked(librariesFilterError).mockReturnValue(null);
     const zotero = (globalThis as any).Zotero;
     zotero.Items = { ...(zotero.Items ?? {}), loadDataTypes: vi.fn(async () => {}) };
 });
@@ -172,6 +176,54 @@ describe('handleItemSearchByMetadataRequest library coverage', () => {
 
         expect(res.error).toBeUndefined();
         expect(res.items.map((i: any) => i.item.library_id)).toEqual([1, 1]);
+    });
+
+    it('reports an unusable libraries_filter as an error rather than an empty result', async () => {
+        // A bad library reference must not read as "those libraries hold nothing".
+        resolveLibrariesFilter.mockReturnValue({
+            libraryIds: [],
+            unresolved: ['g999999'],
+            excluded: [],
+        });
+        vi.mocked(librariesFilterError).mockReturnValue({
+            message: 'Library not found: "g999999".',
+            error_code: 'library_not_found',
+        });
+
+        const res = await handleItemSearchByMetadataRequest({
+            type: 'item_search_by_metadata_request',
+            request_id: 'r9',
+            title_query: 'the',
+            libraries_filter: ['g999999'],
+            limit: 10,
+        } as any);
+
+        expect(res.items).toEqual([]);
+        expect(res.error_code).toBe('library_not_found');
+        expect(res.error).toBe('Library not found: "g999999".');
+        // The search must never run library-wide after an unusable filter.
+        expect(searchItemsByMetadata).not.toHaveBeenCalled();
+    });
+
+    it('searches only the libraries a partially resolvable filter found', async () => {
+        resolveLibrariesFilter.mockReturnValue({
+            libraryIds: [1],
+            unresolved: ['g999999'],
+            excluded: [],
+        });
+        searchItemsByMetadata.mockImplementation(async () => hits(1, 2));
+
+        const res = await handleItemSearchByMetadataRequest({
+            type: 'item_search_by_metadata_request',
+            request_id: 'r10',
+            title_query: 'the',
+            libraries_filter: ['u', 'g999999'],
+            limit: 10,
+        } as any);
+
+        expect(res.error).toBeUndefined();
+        expect(searchItemsByMetadata.mock.calls.map((c) => c[0])).toEqual([1]);
+        expect(res.items).toHaveLength(2);
     });
 
     it('keeps searching later libraries so their items can fill a later page', async () => {

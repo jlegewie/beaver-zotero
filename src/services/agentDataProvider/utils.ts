@@ -32,7 +32,7 @@ import {
 import { activeRunAtom } from '@beaver/agent-core/run-state/atoms';
 import { isAgentSupportedItem } from '../../utils/agentItemSupport';
 import { store } from '../../../react/store';
-import { searchableLibraryIdsAtom } from '../../../react/atoms/profile';
+import { isLibraryAccessReadyAtom, searchableLibraryIdsAtom } from '../../../react/atoms/profile';
 import { TimingAccumulator } from '../../utils/timing';
 import { getAttachmentInfo as resolveAttachmentInfo, type AttachmentInfoOptions } from '../documentExtraction/attachmentInfo';
 export {
@@ -977,52 +977,175 @@ export function isLibrarySearchable(libraryId: number): boolean {
 }
 
 /**
- * Resolves a request-supplied `libraries_filter` array to the local, searchable
- * library IDs it denotes. Each entry may be a numeric ID, a numeric ID string, a
- * portable library_ref ("u" | "g<groupID>"), or a library name (case-insensitive
- * substring match). A `library_ref` that doesn't resolve on this device (e.g. a
- * group the user isn't a member of here) contributes nothing — it never falls
- * back to name matching. The result is always intersected with the searchable
- * libraries and deduplicated.
+ * Whether the library-access snapshot has loaded far enough to explain an access
+ * decision. `getSearchableLibraryIds()` is fail-closed `[]` until the profile and
+ * the local library list are both in the store, so before that every library
+ * reads as non-searchable. Gate any message that *attributes* a denial (e.g. "the
+ * user excluded this library") on this; the fail-closed scope itself needs no
+ * gate.
  */
-export function resolveLibrariesFilterToSearchableIds(filters: Array<string | number>): number[] {
+export function isLibraryAccessReady(): boolean {
+    return store.get(isLibraryAccessReadyAtom);
+}
+
+/** A `libraries_filter` entry that matched a library the user excluded from Beaver. */
+export interface ExcludedFilterLibrary {
+    /** The filter entry that matched it. */
+    input: string;
+    /** Library the match lives in. */
+    libraryId: number;
+}
+
+/** Outcome of resolving a `libraries_filter` against this device's libraries. */
+export interface LibrariesFilterResolution {
+    /** Searchable local library IDs the filter resolved to, deduplicated. */
+    libraryIds: number[];
+    /** Filter entries that matched no library on this device. */
+    unresolved: string[];
+    /** Filter entries that matched only libraries excluded from Beaver. */
+    excluded: ExcludedFilterLibrary[];
+}
+
+/** A `libraries_filter` that left the search with no usable library. */
+export interface LibrariesFilterError {
+    message: string;
+    error_code: 'library_not_found' | 'library_not_searchable';
+}
+
+/**
+ * Resolve a request-supplied `libraries_filter` against this device's libraries.
+ *
+ * Each entry may be a portable library_ref ("u" | "g<groupID>"), a numeric ID, a
+ * numeric ID string, or a library name (case-insensitive substring match). Refs
+ * are the documented form; name matching is kept only as a fallback for models
+ * that pass a name anyway, and never applies to an entry that parses as a ref —
+ * a group ref this device doesn't have is unresolved, not a name to look up.
+ *
+ * An explicit reference (ref or numeric ID) is resolved against every local
+ * library and then classified, so the caller can tell a bad reference apart from
+ * a library the user excluded from Beaver — the same contract as
+ * `validateLibraryAccess`. The name fallback is deliberately narrower: it
+ * searches only the searchable libraries, so a substring can never enumerate an
+ * excluded library or surface its name. A name that matches only excluded
+ * libraries is therefore reported as not found.
+ *
+ * An entry with both searchable and excluded matches counts as resolved: the
+ * searchable matches are what the search can honour.
+ */
+export function resolveLibrariesFilter(filters: Array<string | number>): LibrariesFilterResolution {
     const searchableLibraryIds = getSearchableLibraryIds();
-    const resolvedIds = new Set<number>();
+    const libraryIds = new Set<number>();
+    const unresolved: string[] = [];
+    const excluded: ExcludedFilterLibrary[] = [];
+
+    /** Sort one entry's local matches into the resolution's three buckets. */
+    const classify = (input: string, matchedIds: number[]) => {
+        const searchable = matchedIds.filter((id) => searchableLibraryIds.includes(id));
+        if (searchable.length > 0) {
+            for (const id of searchable) libraryIds.add(id);
+        } else if (matchedIds.length > 0) {
+            excluded.push({ input, libraryId: matchedIds[0] });
+        } else {
+            unresolved.push(input);
+        }
+    };
 
     for (const filter of filters) {
-        if (typeof filter === 'number') {
-            if (searchableLibraryIds.includes(filter)) resolvedIds.add(filter);
-            continue;
-        }
         // Request payloads are external JSON: skip anything that isn't a string
         // or number rather than letting one malformed entry fail the search.
-        if (typeof filter !== 'string') continue;
+        if (typeof filter !== 'number' && typeof filter !== 'string') continue;
+
+        if (typeof filter === 'number') {
+            classify(String(filter), Zotero.Libraries?.get?.(filter) ? [filter] : []);
+            continue;
+        }
 
         const parsedRef = parseLibraryRef(filter);
         if (parsedRef) {
             const libraryID = resolveLibraryRef({ library_ref: filter });
-            if (libraryID != null && searchableLibraryIds.includes(libraryID)) {
-                resolvedIds.add(libraryID);
-            }
+            classify(filter, libraryID != null ? [libraryID] : []);
             continue;
         }
 
-        const numericId = parseInt(filter, 10);
-        if (!isNaN(numericId)) {
-            if (searchableLibraryIds.includes(numericId)) resolvedIds.add(numericId);
+        // Strict numeric string, so "5abc" falls through to the name fallback
+        // instead of being silently read as library 5.
+        if (/^[1-9][0-9]*$/.test(filter)) {
+            const numericId = parseInt(filter, 10);
+            classify(filter, Zotero.Libraries?.get?.(numericId) ? [numericId] : []);
             continue;
         }
 
-        // Name lookup: case-insensitive substring match against searchable libraries
+        // Undocumented name fallback: case-insensitive substring match, scoped to
+        // the searchable libraries. A substring match is far looser than an
+        // explicit reference, so it must never reach a library the user excluded
+        // from Beaver — enumerating one here would leak its name through the
+        // exclusion message.
         const needle = filter.toLowerCase();
-        for (const lib of Zotero.Libraries.getAll()) {
-            if (searchableLibraryIds.includes(lib.libraryID) && lib.name.toLowerCase().includes(needle)) {
-                resolvedIds.add(lib.libraryID);
-            }
-        }
+        const byName = Zotero.Libraries.getAll()
+            .filter((lib) => searchableLibraryIds.includes(lib.libraryID)
+                && lib.name.toLowerCase().includes(needle))
+            .map((lib) => lib.libraryID);
+        classify(filter, byName);
     }
 
-    return Array.from(resolvedIds);
+    return { libraryIds: Array.from(libraryIds), unresolved, excluded };
+}
+
+/**
+ * Error for a `libraries_filter` that resolved to no searchable library.
+ *
+ * Such a filter must narrow the search to no results rather than widen it to
+ * every library, but returning an empty result alone is misleading: the model
+ * reads it as "those libraries hold nothing" and moves on instead of fixing the
+ * reference. Returns null when at least one library resolved — a partially
+ * resolved filter searches the libraries it found.
+ */
+export function librariesFilterError(
+    resolution: LibrariesFilterResolution
+): LibrariesFilterError | null {
+    if (resolution.libraryIds.length > 0) return null;
+
+    // Every classification here depends on the searchable set, which is
+    // fail-closed `[]` until the library-access snapshot loads: until then a valid
+    // reference looks excluded and a valid name looks unknown. Give no reason
+    // rather than a wrong one — the caller's empty library scope still returns no
+    // results, so the search stays fail-closed either way.
+    if (!isLibraryAccessReady()) return null;
+
+    if (resolution.unresolved.length > 0) {
+        const label = resolution.unresolved.length === 1 ? 'Library not found' : 'Libraries not found';
+        const names = resolution.unresolved.map((entry) => `"${entry}"`).join(', ');
+        const available = getSearchableLibraries()
+            .map((lib) => `"${lib.name}"${lib.library_ref ? ` (${lib.library_ref})` : ''}`)
+            .join(', ');
+        const availableNote = available
+            ? ` Available libraries: ${available}.`
+            : '';
+        return {
+            message: `${label}: ${names}. Identify a library by its portable ref ("u" for the personal library, "g<groupID>" for a group).${availableNote}`,
+            error_code: 'library_not_found',
+        };
+    }
+
+    const [entry] = resolution.excluded;
+    if (entry) {
+        return {
+            message: excludedLibraryMessage(entry.libraryId),
+            error_code: 'library_not_searchable',
+        };
+    }
+
+    return null;
+}
+
+/**
+ * Resolves a request-supplied `libraries_filter` array to the local, searchable
+ * library IDs it denotes, discarding why any entry failed to resolve. Prefer
+ * `resolveLibrariesFilter` where an unusable filter has to be reported to the
+ * model rather than silently narrowing the search to nothing.
+ */
+export function resolveLibrariesFilterToSearchableIds(filters: Array<string | number>): number[] {
+    return resolveLibrariesFilter(filters).libraryIds;
 }
 
 /**

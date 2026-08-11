@@ -29,7 +29,8 @@ vi.mock('../../../src/services/agentDataProvider/utils', () => ({
     getSearchableLibraryIds: vi.fn(() => [1]),
     prepareAttachmentInfoBatchData: vi.fn(),
     processAttachmentInfoBatch: vi.fn(),
-    resolveLibrariesFilterToSearchableIds: vi.fn(() => [1]),
+    resolveLibrariesFilter: vi.fn(() => ({ libraryIds: [1], unresolved: [], excluded: [] })),
+    librariesFilterError: vi.fn(() => null),
 }));
 
 vi.mock('../../../src/utils/zoteroUtils', () => ({
