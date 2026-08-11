@@ -12,7 +12,6 @@ import {
 } from '../../../agents/agentActions';
 import CreateItemAgentActionDisplay from './CreateItemAgentActionDisplay';
 import NoteAgentActionDisplay from './NoteAgentActionDisplay';
-import CreateAnnotationsAgentActionDisplay from './CreateAnnotationsAgentActionDisplay';
 import ReviewChangesCard from './reviewChanges/ReviewChangesCard';
 import { useReviewRows } from './reviewChanges/useReviewRows';
 
@@ -85,12 +84,6 @@ export const AgentActionsReview: React.FC<AgentActionsReviewProps> = ({ run }) =
                     actions={noteActions}
                 />
             )}
-            {/* {hasAnnotations && (
-                <CreateAnnotationsAgentActionDisplay
-                    run={run}
-                    actions={annotationActions}
-                />
-            )} */}
             {reviewRows.length > 0 && <ReviewChangesCard run={run} rows={reviewRows} />}
         </div>
     );
