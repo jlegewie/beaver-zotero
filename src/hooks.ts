@@ -608,16 +608,28 @@ async function onMainWindowUnload(win: Window): Promise<void> {
 /**
  * Global AUTHOR_SHEETs, in cascade order.
  *
- * `agent-ui-theme.css` is the shared React layer's own stylesheet
- * (`packages/agent-ui/src/theme/`), copied into `addon/content/styles/` at build
- * time by `scripts/copy-agent-ui-css.mjs`. It is registered *before*
- * `beaver.css` so the Zotero plugin's own rules win at equal specificity — the
- * package supplies the shared baseline, this client adapts it.
+ * The `agent-ui-*` sheets come from `packages/agent-ui/src/theme/` and are copied
+ * into `addon/content/styles/` at build time by `scripts/copy-agent-ui-css.mjs`,
+ * so they are generated, not checked in. `agent-ui-tokens.css` holds Beaver's own
+ * custom properties plus the documented contract of platform tokens Zotero
+ * supplies; `agent-ui-utilities.css` holds the utility layer, scoped
+ * `.beaver-root`.
+ *
+ * Order is the cascade. The shared sheets are registered *before* `beaver.css` so
+ * this client's own rules win at equal specificity — the package supplies the
+ * shared baseline, this client adapts it. Tokens precede the utilities that
+ * consume them.
  *
  * Kept as separate sheets rather than concatenated, so provenance stays readable
- * and the shared file is byte-identical to what the Word add-in imports.
+ * and the shared files are byte-identical to what the Word add-in imports. Keep
+ * this list in step with the `<?xml-stylesheet?>` links in `beaverWindow.xhtml`
+ * and `beaverPreferences.xhtml`.
  */
-const GLOBAL_STYLESHEETS = ["agent-ui-theme.css", "beaver.css"];
+const GLOBAL_STYLESHEETS = [
+    "agent-ui-tokens.css",
+    "agent-ui-utilities.css",
+    "beaver.css",
+];
 
 function loadStylesheet() {
     const ssService = Cc["@mozilla.org/content/style-sheet-service;1"]

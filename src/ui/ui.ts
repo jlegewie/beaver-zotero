@@ -50,7 +50,11 @@ export class BeaverUIFactory {
         function createMountingElement(id: string, location: 'library' | 'reader') {
             const mountPoint = win.document.createXULElement("vbox");
             mountPoint.setAttribute("id", id);
-            mountPoint.setAttribute("class", "display-flex flex-1 h-full min-w-0");
+            // `beaver-root` is the scoping root for @beaver/agent-ui's shared
+            // sheets: they select `.beaver-root .foo`, so the class has to sit
+            // on exactly the elements that carry a `beaver-pane-*` id or the
+            // utility layer stops matching inside this pane.
+            mountPoint.setAttribute("class", "beaver-root display-flex flex-1 h-full min-w-0");
             mountPoint.setAttribute("style", "min-width: 0px; display: none;");
             
             // Create a div inside the vbox as mount point for the React component
@@ -140,6 +144,8 @@ export class BeaverUIFactory {
             if (!floatingPopupRoot) {
                 floatingPopupRoot = win.document.createElement("div");
                 floatingPopupRoot.id = "beaver-pane-floating-popup";
+                // Scoping root for the shared agent-ui sheets, as above.
+                floatingPopupRoot.className = "beaver-root";
                 win.document.documentElement.appendChild(floatingPopupRoot);
                 ztoolkit.log("registerChatPanel: created floating popup root element");
 
