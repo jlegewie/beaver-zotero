@@ -16,7 +16,8 @@
  */
 
 import type { Action, ActionCategory, ActionClient, ActionTargetType } from '@beaver/agent-core/types/actions';
-import { CURRENT_ACTION_CLIENT } from '@beaver/agent-core/types/actions';
+import { getActionClient } from '@beaver/agent-core/types/actions';
+import { ZOTERO_PLUGIN_CLIENT_TYPE } from '@beaver/agent-core/protocol/agentProtocol';
 
 // ---------------------------------------------------------------------------
 // Format constants
@@ -88,7 +89,7 @@ export const toShareableActionFile = (action: Action): ShareableActionFile => {
         text: action.text,
         targets: [...action.targets],
         // Stamp the exporting client so the file declares its compatibility.
-        client: action.client ? [...action.client] : [CURRENT_ACTION_CLIENT],
+        client: action.client ? [...action.client] : [getActionClient()],
     };
     if (action.description !== undefined) payload.description = action.description;
     if (action.name !== undefined) payload.name = action.name;
@@ -119,6 +120,15 @@ const VALID_TARGET_TYPES: ReadonlySet<string> = new Set([
 const VALID_CATEGORIES: ReadonlySet<string> = new Set([
     'research', 'write', 'organize', 'annotate',
 ]);
+
+/**
+ * Client ids written by builds that predate the share format using the same
+ * spelling as the connection handshake's `client_type`. Mapped on read so files
+ * exported by those builds still import.
+ */
+const LEGACY_CLIENT_IDS: Readonly<Record<string, ActionClient>> = {
+    zotero: ZOTERO_PLUGIN_CLIENT_TYPE,
+};
 
 const isNonEmptyString = (v: unknown): v is string =>
     typeof v === 'string' && v.trim().length > 0;
@@ -162,6 +172,7 @@ const parseV1: VersionParser = (envelope, currentClient) => {
     // non-empty list of client strings that includes the importing client.
     // Unknown client values (for clients this build doesn't know yet) are
     // tolerated so multi-client shares still import wherever they list us.
+    let clients: string[] | undefined;
     if (a.client !== undefined) {
         if (
             !Array.isArray(a.client) ||
@@ -170,7 +181,8 @@ const parseV1: VersionParser = (envelope, currentClient) => {
         ) {
             return { ok: false, error: 'The action has a malformed client list.' };
         }
-        if (!(a.client as string[]).includes(currentClient)) {
+        clients = (a.client as string[]).map(c => LEGACY_CLIENT_IDS[c] ?? c);
+        if (!clients.includes(currentClient)) {
             return { ok: false, error: `This action is not compatible with the ${currentClient} client.` };
         }
     }
@@ -197,7 +209,7 @@ const parseV1: VersionParser = (envelope, currentClient) => {
     if (a.description !== undefined) action.description = a.description as string;
     if (a.name !== undefined) action.name = a.name as string;
     if (a.id_model !== undefined) action.id_model = a.id_model as string;
-    if (a.client !== undefined) action.client = a.client as ActionClient[];
+    if (clients !== undefined) action.client = clients as ActionClient[];
     if (a.category !== undefined) action.category = a.category as ActionCategory;
     if (a.argumentHint !== undefined) action.argumentHint = a.argumentHint as string;
 
@@ -223,7 +235,7 @@ const MAX_SUPPORTED_VERSION = Math.max(...Object.keys(VERSION_PARSERS).map(Numbe
  */
 export const parseShareableAction = (
     json: string,
-    currentClient: ActionClient = CURRENT_ACTION_CLIENT,
+    currentClient: ActionClient = getActionClient(),
 ): ParseShareableActionResult => {
     let parsed: unknown;
     try {

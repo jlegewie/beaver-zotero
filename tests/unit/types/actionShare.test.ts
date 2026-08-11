@@ -130,19 +130,29 @@ describe('actionShare — schema', () => {
     it('stamps the current client on export and accepts it on import', () => {
         const minimal: Action = { id: 'x', title: 'T', text: 'P', targets: ['global'] };
         const file = toShareableActionFile(minimal);
-        expect(file.action.client).toEqual(['zotero']);
+        expect(file.action.client).toEqual(['zotero-plugin']);
         const r = parseShareableAction(serializeAction(minimal));
         expect(r.ok).toBe(true);
-        if (r.ok) expect(r.action.client).toEqual(['zotero']);
+        if (r.ok) expect(r.action.client).toEqual(['zotero-plugin']);
     });
 
     it('accepts an action whose client list includes the current client', () => {
         const r = parseShareableAction(JSON.stringify({
             kind: SHAREABLE_ACTION_KIND,
             version: 1,
+            action: { title: 'T', text: 'P', targets: ['global'], client: ['zotero-plugin'] },
+        }));
+        expect(r.ok).toBe(true);
+    });
+
+    it('accepts the legacy "zotero" client id and normalizes it', () => {
+        const r = parseShareableAction(JSON.stringify({
+            kind: SHAREABLE_ACTION_KIND,
+            version: 1,
             action: { title: 'T', text: 'P', targets: ['global'], client: ['zotero'] },
         }));
         expect(r.ok).toBe(true);
+        if (r.ok) expect(r.action.client).toEqual(['zotero-plugin']);
     });
 
     it('rejects an action whose client list excludes the current client', () => {
@@ -176,10 +186,11 @@ describe('actionShare — schema', () => {
         const json = JSON.stringify({
             kind: SHAREABLE_ACTION_KIND,
             version: 1,
-            action: { title: 'T', text: 'P', targets: ['global'], client: ['zotero'] },
+            action: { title: 'T', text: 'P', targets: ['global'], client: ['zotero-plugin'] },
         });
-        // A hypothetical other client is not in the list → rejected.
-        expect(parseShareableAction(json, 'zotero').ok).toBe(true);
+        expect(parseShareableAction(json, 'zotero-plugin').ok).toBe(true);
+        // Another client is not in the list → rejected.
+        expect(parseShareableAction(json, 'word-addin').ok).toBe(false);
     });
 
     it('preserves an empty-string id (importer regenerates as needed)', () => {

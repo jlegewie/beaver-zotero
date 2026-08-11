@@ -19,6 +19,8 @@ import { cancelAllActiveTasks } from "./utils/backgroundTasks";
 import { initContextMenus, cleanupContextMenus } from "./modules/zoteroContextMenu";
 import { initReaderIntegration, cleanupReaderIntegration } from "./modules/readerIntegration";
 import { initReaderToolbarMenu, cleanupReaderToolbarMenu } from "./modules/readerToolbarMenu";
+import { setActionClient } from "@beaver/agent-core/types/actions";
+import { ZOTERO_PLUGIN_CLIENT_TYPE } from "@beaver/agent-core/protocol/agentProtocol";
 
 /** Timeout for individual async shutdown operations to prevent hangs. */
 const SHUTDOWN_TIMEOUT_MS = 3000;
@@ -203,6 +205,11 @@ async function onStartup() {
     // Idempotent. Must run before any PDF op. The webpack bundle calls the
     // same adapter from `react/index.tsx` for its own copy of the config.
     configurePDFForBeaver();
+
+    // -------- Declare the client actions are gated on --------
+    // Each bundle holds its own copy of this seam, so the webpack bundle
+    // registers the same value from `react/index.tsx`.
+    setActionClient(ZOTERO_PLUGIN_CLIENT_TYPE);
 
     // -------- Store plugin version --------
     addon.pluginVersion = version;

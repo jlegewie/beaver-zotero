@@ -134,6 +134,9 @@ export const TOOL_BASE_LABELS: Record<string, string> = {
     view_page_images: 'Viewing pages',
     view: 'Viewing',
 
+    // Word document tools (served by the Word add-in)
+    read_word_document: 'Reading document',
+
     // Extract tool
     extract: 'Extracting',
 
