@@ -163,9 +163,12 @@ export async function handleItemSearchByMetadataRequest(
     //
     // The cap bounds pagination depth, because every fetched row costs data loading and
     // each page re-fetches the whole prefix. It deliberately ends pagination rather than
-    // scaling with an arbitrary offset: a page straddling the cap comes back short and
-    // anything beyond it empty, which the model reads as the end of the results. Raising
-    // it trades a rarely reached depth for a much slower worst case.
+    // scaling with an arbitrary offset: with a single library, a page straddling the cap
+    // comes back short and anything beyond it empty, which the model reads as the end of
+    // the results. With several libraries, offsets past the cap keep paging through the
+    // later libraries and a library with more than `MAX_ROWS_PER_LIBRARY` matches loses
+    // its tail — reaching that needs 40+ pages at the largest allowed limit. Raising the
+    // cap trades a rarely reached depth for a much slower worst case.
     const MAX_ROWS_PER_LIBRARY = 1000;
     const perLibraryLimit = request.limit > 0
         ? Math.min((offset + request.limit) * 2, MAX_ROWS_PER_LIBRARY)
@@ -226,16 +229,9 @@ export async function handleItemSearchByMetadataRequest(
     // Timing accumulator for serialization breakdown
     const ta = new TimingAccumulator();
 
-    // Load item data needed for serialization (searchItemsByMetadata only loads itemData/creators/childItems)
-    if (items.length > 0) {
-        await ta.track('data_loading_ms', () =>
-            Zotero.Items.loadDataTypes(items, ["primaryData", "tags", "collections", "relations", "childItems"])
-        );
-    }
-
     // Record search completion time
     searchEndTime = Date.now();
-    
+
     logger('handleItemSearchByMetadataRequest: Final items', {
         libraryIds,
         items: items.length,
@@ -246,12 +242,18 @@ export async function handleItemSearchByMetadataRequest(
     const candidates = items.slice(offset).filter(item => agentItemFilter(item));
     const BATCH_SIZE = Math.min(targetLimit, 20);
 
-    // Batch-fetch best attachments and sync dates for all candidate items
-    const batchAttachmentData = await prepareAttachmentInfoBatchData(candidates, ta);
-
     const resultItems: ItemSearchFrontendResultItem[] = [];
     for (let batchStart = 0; batchStart < candidates.length && resultItems.length < targetLimit; batchStart += BATCH_SIZE) {
         const batch = candidates.slice(batchStart, batchStart + BATCH_SIZE);
+
+        // Prepared per batch, so the cost tracks what the page actually
+        // serializes: the search over-fetches to survive deduplication and the
+        // page slice, and only the rows reached here are ever serialized.
+        // The search itself loads only the fields deduplication compares.
+        await ta.track('data_loading_ms', () =>
+            Zotero.Items.loadDataTypes(batch, ["primaryData", "tags", "collections", "relations", "childItems"])
+        );
+        const batchAttachmentData = await prepareAttachmentInfoBatchData(batch, ta);
 
         const serialized = await Promise.all(
             batch.map(async (item): Promise<ItemSearchFrontendResultItem | null> => {

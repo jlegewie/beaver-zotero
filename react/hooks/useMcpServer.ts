@@ -211,7 +211,9 @@ const SEARCH_BY_TOPIC_TOOL = {
             collections_filter: {
                 type: 'array',
                 items: { type: 'string' },
-                description: 'Collection names or keys to filter results (OR logic).',
+                description:
+                    'Collection names or keys to filter results (OR logic). ' +
+                    'Each collection includes its subcollections.',
             },
             limit: {
                 type: 'integer',
@@ -280,7 +282,9 @@ const SEARCH_BY_METADATA_TOOL = {
             collections_filter: {
                 type: 'array',
                 items: { type: 'string' },
-                description: 'Collection names or keys to filter results (OR logic).',
+                description:
+                    'Collection names or keys to filter results (OR logic). ' +
+                    'Each collection includes its subcollections.',
             },
             limit: {
                 type: 'integer',

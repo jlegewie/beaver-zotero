@@ -1846,6 +1846,13 @@ export const CLIENT_FEATURES = {
      * rather than after the backend has finished asking us about its citations.
      */
     CITATIONS_EVENT: 'citations_event',
+    /**
+     * `collections_filter` on the search tools matches items in the named
+     * collections *and their subcollections*. Older clients matched direct
+     * membership only, so the backend warns the model about that when this
+     * feature is absent.
+     */
+    RECURSIVE_COLLECTIONS_FILTER: 'recursive_collections_filter',
 } as const;
 
 /** Client type identifier for the Zotero plugin. */

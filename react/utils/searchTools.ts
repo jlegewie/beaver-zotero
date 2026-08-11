@@ -37,7 +37,8 @@ export interface SearchItemsByMetadataOptions {
  *
  * @param libraryID - The library to search in
  * @param options - Search parameters
- * @returns Array of matching items with full data loaded
+ * @returns Array of matching items with `itemData` and `creators` loaded; a
+ *          caller needing child items, tags, or collections loads them itself
  * 
  * @example
  * // Find articles by Smith published after 2020 with "climate" in title
@@ -148,14 +149,12 @@ export const searchItemsByMetadata = async (
     // addCondition throws on those names in Zotero 7, which is still supported.
     const itemIDSet = new Set<number>();
     if (collection_keys && collection_keys.length > 0) {
-        for (const collectionKey of collection_keys) {
-            await runScopedSearch((search) => {
-                search.addCondition('collection', 'is', collectionKey);
-                // Collection scope always includes subcollections, matching the other
-                // library-browsing tools.
-                search.addCondition('recursive', 'true');
-            }, itemIDSet);
-        }
+        await Promise.all(collection_keys.map(collectionKey => runScopedSearch((search) => {
+            search.addCondition('collection', 'is', collectionKey);
+            // Collection scope always includes subcollections, matching the other
+            // library-browsing tools.
+            search.addCondition('recursive', 'true');
+        }, itemIDSet)));
     } else {
         await runScopedSearch(() => {}, itemIDSet);
     }
@@ -175,8 +174,10 @@ export const searchItemsByMetadata = async (
     // Load items with full data
     const items: Zotero.Item[] = await Zotero.Items.getAsync(limitedIDs);
     
+    // Only what a caller needs to compare results (fields + creators). Child
+    // items are left to the caller, which loads them for the rows it serializes.
     if (items.length > 0) {
-        await Zotero.Items.loadDataTypes(items, ["itemData", "creators", "childItems"]);
+        await Zotero.Items.loadDataTypes(items, ["itemData", "creators"]);
     }
 
     return items;

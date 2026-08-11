@@ -48,6 +48,9 @@ const VERSION_GATES: { feature: string; minVersion: string; op: Op }[] = [
 // citations_event is declaration-only because it gates an outbound frame the
 // client must have a handler for — a version cannot vouch for that, and the
 // backend keeps embedding citations in run_complete without it.
+// recursive_collections_filter is declaration-only because it describes what
+// the client's two item-search handlers do with collections_filter; without it
+// the backend warns the model that only direct membership was matched.
 const DECLARATION_ONLY_FEATURES = [
     'external_files',
     'ask_user_question',
@@ -57,6 +60,7 @@ const DECLARATION_ONLY_FEATURES = [
     'edit_note_batch',
     'edit_annotations',
     'citations_event',
+    'recursive_collections_filter',
 ];
 
 // The full backend feature vocabulary (ALL_FEATURES in version_gates.py): every
