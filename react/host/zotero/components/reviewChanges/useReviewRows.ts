@@ -1,7 +1,6 @@
 import { useMemo } from 'react';
 import { useAtomValue } from 'jotai';
 import { getAgentActionsByRunAtom, pendingApprovalsAtom } from '../../../../agents/agentActions';
-import { resolvedReviewToolcallsAtom } from '../../../../atoms/messageUIState';
 import { buildReviewRows, ReviewRow } from '../reviewChangeRows';
 
 /**
@@ -14,7 +13,6 @@ import { buildReviewRows, ReviewRow } from '../reviewChangeRows';
 export function useReviewRows(runId: string): ReviewRow[] {
     const getAgentActionsByRun = useAtomValue(getAgentActionsByRunAtom);
     const pendingApprovals = useAtomValue(pendingApprovalsAtom);
-    const resolvedToolcalls = useAtomValue(resolvedReviewToolcallsAtom);
 
     const actions = useMemo(() => getAgentActionsByRun(runId), [getAgentActionsByRun, runId]);
 
@@ -24,17 +22,8 @@ export function useReviewRows(runId: string): ReviewRow[] {
         [pendingApprovals],
     );
 
-    const resolvedToolcallIds = useMemo(() => {
-        const prefix = `${runId}:`;
-        const ids = new Set<string>();
-        for (const [key, isResolved] of Object.entries(resolvedToolcalls)) {
-            if (isResolved && key.startsWith(prefix)) ids.add(key.slice(prefix.length));
-        }
-        return ids;
-    }, [resolvedToolcalls, runId]);
-
     return useMemo(
-        () => buildReviewRows(actions, { liveApprovalActionIds, resolvedToolcallIds }),
-        [actions, liveApprovalActionIds, resolvedToolcallIds],
+        () => buildReviewRows(actions, { liveApprovalActionIds }),
+        [actions, liveApprovalActionIds],
     );
 }

@@ -91,43 +91,18 @@ describe('buildReviewRows exclusions', () => {
 
         expect(rows.map((row) => row.toolcallId)).toEqual(['call-5']);
     });
-});
 
-describe('buildReviewRows sticky resolution', () => {
-    it('keeps a resolved tool call visible and reports it resolved', () => {
+    it('keeps only pending actions within a mixed-status tool call', () => {
+        const pending = action({ toolcall_id: 'call-1' });
         const rows = buildReviewRows([
+            action({ toolcall_id: 'call-1', status: 'error' }),
             action({ toolcall_id: 'call-1', status: 'applied' }),
-            action({ toolcall_id: 'call-2', status: 'rejected' }),
-        ], {
-            resolvedToolcallIds: new Set(['call-1', 'call-2']),
-        });
-
-        expect(rows.map((row) => row.toolcallId)).toEqual(['call-1', 'call-2']);
-        expect(rows.every((row) => row.resolved)).toBe(true);
-    });
-
-    it('reports a partly applied tool call as unresolved', () => {
-        const rows = buildReviewRows([
-            action({ toolcall_id: 'call-1', status: 'applied' }),
-            action({ toolcall_id: 'call-1', status: 'pending' }),
-        ], {
-            resolvedToolcallIds: new Set(['call-1']),
-        });
+            action({ toolcall_id: 'call-1', status: 'rejected' }),
+            pending,
+        ]);
 
         expect(rows).toHaveLength(1);
-        expect(rows[0].actions).toHaveLength(2);
-        expect(rows[0].resolved).toBe(false);
-    });
-
-    it('still drops a live approval whose tool call is resolved', () => {
-        const live = action({ toolcall_id: 'call-1', status: 'applied' });
-
-        const rows = buildReviewRows([live], {
-            liveApprovalActionIds: new Set([live.id]),
-            resolvedToolcallIds: new Set(['call-1']),
-        });
-
-        expect(rows).toEqual([]);
+        expect(rows[0].actions).toEqual([pending]);
     });
 });
 
@@ -208,64 +183,23 @@ describe('getReviewHeaderCopy', () => {
         expect(rows).toHaveLength(1);
         expect(getReviewHeaderCopy(rows)).toEqual({
             text: '5 changes need your review',
-            tone: 'review',
         });
     });
 
     it('uses the singular for one pending action', () => {
         expect(getReviewHeaderCopy(buildReviewRows([action()]))).toEqual({
             text: '1 change needs your review',
-            tone: 'review',
         });
     });
 
-    it('stays in review while anything is pending', () => {
+    it('counts only pending actions', () => {
         const rows = buildReviewRows([
             action({ toolcall_id: 'call-1', status: 'applied' }),
             action({ toolcall_id: 'call-2' }),
-        ], {
-            resolvedToolcallIds: new Set(['call-1']),
-        });
+        ]);
 
         expect(getReviewHeaderCopy(rows)).toEqual({
-            text: '2 changes need your review',
-            tone: 'review',
-        });
-    });
-
-    it('reports applied when every counted action was applied', () => {
-        const rows = buildReviewRows([
-            action({ toolcall_id: 'call-1', status: 'applied' }),
-            action({ toolcall_id: 'call-2', status: 'applied' }),
-        ], {
-            resolvedToolcallIds: new Set(['call-1', 'call-2']),
-        });
-
-        expect(getReviewHeaderCopy(rows)).toEqual({
-            text: '2 changes applied',
-            tone: 'resolved',
-        });
-        expect(getReviewHeaderCopy([rows[0]])).toEqual({
-            text: '1 change applied',
-            tone: 'resolved',
-        });
-    });
-
-    it('reports reviewed when a resolved action was not applied', () => {
-        const rows = buildReviewRows([
-            action({ toolcall_id: 'call-1', status: 'applied' }),
-            action({ toolcall_id: 'call-2', status: 'rejected' }),
-        ], {
-            resolvedToolcallIds: new Set(['call-1', 'call-2']),
-        });
-
-        expect(getReviewHeaderCopy(rows)).toEqual({
-            text: '2 changes reviewed',
-            tone: 'resolved',
-        });
-        expect(getReviewHeaderCopy([rows[1]])).toEqual({
-            text: '1 change reviewed',
-            tone: 'resolved',
+            text: '1 change needs your review',
         });
     });
 
@@ -276,10 +210,4 @@ describe('getReviewHeaderCopy', () => {
         expect(getReviewHeaderCopy([...rows, rows[0]]).text).toBe('2 changes need your review');
     });
 
-    it('treats no rows as resolved', () => {
-        expect(getReviewHeaderCopy([])).toEqual({
-            text: '0 changes applied',
-            tone: 'resolved',
-        });
-    });
 });

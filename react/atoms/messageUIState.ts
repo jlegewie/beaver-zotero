@@ -252,30 +252,6 @@ export const setAgentActionItemTitleAtom = atom(
 );
 
 // ---------------------------------------------------------------------------
-// Review card resolutions
-// ---------------------------------------------------------------------------
-
-/**
- * Tool calls the user resolved from the review card, keyed `runId:toolcallId`.
- *
- * `buildReviewRows` keeps a non-pending row alive only while its tool call id is
- * in here, so a row does not vanish out from under the click that resolved it.
- * Deliberately not persisted: on reload nothing is pending and the card is gone.
- */
-export const resolvedReviewToolcallsAtom = atom<BooleanMap>({});
-
-/**
- * Mark a tool call as resolved from the review card.
- */
-export const markReviewToolcallResolvedAtom = atom(
-    null,
-    (get, set, { runId, toolcallId }: { runId: string; toolcallId: string }) => {
-        const current = get(resolvedReviewToolcallsAtom);
-        set(resolvedReviewToolcallsAtom, { ...current, [`${runId}:${toolcallId}`]: true });
-    }
-);
-
-// ---------------------------------------------------------------------------
 // Note panels (button + visibility)
 // ---------------------------------------------------------------------------
 
@@ -374,7 +350,6 @@ export const resetMessageUIStateAtom = atom(
         set(annotationBusyAtom, {});
         set(annotationAttachmentTitlesAtom, {});
         set(agentActionItemTitlesAtom, {});
-        set(resolvedReviewToolcallsAtom, {});
         set(notePanelStateAtom, {});
     }
 );

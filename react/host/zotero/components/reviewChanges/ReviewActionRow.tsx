@@ -39,8 +39,6 @@ interface ReviewActionRowProps {
     row: ReviewRow;
     /** True while any card-level bulk operation runs — row buttons are disabled. */
     isBulkRunning?: boolean;
-    /** Pins this row visible; called before its own buttons dispatch anything. */
-    onResolved?: (toolcallId: string) => void;
     /** True when rendered inside the aggregate card; the parent draws the border/background. */
     inGroup?: boolean;
 }
@@ -57,7 +55,6 @@ export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
     runId,
     row,
     isBulkRunning = false,
-    onResolved,
     inGroup = false,
 }) => {
     const [isProcessing, setIsProcessing] = useState(false);
@@ -106,44 +103,33 @@ export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
             : (getCreateAnnotationsDisplayStatus(firstAction) ?? firstAction.status);
     const config = STATUS_CONFIGS[status];
 
-    // Pin before dispatching, never after: an apply flips the action's status
-    // synchronously and only then awaits the backend ack, so a row pinned
-    // afterwards would drop out of the card for the length of that round trip.
     const handleApply = useCallback(async () => {
         if (isDisabled) return;
 
         setIsUndoError(false);
         setIsProcessing(true);
         setClickedButton('approve');
-        onResolved?.(row.toolcallId);
         try {
             await applyAgentActions({ actions: row.actions, runId });
         } finally {
             setIsProcessing(false);
             setClickedButton(null);
         }
-    }, [isDisabled, row, runId, applyAgentActions, onResolved]);
+    }, [isDisabled, row, runId, applyAgentActions]);
 
     const handleReject = useCallback(() => {
         if (isDisabled) return;
 
-        // A pinned row carries its non-pending actions too; rejecting an applied one
-        // would clear its result data and orphan what it created.
-        const actions = row.actions.filter((action) => action.status === 'pending');
-        if (actions.length === 0) return;
-
         setClickedButton('reject');
-        onResolved?.(row.toolcallId);
-        rejectAgentActions({ actions });
+        rejectAgentActions({ actions: row.actions });
         setTimeout(() => setClickedButton(null), 100);
-    }, [isDisabled, row, rejectAgentActions, onResolved]);
+    }, [isDisabled, row, rejectAgentActions]);
 
     const handleUndo = useCallback(async () => {
         if (isDisabled) return;
 
         setIsProcessing(true);
         setClickedButton('undo');
-        onResolved?.(row.toolcallId);
         try {
             const result = await undoAgentActions({ actions: row.actions });
             if (result.fatalError) setIsUndoError(true);
@@ -151,7 +137,7 @@ export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
             setIsProcessing(false);
             setClickedButton(null);
         }
-    }, [isDisabled, row, undoAgentActions, onResolved]);
+    }, [isDisabled, row, undoAgentActions]);
 
     const handleRetry = useCallback(async () => {
         if (isUndoRetry) {
