@@ -59,6 +59,7 @@ import {
     showEditNotePreviewForEdits,
 } from './useEditNoteActions';
 import { buildPreviewableEditOperations } from '../../../utils/editNotePreviewOperations';
+import { getEditNoteRetryOrder } from './editNoteRetryOrder';
 import {
     applyAgentActionsAtom,
     inFlightAgentActionIdsAtom,
@@ -539,14 +540,37 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
         try {
             await dismissActiveEditNotePreview();
 
-            for (const action of errorActions) {
-                if (hasFailedUndo([action])) {
-                    const result = await undoAgentActions({ actions: [action] });
-                    if (result.undone.includes(action.id)) {
-                        logger(`EditNoteGroupView: Retried + undone ${action.action_type} action ${action.id}`, 1);
+            // Undo retries have the same dependency ordering as Undo All:
+            // newest edit first, so an older edit is never reverted through a
+            // newer edit that is still applied. Apply retries retain their
+            // original oldest-to-newest order.
+            const { undoActions, applyActions } = getEditNoteRetryOrder(errorActions);
+
+            for (const action of undoActions) {
+                const result = await undoAgentActions({ actions: [action] });
+                const toolcallId = action.toolcall_id;
+                if (result.undone.includes(action.id)) {
+                    if (toolcallId) {
+                        setPerEditUndoErrors((prev) => {
+                            if (!(toolcallId in prev)) return prev;
+                            const next = { ...prev };
+                            delete next[toolcallId];
+                            return next;
+                        });
                     }
+                    logger(`EditNoteGroupView: Retried + undone ${action.action_type} action ${action.id}`, 1);
                     continue;
                 }
+
+                const errorMessage = result.failed[0]?.error ?? result.fatalError ?? 'Failed to undo note edit';
+                if (toolcallId) {
+                    setPerEditUndoErrors((prev) => ({ ...prev, [toolcallId]: errorMessage }));
+                }
+                setExpanded({ key: expansionKey, expanded: true });
+                logger(`EditNoteGroupView: Retry undo failed for ${action.action_type} action ${action.id}: ${errorMessage}`, 1);
+            }
+
+            for (const action of applyActions) {
                 const result = await applyAgentActions({ actions: [action], runId });
                 if (result.applied.includes(action.id)) {
                     logger(`EditNoteGroupView: Retried + applied ${action.action_type} action ${action.id}`, 1);
@@ -556,7 +580,7 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
             setIsLocallyProcessing(false);
             setClickedButton(null);
         }
-    }, [isProcessing, errorActions, applyAgentActions, undoAgentActions, runId]);
+    }, [isProcessing, errorActions, applyAgentActions, undoAgentActions, runId, setExpanded, expansionKey]);
 
     const handleChildUndoErrorChange = useCallback((childToolcallId: string, error: string | null) => {
         setPerEditUndoErrors((prev) => {
@@ -578,15 +602,15 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
         setPerEditUndoErrors((prev) => {
             const keys = Object.keys(prev);
             if (keys.length === 0) return prev;
-            const stillApplied = new Set(
+            const stillUndoable = new Set(
                 allActions
-                    .filter((a) => a.status === 'applied' && a.toolcall_id)
+                    .filter((a) => a.toolcall_id && (a.status === 'applied' || hasFailedUndo([a])))
                     .map((a) => a.toolcall_id as string),
             );
             let changed = false;
             const next: Record<string, string> = {};
             for (const key of keys) {
-                if (stillApplied.has(key)) {
+                if (stillUndoable.has(key)) {
                     next[key] = prev[key];
                 } else {
                     changed = true;
