@@ -172,6 +172,7 @@ import {
 } from '../../../react/utils/editNoteActions';
 import { deriveEditNoteRows, getEditNoteCallVariant } from '../../../react/components/agentRuns/editNoteShared';
 import { buildAddressSnapshot, snapshotNoteId } from '../../../src/utils/noteSnapshot';
+import { invalidateSimplificationCache } from '../../../src/utils/noteHtmlSimplifier';
 import { stripBeaverEditFooter } from '../../../src/utils/noteEditFooter';
 import { checkLibraryExcluded } from '../../../src/services/agentDataProvider/utils';
 import { store } from '../../../react/store';
@@ -603,6 +604,37 @@ describe('undoEditNoteBlocksAction', () => {
         await expect(
             undoEditNoteBlocksAction({ ...blocksAction([replaceBlock2]), status: 'applied' }),
         ).rejects.toThrow(/No undo data available/);
+    });
+
+    // The apply path keys the simplification cache by the PORTABLE note id
+    // (`snapshotNoteId`). Undo must use the same key or it invalidates nothing —
+    // in a group library the device-local `${libraryID}-KEY` is a different
+    // string entirely.
+    it('invalidates the simplification cache under the portable note id', async () => {
+        const groupItem = makeMockItem();
+        groupItem.libraryID = 7;
+        (globalThis as any).Zotero.Groups = {
+            getGroupIDFromLibraryID: vi.fn((id: number) => (id === 7 ? 4321 : 0)),
+        };
+        getItemSpy.mockImplementation(
+            async (libraryId: number, key: string) => (libraryId === 7 && key === 'NOTE0001' ? groupItem : null),
+        );
+
+        const groupNoteId = snapshotNoteId(7, 'NOTE0001');
+        expect(groupNoteId).toBe('g4321-NOTE0001');
+
+        const action = blocksAction([replaceBlock2], {
+            library_id: 7,
+            snapshot: buildAddressSnapshot(groupNoteId, BODY),
+        });
+        const result = await executeEditNoteBlocksAction(action);
+        expect(invalidateSimplificationCache).toHaveBeenCalledWith(groupNoteId);
+        vi.mocked(invalidateSimplificationCache).mockClear();
+
+        await undoEditNoteBlocksAction({ ...action, status: 'applied', result_data: result });
+
+        expect(invalidateSimplificationCache).toHaveBeenCalledWith(groupNoteId);
+        expect(invalidateSimplificationCache).not.toHaveBeenCalledWith('7-NOTE0001');
     });
 
     it('respects a library exclusion that appeared after the apply', async () => {

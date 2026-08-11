@@ -354,7 +354,11 @@ export async function undoEditNoteBlocksAction(action: AgentAction): Promise<voi
     const library_id = item.libraryID;
 
     await item.loadDataType('note');
-    const noteId = `${library_id}-${zotero_key}`;
+
+    // Built from the RESOLVED item, exactly as the apply path does: this is the
+    // simplification cache key, and a device-local `${libraryID}-KEY` would miss
+    // the portable `g<groupID>-KEY` entry the rest of the blocks path writes.
+    const noteId = snapshotNoteId(library_id, item.key);
 
     const currentHtml = getLatestNoteHtml(item);
     const existingCitationCache = extractDataCitationItems(currentHtml);
