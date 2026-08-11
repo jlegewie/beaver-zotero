@@ -217,8 +217,17 @@ This applies to every query, including simple `COUNT`s. See `src/utils/sync.ts`.
 ## Library exclusions (enforce in every data / write / index path)
 
 Users can exclude Zotero libraries in Beaver Preferences. Exclusion is an access-control
-boundary: Beaver must not index, search, read new data from, attach as model context, or
-modify an excluded library. Exclusions live on `profile.excluded_libraries`.
+boundary for data leaving the user's computer and for Beaver-initiated operations: Beaver
+must not send excluded-library data to the backend or an LLM, index it remotely, expose it in
+an agent response or model context, or modify the excluded library. Exclusions live on
+`profile.excluded_libraries`.
+
+Local enumeration and metadata lookup are allowed when needed to implement the UI or enforce
+this boundary. In particular, `Zotero.Libraries.getAll()` is safe to use locally. Filter to
+the searchable-library set before results, library metadata, item data, or derived data can
+enter an agent response, model context, remote request, index, or mutation path. Do not expose
+an excluded library's existence or name to the model merely because a loose name lookup
+matched it.
 
 Exclusion is **not** a UI restriction. Threads that already reference an excluded library keep
 working — history renders, and the user may click a reference to reveal or open the item.
@@ -238,8 +247,10 @@ Gate **before** the item lookup / read / mutation:
   validation — `const ex = checkLibraryExcluded(ref.library_id); if (ex) return errorResponse(ex.message, 'library_excluded');`
 - **Agent actions** (`agentDataProvider/actions/*.ts`): check in **both** `validate*` and
   `execute*` (TOCTOU) before any `saveTx` / mutation.
-- **Search / list / browse**: scope to `getSearchableLibraryIds()` / `validateLibraryAccess(...)`,
-  never `Zotero.Libraries.getAll()`.
+- **Search / list / browse**: scope agent-visible results to `getSearchableLibraryIds()` /
+  `validateLibraryAccess(...)`. Local `Zotero.Libraries.getAll()` enumeration and local reads
+  are allowed, but excluded libraries must be filtered out before anything is returned to the
+  agent, included in model context, indexed remotely, or otherwise sent off-device.
 - **Context funnels** that stage items for a run (selection, prompt variables, reader
   auto-attach): filter by `searchableLibraryIds` directly — do not rely on cached item
   validation, since an un-validated item reads as allowed.
