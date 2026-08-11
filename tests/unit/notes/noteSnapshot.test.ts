@@ -1,14 +1,11 @@
 import { describe, it, expect } from 'vitest';
 import {
     maskVolatileLocators,
-    EMPTY_READ_WINDOW,
-    encodeReadWindow,
-    parseReadWindow,
     quickHash64,
+    snapshotNoteId,
     buildAddressSnapshot,
-    parseAddressSnapshot,
+    isAddressSnapshotToken,
     verifyAddressSnapshot,
-    type ReadWindow,
 } from '../../../src/utils/noteSnapshot';
 
 // =============================================================================
@@ -30,7 +27,6 @@ function note(...lines: string[]): string {
     return lines.join('\n');
 }
 
-const WINDOW: ReadWindow = { from: 1, to: 3 };
 
 // =============================================================================
 // maskVolatileLocators
@@ -146,65 +142,6 @@ describe('maskVolatileLocators', () => {
 });
 
 // =============================================================================
-// Read window
-// =============================================================================
-
-describe('read window', () => {
-    it('EMPTY_READ_WINDOW is the canonical 0-0 literal', () => {
-        expect(EMPTY_READ_WINDOW).toEqual({ from: 0, to: 0 });
-        expect(encodeReadWindow(EMPTY_READ_WINDOW)).toBe('0-0');
-        expect(parseReadWindow('0-0')).toEqual({ from: 0, to: 0 });
-    });
-
-    it('round-trips encode → parse', () => {
-        for (const w of [{ from: 1, to: 1 }, { from: 1, to: 50 }, { from: 7, to: 1200 }]) {
-            expect(parseReadWindow(encodeReadWindow(w))).toEqual(w);
-        }
-    });
-
-    it('fails closed on non-numeric parts', () => {
-        expect(parseReadWindow('a-3')).toBeNull();
-        expect(parseReadWindow('1-b')).toBeNull();
-        expect(parseReadWindow('one-two')).toBeNull();
-    });
-
-    it('fails closed on a missing separator', () => {
-        expect(parseReadWindow('12')).toBeNull();
-        expect(parseReadWindow('')).toBeNull();
-    });
-
-    it('fails closed on empty parts', () => {
-        expect(parseReadWindow('1-')).toBeNull();
-        expect(parseReadWindow('-')).toBeNull();
-    });
-
-    it('fails closed on negative numbers', () => {
-        expect(parseReadWindow('-1-3')).toBeNull();
-        expect(parseReadWindow('1--3')).toBeNull();
-    });
-
-    it('fails closed on non-integers', () => {
-        expect(parseReadWindow('1.5-3')).toBeNull();
-        expect(parseReadWindow('1-3.5')).toBeNull();
-        expect(parseReadWindow('1e2-300')).toBeNull();
-    });
-
-    it('fails closed on whitespace', () => {
-        expect(parseReadWindow(' 1-3')).toBeNull();
-        expect(parseReadWindow('1 - 3')).toBeNull();
-    });
-
-    it('fails closed on an inverted window', () => {
-        expect(parseReadWindow('5-3')).toBeNull();
-        expect(parseReadWindow('1-0')).toBeNull();
-    });
-
-    it('fails closed on extra segments', () => {
-        expect(parseReadWindow('1-2-3')).toBeNull();
-    });
-});
-
-// =============================================================================
 // quickHash64
 // =============================================================================
 
@@ -236,139 +173,137 @@ describe('quickHash64', () => {
 });
 
 // =============================================================================
-// buildAddressSnapshot / parseAddressSnapshot / verifyAddressSnapshot
+// snapshotNoteId / buildAddressSnapshot / isAddressSnapshotToken / verifyAddressSnapshot
 // =============================================================================
 
 describe('address snapshot token', () => {
     const simplified = note('<h1>Title</h1>', '<p>First para</p>', '<p>Second para</p>');
+    const NOTE_A = snapshotNoteId(1, 'ABCD1234');
+    const NOTE_B = snapshotNoteId(1, 'ZZZZ9999');
 
-    it('has the documented four-part shape', () => {
-        const token = buildAddressSnapshot(simplified, WINDOW);
+    it('has the documented three-part shape', () => {
+        const token = buildAddressSnapshot(NOTE_A, simplified);
         const parts = token.split(':');
-        expect(parts).toHaveLength(4);
+        expect(parts).toHaveLength(3);
         expect(parts[0]).toBe('h');
         expect(parts[1]).toMatch(/^[0-9a-f]{16}$/);
         expect(parts[2]).toBe(String(simplified.length));
-        expect(parts[3]).toBe('1-3');
     });
 
-    // A token built from an inverted window would be rejected by
-    // verifyAddressSnapshot against the very note it was built from — an
-    // unexplainable permanent mismatch. Refuse to mint one.
-    it('throws on a window its own parser would refuse', () => {
-        expect(() => buildAddressSnapshot(simplified, { from: 1, to: 0 })).toThrow(/invalid read window/);
-        expect(() => buildAddressSnapshot(simplified, { from: -1, to: 3 })).toThrow(/invalid read window/);
-        expect(() => buildAddressSnapshot(simplified, { from: 1.5, to: 3 })).toThrow(/invalid read window/);
-        // The canonical empty window is legal and must not throw.
-        expect(() => buildAddressSnapshot(simplified, EMPTY_READ_WINDOW)).not.toThrow();
+    // The library part is PORTABLE (`u` / `g<groupID>`), not the device-local
+    // libraryID: a token minted while reading on one computer is verified when
+    // the edit runs on another, and a group's libraryID differs between them.
+    it('builds the note id from the portable library ref and the key', () => {
+        const prevZotero = (globalThis as any).Zotero;
+        (globalThis as any).Zotero = {
+            Libraries: { userLibraryID: 1 },
+            Groups: { getGroupIDFromLibraryID: (id: number) => (id === 7 ? 4321 : 0) },
+        };
+        try {
+            expect(snapshotNoteId(1, 'ABCD1234')).toBe('u-ABCD1234');
+            expect(snapshotNoteId(7, 'ZZZZ9999')).toBe('g4321-ZZZZ9999');
+            // No portable identity (feed, unregistered group): the numeric id is
+            // the documented fallback, not an error.
+            expect(snapshotNoteId(42, 'ZZZZ9999')).toBe('42-ZZZZ9999');
+        } finally {
+            (globalThis as any).Zotero = prevZotero;
+        }
     });
 
-    it('is stable for the same content and window', () => {
-        expect(buildAddressSnapshot(simplified, WINDOW))
-            .toBe(buildAddressSnapshot(simplified, { from: 1, to: 3 }));
+    it('falls back to the numeric library id when Zotero cannot resolve a ref', () => {
+        expect(snapshotNoteId(1, 'ABCD1234')).toBe('1-ABCD1234');
+    });
+
+    it('is stable for the same note and content', () => {
+        expect(buildAddressSnapshot(NOTE_A, simplified))
+            .toBe(buildAddressSnapshot(NOTE_A, simplified));
     });
 
     it('changes when the content changes', () => {
         const edited = note('<h1>Title</h1>', '<p>First para EDITED</p>', '<p>Second para</p>');
-        expect(buildAddressSnapshot(edited, WINDOW)).not.toBe(buildAddressSnapshot(simplified, WINDOW));
+        expect(buildAddressSnapshot(NOTE_A, edited))
+            .not.toBe(buildAddressSnapshot(NOTE_A, simplified));
     });
 
     it('changes for equal-length differing content (the digest is doing work)', () => {
         const swapped = note('<h1>Title</h1>', '<p>Frist para</p>', '<p>Second para</p>');
         expect(swapped).toHaveLength(simplified.length);
         expect(swapped).not.toBe(simplified);
-        const a = buildAddressSnapshot(simplified, WINDOW);
-        const b = buildAddressSnapshot(swapped, WINDOW);
+        const a = buildAddressSnapshot(NOTE_A, simplified);
+        const b = buildAddressSnapshot(NOTE_A, swapped);
         // Same length term, different digest.
         expect(a.split(':')[2]).toBe(b.split(':')[2]);
         expect(a).not.toBe(b);
     });
 
-    it('changes when only the window changes', () => {
-        expect(buildAddressSnapshot(simplified, { from: 1, to: 3 }))
-            .not.toBe(buildAddressSnapshot(simplified, { from: 1, to: 2 }));
-        expect(buildAddressSnapshot(simplified, EMPTY_READ_WINDOW))
-            .not.toBe(buildAddressSnapshot(simplified, { from: 1, to: 3 }));
+    // THE REASON THE NOTE ID IS IN THE DIGEST. Without it the token identifies a
+    // string rather than a note, so two notes that happen to read identically —
+    // a duplicate, a note from a template — would accept each other's tokens.
+    it('changes when only the note identity changes', () => {
+        expect(buildAddressSnapshot(NOTE_A, simplified))
+            .not.toBe(buildAddressSnapshot(NOTE_B, simplified));
     });
 
-    it('parses a well-formed token back to its window', () => {
-        const parsed = parseAddressSnapshot(buildAddressSnapshot(simplified, { from: 4, to: 60 }));
-        expect(parsed).not.toBeNull();
-        expect(parsed!.window).toEqual({ from: 4, to: 60 });
+    it('refuses a token issued for a DIFFERENT note with identical content', () => {
+        const token = buildAddressSnapshot(NOTE_A, simplified);
+        expect(verifyAddressSnapshot(token, NOTE_A, simplified)).toBe(true);
+        expect(verifyAddressSnapshot(token, NOTE_B, simplified)).toBe(false);
     });
 
-    it('parses the empty-window token', () => {
-        const parsed = parseAddressSnapshot(buildAddressSnapshot(simplified, EMPTY_READ_WINDOW));
-        expect(parsed!.window).toEqual(EMPTY_READ_WINDOW);
+    it('distinguishes the same key in different libraries', () => {
+        expect(buildAddressSnapshot(snapshotNoteId(1, 'ABCD1234'), simplified))
+            .not.toBe(buildAddressSnapshot(snapshotNoteId(2, 'ABCD1234'), simplified));
+    });
+
+    it('accepts a well-formed token structurally', () => {
+        expect(isAddressSnapshotToken(buildAddressSnapshot(NOTE_A, simplified))).toBe(true);
     });
 
     it('rejects malformed tokens structurally', () => {
-        const token = buildAddressSnapshot(simplified, WINDOW);
+        const token = buildAddressSnapshot(NOTE_A, simplified);
         const digest = token.split(':')[1];
-        expect(parseAddressSnapshot('')).toBeNull();
-        expect(parseAddressSnapshot('garbage')).toBeNull();
-        expect(parseAddressSnapshot(`x:${digest}:10:1-3`)).toBeNull();          // wrong prefix
-        expect(parseAddressSnapshot(`h:${digest}:10`)).toBeNull();              // missing window
-        expect(parseAddressSnapshot(`h:${digest}:10:1-3:extra`)).toBeNull();    // extra part
-        expect(parseAddressSnapshot(`h:nothex:10:1-3`)).toBeNull();             // bad digest
-        expect(parseAddressSnapshot(`h:${digest.slice(1)}:10:1-3`)).toBeNull(); // short digest
-        expect(parseAddressSnapshot(`h:${digest}:ten:1-3`)).toBeNull();         // bad length
-        expect(parseAddressSnapshot(`h:${digest}:-1:1-3`)).toBeNull();          // negative length
-        expect(parseAddressSnapshot(`h:${digest}:10:3-1`)).toBeNull();          // inverted window
-        expect(parseAddressSnapshot(`h:${digest}:10:garbage`)).toBeNull();      // bad window
+        expect(isAddressSnapshotToken('')).toBe(false);
+        expect(isAddressSnapshotToken('garbage')).toBe(false);
+        expect(isAddressSnapshotToken(`x:${digest}:10`)).toBe(false);            // wrong prefix
+        expect(isAddressSnapshotToken(`h:${digest}`)).toBe(false);               // missing length
+        expect(isAddressSnapshotToken(`h:${digest}:10:1-3`)).toBe(false);        // stale 4-part form
+        expect(isAddressSnapshotToken(`h:nothex:10`)).toBe(false);               // bad digest
+        expect(isAddressSnapshotToken(`h:${digest.slice(1)}:10`)).toBe(false);   // short digest
+        expect(isAddressSnapshotToken(`h:${digest}:ten`)).toBe(false);           // bad length
+        expect(isAddressSnapshotToken(`h:${digest}:-1`)).toBe(false);            // negative length
+        expect(isAddressSnapshotToken(`h:${digest}:1.5`)).toBe(false);           // fractional length
+        expect(isAddressSnapshotToken(`h:${digest}: 10`)).toBe(false);           // whitespace
     });
 
-    it('verifies an unmodified token against its own note and returns the window', () => {
-        const token = buildAddressSnapshot(simplified, WINDOW);
-        expect(verifyAddressSnapshot(token, simplified)).toEqual(WINDOW);
+    // The old format carried a trailing `<from>-<to>` read window. A token from
+    // that era must not verify — its digest was over different input anyway, but
+    // failing structurally first gives the clearer error.
+    it('rejects the retired window-bearing token form', () => {
+        const token = buildAddressSnapshot(NOTE_A, simplified);
+        expect(isAddressSnapshotToken(`${token}:1-3`)).toBe(false);
+        expect(verifyAddressSnapshot(`${token}:1-3`, NOTE_A, simplified)).toBe(false);
     });
 
-    it('verifies the empty-window token', () => {
-        const token = buildAddressSnapshot(simplified, EMPTY_READ_WINDOW);
-        expect(verifyAddressSnapshot(token, simplified)).toEqual({ from: 0, to: 0 });
+    it('verifies an unmodified token against its own note', () => {
+        const token = buildAddressSnapshot(NOTE_A, simplified);
+        expect(verifyAddressSnapshot(token, NOTE_A, simplified)).toBe(true);
     });
 
     it('fails verification when the note changed underneath the token', () => {
-        const token = buildAddressSnapshot(simplified, WINDOW);
+        const token = buildAddressSnapshot(NOTE_A, simplified);
         const edited = note('<h1>Title</h1>', '<p>First para</p>', '<p>Second para (edited)</p>');
-        expect(verifyAddressSnapshot(token, edited)).toBeNull();
+        expect(verifyAddressSnapshot(token, NOTE_A, edited)).toBe(false);
     });
 
-    it('fails verification when the window suffix was hand-widened', () => {
-        const token = buildAddressSnapshot(simplified, { from: 1, to: 100 });
-        const widened = token.replace(/:1-100$/, ':1-9999');
-        expect(widened).not.toBe(token);
-        // Structurally still a valid token — that is exactly why the window has
-        // to be inside the digest.
-        expect(parseAddressSnapshot(widened)!.window).toEqual({ from: 1, to: 9999 });
-        expect(verifyAddressSnapshot(widened, simplified)).toBeNull();
-    });
-
-    it('fails verification when the window suffix was narrowed or re-based', () => {
-        const token = buildAddressSnapshot(simplified, { from: 1, to: 3 });
-        expect(verifyAddressSnapshot(token.replace(/:1-3$/, ':1-2'), simplified)).toBeNull();
-        expect(verifyAddressSnapshot(token.replace(/:1-3$/, ':2-3'), simplified)).toBeNull();
-        expect(verifyAddressSnapshot(token.replace(/:1-3$/, ':0-0'), simplified)).toBeNull();
-    });
-
-    it('fails verification on a zero-padded (non-canonical) window', () => {
-        const token = buildAddressSnapshot(simplified, { from: 1, to: 3 });
-        expect(verifyAddressSnapshot(token.replace(/:1-3$/, ':01-03'), simplified)).toBeNull();
-    });
-
-    it('fails verification on a missing or garbage suffix', () => {
-        const token = buildAddressSnapshot(simplified, WINDOW);
-        expect(verifyAddressSnapshot(token.replace(/:1-3$/, ''), simplified)).toBeNull();
-        expect(verifyAddressSnapshot(token.replace(/:1-3$/, ':nonsense'), simplified)).toBeNull();
-        expect(verifyAddressSnapshot('', simplified)).toBeNull();
-        expect(verifyAddressSnapshot('h:deadbeefdeadbeef:12:1-3', simplified)).toBeNull();
+    it('fails verification on garbage', () => {
+        expect(verifyAddressSnapshot('', NOTE_A, simplified)).toBe(false);
+        expect(verifyAddressSnapshot('h:deadbeefdeadbeef:12', NOTE_A, simplified)).toBe(false);
     });
 
     it('fails verification when the length term was tampered with', () => {
-        const token = buildAddressSnapshot(simplified, WINDOW);
-        const parts = token.split(':');
-        const tampered = [parts[0], parts[1], String(Number(parts[2]) + 1), parts[3]].join(':');
-        expect(verifyAddressSnapshot(tampered, simplified)).toBeNull();
+        const parts = buildAddressSnapshot(NOTE_A, simplified).split(':');
+        const tampered = [parts[0], parts[1], String(Number(parts[2]) + 1)].join(':');
+        expect(verifyAddressSnapshot(tampered, NOTE_A, simplified)).toBe(false);
     });
 
     it('survives citation locator drift (the reason masking exists)', () => {
@@ -383,14 +318,27 @@ describe('address snapshot token', () => {
             '<p>Both ' + compoundCitation('1-AAAA1111:page=xii, 1-BBBB2222:page=101') + '</p>',
         );
         expect(read).not.toBe(laterWithDriftedLabels);
-        const token = buildAddressSnapshot(read, WINDOW);
-        expect(verifyAddressSnapshot(token, laterWithDriftedLabels)).toEqual(WINDOW);
+        const token = buildAddressSnapshot(NOTE_A, read);
+        expect(verifyAddressSnapshot(token, NOTE_A, laterWithDriftedLabels)).toBe(true);
     });
 
     it('still fails when real content changed alongside locator drift', () => {
         const read = note('<p>Claim ' + citation('1-ABCD1234', 'page3') + '</p>');
         const later = note('<p>Claim REWRITTEN ' + citation('1-ABCD1234', 'page17') + '</p>');
-        const token = buildAddressSnapshot(read, { from: 1, to: 1 });
-        expect(verifyAddressSnapshot(token, later)).toBeNull();
+        const token = buildAddressSnapshot(NOTE_A, read);
+        expect(verifyAddressSnapshot(token, NOTE_A, later)).toBe(false);
+    });
+
+    // This module has no notion of a displayed range — the decision to withhold
+    // a token after a PARTIAL read lives in handleReadNoteRequest, which is
+    // where it is tested. What belongs here is that the digest is defined over
+    // the whole projection, so a slice of it never verifies.
+    it('is defined over the whole projection, never over a slice of it', () => {
+        const whole = note(...Array.from({ length: 300 }, (_, i) => `<p>Line ${i + 1}</p>`));
+        const token = buildAddressSnapshot(NOTE_A, whole);
+
+        expect(verifyAddressSnapshot(token, NOTE_A, whole)).toBe(true);
+        const firstFifty = whole.split('\n').slice(0, 50).join('\n');
+        expect(verifyAddressSnapshot(token, NOTE_A, firstFifty)).toBe(false);
     });
 });

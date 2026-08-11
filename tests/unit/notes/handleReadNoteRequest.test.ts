@@ -73,7 +73,7 @@ vi.mock('../../../react/store', () => ({
 import { handleReadNoteRequest } from '../../../src/services/agentDataProvider/handleReadNoteRequest';
 import { getOrSimplify } from '../../../src/utils/noteHtmlSimplifier';
 import { getLatestNoteHtml, getNoteHtmlForRead } from '../../../src/utils/noteEditorIO';
-import { verifyAddressSnapshot } from '../../../src/utils/noteSnapshot';
+import { snapshotNoteId, verifyAddressSnapshot } from '../../../src/utils/noteSnapshot';
 import type { WSReadNoteRequest } from '@beaver/agent-core/protocol/agentProtocol';
 
 
@@ -304,64 +304,99 @@ describe('handleReadNoteRequest — pagination', () => {
 const WHOLE_NOTE = 'Line one\nLine two\nLine three\nLine four\nLine five';
 
 describe('handleReadNoteRequest — address snapshot', () => {
-    it('emits a snapshot whose window is 1-<total_lines> for a whole-note read', async () => {
+    // The mock item is note 1-ABCD1234; the digest is bound to that identity.
+    const NOTE_ID = snapshotNoteId(1, 'ABCD1234');
+
+    it('emits a token bound to this note and its whole projection', async () => {
         const response = await handleReadNoteRequest(makeRequest());
 
         expect(response.success).toBe(true);
         expect(response.snapshot).toBeTypeOf('string');
-        expect(response.snapshot).toMatch(/:1-5$/);
-        expect(verifyAddressSnapshot(response.snapshot!, WHOLE_NOTE)).toEqual({ from: 1, to: 5 });
+        expect(verifyAddressSnapshot(response.snapshot!, NOTE_ID, WHOLE_NOTE)).toBe(true);
     });
 
-    it('windows a paginated read to what was SHOWN while digesting the whole note', async () => {
-        const response = await handleReadNoteRequest(makeRequest({ offset: 2, limit: 2 }));
+    it('refuses to verify against a different note with the same content', async () => {
+        const response = await handleReadNoteRequest(makeRequest());
 
-        expect(response.success).toBe(true);
-        expect(response.lines_returned).toBe('2-3');
-        // The window is the shown range, NOT 1-total_lines...
-        expect(response.snapshot).toMatch(/:2-3$/);
-        // ...and the token still verifies against the WHOLE simplified note,
-        // proving the digest input is the whole note and not the slice.
-        expect(verifyAddressSnapshot(response.snapshot!, WHOLE_NOTE)).toEqual({ from: 2, to: 3 });
-        expect(verifyAddressSnapshot(response.snapshot!, 'Line two\nLine three')).toBeNull();
+        expect(verifyAddressSnapshot(response.snapshot!, snapshotNoteId(1, 'OTHER999'), WHOLE_NOTE))
+            .toBe(false);
+        expect(verifyAddressSnapshot(response.snapshot!, snapshotNoteId(2, 'ABCD1234'), WHOLE_NOTE))
+            .toBe(false);
     });
 
-    it('uses the canonical empty window when the offset is beyond the end', async () => {
+    // THE SAFETY RULE. The token covers the WHOLE note, so handing one out
+    // after a partial read would license numeric addresses into pages the model
+    // never saw. `expect` cannot catch that on its own: over half a note's lines
+    // have no visible text and are confirmed only by their tag, and a ranged
+    // delete confirms only its endpoints. So a paged read gets content and NO
+    // token, and the model must read the note whole before addressing it.
+    it('withholds the token from every partial read', async () => {
+        for (const args of [
+            { offset: 1, limit: 2 },   // first page
+            { offset: 3, limit: 2 },   // middle page
+            { offset: 2 },             // tail only — still not the whole note
+            { limit: 4 },              // head only
+        ]) {
+            const response = await handleReadNoteRequest(makeRequest(args));
+            expect(response.success).toBe(true);
+            expect(response.content).toBeTruthy();
+            expect(response.snapshot).toBeUndefined();
+        }
+    });
+
+    it('issues the token when a limit happens to cover the whole note', async () => {
+        // Paginated in form, complete in fact — what matters is what was SHOWN.
+        const whole = await handleReadNoteRequest(makeRequest());
+        const covering = await handleReadNoteRequest(makeRequest({ offset: 1, limit: 5 }));
+        const overshoot = await handleReadNoteRequest(makeRequest({ offset: 1, limit: 500 }));
+
+        expect(covering.snapshot).toBe(whole.snapshot);
+        expect(overshoot.snapshot).toBe(whole.snapshot);
+    });
+
+    it('withholds the token when the offset is beyond the end', async () => {
         const response = await handleReadNoteRequest(makeRequest({ offset: 100 }));
 
-        // An out-of-range read is harmless, not a failed tool call: building the
-        // snapshot must not throw on the inverted `100-5` it would otherwise form.
+        // An out-of-range read is harmless, not a failed tool call — but it
+        // showed nothing, so it certainly licenses nothing.
         expect(response.success).toBe(true);
         expect(response.content).toBe('');
-        expect(response.snapshot).toMatch(/:0-0$/);
-        expect(verifyAddressSnapshot(response.snapshot!, WHOLE_NOTE)).toEqual({ from: 0, to: 0 });
+        expect(response.snapshot).toBeUndefined();
     });
 
-    // `offset`/`limit` are unvalidated `number?` on the wire and reach the
-    // handler verbatim from the MCP and HTTP entry points. A malformed one must
-    // never turn a read that has always succeeded into a failed tool call.
+    // `offset`/`limit` are typed `number?` on the wire and reach this handler
+    // verbatim from the MCP and HTTP entry points, so the backend's `ge=1` bound
+    // is not the only line of defence. Sanitizing here is what keeps
+    // `lines_returned` and `next_offset` coherent for every input.
     it.each([
-        ['negative limit', { limit: -1 }],
-        ['fractional offset', { offset: 2.5 }],
-        ['fractional limit', { limit: 2.5 }],
-        ['NaN offset', { offset: NaN }],
-    ])('falls back to the empty window rather than throwing: %s', async (_name, args) => {
+        // A present-but-nonsense limit clamps to ONE line, not to zero and not
+        // to "no limit": the caller asked to be limited, and a page of zero
+        // lines would surface as the "note is empty" error.
+        ['negative limit', { limit: -1 }, '1', 2],
+        ['zero limit', { limit: 0 }, '1', 2],
+        ['fractional limit', { limit: 2.5 }, '1-2', 3],
+        ['negative offset', { offset: -3 }, '1-5', undefined],
+        ['zero offset', { offset: 0 }, '1-5', undefined],
+        ['fractional offset', { offset: 2.5 }, '2-5', undefined],
+        ['NaN offset', { offset: NaN }, '1-5', undefined],
+        ['NaN limit', { limit: NaN }, '1-5', undefined],
+    ])('sanitizes %s into a coherent page', async (_name, args, linesReturned, nextOffset) => {
         const response = await handleReadNoteRequest(makeRequest(args));
 
         expect(response.success).toBe(true);
         expect(response.error).toBeUndefined();
-        expect(response.snapshot).toMatch(/:0-0$/);
-        expect(verifyAddressSnapshot(response.snapshot!, WHOLE_NOTE)).toEqual({ from: 0, to: 0 });
-    });
-
-    // `limit: NaN` is falsy, so it takes the "no limit" branch and is an
-    // ordinary whole-note read — not a fail-closed case. Pinned so the
-    // distinction stays deliberate.
-    it('treats a NaN limit as no limit at all', async () => {
-        const response = await handleReadNoteRequest(makeRequest({ limit: NaN }));
-
-        expect(response.success).toBe(true);
-        expect(verifyAddressSnapshot(response.snapshot!, WHOLE_NOTE)).toEqual({ from: 1, to: 5 });
+        expect(response.lines_returned).toBe(linesReturned);
+        expect(response.next_offset).toBe(nextOffset);
+        // Never a self-referential next page: following next_offset must advance.
+        if (response.next_offset !== undefined) {
+            expect(response.next_offset).toBeGreaterThan(1);
+        }
+        // A token iff the sanitized page covered the whole note.
+        if (linesReturned === '1-5') {
+            expect(verifyAddressSnapshot(response.snapshot!, NOTE_ID, WHOLE_NOTE)).toBe(true);
+        } else {
+            expect(response.snapshot).toBeUndefined();
+        }
     });
 
     it('is stable across identical reads and changes when the note content changes', async () => {
@@ -377,20 +412,7 @@ describe('handleReadNoteRequest — address snapshot', () => {
         const afterEdit = await handleReadNoteRequest(makeRequest());
 
         expect(afterEdit.success).toBe(true);
-        // Same window, different content ⇒ different token.
-        expect(afterEdit.snapshot).toMatch(/:1-5$/);
         expect(afterEdit.snapshot).not.toBe(first.snapshot);
-    });
-
-    it('fails verification when the window is hand-widened (forgery guard)', async () => {
-        const response = await handleReadNoteRequest(makeRequest({ limit: 2 }));
-        expect(response.snapshot).toMatch(/:1-2$/);
-
-        const widened = response.snapshot!.replace(/:1-2$/, ':1-999');
-        expect(verifyAddressSnapshot(widened, WHOLE_NOTE)).toBeNull();
-        // The unmodified token still verifies, so the failure is the widening
-        // and not something wrong with the token itself.
-        expect(verifyAddressSnapshot(response.snapshot!, WHOLE_NOTE)).toEqual({ from: 1, to: 2 });
     });
 });
 
@@ -663,9 +685,16 @@ describe('handleReadNoteRequest — portable note ids', () => {
         expect((globalThis as any).Zotero.Items.getByLibraryAndKeyAsync).not.toHaveBeenCalled();
     });
 
-    it('keys the simplification cache by the device-local id regardless of the requested grammar', async () => {
+    // The id is built from the RESOLVED item, so both grammars converge on the
+    // portable form — the one the address snapshot binds, and the one that has
+    // to mean the same note on another device.
+    it('keys the simplification cache by the resolved portable id regardless of the requested grammar', async () => {
         await handleReadNoteRequest(makeRequest({ note_id: 'u-ABCD1234' }));
-        expect(vi.mocked(getOrSimplify).mock.calls[0][0]).toBe('1-ABCD1234');
+        expect(vi.mocked(getOrSimplify).mock.calls[0][0]).toBe('u-ABCD1234');
+
+        vi.mocked(getOrSimplify).mockClear();
+        await handleReadNoteRequest(makeRequest({ note_id: '1-ABCD1234' }));
+        expect(vi.mocked(getOrSimplify).mock.calls[0][0]).toBe('u-ABCD1234');
     });
 
     it('emits a portable parent_item_id when the parent library maps', async () => {

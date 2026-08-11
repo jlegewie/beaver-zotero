@@ -111,11 +111,10 @@ import {
     type SelectedBlockEdit,
 } from '../../../utils/editNoteBlocksCore';
 import {
-    EMPTY_READ_WINDOW,
     buildAddressSnapshot,
-    parseAddressSnapshot,
+    isAddressSnapshotToken,
+    snapshotNoteId,
     verifyAddressSnapshot,
-    type ReadWindow,
 } from '../../../utils/noteSnapshot';
 
 // =============================================================================
@@ -125,8 +124,22 @@ import {
 /**
  * Size cap for a note body shipped inline (validate-time `current_value` on a
  * snapshot mismatch, execute-time `refreshed_note`). Above either bound the body
- * is omitted and the accompanying snapshot carries {@link EMPTY_READ_WINDOW}, so
- * numeric addressing fails closed until the model re-reads.
+ * is omitted and `truncated` is set instead.
+ *
+ * DELIBERATELY THE LOOSEST BOUND, not a match for any one consumer. This payload
+ * feeds three of them, each with its own cap and each dropping what it cannot
+ * use: the execute-success listing (backend `_RESULT_FULL_NOTE_MAX_LINES` = 120
+ * lines / `_RESULT_MAX_CHARS` = 8k rendered), the snapshot-mismatch retry prompt
+ * (`_RETRY_LISTING_MAX_CHARS` = 24k rendered, no line cap), and the HTTP/MCP
+ * transport. An attempt to "align" this with the first of those was reverted:
+ * it silently starved the second, so a mismatch on a 121–500-line note stopped
+ * embedding the fresh listing and cost an extra read_note round trip — exactly
+ * the recovery path that exists to avoid one.
+ *
+ * The asymmetry is the whole argument. Over-shipping costs bandwidth to a
+ * consumer that discards it; under-shipping costs a round trip and degrades
+ * recovery. So this bound covers the most generous consumer, and each backend
+ * cap does its own trimming.
  */
 const MAX_INLINE_NOTE_LINES = 500;
 const MAX_INLINE_NOTE_CHARS = 50_000;
@@ -283,16 +296,18 @@ function toBlockEditSpecs(edits: EditNoteBlocksEditItem[]): BlockEditSpec[] {
 /**
  * Build the `{ snapshot, total_lines, note? }` triple shipped to the model.
  *
- * The window inside the token is the whole note when the body travels with it
- * and {@link EMPTY_READ_WINDOW} when it does not — the rule that keeps a
- * large-note response from licensing addresses the model was never shown.
+ * The token identifies the note version and is emitted whether or not the body
+ * fits; `truncated` is what tells the model it must re-read to see the content.
+ * Withholding the token from a model that was not shown the listing is the
+ * BACKEND's call — it drops both together, at its OWN (tighter) caps. See
+ * {@link MAX_INLINE_NOTE_LINES} for why this side deliberately does not match
+ * any single one of them.
  */
-export function buildInlineNoteState(simplified: string): RefreshedNoteState {
+export function buildInlineNoteState(noteId: string, simplified: string): RefreshedNoteState {
     const totalLines = simplified.split('\n').length;
     const fits = totalLines <= MAX_INLINE_NOTE_LINES && simplified.length <= MAX_INLINE_NOTE_CHARS;
-    const window: ReadWindow = fits ? { from: 1, to: totalLines } : EMPTY_READ_WINDOW;
     return {
-        snapshot: buildAddressSnapshot(simplified, window),
+        snapshot: buildAddressSnapshot(noteId, simplified),
         total_lines: totalLines,
         ...(fits ? { note: simplified } : { truncated: true }),
     };
@@ -302,12 +317,12 @@ export function buildInlineNoteState(simplified: string): RefreshedNoteState {
  * The validate-time snapshot-mismatch recovery payload.
  *
  * Deliberately carries the SAME fields as execute's `refreshed_note` — including
- * `truncated`. Without it, a large note yields an empty-window token and no
+ * `truncated`. Without it, a large note yields a token and no
  * `note` with nothing saying why, and the two recovery paths disagree about a
  * fact the model needs in order to know it must re-read.
  */
-function buildSnapshotMismatchValue(simplified: string): Record<string, any> {
-    const state = buildInlineNoteState(simplified);
+function buildSnapshotMismatchValue(noteId: string, simplified: string): Record<string, any> {
+    const state = buildInlineNoteState(noteId, simplified);
     return {
         kind: 'snapshot_mismatch',
         snapshot: state.snapshot,
@@ -867,7 +882,6 @@ function runBlockSelection(
     strippedHtml: string,
     metadata: SimplificationMetadata,
     edits: EditNoteBlocksEditItem[],
-    readWindow: ReadWindow,
     externalRefContext: ExternalRefContext,
     labels: PreloadedLabels,
     citationRejections: Map<string, CitationRejection>,
@@ -903,7 +917,6 @@ function runBlockSelection(
             externalRefContext,
             pageLabels: labels.pageLabels,
             resolvedLocatorPages: labels.resolvedLocatorPages,
-            readWindow,
             preprocessContent: makeCitationPrecheck(citationRejections, metadata),
         },
         toBlockEditSpecs(eligible),
@@ -1018,7 +1031,10 @@ async function validateEditNoteBlocksAction(
     }
 
     // Simplify ONCE, strip ONCE.
-    const noteId = `${resolvedLibraryId}-${zotero_key}`;
+    // Built from the RESOLVED item, not the request field: this is both the
+    // simplification cache key and the identity folded into the address
+    // snapshot, so it must be byte-identical to what read_note used.
+    const noteId = snapshotNoteId(resolvedLibraryId, item.key);
     const pageLabelsByItemId = await preloadNotePageLabels(rawHtml, resolvedLibraryId, { extractOnCacheMiss: true });
     const { simplified, metadata } = getOrSimplify(noteId, rawHtml, resolvedLibraryId, pageLabelsByItemId);
     const strippedHtml = stripDataCitationItems(normalizeNoteHtml(rawHtml));
@@ -1080,9 +1096,8 @@ async function validateEditNoteBlocksAction(
             current_value: {
                 note_title: noteTitle,
                 total_lines: totalLines,
-                // The whole note IS shown here (`old_content`), so the token's
-                // window is the whole note.
-                snapshot: buildAddressSnapshot(simplified, { from: 1, to: totalLines }),
+                // The whole note IS shown here, as `old_content`.
+                snapshot: buildAddressSnapshot(noteId, simplified),
                 applicable_count: 1,
                 skipped_count: 0,
                 old_content: simplified,
@@ -1107,18 +1122,17 @@ async function validateEditNoteBlocksAction(
     // ── Numeric addressing ──────────────────────────────────────────────────
     // Structural garbage first: `verifyAddressSnapshot` cannot tell a fabricated
     // token from real drift, and the drift recovery cannot fix a fabricated one.
-    if (!parseAddressSnapshot(snapshot as string)) {
+    if (!isAddressSnapshotToken(snapshot as string)) {
         return validateError(request.request_id, SNAPSHOT_MALFORMED_MESSAGE, 'snapshot_malformed');
     }
-    const readWindow = verifyAddressSnapshot(snapshot as string, simplified);
-    if (!readWindow) {
+    if (!verifyAddressSnapshot(snapshot as string, noteId, simplified)) {
         return validateError(request.request_id, SNAPSHOT_MISMATCH_MESSAGE, 'snapshot_mismatch', {
-            current_value: buildSnapshotMismatchValue(simplified),
+            current_value: buildSnapshotMismatchValue(noteId, simplified),
         });
     }
 
     const selection = runBlockSelection(
-        simplified, strippedHtml, metadata, edits, readWindow,
+        simplified, strippedHtml, metadata, edits,
         externalRefContext, labels, citationRejections,
     );
     if ('refusal' in selection) {
@@ -1209,10 +1223,10 @@ async function validateEditNoteBlocksAction(
         current_value: {
             note_title: noteTitle,
             total_lines: totalLines,
-            // No note body travels on the success path, so the token's window is
-            // the canonical empty one — it identifies the numbering this call ran
-            // against without licensing a follow-up blind numeric address.
-            snapshot: buildAddressSnapshot(simplified, EMPTY_READ_WINDOW),
+            // Nothing has been applied, so this is still the token for the note
+            // the edits were addressed against — the same one the caller sent.
+            // It licenses no MORE than that token already did.
+            snapshot: buildAddressSnapshot(noteId, simplified),
             applicable_count: selection.applied.length,
             skipped_count: selection.skipped.length,
         },
@@ -1364,14 +1378,11 @@ export function planBlockEditsExecution(inputs: BlockExecutionInputs): BlockExec
 
     const soleRewrite = isSoleWholeBodyRewrite(eligibleEdits);
     // Structural garbage is not drift, so it ships no recovery payload (see the
-    // validator). `parseAddressSnapshot` is sync — the no-await contract holds.
-    if (!soleRewrite && !parseAddressSnapshot(snapshot as string)) {
+    // validator). `isAddressSnapshotToken` is sync — the no-await contract holds.
+    if (!soleRewrite && !isAddressSnapshotToken(snapshot as string)) {
         return { ok: false, error: SNAPSHOT_MALFORMED_MESSAGE, errorCode: 'snapshot_malformed' };
     }
-    const preWindow: ReadWindow | null = soleRewrite
-        ? EMPTY_READ_WINDOW
-        : verifyAddressSnapshot(snapshot as string, simplified);
-    if (!preWindow) {
+    if (!soleRewrite && !verifyAddressSnapshot(snapshot as string, noteId, simplified)) {
         // Approval-delay drift. The caller hands back the CURRENT note so the
         // model can re-address without a follow-up read_note round trip.
         return {
@@ -1383,10 +1394,10 @@ export function planBlockEditsExecution(inputs: BlockExecutionInputs): BlockExec
     }
 
     // `address_pre_snapshot` reproduces the token the edits were addressed
-    // against (same window), so a consumer can confirm the action ran on the
-    // numbering the model used. For an `op: 'rewrite'` edit there is no token,
-    // so the canonical empty window is used.
-    const addressPreSnapshot = buildAddressSnapshot(simplified, preWindow);
+    // against, so a consumer can confirm the action ran on the numbering the
+    // model used. An `op: 'rewrite'` edit carries no token, so this is simply
+    // the identifier for the note as it stood immediately before the write.
+    const addressPreSnapshot = buildAddressSnapshot(noteId, simplified);
 
     let newStrippedHtml: string;
     let undoDrafts: BatchUndoDraft[];
@@ -1463,7 +1474,7 @@ export function planBlockEditsExecution(inputs: BlockExecutionInputs): BlockExec
         if (dup) warnings.push(dup);
     } else {
         const selection = runBlockSelection(
-            simplified, strippedHtml, metadata, eligibleEdits, preWindow,
+            simplified, strippedHtml, metadata, eligibleEdits,
             externalRefContext, labels, citationRejections,
         );
         if ('refusal' in selection) {
@@ -1710,7 +1721,7 @@ async function executeEditNoteBlocksAction(
         }
     }
 
-    const noteId = `${resolvedLibraryId}-${zotero_key}`;
+    const noteId = snapshotNoteId(resolvedLibraryId, item.key);
 
     // ── STEP 1: PROVISIONAL read + every async preload ──────────────────────
     // Execute stays on the batch accessor (`item.getNote()` after
@@ -1747,7 +1758,7 @@ async function executeEditNoteBlocksAction(
     if (!plan.ok) {
         return executeError(request.request_id, plan.error, plan.errorCode, {
             ...(plan.errorCode === 'snapshot_mismatch' && plan.simplified !== undefined
-                ? { refreshed_note: buildInlineNoteState(plan.simplified) }
+                ? { refreshed_note: buildInlineNoteState(noteId, plan.simplified) }
                 : {}),
             ...(plan.skipped?.length ? { result_data: { skipped: plan.skipped } } : {}),
         });
@@ -1791,7 +1802,7 @@ async function executeEditNoteBlocksAction(
     // Re-simplify for the post-edit numbering.
     const postPageLabels = await preloadNotePageLabels(finalRawHtml, resolvedLibraryId, { extractOnCacheMiss: true });
     const { simplified: postSimplified } = getOrSimplify(noteId, finalRawHtml, resolvedLibraryId, postPageLabels);
-    const refreshedNote = buildInlineNoteState(postSimplified);
+    const refreshedNote = buildInlineNoteState(noteId, postSimplified);
 
     // The single construction site for `applied[]` (see `appliedIdentities`).
     const appliedBlocks = plan.resolveAppliedBlocks(refreshedNote.total_lines);

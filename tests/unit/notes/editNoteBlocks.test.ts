@@ -196,7 +196,7 @@ import { expandToRawHtml } from '../../../src/utils/noteCitationExpand';
 import { getDeferredToolPreference, checkLibraryExcluded } from '../../../src/services/agentDataProvider/utils';
 import { store } from '../../../react/store';
 import { searchableLibraryIdsAtom } from '../../../react/atoms/profile';
-import { buildAddressSnapshot, verifyAddressSnapshot, EMPTY_READ_WINDOW } from '../../../src/utils/noteSnapshot';
+import { buildAddressSnapshot, snapshotNoteId, verifyAddressSnapshot } from '../../../src/utils/noteSnapshot';
 import { hasSchemaVersionWrapper } from '../../../src/utils/noteWrapper';
 import { undoEditNoteBatchAction } from '../../../react/utils/editNoteActions';
 import { buildPreviewableEditOperations } from '../../../react/utils/editNotePreviewOperations';
@@ -209,6 +209,9 @@ import type {
     WSAgentActionExecuteRequest,
 } from '@beaver/agent-core/protocol/agentProtocol';
 
+/** Every fixture in this file is note 1-NOTE0001. */
+const NOTE_ID = snapshotNoteId(1, 'NOTE0001');
+
 // =============================================================================
 // Fixtures
 // =============================================================================
@@ -218,7 +221,7 @@ const LINE_2 = '<p>Bravo passage two.</p>';
 const LINE_3 = '<p>Charlie section three.</p>';
 const BODY = [LINE_1, LINE_2, LINE_3].join('\n');
 const NOTE_HTML = `<div data-schema-version="9">${BODY}</div>`;
-const SNAPSHOT = buildAddressSnapshot(BODY, { from: 1, to: 3 });
+const SNAPSHOT = buildAddressSnapshot(NOTE_ID, BODY);
 
 // A note long enough for `assessNoteRewrite` to consider it worth protecting
 // (its comparable text must exceed MIN_CHARS_TO_ESCALATE = 600).
@@ -226,13 +229,13 @@ const LONG_LINES = Array.from({ length: 12 }, (_, i) =>
     `<p>Paragraph ${i + 1}: lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod.</p>`);
 const LONG_BODY = LONG_LINES.join('\n');
 const LONG_NOTE_HTML = `<div data-schema-version="9">${LONG_BODY}</div>`;
-const LONG_SNAPSHOT = buildAddressSnapshot(LONG_BODY, { from: 1, to: LONG_LINES.length });
+const LONG_SNAPSHOT = buildAddressSnapshot(NOTE_ID, LONG_BODY);
 
 // A note with a BLANK mid-document simplified line — what an empty list item
 // (`<ul><li></li></ul>`) produces once the li-flattening pass has run.
 const BLANK_BODY = ['<p>Alpha sentence one.</p>', '', '<p>Charlie section three.</p>'].join('\n');
 const BLANK_NOTE_HTML = `<div data-schema-version="9">${BLANK_BODY}</div>`;
-const BLANK_SNAPSHOT = buildAddressSnapshot(BLANK_BODY, { from: 1, to: 3 });
+const BLANK_SNAPSHOT = buildAddressSnapshot(NOTE_ID, BLANK_BODY);
 
 // A note that is not empty by the `rawHtml.trim()` test — it has a wrapper — but
 // whose body projects to no visible text at all: one blank block.
@@ -242,13 +245,13 @@ const EMPTY_BODY = '';
 const MANY_LINES = Array.from({ length: 520 }, (_, i) => `<p>Line ${i + 1}.</p>`);
 const MANY_BODY = MANY_LINES.join('\n');
 const MANY_NOTE_HTML = `<div data-schema-version="9">${MANY_BODY}</div>`;
-const MANY_SNAPSHOT = buildAddressSnapshot(MANY_BODY, { from: 1, to: MANY_LINES.length });
+const MANY_SNAPSHOT = buildAddressSnapshot(NOTE_ID, MANY_BODY);
 
 // Under the line cap but over MAX_INLINE_NOTE_CHARS (50_000).
 const WIDE_LINES = Array.from({ length: 60 }, (_, i) => `<p>${String(i).padStart(4, '0')} ${'x'.repeat(1000)}</p>`);
 const WIDE_BODY = WIDE_LINES.join('\n');
 const WIDE_NOTE_HTML = `<div data-schema-version="9">${WIDE_BODY}</div>`;
-const WIDE_SNAPSHOT = buildAddressSnapshot(WIDE_BODY, { from: 1, to: WIDE_LINES.length });
+const WIDE_SNAPSHOT = buildAddressSnapshot(NOTE_ID, WIDE_BODY);
 
 let noteHtml = NOTE_HTML;
 let mockItem: any;
@@ -360,7 +363,7 @@ describe('validateEditNoteBlocksAction', () => {
             applicable_count: 1,
             skipped_count: 0,
         });
-        expect(response.current_value.snapshot).toBe(buildAddressSnapshot(BODY, EMPTY_READ_WINDOW));
+        expect(response.current_value.snapshot).toBe(buildAddressSnapshot(NOTE_ID, BODY));
 
         const edits = response.normalized_action_data!.edits as EditNoteBlocksEditItem[];
         expect(edits).toHaveLength(1);
@@ -388,7 +391,7 @@ describe('validateEditNoteBlocksAction', () => {
     });
 
     it('refuses on a stale snapshot and returns the current note for re-addressing', async () => {
-        const staleSnapshot = buildAddressSnapshot('<p>Something else entirely.</p>', { from: 1, to: 1 });
+        const staleSnapshot = buildAddressSnapshot(NOTE_ID, '<p>Something else entirely.</p>');
         const response = await handleAgentActionValidateRequest(
             validateRequest([replaceBlock2], { snapshot: staleSnapshot }),
         );
@@ -400,8 +403,8 @@ describe('validateEditNoteBlocksAction', () => {
             total_lines: 3,
             note: BODY,
         });
-        // The fresh token's window matches what is actually shipped (the whole note).
-        expect(response.current_value.snapshot).toBe(buildAddressSnapshot(BODY, { from: 1, to: 3 }));
+        // The fresh token identifies the note as it now stands.
+        expect(response.current_value.snapshot).toBe(buildAddressSnapshot(NOTE_ID, BODY));
     });
 
     it('requires a snapshot whenever an edit addresses by number', async () => {
@@ -535,16 +538,16 @@ describe('validateEditNoteBlocksAction', () => {
 });
 
 // =============================================================================
-// Large-note fail-closed window
+// Large-note truncation
 // =============================================================================
 
-describe('edit_note_blocks large-note fail-closed window', () => {
-    const staleSnapshot = buildAddressSnapshot('<p>Something else entirely.</p>', { from: 1, to: 1 });
+describe('edit_note_blocks large-note truncation', () => {
+    const staleSnapshot = buildAddressSnapshot(NOTE_ID, '<p>Something else entirely.</p>');
 
     it.each([
         ['over the line cap', () => MANY_NOTE_HTML, () => MANY_BODY],
         ['over the character cap', () => WIDE_NOTE_HTML, () => WIDE_BODY],
-    ])('omits the note body and issues an empty-window token on a validate mismatch (%s)', async (_label, note, body) => {
+    ])('omits the note body but still issues a verifiable token on a validate mismatch (%s)', async (_label, note, body) => {
         useNote(note());
         const response = await handleAgentActionValidateRequest(
             validateRequest([replaceBlock2], { snapshot: staleSnapshot }),
@@ -554,15 +557,16 @@ describe('edit_note_blocks large-note fail-closed window', () => {
         expect(response.current_value.kind).toBe('snapshot_mismatch');
         expect(response.current_value.note).toBeUndefined();
         expect(response.current_value.truncated).toBe(true);
-        // Fail closed: the token licenses NO numeric address until a re-read.
-        expect(verifyAddressSnapshot(response.current_value.snapshot, body()))
-            .toEqual(EMPTY_READ_WINDOW);
+        // The token identifies the note version either way; `truncated` is what
+        // tells the model it has not been shown the content. Withholding the
+        // token alongside the listing is the backend's call, not this layer's.
+        expect(verifyAddressSnapshot(response.current_value.snapshot, NOTE_ID, body())).toBe(true);
     });
 
     it.each([
         ['over the line cap', () => MANY_NOTE_HTML, () => MANY_LINES, () => MANY_SNAPSHOT],
         ['over the character cap', () => WIDE_NOTE_HTML, () => WIDE_LINES, () => WIDE_SNAPSHOT],
-    ])('omits the note body and issues an empty-window token in refreshed_note (%s)', async (_label, note, lines, snapshot) => {
+    ])('omits the note body but still issues a verifiable token in refreshed_note (%s)', async (_label, note, lines, snapshot) => {
         useNote(note());
         const response = await handleAgentActionExecuteRequest(executeRequest(
             [{ index: 0, op: 'replace', block: 2, expect: lines()[1], content: '<p>Replaced.</p>' }],
@@ -574,18 +578,17 @@ describe('edit_note_blocks large-note fail-closed window', () => {
         expect(response.refreshed_note!.truncated).toBe(true);
 
         const postBody = [...lines().slice(0, 1), '<p>Replaced.</p>', ...lines().slice(2)].join('\n');
-        expect(verifyAddressSnapshot(response.refreshed_note!.snapshot, postBody))
-            .toEqual(EMPTY_READ_WINDOW);
+        expect(verifyAddressSnapshot(response.refreshed_note!.snapshot, NOTE_ID, postBody)).toBe(true);
         const result = response.result_data as unknown as EditNoteBlocksResultData;
         expect(result.address_post_snapshot).toBe(response.refreshed_note!.snapshot);
     });
 
-    it('still ships the body and a whole-note window just under the caps', async () => {
+    it('still ships the body just under the caps', async () => {
         const response = await handleAgentActionExecuteRequest(executeRequest([replaceBlock2]));
         expect(response.refreshed_note!.truncated).toBeUndefined();
         expect(response.refreshed_note!.note).toBeDefined();
-        expect(verifyAddressSnapshot(response.refreshed_note!.snapshot, response.refreshed_note!.note!))
-            .toEqual({ from: 1, to: 3 });
+        expect(verifyAddressSnapshot(response.refreshed_note!.snapshot, NOTE_ID, response.refreshed_note!.note!))
+            .toBe(true);
     });
 });
 
@@ -683,7 +686,7 @@ describe('executeEditNoteBlocksAction', () => {
 
         const newBody = `${LINE_1}\n<p>Bravo REWRITTEN two.</p>\n${LINE_3}`;
         expect(response.refreshed_note).toMatchObject({ total_lines: 3, note: newBody });
-        expect(response.refreshed_note!.snapshot).toBe(buildAddressSnapshot(newBody, { from: 1, to: 3 }));
+        expect(response.refreshed_note!.snapshot).toBe(buildAddressSnapshot(NOTE_ID, newBody));
         expect(result.address_post_snapshot).toBe(response.refreshed_note!.snapshot);
         // Transport-only: the note body must not be persisted into result_data.
         expect(result).not.toHaveProperty('note');
@@ -691,7 +694,7 @@ describe('executeEditNoteBlocksAction', () => {
     });
 
     it('returns refreshed_note on an approval-delay snapshot mismatch', async () => {
-        const staleSnapshot = buildAddressSnapshot('<p>Something else entirely.</p>', { from: 1, to: 1 });
+        const staleSnapshot = buildAddressSnapshot(NOTE_ID, '<p>Something else entirely.</p>');
         const response = await handleAgentActionExecuteRequest(
             executeRequest([replaceBlock2], { snapshot: staleSnapshot }),
         );
@@ -1131,7 +1134,7 @@ describe('edit_note_blocks preview pair', () => {
         useNote(`<div data-schema-version="9">${EMPTY_BODY}</div>`);
         const response = await handleAgentActionValidateRequest(validateRequest(
             [{ index: 0, op: 'prepend', content: '<p>Head.</p>' }],
-            { snapshot: buildAddressSnapshot(EMPTY_BODY, { from: 1, to: 1 }) },
+            { snapshot: buildAddressSnapshot(NOTE_ID, EMPTY_BODY) },
         ));
 
         expect(response.valid).toBe(true);

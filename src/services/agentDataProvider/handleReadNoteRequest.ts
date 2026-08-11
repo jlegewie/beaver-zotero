@@ -10,8 +10,7 @@ import { getOrSimplify } from '../../utils/noteHtmlSimplifier';
 import { preloadNotePageLabels } from '../../utils/noteCitationExpand';
 import { getNoteHtmlForRead } from '../../utils/noteEditorIO';
 import { containsPreviewMarkers, stripPreviewMarkers } from '../../utils/notePreviewGuard';
-import { buildAddressSnapshot, EMPTY_READ_WINDOW } from '../../utils/noteSnapshot';
-import type { ReadWindow } from '../../utils/noteSnapshot';
+import { buildAddressSnapshot, snapshotNoteId } from '../../utils/noteSnapshot';
 import {
     WSReadNoteRequest,
     WSReadNoteResponse,
@@ -294,22 +293,59 @@ export async function handleReadNoteRequest(
             rawHtml = stripPreviewMarkers(rawHtml);
         }
 
-        // 6. Simplify (also warms cache for subsequent edit_note calls).
-        // The cache is keyed by the device-local "{libraryID}-{itemKey}" form —
-        // the same key edit_note builds from its resolved reference — so a note
-        // addressed by a portable id and by a legacy numeric id shares one entry.
-        // Pass raw HTML so the cache key matches edit_note's getOrSimplify
-        // calls — simplifyNoteHtml normalizes internally, so the cached
-        // simplified output is identical either way.
-        const cacheNoteId = `${item.libraryID}-${item.key}`;
+        // 6. Simplify (also warms the cache for a subsequent edit_note_blocks
+        // call). The key is built from the RESOLVED item, so a note addressed by
+        // a portable id and by a legacy numeric id shares one entry — and it is
+        // the same string the address snapshot binds, which is why it must come
+        // from `snapshotNoteId` and not be spelled out here.
+        //
+        // That makes it the PORTABLE "{library_ref}-{itemKey}" form, which the
+        // v1 `edit_note`/`edit_note_batch` paths do not use: they still key on
+        // the device-local "{resolvedLibraryId}-{zotero_key}". So this read only
+        // warms the block-addressed path, and a v1 edit of the same note pays
+        // one redundant simplification. Deliberately not "fixed" by keying this
+        // read device-locally: `getOrSimplify` re-simplifies on a content-hash
+        // miss, so two entries for one note cost work, never correctness — and
+        // the snapshot identity has to be portable. Unify by moving the v1 paths
+        // onto `snapshotNoteId` too, never by moving this one back.
+        //
+        // Pass raw HTML, not normalized: `simplifyNoteHtml` normalizes
+        // internally, so the cached output is identical either way and every
+        // caller can hand over what it already has.
+        const cacheNoteId = snapshotNoteId(item.libraryID, item.key);
         const pageLabelsByItemId = await preloadNotePageLabels(rawHtml, item.libraryID, { extractOnCacheMiss: true });
         const { simplified } = getOrSimplify(cacheNoteId, rawHtml, item.libraryID, pageLabelsByItemId);
 
-        // 7. Apply offset/limit pagination
+        // 7. Apply offset/limit pagination.
+        //
+        // SANITIZE FIRST. `offset`/`limit` are unvalidated `number?` on the wire
+        // and reach us verbatim from the MCP and HTTP entry points, so they can
+        // be negative, zero, fractional or non-finite. Left raw they corrupt
+        // every derived value at once, not just the slice: `limit: -1` gives
+        // `end = -1`, and `lines.slice(0, -1)` cheerfully returns all-but-the-
+        // last line, so the response ships real content alongside
+        // `lines_returned: "1--1"` and `next_offset: 0` — and an offset of 0
+        // re-reads the same page forever. Flooring and clamping here makes every
+        // line below total, and is why nothing downstream needs a fail-closed
+        // branch.
         const lines = simplified.split('\n');
         const totalLines = lines.length;
-        const start = Math.max(0, (offset ?? 1) - 1);
-        const end = limit ? Math.min(start + limit, totalLines) : totalLines;
+        const safeOffset = Number.isFinite(offset as number)
+            ? Math.max(1, Math.floor(offset as number))
+            : 1;
+        // `limit` absent — or non-finite, which cannot describe a count — means
+        // "to the end". A finite but nonsensical one (0, negative, fractional)
+        // clamps to one line rather than zero, so a read always shows something.
+        const safeLimit = limit === undefined || limit === null
+            ? undefined
+            : (Number.isFinite(limit) ? Math.max(1, Math.floor(limit)) : undefined);
+        // NOT clamped to the last line: an offset past the end honestly returns
+        // nothing, which is long-standing behavior and the only answer that does
+        // not invent a page the model did not ask for.
+        const start = safeOffset - 1;
+        const end = safeLimit === undefined
+            ? totalLines
+            : Math.min(start + safeLimit, totalLines);
         const slice = lines.slice(start, end);
 
         const content = slice.join('\n');
@@ -319,29 +355,30 @@ export async function handleReadNoteRequest(
         const linesReturned = slice.length === 0 ? undefined
             : (startLine === end ? String(startLine) : `${startLine}-${end}`);
 
-        // Address snapshot for edit_note_blocks. The digest covers the WHOLE-note
-        // `simplified` string — that is the string whose split('\n') defines the
-        // block numbering — while the window records only what this response
-        // actually SHOWED, because the edit engine refuses numeric addresses the
-        // model never saw. Do not "fix" this to 1-totalLines: on a paginated read
-        // that would license edits to unseen blocks.
+        // Address snapshot for edit_note_blocks — ONLY when this response showed
+        // the WHOLE note.
         //
-        // The window falls back to the canonical empty one whenever it would not
-        // describe a real shown range. `offset`/`limit` are unvalidated `number?`
-        // on the wire and reach us verbatim from the MCP and HTTP entry points,
-        // so a negative or fractional `limit` can produce a non-empty slice with
-        // a nonsensical `end` (`limit: -1` → `end: -1` with 4 lines returned).
-        // `buildAddressSnapshot` refuses such a window by throwing, and a throw
-        // here would be caught below and turn a read that has always succeeded
-        // into a failed tool call. Failing closed instead costs only a re-read
-        // before the first numeric edit, which is the designed recovery.
-        const windowIsShowable = slice.length > 0
-            && Number.isSafeInteger(startLine) && Number.isSafeInteger(end)
-            && startLine >= 1 && end >= startLine;
-        const readWindow: ReadWindow = windowIsShowable
-            ? { from: startLine, to: end }
-            : EMPTY_READ_WINDOW;
-        const snapshot = buildAddressSnapshot(simplified, readWindow);
+        // The digest covers the whole `simplified` string (that is the string
+        // whose split('\n') defines the block numbering) plus the note's
+        // identity, so a token verifies only against this note in this state.
+        // But covering the whole note is exactly why it must not be handed out
+        // after a PARTIAL read: it would license numeric addresses into the
+        // pages the model never saw, and `expect` cannot catch that on its own.
+        // Over half of a typical note's lines have no visible text, and those
+        // are confirmed only by their attribute-stripped tag — one `</ul>`
+        // matches every other `</ul>` in the note — while a ranged `delete`
+        // confirms only its two endpoints and never its interior. See
+        // `matchExpect` in editNoteBlocksCore.ts, which documents that `expect`
+        // is a per-block sanity check and not an addressing guard.
+        //
+        // So a paged read is for READING. To edit by block number, read the note
+        // whole; that single rule replaces the per-response read window this
+        // token used to carry, and is the same policy the backend applies when
+        // it withholds a snapshot alongside a listing it could not show.
+        const showedWholeNote = slice.length === totalLines;
+        const snapshot = showedWholeNote
+            ? buildAddressSnapshot(cacheNoteId, simplified)
+            : undefined;
 
         // 8. Gather parent metadata
         let parentItemId: string | undefined;

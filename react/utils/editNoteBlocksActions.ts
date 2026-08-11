@@ -63,6 +63,7 @@ import {
     refreshBlockUndoRecords,
     resolveCitationRejections,
 } from '../../src/services/agentDataProvider/actions/editNoteBlocks';
+import { snapshotNoteId } from '../../src/utils/noteSnapshot';
 import { getExternalRefContext } from '../../src/services/agentDataProvider/actions/editNote';
 import { applyBatchUndoRecord, assertNoteLibraryNotExcluded } from './editNoteActions';
 
@@ -133,7 +134,10 @@ export async function executeEditNoteBlocksAction(
     //     the same HTML validation saw. See flushLiveEditorToDB for rationale.
     await flushLiveEditorToDB(item);
 
-    const noteId = `${library_id}-${zotero_key}`;
+    // Built from the RESOLVED item, not the request field: this is both the
+    // simplification cache key and the identity folded into the address
+    // snapshot, so it must be byte-identical to what read_note used.
+    const noteId = snapshotNoteId(library_id, item.key);
 
     // 2c. Repair notes that contain persisted diff-preview markup, mirroring
     //     the agent execute path.
@@ -214,7 +218,7 @@ export async function executeEditNoteBlocksAction(
     //    and `address_post_snapshot`).
     const postPageLabels = await preloadNotePageLabels(finalRawHtml, library_id, { extractOnCacheMiss: true });
     const { simplified: postSimplified } = getOrSimplify(noteId, finalRawHtml, library_id, postPageLabels);
-    const postState = buildInlineNoteState(postSimplified);
+    const postState = buildInlineNoteState(noteId, postSimplified);
 
     const appliedBlocks = plan.resolveAppliedBlocks(postState.total_lines);
     const applied: EditNoteBlocksAppliedEdit[] = plan.appliedIdentities.map((identity) => ({

@@ -171,7 +171,7 @@ import {
     undoEditNoteVariantAction,
 } from '../../../react/utils/editNoteActions';
 import { deriveEditNoteRows, getEditNoteCallVariant } from '../../../react/components/agentRuns/editNoteShared';
-import { buildAddressSnapshot } from '../../../src/utils/noteSnapshot';
+import { buildAddressSnapshot, snapshotNoteId } from '../../../src/utils/noteSnapshot';
 import { stripBeaverEditFooter } from '../../../src/utils/noteEditFooter';
 import { checkLibraryExcluded } from '../../../src/services/agentDataProvider/utils';
 import { store } from '../../../react/store';
@@ -182,6 +182,9 @@ import type {
     EditNoteBlocksResultData,
 } from '@beaver/agent-core/types/agentActions/editNoteBlocks';
 
+/** Every fixture in this file is note 1-NOTE0001. */
+const NOTE_ID = snapshotNoteId(1, 'NOTE0001');
+
 // =============================================================================
 // Fixtures
 // =============================================================================
@@ -191,7 +194,7 @@ const LINE_2 = '<p>Bravo passage two.</p>';
 const LINE_3 = '<p>Charlie section three.</p>';
 const BODY = [LINE_1, LINE_2, LINE_3].join('\n');
 const NOTE_HTML = `<div data-schema-version="9">${BODY}</div>`;
-const SNAPSHOT = buildAddressSnapshot(BODY, { from: 1, to: 3 });
+const SNAPSHOT = buildAddressSnapshot(NOTE_ID, BODY);
 
 const THREAD_ID = 'thread-0001';
 
@@ -369,7 +372,7 @@ describe('executeEditNoteBlocksAction (local re-apply)', () => {
     });
 
     it('refuses a stale snapshot instead of editing the wrong line', async () => {
-        const staleSnapshot = buildAddressSnapshot('<p>A completely different note.</p>', { from: 1, to: 1 });
+        const staleSnapshot = buildAddressSnapshot(NOTE_ID, '<p>A completely different note.</p>');
         await expect(
             executeEditNoteBlocksAction(blocksAction([replaceBlock2], { snapshot: staleSnapshot })),
         ).rejects.toThrow(/block numbering no longer matches/);

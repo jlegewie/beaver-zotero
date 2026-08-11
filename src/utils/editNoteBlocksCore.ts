@@ -29,7 +29,6 @@ import type {
     EditNoteBlocksSkipReasonCode,
 } from '@beaver/agent-core/types/agentActions/editNoteBlocks';
 import type { BatchApplyOp, ResolvedBatchEdit, ResolvedRange } from './editNoteBatchCore';
-import type { ReadWindow } from './noteSnapshot';
 import { findNoteWrapperBounds } from './noteWrapper';
 import { parseCreatedFooter, parseEditFooter } from './noteEditFooter';
 import {
@@ -205,12 +204,6 @@ export interface SelectBlockEditsContext {
     externalRefContext?: ExternalRefContext;
     pageLabels?: PageLabelsByAttachmentId;
     resolvedLocatorPages?: ResolvedLocatorPages;
-    /**
-     * The window the verified snapshot token records as actually SHOWN. When
-     * omitted, no window restriction is imposed (callers that address by number
-     * must always supply one).
-     */
-    readWindow?: ReadWindow;
     /**
      * Optional caller hook applied to `content` BEFORE expansion, so the action
      * layer can plug in Zotero-dependent content checks without this module
@@ -948,9 +941,11 @@ export type ExpectMatchOutcome = 'match' | 'mismatch' | 'too_short';
  *
  * HONEST LIMITATION: on no-visible-text lines `expect` matches hundreds of
  * positions in the same note, so it is NOT the load-bearing guard — the snapshot
- * requirement and the read-window binding are. On lines WITH visible text it is
- * strong (only 7.5% of notes contain two content lines sharing a 40-character
- * prefix).
+ * requirement is, together with the rule that `read_note` issues a snapshot ONLY
+ * for a whole-note read (so a block number can never name a page the model was
+ * not shown). A ranged `delete` likewise confirms only its two endpoints and
+ * never its interior. On lines WITH visible text `expect` is strong (only 7.5%
+ * of notes contain two content lines sharing a 40-character prefix).
  *
  * Both sides are additionally run through {@link canonicalizeForExpect}, which
  * folds the drift classes the single-string matcher needs dedicated strategies
@@ -1164,47 +1159,6 @@ function checkBounds(spec: BlockEditSpec, total: number): SkipDraft | null {
     const to = spec.to ?? from;
     if (from > total) return oor(from, 'block');
     if (to > total) return oor(to, 'to');
-    return null;
-}
-
-/** Gate 2b — the read window carried by the verified snapshot token. */
-function checkReadWindow(spec: BlockEditSpec, window: ReadWindow): SkipDraft | null {
-    // `prepend` / `append` name the note's absolute start and end rather than a
-    // block. Those positions exist whatever the model read and cannot be off by
-    // one, so the window — which answers "did you see this block?" — has no
-    // question to answer. Checked BEFORE the empty-window bail-out so they stay
-    // usable on a token that carries no addressable range at all.
-    if (spec.op === 'prepend' || spec.op === 'append') return null;
-
-    // EMPTY_READ_WINDOW: the response that issued this token showed no note
-    // lines, so there is no range to name and nothing is addressable.
-    if (window.from === 0 && window.to === 0) {
-        return skip(
-            'address_outside_read_window',
-            'No block can be addressed with this snapshot: the read it came from showed no note '
-            + 'lines. Call read_note for this note (omit offset/limit to get the whole note) and '
-            + 'address blocks from that listing, echoing its snapshot.',
-        );
-    }
-    const outside = (what: string) => skip(
-        'address_outside_read_window',
-        `${what} is outside the range you last read (${window.from}–${window.to}); `
-        + 'call read_note for that range before editing it.',
-    );
-    const inWindow = (n: number) => n >= window.from && n <= window.to;
-
-    if (spec.op === 'replace') {
-        const block = spec.block as number;
-        return inWindow(block) ? null : outside(`block ${block}`);
-    }
-    if (spec.op === 'insert') {
-        const after = spec.after as number;
-        return inWindow(after) ? null : outside(`after ${after}`);
-    }
-    const from = spec.block as number;
-    const to = spec.to ?? from;
-    if (!inWindow(from)) return outside(`block ${from}`);
-    if (!inWindow(to)) return outside(`to ${to}`);
     return null;
 }
 
@@ -1667,7 +1621,7 @@ export function selectBlockEdits(
         const shapeSkip = checkShape(spec);
         if (shapeSkip) { emit(shapeSkip); continue; }
 
-        // 2. bounds, then the trailing-empty-line delete guard, then read window
+        // 2. bounds, then the trailing-empty-line delete guard
         const boundsSkip = checkBounds(spec, total);
         if (boundsSkip) { emit(boundsSkip); continue; }
 
@@ -1683,11 +1637,6 @@ export function selectBlockEdits(
                 ));
                 continue;
             }
-        }
-
-        if (ctx.readWindow) {
-            const windowSkip = checkReadWindow(spec, ctx.readWindow);
-            if (windowSkip) { emit(windowSkip); continue; }
         }
 
         // 3. a range crossing a footer-skipped line

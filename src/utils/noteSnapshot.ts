@@ -4,16 +4,19 @@
  * `read_note` renders a simplified projection of a note and numbers its lines;
  * `edit_note_blocks` then addresses those lines BY NUMBER. That only works if
  * both sides agree on which string was numbered, so every response that shows
- * blocks issues a snapshot token pinning it, and every edit that addresses by
- * number echoes the token back. This module is the single implementation of
- * both directions — build and verify — so producer and comparator cannot drift.
+ * blocks the model can address issues a snapshot token pinning it, and every
+ * edit that addresses by number echoes the token back. This module is the single
+ * implementation of both directions — build and verify — so producer and
+ * comparator cannot drift.
  *
  * Token format (see `WSReadNoteResponse.snapshot` for the wire contract):
  *
- *     'h:' + <digest> + ':' + <length> + ':' + <from> + '-' + <to>
+ *     'h:' + <digest> + ':' + <length>
  *
- * Three design points worth stating explicitly, because each one is load-bearing
- * and none is obvious from the format alone:
+ * The token is a NOTE VERSION IDENTIFIER and nothing more: it answers "is this
+ * the same note, in the same state, that produced the numbering you are
+ * addressing?" Three design points worth stating explicitly, because each one is
+ * load-bearing and none is obvious from the format alone:
  *
  * 1. WHY MASKING. Citation locators are rendered from page-label caches that
  *    populate asynchronously and can change between a read and a later edit
@@ -23,13 +26,12 @@
  *    perfectly well addressed. {@link maskVolatileLocators} removes exactly that
  *    class of drift from the digest input, and nothing else.
  *
- * 2. WHY THE WINDOW IS INSIDE THE DIGEST. The trailing `<from>-<to>` records
- *    what was actually SHOWN to the model, and the edit engine refuses numeric
- *    addresses outside it. If the window were merely appended, a model could
- *    widen `:1-100` to `:1-9999` and license itself to edit blocks it never saw.
- *    Folding the window into the hashed input makes any such rewrite produce a
- *    token that no longer verifies, so a hand-widened window routes into
- *    snapshot-mismatch recovery instead of a blind edit.
+ * 2. WHY THE NOTE ID IS INSIDE THE DIGEST. Without it the token identifies a
+ *    STRING, not a note, so a token issued for note A verifies against any note
+ *    B whose simplified projection happens to be identical — duplicated notes and
+ *    template notes make that reachable. The pre-flight that refuses a numeric
+ *    address without a token exists to enforce "you read THIS note first", and
+ *    binding the id is what makes that true rather than merely likely.
  *
  * 3. WHY 64 BITS IS ENOUGH. The digest is a non-cryptographic hash and a
  *    collision would let a changed note verify against a stale token. That risk
@@ -37,12 +39,40 @@
  *    mode no digest can catch — a model mis-deriving a block number from a note
  *    it read correctly. The real guards are the snapshot-required pre-flight
  *    (an edit addressing by number without a token is refused outright) and the
- *    window binding above; the digest only has to catch honest staleness.
+ *    rule that a token is only ever issued alongside the whole listing it
+ *    addresses; the digest only has to catch honest staleness.
  *
- * Pure module: no `Zotero.*`, no React-bundle imports, no async. It is imported
- * from the no-await critical section around a note read, so everything here is
- * synchronous and allocation-light.
+ * THERE IS NO READ WINDOW IN THE TOKEN. An earlier revision folded the range a
+ * response had actually SHOWN into the token and refused numeric addresses
+ * outside it. That answered two different questions with one mechanism, and the
+ * two are now separated:
+ *
+ *   - "is the numbering current?" — the digest, which covers the WHOLE note
+ *     however little of it was displayed. That is what makes the token a note
+ *     VERSION identifier, and it is why the same token survives an edit set that
+ *     spans anything the reader was shown.
+ *   - "was the model shown what it is addressing?" — answered by WITHHOLDING
+ *     the token entirely, not by qualifying it. `read_note` issues a snapshot
+ *     only for a whole-note read; a paged read gets content and no token. The
+ *     backend applies the same rule to its own payloads, dropping the snapshot
+ *     whenever it drops the listing that snapshot addresses.
+ *
+ * The second bullet is load-bearing and easy to get wrong, so state the reason
+ * plainly: `expect` cannot stand in for it. Over half a typical note's lines
+ * carry no visible text and are confirmed only by their attribute-stripped tag,
+ * so one `</ul>` confirms every other `</ul>` in the note; and a ranged `delete`
+ * confirms only its two endpoints, never its interior. `expect` is a per-block
+ * sanity check, not an addressing guard — see `matchExpect` in
+ * `editNoteBlocksCore.ts`, which says so at its definition.
+ *
+ * No React-bundle imports, no async: this module is imported from the no-await
+ * critical section around a note read, so everything here is synchronous and
+ * allocation-light. Masking, hashing and verification are pure string work; the
+ * one exception is {@link snapshotNoteId}, which resolves a portable library
+ * identity through `libraryIdentity` (sync, best-effort, never throws).
  */
+
+import { libraryRefForLibraryID } from './libraryIdentity';
 
 // =============================================================================
 // Locator masking
@@ -122,67 +152,6 @@ export function maskVolatileLocators(simplified: string): string {
 }
 
 // =============================================================================
-// Read window
-// =============================================================================
-
-/**
- * The inclusive 1-based range of blocks a response actually SHOWED.
- *
- * It is what was shown, not what was asked for or what the note contains: an
- * edit addressing a block outside this window is refused with
- * `address_outside_read_window`.
- */
-export interface ReadWindow {
-    /** First block shown (1-based, inclusive). `0` only in the empty window. */
-    from: number;
-    /** Last block shown (1-based, inclusive). `0` only in the empty window. */
-    to: number;
-}
-
-/**
- * The canonical "nothing was shown" window.
- *
- * Builder and validator MUST agree on this literal byte-for-byte — it is part
- * of the digest input, and it is what a response that ships a token WITHOUT the
- * note body carries, so every numeric address against it fails closed until the
- * model re-reads. (`op: 'rewrite'` needs no window and stays available.)
- */
-export const EMPTY_READ_WINDOW: ReadWindow = Object.freeze({ from: 0, to: 0 });
-
-/** Serialize a read window to its canonical `<from>-<to>` form. */
-export function encodeReadWindow(w: ReadWindow): string {
-    return `${w.from}-${w.to}`;
-}
-
-/** Parse a non-negative decimal integer, or `null`. Rejects signs, decimal
- *  points, exponents, whitespace, and anything else `Number()` would coerce. */
-function parseNonNegativeInt(s: string): number | null {
-    if (!/^\d+$/.test(s)) return null;
-    const n = Number(s);
-    return Number.isSafeInteger(n) ? n : null;
-}
-
-/**
- * Parse a `<from>-<to>` read window. FAILS CLOSED — returns `null` rather than
- * guessing — on a missing `-`, non-numeric or non-integer parts, negative
- * numbers, and any inverted window (`from > to`).
- *
- * The canonical empty window `0-0` parses successfully: it has `from === to`,
- * so it is not inverted and needs no special case.
- */
-export function parseReadWindow(s: string): ReadWindow | null {
-    if (typeof s !== 'string') return null;
-    const sep = s.indexOf('-');
-    // `sep === 0` means a leading `-`, i.e. a negative `from`.
-    if (sep <= 0) return null;
-    const from = parseNonNegativeInt(s.slice(0, sep));
-    const to = parseNonNegativeInt(s.slice(sep + 1));
-    if (from === null || to === null) return null;
-    if (from > to) return null;
-    return { from, to };
-}
-
-// =============================================================================
 // Digest
 // =============================================================================
 
@@ -243,84 +212,86 @@ export function quickHash64(input: string): string {
 /** Prefix identifying a hash-form address snapshot token. */
 const TOKEN_PREFIX = 'h';
 /** Number of `:`-separated parts in a well-formed token. */
-const TOKEN_PARTS = 4;
+const TOKEN_PARTS = 3;
 
 const DIGEST_RE = new RegExp(`^[0-9a-f]{${DIGEST_HEX_WIDTH}}$`);
+/** A non-negative decimal integer. Rejects signs, points, exponents, spaces. */
+const LENGTH_RE = /^\d+$/;
 
 /**
- * Build the address snapshot token for a simplified note projection and the
- * window that was actually shown.
+ * The note identity folded into every digest.
+ *
+ * Build it from the RESOLVED Zotero item (`item.libraryID` / `item.key`), never
+ * from a request field the caller has not resolved: a portable `u-KEY` id and a
+ * legacy numeric id name the same note and must produce the same token. This is
+ * also the simplification cache key, and the two must not drift apart.
+ *
+ * PORTABLE, NOT DEVICE-LOCAL. The library part is the `library_ref` form
+ * (`u` / `g<groupID>`), the same one `modelObjectId` emits, because a
+ * token does not stay on the device that minted it: it travels in the thread
+ * transcript, and a thread can be resumed — or an approval executed — on
+ * another Zotero instance. A group library's `libraryID` is assigned per
+ * device, so binding it would fail a byte-identical note read on a laptop and
+ * edited on a desktop, with a "block numbering no longer matches" refusal the
+ * user cannot act on. `libraryRefForLibraryID` is best-effort by design and
+ * falls back to the numeric id for a library with no portable identity (feeds,
+ * the external-file sentinel, an unregistered group) — device-local again, but
+ * only for libraries a cross-device thread cannot reach anyway.
+ */
+export function snapshotNoteId(libraryId: number, itemKey: string): string {
+    return `${libraryRefForLibraryID(libraryId) ?? libraryId}-${itemKey}`;
+}
+
+/**
+ * Build the address snapshot token for a note and its simplified projection.
  *
  * `simplified` must be the EXACT string whose `split('\n')` defines the block
  * numbering the recipient will see — not a numbered rendering of it, and not a
  * paginated slice.
  *
- * The window participates in the digest, not just in the suffix: see this
- * module's header for why that is what stops a model from widening its own
- * addressing licence.
+ * CALLING THIS DOES NOT MEAN THE TOKEN SHOULD BE SENT. The digest covers the
+ * whole note, so a caller that displayed only part of it must withhold the
+ * result — see `handleReadNoteRequest`, which builds a token only when the
+ * response showed every line.
  *
- * THROWS on a window {@link parseReadWindow} would refuse. Without this a caller
- * could mint a structurally invalid token (`1-0` from an off-by-one on an empty
- * slice) that its own {@link verifyAddressSnapshot} then rejects against the
- * very note it was built from — an unexplainable permanent mismatch. It is a
- * programming error, not a data condition, so it fails loudly at the source.
+ * `noteId` must come from {@link snapshotNoteId}.
  */
-export function buildAddressSnapshot(simplified: string, window: ReadWindow): string {
-    if (!parseReadWindow(encodeReadWindow(window))) {
-        throw new Error(
-            `buildAddressSnapshot: invalid read window ${encodeReadWindow(window)}; `
-            + 'expected 0-0 (nothing shown) or from <= to with non-negative integers.',
-        );
-    }
+export function buildAddressSnapshot(noteId: string, simplified: string): string {
     const masked = maskVolatileLocators(simplified);
-    const encodedWindow = encodeReadWindow(window);
-    const digest = quickHash64(`${masked}|${encodedWindow}`);
-    return `${TOKEN_PREFIX}:${digest}:${masked.length}:${encodedWindow}`;
-}
-
-/** A structurally valid snapshot token and the window it carries. */
-export interface ParsedAddressSnapshot {
-    /** The token exactly as supplied. */
-    token: string;
-    /** The read window parsed out of the token's suffix. */
-    window: ReadWindow;
+    const digest = quickHash64(`${noteId}|${masked}`);
+    return `${TOKEN_PREFIX}:${digest}:${masked.length}`;
 }
 
 /**
- * Structurally parse a snapshot token WITHOUT checking it against a note.
+ * Structurally check a snapshot token WITHOUT checking it against a note.
  *
- * Validates the `h:` prefix, the digest shape, the length term and the window;
- * returns `null` on anything malformed. Useful for cheap pre-flight rejection
- * (e.g. an edit request carrying obvious garbage) — but it proves nothing about
- * the note. Anything that is about to act on block numbers must use
+ * Validates the `h:` prefix, the digest shape and the length term; returns false
+ * on anything malformed. Useful for cheap pre-flight rejection (e.g. an edit
+ * request carrying obvious garbage) — but it proves nothing about the note.
+ * Anything that is about to act on block numbers must use
  * {@link verifyAddressSnapshot}.
  */
-export function parseAddressSnapshot(token: string): ParsedAddressSnapshot | null {
-    if (typeof token !== 'string') return null;
+export function isAddressSnapshotToken(token: string): boolean {
+    if (typeof token !== 'string') return false;
     const parts = token.split(':');
-    if (parts.length !== TOKEN_PARTS) return null;
-    if (parts[0] !== TOKEN_PREFIX) return null;
-    if (!DIGEST_RE.test(parts[1])) return null;
-    if (parseNonNegativeInt(parts[2]) === null) return null;
-    const window = parseReadWindow(parts[3]);
-    if (!window) return null;
-    return { token, window };
+    if (parts.length !== TOKEN_PARTS) return false;
+    if (parts[0] !== TOKEN_PREFIX) return false;
+    if (!DIGEST_RE.test(parts[1])) return false;
+    return LENGTH_RE.test(parts[2]);
 }
 
 /**
- * Verify a snapshot token against a simplified note projection.
+ * Verify a snapshot token against a note and its simplified projection.
  *
- * Parses the token, RECOMPUTES it from `simplified` using the window parsed out
- * of the token itself, and requires byte equality. Returns the verified window
- * on success and `null` on any mismatch or malformed token.
- *
- * This is the function callers use. It is deliberately impossible to check the
- * digest without also receiving the window: the two travel together, so no
- * caller can validate staleness and then forget to bound the addressing.
+ * RECOMPUTES the token and requires byte equality — the note id participates, so
+ * a token issued for a different note fails even when the two notes read
+ * identically. Returns false on any mismatch or malformed token.
  */
-export function verifyAddressSnapshot(token: string, simplified: string): ReadWindow | null {
-    const parsed = parseAddressSnapshot(token);
-    if (!parsed) return null;
-    const recomputed = buildAddressSnapshot(simplified, parsed.window);
-    return recomputed === token ? parsed.window : null;
+export function verifyAddressSnapshot(
+    token: string,
+    noteId: string,
+    simplified: string,
+): boolean {
+    if (!isAddressSnapshotToken(token)) return false;
+    return buildAddressSnapshot(noteId, simplified) === token;
 }

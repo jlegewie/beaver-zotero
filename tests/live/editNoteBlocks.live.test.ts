@@ -247,7 +247,7 @@ interface NoteView {
     snapshot: string;
 }
 
-/** Full (unpaginated) read_note, which is what mints a whole-note read window. */
+/** Full (unpaginated) read_note. */
 async function readBlocks(ref: { library_id: number; zotero_key: string }): Promise<NoteView> {
     const res = await post<ReadNoteResponse>('/beaver/note/read', {
         note_id: `${ref.library_id}-${ref.zotero_key}`,
@@ -440,7 +440,7 @@ describe('edit_note_blocks dispatch', () => {
             // Structurally well-formed token: the shape gate only requires a
             // non-empty string, so validation gets past it and fails on the
             // note lookup — which is the dispatch signal we want.
-            snapshot: 'h:0000000000000000:0:1-1',
+            snapshot: 'h:0000000000000000:0',
             edits: [{
                 index: 0,
                 op: 'replace',
@@ -458,7 +458,7 @@ describe('edit_note_blocks dispatch', () => {
         const res = await executeBlocks({
             library_id: LIBRARY_ID,
             zotero_key: 'ZZZZZZZZ',
-            snapshot: 'h:0000000000000000:0:1-1',
+            snapshot: 'h:0000000000000000:0',
             edits: [{
                 index: 0,
                 op: 'replace',
@@ -484,10 +484,9 @@ describe('edit_note_blocks numeric replace from a read_note snapshot', () => {
         const ref = await seedNote(THREE_PARA_HTML);
 
         const view = await readBlocks(ref);
-        // The token read_note issues for a full read carries the whole-note
-        // window `1-<total_lines>`.
-        expect(view.snapshot).toMatch(/^h:[0-9a-f]{16}:\d+:1-\d+$/);
-        expect(view.snapshot.endsWith(`:1-${view.total_lines}`)).toBe(true);
+        // A note VERSION identifier: digest + masked length, no displayed
+        // range. The digest covers the whole note however much of it was shown.
+        expect(view.snapshot).toMatch(/^h:[0-9a-f]{16}:\d+$/);
 
         const block = blockOf(view.lines, 'Bravo paragraph about numbered edits.');
         const newLine = '<p>BRAVO rewritten by block number.</p>';
@@ -513,9 +512,9 @@ describe('edit_note_blocks numeric replace from a read_note snapshot', () => {
         expect(validation.current_value?.total_lines).toBe(view.total_lines);
         expect(validation.current_value?.applicable_count).toBe(1);
         expect(validation.current_value?.skipped_count).toBe(0);
-        // The success-path token deliberately carries the EMPTY window: no note
-        // body travels with it, so it must not license a blind numeric address.
-        expect(validation.current_value?.snapshot?.endsWith(':0-0')).toBe(true);
+        // Nothing was applied yet, so the note is still the one that was read
+        // and the token validate reports is the very token that was sent.
+        expect(validation.current_value?.snapshot).toBe(view.snapshot);
 
         const exec = await executeBlocks(actionData);
         expect(exec.success, exec.error ?? undefined).toBe(true);
@@ -588,20 +587,17 @@ describe('edit_note_blocks snapshot mismatch', () => {
         expect(validation.current_value?.total_lines).toBeGreaterThan(view.total_lines);
         expect(validation.current_value?.snapshot).toBeTruthy();
         expect(validation.current_value?.snapshot).not.toBe(view.snapshot);
-        // Body travelled with it, so the fresh token carries the whole-note window.
-        expect(validation.current_value?.snapshot?.endsWith(`:1-${validation.current_value?.total_lines}`)).toBe(true);
+        expect(validation.current_value?.snapshot).toMatch(/^h:[0-9a-f]{16}:\d+$/);
 
         // Execute is fail-closed on the same token, and carries its own recovery
-        // payload: the fresh note plus a token whose window covers it.
+        // payload: the fresh note plus the token that identifies it.
         const exec = await executeBlocks(staleAction);
         expect(exec.success).toBe(false);
         expect(exec.error_code).toBe('snapshot_mismatch');
         expect(exec.refreshed_note?.note).toContain('OUT OF BAND PARAGRAPH QXZV.');
         expect(exec.refreshed_note?.snapshot).toBeTruthy();
         expect(exec.refreshed_note?.snapshot).not.toBe(view.snapshot);
-        expect(
-            exec.refreshed_note?.snapshot?.endsWith(`:1-${exec.refreshed_note?.total_lines}`),
-        ).toBe(true);
+        expect(exec.refreshed_note?.snapshot).toMatch(/^h:[0-9a-f]{16}:\d+$/);
 
         const afterRefusal = await readSaved(ref);
         expect(afterRefusal).toBe(driftedHtml);

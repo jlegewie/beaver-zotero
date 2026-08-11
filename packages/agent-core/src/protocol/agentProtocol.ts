@@ -1034,22 +1034,33 @@ export interface WSReadNoteResponse {
      * Address snapshot token pinning the block numbering this response shows,
      * for later use by `edit_note_blocks`.
      *
-     * Format: `'h:' + <digest> + ':' + <length> + ':' + <from> + '-' + <to>`.
+     * Format: `'h:' + <digest> + ':' + <length>`.
      *
-     * `<digest>` is a 64-bit non-cryptographic hash over the simplified note
-     * projection (the exact string whose `split('\n')` defines the block
-     * numbering) with volatile citation locator values masked, concatenated
-     * with `'|'` and the window. `<length>` is the character length of that
-     * masked projection alone (no window, no separator) — an independent term,
-     * not a second view of the digest input. Producer and comparator must agree
-     * byte-for-byte on both —
-     * see `src/utils/noteSnapshot.ts`, which is the single implementation of
-     * both directions. Comparison is whole-token equality of the recomputed
-     * token; the window is additionally parsed out to bound numeric addressing.
+     * `<digest>` is a 64-bit non-cryptographic hash over the note's PORTABLE
+     * `{library_ref}-{itemKey}` identity (`u-KEY` / `g<groupID>-KEY`, falling
+     * back to the numeric `libraryID` for a library with no portable form) and
+     * the simplified note projection (the exact string whose `split('\n')`
+     * defines the block numbering) with volatile citation locator values
+     * masked, joined by `'|'`. The identity is portable rather than
+     * device-local because the token travels in the thread transcript: a note
+     * read on one computer can be edited from another, where the same group
+     * library has a different `libraryID`. `<length>` is
+     * the character length of that masked projection alone — an independent
+     * term, not a second view of the digest input. Producer and comparator must
+     * agree byte-for-byte on both; see `src/utils/noteSnapshot.ts`, the single
+     * implementation of both directions. Comparison is whole-token equality of
+     * the recomputed token.
      *
-     * The trailing `<from>-<to>` is the read window, and it records what was
-     * actually SHOWN rather than what was asked for; the canonical empty window
-     * is the literal `0-0`.
+     * The token identifies a NOTE VERSION, not a displayed range: it covers the
+     * whole note and carries no window.
+     *
+     * PRESENT ONLY ON A WHOLE-NOTE READ. Because the token covers the whole
+     * note, issuing it after a paginated read would license numeric addresses
+     * into pages the model was never shown, and the per-edit `expect` check
+     * cannot catch that on its own (lines with no visible text are confirmed
+     * only by their tag, and a ranged delete confirms only its endpoints). So a
+     * paged read returns `content` with NO `snapshot`, and the model must read
+     * the note whole before addressing it by block number.
      *
      * The token is OPAQUE to the backend: it is echoed back on an edit request
      * verbatim and never parsed, rewritten or synthesized there. Only the
@@ -1649,13 +1660,11 @@ export interface RefreshedNoteState {
     /**
      * Address snapshot token for the note in this state.
      *
-     * Its read window records what this payload actually SHOWS, not what the
-     * note contains: `1-<total_lines>` when `note` is present, and the
-     * canonical empty window `0-0` when it is absent. That is what keeps the
-     * large-note path from handing the model a token licensing it to address
-     * blocks it was never shown; with an empty window every numeric address
-     * fails closed with `address_outside_read_window` until it re-reads.
-     * `op: 'rewrite'` needs no window and stays available either way.
+     * Emitted whether or not `note` fits under the size cap — it identifies the
+     * note version, which is true either way. `truncated` is what tells the
+     * model it has not been shown the content. Deciding that a model which was
+     * not shown the listing should not receive the token either is the
+     * BACKEND's call: it drops both together, at its own tighter caps.
      */
     snapshot: string;
     /** Total line count of the simplified note */

@@ -47,8 +47,6 @@ export type EditNoteBlocksOp =
  * - `expect_mismatch`: `expect` did not match the block at the addressed number
  * - `expect_end_mismatch`: `expect_end` did not match the block at `to`
  * - `block_out_of_range`: the addressed block number does not exist in the note
- * - `address_outside_read_window`: the address is outside the window the
- *   snapshot token records as actually shown to the model
  * - `unbalanced_range`: the addressed range is not tag-balanced — it contains a
  *   container opener with no matching closer inside the range, or a closer whose
  *   opener is outside it (e.g. a lone `</ul>`, a delete crossing a `</li>`+`<li>`
@@ -78,7 +76,6 @@ export type EditNoteBlocksSkipReasonCode =
     | 'expect_mismatch'
     | 'expect_end_mismatch'
     | 'block_out_of_range'
-    | 'address_outside_read_window'
     | 'unbalanced_range'
     | 'structural_seam'
     | 'span_partial_edit'
@@ -226,8 +223,8 @@ export interface EditNoteBlocksProposedData {
      * Address snapshot token issued by `read_note`; required whenever any edit
      * addresses by number. It pins the numbering the edits were written
      * against, so a note that changed underneath the model fails loudly instead
-     * of editing the wrong line. The read window rides INSIDE the token — there
-     * is no separate window field to keep in sync with it.
+     * of editing the wrong line. The token also binds the note's identity, so
+     * one issued for a different note never verifies here.
      */
     snapshot?: string;
     /** Ordered list of block edits to apply to the note */
@@ -354,11 +351,8 @@ export interface EditNoteBlocksResultData {
     /**
      * Address snapshot token for the note as it stands after this action.
      *
-     * Its read window follows the same rule as everywhere else: it records what
-     * was actually SHOWN. It therefore carries the whole-note window only when
-     * the action's response also shipped the post-edit note; otherwise it
-     * carries the canonical empty window `0-0`, and numeric addressing against
-     * it fails closed until the model re-reads.
+     * Emitted whether or not the response also shipped the post-edit note: the
+     * token identifies the note version, which is true either way.
      */
     address_post_snapshot?: string;
     /** Edits that were successfully applied, in request order */
