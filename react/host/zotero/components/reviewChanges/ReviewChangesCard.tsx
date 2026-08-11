@@ -176,21 +176,6 @@ export const ReviewChangesCard: React.FC<ReviewChangesCardProps> = ({ run, rows 
 
     if (rows.length === 0 || (isDismissed && !hasPendingRows)) return null;
 
-    // A lone row is the whole card: no aggregate header to summarize.
-    if (rows.length === 1) {
-        return (
-            <div className="min-w-0" style={exitStyle}>
-                <ReviewActionRow
-                    runId={run.id}
-                    row={rows[0]}
-                    isBulkRunning={isBulkRunning}
-                    onResolved={handleRowResolved}
-                    inGroup={false}
-                />
-            </div>
-        );
-    }
-
     const { text: headerText, tone } = getReviewHeaderCopy(rows);
     const allApplied = rows.every((row) => row.actions.every((action) => action.status === 'applied'));
     // A row applying on its own must finish before a bulk run starts, or the same
