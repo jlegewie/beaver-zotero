@@ -407,6 +407,21 @@ describe('validateEditNoteBlocksAction', () => {
         expect(response.current_value.snapshot).toBe(buildAddressSnapshot(NOTE_ID, BODY));
     });
 
+    it('names both causes on a mismatch, since a token from another note fails identically', async () => {
+        // Same body, different note id — the id is inside the digest, so this is
+        // indistinguishable from real drift at this layer.
+        const otherNoteSnapshot = buildAddressSnapshot(snapshotNoteId(1, 'NOTE0002'), BODY);
+        const response = await handleAgentActionValidateRequest(
+            validateRequest([replaceBlock2], { snapshot: otherNoteSnapshot }),
+        );
+
+        expect(response.error_code).toBe('snapshot_mismatch');
+        // Both causes, offered as alternatives — a flat "the note changed" would
+        // send the model re-reading a note that never changed.
+        expect(response.error).toContain('came from a different note');
+        expect(response.error).toContain('Either the note changed');
+    });
+
     it('requires a snapshot whenever an edit addresses by number', async () => {
         const response = await handleAgentActionValidateRequest(
             validateRequest([replaceBlock2], { snapshot: undefined }),

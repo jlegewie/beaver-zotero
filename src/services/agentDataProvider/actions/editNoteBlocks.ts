@@ -332,15 +332,24 @@ function buildSnapshotMismatchValue(noteId: string, simplified: string): Record<
     };
 }
 
+/**
+ * A well-formed token that does not verify against this note.
+ *
+ * The note id is part of the digest, so a token minted for a DIFFERENT note
+ * fails exactly like real drift and this layer cannot tell the two apart. The
+ * message names both causes rather than asserting the note changed — telling a
+ * model to re-read a note that never changed sends it into a pointless loop.
+ */
 const SNAPSHOT_MISMATCH_MESSAGE =
-    'The note changed since the read_note call these block numbers were written against, so the '
-    + 'block numbering no longer matches. Re-address the edits against the current note (returned '
-    + 'with this error) or call read_note again.';
+    'The `snapshot` token does not match the current block numbering of this note, so these block '
+    + 'numbers cannot be resolved. Either the note changed since the read_note call the token came '
+    + 'from, or the token came from a different note. Re-address the edits against the current '
+    + 'note (returned with this error) or call read_note again.';
 
 /**
  * A token that is not a snapshot token at all. Distinct from
- * {@link SNAPSHOT_MISMATCH_MESSAGE} because the note did NOT change, so a fresh
- * listing fixes nothing — only echoing the real token does.
+ * {@link SNAPSHOT_MISMATCH_MESSAGE} because no note state can make it verify, so
+ * a fresh listing fixes nothing — only echoing the real token does.
  */
 const SNAPSHOT_MALFORMED_MESSAGE =
     'The `snapshot` value is not a valid address snapshot token, so these block numbers cannot be '

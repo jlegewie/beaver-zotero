@@ -232,7 +232,7 @@ const LENGTH_RE = /^\d+$/;
  * transcript, and a thread can be resumed — or an approval executed — on
  * another Zotero instance. A group library's `libraryID` is assigned per
  * device, so binding it would fail a byte-identical note read on a laptop and
- * edited on a desktop, with a "block numbering no longer matches" refusal the
+ * edited on a desktop, with a "snapshot does not match this note" refusal the
  * user cannot act on. `libraryRefForLibraryID` is best-effort by design and
  * falls back to the numeric id for a library with no portable identity (feeds,
  * the external-file sentinel, an unregistered group) — device-local again, but

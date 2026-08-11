@@ -376,7 +376,7 @@ describe('executeEditNoteBlocksAction (local re-apply)', () => {
         const staleSnapshot = buildAddressSnapshot(NOTE_ID, '<p>A completely different note.</p>');
         await expect(
             executeEditNoteBlocksAction(blocksAction([replaceBlock2], { snapshot: staleSnapshot })),
-        ).rejects.toThrow(/block numbering no longer matches/);
+        ).rejects.toThrow(/does not match the current block numbering/);
         expect(mockItem.setNote).not.toHaveBeenCalled();
     });
 
