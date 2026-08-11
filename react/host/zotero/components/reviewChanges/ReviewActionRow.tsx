@@ -7,6 +7,7 @@ import {
 } from '../../../../atoms/messageUIState';
 import {
     applyAgentActionsAtom,
+    inFlightAgentActionIdsAtom,
     rejectAgentActionsAtom,
     undoAgentActionsAtom,
 } from '../../agentActionExecution';
@@ -35,14 +36,10 @@ import Tooltip from '../../../../components/ui/Tooltip';
 interface ReviewActionRowProps {
     runId: string;
     row: ReviewRow;
-    /** True while a write for this row is in flight — its own, or a bulk apply's. */
-    isApplying?: boolean;
     /** True while any card-level bulk operation runs — row buttons are disabled. */
     isBulkRunning?: boolean;
     /** Pins this row visible; called before its own buttons dispatch anything. */
     onResolved?: (toolcallId: string) => void;
-    /** Reports an in-flight Zotero write, so the card's bulk apply cannot race it. */
-    onBusyChange?: (toolcallId: string, isBusy: boolean) => void;
     /** True when rendered inside the aggregate card; the parent draws the border/background. */
     inGroup?: boolean;
 }
@@ -58,10 +55,8 @@ const GHOST_BUTTON_STYLE: React.CSSProperties = { padding: '3px 6px' };
 export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
     runId,
     row,
-    isApplying = false,
     isBulkRunning = false,
     onResolved,
-    onBusyChange,
     inGroup = false,
 }) => {
     const [isProcessing, setIsProcessing] = useState(false);
@@ -83,14 +78,20 @@ export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
     // key, so this surface shares that one fetch instead of repeating it.
     const itemTitle = useAtomValue(agentActionItemTitlesAtom)[row.toolcallId] ?? null;
 
+    // Read the executor's claim rather than a card-local flag: it is the only
+    // signal that sees a write started from another surface (the in-stream card),
+    // and it is what keeps this row's buttons from racing that write.
+    const inFlightActionIds = useAtomValue(inFlightAgentActionIdsAtom);
+    const isWriting = row.actions.some((action) => inFlightActionIds.has(action.id));
+
     const firstAction = row.actions[0];
-    const isBusy = isProcessing || isApplying;
+    const isBusy = isProcessing || isWriting;
     const isDisabled = isBusy || isBulkRunning;
-    // A write this row did not click (a bulk apply, or its own from before a
-    // remount) keeps its button mounted with a spinner instead of the row briefly
-    // losing its buttons. An applied row can only be undoing.
+    // A write this row did not click (a bulk apply, another surface, or its own
+    // from before a remount) keeps its button mounted with a spinner instead of
+    // the row briefly losing its buttons. An applied row can only be undoing.
     const externalButton = row.actions.some((action) => action.status === 'applied') ? 'undo' : 'approve';
-    const activeButton = clickedButton ?? (isApplying ? externalButton : null);
+    const activeButton = clickedButton ?? (isWriting ? externalButton : null);
 
     // 'awaiting' while busy: its STATUS_CONFIGS entry carries the spinner icon
     // and keeps the apply/reject vocabulary the in-stream card uses.
@@ -111,15 +112,13 @@ export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
         setIsProcessing(true);
         setClickedButton('approve');
         onResolved?.(row.toolcallId);
-        onBusyChange?.(row.toolcallId, true);
         try {
             await applyAgentActions({ actions: row.actions, runId });
         } finally {
             setIsProcessing(false);
             setClickedButton(null);
-            onBusyChange?.(row.toolcallId, false);
         }
-    }, [isDisabled, row, runId, applyAgentActions, onResolved, onBusyChange]);
+    }, [isDisabled, row, runId, applyAgentActions, onResolved]);
 
     const handleReject = useCallback(() => {
         if (isDisabled) return;
@@ -141,16 +140,14 @@ export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
         setIsProcessing(true);
         setClickedButton('undo');
         onResolved?.(row.toolcallId);
-        onBusyChange?.(row.toolcallId, true);
         try {
             const result = await undoAgentActions({ actions: row.actions });
             if (result.fatalError) setIsUndoError(true);
         } finally {
             setIsProcessing(false);
             setClickedButton(null);
-            onBusyChange?.(row.toolcallId, false);
         }
-    }, [isDisabled, row, undoAgentActions, onResolved, onBusyChange]);
+    }, [isDisabled, row, undoAgentActions, onResolved]);
 
     const handleRetry = useCallback(async () => {
         if (isUndoError) {

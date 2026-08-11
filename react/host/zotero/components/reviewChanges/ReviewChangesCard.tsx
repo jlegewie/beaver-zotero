@@ -4,14 +4,16 @@ import { AgentRun } from '@beaver/agent-core/agents/types';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { getAgentActionsByToolcallAtom } from '../../../../agents/agentActions';
 import {
-    annotationBusyAtom,
     annotationPanelStateAtom,
     defaultAnnotationPanelState,
     markReviewToolcallResolvedAtom,
-    setAnnotationBusyStateAtom,
     toggleAnnotationPanelVisibilityAtom,
 } from '../../../../atoms/messageUIState';
-import { applyAgentActionsAtom, rejectAgentActionsAtom } from '../../agentActionExecution';
+import {
+    applyAgentActionsAtom,
+    inFlightAgentActionIdsAtom,
+    rejectAgentActionsAtom,
+} from '../../agentActionExecution';
 import { getReviewHeaderCopy, ReviewRow } from '../reviewChangeRows';
 import { ReviewActionRow } from './ReviewActionRow';
 import {
@@ -62,28 +64,21 @@ export const ReviewChangesCard: React.FC<ReviewChangesCardProps> = ({ run, rows 
     const isExpanded = (panelStates[groupId] ?? defaultAnnotationPanelState).resultsVisible;
     const togglePanelVisibility = useSetAtom(toggleAnnotationPanelVisibilityAtom);
 
-    // Which rows have a Zotero write in flight is shared state, unlike the flags
-    // above: two panes on the same run would otherwise each believe nothing is in
-    // flight and both dispatch the same tool call. Whether *this* card is running a
-    // bulk apply stays local — a shared flag left set by a pane that went away
-    // would disable the card for good, since loading a thread does not reset it.
-    const busyRows = useAtomValue(annotationBusyAtom)[groupId] ?? {};
-    const setRowBusy = useSetAtom(setAnnotationBusyStateAtom);
-    const hasBusyRow = Object.values(busyRows).some(Boolean);
+    // Whether a write is in flight comes from the executor's claim, which is the
+    // only signal that also sees writes started elsewhere (another pane, or the
+    // in-stream card for the same tool call). Whether *this* card is running a bulk
+    // apply stays local — a shared flag left set by a pane that went away would
+    // disable the card for good, since loading a thread does not reset it.
+    const inFlightActionIds = useAtomValue(inFlightAgentActionIdsAtom);
+    const hasWritingRow = rows.some((row) => row.actions.some((action) => inFlightActionIds.has(action.id)));
 
     const handleRowResolved = useCallback(
         (toolcallId: string) => markResolved({ runId: run.id, toolcallId }),
         [markResolved, run.id],
     );
 
-    const handleRowBusyChange = useCallback(
-        (toolcallId: string, isBusy: boolean) =>
-            setRowBusy({ key: groupId, annotationId: toolcallId, isBusy }),
-        [groupId, setRowBusy],
-    );
-
     const handleBulkApply = useCallback(async () => {
-        if (isBulkRunning || hasBusyRow) return;
+        if (isBulkRunning || hasWritingRow) return;
         // Snapshot at click time. Non-bulk-applicable rows (annotation deletions,
         // destructive note rewrites) are their own approval groups in
         // runApprovalPolicy so that approving annotation or note edits never
@@ -112,24 +107,21 @@ export const ReviewChangesCard: React.FC<ReviewChangesCardProps> = ({ run, rows 
                 // only then awaits the ack, so pinning afterwards would drop the
                 // row out of the card for that round trip.
                 markResolved({ runId: run.id, toolcallId: row.toolcallId });
-                setRowBusy({ key: groupId, annotationId: row.toolcallId, isBusy: true });
                 try {
                     await applyAgentActions({ actions, runId: run.id });
                 } catch (error) {
                     // The executor records per-action failures itself; catching
                     // here only keeps one bad row from aborting the rest.
                     logger(`ReviewChangesCard: bulk apply failed for ${row.toolcallId}: ${error}`, 1);
-                } finally {
-                    setRowBusy({ key: groupId, annotationId: row.toolcallId, isBusy: false });
                 }
             }
         } finally {
             setIsBulkRunning(false);
         }
-    }, [applyAgentActions, getActionsByToolcall, groupId, hasBusyRow, isBulkRunning, markResolved, rows, run.id, setRowBusy]);
+    }, [applyAgentActions, getActionsByToolcall, hasWritingRow, isBulkRunning, markResolved, rows, run.id]);
 
     const handleBulkReject = useCallback(() => {
-        if (isBulkRunning || hasBusyRow) return;
+        if (isBulkRunning || hasWritingRow) return;
         // A rejection is a local refusal with no Zotero write, so it covers every
         // pending row — including the ones bulk apply has to skip.
         const rowsToReject = rows.filter((row) => !row.resolved);
@@ -143,7 +135,7 @@ export const ReviewChangesCard: React.FC<ReviewChangesCardProps> = ({ run, rows 
             markResolved({ runId: run.id, toolcallId: row.toolcallId });
             rejectAgentActions({ actions });
         }
-    }, [hasBusyRow, isBulkRunning, markResolved, rejectAgentActions, rows, run.id]);
+    }, [hasWritingRow, isBulkRunning, markResolved, rejectAgentActions, rows, run.id]);
 
     // Expanding stays available during a bulk apply: the per-row spinners are the
     // only view of how far a long apply has got.
@@ -160,10 +152,8 @@ export const ReviewChangesCard: React.FC<ReviewChangesCardProps> = ({ run, rows 
             <ReviewActionRow
                 runId={run.id}
                 row={rows[0]}
-                isApplying={Boolean(busyRows[rows[0].toolcallId])}
                 isBulkRunning={isBulkRunning}
                 onResolved={handleRowResolved}
-                onBusyChange={handleRowBusyChange}
                 inGroup={false}
             />
         );
@@ -176,20 +166,20 @@ export const ReviewChangesCard: React.FC<ReviewChangesCardProps> = ({ run, rows 
     // tool call would be written to Zotero twice. Disabled rather than unmounted:
     // the buttons keep their place, and a write that never reports back leaves the
     // card looking busy instead of looking like it has no controls at all.
-    const bulkDisabled = isBulkRunning || hasBusyRow;
+    const bulkDisabled = isBulkRunning || hasWritingRow;
     // Nothing left for the header ✓ once only non-bulk-applicable rows are pending;
     // showing it then would be a dead click.
     const showBulkApply = rows.some((row) => !row.resolved && row.bulkApplicable);
     const visibleRows = showAllRows ? rows : rows.slice(0, MAX_VISIBLE_ROWS);
 
     const headerIcon = (() => {
-        if (isBulkRunning || hasBusyRow) return Spinner;
+        if (isBulkRunning || hasWritingRow) return Spinner;
         if (isHovered && isExpanded) return ArrowDownIcon;
         if (isHovered && !isExpanded) return ArrowRightIcon;
         if (tone === 'review') return ClockIcon;
         return allApplied ? CheckmarkCircleIcon : CancelCircleIcon;
     })();
-    const headerIconClassName = !isBulkRunning && !hasBusyRow && !isHovered && tone === 'resolved'
+    const headerIconClassName = !isBulkRunning && !hasWritingRow && !isHovered && tone === 'resolved'
         ? `${allApplied ? 'font-color-green' : 'font-color-red'} scale-11`
         : undefined;
 
@@ -257,10 +247,8 @@ export const ReviewChangesCard: React.FC<ReviewChangesCardProps> = ({ run, rows 
                             <ReviewActionRow
                                 runId={run.id}
                                 row={row}
-                                isApplying={Boolean(busyRows[row.toolcallId])}
                                 isBulkRunning={isBulkRunning}
                                 onResolved={handleRowResolved}
-                                onBusyChange={handleRowBusyChange}
                                 inGroup
                             />
                         </div>

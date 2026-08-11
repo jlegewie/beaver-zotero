@@ -121,25 +121,34 @@ function toFailures(actions: AgentAction[], error: string, errorDetails?: Record
  *
  * A terminal run's pending action is offered by every surface that can reach it —
  * the in-stream card and the review card both show Apply — and an action stays
- * `pending` until its write finishes and the ack lands. Two surfaces each
- * guarding only their own button therefore dispatch the same mutation twice,
- * creating duplicate items or collections. Claiming here covers every caller,
- * including ones added later, instead of asking each to coordinate.
+ * `pending` until its write finishes and the ack lands. Surfaces each guarding
+ * only their own buttons therefore let a second click through: two applies
+ * duplicate the mutation, and a reject lands on an action whose write is still
+ * running, so the ack flips it straight back to `applied` and the user's "no" is
+ * lost. Claiming here covers every caller, including ones added later.
  *
- * Module scope is the right scope: the separate Beaver window reuses the main
- * window's bundle, so all panes share this set.
+ * An atom rather than a plain Set because the claim is the only thing that knows
+ * a write is running — the action's status says `pending` throughout — so
+ * surfaces need to observe it to disable their controls.
  */
-const inFlightActionIds = new Set<string>();
+export const inFlightAgentActionIdsAtom = atom<ReadonlySet<string>>(new Set<string>());
 
 /** The actions not already being written; empty when another surface holds them all. */
-function claimActions(actions: AgentAction[]): AgentAction[] {
-    const claimed = actions.filter((action) => !inFlightActionIds.has(action.id));
-    for (const action of claimed) inFlightActionIds.add(action.id);
+function claimActions(get: Getter, set: Setter, actions: AgentAction[]): AgentAction[] {
+    const inFlight = get(inFlightAgentActionIdsAtom);
+    const claimed = actions.filter((action) => !inFlight.has(action.id));
+    if (claimed.length > 0) {
+        const next = new Set(inFlight);
+        for (const action of claimed) next.add(action.id);
+        set(inFlightAgentActionIdsAtom, next);
+    }
     return claimed;
 }
 
-function releaseActions(actions: AgentAction[]): void {
-    for (const action of actions) inFlightActionIds.delete(action.id);
+function releaseActions(get: Getter, set: Setter, actions: AgentAction[]): void {
+    const next = new Set(get(inFlightAgentActionIdsAtom));
+    for (const action of actions) next.delete(action.id);
+    set(inFlightAgentActionIdsAtom, next);
 }
 
 /**
@@ -173,7 +182,7 @@ export const applyAgentActionsAtom = atom(
     async (get, set, { actions, runId }: { actions: AgentAction[]; runId: string }): Promise<ApplyAgentActionsResult> => {
         if (actions.length === 0) return { applied: [], failed: [] };
 
-        const claimed = claimActions(actions);
+        const claimed = claimActions(get, set, actions);
         if (claimed.length === 0) {
             logger('agentActionExecution: apply skipped, another surface is already writing these actions', 1);
             return { applied: [], failed: [] };
@@ -181,7 +190,7 @@ export const applyAgentActionsAtom = atom(
         try {
             return await applyClaimedActions(get, set, claimed, runId);
         } finally {
-            releaseActions(claimed);
+            releaseActions(get, set, claimed);
         }
     }
 );
@@ -262,10 +271,10 @@ async function applyClaimedActions(
  */
 export const undoAgentActionsAtom = atom(
     null,
-    async (_get, set, { actions }: { actions: AgentAction[] }): Promise<UndoAgentActionsResult> => {
+    async (get, set, { actions }: { actions: AgentAction[] }): Promise<UndoAgentActionsResult> => {
         if (actions.length === 0) return { undone: [], failed: [] };
 
-        const claimed = claimActions(actions);
+        const claimed = claimActions(get, set, actions);
         if (claimed.length === 0) {
             logger('agentActionExecution: undo skipped, another surface is already writing these actions', 1);
             return { undone: [], failed: [] };
@@ -273,7 +282,7 @@ export const undoAgentActionsAtom = atom(
         try {
             return await undoClaimedActions(set, claimed);
         } finally {
-            releaseActions(claimed);
+            releaseActions(get, set, claimed);
         }
     }
 );
@@ -348,11 +357,23 @@ async function undoClaimedActions(set: Setter, actions: AgentAction[]): Promise<
     return { undone, failed };
 }
 
-/** Reject the given agent actions. */
+/**
+ * Reject the given agent actions, skipping any whose write is already running.
+ *
+ * Rejecting mid-write cannot stop the write, and its ack would overwrite the
+ * `rejected` status with `applied` — the rejection silently lost while the
+ * change stayed in the library. Skipping leaves the action to settle into its
+ * applied state, where Undo reverses it in one more click.
+ */
 export const rejectAgentActionsAtom = atom(
     null,
-    (_get, set, { actions }: { actions: AgentAction[] }): void => {
+    (get, set, { actions }: { actions: AgentAction[] }): void => {
+        const inFlight = get(inFlightAgentActionIdsAtom);
         for (const action of actions) {
+            if (inFlight.has(action.id)) {
+                logger(`agentActionExecution: reject skipped for ${action.id}, its write is already running`, 1);
+                continue;
+            }
             set(rejectAgentActionAtom, action.id);
         }
     }
