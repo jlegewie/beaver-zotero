@@ -640,10 +640,16 @@ describe('undoEditNoteBlocksAction', () => {
         expect(invalidateSimplificationCache).toHaveBeenCalledWith(groupNoteId);
         vi.mocked(invalidateSimplificationCache).mockClear();
 
+        vi.mocked(logger).mockClear();
         await undoEditNoteBlocksAction({ ...action, status: 'applied', result_data: result });
 
         expect(invalidateSimplificationCache).toHaveBeenCalledWith(groupNoteId);
         expect(invalidateSimplificationCache).not.toHaveBeenCalledWith('7-NOTE0001');
+        // The drift check folds the same id into its recompute, and this is the
+        // only fixture where the portable and device-local forms differ: a
+        // device-local `7-NOTE0001` there would report drift on every
+        // group-library note, on an undo that has touched nothing.
+        expect(driftLogged()).toBe(false);
     });
 
     // `address_post_snapshot` is audit-only. Undo reports drift and proceeds:
@@ -666,6 +672,17 @@ describe('undoEditNoteBlocksAction', () => {
         expect(noteHtml).toContain('<p>User added this.</p>');
     });
 
+    // The complement of the case above, and the reason the recompute mirrors the
+    // apply path step for step: a diagnostic that fires on an untouched note is
+    // worse than none.
+    //
+    // Narrow on purpose — it pins the comparison operand and direction (post,
+    // not pre), and that the recompute hashes the SIMPLIFIED projection through
+    // the same `buildAddressSnapshot` the apply path reaches via
+    // `buildInlineNoteState`. It does not pin the note id (library 1 makes the
+    // portable and device-local forms the same string — the group case above
+    // covers that) nor page-label divergence (mocked away here; that property
+    // belongs to `maskVolatileLocators`, and noteSnapshot.test.ts owns it).
     it('reports no drift when the note is exactly where the apply left it', async () => {
         const result = await executeEditNoteBlocksAction(blocksAction([replaceBlock2]));
         vi.mocked(logger).mockClear();
@@ -676,13 +693,22 @@ describe('undoEditNoteBlocksAction', () => {
     });
 
     // The check is a diagnostic; it must not be able to fail an undo that would
-    // otherwise succeed.
+    // otherwise succeed. Asserting the swallowed-error line is what makes this a
+    // test of the check rather than of an undo that never ran one — and it also
+    // proves the queued rejection was consumed here rather than leaking into the
+    // next test (`clearAllMocks` does not drain a `…Once` queue).
     it('undoes even when the drift check itself throws', async () => {
         const result = await executeEditNoteBlocksAction(blocksAction([replaceBlock2]));
         vi.mocked(preloadNotePageLabels).mockRejectedValueOnce(new Error('page label lookup failed'));
+        vi.mocked(logger).mockClear();
 
         await undoEditNoteBlocksAction(appliedBlocksAction(result, [replaceBlock2]));
 
+        expect(vi.mocked(logger).mock.calls.some(
+            ([message]) => typeof message === 'string'
+                && message.includes('could not check address_post_snapshot')
+                && message.includes('page label lookup failed'),
+        )).toBe(true);
         expect(stripBeaverEditFooter(noteHtml)).toBe(NOTE_HTML);
     });
 

@@ -324,9 +324,14 @@ function toBatchUndoRecord(record: EditNoteBlocksUndoRecord): EditNoteBatchUndoR
  * belongs with the snapshot-and-hash undo work, not here.
  *
  * Never throws: a diagnostic must not take down an undo that would otherwise
- * succeed. Page labels are read from cache only (no extraction) — the digest
- * masks locator VALUES, and label availability changes only those values, never
- * a line boundary or a tag's shape.
+ * succeed.
+ *
+ * Everything else mirrors the apply path's step 8 exactly — same `getLatestNoteHtml`,
+ * same `getOrSimplify`, same portable `noteId` — because a recompute that differs
+ * from the one that minted the token reports drift on a note nobody touched. The
+ * one deliberate divergence is that page labels are read from cache only — an
+ * extraction is not worth running to produce a log line, and the digest masks
+ * locator values, so a cache miss changes nothing the digest sees.
  */
 async function logAddressSnapshotDrift(
     item: Zotero.Item,
