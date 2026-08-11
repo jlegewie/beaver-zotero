@@ -130,7 +130,9 @@ describe('actionShare — schema', () => {
     it('stamps the current client on export and accepts it on import', () => {
         const minimal: Action = { id: 'x', title: 'T', text: 'P', targets: ['global'] };
         const file = toShareableActionFile(minimal);
-        expect(file.action.client).toEqual(['zotero-plugin']);
+        // The file carries the format's spelling; the parser maps it back to the
+        // runtime id. See the separate forward-compatibility cases below.
+        expect(file.action.client).toEqual(['zotero']);
         const r = parseShareableAction(serializeAction(minimal));
         expect(r.ok).toBe(true);
         if (r.ok) expect(r.action.client).toEqual(['zotero-plugin']);
@@ -153,6 +155,34 @@ describe('actionShare — schema', () => {
         }));
         expect(r.ok).toBe(true);
         if (r.ok) expect(r.action.client).toEqual(['zotero-plugin']);
+    });
+
+    // Shipped builds compare the file's client list against the literal
+    // "zotero" and have no mapping step, so writing the runtime id would make
+    // every file exported here unimportable anywhere but this build.
+    it('writes the file-format client id, not the runtime one', () => {
+        expect(toShareableActionFile({ ...fullAction, client: undefined }).action.client)
+            .toEqual(['zotero']);
+        expect(toShareableActionFile({ ...fullAction, client: ['zotero-plugin'] }).action.client)
+            .toEqual(['zotero']);
+    });
+
+    it('leaves a client with no legacy spelling as its runtime id', () => {
+        expect(toShareableActionFile({ ...fullAction, client: ['word-addin'] }).action.client)
+            .toEqual(['word-addin']);
+    });
+
+    // A legacy file imported and re-exported must come back out unchanged, or
+    // an action stops being shareable with anyone who has not updated.
+    it('round-trips a legacy file without upgrading its client id', () => {
+        const parsed = parseShareableAction(JSON.stringify({
+            kind: SHAREABLE_ACTION_KIND,
+            version: 1,
+            action: { title: 'T', text: 'P', targets: ['global'], client: ['zotero'] },
+        }));
+        expect(parsed.ok).toBe(true);
+        if (!parsed.ok) return;
+        expect(toShareableActionFile(parsed.action).action.client).toEqual(['zotero']);
     });
 
     it('rejects an action whose client list excludes the current client', () => {

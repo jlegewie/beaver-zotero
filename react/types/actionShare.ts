@@ -53,9 +53,11 @@ export interface ShareableActionPayloadV1 {
     name?: string;
     id_model?: string;
     targets: ActionTargetType[];
-    /** Clients this action supports. Absent → any client. Import rejects a
-     *  file whose list excludes the importing client. */
-    client?: ActionClient[];
+    /** Clients this action supports, in the file format's own spelling (see
+     *  CLIENT_ID_TO_FILE) — `string`, not `ActionClient`, because a file may
+     *  legitimately name a client this build has never heard of. Absent → any
+     *  client. Import rejects a file whose list excludes the importing client. */
+    client?: string[];
     category?: ActionCategory;
     argumentHint?: string;
 }
@@ -88,8 +90,9 @@ export const toShareableActionFile = (action: Action): ShareableActionFile => {
         title: action.title,
         text: action.text,
         targets: [...action.targets],
-        // Stamp the exporting client so the file declares its compatibility.
-        client: action.client ? [...action.client] : [getActionClient()],
+        // Stamp the exporting client so the file declares its compatibility,
+        // in the file format's own spelling (see CLIENT_ID_TO_FILE).
+        client: (action.client ?? [getActionClient()]).map(toFileClientId),
     };
     if (action.description !== undefined) payload.description = action.description;
     if (action.name !== undefined) payload.name = action.name;
@@ -122,13 +125,35 @@ const VALID_CATEGORIES: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * Client ids written by builds that predate the share format using the same
- * spelling as the connection handshake's `client_type`. Mapped on read so files
- * exported by those builds still import.
+ * The share format has its own client vocabulary, mapped to and from the runtime
+ * `ActionClient` at this boundary.
+ *
+ * They diverged when the runtime ids were aligned with the connection
+ * handshake's `client_type`: the Zotero plugin became `zotero-plugin`, but every
+ * shipped build writes and validates against `zotero`, and its parser has no
+ * mapping step. Writing the new id would make files exported here fail to import
+ * anywhere but the current build — with a message telling the user their Zotero
+ * is not a Zotero client. So the file keeps the id it has always had, and the
+ * mapping is symmetric: a file round-trips unchanged, and a legacy file imports
+ * and re-exports without being silently upgraded.
+ *
+ * A client with no legacy spelling (`word-addin`) writes its runtime id as-is.
  */
-const LEGACY_CLIENT_IDS: Readonly<Record<string, ActionClient>> = {
+const CLIENT_ID_TO_FILE: Readonly<Partial<Record<ActionClient, string>>> = {
+    [ZOTERO_PLUGIN_CLIENT_TYPE]: 'zotero',
+};
+
+const FILE_TO_CLIENT_ID: Readonly<Record<string, ActionClient>> = {
     zotero: ZOTERO_PLUGIN_CLIENT_TYPE,
 };
+
+/** Runtime client id -> the spelling written into a `.beaveraction` file. */
+const toFileClientId = (client: ActionClient): string =>
+    CLIENT_ID_TO_FILE[client] ?? client;
+
+/** File client id -> runtime id, leaving ids this build does not know untouched. */
+const fromFileClientId = (client: string): string =>
+    FILE_TO_CLIENT_ID[client] ?? client;
 
 const isNonEmptyString = (v: unknown): v is string =>
     typeof v === 'string' && v.trim().length > 0;
@@ -181,7 +206,7 @@ const parseV1: VersionParser = (envelope, currentClient) => {
         ) {
             return { ok: false, error: 'The action has a malformed client list.' };
         }
-        clients = (a.client as string[]).map(c => LEGACY_CLIENT_IDS[c] ?? c);
+        clients = (a.client as string[]).map(fromFileClientId);
         if (!clients.includes(currentClient)) {
             return { ok: false, error: `This action is not compatible with the ${currentClient} client.` };
         }
