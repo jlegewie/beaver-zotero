@@ -34,23 +34,12 @@ import {
     TickIcon,
     CancelIcon,
     ChevronIcon,
-    ClockIcon,
     Spinner,
     Icon,
     RepeatIcon,
     ArrowDownIcon,
     ArrowRightIcon,
-    PropertyEditIcon,
     ArrowUpRightIcon,
-    FolderAddIcon,
-    FolderDetailIcon,
-    TaskDoneIcon,
-    TagIcon,
-    HighlighterIcon,
-    DocumentValidationIcon,
-    DollarCircleIcon,
-    GlobalSearchIcon,
-    NoteIcon,
 } from '../../../components/icons/icons';
 import { revealSource, openNoteByKey, getCurrentCollectionKeyForItem } from '../../../utils/sourceUtils';
 import Button from '../../../components/ui/Button';
@@ -69,6 +58,8 @@ import {
     getActionTitle,
     buildPreviewData,
     PreviewData,
+    getCreateAnnotationsDisplayStatus,
+    getAgentActionToolIcon,
 } from './agentActionViewHelpers';
 import { ActionPreview } from './ActionPreview';
 import { useApprovalRecovery } from './useApprovalRecovery';
@@ -99,17 +90,6 @@ type HeaderLinkAction = {
 type HeaderLinkActionRule = HeaderLinkAction & {
     matches: () => boolean;
 };
-
-function getCreateAnnotationsDisplayStatus(action: AgentAction): ActionStatus | null {
-    if (!isCreateAnnotationsAgentAction(action) || action.status !== 'applied') return null;
-    const createdCount = Array.isArray(action.result_data?.created)
-        ? action.result_data.created.length
-        : 0;
-    const failedCount = Array.isArray(action.result_data?.failed)
-        ? action.result_data.failed.length
-        : 0;
-    return createdCount === 0 && failedCount > 0 ? 'error' : null;
-}
 
 export const AgentActionView: React.FC<AgentActionViewProps> = ({
     toolcallId,
@@ -394,25 +374,10 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     const runApprovalScope = getToolGroupRunApprovalScope(toolName);
 
     const getHeaderIcon = () => {
-        const getToolIcon = () => {
-            if (toolName === 'edit_metadata' || toolName === 'edit_item') return PropertyEditIcon;
-            if (toolName === 'create_note') return NoteIcon;
-            if (toolName === 'create_highlight_annotations') return HighlighterIcon;
-            if (toolName === 'create_note_annotations') return NoteIcon;
-            if (toolName === 'edit_annotations' || toolName === 'delete_annotations') return HighlighterIcon;
-            if (toolName === 'create_collection') return FolderAddIcon;
-            if (toolName === 'organize_items') return TaskDoneIcon;
-            if (toolName === 'manage_tags') return TagIcon;
-            if (toolName === 'manage_collections') return FolderDetailIcon;
-            if (toolName === 'create_items' || toolName === 'create_item') return DocumentValidationIcon;
-            if (toolName === 'confirm_extraction') return DollarCircleIcon;
-            if (toolName === 'confirm_external_search') return GlobalSearchIcon;
-            return ClockIcon;
-        };
-        if (isAwaitingApproval) return getToolIcon();
+        if (isAwaitingApproval) return getAgentActionToolIcon(toolName);
         if (isHovered && isExpanded) return ArrowDownIcon;
         if (isHovered && !isExpanded) return ArrowRightIcon;
-        if (config.icon === null) return getToolIcon();
+        if (config.icon === null) return getAgentActionToolIcon(toolName);
         return config.icon;
     };
 

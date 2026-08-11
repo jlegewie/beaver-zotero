@@ -18,8 +18,8 @@ export interface ReviewRow {
 export interface BuildReviewRowsOptions {
     /** Action ids with a live approval (pendingApprovalsAtom) — those belong to the in-stream card. */
     liveApprovalActionIds?: ReadonlySet<string>;
-    /** Tool call ids already resolved from the card this session; their rows stay visible. */
-    resolvedToolcallIds?: ReadonlySet<string>;
+    /** Actions resolved from this card that stay in its current session snapshot. */
+    retainedActionIds?: ReadonlySet<string>;
 }
 
 /** These gate a run rather than propose a change, so they are never review material. */
@@ -27,6 +27,17 @@ const GATING_ACTION_TYPES = new Set<string>(['confirm_extraction', 'confirm_exte
 
 /** Citation imports have their own card. */
 const CITATIONS_TOOLCALL_ID = 'citations';
+
+/**
+ * Types the shared executor has no apply path for: inline notes apply through
+ * their own surface, and the per-annotation types are legacy. A row here would
+ * offer a dead ✓.
+ */
+const UNAPPLIABLE_ACTION_TYPES = new Set<string>([
+    'zotero_note',
+    'highlight_annotation',
+    'note_annotation',
+]);
 
 /**
  * Groups the bulk ✓ must never carry along. They are separate approval groups
@@ -49,7 +60,7 @@ export function buildReviewRows(
     actions: AgentAction[],
     options: BuildReviewRowsOptions = {},
 ): ReviewRow[] {
-    const { liveApprovalActionIds, resolvedToolcallIds } = options;
+    const { liveApprovalActionIds, retainedActionIds } = options;
     const rowsByToolcall = new Map<string, ReviewRow>();
 
     // A live approval claims its whole tool call, not just the action it names:
@@ -66,17 +77,17 @@ export function buildReviewRows(
 
     for (const action of actions) {
         if (GATING_ACTION_TYPES.has(action.action_type)) continue;
+        if (UNAPPLIABLE_ACTION_TYPES.has(action.action_type)) continue;
         if (liveApprovalActionIds?.has(action.id)) continue;
 
         const toolcallId = action.toolcall_id;
         if (!toolcallId || toolcallId === CITATIONS_TOOLCALL_ID) continue;
         if (approvedToolcallIds.has(toolcallId)) continue;
 
-        // Only `pending` is review material — an action the run itself failed is
-        // routinely retried by the model. A non-pending action is otherwise here
-        // only because the user just resolved this tool call from the card, and
-        // the row must not vanish out from under them.
-        if (action.status !== 'pending' && !resolvedToolcallIds?.has(toolcallId)) continue;
+        // Start with pending actions. Once the user resolves actions from this
+        // card, retain them so the rows do not shift while other changes
+        // are still pending and the resolved status remains visible.
+        if (action.status !== 'pending' && !retainedActionIds?.has(action.id)) continue;
 
         const row = rowsByToolcall.get(toolcallId);
         if (row) {
@@ -100,6 +111,11 @@ export function buildReviewRows(
     return rows;
 }
 
+/** Whether the current card snapshot still has work awaiting a decision. */
+export function hasPendingReviewRows(rows: ReviewRow[]): boolean {
+    return rows.some((row) => !row.resolved);
+}
+
 /**
  * Header copy for the card. N counts actions as a set union keyed on action id,
  * not rows — one create_items row with 5 items contributes 5.
@@ -121,7 +137,6 @@ export function getReviewHeaderCopy(rows: ReviewRow[]): {
         return { text: `${actions.length} ${noun} ${verb} your review`, tone: 'review' };
     }
 
-    // No rows means nothing is pending, so the empty case lands here too.
     const allApplied = actions.every((action) => action.status === 'applied');
     return { text: `${actions.length} ${noun} ${allApplied ? 'applied' : 'reviewed'}`, tone: 'resolved' };
 }

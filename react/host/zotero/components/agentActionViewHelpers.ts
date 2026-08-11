@@ -1,10 +1,22 @@
 import React from 'react';
-import { AgentAction, PendingApproval } from '../../../agents/agentActions';
+import { AgentAction, PendingApproval, isCreateAnnotationsAgentAction } from '../../../agents/agentActions';
 import {
     CheckmarkCircleIcon,
     CancelCircleIcon,
     AlertIcon,
     Spinner,
+    ClockIcon,
+    PropertyEditIcon,
+    FolderAddIcon,
+    FolderDetailIcon,
+    TaskDoneIcon,
+    TagIcon,
+    HighlighterIcon,
+    DocumentValidationIcon,
+    DollarCircleIcon,
+    GlobalSearchIcon,
+    NoteIcon,
+    EditIcon,
 } from '../../../components/icons/icons';
 import { truncateText } from '../../../utils/stringUtils';
 
@@ -119,6 +131,24 @@ export const STATUS_CONFIGS: Record<ActionStatus | 'awaiting', StatusConfig> = {
     },
 };
 
+/** Tool-specific icon shared by Zotero agent-action review surfaces. */
+export function getAgentActionToolIcon(toolName: string): React.FC<React.SVGProps<SVGSVGElement>> {
+    if (toolName === 'edit_metadata' || toolName === 'edit_item') return PropertyEditIcon;
+    if (toolName === 'edit_note' || toolName === 'edit_note_batch') return EditIcon;
+    if (toolName === 'create_note') return NoteIcon;
+    if (toolName === 'create_highlight_annotations') return HighlighterIcon;
+    if (toolName === 'create_note_annotations') return NoteIcon;
+    if (toolName === 'edit_annotations' || toolName === 'delete_annotations') return HighlighterIcon;
+    if (toolName === 'create_collection') return FolderAddIcon;
+    if (toolName === 'organize_items') return TaskDoneIcon;
+    if (toolName === 'manage_tags') return TagIcon;
+    if (toolName === 'manage_collections') return FolderDetailIcon;
+    if (toolName === 'create_items' || toolName === 'create_item') return DocumentValidationIcon;
+    if (toolName === 'confirm_extraction') return DollarCircleIcon;
+    if (toolName === 'confirm_external_search') return GlobalSearchIcon;
+    return ClockIcon;
+}
+
 /**
  * Compute the overall status for a group of actions.
  * Used for batch operations where we need a single status to display.
@@ -145,6 +175,36 @@ export function getOverallStatus(actions: AgentAction[]): ActionStatus {
     if (statuses.every(s => s === 'rejected' || s === 'undone')) return 'rejected';
 
     return 'pending';
+}
+
+/**
+ * A bulk annotation apply that acked with nothing created reads as an error, not
+ * as the `applied` its action record claims.
+ */
+export function getCreateAnnotationsDisplayStatus(action: AgentAction): ActionStatus | null {
+    if (!isCreateAnnotationsAgentAction(action) || action.status !== 'applied') return null;
+    const createdCount = Array.isArray(action.result_data?.created)
+        ? action.result_data.created.length
+        : 0;
+    const failedCount = Array.isArray(action.result_data?.failed)
+        ? action.result_data.failed.length
+        : 0;
+    return createdCount === 0 && failedCount > 0 ? 'error' : null;
+}
+
+/**
+ * True when the failure on these actions came from an undo rather than an apply,
+ * so a Retry can be pointed back at undo instead of re-running the change.
+ *
+ * Read off the records rather than remembered in component state, which does not
+ * survive a remount or a failure triggered from another pane: only an applied
+ * action carries `result_data`, a successful undo clears it, and the error path
+ * preserves it — so an errored action that still has a result is one whose undo
+ * failed. A write that succeeded but failed to acknowledge lands here too, where
+ * undo is likewise the safer direction: re-applying would duplicate it.
+ */
+export function hasFailedUndo(actions: AgentAction[]): boolean {
+    return actions.some((action) => action.status === 'error' && action.result_data != null);
 }
 
 /**
