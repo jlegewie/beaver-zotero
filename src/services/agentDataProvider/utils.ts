@@ -835,6 +835,204 @@ export async function getCollectionScopeItemIds(collections: Zotero.Collection[]
     return Array.from(itemIds);
 }
 
+/** A `tags_filter` entry that matched no tag in the searched libraries. */
+export interface UnresolvedTag {
+    /** The filter entry that matched nothing. */
+    input: string;
+    /** Existing tag names that resemble the entry, best first, possibly empty. */
+    suggestions: string[];
+}
+
+/** Outcome of resolving a `tags_filter` against the searched libraries. */
+export interface TagsFilterResolution {
+    /**
+     * Tag names to filter by, spelled as Zotero stores them and deduplicated.
+     * Empty when nothing resolved — callers must then return no results rather
+     * than search without a tag filter.
+     */
+    tags: string[];
+    /** Filter entries that matched no tag in the searched libraries. */
+    unresolved: UnresolvedTag[];
+}
+
+/** A `tags_filter` that left the search with no usable tag. */
+export interface TagsFilterError {
+    message: string;
+    error_code: 'tag_not_found';
+}
+
+/** How many close matches an unresolved tag offers. */
+const TAG_SUGGESTION_LIMIT = 3;
+
+/** Below this length a containment match is noise ("a" is inside half the library). */
+const MIN_CONTAINMENT_LENGTH = 3;
+
+/**
+ * Levenshtein distance between two strings, abandoned as soon as it is known to
+ * exceed `max` (which is then returned as `max + 1`). The bound is what keeps
+ * this cheap enough to run against every tag in the library.
+ */
+function boundedEditDistance(a: string, b: string, max: number): number {
+    if (Math.abs(a.length - b.length) > max) return max + 1;
+
+    let previous = Array.from({ length: b.length + 1 }, (_, i) => i);
+    for (let i = 1; i <= a.length; i++) {
+        const current = [i];
+        let rowBest = i;
+        for (let j = 1; j <= b.length; j++) {
+            const substitution = previous[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1);
+            const distance = Math.min(previous[j] + 1, current[j - 1] + 1, substitution);
+            current.push(distance);
+            if (distance < rowBest) rowBest = distance;
+        }
+        // Every alignment through this row already costs more than the bound.
+        if (rowBest > max) return max + 1;
+        previous = current;
+    }
+    return previous[b.length];
+}
+
+/**
+ * Existing tag names that most resemble `input`, best first.
+ *
+ * Two kinds of near-miss are worth reporting, because both are common in a
+ * model-supplied filter: a misspelling ("Econimics"), caught by edit distance,
+ * and a tag written shorter or longer than the stored one ("econ" for
+ * "economics"), caught by containment. The distance budget scales with the
+ * input so a long tag may be off by more than one character without a short one
+ * matching everything.
+ */
+function suggestTagNames(input: string, inventory: string[]): string[] {
+    const needle = input.toLowerCase();
+    if (!needle) return [];
+    const maxDistance = needle.length <= 4 ? 1 : Math.min(3, Math.floor(needle.length / 3));
+
+    const scored: { name: string; distance: number; lengthDiff: number }[] = [];
+    for (const name of inventory) {
+        const candidate = name.toLowerCase();
+        if (candidate === needle) continue;
+        const lengthDiff = Math.abs(candidate.length - needle.length);
+
+        if (
+            needle.length >= MIN_CONTAINMENT_LENGTH
+            && (candidate.includes(needle) || needle.includes(candidate))
+        ) {
+            scored.push({ name, distance: 0, lengthDiff });
+            continue;
+        }
+
+        const distance = boundedEditDistance(needle, candidate, maxDistance);
+        if (distance <= maxDistance) scored.push({ name, distance, lengthDiff });
+    }
+
+    scored.sort((a, b) => (
+        a.distance - b.distance
+        || a.lengthDiff - b.lengthDiff
+        || a.name.localeCompare(b.name)
+    ));
+    return scored.slice(0, TAG_SUGGESTION_LIMIT).map((entry) => entry.name);
+}
+
+/**
+ * Resolve a `tags_filter` against the libraries a search will cover.
+ *
+ * Entries are matched case-insensitively but resolve to the tag names Zotero
+ * stores, because the metadata search compares tags case-sensitively in SQL: a
+ * filter of "economics" against a stored "Economics" would otherwise match
+ * nothing and read as an empty library. When both casings exist as separate
+ * tags, all of them resolve — the filter ORs its tags, so that widens nothing
+ * beyond what the entry asked for.
+ *
+ * A tag carried only by a trashed item still counts as existing. Reporting it as
+ * unknown would send the model looking for a spelling mistake that isn't there,
+ * which is worse than the empty result the search returns.
+ *
+ * `libraryIds` must already be the searchable libraries the search will cover;
+ * an empty list resolves nothing at all, so no tag from a library the user
+ * excluded from Beaver can be confirmed, suggested, or denied.
+ */
+export async function resolveTagsFilter(
+    tagsFilter: (string | number)[],
+    libraryIds: number[]
+): Promise<TagsFilterResolution> {
+    if (libraryIds.length === 0) return { tags: [], unresolved: [] };
+
+    const inputs: string[] = [];
+    for (const entry of tagsFilter) {
+        // Request payloads are external JSON: skip anything that isn't a string
+        // or number rather than letting one malformed entry fail the search.
+        if (typeof entry !== 'string' && typeof entry !== 'number') continue;
+        const input = String(entry).trim();
+        if (input) inputs.push(input);
+    }
+    if (inputs.length === 0) return { tags: [], unresolved: [] };
+
+    // Every tag in the searched libraries, including tags that only sit on
+    // attachments, notes, or annotations: those are real tags a user can filter
+    // by even though this search only returns regular items.
+    const perLibrary = await Promise.all(
+        libraryIds.map((libraryId) => Zotero.Tags.getAll(libraryId) as Promise<{ tag: string }[]>)
+    );
+    const byFoldedName = new Map<string, string[]>();
+    const inventory: string[] = [];
+    for (const libraryTags of perLibrary) {
+        for (const { tag } of libraryTags) {
+            const folded = tag.toLowerCase();
+            const stored = byFoldedName.get(folded);
+            if (!stored) {
+                byFoldedName.set(folded, [tag]);
+                inventory.push(tag);
+            } else if (!stored.includes(tag)) {
+                stored.push(tag);
+                inventory.push(tag);
+            }
+        }
+    }
+
+    const tags = new Set<string>();
+    const unresolved: UnresolvedTag[] = [];
+    for (const input of inputs) {
+        const stored = byFoldedName.get(input.toLowerCase());
+        if (stored) {
+            for (const name of stored) tags.add(name);
+        } else {
+            unresolved.push({ input, suggestions: suggestTagNames(input, inventory) });
+        }
+    }
+
+    return { tags: Array.from(tags), unresolved };
+}
+
+/**
+ * Error for a `tags_filter` that resolved to no existing tag.
+ *
+ * Without it the model cannot tell its three cases apart: a tag it spelled
+ * wrong, a tag that exists but carries no matching item, and a real result.
+ * Only the first is an error, and it is the one an empty result hides.
+ *
+ * Returns null when at least one tag resolved. A partially resolved filter is
+ * not an error and is reported as none: the filter ORs its tags, so an entry
+ * that matches no tag at all contributes nothing either way, and the search the
+ * model gets back is exactly the one it asked for.
+ */
+export function tagsFilterError(resolution: TagsFilterResolution): TagsFilterError | null {
+    if (resolution.tags.length > 0) return null;
+    if (resolution.unresolved.length === 0) return null;
+
+    const label = resolution.unresolved.length === 1 ? 'Tag not found' : 'Tags not found';
+    const entries = resolution.unresolved
+        .map(({ input, suggestions }) => {
+            if (suggestions.length === 0) return `"${input}"`;
+            const names = suggestions.map((name) => `"${name}"`).join(', ');
+            return `"${input}" (did you mean ${names}?)`;
+        })
+        .join(', ');
+    return {
+        message: `${label}: ${entries}. Tags must match an existing tag; use list_tags to discover them.`,
+        error_code: 'tag_not_found',
+    };
+}
+
 /**
  * Format creators array into a string for display.
  */

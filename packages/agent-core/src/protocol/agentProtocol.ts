@@ -556,6 +556,7 @@ export type ItemSearchErrorCode =
     | 'collection_not_found'   // collections_filter matched no collection the search covers
     | 'library_not_found'      // libraries_filter matched no library on this device
     | 'library_not_searchable' // a filter matched only in a library excluded from Beaver
+    | 'tag_not_found'          // tags_filter matched no tag in the searched libraries
     | 'timeout';               // Operation timed out
 
 /** Response to item metadata search request */

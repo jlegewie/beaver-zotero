@@ -23,9 +23,10 @@ export interface SearchItemsByMetadataOptions {
     /**
      * Tags to filter by (OR logic — item must have at least one).
      *
-     * Nullable because callers forward it straight from a request payload, where
-     * an unset optional field arrives as an explicit `null` rather than being
-     * absent.
+     * Each name must be spelled as Zotero stores it: the tag condition below is
+     * an exact, case-sensitive match. Nullable so that a filter read straight
+     * out of a request payload, where an unset optional field arrives as an
+     * explicit `null`, cannot turn into a tag condition.
      */
     tags?: string[] | null;
     /** Collection keys to search within (OR logic, includes subcollections) */
@@ -72,7 +73,7 @@ export const searchItemsByMetadata = async (
     } = options;
 
     // Normalized rather than defaulted in the destructuring above: a default only
-    // fires on `undefined`, and an unset `tags` reaches this function as `null`.
+    // fires on `undefined`, and `tags` may arrive as `null`.
     const tags = options.tags ?? [];
 
     // Builds a search with every condition except collection and tag scope, so

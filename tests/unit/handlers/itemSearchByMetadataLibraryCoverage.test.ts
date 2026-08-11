@@ -23,8 +23,14 @@ const mocks = vi.hoisted(() => ({
     searchItemsByMetadata: vi.fn(),
     getSearchableLibraryIds: vi.fn(() => [3, 1]),
     resolveLibrariesFilter: vi.fn(() => ({ libraryIds: [3, 1], unresolved: [], excluded: [] })),
+    resolveTagsFilter: vi.fn(async () => ({ tags: [], unresolved: [] })),
 }));
-const { searchItemsByMetadata, getSearchableLibraryIds, resolveLibrariesFilter } = mocks;
+const {
+    searchItemsByMetadata,
+    getSearchableLibraryIds,
+    resolveLibrariesFilter,
+    resolveTagsFilter,
+} = mocks;
 
 vi.mock('../../../react/utils/searchTools', () => ({
     searchItemsByMetadata: mocks.searchItemsByMetadata,
@@ -36,11 +42,13 @@ vi.mock('../../../src/services/agentDataProvider/utils', () => ({
     librariesFilterError: vi.fn(() => null),
     resolveCollectionsFilter: vi.fn(() => ({ collections: [], unresolved: [], outOfScope: [] })),
     collectionsFilterError: vi.fn(() => null),
+    resolveTagsFilter: mocks.resolveTagsFilter,
+    tagsFilterError: vi.fn(() => null),
     prepareAttachmentInfoBatchData: vi.fn(async () => ({})),
     processAttachmentInfoBatch: vi.fn(async () => []),
 }));
 
-import { librariesFilterError } from '../../../src/services/agentDataProvider/utils';
+import { librariesFilterError, tagsFilterError } from '../../../src/services/agentDataProvider/utils';
 import { handleItemSearchByMetadataRequest } from '../../../src/services/agentDataProvider/handleItemSearchByMetadataRequest';
 
 /** A regular, non-trashed item the handler will accept. */
@@ -62,8 +70,10 @@ beforeEach(() => {
     vi.clearAllMocks();
     getSearchableLibraryIds.mockReturnValue([3, 1]);
     resolveLibrariesFilter.mockReturnValue({ libraryIds: [3, 1], unresolved: [], excluded: [] });
+    resolveTagsFilter.mockResolvedValue({ tags: [], unresolved: [] });
     // clearAllMocks() drops calls but keeps a mockReturnValue set by a prior test.
     vi.mocked(librariesFilterError).mockReturnValue(null);
+    vi.mocked(tagsFilterError).mockReturnValue(null);
     const zotero = (globalThis as any).Zotero;
     zotero.Items = { ...(zotero.Items ?? {}), loadDataTypes: vi.fn(async () => {}) };
 });
@@ -143,6 +153,69 @@ describe('handleItemSearchByMetadataRequest library coverage', () => {
 
         const tags = searchItemsByMetadata.mock.calls.map((c) => c[1].tags);
         expect(tags).toEqual([undefined, undefined]);
+    });
+
+    it('searches for the resolved tag names rather than the requested spelling', async () => {
+        // The Zotero search matches tags case-sensitively, so only the stored
+        // spelling finds anything.
+        resolveTagsFilter.mockResolvedValue({ tags: ['Economics'], unresolved: [] });
+        searchItemsByMetadata.mockResolvedValue([]);
+
+        await handleItemSearchByMetadataRequest({
+            type: 'item_search_by_metadata_request',
+            request_id: 'r6a',
+            author_query: 'Dean',
+            tags_filter: ['economics'],
+            limit: 10,
+        } as any);
+
+        expect(resolveTagsFilter).toHaveBeenCalledWith(['economics'], [3, 1]);
+        const tags = searchItemsByMetadata.mock.calls.map((c) => c[1].tags);
+        expect(tags).toEqual([['Economics'], ['Economics']]);
+    });
+
+    it('reports an unusable tags_filter as an error rather than an empty result', async () => {
+        // A tag the library doesn't have must not read as "no item carries it".
+        resolveTagsFilter.mockResolvedValue({
+            tags: [],
+            unresolved: [{ input: 'econimics', suggestions: ['Economics'] }],
+        });
+        vi.mocked(tagsFilterError).mockReturnValue({
+            message: 'Tag not found: "econimics" (did you mean "Economics"?).',
+            error_code: 'tag_not_found',
+        });
+
+        const res = await handleItemSearchByMetadataRequest({
+            type: 'item_search_by_metadata_request',
+            request_id: 'r6b',
+            author_query: 'Dean',
+            tags_filter: ['econimics'],
+            limit: 10,
+        } as any);
+
+        expect(res.items).toEqual([]);
+        expect(res.error_code).toBe('tag_not_found');
+        expect(res.error).toContain('did you mean "Economics"');
+        // The search must never run unfiltered after an unusable filter.
+        expect(searchItemsByMetadata).not.toHaveBeenCalled();
+    });
+
+    it('returns no results rather than dropping a tags_filter that resolved to nothing', async () => {
+        // No error to report (no library in scope yet), but searching without the
+        // requested tag would answer a different question.
+        resolveTagsFilter.mockResolvedValue({ tags: [], unresolved: [] });
+
+        const res = await handleItemSearchByMetadataRequest({
+            type: 'item_search_by_metadata_request',
+            request_id: 'r6c',
+            author_query: 'Dean',
+            tags_filter: ['economics'],
+            limit: 10,
+        } as any);
+
+        expect(res.items).toEqual([]);
+        expect(res.error).toBeUndefined();
+        expect(searchItemsByMetadata).not.toHaveBeenCalled();
     });
 
     it('reports an error when every searched library failed', async () => {

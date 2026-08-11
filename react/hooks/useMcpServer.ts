@@ -206,7 +206,10 @@ const SEARCH_BY_TOPIC_TOOL = {
             tags_filter: {
                 type: 'array',
                 items: { type: 'string' },
-                description: 'Zotero tags to filter results (OR logic).',
+                description:
+                    'Zotero tags to filter results (OR logic). Matched ignoring case; ' +
+                    'a tag the library does not have is reported as an error, so use ' +
+                    '`list_tags` to discover them.',
             },
             collections_filter: {
                 type: 'array',
@@ -277,7 +280,10 @@ const SEARCH_BY_METADATA_TOOL = {
             tags_filter: {
                 type: 'array',
                 items: { type: 'string' },
-                description: 'Zotero tags to filter results (OR logic).',
+                description:
+                    'Zotero tags to filter results (OR logic). Matched ignoring case; ' +
+                    'a tag the library does not have is reported as an error, so use ' +
+                    '`list_tags` to discover them.',
             },
             collections_filter: {
                 type: 'array',

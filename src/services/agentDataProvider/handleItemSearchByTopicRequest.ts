@@ -28,6 +28,8 @@ import {
     processAttachmentInfoBatch,
     resolveCollectionsFilter,
     resolveLibrariesFilter,
+    resolveTagsFilter,
+    tagsFilterError,
 } from '../agentDataProvider/utils';
 import { TimingAccumulator } from '../../utils/timing';
 
@@ -162,6 +164,51 @@ export async function handleItemSearchByTopicRequest(
         }
     }
 
+    // Resolve tags_filter to the tag names Zotero stores, before the embedding
+    // query: a tag the library doesn't have is a bad filter, not an empty result,
+    // and the model can only tell the two apart if it is told.
+    const tagsFilter = request.tags_filter ?? [];
+    let tagNames: string[] | undefined;
+    if (tagsFilter.length > 0) {
+        const resolution = await resolveTagsFilter(tagsFilter, libraryIds);
+
+        const filterError = tagsFilterError(resolution);
+        if (filterError) {
+            logger(`handleItemSearchByTopicRequest: ${filterError.message}`, 1);
+            return {
+                type: 'item_search_by_topic',
+                request_id: request.request_id,
+                items: [],
+                error: filterError.message,
+                error_code: filterError.error_code,
+                timing: {
+                    total_ms: Date.now() - startTime,
+                    item_count: 0,
+                    attachment_count: 0,
+                },
+            };
+        }
+
+        // A tags_filter must narrow the search, never drop off it: when nothing
+        // resolved and no error explained why (no library in scope), return no
+        // results instead of ranking as if no tag had been requested.
+        if (resolution.tags.length === 0) {
+            logger('handleItemSearchByTopicRequest: tags_filter resolved to no tags', 1);
+            return {
+                type: 'item_search_by_topic',
+                request_id: request.request_id,
+                items: [],
+                timing: {
+                    total_ms: Date.now() - startTime,
+                    item_count: 0,
+                    attachment_count: 0,
+                },
+            };
+        }
+
+        tagNames = resolution.tags;
+    }
+
     logger('handleItemSearchByTopicRequest: Searching by topic', {
         topic_query: request.topic_query,
         libraryIds: libraryIds.length > 0 ? libraryIds : 'all',
@@ -288,10 +335,11 @@ export async function handleItemSearchByTopicRequest(
             if (!matchesAuthor) continue;
         }
 
-        // Tags filter
-        if (request.tags_filter && request.tags_filter.length > 0) {
+        // Tags filter, applied to the resolved tag names rather than the request's
+        // own spelling so it matches what the library actually stores.
+        if (tagNames) {
             const itemTags = item.getTags().map(t => t.tag.toLowerCase());
-            const matchesTag = request.tags_filter.some(tag =>
+            const matchesTag = tagNames.some(tag =>
                 itemTags.includes(tag.toLowerCase())
             );
             if (!matchesTag) continue;

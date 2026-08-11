@@ -26,6 +26,8 @@ import {
     processAttachmentInfoBatch,
     resolveCollectionsFilter,
     resolveLibrariesFilter,
+    resolveTagsFilter,
+    tagsFilterError,
 } from './utils';
 import { TimingAccumulator } from '../../utils/timing';
 
@@ -148,6 +150,54 @@ export async function handleItemSearchByMetadataRequest(
         }
     }
 
+    // Resolve tags_filter to the tag names Zotero stores. Rewriting the filter is
+    // what makes it work at all: the Zotero search matches tags case-sensitively,
+    // so a differently cased entry would silently match nothing.
+    const tagsFilter = request.tags_filter ?? [];
+    let tagNames: string[] | undefined;
+    if (tagsFilter.length > 0) {
+        const resolution = await resolveTagsFilter(tagsFilter, libraryIds);
+
+        // A tag the library doesn't have is reported as an error rather than an
+        // empty result, so the model can tell a misspelled tag from a real tag
+        // that carries no matching item.
+        const filterError = tagsFilterError(resolution);
+        if (filterError) {
+            logger(`handleItemSearchByMetadataRequest: ${filterError.message}`, 1);
+            return {
+                type: 'item_search_by_metadata',
+                request_id: request.request_id,
+                items: [],
+                error: filterError.message,
+                error_code: filterError.error_code,
+                timing: {
+                    total_ms: Date.now() - startTime,
+                    item_count: 0,
+                    attachment_count: 0,
+                },
+            };
+        }
+
+        // A tags_filter must narrow the search, never drop off it: when nothing
+        // resolved and no error explained why (no library in scope), return no
+        // results instead of searching as if no tag had been requested.
+        if (resolution.tags.length === 0) {
+            logger('handleItemSearchByMetadataRequest: tags_filter resolved to no tags', 1);
+            return {
+                type: 'item_search_by_metadata',
+                request_id: request.request_id,
+                items: [],
+                timing: {
+                    total_ms: Date.now() - startTime,
+                    item_count: 0,
+                    attachment_count: 0,
+                },
+            };
+        }
+
+        tagNames = resolution.tags;
+    }
+
     // Calculate offset for pagination (default 0, guard against negative values)
     const offset = Math.max(0, request.offset ?? 0);
 
@@ -200,9 +250,7 @@ export async function handleItemSearchByMetadataRequest(
             year_min: request.year_min,
             year_max: request.year_max,
             item_type: request.item_type_filter,
-            // Unset optional request fields arrive as explicit null, which is not
-            // what an optional search option means.
-            tags: request.tags_filter ?? undefined,
+            tags: tagNames,
             collection_keys: collectionKeys ? Array.from(collectionKeys) : undefined,
             limit: perLibraryLimit,
         };
