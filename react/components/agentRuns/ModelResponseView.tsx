@@ -7,7 +7,7 @@ import { isAnnotationToolResult } from '@beaver/agent-core/run-state/toolResultT
 import ContextMenu from '@beaver/agent-ui/primitives/ContextMenu';
 import useSelectionContextMenu from '../../hooks/useSelectionContextMenu';
 import { buildEditNoteRenderItems, getEditNoteGroupInstanceId } from './editNoteShared';
-import { getHost } from '../../host';
+import { getHost } from '@beaver/agent-ui/host';
 import { GenericAgentActionView } from './GenericAgentActionView';
 
 /**

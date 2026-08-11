@@ -9,7 +9,7 @@ import type {
     CitationExportRender,
     DocumentExportHost,
     ExternalFileCitationExportRequest,
-} from '../types';
+} from '@beaver/agent-ui/host/types';
 
 /** Escape text for safe interpolation into an HTML attribute or text node. */
 function escapeHtml(value: string): string {

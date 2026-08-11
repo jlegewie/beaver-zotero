@@ -175,9 +175,12 @@ const l2UiAmbientTypeBan = [
  */
 const l2UiImportBans = [
     {
+        // The registry itself lives in this package (`src/host/`), so any
+        // specifier naming a `host/zotero` path from here is necessarily a
+        // relative escape into the plugin's implementation of it.
         group: ["**/host/zotero", "**/host/zotero/**"],
         message:
-            "The shared React layer must use the host registry, not a client's implementation of it (react/host/zotero).",
+            "The shared React layer defines the host registry; it must not import a client's implementation of it (react/host/zotero).",
     },
     {
         group: ["**/utils/prefs"],
@@ -347,9 +350,9 @@ export default tseslint.config(
         },
     },
     // The shared render layer must stay client-agnostic so it can be reused
-    // across clients. It may use the host registry (`react/host`) but must NOT
-    // touch the `Zotero` global or import the Zotero host implementation / prefs
-    // directly — those couplings go through `getHost()`.
+    // across clients. It may use the host registry (`@beaver/agent-ui/host`) but
+    // must NOT touch the `Zotero` global or import the Zotero host implementation
+    // / prefs directly — those couplings go through `getHost()`.
     // See docs-zotero/client-host-architecture.md.
     {
         files: [
@@ -383,7 +386,7 @@ export default tseslint.config(
                 {
                     name: "Zotero",
                     message:
-                        "The citation render layer must stay client-agnostic — use getHost() (react/host) for Zotero-specific behavior.",
+                        "The citation render layer must stay client-agnostic — use getHost() (@beaver/agent-ui/host) for Zotero-specific behavior.",
                 },
             ],
             "no-restricted-imports": [
@@ -393,7 +396,7 @@ export default tseslint.config(
                         {
                             group: ["**/host/zotero/*", "**/host/zotero"],
                             message:
-                                "Render layer must use the host registry (react/host), not the Zotero implementation (react/host/zotero).",
+                                "Render layer must use the host registry (@beaver/agent-ui/host), not the Zotero implementation (react/host/zotero).",
                         },
                         {
                             group: ["**/utils/prefs"],

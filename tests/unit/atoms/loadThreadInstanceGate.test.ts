@@ -29,7 +29,7 @@ vi.mock('../../../src/utils/prefs', () => ({
 }));
 
 const confirmMock = vi.fn();
-vi.mock('../../../react/host', () => ({
+vi.mock('@beaver/agent-ui/host', () => ({
     getHost: () => ({ dialogs: { confirm: confirmMock } }),
 }));
 

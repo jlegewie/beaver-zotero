@@ -3,7 +3,7 @@ import type {
     ComponentsHost,
     ExternalReferenceActionsProps,
     AgentActionInStreamProps,
-} from '../../types';
+} from '@beaver/agent-ui/host/types';
 import ActionButtons from './ActionButtons';
 import { AgentActionInStream } from './AgentActionInStream';
 import { AgentActionsReview } from './AgentActionsReview';

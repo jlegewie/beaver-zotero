@@ -24,7 +24,7 @@ import Tooltip from '@beaver/agent-ui/primitives/Tooltip';
 import Spinner from '@beaver/agent-ui/icons/Spinner';
 import { prepareCitationRenderContext } from '../../utils/citationRenderContext';
 import { addPopupMessageAtom } from '../../utils/popupMessageUtils';
-import { getHost } from '../../host';
+import { getHost } from '@beaver/agent-ui/host';
 
 interface AgentRunFooterProps {
     run: AgentRun;

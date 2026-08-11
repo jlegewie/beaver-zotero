@@ -32,7 +32,7 @@ import Tooltip from '@beaver/agent-ui/primitives/Tooltip';
 import { renderToHTML, renderToMarkdown } from '../../utils/citationRenderers';
 import { ToolDisplayFooter } from './ToolDisplayFooter';
 import { prepareCitationRenderContext } from '../../utils/citationRenderContext';
-import { getHost } from '../../host';
+import { getHost } from '@beaver/agent-ui/host';
 
 export interface StreamingNoteBlock {
     id: string;

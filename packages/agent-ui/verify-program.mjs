@@ -237,10 +237,14 @@ if (
 // it dropping out of the closure. The primitive barrel is the same shape: the
 // primitives are imported by subpath in practice, and some import each other,
 // so the barrel is what makes every one of them reachable on purpose rather
-// than by way of a sibling that could stop importing it.
-const entryPaths = ["src/icons/index.tsx", "src/primitives/index.ts"].map((p) =>
-  path.join(pkgDir, p),
-);
+// than by way of a sibling that could stop importing it. The host barrel is a
+// root because nothing else in the package imports the registry — a client and
+// a shared component both reach it from outside.
+const entryPaths = [
+  "src/icons/index.tsx",
+  "src/primitives/index.ts",
+  "src/host/index.ts",
+].map((p) => path.join(pkgDir, p));
 
 const listed = parsed.fileNames.map((f) => path.resolve(f));
 const listedSet = new Set(listed);

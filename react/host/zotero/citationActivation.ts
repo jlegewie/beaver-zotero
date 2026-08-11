@@ -37,7 +37,7 @@ import {
 } from '../../../src/utils/zoteroItemHelpers';
 import { BEAVER_CITATION_ANNOTATION_AUTHOR } from '../../../src/constants/annotations';
 import { libraryRefForLibraryID, resolveItemReference } from '../../../src/utils/libraryIdentity';
-import type { CitationActivation } from '../types';
+import type { CitationActivation } from '@beaver/agent-ui/host/types';
 
 /** Reveal the cited item in the library view. */
 function revealInLibrary(libraryID: number, zoteroKey: string): void {

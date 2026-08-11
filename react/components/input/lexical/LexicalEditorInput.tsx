@@ -41,7 +41,7 @@ import {
     type SlashCommandDescriptor,
 } from '../../../utils/slashCommands';
 import { isImeKeyEvent } from '../../../utils/ime';
-import { getHost } from '../../../host';
+import { getHost } from '@beaver/agent-ui/host';
 import { getPref } from '../../../../src/utils/prefs';
 import {
     createCompositionGatedEmitter,

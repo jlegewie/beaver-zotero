@@ -9,7 +9,7 @@ import {
 import { externalReferenceMappingAtom } from '../../atoms/externalReferences';
 import { pageLabelsByAttachmentIdAtom, externalFileLocalPathsAtom } from '@beaver/agent-core/citations/atoms';
 import { useCitationMarker } from '../../hooks/useCitationMarker';
-import { getHost } from '../../host';
+import { getHost } from '@beaver/agent-ui/host';
 import { useCitationViewModel } from './useCitationViewModel';
 import { Icon, LibraryIcon, PdfIcon, FileIcon, GlobalSearchIcon, NoteIcon, HighlighterIcon, TextAlignLeftIcon, ExternalLinkIcon } from '../icons/icons';
 const TOOLTIP_WIDTH = '250px';

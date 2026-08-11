@@ -113,11 +113,13 @@ The wire protocol and its type closure (`protocol/`, `transport/`, `run-state/`,
 
 ## Client host seam and the shared render layer
 
-Client-specific behavior is injected, not imported. The registry lives in `react/host/`
-(`ClientHost` with optional slices: `navigation`, `itemData`, `documentExport`, `noteWriter`,
-`config`, `components`, `dialogs`). The Zotero implementations live in `react/host/zotero/*`
-and are registered once at bundle init by `registerZoteroHost()` (called from
-`react/index.tsx`). Absent slices must degrade gracefully.
+Client-specific behavior is injected, not imported. The registry lives in the shared package,
+`@beaver/agent-ui/host` (`ClientHost` with optional slices: `navigation`, `itemData`,
+`documentExport`, `noteWriter`, `config`, `components`, `documentActions`, `dialogs`) — a shared
+component must be able to import its seam without reaching into a client's source tree. The
+Zotero implementations stay in `react/host/zotero/*` and are registered once at bundle init by
+`registerZoteroHost()` (called from `react/index.tsx`). Absent slices must degrade gracefully;
+Zotero has no `documentActions` (that slice is for document-hosted clients).
 
 Shared render components reach client-specific behavior only through
 `getHost().<slice>?.<method>(...)`. Rules that are load-bearing:

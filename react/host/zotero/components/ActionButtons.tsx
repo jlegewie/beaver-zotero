@@ -37,7 +37,7 @@ import { CreateItemResultData } from '@beaver/agent-core/types/agentActions/item
 import { currentThreadIdAtom } from '../../../atoms/threads';
 import { searchableLibraryIdsAtom } from '../../../atoms/profile';
 import type { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
-import type { ExternalReferenceActionMode, ExternalReferenceActionsProps } from '../../types';
+import type { ExternalReferenceActionMode, ExternalReferenceActionsProps } from '@beaver/agent-ui/host/types';
 import { resolveSearchableLibraryId } from '../libraryAccess';
 
 const CITED_BY_URL = 'https://openalex.org/works?page=1&filter=cites:';

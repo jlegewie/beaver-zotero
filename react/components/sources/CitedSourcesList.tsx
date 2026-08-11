@@ -17,7 +17,7 @@ import Tooltip from '@beaver/agent-ui/primitives/Tooltip';
 import { externalReferenceMappingAtom, externalReferenceItemMappingAtom, formatExternalCitation } from '../../atoms/externalReferences';
 import { ExternalReference } from '@beaver/agent-core/types/externalReferences';
 import { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
-import { getHost, type ResolvedItemDisplay } from '../../host';
+import { getHost, type ResolvedItemDisplay } from '@beaver/agent-ui/host';
 
 interface CitedSourcesListProps {
     citations: CitedSource[];

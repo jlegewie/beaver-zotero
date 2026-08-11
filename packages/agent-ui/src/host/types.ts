@@ -5,8 +5,7 @@ import type { Citation, PartLocation } from '@beaver/agent-core/types/citations'
 import type { PageLabelsByAttachmentId } from '@beaver/agent-core/citations/atoms';
 import type { ExternalReference } from '@beaver/agent-core/types/externalReferences';
 import type { ToolCallPart, AgentRun, AgentRunStatus } from '@beaver/agent-core/agents/types';
-import type { PendingApproval } from '../agents/agentActions';
-import type { EditNoteResolvedTarget } from '../components/agentRuns/editNoteShared';
+import type { AgentActionType } from '@beaver/agent-core/protocol/agentProtocol';
 
 /**
  * Everything the host needs to activate (navigate to / open) a cited location.
@@ -367,19 +366,35 @@ export interface ExternalReferenceActionsProps {
 }
 
 /**
- * Host-provided, client-specific UI components.
+ * A write the backend has deferred for user approval, as carried by the
+ * `deferred_approval_request` wire event. Client-neutral by construction: the
+ * shape is that event's payload, and `actionData` stays opaque — only the client
+ * that renders and applies the action interprets it.
  *
- * Unlike the other slices (which inject *behavior*), this slice injects *UI* for
- * surfaces that are inherently client-specific — chiefly the agent-action
- * approve/apply/undo controls and item-mutation buttons that only make sense for
- * a Zotero library. Shared dispatchers ask the host for these renderers instead
- * of importing the client components directly, so the dependency arrow stays
- * shared → host-interface, never shared → client UI.
- *
- * Each method returns a {@link ReactNode}, or `null` when the client has no UI
- * for that surface (the shared caller then renders nothing). The slice grows as
- * more action UIs move behind the host seam.
+ * Declared here because the shared render layer hands it to the host's in-stream
+ * action UI below; each client's approval store imports this declaration rather
+ * than restating it.
  */
+export interface PendingApproval {
+    actionId: string;
+    toolcallId: string;
+    actionType: AgentActionType;
+    actionData: Record<string, any>;
+    /** Prior value of the edited object, when the backend sent one (for diffs). */
+    currentValue?: any;
+}
+
+/**
+ * The object an `edit_note` group writes to, resolved from the tool-call args.
+ *
+ * Zotero-shaped by name because notes are — the render layer only groups the
+ * parts and forwards the target, and the host resolves it to a real note.
+ */
+export interface EditNoteResolvedTarget {
+    libraryId: number;
+    zoteroKey: string;
+}
+
 /**
  * Inputs for the in-stream agent-action UI, discriminated by `kind` to cover the
  * three render situations: a single action tool-call (`tool-action`), a bulk
@@ -410,6 +425,20 @@ export type AgentActionInStreamProps =
         runStatus: AgentRunStatus;
     };
 
+/**
+ * Host-provided, client-specific UI components.
+ *
+ * Unlike the other slices (which inject *behavior*), this slice injects *UI* for
+ * surfaces that are inherently client-specific — chiefly the agent-action
+ * approve/apply/undo controls and item-mutation buttons that only make sense for
+ * a Zotero library. Shared dispatchers ask the host for these renderers instead
+ * of importing the client components directly, so the dependency arrow stays
+ * shared → host-interface, never shared → client UI.
+ *
+ * Each method returns a {@link ReactNode}, or `null` when the client has no UI
+ * for that surface (the shared caller then renders nothing). The slice grows as
+ * more action UIs move behind the host seam.
+ */
 export interface ComponentsHost {
     /**
      * Render the action buttons for an external (non-library) reference —
@@ -430,6 +459,45 @@ export interface ComponentsHost {
      * approve.
      */
     pendingActionsReview(props: { run: AgentRun }): ReactNode;
+}
+
+/**
+ * What the host can report about the user's current selection in the document it
+ * is embedded in.
+ *
+ * Deliberately minimal: the only thing every document host can produce is the
+ * selected text, plus something it can later use to find that range again.
+ * `location` is opaque — the render layer stores it and hands it back to the same
+ * host unchanged, never parsing it — so each client picks its own encoding (a
+ * Word bookmark id, an OOXML range, …) without the shared layer growing a case
+ * per client. It is a string so a staged context chip can be serialized into a
+ * run payload like any other attachment reference.
+ */
+export interface DocumentSelection {
+    /** Selected text as plain text. Empty when the selection is a collapsed cursor. */
+    text: string;
+    /** Opaque, host-owned handle for the selected range. Absent when the host cannot address it. */
+    location?: string;
+}
+
+/**
+ * Reading from and writing to the document the client is embedded in (Word,
+ * later Google Docs).
+ *
+ * Inherently client-specific, and absent for clients that are not hosted inside
+ * a document: the Zotero plugin has a library, not a cursor, and omits this
+ * slice entirely. Shared components must therefore treat it as optional — an
+ * "insert citation" affordance is only offered when the slice is present.
+ */
+export interface DocumentActionsHost {
+    /** Insert citations for the given references at the cursor, host-native. */
+    insertCitation(refs: CitationRef[]): Promise<void>;
+    /** Insert already-rendered markdown content at the cursor. */
+    insertText(markdown: string): Promise<void>;
+    /** The user's current selection, or null when there is none to report. */
+    getSelection(): Promise<DocumentSelection | null>;
+    /** Display name of the open document, or null when unavailable. */
+    documentName(): string | null;
 }
 
 export interface DialogsHost {
@@ -453,5 +521,6 @@ export interface ClientHost {
     noteWriter?: NoteWriterHost;
     config?: ConfigHost;
     components?: ComponentsHost;
+    documentActions?: DocumentActionsHost;
     dialogs?: DialogsHost;
 }

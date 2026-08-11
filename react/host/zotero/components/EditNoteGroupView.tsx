@@ -4,10 +4,10 @@ import { AgentRunStatus, ToolCallPart } from '@beaver/agent-core/agents/types';
 import { getToolCallStatus, toolResultsMapAtom } from '@beaver/agent-core/run-state/atoms';
 import {
     AgentAction,
-    PendingApproval,
     agentActionsByToolcallAtom,
     pendingApprovalsAtom,
 } from '../../../agents/agentActions';
+import type { EditNoteResolvedTarget, PendingApproval } from '@beaver/agent-ui/host';
 import {
     approveToolGroupForRunAtom,
     isWSChatPendingAtom,
@@ -67,7 +67,6 @@ import {
 } from '../agentActionExecution';
 import {
     deriveEditNoteRows,
-    type EditNoteResolvedTarget,
     type EditNoteRowDescriptor,
     findPendingApprovalForToolcall,
     getEditNoteDisplayStatus,

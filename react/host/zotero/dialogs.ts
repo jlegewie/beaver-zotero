@@ -1,4 +1,4 @@
-import type { DialogsHost } from '../types';
+import type { DialogsHost } from '@beaver/agent-ui/host/types';
 
 /**
  * Zotero implementation of the dialogs host slice: native blocking prompts via

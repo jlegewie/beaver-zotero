@@ -9,7 +9,7 @@ import { logger } from '@beaver/agent-core/platform/logger';
 import { ChipWithPopup, type ChipPopupContent } from '../agentRuns/requestChips/ChipPopup';
 import { ChipButton } from '../agentRuns/requestChips/ChipButton';
 import { ChipRemovableIcon } from '../agentRuns/requestChips/ChipRemovableIcon';
-import { getHost } from '../../host';
+import { getHost } from '@beaver/agent-ui/host';
 
 const MAX_FILENAME_LENGTH = 25;
 

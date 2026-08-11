@@ -20,7 +20,7 @@ import { formatNumberRanges, formatPageRangesWithLabels } from '../../utils/stri
 import { resolvePageLabelFromLabels } from '../../utils/pageLabels';
 import { explicitPageLabel } from '../../utils/locationDisplay';
 import { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
-import { getHost } from '../../host';
+import { getHost } from '@beaver/agent-ui/host';
 
 /**
  * Citation display state - explicit FSM for citation lifecycle.

@@ -10,7 +10,7 @@ import { threadService, ZoteroInstanceRef } from "@beaver/agent-core/transport/t
 import { getPref } from "../../src/utils/prefs";
 import { loadFullItemDataWithAllTypes, currentZoteroInstanceRef } from "../../src/utils/zoteroUtils";
 import { isThreadInstanceMismatch } from "../utils/threadMatches";
-import { getHost } from "../host";
+import { getHost } from '@beaver/agent-ui/host';
 import { logger } from "@beaver/agent-core/platform/logger";
 import { ApiError } from "@beaver/agent-core/types/apiErrors";
 import { resetMessageUIStateAtom, retainedReviewActionsAtom } from "./messageUIState";

@@ -4,11 +4,11 @@ import { useAtomValue, useSetAtom } from 'jotai';
 import { AgentRunStatus } from '@beaver/agent-core/agents/types';
 import {
     AgentAction,
-    PendingApproval,
     getAgentActionsByToolcallAtom,
     removePendingApprovalAtom,
     isCreateAnnotationsAgentAction,
 } from '../../../agents/agentActions';
+import type { PendingApproval } from '@beaver/agent-ui/host';
 import {
     approveToolGroupForRunAtom,
     approvalResponseIntentsAtom,

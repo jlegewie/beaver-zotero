@@ -13,7 +13,7 @@ import {
     createPreprocessState 
 } from '../../utils/citationPreprocessing';
 import { processPartialContent } from '../../utils/markdownPartialContent';
-import { getHost } from '../../host';
+import { getHost } from '@beaver/agent-ui/host';
 
 const citationDataAttributes = [
     'data-library-id', 'dataLibraryId',

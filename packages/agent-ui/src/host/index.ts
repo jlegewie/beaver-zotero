@@ -8,13 +8,17 @@ export type {
     NoteWriterHost,
     ConfigHost,
     ComponentsHost,
+    DocumentActionsHost,
     DialogsHost,
     SaveNoteRequest,
     SavedNoteReference,
     NoteSaveFormat,
+    DocumentSelection,
     ExternalReferenceActionsProps,
     ExternalReferenceActionMode,
     AgentActionInStreamProps,
+    PendingApproval,
+    EditNoteResolvedTarget,
     HostButtonVariant,
     ResolvedItemDisplay,
     CitationActivation,
@@ -25,8 +29,8 @@ export type {
 /**
  * Default host: no capabilities. A non-Zotero client can run the render surface
  * with this empty host; renderers degrade gracefully (e.g. page labels fall
- * back to raw numbers, navigation clicks become no-ops). The Zotero plugin
- * registers its implementation at bundle init via {@link setHost}.
+ * back to raw numbers, navigation clicks become no-ops). Each client registers
+ * its own implementation at bundle init via {@link setHost}.
  */
 let host: ClientHost = {};
 

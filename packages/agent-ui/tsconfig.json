@@ -172,6 +172,12 @@
     "./src/primitives/MenuButton.tsx",
     "./src/primitives/Tag.tsx",
     "./src/primitives/Tooltip.tsx",
-    "./src/utils/windowContext.ts"
+    "./src/utils/windowContext.ts",
+
+    // The client-host registry: the seam a shared component reaches client
+    // behavior through. Its slice interfaces are the whole of `types.ts`, which
+    // the barrel re-exports, so the barrel alone is the entry point.
+    "./src/host/index.ts",
+    "./src/host/types.ts"
   ]
 }
