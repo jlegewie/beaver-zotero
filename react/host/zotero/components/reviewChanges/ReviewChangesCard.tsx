@@ -8,6 +8,7 @@ import {
     clearRetainedReviewActionsForRunAtom,
     defaultAnnotationPanelState,
     retainReviewActionsAtom,
+    setToolExpandedAtom,
     toggleAnnotationPanelVisibilityAtom,
 } from '../../../../atoms/messageUIState';
 import {
@@ -58,6 +59,7 @@ export const ReviewChangesCard: React.FC<ReviewChangesCardProps> = ({ run, rows 
     const rejectAgentActions = useSetAtom(rejectAgentActionsAtom);
     const retainActions = useSetAtom(retainReviewActionsAtom);
     const clearRetainedActionsForRun = useSetAtom(clearRetainedReviewActionsForRunAtom);
+    const setToolExpanded = useSetAtom(setToolExpandedAtom);
 
     // The jotai getter this closure carries reads the store when it is called, so
     // the bulk loop sees each tool call's status as of its turn, not of the click.
@@ -168,11 +170,17 @@ export const ReviewChangesCard: React.FC<ReviewChangesCardProps> = ({ run, rows 
     }, [hasWritingRow, isBulkRunning, rejectAgentActions, retainActions, rows, run.id]);
 
     // Expanding stays available during a bulk apply: the per-row spinners are the
-    // only view of how far a long apply has got.
-    const toggleExpanded = useCallback(
-        () => togglePanelVisibility(groupId),
-        [groupId, togglePanelVisibility],
-    );
+    // only view of how far a long apply has got. When there is only one row, open
+    // its preview along with the card; multiple rows stay collapsed for scanning.
+    const toggleExpanded = useCallback(() => {
+        if (!isExpanded && rows.length === 1) {
+            setToolExpanded({
+                key: `${run.id}:review:${rows[0].toolcallId}`,
+                expanded: true,
+            });
+        }
+        togglePanelVisibility(groupId);
+    }, [groupId, isExpanded, rows, run.id, setToolExpanded, togglePanelVisibility]);
 
     if (rows.length === 0 || (isDismissed && !hasPendingRows)) return null;
 
