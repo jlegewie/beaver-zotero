@@ -16,6 +16,7 @@ import {
     STATUS_CONFIGS,
     getCreateAnnotationsDisplayStatus,
     getOverallStatus,
+    hasFailedUndo,
     getActionLabel,
     getActionTitle,
     buildPreviewData,
@@ -85,6 +86,9 @@ export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
     const isWriting = row.actions.some((action) => inFlightActionIds.has(action.id));
 
     const firstAction = row.actions[0];
+    // Local state alone would send Retry into a fresh apply after a remount, or
+    // after an undo that failed in another pane.
+    const isUndoRetry = isUndoError || hasFailedUndo(row.actions);
     const isBusy = isProcessing || isWriting;
     const isDisabled = isBusy || isBulkRunning;
     // A write this row did not click (a bulk apply, another surface, or its own
@@ -150,13 +154,13 @@ export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
     }, [isDisabled, row, undoAgentActions, onResolved]);
 
     const handleRetry = useCallback(async () => {
-        if (isUndoError) {
+        if (isUndoRetry) {
             setIsUndoError(false);
             await handleUndo();
         } else {
             await handleApply();
         }
-    }, [isUndoError, handleUndo, handleApply]);
+    }, [isUndoRetry, handleUndo, handleApply]);
 
     const toggleExpanded = useCallback(
         () => setExpanded({ key: expansionKey, expanded: !isExpanded }),
@@ -231,7 +235,7 @@ export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
                             disabled={isDisabled}
                             style={GHOST_BUTTON_STYLE}
                         >
-                            {isUndoError ? 'Retry Undo' : 'Try Again'}
+                            {isUndoRetry ? 'Retry Undo' : 'Try Again'}
                         </Button>
                     )}
 

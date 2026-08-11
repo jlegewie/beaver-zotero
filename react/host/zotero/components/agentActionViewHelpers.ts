@@ -174,6 +174,21 @@ export function getCreateAnnotationsDisplayStatus(action: AgentAction): ActionSt
 }
 
 /**
+ * True when the failure on these actions came from an undo rather than an apply,
+ * so a Retry can be pointed back at undo instead of re-running the change.
+ *
+ * Read off the records rather than remembered in component state, which does not
+ * survive a remount or a failure triggered from another pane: only an applied
+ * action carries `result_data`, a successful undo clears it, and the error path
+ * preserves it — so an errored action that still has a result is one whose undo
+ * failed. A write that succeeded but failed to acknowledge lands here too, where
+ * undo is likewise the safer direction: re-applying would duplicate it.
+ */
+export function hasFailedUndo(actions: AgentAction[]): boolean {
+    return actions.some((action) => action.status === 'error' && action.result_data != null);
+}
+
+/**
  * Status used by the expansion lifecycle after a live approval disappears.
  * Multi-action cards must stay aligned with their displayed aggregate status,
  * while confirmation tools can complete without persisting an AgentAction.
