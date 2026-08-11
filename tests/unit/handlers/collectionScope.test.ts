@@ -224,7 +224,8 @@ describe('resolveCollectionsFilter', () => {
 
         expect(resolution.collections).toEqual([]);
         expect(resolution.unresolved).toEqual([]);
-        expect(resolution.outOfScope).toEqual([{ input: 'CCCCCCCC', name: 'Private', libraryId: 42 }]);
+        // Library 42 is excluded, so its collection name is not carried out.
+        expect(resolution.outOfScope).toEqual([{ input: 'CCCCCCCC', name: null, libraryId: 42 }]);
     });
 
     it('reports a numeric ID from an unsearched library as out of scope', () => {
@@ -305,6 +306,8 @@ describe('collectionsFilterError', () => {
         const error = collectionsFilterError({
             collections: [],
             unresolved: [],
+            // A stale name here stands in for a caller that built the entry by
+            // hand: the message must still not carry it.
             outOfScope: [{ input: 'CCCCCCCC', name: 'Private', libraryId: 42 }],
         });
 

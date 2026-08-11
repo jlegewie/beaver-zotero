@@ -660,8 +660,12 @@ function findCollectionInLibrary(
 export interface OutOfScopeCollection {
     /** The filter entry that matched it. */
     input: string;
-    /** Name of the matched collection. */
-    name: string;
+    /**
+     * Name of the matched collection, or null when it lives in a library
+     * excluded from Beaver — that name is content the user put out of Beaver's
+     * reach, so it is never carried out of the lookup.
+     */
+    name: string | null;
     /** Library the match lives in. */
     libraryId: number;
 }
@@ -730,7 +734,9 @@ export function resolveCollectionsFilter(
             const [collection] = matches;
             outOfScope.push({
                 input: String(filter),
-                name: collection.name,
+                // Keep an excluded library's collection name out of the resolution
+                // entirely, so no caller can surface it by accident.
+                name: isLibrarySearchable(collection.libraryID) ? collection.name : null,
                 libraryId: collection.libraryID,
             });
         } else {
@@ -764,8 +770,9 @@ export function collectionsFilterError(
         };
     }
 
-    // Do not echo the collection's name for an excluded library: it is content
-    // from a library the user put out of Beaver's reach.
+    // Report the exclusion without the collection's name: it is content from a
+    // library the user put out of Beaver's reach. The resolution carries no name
+    // for such a match, so this cannot regress into echoing one.
     const excluded = resolution.outOfScope.find((entry) => !isLibrarySearchable(entry.libraryId));
     if (excluded) {
         return {
@@ -778,9 +785,10 @@ export function collectionsFilterError(
     if (entry) {
         const library = Zotero.Libraries?.get?.(entry.libraryId);
         const libraryName = library ? `"${library.name}"` : `library ${entry.libraryId}`;
+        const collectionLabel = entry.name ? `Collection "${entry.name}"` : `Collection "${entry.input}"`;
         return {
             message: (
-                `Collection "${entry.name}" is in ${libraryName}, which is outside the ` +
+                `${collectionLabel} is in ${libraryName}, which is outside the ` +
                 `requested libraries_filter. Drop libraries_filter or set it to that library.`
             ),
             error_code: 'collection_not_found',
