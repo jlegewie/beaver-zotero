@@ -672,6 +672,23 @@ describe('undoEditNoteBlocksAction', () => {
         expect(noteHtml).toContain('<p>User added this.</p>');
     });
 
+    it('reports drift that occurs while page labels are preloading', async () => {
+        const result = await executeEditNoteBlocksAction(blocksAction([replaceBlock2]));
+
+        vi.mocked(preloadNotePageLabels).mockImplementationOnce(async () => {
+            noteHtml = noteHtml.replace(/<\/div>\s*$/, '<p>User added this during preload.</p></div>');
+            return {};
+        });
+        vi.mocked(logger).mockClear();
+
+        await undoEditNoteBlocksAction(appliedBlocksAction(result, [replaceBlock2]));
+
+        expect(driftLogged()).toBe(true);
+        expect(noteHtml).toContain(LINE_2);
+        expect(noteHtml).not.toContain('Bravo REWRITTEN two.');
+        expect(noteHtml).toContain('<p>User added this during preload.</p>');
+    });
+
     // The complement of the case above, and the reason the recompute mirrors the
     // apply path step for step: a diagnostic that fires on an untouched note is
     // worse than none.

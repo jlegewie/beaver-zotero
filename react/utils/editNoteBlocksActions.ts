@@ -343,9 +343,13 @@ async function logAddressSnapshotDrift(
     // backend relayed without it. Nothing to compare against.
     if (!expectedPostSnapshot) return;
     try {
-        const html = getLatestNoteHtml(item);
-        const pageLabels = await preloadNotePageLabels(html, libraryId);
-        const { simplified } = getOrSimplify(noteId, html, libraryId, pageLabels);
+        const preloadHtml = getLatestNoteHtml(item);
+        const pageLabels = await preloadNotePageLabels(preloadHtml, libraryId);
+        // Page-label preloading yields, so the note may have changed while it
+        // was in flight. Hash a fresh read so this diagnostic describes the
+        // same current note state that undo will subsequently relocate against.
+        const currentHtml = getLatestNoteHtml(item);
+        const { simplified } = getOrSimplify(noteId, currentHtml, libraryId, pageLabels);
         const currentSnapshot = buildAddressSnapshot(noteId, simplified);
         if (currentSnapshot === expectedPostSnapshot) return;
         logger(
