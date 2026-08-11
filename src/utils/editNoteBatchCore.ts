@@ -25,7 +25,7 @@
 
 import type { EditNoteOperation } from '@beaver/agent-core/types/agentActions/editNote';
 import type { SimplificationMetadata } from './noteHtmlSimplifier';
-import type { PageLabelsByAttachmentId } from '../../react/atoms/citations';
+import type { PageLabelsByAttachmentId } from '@beaver/agent-core/citations/atoms';
 import type { CandidateSnippet } from './editNoteHints';
 import {
     expandBase,

@@ -2,7 +2,8 @@ import { atom } from "jotai";
 import { currentMessageItemsAtom, clearComposerAtom, currentMessageCollectionsAtom, currentMessageExternalFilesAtom, updateMessageItemsFromZoteroSelectionAtom, updateReaderAttachmentAtom } from "./messageComposition";
 import { isLibraryTabAtom, isWebSearchEnabledAtom, removePopupMessagesByTypeAtom, userScrolledAtom, windowUserScrolledAtom } from "./ui";
 
-import { citationsAtom, citationMapAtom, processCitationsAtom, resetCitationMarkersAtom, mergePageLabelsByAttachmentIdAtom } from "./citations";
+import { citationsAtom, citationMapAtom, processCitationsAtom, resetCitationMarkersAtom, mergePageLabelsByAttachmentIdAtom } from "@beaver/agent-core/citations/atoms";
+import { maybeShowCitationTipAtom } from "./citationTip";
 import { preloadPageLabelsForCitations } from "../utils/pageLabels";
 import { agentRunService, agentService } from "@beaver/agent-core/transport/agentService";
 import { threadService, ZoteroInstanceRef } from "@beaver/agent-core/transport/threadService";
@@ -584,6 +585,7 @@ export const loadThreadAtom = atom(
                 // Update citation state (synchronous: markers + citation tip)
                 set(citationsAtom, citationMetadata);
                 set(processCitationsAtom);
+                set(maybeShowCitationTipAtom);
 
                 // Preload PDF page labels in the background so subsequent
                 // renders can resolve page locators to their display labels.

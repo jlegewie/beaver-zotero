@@ -54,7 +54,7 @@ import {
 } from '../../../utils/editNoteMatcher';
 import { clearNoteEditorSelection } from '../../../../react/utils/sourceUtils';
 import { store } from '../../../../react/store';
-import { citationMapAtom } from '../../../../react/atoms/citations';
+import { citationMapAtom } from '@beaver/agent-core/citations/atoms';
 import { currentThreadIdAtom } from '../../../../react/atoms/threads';
 import {
     externalReferenceMappingAtom,

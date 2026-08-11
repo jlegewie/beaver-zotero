@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { citationKeyToMarkerAtom, getOrAssignCitationMarkerAtom } from '../atoms/citations';
+import { citationKeyToMarkerAtom, getOrAssignCitationMarkerAtom } from '@beaver/agent-core/citations/atoms';
 import { useIsomorphicLayoutEffect } from './useIsomorphicLayoutEffect';
 
 /**

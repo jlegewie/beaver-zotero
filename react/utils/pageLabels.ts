@@ -30,7 +30,7 @@ import {
     normalizeCitationTag,
     parseRawCitationAttributes,
 } from '@beaver/agent-core/citations/citationGrammar';
-import type { PageLabelsByAttachmentId } from '../atoms/citations';
+import type { PageLabelsByAttachmentId } from '@beaver/agent-core/citations/atoms';
 
 // Regex for citation tags — matches self-closing and non-self-closing forms
 const CITATION_REGEX = /<citation(?:\s+([^>]*?))?\s*(\/>|>(?:.*?<\/citation>)?)/g;

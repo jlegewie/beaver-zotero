@@ -9,7 +9,7 @@ import { getBeaverNoteFooterHTML } from '../../../utils/noteActions';
 import { extractThreadContent, ExtractThreadContentOptions } from '../../../utils/threadContent';
 import { allRunsAtom, toolResultsMapAtom } from '@beaver/agent-core/run-state/atoms';
 import { currentThreadIdAtom, currentThreadNameAtom, newThreadAtom, recentThreadsAtom, ThreadData } from '../../../atoms/threads';
-import { citationMapAtom } from '../../../atoms/citations';
+import { citationMapAtom } from '@beaver/agent-core/citations/atoms';
 import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '../../../atoms/externalReferences';
 import { getZoteroTargetContextSync } from '../../../../src/utils/zoteroUtils';
 import { getSelectedCollection } from '../../../../src/utils/zoteroSelection';

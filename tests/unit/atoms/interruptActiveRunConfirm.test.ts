@@ -55,7 +55,7 @@ vi.mock('../../../react/atoms/ui', async () => {
     };
 });
 
-vi.mock('../../../react/atoms/citations', async () => {
+vi.mock('@beaver/agent-core/citations/atoms', async () => {
     const { atom } = await import('jotai');
     return {
         citationsAtom: atom<unknown[]>([]),
@@ -69,6 +69,13 @@ vi.mock('../../../react/atoms/citations', async () => {
 vi.mock('../../../react/utils/pageLabels', () => ({
     preloadPageLabelsForCitations: vi.fn(async () => new Map()),
 }));
+
+// The Zotero-only citation onboarding tip; stubbing it keeps the popup/prefs
+// chain out of the thread atoms' import graph.
+vi.mock('../../../react/atoms/citationTip', async () => {
+    const { atom } = await import('jotai');
+    return { maybeShowCitationTipAtom: atom(null, () => {}) };
+});
 
 // Partial mock: the module only pulls in jotai, so keep every atom real and stub
 // just the reset. A hand-written export list would silently resolve any atom

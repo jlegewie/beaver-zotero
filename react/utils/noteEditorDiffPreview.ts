@@ -33,7 +33,7 @@ import {
     preloadNotePageLabels,
     type ExternalRefContext,
 } from '../../src/utils/noteCitationExpand';
-import type { PageLabelsByAttachmentId } from '../atoms/citations';
+import type { PageLabelsByAttachmentId } from '@beaver/agent-core/citations/atoms';
 import { getLatestNoteHtml } from '../../src/utils/noteEditorIO';
 import {
     stripDataCitationItems,

@@ -2,7 +2,7 @@ import type { ReactNode } from 'react';
 import type { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import type { CitationRef } from '@beaver/agent-core/citations/citationGrammar';
 import type { Citation, PartLocation } from '@beaver/agent-core/types/citations';
-import type { PageLabelsByAttachmentId } from '../atoms/citations';
+import type { PageLabelsByAttachmentId } from '@beaver/agent-core/citations/atoms';
 import type { ExternalReference } from '@beaver/agent-core/types/externalReferences';
 import type { ToolCallPart, AgentRun, AgentRunStatus } from '@beaver/agent-core/agents/types';
 import type { PendingApproval } from '../agents/agentActions';

@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import { useAtomValue } from 'jotai';
-import { citationByKeyAtom, pageLabelsByAttachmentIdAtom } from '../../atoms/citations';
+import { citationByKeyAtom, pageLabelsByAttachmentIdAtom } from '@beaver/agent-core/citations/atoms';
 import { externalReferenceItemMappingAtom } from '../../atoms/externalReferences';
 import {
     Citation,

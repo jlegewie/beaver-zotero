@@ -1,5 +1,5 @@
 import { store } from '../../store';
-import { pageLabelsByAttachmentIdAtom } from '../../atoms/citations';
+import { pageLabelsByAttachmentIdAtom } from '@beaver/agent-core/citations/atoms';
 import { externalReferenceMappingAtom } from '../../atoms/externalReferences';
 import {
     isExternalReferenceDetailsDialogVisibleAtom,

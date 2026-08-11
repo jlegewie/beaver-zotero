@@ -1,4 +1,4 @@
-import { type PageLabelsByAttachmentId } from '../../atoms/citations';
+import { type PageLabelsByAttachmentId } from '@beaver/agent-core/citations/atoms';
 import { getBestPDFAttachment } from '../../../src/utils/zoteroItemHelpers';
 import { getLibraryByIdOrName, getCollectionByIdOrName } from '../../../src/services/agentDataProvider/utils';
 import type { CitationRef } from '@beaver/agent-core/citations/citationGrammar';

@@ -7,7 +7,7 @@ import {
     getSymbolicLocation,
 } from '@beaver/agent-core/types/citations';
 import { externalReferenceMappingAtom } from '../../atoms/externalReferences';
-import { pageLabelsByAttachmentIdAtom, externalFileLocalPathsAtom } from '../../atoms/citations';
+import { pageLabelsByAttachmentIdAtom, externalFileLocalPathsAtom } from '@beaver/agent-core/citations/atoms';
 import { useCitationMarker } from '../../hooks/useCitationMarker';
 import { getHost } from '../../host';
 import { useCitationViewModel } from './useCitationViewModel';
