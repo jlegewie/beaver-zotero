@@ -86,6 +86,10 @@ import {
     handleTestNoteUndoHttpRequest,
 } from './httpHandlers/testNoteHandlers';
 import {
+    handleTestCollectionCreateHttpRequest,
+    handleTestCollectionDeleteHttpRequest,
+} from './httpHandlers/testCollectionHandlers';
+import {
     handleTestAnnotationCreateHttpRequest,
 } from './httpHandlers/testAnnotationHandlers';
 import {
@@ -257,6 +261,9 @@ const ENDPOINT_PATHS = [
     '/beaver/test/note-open-editor',
     '/beaver/test/note-close-editor',
     '/beaver/test/note-undo',
+    // Test-only endpoints (collection seeding/teardown)
+    '/beaver/test/collection-create',
+    '/beaver/test/collection-delete',
     // Test-only endpoints (headless PDF annotations)
     '/beaver/test/annotation-create',
     // Test-only endpoints (MuPDF worker singleton stats / lifecycle)
@@ -438,9 +445,11 @@ async function handleMetadataSearchHttpRequest(request: any) {
     };
     
     const response = await handleItemSearchByMetadataRequest(wsRequest);
-    
+
     return {
         items: response.items,
+        error: response.error ?? null,
+        error_code: response.error_code ?? null,
     };
 }
 
@@ -460,9 +469,11 @@ async function handleTopicSearchHttpRequest(request: any) {
     };
     
     const response = await handleItemSearchByTopicRequest(wsRequest);
-    
+
     return {
         items: response.items,
+        error: response.error ?? null,
+        error_code: response.error_code ?? null,
     };
 }
 
@@ -995,6 +1006,13 @@ function registerEndpoints(): boolean {
 
         Zotero.Server.Endpoints['/beaver/test/note-undo'] =
             createEndpoint(handleTestNoteUndoHttpRequest);
+
+        // Collection seeding/teardown (dev-only)
+        Zotero.Server.Endpoints['/beaver/test/collection-create'] =
+            createEndpoint(handleTestCollectionCreateHttpRequest);
+
+        Zotero.Server.Endpoints['/beaver/test/collection-delete'] =
+            createEndpoint(handleTestCollectionDeleteHttpRequest);
 
         // Headless PDF annotation primitives (dev-only)
         Zotero.Server.Endpoints['/beaver/test/annotation-create'] =
