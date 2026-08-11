@@ -10,7 +10,7 @@ import { extractThreadContent, ExtractThreadContentOptions } from '../../../util
 import { allRunsAtom, toolResultsMapAtom } from '@beaver/agent-core/run-state/atoms';
 import { currentThreadIdAtom, currentThreadNameAtom, newThreadAtom, recentThreadsAtom, ThreadData } from '../../../atoms/threads';
 import { citationMapAtom } from '@beaver/agent-core/citations/atoms';
-import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '../../../atoms/externalReferences';
+import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '@beaver/agent-core/citations/externalReferences';
 import { getZoteroTargetContextSync } from '../../../../src/utils/zoteroUtils';
 import { getSelectedCollection } from '../../../../src/utils/zoteroSelection';
 import { selectItem, selectItemById } from '../../../../src/utils/selectItem';

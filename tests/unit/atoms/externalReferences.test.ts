@@ -29,10 +29,8 @@ vi.mock("@beaver/agent-core/platform/logger", () => ({
   logger: vi.fn(),
 }));
 
-import {
-  checkExternalReferencesAtom,
-  externalReferenceItemMappingAtom,
-} from "../../../react/atoms/externalReferences";
+import { checkExternalReferencesAtom } from "../../../react/atoms/externalReferences";
+import { externalReferenceItemMappingAtom } from "@beaver/agent-core/citations/externalReferences";
 import type { ExternalReference } from "@beaver/agent-core/types/externalReferences";
 
 describe("checkExternalReferencesAtom", () => {

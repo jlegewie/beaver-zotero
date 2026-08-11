@@ -459,6 +459,26 @@ export interface ComponentsHost {
      * approve.
      */
     pendingActionsReview(props: { run: AgentRun }): ReactNode;
+    /**
+     * Render the icon that stands for a bibliographic item of the given type.
+     *
+     * `itemType` is the client-agnostic icon name produced by
+     * `itemTypeToIconName` (`@beaver/agent-core/types/citations`) — an item type
+     * such as `journalArticle` or `book`, or an attachment kind such as
+     * `attachmentPDF` — so the shared layer describes *what the item is* and the
+     * host decides what that looks like. Hosts with a full item-type icon set
+     * (Zotero) render the matching glyph; returning null falls back to the
+     * package's generic document icon.
+     */
+    itemTypeIcon(props: { itemType: string; className?: string }): ReactNode;
+    /**
+     * Render the icon for the reveal-in-library action, i.e. the glyph for
+     * {@link NavigationHost.revealInLibrary}. Split from the shared icon set
+     * because "show this item where the user keeps it" is a client's own
+     * affordance and each one has its own established glyph for it. Returning
+     * null falls back to the package's generic library icon.
+     */
+    revealInLibraryIcon(props: { className?: string }): ReactNode;
 }
 
 /**

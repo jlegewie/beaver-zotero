@@ -19,10 +19,12 @@ import { ZoteroIcon } from '../../../components/icons/ZoteroIcon';
 import { revealSource } from '../../../utils/sourceUtils';
 import {
     checkExternalReferenceAtom,
-    externalReferenceItemMappingAtom,
-    isCheckingReferenceObjectAtom,
     markExternalReferenceImportedAtom,
 } from '../../../atoms/externalReferences';
+import {
+    externalReferenceItemMappingAtom,
+    isCheckingReferenceObjectAtom,
+} from '@beaver/agent-core/citations/externalReferences';
 import { createZoteroItem, stampBeaverProvenanceExtra } from '../../../utils/addItemActions';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { ensureItemSynced } from '../../../../src/utils/sync';

@@ -20,7 +20,8 @@ import { ZoteroItemReference } from "@beaver/agent-core/types/zotero";
 import { logger } from "@beaver/agent-core/platform/logger";
 import { resolveItemReference } from "../../src/utils/libraryIdentity";
 import { safeAttachmentFilename } from "../../src/utils/attachmentFiles";
-import { truncateText, formatNumberRanges } from "../utils/stringUtils";
+import { truncateText } from "../utils/stringUtils";
+import { formatNumberRanges } from "@beaver/agent-ui/utils/pageRanges";
 import { EXTERNAL_LIBRARY_ID } from "../../src/services/externalFiles";
 import {
     ToolResultView,

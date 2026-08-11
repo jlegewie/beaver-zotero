@@ -18,11 +18,13 @@ import IconButton from '@beaver/agent-ui/primitives/IconButton';
 import Tooltip from '@beaver/agent-ui/primitives/Tooltip';
 import { ZOTERO_ICONS, ZoteroIcon } from '../../../components/icons/ZoteroIcon';
 import { revealSource } from '../../../utils/sourceUtils';
-import { 
-    checkExternalReferenceAtom, 
+import {
+    checkExternalReferenceAtom,
+} from '../../../atoms/externalReferences';
+import {
     getCachedReferenceForObjectAtom,
     isCheckingReferenceObjectAtom,
-} from '../../../atoms/externalReferences';
+} from '@beaver/agent-core/citations/externalReferences';
 import { ButtonVariant } from '@beaver/agent-ui/primitives/Button';
 import { CreateItemAgentAction } from '../../../agents/agentActions';
 import { ZoteroItemReference } from '@beaver/agent-core/types/zotero';

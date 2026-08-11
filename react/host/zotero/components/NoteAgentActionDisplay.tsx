@@ -38,7 +38,7 @@ import {
     ParsedNoteBlock,
 } from '../../../utils/agentActionUtils';
 import { citationMapAtom } from '@beaver/agent-core/citations/atoms';
-import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '../../../atoms/externalReferences';
+import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '@beaver/agent-core/citations/externalReferences';
 import { isLibraryTabAtom } from '../../../atoms/ui';
 import {
     annotationPanelStateAtom,

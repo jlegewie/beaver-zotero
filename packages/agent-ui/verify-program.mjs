@@ -244,6 +244,7 @@ const entryPaths = [
   "src/icons/index.tsx",
   "src/primitives/index.ts",
   "src/host/index.ts",
+  "src/chat/index.ts",
 ].map((p) => path.join(pkgDir, p));
 
 const listed = parsed.fileNames.map((f) => path.resolve(f));

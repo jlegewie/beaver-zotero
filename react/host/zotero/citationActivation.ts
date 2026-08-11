@@ -1,6 +1,6 @@
 import { store } from '../../store';
 import { pageLabelsByAttachmentIdAtom } from '@beaver/agent-core/citations/atoms';
-import { externalReferenceMappingAtom } from '../../atoms/externalReferences';
+import { externalReferenceMappingAtom } from '@beaver/agent-core/citations/externalReferences';
 import {
     isExternalReferenceDetailsDialogVisibleAtom,
     selectedExternalReferenceAtom,
@@ -25,7 +25,7 @@ import {
 } from '../../utils/citationNavigation';
 import { navigateToEpubCitation } from '../../utils/epubVisualizer/epubCitationNavigation';
 import { navigateToSnapshotCitation } from '../../utils/snapshotVisualizer/snapshotCitationNavigation';
-import { resolvePageLabelFromLabels } from '../../utils/pageLabels';
+import { resolvePageLabelFromLabels } from '@beaver/agent-ui/utils/pageLabels';
 import { getPageLabelsForItem } from './itemData';
 import { launchExternalFile, notifyReferenceUnavailable } from './sourceActions';
 import { getPref } from '../../../src/utils/prefs';

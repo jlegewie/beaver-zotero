@@ -14,7 +14,7 @@ import { getPref } from '../../src/utils/prefs';
 import { store } from '../store';
 import { currentReaderAttachmentKeyAtom } from '../atoms/messageComposition';
 import { citationMapAtom } from '@beaver/agent-core/citations/atoms';
-import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '../atoms/externalReferences';
+import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '@beaver/agent-core/citations/externalReferences';
 import { toolAnnotationApplyBatcher, filterAnnotationAgentActions } from './toolAnnotationApplyBatcher';
 import { saveStreamingNote } from './noteActions';
 import { currentThreadIdAtom } from '../atoms/threads';

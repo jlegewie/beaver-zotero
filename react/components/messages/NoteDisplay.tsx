@@ -1,7 +1,7 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { citationMapAtom } from '@beaver/agent-core/citations/atoms';
-import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '../../atoms/externalReferences';
+import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '@beaver/agent-core/citations/externalReferences';
 import IconButton from '@beaver/agent-ui/primitives/IconButton';
 import {
     ArrowDownIcon,

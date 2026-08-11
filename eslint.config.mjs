@@ -356,8 +356,9 @@ export default tseslint.config(
     // See docs-zotero/client-host-architecture.md.
     {
         files: [
-            "react/components/citations/**/*.{ts,tsx}",
-            "react/components/sources/CitedSourcesList.tsx",
+            // The citation stack (Citation, useCitationViewModel, CitedSourcesList)
+            // graduated into packages/agent-ui and is covered by that package's own
+            // block below, which is stricter.
             "react/components/agentRuns/toolResultViews/**/*.{ts,tsx}",
             // The tool-result dispatcher: renders only from hydrated view models and
             // a generic fallback (dev-mode check via getHost().config), no Zotero global.

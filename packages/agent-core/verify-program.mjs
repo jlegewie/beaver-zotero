@@ -181,6 +181,7 @@ const entryPaths = [
   "src/run-state/toolLabels.ts",
   "src/run-state/pendingQuestions.ts",
   "src/citations/atoms.ts",
+  "src/citations/externalReferences.ts",
 ].map((p) => path.join(pkgDir, p));
 
 const listed = parsed.fileNames.map((f) => path.resolve(f));

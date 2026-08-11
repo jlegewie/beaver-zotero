@@ -52,7 +52,7 @@ import { store } from '../store';
 import {
     externalReferenceMappingAtom,
     externalReferenceItemMappingAtom,
-} from '../atoms/externalReferences';
+} from '@beaver/agent-core/citations/externalReferences';
 
 /**
  * Snapshot the thread's external-reference state from the Jotai store so

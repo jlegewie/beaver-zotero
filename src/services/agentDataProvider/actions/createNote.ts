@@ -2,7 +2,7 @@ import { logger } from '@beaver/agent-core/platform/logger';
 import { store } from '../../../../react/store';
 import { searchableLibraryIdsAtom } from '../../../../react/atoms/profile';
 import { citationMapAtom } from '@beaver/agent-core/citations/atoms';
-import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '../../../../react/atoms/externalReferences';
+import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '@beaver/agent-core/citations/externalReferences';
 import { currentThreadIdAtom } from '../../../../react/atoms/threads';
 import { grantCreatedNoteEditsForRunAtom } from '../../../../react/atoms/runApprovalPolicy';
 import { activeRunAtom } from '@beaver/agent-core/run-state/atoms';

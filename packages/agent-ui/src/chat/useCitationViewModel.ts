@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import { useAtomValue } from 'jotai';
 import { citationByKeyAtom, pageLabelsByAttachmentIdAtom } from '@beaver/agent-core/citations/atoms';
-import { externalReferenceItemMappingAtom } from '../../atoms/externalReferences';
+import { externalReferenceItemMappingAtom } from '@beaver/agent-core/citations/externalReferences';
 import {
     Citation,
     getCitationPages,
@@ -16,11 +16,11 @@ import {
     LocatorKind,
     requestedCitationKey,
 } from '@beaver/agent-core/citations/citationGrammar';
-import { formatNumberRanges, formatPageRangesWithLabels } from '../../utils/stringUtils';
-import { resolvePageLabelFromLabels } from '../../utils/pageLabels';
-import { explicitPageLabel } from '../../utils/locationDisplay';
+import { formatNumberRanges, formatPageRangesWithLabels } from '../utils/pageRanges';
+import { resolvePageLabelFromLabels } from '../utils/pageLabels';
+import { explicitPageLabel } from '../utils/locationDisplay';
 import { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
-import { getHost } from '@beaver/agent-ui/host';
+import { getHost } from '../host';
 
 /**
  * Citation display state - explicit FSM for citation lifecycle.

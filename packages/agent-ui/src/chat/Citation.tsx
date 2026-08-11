@@ -1,26 +1,25 @@
 import React from 'react';
-import Tooltip from '@beaver/agent-ui/primitives/Tooltip';
+import Tooltip from '../primitives/Tooltip';
 import { useAtomValue } from 'jotai';
 import {
     getCitationBoundingBoxes,
     getContentKind,
     getSymbolicLocation,
 } from '@beaver/agent-core/types/citations';
-import { externalReferenceMappingAtom } from '../../atoms/externalReferences';
+import { externalReferenceMappingAtom } from '@beaver/agent-core/citations/externalReferences';
 import { pageLabelsByAttachmentIdAtom, externalFileLocalPathsAtom } from '@beaver/agent-core/citations/atoms';
-import { useCitationMarker } from '../../hooks/useCitationMarker';
-import { getHost } from '@beaver/agent-ui/host';
+import { useCitationMarker } from './useCitationMarker';
+import { getHost } from '../host';
 import { useCitationViewModel } from './useCitationViewModel';
-import { Icon, LibraryIcon, PdfIcon, FileIcon, GlobalSearchIcon, NoteIcon, HighlighterIcon, TextAlignLeftIcon, ExternalLinkIcon } from '../icons/icons';
+import { Icon, LibraryIcon, PdfIcon, FileIcon, GlobalSearchIcon, NoteIcon, HighlighterIcon, TextAlignLeftIcon, ExternalLinkIcon } from '../icons';
 const TOOLTIP_WIDTH = '250px';
 
 /**
  * Presentational citation component. Client-agnostic: it renders from the
  * citation view model and delegates every client-specific concern (navigation,
- * note export, display config) to the host registry (`react/host`). It must not
- * touch the `Zotero` global or import the Zotero host implementation — the lint
- * guard in `eslint.config.mjs` enforces this.
- * See docs-zotero/client-host-architecture.md.
+ * note export, display config) to the host registry (`../host`). It must not
+ * touch the `Zotero` global or import a client's host implementation — the lint
+ * guard in `eslint.config.mjs` and the `typecheck:ui` closure gate enforce this.
  *
  * Supported citation tag formats from LLM:
  *   <citation id="libraryID-itemKey"/>           - library item reference

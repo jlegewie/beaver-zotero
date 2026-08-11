@@ -101,6 +101,12 @@ vi.mock('../../../react/atoms/externalReferences', async () => {
     const { atom } = await import('jotai');
     return {
         checkExternalReferencesAtom: atom(null, () => {}),
+    };
+});
+
+vi.mock('@beaver/agent-core/citations/externalReferences', async () => {
+    const { atom } = await import('jotai');
+    return {
         clearExternalReferenceCacheAtom: atom(null, () => {}),
         addExternalReferencesToMappingAtom: atom(null, () => {}),
     };

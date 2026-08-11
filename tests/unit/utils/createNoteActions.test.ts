@@ -14,7 +14,7 @@ vi.mock('@beaver/agent-core/citations/atoms', () => ({
     citationMapAtom: Symbol('citationMapAtom'),
 }));
 
-vi.mock('../../../react/atoms/externalReferences', () => ({
+vi.mock('@beaver/agent-core/citations/externalReferences', () => ({
     externalReferenceItemMappingAtom: Symbol('externalReferenceItemMappingAtom'),
     externalReferenceMappingAtom: Symbol('externalReferenceMappingAtom'),
 }));

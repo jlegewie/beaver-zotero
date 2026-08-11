@@ -59,7 +59,7 @@ import { currentThreadIdAtom } from '../../../../react/atoms/threads';
 import {
     externalReferenceMappingAtom,
     externalReferenceItemMappingAtom,
-} from '../../../../react/atoms/externalReferences';
+} from '@beaver/agent-core/citations/externalReferences';
 import { renderToHTML, type RenderContextData } from '../../../../react/utils/citationRenderers';
 import { prepareCitationRenderContext } from '../../../../react/utils/citationRenderContext';
 import { addOrUpdateEditFooter, getBeaverFooterAppendPoint } from '../../../utils/noteEditFooter';

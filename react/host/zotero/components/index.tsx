@@ -8,6 +8,8 @@ import ActionButtons from './ActionButtons';
 import { AgentActionInStream } from './AgentActionInStream';
 import { AgentActionsReview } from './AgentActionsReview';
 import type { AgentRun } from '@beaver/agent-core/agents/types';
+import { CSSItemTypeIcon } from '../../../components/icons/zotero';
+import { ZOTERO_ICONS, ZoteroIcon } from '../../../components/icons/ZoteroIcon';
 
 /**
  * Zotero implementations of the host-provided, client-specific UI components.
@@ -26,5 +28,13 @@ export const zoteroComponents: ComponentsHost = {
     },
     pendingActionsReview(props: { run: AgentRun }) {
         return <AgentActionsReview run={props.run} />;
+    },
+    itemTypeIcon({ itemType, className }: { itemType: string; className?: string }) {
+        // Zotero's item-type glyphs are CSS icons keyed by the item type itself,
+        // which is exactly the name the shared layer passes in.
+        return <CSSItemTypeIcon className={className} itemType={itemType} />;
+    },
+    revealInLibraryIcon({ className }: { className?: string }) {
+        return <ZoteroIcon icon={ZOTERO_ICONS.SHOW_ITEM} size={10} className={className} />;
     },
 };
