@@ -5,6 +5,7 @@ import {
     getBatchRewriteOldContent,
     getEditNotePreviewKind,
 } from '../../../react/host/zotero/components/editNoteBatchPreviewData';
+import { deriveEditNoteRows } from '../../../react/components/agentRuns/editNoteShared';
 
 const rewriteRow = {
     editIndex: 4,
@@ -189,5 +190,92 @@ describe('buildBatchRowPreviewData — edit_note_blocks rows', () => {
             old_string: 'a',
             new_string: 'A',
         }]);
+    });
+});
+
+/**
+ * The blocks preview does not render the scoped payload directly — it re-derives
+ * its row from it (`ActionPreview` → `deriveEditNoteRows`). So the round trip is
+ * what has to hold, and these compose the two rather than asserting on the
+ * intermediate shape.
+ *
+ * The case that matters is an edit VALIDATION accepted and EXECUTE refused:
+ * execute re-resolves every edit, and citation identity or library exclusion can
+ * change while the action waits for approval. Such an edit carries no
+ * `skip_reason_code` — the only record that it never reached the note is
+ * `resultData.skipped`.
+ */
+describe('buildBatchRowPreviewData — execute-time skips survive the round trip', () => {
+    const accepted = { index: 0, op: 'replace', block: 2, operation: 'str_replace', old_string: 'a', new_string: 'A' };
+    // No skip_reason_code: validation was happy with this one.
+    const refusedByExecute = { index: 1, op: 'replace', block: 4, operation: 'str_replace', old_string: 'b', new_string: 'B' };
+
+    const base = {
+        actionType: 'edit_note_blocks',
+        actionData: { library_id: 1, zotero_key: 'AAAAA', edits: [accepted, refusedByExecute] },
+        resultData: {
+            applied: [{ index: 0, blocks: '2' }],
+            skipped: [{ index: 1, reason_code: 'expansion_failed', reason: 'Cited item does not exist.' }],
+        },
+    };
+
+    const rowFor = (editIndex: number) => ({
+        editIndex,
+        operation: 'str_replace',
+        oldString: editIndex === 0 ? 'a' : 'b',
+        newString: editIndex === 0 ? 'A' : 'B',
+    });
+
+    const deriveScopedRow = (previewBase: any, editIndex: number) => {
+        const scoped = buildBatchRowPreviewData(previewBase, rowFor(editIndex));
+        return deriveEditNoteRows({
+            actionType: scoped.actionType,
+            actionData: scoped.actionData,
+            resultData: scoped.resultData,
+        })[0];
+    };
+
+    it('renders the skipped row as skipped rather than as an applied diff', () => {
+        expect(deriveScopedRow(base, 1).skippedReason).toBe('Cited item does not exist.');
+    });
+
+    it('does not leak one row\'s skip onto its applied sibling', () => {
+        expect(deriveScopedRow(base, 0).skippedReason).toBeUndefined();
+    });
+
+    // The empty case is the subtle one: `deriveEditNoteRows` reads "skipped is an
+    // array" as "this action has executed", so forwarding only NON-empty skips
+    // would quietly send a fully-applied action back to the validation-time
+    // fallback. Defense in depth rather than a fix for a live symptom — execute
+    // carries validation's skips into `skipped`, so an action with `skipped: []`
+    // has no edit holding a `skip_reason_code` for the fallback to find. The
+    // point is that the scoped payload stays semantically identical to the
+    // unscoped one, which is what stops the next reader of this function from
+    // inheriting the bug above.
+    it('keeps an executed action legible as executed when nothing was skipped', () => {
+        const allApplied = {
+            ...base,
+            resultData: { applied: [{ index: 0, blocks: '2' }, { index: 1, blocks: '4' }], skipped: [] },
+        };
+        const scoped = buildBatchRowPreviewData(allApplied, rowFor(1));
+
+        expect(scoped.resultData?.skipped).toEqual([]);
+        expect(deriveScopedRow(allApplied, 1).skippedReason).toBeUndefined();
+    });
+
+    // Before execute there is no `skipped` array to consult, and validation's
+    // marker is the only signal there is — it must still reach the row.
+    it('falls back to the validation skip marker while the action is still pending', () => {
+        const pending = {
+            actionType: 'edit_note_blocks',
+            actionData: {
+                library_id: 1,
+                zotero_key: 'AAAAA',
+                edits: [accepted, { ...refusedByExecute, skip_reason_code: 'expansion_failed', skip_reason: 'Cited item does not exist.' }],
+            },
+        };
+
+        expect(buildBatchRowPreviewData(pending, rowFor(1)).resultData?.skipped).toBeUndefined();
+        expect(deriveScopedRow(pending, 1).skippedReason).toBe('Cited item does not exist.');
     });
 });

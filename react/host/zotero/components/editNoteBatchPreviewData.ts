@@ -71,6 +71,10 @@ function findSourceEdit(
  * `block`/`after`/`to`) and the skip reason, none of which
  * survive a rebuild, and copying them field by field would just be a second
  * place to forget one.
+ *
+ * The blocks preview RE-DERIVES its row from this scoped payload
+ * (`ActionPreview` → `deriveEditNoteRows`), so anything that derivation reads
+ * has to be scoped rather than dropped — `skipped` included, see below.
  */
 export function buildBatchRowPreviewData(
     basePreviewData: PreviewData | null,
@@ -96,6 +100,19 @@ export function buildBatchRowPreviewData(
     }
     if (baseResultData?.warnings !== undefined) {
         scopedResultData.warnings = baseResultData.warnings;
+    }
+    // `skipped` must survive the scoping with its ARRAY-NESS intact, the empty
+    // case included. `deriveEditNoteRows` reads "is this an array?" as "has this
+    // action executed?" and otherwise falls back to the validation-time
+    // `skip_reason_code` — which an edit that validation ACCEPTED and execute
+    // later refused does not carry. Dropping the field therefore told such a row
+    // that execute never ran, and it rendered a before/after diff for a change
+    // that never reached the note. Blocks-only, matching the consumer.
+    if (isBlocks && Array.isArray(baseResultData?.skipped)) {
+        const matchingSkip = row.editIndex != null
+            ? baseResultData.skipped.find((entry: any) => entry?.index === row.editIndex)
+            : undefined;
+        scopedResultData.skipped = matchingSkip ? [matchingSkip] : [];
     }
 
     const sourceEdit = isBlocks ? findSourceEdit(baseActionData, row.editIndex) : undefined;

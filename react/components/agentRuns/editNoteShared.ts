@@ -49,8 +49,14 @@ export interface EditNoteRowDescriptor {
      */
     label?: string;
     /**
-     * Present if and only if validation skipped this edit (blocks only). The
-     * row renders the reason instead of a diff — execute will not apply it.
+     * Present when this edit was skipped and never reached the note (blocks
+     * only). The row renders the reason instead of a diff.
+     *
+     * Sourced from EXECUTE's `skipped` once the action has produced a result,
+     * and from validation's `skip_reason_code` before that (including when
+     * execute failed outright and stored none) — execute re-resolves every
+     * edit, so it can refuse one validation accepted. See the `executedSkips`
+     * note in {@link deriveEditNoteRows}.
      */
     skippedReason?: string;
     /**
