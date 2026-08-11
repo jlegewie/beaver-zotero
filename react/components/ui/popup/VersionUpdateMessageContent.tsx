@@ -1,6 +1,6 @@
 import React from 'react';
 import { TickIcon, CancelIcon } from '../../icons/icons';
-import Icon from '../../icons/Icon';
+import Icon from '@beaver/agent-ui/icons/Icon';
 import { PopupMessage, PopupMessageFeature } from '../../../types/popupMessage';
 import Button from "../Button";
 import IconButton from '../IconButton';

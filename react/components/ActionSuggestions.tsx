@@ -7,7 +7,7 @@ import { useActionRunner } from "../hooks/useActionRunner";
 import { getActiveTarget } from "../utils/actionVisibility";
 import { searchableLibraryIdsAtom } from "../atoms/profile";
 import { CSSIcon, CSSItemTypeIcon } from "./icons/zotero";
-import Icon from "./icons/Icon";
+import Icon from "@beaver/agent-ui/icons/Icon";
 import { AlertIcon, SettingsIcon, ZapIcon } from './icons/icons';
 import { openPreferencesWindow } from "../../src/ui/openPreferencesWindow";
 import IconButton from "./ui/IconButton";

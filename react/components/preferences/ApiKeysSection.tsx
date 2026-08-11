@@ -3,7 +3,7 @@ import Button from "../ui/Button";
 import {SettingsGroup, SettingsRow, SectionLabel, DocLink, SectionHeader, SectionDescription} from "./components/SettingsElements";
 import ApiKeyInput from "./ApiKeyInput";
 import CustomProviderCard from "./CustomProviderCard";
-import PlusSignIcon from "../icons/PlusSignIcon";
+import PlusSignIcon from "@beaver/agent-ui/icons/PlusSignIcon";
 import { getPref, setPref } from "../../../src/utils/prefs";
 import { handlePrefSave } from "./utils";
 import { activePreferencePageTabAtom, requestPlusToolsAtom } from "../../atoms/ui";

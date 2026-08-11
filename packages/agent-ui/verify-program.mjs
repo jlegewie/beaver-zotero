@@ -230,11 +230,12 @@ if (
 // widen the program.
 //
 // Each root is a module a client imports directly and nothing inside the
-// package imports. Right now that is the one canary icon; as components move
-// in, a component that another package file already imports must NOT be added
-// here — listing it as a root would only cost the orphan signal that catches it
-// dropping out of the closure.
-const entryPaths = ["src/icons/Spinner.tsx"].map((p) => path.join(pkgDir, p));
+// package imports. The icon barrel is one such root: it re-exports every icon,
+// so all of them are reachable from it. The individual icons are deliberately
+// NOT roots — a client may import one by its own subpath, but the barrel already
+// imports it, and listing it here would only cost the orphan signal that catches
+// it dropping out of the closure.
+const entryPaths = ["src/icons/index.tsx"].map((p) => path.join(pkgDir, p));
 
 const listed = parsed.fileNames.map((f) => path.resolve(f));
 const listedSet = new Set(listed);

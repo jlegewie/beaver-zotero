@@ -1,7 +1,7 @@
 import React, { useState, useCallback, useEffect, useMemo } from "react";
 import { useAtom, useAtomValue } from 'jotai';
 import { Icon, TickIcon, ArrowDownIcon, UploadCircleIcon, ImportIcon } from '../icons/icons';
-import PlusSignIcon from '../icons/PlusSignIcon';
+import PlusSignIcon from '@beaver/agent-ui/icons/PlusSignIcon';
 import Button from "../ui/Button";
 import { useSetAtom } from 'jotai';
 import { Action, ActionCategory, ActionCategoryFilter, ActionTargetType, generateActionId, TARGET_TYPE_LABELS, CATEGORY_LABELS } from "@beaver/agent-core/types/actions";

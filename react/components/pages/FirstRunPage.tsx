@@ -19,7 +19,7 @@ import SuggestionCardButton from './firstRun/SuggestionCardButton';
 import SuggestionCardSkeleton from './firstRun/SuggestionCardSkeleton';
 import EmptyLibraryDiscovery from './firstRun/EmptyLibraryDiscovery';
 import IconButton from '../ui/IconButton';
-import RepeatIcon from '../icons/RepeatIcon';
+import RepeatIcon from '@beaver/agent-ui/icons/RepeatIcon';
 import { OnboardingHeader, OnboardingFooter } from './onboarding';
 import { ChargingPermissions } from '@beaver/agent-core/protocol/agentProtocol';
 import { logger } from '@beaver/agent-core/platform/logger';

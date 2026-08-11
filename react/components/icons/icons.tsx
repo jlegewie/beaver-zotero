@@ -1,100 +1,14 @@
-import DatabaseIcon from './DatabaseIcon';
+// The Zotero client's icon barrel: the shared icon set merged with the icons
+// that only exist in a Zotero window. The icon components themselves live in
+// @beaver/agent-ui; this file stays because merging the two sets is a client
+// concern, and because ~100 files across the plugin import their icons from
+// here.
+export * from '@beaver/agent-ui/icons';
 
-export { default as Icon } from './Icon';
-export { default as CancelIcon } from './CancelIcon';
+// Zotero's own CSS icons: `<span class="icon icon-css icon-...">` elements
+// styled by Zotero's stylesheets, which no other client has.
 export { CSSItemTypeIcon, CSSIcon } from './zotero';
-export { default as Spinner } from '@beaver/agent-ui/icons/Spinner';
-export { default as ClockIcon } from './ClockIcon';
-export { default as FolderAddIcon } from './FolderAddIcon';
-export { default as NoteIcon } from './NoteIcon';
-export { default as FolderDetailIcon } from './FolderDetailIcon';
-export { default as FileDiffIcon } from './FileDiffIcon';
-export { default as UndoIcon } from './UndoIcon';
-export { default as PlusSignIcon } from './PlusSignIcon';
-export { default as SpeedIcon } from './SpeedIcon';
-export { default as StarIcon } from './StarIcon';
-export { default as StarSolidIcon } from './StarSolidIcon';
-export { default as IdeaIcon } from './IdeaIcon';
-export { default as SettingsIcon } from './SettingsIcon';
-export { default as ToolsIcon } from './ToolsIcon';
-export { default as PictureInPictureIcon } from './PictureInPictureIcon';
-export { default as TaskDoneIcon } from './TaskDoneIcon';
-export { default as TaskDailyIcon } from './TaskDailyIcon';
-export { default as SettingsSolidIcon } from './SettingsSolidIcon';
-export { default as LinkForwardIcon } from './LinkForwardIcon';
-export { default as LinkBackwardIcon } from './LinkBackwardIcon';
-export { default as PropertyEditIcon } from './propertyEditIcon';
-export { default as PdfIcon } from './PdfIcon';
-export { default as TagIcon } from './TagIcon';
-export { default as HighlighterIcon } from './HighlighterIcon';
-export { default as PinIcon } from './PinIcon';
-export { default as PinOffIcon } from './PinOffIcon';
-export { default as DollarCircleIcon } from './DollarCircleIcon';
-export { default as DocumentValidationIcon } from './DocumentValidationIcon';
-export { default as DownloadIcon } from './DownloadIcon';
-export { default as AttachmentIcon } from './AttachmentIcon';
-export { default as ArrowUpIcon } from './ArrowUpIcon';
-export { default as ArrowDownIcon } from './ArrowDownIcon';
-export { default as ArrowLeftIcon } from './ArrowLeftIcon';
-export { default as MoreHorizontalIcon } from './MoreHorizontalIcon';
-export { default as ArrowRightIcon } from './ArrowRightIcon';
-export { default as RepeatIcon } from './RepeatIcon';
-export { default as GlobalSearchIcon } from './GlobalSearchIcon';
-export { default as CopyIcon } from './CopyIcon';
-export { default as TickIcon } from './TickIcon';
-export { default as ShareIcon } from './ShareIcon';
-export { default as Share05Icon } from './Share05Icon';
-export { default as AlertIcon } from './AlertIcon';
-export { default as StopIcon } from './StopIcon';
-export { default as QuillWriteIcon } from './QuillWriteIcon';
-export { default as StopStrokeIcon } from './StopStrokeIcon';
+
+// Status icons for the database-sync surface, which is Zotero-only.
 export { default as DatabaseStatusIcon } from './DatabaseStatusIcon';
-export { default as UserIcon } from './UserIcon';
-export { default as AuthorGroupIcon } from './AuthorGroupIcon';
-export { default as AuthorIcon } from './AuthorIcon';
-export { default as BookmarkIcon } from './BookmarkIcon';
-export { default as CheckmarkCircleIcon } from './CheckmarkCircleIcon';
-export { default as CheckmarkCircleSolidIcon } from './CheckmarkCircleSolidIcon';
-export { default as CancelCircleIcon } from './CancelCircleIcon';
-export { default as LogoutIcon } from './LogoutIcon';
-export { default as LibraryIcon } from './LibraryIcon';
-export { default as UploadCircleIcon } from './UploadCircleIcon';
-export { default as ChattingIcon } from './ChattingIcon';
-export { default as SyncIcon } from './SyncIcon';
-export { default as InformationCircleIcon } from './InformationCircleIcon';
-export { default as LockIcon } from './LockIcon';
-export { default as FileViewIcon } from './FileViewIcon';
-export { default as LinkIcon } from './LinkIcon';
-export { default as KeyIcon } from './KeyIcon';
-export { default as BrainIcon } from './BrainIcon';
-export { default as TextAlignLeftIcon } from './TextAlignLeftIcon';
-export { default as SearchIcon } from './SearchIcon';
-export { default as ArrowUpRightIcon } from './ArrowUpRightIcon';
-export { default as ZapIcon } from './ZapIcon';
-export { default as AiMagicIcon } from './AiMagicIcon';
-export { default as ViewIcon } from './ViewIcon';
-export { default as OneIcon } from './OneIcon';
-export { default as TwoIcon } from './TwoIcon';
-export { default as ThreeIcon } from './ThreeIcon';
-export { default as EditIcon } from './EditIcon';
-export { default as FourIcon } from './FourIcon';
-export { default as AlertCircleIcon } from './AlertCircleIcon';
-export { default as CircleIcon } from './CircleIcon';
 export { default as CircleStatusIcon } from './CircleStatusIcon';
-export { default as DeleteIcon } from './DeleteIcon';
-export { default as PuzzleIcon } from './PuzzleIcon';
-export { default as DatabaseIcon } from './DatabaseIcon';
-export { default as BugIcon } from './BugIcon';
-export { default as PlayIcon } from './PlayIcon';
-export { default as ChevronIcon } from './ChevronIcon';
-export { default as ChartIcon } from './ChartIcon';
-export { default as RockIcon } from './RockIcon';
-export { default as TissuePaperIcon } from './TissuePaperIcon';
-export { default as ScissorIcon } from './ScissorIcon';
-export { default as FileLinkIcon } from './FileLinkIcon';
-export { default as ExternalLinkIcon } from './ExternalLinkIcon';
-export { default as FileIcon } from './FileIcon';
-export { default as LayersIcon } from './LayersIcon';
-export { default as BookSearchIcon } from './BookSearchIcon';
-export { default as FilterIcon } from './FilterIcon';
-export { default as ImportIcon } from './ImportIcon';
