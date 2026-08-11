@@ -23,6 +23,14 @@ archive
 .vscode/
 /scripts/*
 !/scripts/pack-xpi.mjs
+!/scripts/worktree/
+!/scripts/worktree/**
+
+# Worktree local artifacts (also added to .git/info/exclude by setup-worktree)
+.worktree-zotero.log
+.worktree-start.log
+.worktree-meta.json
+.mcp.json
 
 # compiled files
 reactBundle.js
