@@ -39,6 +39,8 @@ interface ReviewActionRowProps {
     row: ReviewRow;
     /** True while any card-level bulk operation runs — row buttons are disabled. */
     isBulkRunning?: boolean;
+    /** Retains the row in the current card snapshot before its status changes. */
+    onResolved?: (actionIds: string[]) => void;
     /** True when rendered inside the aggregate card; the parent draws the border/background. */
     inGroup?: boolean;
 }
@@ -55,6 +57,7 @@ export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
     runId,
     row,
     isBulkRunning = false,
+    onResolved,
     inGroup = false,
 }) => {
     const [isProcessing, setIsProcessing] = useState(false);
@@ -109,27 +112,35 @@ export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
         setIsUndoError(false);
         setIsProcessing(true);
         setClickedButton('approve');
+        onResolved?.(row.actions.map((action) => action.id));
         try {
             await applyAgentActions({ actions: row.actions, runId });
         } finally {
             setIsProcessing(false);
             setClickedButton(null);
         }
-    }, [isDisabled, row, runId, applyAgentActions]);
+    }, [isDisabled, row, runId, applyAgentActions, onResolved]);
 
     const handleReject = useCallback(() => {
         if (isDisabled) return;
 
+        // Retained rows may contain actions already applied or failed. Reject
+        // only the actions that still await a decision.
+        const pendingActions = row.actions.filter((action) => action.status === 'pending');
+        if (pendingActions.length === 0) return;
+
         setClickedButton('reject');
-        rejectAgentActions({ actions: row.actions });
+        onResolved?.(pendingActions.map((action) => action.id));
+        rejectAgentActions({ actions: pendingActions });
         setTimeout(() => setClickedButton(null), 100);
-    }, [isDisabled, row, rejectAgentActions]);
+    }, [isDisabled, row, rejectAgentActions, onResolved]);
 
     const handleUndo = useCallback(async () => {
         if (isDisabled) return;
 
         setIsProcessing(true);
         setClickedButton('undo');
+        onResolved?.(row.actions.map((action) => action.id));
         try {
             const result = await undoAgentActions({ actions: row.actions });
             if (result.fatalError) setIsUndoError(true);
@@ -137,7 +148,7 @@ export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
             setIsProcessing(false);
             setClickedButton(null);
         }
-    }, [isDisabled, row, undoAgentActions]);
+    }, [isDisabled, row, undoAgentActions, onResolved]);
 
     const handleRetry = useCallback(async () => {
         if (isUndoRetry) {

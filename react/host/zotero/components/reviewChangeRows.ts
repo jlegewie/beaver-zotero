@@ -11,11 +11,15 @@ export interface ReviewRow {
     actions: AgentAction[];
     /** False when the card's bulk apply must skip this row. */
     bulkApplicable: boolean;
+    /** True when nothing in the row is pending any more. */
+    resolved: boolean;
 }
 
 export interface BuildReviewRowsOptions {
     /** Action ids with a live approval (pendingApprovalsAtom) — those belong to the in-stream card. */
     liveApprovalActionIds?: ReadonlySet<string>;
+    /** Actions resolved from this card that stay in its current session snapshot. */
+    retainedActionIds?: ReadonlySet<string>;
 }
 
 /** These gate a run rather than propose a change, so they are never review material. */
@@ -58,7 +62,7 @@ export function buildReviewRows(
     actions: AgentAction[],
     options: BuildReviewRowsOptions = {},
 ): ReviewRow[] {
-    const { liveApprovalActionIds } = options;
+    const { liveApprovalActionIds, retainedActionIds } = options;
     const rowsByToolcall = new Map<string, ReviewRow>();
 
     // A live approval claims its whole tool call, not just the action it names:
@@ -82,9 +86,10 @@ export function buildReviewRows(
         if (!toolcallId || toolcallId === CITATIONS_TOOLCALL_ID) continue;
         if (approvedToolcallIds.has(toolcallId)) continue;
 
-        // Only `pending` is review material. Applied, rejected, undone, and
-        // failed actions disappear from this card as soon as their status changes.
-        if (action.status !== 'pending') continue;
+        // Start with pending actions. Once the user resolves actions from this
+        // card, retain them so the rows do not shift while other changes
+        // are still pending and the resolved status remains visible.
+        if (action.status !== 'pending' && !retainedActionIds?.has(action.id)) continue;
 
         const row = rowsByToolcall.get(toolcallId);
         if (row) {
@@ -95,6 +100,7 @@ export function buildReviewRows(
                 actionType: action.action_type,
                 actions: [action],
                 bulkApplicable: true,
+                resolved: true,
             });
         }
     }
@@ -102,8 +108,14 @@ export function buildReviewRows(
     const rows = Array.from(rowsByToolcall.values());
     for (const row of rows) {
         row.bulkApplicable = row.actions.every(isBulkApplicable);
+        row.resolved = !row.actions.some((action) => action.status === 'pending');
     }
     return rows;
+}
+
+/** Whether the current card snapshot still has work awaiting a decision. */
+export function hasPendingReviewRows(rows: ReviewRow[]): boolean {
+    return rows.some((row) => !row.resolved);
 }
 
 /**
@@ -112,6 +124,7 @@ export function buildReviewRows(
  */
 export function getReviewHeaderCopy(rows: ReviewRow[]): {
     text: string;
+    tone: 'review' | 'resolved';
 } {
     const counted = new Map<string, AgentAction>();
     for (const row of rows) {
@@ -121,6 +134,11 @@ export function getReviewHeaderCopy(rows: ReviewRow[]): {
     const actions = Array.from(counted.values());
     const noun = actions.length === 1 ? 'change' : 'changes';
 
-    const verb = actions.length === 1 ? 'needs' : 'need';
-    return { text: `${actions.length} ${noun} ${verb} your review` };
+    if (actions.some((action) => action.status === 'pending')) {
+        const verb = actions.length === 1 ? 'needs' : 'need';
+        return { text: `${actions.length} ${noun} ${verb} your review`, tone: 'review' };
+    }
+
+    const allApplied = actions.every((action) => action.status === 'applied');
+    return { text: `${actions.length} ${noun} ${allApplied ? 'applied' : 'reviewed'}`, tone: 'resolved' };
 }

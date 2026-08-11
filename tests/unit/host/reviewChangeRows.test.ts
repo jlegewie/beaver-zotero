@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
     buildReviewRows,
     getReviewHeaderCopy,
+    hasPendingReviewRows,
     isBulkApplicable,
 } from '../../../react/host/zotero/components/reviewChangeRows';
 import type { AgentAction } from '@beaver/agent-core/agents/agentActionTypes';
@@ -104,6 +105,21 @@ describe('buildReviewRows exclusions', () => {
         expect(rows).toHaveLength(1);
         expect(rows[0].actions).toEqual([pending]);
     });
+
+    it('retains exactly the resolved actions from the current card snapshot', () => {
+        const applied = action({ toolcall_id: 'call-1', status: 'applied' });
+        const oldError = action({ toolcall_id: 'call-1', status: 'error' });
+        const pending = action({ toolcall_id: 'call-2' });
+        const rows = buildReviewRows([applied, oldError, pending], {
+            retainedActionIds: new Set([applied.id]),
+        });
+
+        expect(rows.map((row) => row.toolcallId)).toEqual(['call-1', 'call-2']);
+        expect(rows[0].actions).toEqual([applied]);
+        expect(rows[0].resolved).toBe(true);
+        expect(rows[1].actions).toEqual([pending]);
+        expect(rows[1].resolved).toBe(false);
+    });
 });
 
 describe('buildReviewRows grouping', () => {
@@ -131,6 +147,24 @@ describe('buildReviewRows grouping', () => {
 
         expect(rows.map((row) => row.toolcallId)).toEqual(['call-b', 'call-a']);
         expect(rows[0].actions.map((item) => item.id)).toEqual(['a1', 'a3']);
+    });
+});
+
+describe('hasPendingReviewRows', () => {
+    it('keeps the snapshot while any row is pending and drops it once all resolve', () => {
+        const applied = action({ toolcall_id: 'call-1', status: 'applied' });
+        const pending = action({ toolcall_id: 'call-2' });
+        const retained = new Set([applied.id]);
+
+        const activeRows = buildReviewRows([applied, pending], { retainedActionIds: retained });
+        expect(hasPendingReviewRows(activeRows)).toBe(true);
+
+        const settledRows = buildReviewRows([
+            applied,
+            { ...pending, status: 'rejected' },
+        ], { retainedActionIds: new Set([applied.id, pending.id]) });
+        expect(settledRows).toHaveLength(2);
+        expect(hasPendingReviewRows(settledRows)).toBe(false);
     });
 });
 
@@ -183,12 +217,14 @@ describe('getReviewHeaderCopy', () => {
         expect(rows).toHaveLength(1);
         expect(getReviewHeaderCopy(rows)).toEqual({
             text: '5 changes need your review',
+            tone: 'review',
         });
     });
 
     it('uses the singular for one pending action', () => {
         expect(getReviewHeaderCopy(buildReviewRows([action()]))).toEqual({
             text: '1 change needs your review',
+            tone: 'review',
         });
     });
 
@@ -200,6 +236,20 @@ describe('getReviewHeaderCopy', () => {
 
         expect(getReviewHeaderCopy(rows)).toEqual({
             text: '1 change needs your review',
+            tone: 'review',
+        });
+    });
+
+    it('counts retained resolved actions while another action is pending', () => {
+        const applied = action({ toolcall_id: 'call-1', status: 'applied' });
+        const pending = action({ toolcall_id: 'call-2' });
+        const rows = buildReviewRows([applied, pending], {
+            retainedActionIds: new Set([applied.id]),
+        });
+
+        expect(getReviewHeaderCopy(rows)).toEqual({
+            text: '2 changes need your review',
+            tone: 'review',
         });
     });
 

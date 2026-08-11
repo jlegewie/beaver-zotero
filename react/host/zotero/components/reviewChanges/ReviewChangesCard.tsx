@@ -6,6 +6,7 @@ import { getAgentActionsByToolcallAtom } from '../../../../agents/agentActions';
 import {
     annotationPanelStateAtom,
     defaultAnnotationPanelState,
+    retainReviewActionsAtom,
     toggleAnnotationPanelVisibilityAtom,
 } from '../../../../atoms/messageUIState';
 import {
@@ -18,7 +19,9 @@ import { ReviewActionRow } from './ReviewActionRow';
 import {
     ArrowDownIcon,
     ArrowRightIcon,
+    CancelCircleIcon,
     CancelIcon,
+    CheckmarkCircleIcon,
     ClockIcon,
     Icon,
     Spinner,
@@ -48,6 +51,7 @@ export const ReviewChangesCard: React.FC<ReviewChangesCardProps> = ({ run, rows 
 
     const applyAgentActions = useSetAtom(applyAgentActionsAtom);
     const rejectAgentActions = useSetAtom(rejectAgentActionsAtom);
+    const retainActions = useSetAtom(retainReviewActionsAtom);
 
     // The jotai getter this closure carries reads the store when it is called, so
     // the bulk loop sees each tool call's status as of its turn, not of the click.
@@ -68,6 +72,11 @@ export const ReviewChangesCard: React.FC<ReviewChangesCardProps> = ({ run, rows 
     const inFlightActionIds = useAtomValue(inFlightAgentActionIdsAtom);
     const hasWritingRow = rows.some((row) => row.actions.some((action) => inFlightActionIds.has(action.id)));
 
+    const handleRowResolved = useCallback(
+        (actionIds: string[]) => retainActions({ runId: run.id, actionIds }),
+        [retainActions, run.id],
+    );
+
     const handleBulkApply = useCallback(async () => {
         if (isBulkRunning || hasWritingRow) return;
         // Snapshot at click time. Non-bulk-applicable rows (annotation deletions,
@@ -75,7 +84,7 @@ export const ReviewChangesCard: React.FC<ReviewChangesCardProps> = ({ run, rows 
         // runApprovalPolicy so that approving annotation or note edits never
         // carries them along — the bulk ✓ must not re-open that. They stay in the
         // card with their own ✓.
-        const rowsToApply = rows.filter((row) => row.bulkApplicable);
+        const rowsToApply = rows.filter((row) => row.bulkApplicable && !row.resolved);
         if (rowsToApply.length === 0) return;
 
         setIsBulkRunning(true);
@@ -94,6 +103,7 @@ export const ReviewChangesCard: React.FC<ReviewChangesCardProps> = ({ run, rows 
                 );
                 if (actions.length === 0) continue;
 
+                retainActions({ runId: run.id, actionIds: actions.map((action) => action.id) });
                 try {
                     await applyAgentActions({ actions, runId: run.id });
                 } catch (error) {
@@ -105,19 +115,22 @@ export const ReviewChangesCard: React.FC<ReviewChangesCardProps> = ({ run, rows 
         } finally {
             setIsBulkRunning(false);
         }
-    }, [applyAgentActions, getActionsByToolcall, hasWritingRow, isBulkRunning, rows, run.id]);
+    }, [applyAgentActions, getActionsByToolcall, hasWritingRow, isBulkRunning, retainActions, rows, run.id]);
 
     const handleBulkReject = useCallback(() => {
         if (isBulkRunning || hasWritingRow) return;
         // A rejection is a local refusal with no Zotero write, so it covers every
         // pending row — including the ones bulk apply has to skip.
-        const rowsToReject = rows;
+        const rowsToReject = rows.filter((row) => !row.resolved);
         if (rowsToReject.length === 0) return;
 
         for (const row of rowsToReject) {
-            rejectAgentActions({ actions: row.actions });
+            const actions = row.actions.filter((action) => action.status === 'pending');
+            if (actions.length === 0) continue;
+            retainActions({ runId: run.id, actionIds: actions.map((action) => action.id) });
+            rejectAgentActions({ actions });
         }
-    }, [hasWritingRow, isBulkRunning, rejectAgentActions, rows]);
+    }, [hasWritingRow, isBulkRunning, rejectAgentActions, retainActions, rows, run.id]);
 
     // Expanding stays available during a bulk apply: the per-row spinners are the
     // only view of how far a long apply has got.
@@ -135,12 +148,15 @@ export const ReviewChangesCard: React.FC<ReviewChangesCardProps> = ({ run, rows 
                 runId={run.id}
                 row={rows[0]}
                 isBulkRunning={isBulkRunning}
+                onResolved={handleRowResolved}
                 inGroup={false}
             />
         );
     }
 
-    const { text: headerText } = getReviewHeaderCopy(rows);
+    const { text: headerText, tone } = getReviewHeaderCopy(rows);
+    const hasPendingRows = rows.some((row) => !row.resolved);
+    const allApplied = rows.every((row) => row.actions.every((action) => action.status === 'applied'));
     // A row applying on its own must finish before a bulk run starts, or the same
     // tool call would be written to Zotero twice. Disabled rather than unmounted:
     // the buttons keep their place, and a write that never reports back leaves the
@@ -148,15 +164,19 @@ export const ReviewChangesCard: React.FC<ReviewChangesCardProps> = ({ run, rows 
     const bulkDisabled = isBulkRunning || hasWritingRow;
     // Nothing left for the header ✓ once only non-bulk-applicable rows are pending;
     // showing it then would be a dead click.
-    const showBulkApply = rows.some((row) => row.bulkApplicable);
+    const showBulkApply = rows.some((row) => !row.resolved && row.bulkApplicable);
     const visibleRows = showAllRows ? rows : rows.slice(0, MAX_VISIBLE_ROWS);
 
     const headerIcon = (() => {
         if (isBulkRunning || hasWritingRow) return Spinner;
         if (isHovered && isExpanded) return ArrowDownIcon;
         if (isHovered && !isExpanded) return ArrowRightIcon;
-        return ClockIcon;
+        if (tone === 'review') return ClockIcon;
+        return allApplied ? CheckmarkCircleIcon : CancelCircleIcon;
     })();
+    const headerIconClassName = !isBulkRunning && !hasWritingRow && !isHovered && tone === 'resolved'
+        ? `${allApplied ? 'font-color-green' : 'font-color-red'} scale-11`
+        : undefined;
 
     return (
         <div className="border-popup rounded-md display-flex flex-col min-w-0">
@@ -174,10 +194,10 @@ export const ReviewChangesCard: React.FC<ReviewChangesCardProps> = ({ run, rows 
                 >
                     <div className="display-flex flex-row ml-3 gap-2">
                         <div className="flex-1 display-flex mt-010 font-color-primary">
-                            <Icon icon={headerIcon} />
+                            <Icon icon={headerIcon} className={headerIconClassName} />
                         </div>
                         <div className="display-flex">
-                            <span className="font-color-primary font-medium">
+                            <span className={tone === 'resolved' ? 'font-color-secondary' : 'font-color-primary font-medium'}>
                                 {headerText}
                             </span>
                         </div>
@@ -186,7 +206,7 @@ export const ReviewChangesCard: React.FC<ReviewChangesCardProps> = ({ run, rows 
 
                 <div className="flex-1" />
 
-                <div className="display-flex flex-row items-center gap-25 mr-3 mt-015">
+                {hasPendingRows && <div className="display-flex flex-row items-center gap-25 mr-3 mt-015">
                     <Tooltip content="Reject all" showArrow singleLine>
                         <IconButton
                             icon={CancelIcon}
@@ -207,7 +227,7 @@ export const ReviewChangesCard: React.FC<ReviewChangesCardProps> = ({ run, rows 
                             />
                         </Tooltip>
                     )}
-                </div>
+                </div>}
             </div>
 
             {isExpanded && (
@@ -221,6 +241,7 @@ export const ReviewChangesCard: React.FC<ReviewChangesCardProps> = ({ run, rows 
                                 runId={run.id}
                                 row={row}
                                 isBulkRunning={isBulkRunning}
+                                onResolved={handleRowResolved}
                                 inGroup
                             />
                         </div>
