@@ -20,11 +20,12 @@ import {
 import { semanticSearchService, SearchResult } from '../semanticSearchService';
 import { BeaverDB } from '../database';
 import {
-    getCollectionByIdOrName,
+    collectionsFilterError,
     getCollectionScopeItemIds,
     getSearchableLibraryIds,
     prepareAttachmentInfoBatchData,
     processAttachmentInfoBatch,
+    resolveCollectionsFilter,
     resolveLibrariesFilterToSearchableIds,
 } from '../agentDataProvider/utils';
 import { TimingAccumulator } from '../../utils/timing';
@@ -103,39 +104,40 @@ export async function handleItemSearchByTopicRequest(
         };
     }
 
-    // Resolve collections_filter to collection objects. Every resolution is
-    // re-checked against libraryIds: a key-like filter resolves through a
-    // cross-library fallback that can land outside the searchable set, and the
-    // scope is read from Zotero before the embedding query narrows by library.
-    const collectionsById = new Map<number, Zotero.Collection>();
-    const addCollectionInScope = (collection: Zotero.Collection | null | undefined) => {
-        if (collection && libraryIds.includes(collection.libraryID)) {
-            collectionsById.set(collection.id, collection);
-        }
-    };
-    if (request.collections_filter && request.collections_filter.length > 0) {
-        for (const collectionFilter of request.collections_filter) {
-            if (typeof collectionFilter === 'number') {
-                addCollectionInScope(Zotero.Collections.get(collectionFilter));
-                continue;
-            }
-
-            // String filter: search within each library
-            for (const libId of libraryIds) {
-                addCollectionInScope(getCollectionByIdOrName(collectionFilter, libId)?.collection);
-            }
-        }
-    }
-
-    // Resolve the collection scope to an item allowlist before ranking, so the
-    // candidate pool isn't spent on items outside the requested collections.
-    // An empty allowlist returns empty rather than widening scope: a filter that
-    // resolves to nothing must narrow, not silently search the whole library.
+    // Resolve collections_filter, then turn the scope into an item allowlist
+    // before ranking, so the candidate pool isn't spent on items outside the
+    // requested collections. Both are read from Zotero before the embedding
+    // query narrows by library.
     let collectionItemIds: number[] | undefined;
     if (request.collections_filter && request.collections_filter.length > 0) {
-        collectionItemIds = await getCollectionScopeItemIds(Array.from(collectionsById.values()));
+        const resolution = resolveCollectionsFilter(request.collections_filter, libraryIds);
+
+        // A collections_filter that resolves to nothing must narrow the search to
+        // no results, never widen it to the whole library — and it is reported as
+        // an error rather than an empty result so a bad collection reference is
+        // not mistaken for a collection that holds no matching items.
+        const filterError = collectionsFilterError(resolution);
+        if (filterError) {
+            logger(`handleItemSearchByTopicRequest: ${filterError.message}`, 1);
+            return {
+                type: 'item_search_by_topic',
+                request_id: request.request_id,
+                items: [],
+                error: filterError.message,
+                error_code: filterError.error_code,
+                timing: {
+                    total_ms: Date.now() - startTime,
+                    item_count: 0,
+                    attachment_count: 0,
+                },
+            };
+        }
+
+        // An empty allowlist here means the collections resolved but hold no
+        // items: an honest empty result, not a bad reference.
+        collectionItemIds = await getCollectionScopeItemIds(resolution.collections);
         if (collectionItemIds.length === 0) {
-            logger(`handleItemSearchByTopicRequest: collections_filter resolved to ${collectionsById.size} collections holding no items`, 1);
+            logger(`handleItemSearchByTopicRequest: collections_filter resolved to ${resolution.collections.length} collections holding no items`, 1);
             return {
                 type: 'item_search_by_topic',
                 request_id: request.request_id,

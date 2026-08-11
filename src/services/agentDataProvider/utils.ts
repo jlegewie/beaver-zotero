@@ -656,6 +656,140 @@ function findCollectionInLibrary(
     return null;
 }
 
+/** A collection a `collections_filter` entry matched outside the searched libraries. */
+export interface OutOfScopeCollection {
+    /** The filter entry that matched it. */
+    input: string;
+    /** Name of the matched collection. */
+    name: string;
+    /** Library the match lives in. */
+    libraryId: number;
+}
+
+/** Outcome of resolving a `collections_filter` against the searched libraries. */
+export interface CollectionsFilterResolution {
+    /** Collections that resolved inside the searched libraries, deduplicated by ID. */
+    collections: Zotero.Collection[];
+    /** Filter entries that matched no collection at all. */
+    unresolved: string[];
+    /** Filter entries that matched only outside the searched libraries. */
+    outOfScope: OutOfScopeCollection[];
+}
+
+/** A `collections_filter` that left the search with no usable collection. */
+export interface CollectionsFilterError {
+    message: string;
+    error_code: 'collection_not_found' | 'library_not_searchable';
+}
+
+/**
+ * Resolve a `collections_filter` against the libraries a search will cover.
+ *
+ * A name is resolved in every searched library, because the same name can
+ * legitimately exist in several of them. Matches outside those libraries are
+ * reported separately rather than dropped: numeric IDs and key-like entries
+ * resolve through a cross-library fallback that can land in a library the
+ * request is not scoped to, or that the user excluded from Beaver, and the
+ * caller has to tell that apart from a bad reference.
+ *
+ * `libraryIds` must already be the searchable libraries the search will cover;
+ * an empty list resolves nothing at all.
+ */
+export function resolveCollectionsFilter(
+    collectionsFilter: (string | number)[],
+    libraryIds: number[]
+): CollectionsFilterResolution {
+    const collections = new Map<number, Zotero.Collection>();
+    const unresolved: string[] = [];
+    const outOfScope: OutOfScopeCollection[] = [];
+
+    // Nothing to search in: resolve nothing rather than looking the filter up
+    // library-less, which would enumerate every library the user excluded from
+    // Beaver. The searchable set is also empty while the profile is still
+    // loading, so a lookup here could report an allowed collection as excluded.
+    if (libraryIds.length === 0) {
+        return { collections: [], unresolved, outOfScope };
+    }
+
+    for (const filter of collectionsFilter) {
+        const matches: Zotero.Collection[] = [];
+        if (typeof filter === 'number') {
+            const collection = Zotero.Collections.get(filter);
+            if (collection) matches.push(collection);
+        } else {
+            for (const libraryId of libraryIds) {
+                const match = getCollectionByIdOrName(filter, libraryId);
+                if (match) matches.push(match.collection);
+            }
+        }
+
+        const inScope = matches.filter((collection) => libraryIds.includes(collection.libraryID));
+        if (inScope.length > 0) {
+            for (const collection of inScope) collections.set(collection.id, collection);
+        } else if (matches.length > 0) {
+            const [collection] = matches;
+            outOfScope.push({
+                input: String(filter),
+                name: collection.name,
+                libraryId: collection.libraryID,
+            });
+        } else {
+            unresolved.push(String(filter));
+        }
+    }
+
+    return { collections: Array.from(collections.values()), unresolved, outOfScope };
+}
+
+/**
+ * Error for a `collections_filter` that resolved to no usable collection.
+ *
+ * Such a filter must narrow the search to no results rather than widen it to
+ * the whole library, but returning an empty result alone is misleading: the
+ * model reads it as "that collection holds nothing" and moves on instead of
+ * fixing the reference. Returns null when at least one collection resolved —
+ * a partially resolved filter searches the collections it found.
+ */
+export function collectionsFilterError(
+    resolution: CollectionsFilterResolution
+): CollectionsFilterError | null {
+    if (resolution.collections.length > 0) return null;
+
+    if (resolution.unresolved.length > 0) {
+        const label = resolution.unresolved.length === 1 ? 'Collection not found' : 'Collections not found';
+        const names = resolution.unresolved.map((entry) => `"${entry}"`).join(', ');
+        return {
+            message: `${label}: ${names}. Use list_collections to discover the available collections.`,
+            error_code: 'collection_not_found',
+        };
+    }
+
+    // Do not echo the collection's name for an excluded library: it is content
+    // from a library the user put out of Beaver's reach.
+    const excluded = resolution.outOfScope.find((entry) => !isLibrarySearchable(entry.libraryId));
+    if (excluded) {
+        return {
+            message: excludedLibraryMessage(excluded.libraryId),
+            error_code: 'library_not_searchable',
+        };
+    }
+
+    const [entry] = resolution.outOfScope;
+    if (entry) {
+        const library = Zotero.Libraries?.get?.(entry.libraryId);
+        const libraryName = library ? `"${library.name}"` : `library ${entry.libraryId}`;
+        return {
+            message: (
+                `Collection "${entry.name}" is in ${libraryName}, which is outside the ` +
+                `requested libraries_filter. Drop libraries_filter or set it to that library.`
+            ),
+            error_code: 'collection_not_found',
+        };
+    }
+
+    return null;
+}
+
 /**
  * Return the IDs of the items held by the given collections and all of their
  * subcollections. Trashed subcollections and trashed members are excluded, and

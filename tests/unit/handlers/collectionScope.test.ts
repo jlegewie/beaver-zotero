@@ -1,6 +1,7 @@
 /**
- * Focused unit tests for getCollectionScopeItemIds
- * (src/services/agentDataProvider/utils.ts).
+ * Focused unit tests for the collection-scope helpers in
+ * src/services/agentDataProvider/utils.ts: getCollectionScopeItemIds,
+ * resolveCollectionsFilter and collectionsFilterError.
  *
  * The module has a wide transitive dependency surface (document extraction,
  * sync, popups, etc.) that getCollectionScopeItemIds itself never touches, so
@@ -65,7 +66,11 @@ vi.mock('../../../src/services/documentExtraction', () => ({
     resolveToImageAttachment: vi.fn(),
 }));
 
-import { getCollectionScopeItemIds } from '../../../src/services/agentDataProvider/utils';
+import {
+    collectionsFilterError,
+    getCollectionScopeItemIds,
+    resolveCollectionsFilter,
+} from '../../../src/services/agentDataProvider/utils';
 
 /** Item IDs held directly by each collection ID. */
 const itemsByCollectionId = new Map<number, number[]>([
@@ -143,5 +148,181 @@ describe('getCollectionScopeItemIds', () => {
         // Collection 12 is both an input and a descendant of collection 10, so
         // it is queried once.
         expect(queryAsync.mock.calls[0][1]).toEqual([10, 11, 12, 20]);
+    });
+});
+
+/**
+ * Collections available to the resolver tests. Library 42 stands in for a
+ * library excluded from Beaver: the mocked store reports 1 and 100 as the
+ * searchable ones.
+ */
+const COLLECTIONS = [
+    { id: 11, key: 'AAAAAAAA', name: 'Papers', libraryID: 1 },
+    { id: 12, key: 'BBBBBBBB', name: 'Papers', libraryID: 100 },
+    { id: 13, key: 'CCCCCCCC', name: 'Private', libraryID: 42 },
+] as unknown as Zotero.Collection[];
+
+const LIBRARY_NAMES = new Map([
+    [1, 'My Library'],
+    [100, 'Group Library'],
+    [42, 'Excluded Library'],
+]);
+
+describe('resolveCollectionsFilter', () => {
+    let previousZotero: any;
+
+    beforeEach(() => {
+        vi.clearAllMocks();
+        previousZotero = (globalThis as any).Zotero;
+        (globalThis as any).Zotero = {
+            Utilities: { isValidObjectKey: (input: string) => /^[A-Z0-9]{8}$/.test(input) },
+            Collections: {
+                get: (id: number) => COLLECTIONS.find(c => (c as any).id === id) ?? false,
+                getByLibraryAndKey: (libraryId: number, key: string) =>
+                    COLLECTIONS.find(c => (c as any).libraryID === libraryId && (c as any).key === key) ?? false,
+                getByLibrary: (libraryId: number) =>
+                    COLLECTIONS.filter(c => (c as any).libraryID === libraryId),
+            },
+            Libraries: {
+                getAll: () => [{ libraryID: 1 }, { libraryID: 100 }, { libraryID: 42 }],
+                get: (libraryId: number) =>
+                    LIBRARY_NAMES.has(libraryId) ? { name: LIBRARY_NAMES.get(libraryId) } : false,
+            },
+        };
+    });
+
+    afterEach(() => {
+        (globalThis as any).Zotero = previousZotero;
+    });
+
+    it('resolves a shared name in every searched library', () => {
+        const resolution = resolveCollectionsFilter(['Papers'], [1, 100]);
+
+        expect(resolution.collections.map(c => (c as any).id)).toEqual([11, 12]);
+        expect(resolution.unresolved).toEqual([]);
+        expect(resolution.outOfScope).toEqual([]);
+    });
+
+    it('returns a collection once when several filter entries resolve to it', () => {
+        const resolution = resolveCollectionsFilter(['Papers', 'AAAAAAAA'], [1]);
+
+        expect(resolution.collections.map(c => (c as any).id)).toEqual([11]);
+    });
+
+    it('reports an entry that matches nothing as unresolved', () => {
+        const resolution = resolveCollectionsFilter(['Typo'], [1]);
+
+        expect(resolution.collections).toEqual([]);
+        expect(resolution.unresolved).toEqual(['Typo']);
+        expect(resolution.outOfScope).toEqual([]);
+    });
+
+    it('separates a key that resolves outside the searched libraries from a missing one', () => {
+        // Key-like entries resolve through a cross-library fallback that can
+        // land in a library the request is not scoped to.
+        const resolution = resolveCollectionsFilter(['CCCCCCCC'], [1]);
+
+        expect(resolution.collections).toEqual([]);
+        expect(resolution.unresolved).toEqual([]);
+        expect(resolution.outOfScope).toEqual([{ input: 'CCCCCCCC', name: 'Private', libraryId: 42 }]);
+    });
+
+    it('reports a numeric ID from an unsearched library as out of scope', () => {
+        const resolution = resolveCollectionsFilter([12], [1]);
+
+        expect(resolution.outOfScope).toEqual([{ input: '12', name: 'Papers', libraryId: 100 }]);
+    });
+
+    it('keeps the collections it resolved when only some entries fail', () => {
+        const resolution = resolveCollectionsFilter(['Papers', 'Typo'], [1]);
+
+        expect(resolution.collections.map(c => (c as any).id)).toEqual([11]);
+        expect(resolution.unresolved).toEqual(['Typo']);
+    });
+
+    it('looks nothing up when no library is searchable', () => {
+        const zotero = (globalThis as any).Zotero;
+        const getByLibrary = vi.fn(zotero.Collections.getByLibrary);
+        const getByLibraryAndKey = vi.fn(zotero.Collections.getByLibraryAndKey);
+        zotero.Collections = { ...zotero.Collections, getByLibrary, getByLibraryAndKey };
+
+        const resolution = resolveCollectionsFilter(['Papers', 'CCCCCCCC'], []);
+
+        // An empty searchable set is fail-closed (all libraries excluded, or the
+        // profile still loading): reading collections out of those libraries to
+        // classify the filter would be an unauthorized read, and would report an
+        // allowed collection as excluded while loading.
+        expect(resolution).toEqual({ collections: [], unresolved: [], outOfScope: [] });
+        expect(getByLibrary).not.toHaveBeenCalled();
+        expect(getByLibraryAndKey).not.toHaveBeenCalled();
+    });
+});
+
+describe('collectionsFilterError', () => {
+    let previousZotero: any;
+
+    beforeEach(() => {
+        previousZotero = (globalThis as any).Zotero;
+        (globalThis as any).Zotero = {
+            Libraries: {
+                get: (libraryId: number) =>
+                    LIBRARY_NAMES.has(libraryId) ? { name: LIBRARY_NAMES.get(libraryId) } : false,
+            },
+        };
+    });
+
+    afterEach(() => {
+        (globalThis as any).Zotero = previousZotero;
+    });
+
+    it('returns no error when at least one collection resolved', () => {
+        const error = collectionsFilterError({
+            collections: [COLLECTIONS[0]],
+            unresolved: ['Typo'],
+            outOfScope: [],
+        });
+
+        expect(error).toBeNull();
+    });
+
+    it('returns no error for an empty filter', () => {
+        expect(collectionsFilterError({ collections: [], unresolved: [], outOfScope: [] })).toBeNull();
+    });
+
+    it('names the unresolved entries and points at list_collections', () => {
+        const error = collectionsFilterError({
+            collections: [],
+            unresolved: ['Typo', 'KB7KVUEB'],
+            outOfScope: [],
+        });
+
+        expect(error?.error_code).toBe('collection_not_found');
+        expect(error?.message).toContain('"Typo", "KB7KVUEB"');
+        expect(error?.message).toContain('list_collections');
+    });
+
+    it('reports an excluded library without echoing the collection name', () => {
+        const error = collectionsFilterError({
+            collections: [],
+            unresolved: [],
+            outOfScope: [{ input: 'CCCCCCCC', name: 'Private', libraryId: 42 }],
+        });
+
+        expect(error?.error_code).toBe('library_not_searchable');
+        expect(error?.message).toContain('Excluded Library');
+        expect(error?.message).not.toContain('Private');
+    });
+
+    it('reports a searchable library that the libraries_filter left out', () => {
+        const error = collectionsFilterError({
+            collections: [],
+            unresolved: [],
+            outOfScope: [{ input: '12', name: 'Papers', libraryId: 100 }],
+        });
+
+        expect(error?.error_code).toBe('collection_not_found');
+        expect(error?.message).toContain('"Papers"');
+        expect(error?.message).toContain('Group Library');
+        expect(error?.message).toContain('libraries_filter');
     });
 });

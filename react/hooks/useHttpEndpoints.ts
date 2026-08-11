@@ -445,9 +445,11 @@ async function handleMetadataSearchHttpRequest(request: any) {
     };
     
     const response = await handleItemSearchByMetadataRequest(wsRequest);
-    
+
     return {
         items: response.items,
+        error: response.error ?? null,
+        error_code: response.error_code ?? null,
     };
 }
 
@@ -467,9 +469,11 @@ async function handleTopicSearchHttpRequest(request: any) {
     };
     
     const response = await handleItemSearchByTopicRequest(wsRequest);
-    
+
     return {
         items: response.items,
+        error: response.error ?? null,
+        error_code: response.error_code ?? null,
     };
 }
 

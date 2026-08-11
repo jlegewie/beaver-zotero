@@ -33,7 +33,8 @@ vi.mock('../../../react/utils/searchTools', () => ({
 vi.mock('../../../src/services/agentDataProvider/utils', () => ({
     getSearchableLibraryIds: mocks.getSearchableLibraryIds,
     resolveLibrariesFilterToSearchableIds: mocks.resolveLibrariesFilterToSearchableIds,
-    getCollectionByIdOrName: vi.fn(),
+    resolveCollectionsFilter: vi.fn(() => ({ collections: [], unresolved: [], outOfScope: [] })),
+    collectionsFilterError: vi.fn(() => null),
     prepareAttachmentInfoBatchData: vi.fn(async () => ({})),
     processAttachmentInfoBatch: vi.fn(async () => []),
 }));

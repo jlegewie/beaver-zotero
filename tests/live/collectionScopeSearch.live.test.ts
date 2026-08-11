@@ -43,6 +43,8 @@ interface SearchResultItem {
 
 interface SearchResponse {
     items?: SearchResultItem[];
+    error?: string | null;
+    error_code?: string | null;
 }
 
 interface CollectionCreateResponse {
@@ -204,24 +206,40 @@ describe('collection-scoped metadata pagination', () => {
     }, 60_000);
 });
 
-describe('a collection filter that resolves to nothing narrows instead of widening', () => {
+describe('a collection filter that resolves to nothing errors instead of widening', () => {
     beforeEach((ctx) => skipIfNoZotero(ctx, available));
 
-    it('returns no items for metadata search', async () => {
+    it('returns collection_not_found for metadata search', async () => {
         const res = await post<SearchResponse>('/beaver/search/metadata', {
             title_query: 'the',
             collections_filter: [`no-such-collection-${suffix}`],
             limit: 5,
         });
         expect(res.items ?? []).toHaveLength(0);
+        // Empty results alone would read as "that collection holds nothing".
+        expect(res.error_code).toBe('collection_not_found');
+        expect(res.error).toContain(`no-such-collection-${suffix}`);
     }, 30_000);
 
-    it('returns no items for topic search', async () => {
+    it('returns collection_not_found for topic search', async () => {
         const res = await post<SearchResponse>('/beaver/search/topic', {
             topic_query: TOPIC_QUERY,
             collections_filter: [`no-such-collection-${suffix}`],
             limit: 5,
         });
         expect(res.items ?? []).toHaveLength(0);
+        expect(res.error_code).toBe('collection_not_found');
+        expect(res.error).toContain(`no-such-collection-${suffix}`);
+    }, 30_000);
+
+    it('still searches the collections it did resolve when only one entry is bad', async () => {
+        expect(embeddedKey, 'an embedded item in the user library').toBeTruthy();
+
+        const res = await post<SearchResponse>('/beaver/search/metadata', {
+            collections_filter: [singleParentKey, `no-such-collection-${suffix}`],
+            limit: 5,
+        });
+        expect(res.error ?? null).toBeNull();
+        expect(userLibraryItems(res).map((r) => r.item.zotero_key)).toEqual([embeddedKey]);
     }, 30_000);
 });

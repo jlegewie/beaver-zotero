@@ -1,7 +1,10 @@
 /**
  * Tests for the collection scoping of handleItemSearchByTopicRequest: the
  * collections filter is resolved to an item allowlist that is handed to the
- * semantic search, rather than applied to the ranked results.
+ * semantic search, rather than applied to the ranked results — and a filter
+ * that resolves to no usable collection is reported as an error rather than as
+ * an empty result. Resolving the filter itself is covered by the
+ * `resolveCollectionsFilter` tests in collectionScope.test.ts.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -20,7 +23,8 @@ vi.mock('../../../src/services/database', () => ({
 }));
 
 vi.mock('../../../src/services/agentDataProvider/utils', () => ({
-    getCollectionByIdOrName: vi.fn(),
+    resolveCollectionsFilter: vi.fn(),
+    collectionsFilterError: vi.fn(),
     getCollectionScopeItemIds: vi.fn(),
     getSearchableLibraryIds: vi.fn(() => [1]),
     prepareAttachmentInfoBatchData: vi.fn(),
@@ -43,8 +47,9 @@ vi.mock('../../../src/utils/zoteroSerializers', () => ({
 import type { WSItemSearchByTopicRequest } from '@beaver/agent-core/protocol/agentProtocol';
 import { handleItemSearchByTopicRequest } from '../../../src/services/agentDataProvider/handleItemSearchByTopicRequest';
 import {
-    getCollectionByIdOrName,
+    collectionsFilterError,
     getCollectionScopeItemIds,
+    resolveCollectionsFilter,
 } from '../../../src/services/agentDataProvider/utils';
 
 function makeRequest(overrides: Partial<WSItemSearchByTopicRequest> = {}): WSItemSearchByTopicRequest {
@@ -60,10 +65,18 @@ function makeRequest(overrides: Partial<WSItemSearchByTopicRequest> = {}): WSIte
 /** Options the handler passed to semanticSearchService.search(). */
 const searchOptions = () => searchMock.mock.calls[0]?.[1];
 
+const collection = { id: 7, key: 'COLL7', libraryID: 1 } as unknown as Zotero.Collection;
+
 describe('handleItemSearchByTopicRequest collection scoping', () => {
     beforeEach(() => {
         vi.clearAllMocks();
         searchMock.mockResolvedValue([]);
+        vi.mocked(collectionsFilterError).mockReturnValue(null);
+        vi.mocked(resolveCollectionsFilter).mockReturnValue({
+            collections: [],
+            unresolved: [],
+            outOfScope: [],
+        });
         (globalThis as any).Zotero = {
             Beaver: { db: {} },
             Collections: { get: vi.fn(() => null) },
@@ -71,23 +84,57 @@ describe('handleItemSearchByTopicRequest collection scoping', () => {
         };
     });
 
-    it('returns no items and skips the search when the collections filter resolves to nothing', async () => {
-        vi.mocked(getCollectionByIdOrName).mockReturnValue(null);
-        vi.mocked(getCollectionScopeItemIds).mockResolvedValue([]);
+    it('returns an error and skips the search when the collections filter resolves to nothing', async () => {
+        vi.mocked(resolveCollectionsFilter).mockReturnValue({
+            collections: [],
+            unresolved: ['Nonexistent'],
+            outOfScope: [],
+        });
+        vi.mocked(collectionsFilterError).mockReturnValue({
+            message: 'Collection not found: "Nonexistent". Use list_collections to discover the available collections.',
+            error_code: 'collection_not_found',
+        });
 
         const response = await handleItemSearchByTopicRequest(
             makeRequest({ collections_filter: ['Nonexistent'] })
         );
 
         expect(response.items).toEqual([]);
+        expect(response.error).toContain('Collection not found: "Nonexistent"');
+        expect(response.error_code).toBe('collection_not_found');
         expect(response.timing).toBeDefined();
         expect(searchMock).not.toHaveBeenCalled();
-        expect(getCollectionScopeItemIds).toHaveBeenCalledWith([]);
+        // The allowlist is never built for a filter that resolved to nothing.
+        expect(getCollectionScopeItemIds).not.toHaveBeenCalled();
     });
 
-    it('returns no items and skips the search when the collection scope holds no items', async () => {
-        const collection = { id: 7, key: 'COLL7', libraryID: 1 } as unknown as Zotero.Collection;
-        vi.mocked(getCollectionByIdOrName).mockReturnValue({ collection, libraryID: 1 });
+    it('reports an excluded library rather than a missing collection', async () => {
+        vi.mocked(resolveCollectionsFilter).mockReturnValue({
+            collections: [],
+            unresolved: [],
+            outOfScope: [{ input: 'ABCD1234', name: 'Private', libraryId: 42 }],
+        });
+        vi.mocked(collectionsFilterError).mockReturnValue({
+            message: 'The library "Excluded" is excluded from Beaver.',
+            error_code: 'library_not_searchable',
+        });
+
+        const response = await handleItemSearchByTopicRequest(
+            makeRequest({ collections_filter: ['ABCD1234'] })
+        );
+
+        expect(response.error_code).toBe('library_not_searchable');
+        // The excluded collection's own name never reaches the model.
+        expect(response.error).not.toContain('Private');
+        expect(searchMock).not.toHaveBeenCalled();
+    });
+
+    it('returns no items and no error when the collection scope holds no items', async () => {
+        vi.mocked(resolveCollectionsFilter).mockReturnValue({
+            collections: [collection],
+            unresolved: [],
+            outOfScope: [],
+        });
         vi.mocked(getCollectionScopeItemIds).mockResolvedValue([]);
 
         const response = await handleItemSearchByTopicRequest(
@@ -95,48 +142,26 @@ describe('handleItemSearchByTopicRequest collection scoping', () => {
         );
 
         expect(response.items).toEqual([]);
+        // The collection exists and is simply empty: an honest empty result.
+        expect(response.error ?? null).toBeNull();
         expect(response.timing).toBeDefined();
         expect(getCollectionScopeItemIds).toHaveBeenCalledWith([collection]);
         expect(searchMock).not.toHaveBeenCalled();
     });
 
     it('passes the collection scope item IDs to the search as an allowlist', async () => {
-        const collection = { id: 7, key: 'COLL7', libraryID: 1 } as unknown as Zotero.Collection;
-        vi.mocked(getCollectionByIdOrName).mockReturnValue({ collection, libraryID: 1 });
+        vi.mocked(resolveCollectionsFilter).mockReturnValue({
+            collections: [collection],
+            unresolved: [],
+            outOfScope: [],
+        });
         vi.mocked(getCollectionScopeItemIds).mockResolvedValue([11, 22, 33]);
 
         await handleItemSearchByTopicRequest(makeRequest({ collections_filter: ['Reading'] }));
 
+        expect(resolveCollectionsFilter).toHaveBeenCalledWith(['Reading'], [1]);
         expect(searchMock).toHaveBeenCalledTimes(1);
         expect(searchOptions()).toMatchObject({ itemIds: [11, 22, 33], libraryIds: [1] });
-    });
-
-    it('drops a collection resolved outside the searchable libraries', async () => {
-        // Key-like filters resolve through a cross-library fallback that can
-        // land in a library the request is not scoped to.
-        const foreign = { id: 9, key: 'COLL9', libraryID: 42 } as unknown as Zotero.Collection;
-        vi.mocked(getCollectionByIdOrName).mockReturnValue({ collection: foreign, libraryID: 42 });
-        vi.mocked(getCollectionScopeItemIds).mockResolvedValue([]);
-
-        const response = await handleItemSearchByTopicRequest(
-            makeRequest({ collections_filter: ['ABCD1234'] })
-        );
-
-        expect(response.items).toEqual([]);
-        expect(getCollectionScopeItemIds).toHaveBeenCalledWith([]);
-        expect(searchMock).not.toHaveBeenCalled();
-    });
-
-    it('deduplicates collections resolved from several filter entries', async () => {
-        const collection = { id: 7, key: 'COLL7', libraryID: 1 } as unknown as Zotero.Collection;
-        vi.mocked(getCollectionByIdOrName).mockReturnValue({ collection, libraryID: 1 });
-        vi.mocked(getCollectionScopeItemIds).mockResolvedValue([11]);
-
-        await handleItemSearchByTopicRequest(
-            makeRequest({ collections_filter: ['Reading', 'COLL7'] })
-        );
-
-        expect(getCollectionScopeItemIds).toHaveBeenCalledWith([collection]);
     });
 
     it('does not pass an allowlist when no collections filter is requested', async () => {
@@ -144,6 +169,7 @@ describe('handleItemSearchByTopicRequest collection scoping', () => {
 
         expect(searchMock).toHaveBeenCalledTimes(1);
         expect(searchOptions().itemIds).toBeUndefined();
+        expect(resolveCollectionsFilter).not.toHaveBeenCalled();
         expect(getCollectionScopeItemIds).not.toHaveBeenCalled();
     });
 });

@@ -19,10 +19,11 @@ import {
 } from '@beaver/agent-core/protocol/agentProtocol';
 import { searchItemsByMetadata, SearchItemsByMetadataOptions } from '../../../react/utils/searchTools';
 import {
-    getCollectionByIdOrName,
+    collectionsFilterError,
     getSearchableLibraryIds,
     prepareAttachmentInfoBatchData,
     processAttachmentInfoBatch,
+    resolveCollectionsFilter,
     resolveLibrariesFilterToSearchableIds,
 } from './utils';
 import { TimingAccumulator } from '../../utils/timing';
@@ -103,52 +104,39 @@ export async function handleItemSearchByMetadataRequest(
     // given a collection key from library A matches nothing, so a shared collection
     // name (e.g. "Papers") in two libraries would silently empty out both searches.
     const collectionKeysByLibrary = new Map<number, Set<string>>();
-    const addCollectionKey = (libraryId: number, key: string) => {
-        if (!libraryIds.includes(libraryId)) return;
-        let keys = collectionKeysByLibrary.get(libraryId);
-        if (!keys) {
-            keys = new Set<string>();
-            collectionKeysByLibrary.set(libraryId, keys);
-        }
-        keys.add(key);
-    };
-
     const hasCollectionsFilter = collectionsFilter.length > 0;
     if (hasCollectionsFilter) {
-        for (const collectionFilter of collectionsFilter) {
-            if (typeof collectionFilter === 'number') {
-                const collection = Zotero.Collections.get(collectionFilter);
-                if (collection) {
-                    addCollectionKey(collection.libraryID, collection.key);
-                }
-                continue;
-            }
+        const resolution = resolveCollectionsFilter(collectionsFilter, libraryIds);
 
-            // String filter: resolve within each library. The lookup can fall back to
-            // another library for key-like input, so bucket by the resolved library.
-            for (const libId of libraryIds) {
-                const result = getCollectionByIdOrName(collectionFilter, libId);
-                if (result) {
-                    addCollectionKey(result.collection.libraryID, result.collection.key);
-                }
-            }
+        // A collections_filter that resolves to nothing must narrow the search to
+        // no results, never widen it to the whole library — and it is reported as
+        // an error rather than an empty result so a bad collection reference is
+        // not mistaken for a collection that holds no matching items.
+        const filterError = collectionsFilterError(resolution);
+        if (filterError) {
+            logger(`handleItemSearchByMetadataRequest: ${filterError.message}`, 1);
+            return {
+                type: 'item_search_by_metadata',
+                request_id: request.request_id,
+                items: [],
+                error: filterError.message,
+                error_code: filterError.error_code,
+                timing: {
+                    total_ms: Date.now() - startTime,
+                    item_count: 0,
+                    attachment_count: 0,
+                },
+            };
         }
-    }
 
-    // Guard: a provided collections_filter that resolves to nothing must narrow the
-    // search to no results, never widen it to the whole library.
-    if (hasCollectionsFilter && collectionKeysByLibrary.size === 0) {
-        logger('handleItemSearchByMetadataRequest: collections_filter resolved to no collections', 1);
-        return {
-            type: 'item_search_by_metadata',
-            request_id: request.request_id,
-            items: [],
-            timing: {
-                total_ms: Date.now() - startTime,
-                item_count: 0,
-                attachment_count: 0,
-            },
-        };
+        for (const collection of resolution.collections) {
+            let keys = collectionKeysByLibrary.get(collection.libraryID);
+            if (!keys) {
+                keys = new Set<string>();
+                collectionKeysByLibrary.set(collection.libraryID, keys);
+            }
+            keys.add(collection.key);
+        }
     }
 
     // Calculate offset for pagination (default 0, guard against negative values)
