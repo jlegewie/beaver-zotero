@@ -361,6 +361,21 @@ maybe_normalize_before_start() {
   fi
 }
 
+# @beaver/agent-ui ships its stylesheets as source; the build copies them into
+# addon/content/styles/, where they are gitignored generated files. `open` does
+# not build, and `setup-worktree.sh` runs only build-react:dev, so a fresh
+# worktree can otherwise launch with them missing — which registers nothing and
+# renders the whole plugin unstyled behind a single logError.
+ensure_agent_ui_css() {
+  local wt="$1"
+  [[ -f "$wt/package.json" ]] || return 0
+  if ! ls "$wt"/addon/content/styles/agent-ui-*.css >/dev/null 2>&1; then
+    echo "Shared agent-ui stylesheets are missing — generating them."
+    ( cd "$wt" && npm run --silent copy:agent-ui-css ) \
+      || echo "WARNING: copy:agent-ui-css failed; the plugin will render unstyled."
+  fi
+}
+
 # Launch this worktree's Zotero directly (no npm start / hot-reload watcher).
 start_zotero_direct() {
   local wt="$1"
@@ -659,6 +674,7 @@ EOF
   echo "Configured, but Zotero is not running for this worktree."
   print_status "$wt" || true
   echo
+  ensure_agent_ui_css "$wt"
   # Start immediately (no prompt) — `open` means open. Agents need this non-interactive.
   start_zotero_direct "$wt"
 }

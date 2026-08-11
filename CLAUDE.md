@@ -51,6 +51,10 @@ Consequences:
 - **Don't edit source while a live/integration run is extracting.**
 - Hot reload only refreshes the bundles and UI, not global state that survives a window
   reload (DB, Supabase, services). Startup-only wiring needs a full plugin reload.
+- **`@beaver/agent-ui`'s stylesheets are not watched.** `copy:agent-ui-css` runs once per
+  `npm start`. Saving one *does* trigger a scaffold rebuild + reload, but that copies the
+  stale generated file, so it looks like the edit did nothing. Re-run
+  `npm run copy:agent-ui-css` after editing a shared sheet.
 
 ## Source layout: four roots, two bundles
 

@@ -164,6 +164,24 @@ const l2UiAmbientTypeBan = [
         message:
             "The shared React layer must not use ambient Zotero types — it has to typecheck without zotero-types.",
     },
+    // `no-restricted-globals` only sees a bare identifier reference, so
+    // `(globalThis as unknown as { Zotero: … }).Zotero` slips past it while
+    // reaching the same host surface. Screening the property name does not help —
+    // a cast, a temporary or a computed key defeats any access-shape match — so
+    // the identifier itself is banned. A shared component has no use for it.
+    // `verify-program.mjs` rejects this too; this block is the fast local signal.
+    {
+        selector: 'Identifier[name="globalThis"]',
+        message:
+            "The shared React layer must not name `globalThis` — derive window/document from an element's ownerDocument, and reach host behavior through the host registry.",
+    },
+    // A `declare global` block inside the package hands it a host global while
+    // every other check stays green.
+    {
+        selector: 'TSModuleDeclaration[global=true]',
+        message:
+            "The shared React layer must not declare a global — a global it declares is one the other client does not have.",
+    },
 ];
 
 /**

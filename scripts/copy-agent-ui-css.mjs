@@ -9,10 +9,16 @@
 // because `build.assets` in zotero-plugin.config.ts is what copies
 // `addon/**/*` into the packaged XPI.
 //
-// Run from the npm scripts (see `copy:agent-ui-css`) rather than from a
-// scaffold build hook, so the same step serves `npm run build*` and the
-// `npm start` watcher, and so a missing copy is visible in the build log
-// instead of buried in plugin internals.
+// Run from the npm scripts (see `copy:agent-ui-css`) rather than from a scaffold
+// build hook, so a missing copy is visible in the build log instead of buried in
+// plugin internals.
+//
+// It therefore runs ONCE per `npm run build*` / `npm start` invocation, and is
+// NOT watched. Editing a sheet under a running `npm start` does trigger a
+// scaffold rebuild (`source` includes `packages`), but that rebuild copies the
+// stale generated file from addon/content/styles/ — the plugin reloads and
+// nothing changes. Re-run `npm run copy:agent-ui-css`, or use the
+// reload-driven flow, after editing a shared stylesheet.
 //
 // Each sheet is copied rather than concatenated into beaver.css, which keeps
 // provenance and diffs readable, and it keeps its own filename — so the

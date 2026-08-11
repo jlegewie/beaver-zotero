@@ -211,6 +211,23 @@ if (parsed.options.jsx !== ts.JsxEmit.React) {
     'tsconfig `jsx` must be "react" (the classic runtime). beaver-zotero transforms JSX with @babel/preset-react in its default classic mode, so a file that omits `import React from \'react\'` compiles here and then fails at runtime there. "react" is what forces the import that works in both clients.',
   );
 }
+// The flags that make the rest of this gate mean anything. Asserted by name
+// rather than left to fail incidentally: `strict` off, for instance, currently
+// happens to break the build on an unrelated inference error, which is luck, not
+// a check — and `isolatedModules` off would let the package emit type-only
+// constructs the consumers' Babel transforms cannot see.
+for (const [flag, expected] of [
+  ["strict", true],
+  ["isolatedModules", true],
+  ["forceConsistentCasingInFileNames", true],
+  ["noEmit", true],
+]) {
+  if (parsed.options[flag] !== expected) {
+    setupErrors.push(
+      `tsconfig \`${flag}\` must be ${expected}; it is ${JSON.stringify(parsed.options[flag])}.`,
+    );
+  }
+}
 // The only path mapping allowed. Anything else would be a route back into the
 // host repo that the escapee check below could not distinguish from the
 // sibling package.
@@ -276,7 +293,13 @@ const isDependency = (f) =>
 // agent-core is a declared peer whose files live in the repo rather than in
 // node_modules, so for this gate's purposes they are dependency declarations.
 // Its own gate (`npm run typecheck:core`) is what bounds them.
-const isSiblingCore = (f) => f.startsWith(siblingCoreDir + path.sep);
+//
+// Scoped to that package's `src/`, not the package directory: agent-core's gate
+// seeds from `src/**` and orphan-scans only `src/`, so a helper beside its
+// package.json would sit inside neither package's closure list — a region no
+// gate covers.
+const siblingCoreSrc = path.join(siblingCoreDir, "src");
+const isSiblingCore = (f) => f.startsWith(siblingCoreSrc + path.sep);
 
 const closureSet = new Set(closure);
 // `files` describes the package's own surface, so the two-way match is scoped
@@ -367,6 +390,41 @@ function collectAmbientZoteroTypeUses(sourceFile) {
   return lines;
 }
 
+// Collects the two routes to a host surface that neither the specifier rule nor
+// `types`/`lib` can see: `declare global`, and `globalThis`.
+//
+// `declare global { const Zotero: ... }` inside the package puts the global in
+// the program while every other check stays green.
+//
+// `globalThis` is rejected outright rather than only where it names a known host
+// global. Screening the property name does not work: the useful form is
+// `(globalThis as unknown as { Zotero: … }).Zotero`, where the member expression's
+// object is a cast, not the identifier — so any check that pattern-matches the
+// access shape can be sidestepped by adding a cast, an intermediate variable, or
+// a computed key. The identifier is the narrow waist, and a shared component has
+// no legitimate use for it: it reaches its window and document through an
+// element's `ownerDocument`, and everything else host-specific through the
+// registry.
+function collectGlobalEscapes(sourceFile) {
+  const found = [];
+  const lineOf = (node) =>
+    sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile)).line + 1;
+  const visit = (node) => {
+    if (
+      ts.isModuleDeclaration(node) &&
+      node.flags & ts.NodeFlags.GlobalAugmentation
+    ) {
+      found.push({ kind: "declare global", line: lineOf(node) });
+    }
+    if (ts.isIdentifier(node) && node.text === "globalThis") {
+      found.push({ kind: "globalThis", line: lineOf(node) });
+    }
+    ts.forEachChild(node, visit);
+  };
+  ts.forEachChild(sourceFile, visit);
+  return found;
+}
+
 // "@scope/name/sub" -> "@scope/name"; "name/sub" -> "name".
 function packageNameOf(specifier) {
   const segments = specifier.split("/");
@@ -379,6 +437,8 @@ const undeclaredImports = [];
 const builtinImports = [];
 const ambientReferences = [];
 const ambientZoteroTypes = [];
+const relativeEscapes = [];
+const globalAugmentations = [];
 // Every file the package owns, not just those under src/: a helper at the
 // package root would otherwise be an unguarded region.
 for (const sourceFile of sourceFiles) {
@@ -397,6 +457,9 @@ for (const sourceFile of sourceFiles) {
   for (const line of collectAmbientZoteroTypeUses(sourceFile)) {
     ambientZoteroTypes.push({ file, line });
   }
+  for (const escape of collectGlobalEscapes(sourceFile)) {
+    globalAugmentations.push({ file, ...escape });
+  }
   for (const specifier of collectSpecifiers(sourceFile)) {
     const where = { file, specifier };
     // No legitimate specifier names node_modules. Spelling it out is the one
@@ -406,7 +469,19 @@ for (const sourceFile of sourceFiles) {
       undeclaredImports.push({ ...where, packageName: "node_modules" });
       continue;
     }
-    if (specifier.startsWith(".") || path.isAbsolute(specifier)) continue;
+    // A relative specifier must stay inside the package. Reaching a sibling
+    // package by relative path resolves to a real file, so the escapee check
+    // above passes it — but the specifier is then one no consumer's alias
+    // remaps, and `exports` publishes only `./src/*`, so the Word add-in would
+    // resolve a path outside the package tree it installed. agent-core is
+    // reachable, by its package specifier, like any other dependency.
+    if (specifier.startsWith(".") || path.isAbsolute(specifier)) {
+      const resolved = path.resolve(path.dirname(filePath), specifier);
+      if (!isInPackage(resolved)) {
+        relativeEscapes.push(where);
+      }
+      continue;
+    }
     const packageName = packageNameOf(specifier);
     if (specifier.startsWith("node:") || nodeBuiltins.has(packageName)) {
       builtinImports.push(where);
@@ -469,6 +544,8 @@ if (
   ambientReferences.length > 0 ||
   ambientZoteroTypes.length > 0 ||
   bannedAmbientFiles.length > 0 ||
+  relativeEscapes.length > 0 ||
+  globalAugmentations.length > 0 ||
   orphans.length > 0
 ) {
   for (const message of setupErrors) {
@@ -515,6 +592,18 @@ if (
       `a banned ambient type package is in the program: ${path.relative(repoRoot, f)}`,
     );
   }
+  for (const { file, specifier } of relativeEscapes) {
+    console.error(
+      `${file} imports '${specifier}', which resolves outside the package — reach a sibling package by its package specifier (e.g. '@beaver/agent-core/...'), which is what every consumer's alias remaps.`,
+    );
+  }
+  for (const { file, kind, line } of globalAugmentations) {
+    console.error(
+      kind === "declare global"
+        ? `${file}:${line} has a \`declare global\` block — the package must not declare a host global; take host behavior as a prop or through the host registry.`
+        : `${file}:${line} names \`globalThis\` — a shared component derives its window and document from an element's ownerDocument, and reaches everything else host-specific through the registry.`,
+    );
+  }
   for (const f of orphans) {
     console.error(
       `on disk under src/ but not in the closure: ${path.relative(pkgDir, f)}`,
@@ -532,8 +621,12 @@ if (
       "agent-ui's own declarations do not typecheck — an unresolved type there silently becomes `any` wherever it is used.",
     ],
     [
-      [...ambientZoteroTypes, ...bannedAmbientFiles],
-      "agent-ui reaches a client's ambient types — it must typecheck with neither zotero-types nor @types/office-js present.",
+      [...ambientZoteroTypes, ...bannedAmbientFiles, ...globalAugmentations],
+      "agent-ui reaches a client's host surface — it must typecheck, and run, with neither client's globals or ambient types present.",
+    ],
+    [
+      relativeEscapes,
+      "agent-ui reaches a sibling package by relative path — use its package specifier so every consumer resolves the same file.",
     ],
     [
       [...undeclaredImports, ...builtinImports, ...ambientReferences],
