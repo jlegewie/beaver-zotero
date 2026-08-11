@@ -70,9 +70,13 @@ vi.mock('../../../react/utils/pageLabels', () => ({
     preloadPageLabelsForCitations: vi.fn(async () => new Map()),
 }));
 
-vi.mock('../../../react/atoms/messageUIState', async () => {
+// Partial mock: the module only pulls in jotai, so keep every atom real and stub
+// just the reset. A hand-written export list would silently resolve any atom
+// added later to `undefined`, and loadThreadAtom writes to several of them.
+vi.mock('../../../react/atoms/messageUIState', async (importOriginal) => {
+    const actual = await importOriginal<typeof import('../../../react/atoms/messageUIState')>();
     const { atom } = await import('jotai');
-    return { resetMessageUIStateAtom: atom(null, () => {}) };
+    return { ...actual, resetMessageUIStateAtom: atom(null, () => {}) };
 });
 
 vi.mock('../../../react/atoms/externalReferences', async () => {
