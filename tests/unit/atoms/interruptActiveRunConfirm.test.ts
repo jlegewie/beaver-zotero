@@ -100,8 +100,11 @@ vi.mock('@beaver/agent-core/run-state/atoms', async () => {
     return {
         threadRunsAtom: atom<unknown[]>([]),
         activeRunAtom: atom<unknown | null>(null),
-        // threads.ts re-exports this from the run state, so the stub must provide it
+        // threads.ts re-exports these three from the run state, so the stub must
+        // provide them
         currentThreadIdAtom: atom<string | null>(null),
+        currentThreadNameAtom: atom<string | null>(null),
+        isLoadingThreadAtom: atom<boolean>(false),
     };
 });
 
