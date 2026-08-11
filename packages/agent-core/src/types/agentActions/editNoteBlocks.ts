@@ -20,11 +20,26 @@ import type { ProposedAction } from './base';
  * {@link EditNoteBlocksEditItem} apply.
  *
  * - replace: overwrite the addressed block
- * - insert: splice new content after an addressed position
+ * - insert: splice new content after an addressed block
+ * - prepend: splice new content at the very start of the note body
+ * - append: splice new content at the very end of the note body
  * - delete: remove a block, or an inclusive range of blocks
  * - rewrite: replace the whole note body (must be the sole edit)
+ *
+ * `prepend` and `append` address NO block. The start and end of a note are
+ * absolute positions: they cannot be off by one, they do not move when the
+ * numbering shifts, and there is nothing at them to confirm. So they take
+ * `content` and nothing else — no `block`, no `after`, no `expect`. That is
+ * also why `insert` has no `after: 0` and no `after: 'end'` sentinel: every
+ * spelling of "at the start" or "at the end" is one of these two ops.
  */
-export type EditNoteBlocksOp = 'replace' | 'insert' | 'delete' | 'rewrite';
+export type EditNoteBlocksOp =
+    | 'replace'
+    | 'insert'
+    | 'prepend'
+    | 'append'
+    | 'delete'
+    | 'rewrite';
 
 /**
  * Machine-readable reason an edit was skipped during validation.
@@ -97,6 +112,8 @@ export interface EditNoteBlocksEditItem {
     // Addressing, by op:
     //   replace  → `block`
     //   insert   → `after`
+    //   prepend  → (none)
+    //   append   → (none)
     //   delete   → `block` [.. `to`]
     //   rewrite  → (none)
     // -------------------------------------------------------------------------
@@ -114,11 +131,10 @@ export interface EditNoteBlocksEditItem {
      * - `replace`: confirms `block`. REQUIRED.
      * - `delete`: confirms `block`. REQUIRED. A multi-line delete also
      *   confirms its far end via `expect_end`.
-     * - `insert`: confirms the anchor block `after`. REQUIRED when `after` is a
-     *   block number (>= 1); NOT allowed for `after: 0` / `after: 'end'`, which
-     *   name a seam rather than a block. Uniquely for insert, matching accepts
-     *   the END of the anchor's visible text as well as its start.
-     * - `rewrite`: not used.
+     * - `insert`: confirms the anchor block `after`. REQUIRED. Uniquely for
+     *   insert, matching accepts the END of the anchor's visible text as well
+     *   as its start.
+     * - `prepend` / `append` / `rewrite`: not used — they address no block.
      *
      * Matching is prefix-with-floor against the addressed line's visible-text
      * projection (prefix-or-suffix for insert anchors); lines with no visible
@@ -127,9 +143,9 @@ export interface EditNoteBlocksEditItem {
      */
     expect?: string;
     /**
-     * Payload for `replace` and `insert` (may be multiple lines; the engine
-     * expands it back into raw HTML), or the ENTIRE new note body for
-     * `rewrite`. Not used by `delete`.
+     * Payload for `replace`, `insert`, `prepend` and `append` (may be multiple
+     * lines; the engine expands it back into raw HTML), or the ENTIRE new note
+     * body for `rewrite`. Not used by `delete`.
      */
     content?: string;
 
@@ -137,10 +153,14 @@ export interface EditNoteBlocksEditItem {
     // insert
     // -------------------------------------------------------------------------
     /**
-     * `insert` only. Position to insert `content` after (1-based). `0` means the
-     * very start of the note; the literal `'end'` means the end of the body.
+     * `insert` only. The block `content` is spliced in after (1-based, >= 1).
+     *
+     * There is no `0` and no `'end'`: the start and end of the note are
+     * addressed by `op: 'prepend'` / `op: 'append'`, which take no address at
+     * all. Every `after` value therefore names a real block that `expect`
+     * confirms.
      */
-    after?: number | 'end';
+    after?: number;
 
     // -------------------------------------------------------------------------
     // delete

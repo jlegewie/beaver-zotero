@@ -23,9 +23,9 @@ describe('describeBlockEdit', () => {
         expect(describeBlockEdit({ op: 'delete', block: 4, to: 4 })).toBe('delete · block 4');
     });
 
-    it('names the two insert seams that are not block numbers', () => {
-        expect(describeBlockEdit({ op: 'insert', after: 0 })).toBe('insert · at start');
-        expect(describeBlockEdit({ op: 'insert', after: 'end' })).toBe('insert · at end');
+    it('names the two ops that address no block', () => {
+        expect(describeBlockEdit({ op: 'prepend', content: '<p>x</p>' })).toBe('insert · at start');
+        expect(describeBlockEdit({ op: 'append', content: '<p>x</p>' })).toBe('insert · at end');
     });
 
     it('degrades to the bare op rather than inventing an address', () => {

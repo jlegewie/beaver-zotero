@@ -234,6 +234,10 @@ const BLANK_BODY = ['<p>Alpha sentence one.</p>', '', '<p>Charlie section three.
 const BLANK_NOTE_HTML = `<div data-schema-version="9">${BLANK_BODY}</div>`;
 const BLANK_SNAPSHOT = buildAddressSnapshot(BLANK_BODY, { from: 1, to: 3 });
 
+// A note that is not empty by the `rawHtml.trim()` test — it has a wrapper — but
+// whose body projects to no visible text at all: one blank block.
+const EMPTY_BODY = '';
+
 // Over MAX_INLINE_NOTE_LINES (500).
 const MANY_LINES = Array.from({ length: 520 }, (_, i) => `<p>Line ${i + 1}.</p>`);
 const MANY_BODY = MANY_LINES.join('\n');
@@ -990,7 +994,7 @@ describe('executeEditNoteBlocksAction', () => {
 describe('edit_note_blocks advisory block ranges', () => {
     it('reports the produced range of an insert at the very start of the note', async () => {
         const response = await handleAgentActionExecuteRequest(executeRequest([
-            { index: 0, op: 'insert', after: 0, content: '<p>New A.</p>\n<p>New B.</p>' },
+            { index: 0, op: 'prepend', content: '<p>New A.</p>\n<p>New B.</p>' },
         ]));
 
         expect(response.success).toBe(true);
@@ -1001,6 +1005,23 @@ describe('edit_note_blocks advisory block ranges', () => {
         // The inserted content IS blocks 1-2. An edit must never fold its own
         // delta into its own reported position.
         expect(result.applied).toEqual([{ index: 0, blocks: '1-2' }]);
+    });
+
+    // `append` is the one op whose `anchorBlock` comes from the index
+    // (`bodyAppendAnchorBlock`) rather than from the spec, so it is the likeliest
+    // place for an off-by-one in `producedRange`.
+    it('reports the produced range of an append at the very end of the note', async () => {
+        const response = await handleAgentActionExecuteRequest(executeRequest([
+            { index: 0, op: 'append', content: '<p>New D.</p>\n<p>New E.</p>' },
+        ]));
+
+        expect(response.success).toBe(true);
+        expect(noteHtml).toBe(
+            `<div data-schema-version="9">${LINE_1}\n${LINE_2}\n${LINE_3}\n<p>New D.</p>\n<p>New E.</p></div>`,
+        );
+        const result = response.result_data as unknown as EditNoteBlocksResultData;
+        // Appended below blocks 1-3, so the new content IS blocks 4-5.
+        expect(result.applied).toEqual([{ index: 0, blocks: '4-5' }]);
     });
 
     it('reports the produced range of an insert in the middle of the note', async () => {
@@ -1027,7 +1048,7 @@ describe('edit_note_blocks advisory block ranges', () => {
 describe('edit_note_blocks preview pair', () => {
     it('pins the anchor-merge order for insert_after and insert_before', async () => {
         const response = await handleAgentActionValidateRequest(validateRequest([
-            { index: 0, op: 'insert', after: 0, content: '<p>Top.</p>' },
+            { index: 0, op: 'prepend', content: '<p>Top.</p>' },
             { index: 1, op: 'insert', after: 2, expect: LINE_2, content: '<p>Middle.</p>' },
         ]));
 
@@ -1049,6 +1070,23 @@ describe('edit_note_blocks preview pair', () => {
 
         // Both must survive the real preview flattener.
         expect(buildPreviewableEditOperations([response.normalized_action_data!])).toHaveLength(2);
+    });
+
+    // `append` has no anchor line to merge against, so it is the one insert
+    // shape the preview renders as a pure addition.
+    it('renders an append as an unanchored addition', async () => {
+        const response = await handleAgentActionValidateRequest(validateRequest([
+            { index: 0, op: 'append', content: '<p>Bottom.</p>' },
+        ]));
+
+        expect(response.valid).toBe(true);
+        const edits = response.normalized_action_data!.edits as EditNoteBlocksEditItem[];
+        expect(edits[0]).toMatchObject({
+            operation: 'append',
+            old_string: '',
+            new_string: '<p>Bottom.</p>',
+        });
+        expect(buildPreviewableEditOperations([response.normalized_action_data!])).toHaveLength(1);
     });
 
     it('keeps a blank-anchored edit in the preview by widening its anchor', async () => {
@@ -1083,6 +1121,27 @@ describe('edit_note_blocks preview pair', () => {
         expect(response.current_value.applicable_count).toBe(3);
         // The defect this guards: 3 approved, 2 rendered.
         expect(buildPreviewableEditOperations([response.normalized_action_data!])).toHaveLength(3);
+    });
+
+    // A note that projects to NO visible text anywhere — an empty wrapper, or a
+    // body holding nothing but Beaver footers — has no anchor line for
+    // `insert_before` and nothing to widen onto, so the anchored presentation
+    // would carry `old_string: ''` and be dropped while the prepend still ran.
+    it('renders a prepend into a contentless note as an unanchored addition', async () => {
+        useNote(`<div data-schema-version="9">${EMPTY_BODY}</div>`);
+        const response = await handleAgentActionValidateRequest(validateRequest(
+            [{ index: 0, op: 'prepend', content: '<p>Head.</p>' }],
+            { snapshot: buildAddressSnapshot(EMPTY_BODY, { from: 1, to: 1 }) },
+        ));
+
+        expect(response.valid).toBe(true);
+        const edits = response.normalized_action_data!.edits as EditNoteBlocksEditItem[];
+        expect(edits[0]).toMatchObject({
+            operation: 'append',
+            old_string: '',
+            new_string: '<p>Head.</p>',
+        });
+        expect(buildPreviewableEditOperations([response.normalized_action_data!])).toHaveLength(1);
     });
 
     it('does not widen a delete into showing borrowed context as deleted', async () => {

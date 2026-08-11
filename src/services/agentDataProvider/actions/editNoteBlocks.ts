@@ -602,7 +602,7 @@ function buildBlockShiftModel(applied: readonly SelectedBlockEdit[]): BlockShift
             // `deltaBefore(anchorBlock)` is what EXCLUDES this edit from its own
             // offset: every op's own `lastPreBlock` is >= its `anchorBlock`, so
             // the `<` test never counts it. That holds for `anchorBlock: 0`
-            // (`insert after: 0`) too — `deltaBefore(0)` is legitimately 0.
+            // (`prepend`) too — `deltaBefore(0)` is legitimately 0.
             // Substituting 1 there, as an earlier revision did, made `0 < 1`
             // true and folded the edit's own delta into its own position.
             const d = deltaBefore(edit.anchorBlock);
@@ -631,6 +631,7 @@ function addressedBlocks(edit: EditNoteBlocksEditItem): { from: number; to: numb
     if (edit.op === 'insert' && typeof edit.after === 'number' && edit.after >= 1) {
         return { from: edit.after, to: edit.after };
     }
+    // `prepend` / `append` address no block, so there is no shift to hint at.
     return null;
 }
 
@@ -669,7 +670,7 @@ interface PresentationFields {
  * untouched is what keeps this change free of blast radius. Extending BACKWARDS
  * is preferred so the change renders in its preceding context; an edit at line 1
  * falls forwards instead; a note that projects to nothing anywhere keeps the
- * original window and accepts the drop.
+ * original window, and its caller falls back to the unanchored presentation.
  *
  * A window that already carries text is returned unchanged, so the common case
  * is byte-identical to the un-widened behavior.
@@ -734,7 +735,7 @@ function buildPresentationFields(
     // widened: `append` clears gate 1 on its operation alone, and it has no
     // anchor line to widen around.
     const isAppend =
-        (spec.op === 'insert' && spec.after === 'end')
+        spec.op === 'append'
         || (spec.op === 'insert' && spec.after === total && trailingEmpty)
         || (spec.op === 'replace' && selected.consumedBlocks === 0);
 
@@ -778,6 +779,29 @@ function buildPresentationFields(
 
     const window = widenPresentationWindow(simplifiedLines, targetFrom, targetTo);
     const windowLines = simplifiedLines.slice(window.from - 1, window.to);
+
+    // Widening came back empty-handed: the note projects to NO visible text
+    // anywhere, so there is no anchor to render this change against and the
+    // `old_string: ''` that results would be dropped by the preview's first
+    // gate while the edit still executes. `prepend` into a contentless note —
+    // an empty wrapper, or a body holding nothing but Beaver footers — is the
+    // shape that reaches here with content the user must see.
+    //
+    // With nothing visible in the note, "above everything" and "below
+    // everything" are the same place, so the change presents as the same
+    // unanchored addition `append` uses, at its OWN splice point. A delete has
+    // no content and so nothing to show: it keeps the anchored form and
+    // accepts the drop, which removes nothing visible either way.
+    if (content !== '' && windowLines.join('\n').trim() === '') {
+        const splice = selected.resolved.ranges[0];
+        return {
+            operation: 'append',
+            old_string: '',
+            new_string: content,
+            presentationRange: { start: splice.start, end: splice.end },
+        };
+    }
+
     const offset = targetFrom - window.from;
     const newWindowLines = [
         ...windowLines.slice(0, offset),

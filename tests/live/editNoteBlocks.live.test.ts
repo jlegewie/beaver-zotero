@@ -32,7 +32,7 @@
  *   6. Real annotation HTML: a whole-annotation delete undoes byte-exactly,
  *      while an edit that alters the annotation's inner text is SKIPPED with
  *      `annotation_immutable` while its sibling edit still applies.
- *   7. `after: 'end'` insert lands ABOVE the Beaver footers (regression guard
+ *   7. `op: 'append'` lands ABOVE the Beaver footers (regression guard
  *      for a defect found in review) and the advisory renumbering round-trips
  *      against a fresh read.
  *   8. Citation degrade: content citing a nonexistent id degrades to plain
@@ -96,14 +96,14 @@ const LIBRARY_ID = Number(process.env.ZOTERO_TEST_LIBRARY_ID ?? 1);
 // Block action wire types + HTTP wrappers
 // ---------------------------------------------------------------------------
 
-type BlockOp = 'replace' | 'insert' | 'delete' | 'rewrite';
+type BlockOp = 'replace' | 'insert' | 'prepend' | 'append' | 'delete' | 'rewrite';
 
 interface BlockEdit {
     index: number;
     client_item_id?: string;
     op: BlockOp;
     block?: number;
-    after?: number | 'end';
+    after?: number;
     to?: number;
     expect?: string;
     expect_end?: string;
@@ -956,7 +956,7 @@ describe('edit_note_blocks annotations', () => {
 });
 
 // ---------------------------------------------------------------------------
-// 7. `after: 'end'` lands ABOVE the Beaver footers
+// 7. `op: 'append'` lands ABOVE the Beaver footers
 // ---------------------------------------------------------------------------
 //
 // REGRESSION GUARD (defect found in review). Beaver footers are metadata: they
@@ -965,7 +965,7 @@ describe('edit_note_blocks annotations', () => {
 // them. Both footers are SEEDED here — a headless run has no current chat
 // thread, so relying on one being stamped would make this test vacuous.
 
-describe('edit_note_blocks insert after "end"', () => {
+describe('edit_note_blocks append', () => {
     beforeEach((ctx) => skipIfNoZotero(ctx, zoteroAvailable));
 
     const MARKER = 'APPENDED ABOVE THE FOOTERS.';
@@ -985,8 +985,7 @@ describe('edit_note_blocks insert after "end"', () => {
             edits: [{
                 index: 0,
                 client_item_id: 'e-0',
-                op: 'insert',
-                after: 'end',
+                op: 'append',
                 content: `<p>${MARKER}</p>`,
             }],
         };

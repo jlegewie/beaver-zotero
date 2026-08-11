@@ -154,7 +154,7 @@ export interface BlockEditSpec {
     client_item_id?: string;
     op: EditNoteBlocksOp;
     block?: number;
-    after?: number | 'end';
+    after?: number;
     to?: number;
     expect?: string;
     expect_end?: string;
@@ -184,9 +184,12 @@ export interface SelectedBlockEdit {
     /** The batch engine's own resolved shape; feed straight to `applyResolvedEdits`. */
     resolved: ResolvedBatchEdit;
     op: EditNoteBlocksOp;
-    /** First pre-edit block of the changed region (`0` for `insert after: 0`). */
+    /** First pre-edit block of the changed region (`0` for `prepend`). */
     anchorBlock: number;
-    /** Pre-edit blocks consumed: 1 for replace, `to - from + 1` for delete, 0 for insert. */
+    /**
+     * Pre-edit blocks consumed: 1 for replace, `to - from + 1` for delete, 0 for
+     * `insert` / `prepend` / `append`.
+     */
     consumedBlocks: number;
     /** Blocks the replacement contributes at that position (0 for delete). */
     producedBlocks: number;
@@ -1054,8 +1057,31 @@ function checkShape(spec: BlockEditSpec): SkipDraft | null {
             + 'engine. It must be sent as the sole edit in the request.',
         );
     }
-    if (op !== 'replace' && op !== 'insert' && op !== 'delete') {
-        return skip('invalid_edit', `Unknown op "${String(op)}"; expected "replace", "insert", "delete" or "rewrite".`);
+    if (op !== 'replace' && op !== 'insert' && op !== 'prepend' && op !== 'append' && op !== 'delete') {
+        return skip(
+            'invalid_edit',
+            `Unknown op "${String(op)}"; expected "replace", "insert", "prepend", "append", `
+            + '"delete" or "rewrite".',
+        );
+    }
+
+    // `prepend` / `append` address the note's absolute start and end. They name
+    // no block, so every addressing field is a sign the caller meant `insert`.
+    if (op === 'prepend' || op === 'append') {
+        if (typeof spec.content !== 'string') {
+            return skip('invalid_edit', `${op} requires \`content\` (the text to add, in simplified format).`);
+        }
+        const stray = (['block', 'after', 'to', 'expect', 'expect_end'] as const)
+            .find((field) => spec[field] !== undefined);
+        if (stray) {
+            return skip(
+                'invalid_edit',
+                `\`${stray}\` is not valid for ${op} — it adds \`content\` at the `
+                + `${op === 'prepend' ? 'start' : 'end'} of the note and addresses no block. `
+                + 'Use op:"insert" with `after` and `expect` to add content next to a block.',
+            );
+        }
+        return null;
     }
 
     if (op === 'replace') {
@@ -1072,25 +1098,21 @@ function checkShape(spec: BlockEditSpec): SkipDraft | null {
     }
 
     if (op === 'insert') {
-        const after = spec.after;
-        const validAfter = after === 'end'
-            || (typeof after === 'number' && Number.isInteger(after) && after >= 0);
-        if (!validAfter) {
-            return skip('invalid_edit', 'insert requires `after` — a block number >= 0, or the literal "end".');
+        if (!isBlockNumber(spec.after)) {
+            return skip(
+                'invalid_edit',
+                'insert requires `after` — a 1-based integer block number. To add content at the '
+                + 'very start or end of the note, use op:"prepend" or op:"append" instead.',
+            );
         }
         if (typeof spec.content !== 'string') {
             return skip('invalid_edit', 'insert requires `content` (the text to insert, in simplified format).');
         }
-        // An insert overwrites no line, but a numbered anchor still needs its
-        // `expect` so an off-by-one `after` is caught instead of silently
-        // placing content at the wrong seam. `after: 0` / `after: "end"` name a
-        // seam rather than a block, so they take no expect.
-        if (typeof after === 'number' && after >= 1) {
-            if (typeof spec.expect !== 'string') {
-                return skip('invalid_edit', 'insert requires `expect` — the text of the block you are inserting after.');
-            }
-        } else if (spec.expect !== undefined) {
-            return skip('invalid_edit', '`expect` is not valid for after:0 or after:"end" — they address no block.');
+        // An insert overwrites no line, but its anchor still needs `expect` so an
+        // off-by-one `after` is caught instead of silently placing content at the
+        // wrong seam. Every `after` names a real block, so this is unconditional.
+        if (typeof spec.expect !== 'string') {
+            return skip('invalid_edit', 'insert requires `expect` — the text of the block you are inserting after.');
         }
         return null;
     }
@@ -1126,13 +1148,14 @@ function checkBounds(spec: BlockEditSpec, total: number): SkipDraft | null {
         `${field} ${n} does not exist; this note has ${total} block(s). `
         + `Address a block between 1 and ${total}.`,
     );
+    // `prepend` / `append` address no block, so there is nothing to bound.
+    if (spec.op === 'prepend' || spec.op === 'append') return null;
     if (spec.op === 'replace') {
         const block = spec.block as number;
         if (block > total) return oor(block, 'block');
         return null;
     }
     if (spec.op === 'insert') {
-        if (spec.after === 'end') return null;
         const after = spec.after as number;
         if (after > total) return oor(after, 'after');
         return null;
@@ -1145,7 +1168,14 @@ function checkBounds(spec: BlockEditSpec, total: number): SkipDraft | null {
 }
 
 /** Gate 2b — the read window carried by the verified snapshot token. */
-function checkReadWindow(spec: BlockEditSpec, window: ReadWindow, total: number): SkipDraft | null {
+function checkReadWindow(spec: BlockEditSpec, window: ReadWindow): SkipDraft | null {
+    // `prepend` / `append` name the note's absolute start and end rather than a
+    // block. Those positions exist whatever the model read and cannot be off by
+    // one, so the window — which answers "did you see this block?" — has no
+    // question to answer. Checked BEFORE the empty-window bail-out so they stay
+    // usable on a token that carries no addressable range at all.
+    if (spec.op === 'prepend' || spec.op === 'append') return null;
+
     // EMPTY_READ_WINDOW: the response that issued this token showed no note
     // lines, so there is no range to name and nothing is addressable.
     if (window.from === 0 && window.to === 0) {
@@ -1168,16 +1198,7 @@ function checkReadWindow(spec: BlockEditSpec, window: ReadWindow, total: number)
         return inWindow(block) ? null : outside(`block ${block}`);
     }
     if (spec.op === 'insert') {
-        if (spec.after === 'end') {
-            // `after: "end"` names the seam at the end of the body; the model
-            // must have actually seen the end of the note.
-            return window.to === total ? null : outside('after "end"');
-        }
         const after = spec.after as number;
-        if (after === 0) {
-            // `after: 0` names the seam before block 1.
-            return window.from === 1 ? null : outside('after 0');
-        }
         return inWindow(after) ? null : outside(`after ${after}`);
     }
     const from = spec.block as number;
@@ -1263,8 +1284,11 @@ function checkSpanRules(index: BlockRawIndex, spec: BlockEditSpec): SkipDraft | 
         );
     }
 
+    // `prepend` / `append` land at the body's outer edges, which cannot be
+    // inside a span.
+    if (spec.op === 'prepend' || spec.op === 'append') return null;
+
     if (spec.op === 'insert') {
-        if (spec.after === 'end' || spec.after === 0) return null;
         const after = spec.after as number;
         // A seam strictly inside a multiline span: blocks `after` and `after+1`
         // both belong to it. Seams at span boundaries are fine.
@@ -1302,8 +1326,11 @@ function checkSpanRules(index: BlockRawIndex, spec: BlockEditSpec): SkipDraft | 
 
 /** Gate 5 — structural rules. */
 function checkStructuralRules(index: BlockRawIndex, spec: BlockEditSpec): SkipDraft | null {
+    // `prepend` / `append` land at the body's outer edges, never between a
+    // container's own structural lines.
+    if (spec.op === 'prepend' || spec.op === 'append') return null;
+
     if (spec.op === 'insert') {
-        if (spec.after === 'end' || spec.after === 0) return null;
         const after = spec.after as number;
         if (!seamIsStructural(index.simplifiedLines, after)) return null;
         return skip(
@@ -1367,14 +1394,17 @@ function checkExpect(index: BlockRawIndex, spec: BlockEditSpec): SkipDraft | nul
               + '`actual`. Either the expect text came from a different block or the block number '
               + 'is wrong; check both against the read_note listing you already have.';
 
+    // `prepend` / `append` address no block, so there is nothing to confirm.
+    // `checkShape` has already refused any `expect` they carried.
+    if (spec.op === 'prepend' || spec.op === 'append') return null;
+
     if (spec.op === 'insert') {
-        // Only numbered anchors carry an expect; 0 / "end" name a seam. The
-        // anchor is quoted from either end of the block, so suffixes match too.
-        if (typeof spec.after !== 'number' || spec.after < 1) return null;
-        const anchorLine = index.simplifiedLines[spec.after - 1];
+        // The anchor is quoted from either end of the block, so suffixes match too.
+        const after = spec.after as number;
+        const anchorLine = index.simplifiedLines[after - 1];
         const outcome = matchExpect(spec.expect as string, anchorLine, { allowSuffix: true });
         if (outcome !== 'match') {
-            return skip('expect_mismatch', mismatchMessage('expect', spec.after, outcome), spec.after);
+            return skip('expect_mismatch', mismatchMessage('expect', after, outcome), after);
         }
         return null;
     }
@@ -1442,11 +1472,11 @@ function buildSplice(
 
     /**
      * "Append at the end of the body" — the SINGLE implementation shared by
-     * `insert after: 'end'`, `insert after: <trailing empty line>` and `replace`
-     * of the trailing empty line. These are the same conceptual operation and
-     * must not diverge, which is why there is one helper and not three call
-     * sites. The point comes from the walk (see `BlockRawIndex.bodyAppendPoint`),
-     * so content lands ABOVE any trailing Beaver footer.
+     * `op: 'append'`, `insert after: <trailing empty line>` and `replace` of the
+     * trailing empty line. These are the same conceptual operation and must not
+     * diverge, which is why there is one helper and not three call sites. The
+     * point comes from the walk (see `BlockRawIndex.bodyAppendPoint`), so content
+     * lands ABOVE any trailing Beaver footer.
      */
     const appendAtBodyEnd = () => {
         const at = index.bodyAppendPoint;
@@ -1460,6 +1490,31 @@ function buildSplice(
             producedBlocks: lineCount(expandedContent),
         };
     };
+
+    if (spec.op === 'append') return appendAtBodyEnd();
+
+    if (spec.op === 'prepend') {
+        // The first KEPT line is normally the first content line, so prepending
+        // at its start puts content above every block — and below a LEADING
+        // Beaver footer, which is where it belongs.
+        //
+        // EXCEPT when the body holds no content line at all (only footers): then
+        // the first kept line is the trailing empty line, which sits BELOW the
+        // footer, and prepending there would bury the user's content under
+        // "Created by Beaver" — the exact hazard `bodyAppendPoint` exists to
+        // avoid at the other end. `bodyAppendAnchorBlock === 0` is the walk's own
+        // signal for that shape and `bodyStart` is what its append point falls
+        // back to, so the two ends coincide there, as they must: with no content,
+        // there is nothing to be before or after.
+        const at = index.bodyAppendAnchorBlock === 0 ? index.bodyStart : rawLineRanges[0].start;
+        const replacement = `${expandedContent}\n`;
+        return {
+            ...make(at, at, replacement, '', replacement),
+            anchorBlock: 0,
+            consumedBlocks: 0,
+            producedBlocks: lineCount(expandedContent),
+        };
+    }
 
     if (spec.op === 'replace') {
         const block = spec.block as number;
@@ -1476,20 +1531,10 @@ function buildSplice(
     }
 
     if (spec.op === 'insert') {
-        const isEnd = spec.after === 'end'
-            || (spec.after === total && trailingEmpty);
-        if (isEnd) return appendAtBodyEnd();
+        // Inserting after the trailing empty line IS an append at the end of the
+        // body — the one spelling of `append` that `insert` can still reach.
+        if (spec.after === total && trailingEmpty) return appendAtBodyEnd();
         const after = spec.after as number;
-        if (after === 0) {
-            const at = rawLineRanges[0].start;
-            const replacement = `${expandedContent}\n`;
-            return {
-                ...make(at, at, replacement, '', replacement),
-                anchorBlock: 0,
-                consumedBlocks: 0,
-                producedBlocks: lineCount(expandedContent),
-            };
-        }
         const at = rawLineRanges[after - 1].end;
         const replacement = `\n${expandedContent}`;
         return {
@@ -1540,7 +1585,7 @@ function rangesIntersect(a: ResolvedRange, b: ResolvedRange): boolean {
  *    intersection reports as non-conflicting. The second must be skipped so the
  *    model combines them into one `content`.
  * 2. A zero-width insert whose offset equals another edit's range START escapes
- *    strict intersection too — `insert after: 0` resolves to `rawLineRanges[0].start`,
+ *    strict intersection too — `prepend` resolves to `rawLineRanges[0].start`,
  *    exactly where `replace block 1` / `delete block 1` begin. Keeping both
  *    is silent corruption, not a cosmetic ordering quirk: `applyResolvedEdits`
  *    splices descending by start and breaks ties by DESCENDING edit index (a
@@ -1641,7 +1686,7 @@ export function selectBlockEdits(
         }
 
         if (ctx.readWindow) {
-            const windowSkip = checkReadWindow(spec, ctx.readWindow, total);
+            const windowSkip = checkReadWindow(spec, ctx.readWindow);
             if (windowSkip) { emit(windowSkip); continue; }
         }
 
@@ -1673,7 +1718,8 @@ export function selectBlockEdits(
             const from = spec.block as number;
             const to = spec.to ?? from;
             for (let n = from; n <= to; n++) touched.push(n);
-        } else if (typeof spec.after === 'number' && spec.after >= 1) touched.push(spec.after);
+        } else if (spec.op === 'insert') touched.push(spec.after as number);
+        // `prepend` / `append` touch no block, so they have nothing to verify.
         for (const block of touched) {
             const refusal = verifyBlock(block);
             if (refusal) return refusal;

@@ -145,8 +145,17 @@ function replaceEdit(index: BlockRawIndex, block: number, content: string, i = 0
     return { index: i, op: 'replace', block, content, expect: index.simplifiedLines[block - 1] };
 }
 
-function insertEdit(after: number | 'end', content: string, i = 0): BlockEditSpec {
+function insertEdit(after: number, content: string, i = 0): BlockEditSpec {
     return { index: i, op: 'insert', after, content };
+}
+
+/** The note's absolute start / end — neither addresses a block. */
+function prependEdit(content: string, i = 0): BlockEditSpec {
+    return { index: i, op: 'prepend', content };
+}
+
+function appendEdit(content: string, i = 0): BlockEditSpec {
+    return { index: i, op: 'append', content };
 }
 
 function deleteEdit(index: BlockRawIndex, from: number, to?: number, i = 0): BlockEditSpec {
@@ -472,14 +481,14 @@ describe('buildBlockRawIndex — footer matrix', () => {
         }
     });
 
-    // `insert after: 0` anchors on the first KEPT line, not on `bodyStart`;
+    // `prepend` anchors on the first KEPT line, not on `bodyStart`;
     // the two differ only when a footer leads the body.
-    it('anchors insert after:0 on the first kept line, below a leading footer', () => {
+    it('anchors prepend on the first kept line, below a leading footer', () => {
         const f = fixture(`${CREATED_FOOTER}<p>Alpha</p>`);
         const index = buildIndex(f);
         expect(index.footerRanges.length).toBe(1);
         expect(index.rawLineRanges[0].start).toBeGreaterThan(index.bodyStart);
-        const applied = applyAll(index, select(index, [insertEdit(0, '<p>Head</p>')]));
+        const applied = applyAll(index, select(index, [prependEdit('<p>Head</p>')]));
         expect(applied.indexOf('Created by Beaver')).toBeLessThan(applied.indexOf('<p>Head</p>'));
         expect(applied).toContain(CREATED_FOOTER);
         expect(applied).toContain('<p>Head</p>\n<p>Alpha</p>');
@@ -877,20 +886,20 @@ describe('selectBlockEdits — splices', () => {
         expect(applied.anchorBlock).toBe(1);
     });
 
-    it('insert after 0 lands at the very start, never touching the wrapper', () => {
+    it('prepend lands at the very start, never touching the wrapper', () => {
         const f = fixture('<p>Alpha</p>');
         const index = buildIndex(f);
-        const result = select(index, [insertEdit(0, '<p>First</p>')]);
+        const result = select(index, [prependEdit('<p>First</p>')]);
         const applied = applyAll(index, result);
         expect(applied).toBe(`${WRAPPER_OPEN}<p>First</p>\n<p>Alpha</p>\n</div>`);
         expect(applied.startsWith(WRAPPER_OPEN)).toBe(true);
         expect(expectOk(result).applied[0].anchorBlock).toBe(0);
     });
 
-    it("insert after 'end' appends at the body append point", () => {
+    it("append lands at the body append point", () => {
         const f = fixture('<p>Alpha</p><p>Beta</p>');
         const index = buildIndex(f);
-        const result = select(index, [insertEdit('end', '<p>Last</p>')]);
+        const result = select(index, [appendEdit('<p>Last</p>')]);
         expect(applyAll(index, result)).toBe(
             `${WRAPPER_OPEN}<p>Alpha</p>\n<p>Beta</p>\n<p>Last</p>\n</div>`,
         );
@@ -981,12 +990,12 @@ describe('selectBlockEdits — the trailing empty line', () => {
         expect(expectOk(result).skipped[0].reason).toMatch(/trailing empty line/);
     });
 
-    it("insert after the trailing empty line is treated as after:'end'", () => {
+    it('insert after the trailing empty line is treated as an append', () => {
         const f = fixture('<p>Alpha</p>');
         const index = buildIndex(f);
         const last = index.rawLineRanges.length;
         const viaNumber = applyAll(index, select(index, [insertEdit(last, '<p>Tail</p>')]));
-        const viaEnd = applyAll(index, select(index, [insertEdit('end', '<p>Tail</p>')]));
+        const viaEnd = applyAll(index, select(index, [appendEdit('<p>Tail</p>')]));
         expect(viaNumber).toBe(viaEnd);
         expect(viaEnd).toBe(`${WRAPPER_OPEN}<p>Alpha</p>\n<p>Tail</p>\n</div>`);
     });
@@ -1102,8 +1111,8 @@ describe('selectBlockEdits — structural rules (lists AND tables, one code path
         const index = buildIndex(f);
         const closeUl = blockOf(index, '</ul>');
         expect(skipCodes(select(index, [insertEdit(closeUl, '<p>after the list</p>')]))).toEqual([]);
-        expect(skipCodes(select(index, [insertEdit(0, '<p>before everything</p>')]))).toEqual([]);
-        expect(skipCodes(select(index, [insertEdit('end', '<p>at the end</p>')]))).toEqual([]);
+        expect(skipCodes(select(index, [prependEdit('<p>before everything</p>')]))).toEqual([]);
+        expect(skipCodes(select(index, [appendEdit('<p>at the end</p>')]))).toEqual([]);
     });
 });
 
@@ -1383,12 +1392,12 @@ describe('selectBlockEdits — mid-document footers', () => {
         expect(applied).toContain(EDIT_FOOTER);
     });
 
-    it("after:'end' lands at the end of the last content line, above nothing (no trailing footer)", () => {
+    it("append lands at the end of the last content line, above nothing (no trailing footer)", () => {
         const f = fixture(
             `<p>Alpha</p>${CREATED_FOOTER}<p>Middle</p>${EDIT_FOOTER}<p>Omega</p>`,
         );
         const index = buildIndex(f);
-        const result = select(index, [insertEdit('end', '<p>Tail</p>')]);
+        const result = select(index, [appendEdit('<p>Tail</p>')]);
         const op = expectOk(result).applied[0].resolved.applyOps[0];
         // The last body line is the trailing empty line; the append point is the
         // end of the last CONTENT line above it.
@@ -1401,19 +1410,19 @@ describe('selectBlockEdits — mid-document footers', () => {
     // paragraphs, so appending there would put user content under "Created by
     // Beaver". `addOrUpdateEditFooter` re-appends the EDIT footer at save time
     // so that one self-heals, but the CREATED footer never moves.
-    it("after:'end' lands ABOVE a trailing created footer", () => {
+    it("append lands ABOVE a trailing created footer", () => {
         const f = fixture(`<p>Alpha</p>${CREATED_FOOTER}`);
         const index = buildIndex(f);
-        const applied = applyAll(index, select(index, [insertEdit('end', '<p>Tail</p>')]));
+        const applied = applyAll(index, select(index, [appendEdit('<p>Tail</p>')]));
         expect(applied.indexOf('<p>Tail</p>')).toBeLessThan(applied.indexOf('Created by Beaver'));
         expect(applied).toContain(CREATED_FOOTER);
         expect(applied).toContain('<p>Alpha</p>\n<p>Tail</p>\n');
     });
 
-    it("after:'end' lands ABOVE BOTH trailing footers, leaving each byte-intact", () => {
+    it("append lands ABOVE BOTH trailing footers, leaving each byte-intact", () => {
         const f = fixture(`<p>Alpha</p>${CREATED_FOOTER}${EDIT_FOOTER}`);
         const index = buildIndex(f);
-        const applied = applyAll(index, select(index, [insertEdit('end', '<p>Tail</p>')]));
+        const applied = applyAll(index, select(index, [appendEdit('<p>Tail</p>')]));
         expect(applied.indexOf('<p>Tail</p>')).toBeLessThan(applied.indexOf('Created by Beaver'));
         expect(applied.indexOf('<p>Tail</p>')).toBeLessThan(applied.indexOf('Edited by Beaver'));
         expect(applied).toContain(CREATED_FOOTER);
@@ -1426,15 +1435,15 @@ describe('selectBlockEdits — mid-document footers', () => {
         const last = index.rawLineRanges.length;
         expect(index.simplifiedLines[last - 1]).toBe('');
         const applied = applyAll(index, select(index, [replaceEdit(index, last, '<p>Tail</p>')]));
-        // Same conceptual operation as after:'end', so it must not diverge.
+        // Same conceptual operation as op:'append', so it must not diverge.
         expect(applied.indexOf('<p>Tail</p>')).toBeLessThan(applied.indexOf('Created by Beaver'));
         expect(applied).toContain(CREATED_FOOTER);
     });
 
-    it("after:'end' falls back to bodyStart when the body holds nothing but a footer", () => {
+    it("append falls back to bodyStart when the body holds nothing but a footer", () => {
         const f = fixture(`${CREATED_FOOTER}`);
         const index = buildIndex(f);
-        const result = select(index, [insertEdit('end', '<p>Tail</p>')]);
+        const result = select(index, [appendEdit('<p>Tail</p>')]);
         expect(skipCodes(result)).toEqual([]);
         expect(expectOk(result).applied[0].resolved.applyOps[0].start).toBe(index.bodyStart);
         const applied = applyAll(index, result);
@@ -1454,9 +1463,64 @@ describe('selectBlockEdits — mid-document footers', () => {
         // footer is irrelevant: the append point is still the last content line.
         expect(index.bodyAppendPoint)
             .toBe(index.rawLineRanges[index.rawLineRanges.length - 2].end);
-        const applied = applyAll(index, select(index, [insertEdit('end', '<p>Tail</p>')]));
+        const applied = applyAll(index, select(index, [appendEdit('<p>Tail</p>')]));
         expect(applied).toContain('<p>Omega</p>\n<p>Tail</p>\n');
         expect(applied.indexOf('Created by Beaver')).toBeLessThan(applied.indexOf('<p>Tail</p>'));
+    });
+});
+
+// =============================================================================
+// PART 2c — the two ops that address no block
+// =============================================================================
+
+describe('selectBlockEdits — prepend / append', () => {
+    const f = () => fixture('<p>Alpha</p><p>Beta</p>');
+
+    it('applies both ends in one call without conflicting', () => {
+        const index = buildIndex(f());
+        const result = select(index, [
+            prependEdit('<p>Head</p>', 0),
+            appendEdit('<p>Tail</p>', 1),
+        ]);
+        expect(skipCodes(result)).toEqual([]);
+        expect(applyAll(index, result)).toBe(
+            `${WRAPPER_OPEN}<p>Head</p>\n<p>Alpha</p>\n<p>Beta</p>\n<p>Tail</p>\n</div>`,
+        );
+    });
+
+    // They carry `content`, so the other direction of the balance hazard still
+    // applies even though they confirm no block.
+    it('still refuses tag-unbalanced content', () => {
+        const index = buildIndex(f());
+        expect(skipCodes(select(index, [prependEdit('<ul><li>')]))).toEqual(['unbalanced_range']);
+        expect(skipCodes(select(index, [appendEdit('</ul>')]))).toEqual(['unbalanced_range']);
+    });
+
+    it('reports an anchorBlock of 0 for prepend and the last content block for append', () => {
+        const index = buildIndex(f());
+        const [prepended] = expectOk(select(index, [prependEdit('<p>Head</p>')])).applied;
+        expect(prepended).toMatchObject({ anchorBlock: 0, consumedBlocks: 0, producedBlocks: 1 });
+        // The literal, not `index.bodyAppendAnchorBlock` — comparing the output
+        // to the field the engine read to produce it passes for any value.
+        // `<p>Alpha</p><p>Beta</p>` is blocks 1-2 plus a trailing empty line.
+        const [appended] = expectOk(select(index, [appendEdit('<p>Tail</p>')])).applied;
+        expect(appended).toMatchObject({ anchorBlock: 2, consumedBlocks: 0, producedBlocks: 1 });
+    });
+
+    // The footer-only body is the one shape where "the first kept line" is NOT a
+    // content line: it is the trailing empty line, which sits BELOW the footer.
+    // Prepending there would bury the content under "Created by Beaver" — the
+    // inverse of the hazard `bodyAppendPoint` guards at the other end.
+    it('prepends ABOVE a footer when the body holds nothing but that footer', () => {
+        const index = buildIndex(fixture(`${CREATED_FOOTER}`));
+        expect(index.rawLineRanges[0].start).toBeGreaterThan(index.bodyStart);
+
+        const result = select(index, [prependEdit('<p>Head</p>')]);
+        expect(skipCodes(result)).toEqual([]);
+        expect(expectOk(result).applied[0].resolved.applyOps[0].start).toBe(index.bodyStart);
+        // Byte-exact, and identical to what `append` produces on this note: with
+        // no content line there is nothing to be before or after.
+        expect(applyAll(index, result)).toBe(`${WRAPPER_OPEN}<p>Head</p>\n${CREATED_FOOTER}\n</div>`);
     });
 });
 
@@ -1489,8 +1553,8 @@ describe('selectBlockEdits — read window', () => {
         const total = index.rawLineRanges.length;
         const window = { from: 1, to: total };
         expect(skipCodes(select(index, [replaceEdit(index, total - 1, '<p>E2</p>')], { readWindow: window }))).toEqual([]);
-        expect(skipCodes(select(index, [insertEdit(0, '<p>x</p>')], { readWindow: window }))).toEqual([]);
-        expect(skipCodes(select(index, [insertEdit('end', '<p>x</p>')], { readWindow: window }))).toEqual([]);
+        expect(skipCodes(select(index, [prependEdit('<p>x</p>')], { readWindow: window }))).toEqual([]);
+        expect(skipCodes(select(index, [appendEdit('<p>x</p>')], { readWindow: window }))).toEqual([]);
     });
 
     it('fails closed against the canonical empty window', () => {
@@ -1498,10 +1562,19 @@ describe('selectBlockEdits — read window', () => {
         const window = { from: 0, to: 0 };
         expect(skipCodes(select(index, [replaceEdit(index, 1, '<p>x</p>')], { readWindow: window })))
             .toEqual(['address_outside_read_window']);
-        expect(skipCodes(select(index, [insertEdit(0, '<p>x</p>')], { readWindow: window })))
+        expect(skipCodes(select(index, [insertEdit(1, '<p>x</p>')], { readWindow: window })))
             .toEqual(['address_outside_read_window']);
-        expect(skipCodes(select(index, [insertEdit('end', '<p>x</p>')], { readWindow: window })))
-            .toEqual(['address_outside_read_window']);
+    });
+
+    // The window answers "did you see this block?". `prepend` / `append` name
+    // the note's absolute start and end, which exist whatever the model read and
+    // cannot be off by one, so they stay usable on a token that shows nothing.
+    it('exempts prepend and append from the window, even the empty one', () => {
+        const index = buildIndex(f());
+        for (const window of [{ from: 0, to: 0 }, { from: 2, to: 3 }]) {
+            expect(skipCodes(select(index, [prependEdit('<p>x</p>')], { readWindow: window }))).toEqual([]);
+            expect(skipCodes(select(index, [appendEdit('<p>x</p>')], { readWindow: window }))).toEqual([]);
+        }
     });
 
     // `{from: 0, to: 0}` means "this response showed no note lines", so the
@@ -1549,8 +1622,13 @@ describe('selectBlockEdits — shape validation', () => {
             { index: 8, op: 'delete', block: 1, expect: 'y', expect_end: 'z' },      // stray expect_end
             { index: 9, op: 'replace', block: 1.5 as any, content: 'x', expect: 'y' },    // non-integer
             { index: 10, op: 'insert', after: -1, expect: 'y', content: 'x' },            // negative
-            { index: 11, op: 'insert', after: 0, expect: 'y', content: 'x' },             // expect on a seam
-            { index: 12, op: 'insert', after: 'end', expect: 'y', content: 'x' },         // expect on a seam
+            { index: 11, op: 'insert', after: 0, expect: 'y', content: 'x' },             // after:0 is now prepend
+            { index: 12, op: 'insert', after: 'end' as any, expect: 'y', content: 'x' },  // 'end' is now append
+            { index: 13, op: 'prepend' },                                                 // no content
+            { index: 14, op: 'append' },                                                  // no content
+            { index: 15, op: 'prepend', content: 'x', expect: 'y' },                       // stray expect
+            { index: 16, op: 'append', content: 'x', after: 1 },                           // stray after
+            { index: 17, op: 'append', content: 'x', block: 1 },                           // stray block
         ];
         expect(skipCodes(select(i, cases))).toEqual(cases.map(() => 'invalid_edit'));
     });
@@ -1693,7 +1771,7 @@ describe('selectBlockEdits — overlap determinism', () => {
         expect(applyAll(index, result)).toBe(`${WRAPPER_OPEN}<p>A2</p>\n<p>B2</p>\n<p>Gamma</p>\n</div>`);
     });
 
-    // `insert after: 0` resolves to `rawLineRanges[0].start` — exactly where a
+    // `prepend` resolves to `rawLineRanges[0].start` — exactly where a
     // replace/delete of block 1 begins. Strict intersection says "no conflict"
     // (the insert is zero-width), but `applyResolvedEdits` breaks same-offset
     // ties by DESCENDING edit index, so the insert is spliced FIRST and the
@@ -1701,23 +1779,23 @@ describe('selectBlockEdits — overlap determinism', () => {
     // Before the fix this produced `<p>ALPHA</p><p>Alpha</p>` with no skip and
     // no warning: the reverse-replay self-check does not fire because the two
     // length deltas cancel.
-    it('REQUIRED: insert after:0 conflicts with a replace of block 1', () => {
+    it('REQUIRED: prepend conflicts with a replace of block 1', () => {
         const f = fixture('<p>Alpha</p><p>Beta</p>');
         const index = buildIndex(f);
         const result = select(index, [
             replaceEdit(index, 1, '<p>ALPHA</p>', 0),
-            insertEdit(0, '<p>Head</p>', 1),
+            prependEdit('<p>Head</p>', 1),
         ]);
         expect(skipCodes(result)).toEqual(['overlapping_edits']);
         expect(applyAll(index, result)).toBe(`${WRAPPER_OPEN}<p>ALPHA</p>\n<p>Beta</p>\n</div>`);
     });
 
-    it('REQUIRED: insert after:0 conflicts with a delete of block 1', () => {
+    it('REQUIRED: prepend conflicts with a delete of block 1', () => {
         const f = fixture('<p>Alpha</p><p>Beta</p>');
         const index = buildIndex(f);
         const result = select(index, [
             deleteEdit(index, 1, 1, 0),
-            insertEdit(0, '<p>Head</p>', 1),
+            prependEdit('<p>Head</p>', 1),
         ]);
         expect(skipCodes(result)).toEqual(['overlapping_edits']);
         // Before the fix this emitted malformed HTML: `p>Alpha</p>`.
@@ -1728,7 +1806,7 @@ describe('selectBlockEdits — overlap determinism', () => {
         const f = fixture('<p>Alpha</p><p>Beta</p>');
         const index = buildIndex(f);
         const result = select(index, [
-            insertEdit(0, '<p>Head</p>', 0),
+            prependEdit('<p>Head</p>', 0),
             replaceEdit(index, 1, '<p>ALPHA</p>', 1),
         ]);
         // Keep-first: the insert wins here, the replace is the one skipped.
@@ -1847,7 +1925,7 @@ describe('property: apply → reverse replay reconstructs the pre-edit note byte
         ['repeated fragments', '<p>same</p><p>same</p><p>same</p><p>same</p>',
             (i) => [replaceEdit(i, 1, '<p>one</p>', 0), replaceEdit(i, 3, '<p>three</p>', 1)]],
         ['insert at both ends', '<p>Alpha</p><p>Beta</p>',
-            () => [insertEdit(0, '<p>Head</p>', 0), insertEdit('end', '<p>Tail</p>', 1)]],
+            () => [prependEdit('<p>Head</p>', 0), appendEdit('<p>Tail</p>', 1)]],
         ['multi-line content', '<p>Alpha</p><p>Beta</p>',
             (i) => [replaceEdit(i, 2, '<p>B1</p>\n<p>B2</p>\n<p>B3</p>')]],
     ];

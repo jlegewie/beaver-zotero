@@ -120,10 +120,9 @@ export function getEditNoteCallVariant({
  * Reads ONLY the persisted addressing fields, which is why it can live in the
  * render layer: nothing here consults the note, prefs, or the editor.
  *
- * `after: 0` and `after: 'end'` name a seam rather than a block, so they get
- * their own wording — "after 0" would read as a block number that does not
- * exist. An edit whose addressing field is missing or malformed degrades to the
- * bare op rather than inventing an address.
+ * `prepend` and `append` address no block, so they name the position in words
+ * instead of quoting an address. An edit whose addressing field is missing or
+ * malformed degrades to the bare op rather than inventing an address.
  */
 export function describeBlockEdit(edit: Record<string, any> | null | undefined): string {
     const op = typeof edit?.op === 'string' ? edit.op : '';
@@ -134,10 +133,12 @@ export function describeBlockEdit(edit: Record<string, any> | null | undefined):
             const block = edit!.block;
             return typeof block === 'number' ? `replace · block ${block}` : 'replace';
         }
+        case 'prepend':
+            return 'insert · at start';
+        case 'append':
+            return 'insert · at end';
         case 'insert': {
             const after = edit!.after;
-            if (after === 'end') return 'insert · at end';
-            if (after === 0) return 'insert · at start';
             return typeof after === 'number' ? `insert · after ${after}` : 'insert';
         }
         case 'delete': {

@@ -430,7 +430,7 @@ describe('undoEditNoteBlocksAction', () => {
 
     it('round-trips a multi-edit action, replaying records in reverse order', async () => {
         const edits: EditNoteBlocksEditItem[] = [
-            { index: 0, op: 'insert', after: 0, content: '<p>Inserted line.</p>' },
+            { index: 0, op: 'prepend', content: '<p>Inserted line.</p>' },
             { index: 1, op: 'replace', block: 2, expect: LINE_2, content: '<p>Bravo edited.</p>' },
             { index: 2, op: 'delete', block: 3, expect: LINE_3 },
         ];
@@ -731,7 +731,7 @@ describe('getEditNoteCallVariant', () => {
             toolArgs: { edits: [{ op: 'replace', block: 2, content: '<p>x</p>' }] },
         })).toBe('blocks');
         expect(getEditNoteCallVariant({
-            toolArgs: { edits: [{ op: 'insert', after: 0, content: '<p>x</p>' }] },
+            toolArgs: { edits: [{ op: 'prepend', content: '<p>x</p>' }] },
         })).toBe('blocks');
         expect(getEditNoteCallVariant({
             toolArgs: { edits: [{ op: 'delete', block: 3 }] },
