@@ -287,6 +287,7 @@ export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
                     previewData={previewData}
                     status={status}
                     actions={row.actions}
+                    compact
                 />
             )}
         </div>
