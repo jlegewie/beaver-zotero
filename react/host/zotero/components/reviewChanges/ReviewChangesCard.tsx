@@ -34,7 +34,7 @@ import IconButton from '../../../../components/ui/IconButton';
 import Tooltip from '../../../../components/ui/Tooltip';
 
 /** Rows shown before the `Show all (N)` affordance. */
-const MAX_VISIBLE_ROWS = 20;
+const MAX_VISIBLE_ROWS = 12;
 const REVIEW_EXIT_DELAY_MS = 600;
 const REVIEW_FADE_MS = 200;
 
