@@ -429,10 +429,24 @@ fi
 
 # 4. Clean up the copy: drop stale locks / recovery markers, then checkpoint the
 #    cloned databases so the new instance starts as if the source had been quit
-#    cleanly. Only touch the databases when we just made the copy -- a data dir
-#    from an earlier run may belong to a Zotero that is currently running, and
-#    Zotero 10 holds an exclusive SQLite lock while live.
-zc_strip_clone_artifacts "$DEST_PROFILE" "$DEST_DATADIR"
+#    cleanly. Both steps apply ONLY to a destination this run actually cloned.
+#    A profile / data dir kept from an earlier run may belong to a Zotero that is
+#    running right now: its `.parentlock` is the live profile lock (deleting it
+#    would let a second instance open the same database), its `*.is.corrupt`
+#    markers are that instance's own recovery state, and Zotero 10 holds an
+#    exclusive SQLite lock while live. Locks left behind by a crashed instance
+#    need no help from us -- Zotero drops a lock whose owner is gone.
+#    (`if`, not `&&`: under `set -e` a false `[[ ]] && …` list aborts the script.)
+STRIP_DIRS=()
+if [[ "$CLONED_PROFILE" == "1" ]]; then STRIP_DIRS+=("$DEST_PROFILE"); fi
+if [[ "$CLONED_DATADIR" == "1" ]]; then STRIP_DIRS+=("$DEST_DATADIR"); fi
+if [[ ${#STRIP_DIRS[@]} -gt 0 ]]; then
+  zc_strip_clone_artifacts "${STRIP_DIRS[@]}"
+else
+  echo "==> Reusing the existing profile + data dir untouched"
+  echo "    (stuck on \"Checking database integrity…\"? that repair is fix-db's job:"
+  echo "     $SCRIPT_DIR/worktree-zotero.sh fix-db \"$WORKTREE_DIR\")"
+fi
 
 if [[ "$CLONED_DATADIR" == "1" ]]; then
   echo "==> Checkpointing cloned databases"
@@ -625,6 +639,16 @@ else
 fi
 
 # 11. Optionally launch `npm start` (Zotero + webpack watch) in the background.
+#
+#     Never on a re-run whose Zotero is already up: the second launch would fight
+#     the first over the profile and over .scaffold/build, and the profile lock
+#     turns it into a "profile in use" dialog rather than a working instance.
+if [[ "$START" == "1" ]] && zc_dir_in_use "$DEST_PROFILE"; then
+  echo "==> Zotero is already running for this worktree -- not launching a second one."
+  echo "    Pick up its changes with: scripts/worktree/worktree-zotero.sh reload \"$WORKTREE_DIR\""
+  START=0
+fi
+
 if [[ "$START" == "1" ]]; then
   START_LOG="$WORKTREE_DIR/.worktree-start.log"
   echo "==> Launching 'npm start' in the background (logs: $START_LOG)"

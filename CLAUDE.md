@@ -327,7 +327,9 @@ scripts/worktree/setup-worktree.sh --lite /path/to/worktree
   `git branch <name> main` first.
 - Full setup clones the dev profile/data dir, allocates unique HTTP + RDP ports, forces sync
   **off** in the clone, and builds the React bundle if the worktree lacks one. Re-running is
-  safe and **keeps the ports the worktree already has**.
+  safe and **keeps the ports the worktree already has**: a profile/data dir kept from an
+  earlier run is never touched (no lock or recovery-marker cleanup, no checkpointing), and
+  `--start` won't launch a second Zotero against a profile that already has one.
 - A fresh worktree must have `addon/content/reactBundle.js` before `npm start`; the serve
   installs the plugin long before webpack's first build finishes and does not re-copy the
   bundle afterwards. Setup builds it; a hand-bootstrapped worktree needs
