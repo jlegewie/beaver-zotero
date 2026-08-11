@@ -550,13 +550,15 @@ export interface WSItemSearchByMetadataRequest extends WSBaseEvent {
 
 /** Error codes for item search failures */
 export type ItemSearchErrorCode =
-    | 'internal_error'          // General internal error
-    | 'database_error'          // Database/indexing error
-    | 'invalid_request'         // Invalid request parameters
-    | 'timeout'                 // Operation timed out
-    | 'collection_not_found'    // A requested collection filter matched nothing
-    | 'library_unavailable'     // A filter named a library this computer does not have
-    | 'library_not_searchable'; // A filter named a library excluded from Beaver
+    | 'internal_error'         // General internal error
+    | 'database_error'         // Database/indexing error
+    | 'invalid_request'        // Invalid request parameters
+    | 'collection_not_found'   // collections_filter matched no collection the search covers
+    | 'library_not_found'      // libraries_filter matched no library on this device
+    | 'library_unavailable'    // A filter named a library this computer does not have
+    | 'library_not_searchable' // a filter matched only in a library excluded from Beaver
+    | 'tag_not_found'          // tags_filter matched no tag in the searched libraries
+    | 'timeout';               // Operation timed out
 
 /** Response to item metadata search request */
 export interface WSItemSearchByMetadataResponse {
@@ -1856,6 +1858,13 @@ export const CLIENT_FEATURES = {
      * rather than after the backend has finished asking us about its citations.
      */
     CITATIONS_EVENT: 'citations_event',
+    /**
+     * `collections_filter` on the search tools matches items in the named
+     * collections *and their subcollections*. Older clients matched direct
+     * membership only, so the backend warns the model about that when this
+     * feature is absent.
+     */
+    RECURSIVE_COLLECTIONS_FILTER: 'recursive_collections_filter',
 } as const;
 
 /** Client type identifier for the Zotero plugin. */

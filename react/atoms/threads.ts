@@ -12,7 +12,7 @@ import { isThreadInstanceMismatch } from "../utils/threadMatches";
 import { getHost } from "../host";
 import { logger } from "@beaver/agent-core/platform/logger";
 import { ApiError } from "@beaver/agent-core/types/apiErrors";
-import { resetMessageUIStateAtom } from "./messageUIState";
+import { resetMessageUIStateAtom, retainedReviewActionsAtom } from "./messageUIState";
 import { checkExternalReferencesAtom, clearExternalReferenceCacheAtom, addExternalReferencesToMappingAtom } from "./externalReferences";
 import { ExternalReference } from "@beaver/agent-core/types/externalReferences";
 import { threadRunsAtom, activeRunAtom, currentThreadIdAtom } from "@beaver/agent-core/run-state/atoms";
@@ -449,7 +449,9 @@ export const loadThreadAtom = atom(
             // Clear all pending approvals/questions when loading a different thread
             set(clearAllPendingApprovalsAtom);
             set(clearAllPendingQuestionsAtom);
-
+            // A reopened thread takes a fresh snapshot containing only actions
+            // that are still pending.
+            set(retainedReviewActionsAtom, {});
             // Legacy non-stateful path: fetch the name from the local DB when
             // not provided (the stateful path already resolved it above).
             const threadNamePromise = !resolvedName && !statefulChat

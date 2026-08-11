@@ -3,9 +3,9 @@ import { describe, expect, it } from "vitest";
 import {
     getActionLabel,
     getActionTitle,
-    getActionCardResolutionStatus,
-    shouldAutoCollapseResolvedApproval,
+    hasFailedUndo,
 } from "../../../react/host/zotero/components/agentActionViewHelpers";
+import type { AgentAction } from "@beaver/agent-core/agents/agentActionTypes";
 
 /**
  * `edit_annotations` and `delete_annotations` are two tools sharing one action
@@ -83,30 +83,38 @@ describe("annotation action labels", () => {
     });
 });
 
-describe("pending action visibility", () => {
-    it("only auto-collapses resolved approvals with terminal statuses", () => {
-        expect(shouldAutoCollapseResolvedApproval("pending")).toBe(false);
-        expect(shouldAutoCollapseResolvedApproval("awaiting")).toBe(false);
-        expect(shouldAutoCollapseResolvedApproval("applied")).toBe(true);
-        expect(shouldAutoCollapseResolvedApproval("rejected")).toBe(true);
-        expect(shouldAutoCollapseResolvedApproval("undone")).toBe(true);
-        expect(shouldAutoCollapseResolvedApproval("error")).toBe(true);
-        expect(shouldAutoCollapseResolvedApproval("applied", true)).toBe(false);
+describe("hasFailedUndo", () => {
+    const errored = (overrides: Partial<AgentAction> = {}): AgentAction => ({
+        id: "a1",
+        run_id: "run-1",
+        toolcall_id: "call-1",
+        action_type: "create_note",
+        status: "error",
+        proposed_data: {},
+        ...overrides,
+    } as AgentAction);
+
+    // Retry has to know which direction failed, and only an applied action ever
+    // carries result_data — a successful undo clears it.
+    it("is true for an errored action that still carries a result", () => {
+        expect(hasFailedUndo([errored({ result_data: { zotero_key: "ABC" } })])).toBe(true);
     });
 
-    it("keeps a multi-action card pending until every action resolves", () => {
-        const actions = [
-            { status: "applied" },
-            { status: "pending" },
-        ] as any;
-
-        expect(getActionCardResolutionStatus(actions, true, true)).toBe(
-            "pending",
-        );
+    it("is false for a failed apply, which never produced a result", () => {
+        expect(hasFailedUndo([errored()])).toBe(false);
+        expect(hasFailedUndo([errored({ result_data: null as any })])).toBe(false);
     });
 
-    it("treats a returned actionless confirmation as resolved", () => {
-        expect(getActionCardResolutionStatus([], false, false)).toBe("pending");
-        expect(getActionCardResolutionStatus([], false, true)).toBe("applied");
+    it("is false when nothing errored", () => {
+        expect(hasFailedUndo([errored({ status: "applied", result_data: { zotero_key: "ABC" } })])).toBe(false);
+        expect(hasFailedUndo([errored({ status: "undone" })])).toBe(false);
+        expect(hasFailedUndo([])).toBe(false);
+    });
+
+    it("finds the failed undo in a batch that also has failed applies", () => {
+        expect(hasFailedUndo([
+            errored(),
+            errored({ id: "a2", result_data: { zotero_key: "ABC" } }),
+        ])).toBe(true);
     });
 });

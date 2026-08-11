@@ -20,12 +20,16 @@ import {
 import { semanticSearchService, SearchResult } from '../semanticSearchService';
 import { BeaverDB } from '../database';
 import {
-    collectionFilterKey,
+    collectionsFilterError,
+    getCollectionScopeItemIds,
     getSearchableLibraryIds,
+    librariesFilterError,
     prepareAttachmentInfoBatchData,
     processAttachmentInfoBatch,
-    resolveCollectionFilters,
-    resolveLibrariesFilterToSearchableIds,
+    resolveCollectionsFilter,
+    resolveLibrariesFilter,
+    resolveTagsFilter,
+    tagsFilterError,
 } from '../agentDataProvider/utils';
 import { TimingAccumulator } from '../../utils/timing';
 
@@ -64,9 +68,11 @@ export async function handleItemSearchByTopicRequest(
         };
     }
 
-    // Get searchable library IDs
+    // Get searchable library IDs. An explicit libraries_filter is resolved even
+    // when none are searchable, so the model is told the library is excluded
+    // instead of reading an empty result as "that library holds nothing".
     const searchableLibraryIds = getSearchableLibraryIds();
-    if (searchableLibraryIds.length === 0) {
+    if (searchableLibraryIds.length === 0 && !request.libraries_filter?.length) {
         logger('handleItemSearchByTopicRequest: no searchable libraries available', 1);
         return {
             type: 'item_search_by_topic',
@@ -79,61 +85,134 @@ export async function handleItemSearchByTopicRequest(
             },
         };
     }
-    
+
     // Resolve library IDs from filter, but always intersect with searchable libraries.
     // Accepts portable library refs ("u"/"g<groupID>"), numeric IDs, numeric-ID
     // strings, and library name substrings.
-    const libraryIds: number[] = request.libraries_filter && request.libraries_filter.length > 0
-        ? resolveLibrariesFilterToSearchableIds(request.libraries_filter)
-        : [...searchableLibraryIds];
+    let libraryIds: number[] = [...searchableLibraryIds];
+    if (request.libraries_filter && request.libraries_filter.length > 0) {
+        const resolution = resolveLibrariesFilter(request.libraries_filter);
 
-    // Guard: if libraries_filter was provided but resolved to no searchable libraries,
-    // return empty results instead of widening scope to all libraries
-    if (request.libraries_filter && request.libraries_filter.length > 0 && libraryIds.length === 0) {
-        logger('handleItemSearchByTopicRequest: libraries_filter resolved to no searchable libraries', 1);
-        return {
-            type: 'item_search_by_topic',
-            request_id: request.request_id,
-            items: [],
-            timing: {
-                total_ms: Date.now() - startTime,
-                item_count: 0,
-                attachment_count: 0,
-            },
-        };
+        // A libraries_filter that resolves to nothing must narrow the search to no
+        // results, never widen it to every library — and it is reported as an error
+        // rather than an empty result so a bad library reference is not mistaken for
+        // a library that holds no matching items.
+        const filterError = librariesFilterError(resolution);
+        if (filterError) {
+            logger(`handleItemSearchByTopicRequest: ${filterError.message}`, 1);
+            return {
+                type: 'item_search_by_topic',
+                request_id: request.request_id,
+                items: [],
+                error: filterError.message,
+                error_code: filterError.error_code,
+                timing: {
+                    total_ms: Date.now() - startTime,
+                    item_count: 0,
+                    attachment_count: 0,
+                },
+            };
+        }
+
+        libraryIds = resolution.libraryIds;
     }
 
-    // Resolve collections_filter to (library, key) pairs within the searched
-    // libraries. Every entry must resolve, so an unresolvable filter fails the
-    // request instead of running a search the caller believes is scoped.
-    const hasExplicitLibraries = !!(request.libraries_filter && request.libraries_filter.length > 0);
-    const filterResolution = resolveCollectionFilters(request.collections_filter, {
-        eligibleLibraryIds: libraryIds,
-        explicitLibrary: hasExplicitLibraries,
-    });
-    if (!filterResolution.ok) {
-        logger(`handleItemSearchByTopicRequest: ${filterResolution.message}`, 1);
-        return {
-            type: 'item_search_by_topic',
-            request_id: request.request_id,
-            items: [],
-            error: filterResolution.message,
-            error_code: filterResolution.code,
-            timing: {
-                total_ms: Date.now() - startTime,
-                item_count: 0,
-                attachment_count: 0,
-            },
-        };
+    // Resolve collections_filter, then turn the scope into an item allowlist
+    // before ranking, so the candidate pool isn't spent on items outside the
+    // requested collections. Both are read from Zotero before the embedding
+    // query narrows by library.
+    let collectionItemIds: number[] | undefined;
+    if (request.collections_filter && request.collections_filter.length > 0) {
+        const resolution = resolveCollectionsFilter(request.collections_filter, libraryIds);
+
+        // A collections_filter that resolves to nothing must narrow the search to
+        // no results, never widen it to the whole library — and it is reported as
+        // an error rather than an empty result so a bad collection reference is
+        // not mistaken for a collection that holds no matching items.
+        const filterError = collectionsFilterError(resolution);
+        if (filterError) {
+            logger(`handleItemSearchByTopicRequest: ${filterError.message}`, 1);
+            return {
+                type: 'item_search_by_topic',
+                request_id: request.request_id,
+                items: [],
+                error: filterError.message,
+                error_code: filterError.error_code,
+                timing: {
+                    total_ms: Date.now() - startTime,
+                    item_count: 0,
+                    attachment_count: 0,
+                },
+            };
+        }
+
+        // An empty allowlist here means the collections resolved but hold no
+        // items: an honest empty result, not a bad reference.
+        collectionItemIds = await getCollectionScopeItemIds(resolution.collections);
+        if (collectionItemIds.length === 0) {
+            logger(`handleItemSearchByTopicRequest: collections_filter resolved to ${resolution.collections.length} collections holding no items`, 1);
+            return {
+                type: 'item_search_by_topic',
+                request_id: request.request_id,
+                items: [],
+                timing: {
+                    total_ms: Date.now() - startTime,
+                    item_count: 0,
+                    attachment_count: 0,
+                },
+            };
+        }
     }
-    const collectionFilterKeys = new Set(
-        filterResolution.filters.map(filter => collectionFilterKey(filter.libraryID, filter.key))
-    );
+
+    // Resolve tags_filter to the tag names Zotero stores, before the embedding
+    // query: a tag the library doesn't have is a bad filter, not an empty result,
+    // and the model can only tell the two apart if it is told.
+    const tagsFilter = request.tags_filter ?? [];
+    let tagNames: string[] | undefined;
+    if (tagsFilter.length > 0) {
+        const resolution = await resolveTagsFilter(tagsFilter, libraryIds);
+
+        const filterError = tagsFilterError(resolution);
+        if (filterError) {
+            logger(`handleItemSearchByTopicRequest: ${filterError.message}`, 1);
+            return {
+                type: 'item_search_by_topic',
+                request_id: request.request_id,
+                items: [],
+                error: filterError.message,
+                error_code: filterError.error_code,
+                timing: {
+                    total_ms: Date.now() - startTime,
+                    item_count: 0,
+                    attachment_count: 0,
+                },
+            };
+        }
+
+        // A tags_filter must narrow the search, never drop off it: when nothing
+        // resolved and no error explained why (no library in scope), return no
+        // results instead of ranking as if no tag had been requested.
+        if (resolution.tags.length === 0) {
+            logger('handleItemSearchByTopicRequest: tags_filter resolved to no tags', 1);
+            return {
+                type: 'item_search_by_topic',
+                request_id: request.request_id,
+                items: [],
+                timing: {
+                    total_ms: Date.now() - startTime,
+                    item_count: 0,
+                    attachment_count: 0,
+                },
+            };
+        }
+
+        tagNames = resolution.tags;
+    }
 
     logger('handleItemSearchByTopicRequest: Searching by topic', {
         topic_query: request.topic_query,
         libraryIds: libraryIds.length > 0 ? libraryIds : 'all',
-        collections: filterResolution.filters.length > 0 ? filterResolution.filters : 'all',
+        collectionItemIds: collectionItemIds ? collectionItemIds.length : 'all',
         limit: request.limit,
     }, 1);
 
@@ -143,11 +222,97 @@ export async function handleItemSearchByTopicRequest(
     // Calculate offset for pagination (default 0, guard against negative values)
     const offset = Math.max(0, request.offset ?? 0);
 
+    let searchResults: SearchResult[];
+    try {
+        searchResults = await searchService.search(request.topic_query, {
+            topK: (offset + request.limit) * 4, // Fetch extra to account for filtering and pagination offset
+            minSimilarity: 0.3,
+            libraryIds,
+            itemIds: collectionItemIds,
+        });
+    } catch (error) {
+        logger(`handleItemSearchByTopicRequest: Semantic search failed: ${error}`, 1);
+        return {
+            type: 'item_search_by_topic',
+            request_id: request.request_id,
+            items: [],
+        };
+    }
+    
+    // Record search completion time
+    searchEndTime = Date.now();
+
+    logger(`handleItemSearchByTopicRequest: Semantic search returned ${searchResults.length} results`, 1);
+
+    if (searchResults.length === 0) {
+        const timing: FrontendTimingMetadata = {
+            total_ms: Date.now() - startTime,
+            search_ms: searchEndTime - startTime,
+            item_count: 0,
+            attachment_count: 0,
+        };
+        return {
+            type: 'item_search_by_topic',
+            request_id: request.request_id,
+            items: [],
+            timing,
+        };
+    }
+
+    // Load items from search results
+    const itemIds = searchResults.map(r => r.itemId);
+    const items = await Zotero.Items.getAsync(itemIds);
+    let validItems = items.filter((item): item is Zotero.Item => item !== null);
+
+    if (validItems.length === 0) {
+        return {
+            type: 'item_search_by_topic',
+            request_id: request.request_id,
+            items: [],
+            timing: {
+                total_ms: Date.now() - startTime,
+                search_ms: searchEndTime - startTime,
+                item_count: 0,
+                attachment_count: 0,
+            },
+        };
+    }
+
     // Timing accumulator for serialization breakdown
     const ta = new TimingAccumulator();
 
-    /** Every request filter. Collection membership matches on (library, key). */
-    const passesFilters = (item: Zotero.Item): boolean => {
+    // Load item data (needed for deduplication which checks title, DOI, ISBN, creators)
+    await ta.track('data_loading_ms', () =>
+        Zotero.Items.loadDataTypes(validItems, ["primaryData", "creators", "itemData", "childItems", "tags", "collections", "relations"])
+    );
+
+    // Deduplicate items, prioritizing items from user's main library (library ID 1)
+    validItems = deduplicateItems(validItems, 1);
+    const deduplicatedItemIds = new Set(validItems.map(item => item.id));
+    
+    // Create a map for item lookup by ID
+    const itemById = new Map<number, Zotero.Item>();
+    for (const item of validItems) {
+        itemById.set(item.id, item);
+    }
+    
+    // Filter searchResults to only include items that survived deduplication
+    searchResults = searchResults.filter(result => deduplicatedItemIds.has(result.itemId));
+
+    // Create similarity map
+    const similarityByItemId = new Map<number, number>();
+    for (const result of searchResults) {
+        similarityByItemId.set(result.itemId, result.similarity);
+    }
+
+    // Apply filters first (before serialization)
+    const filteredItems: { item: Zotero.Item; similarity: number }[] = [];
+
+    for (const searchResult of searchResults) {
+        const item = itemById.get(searchResult.itemId);
+        if (!item) continue;
+
+        // Apply filters
         // Year filter
         if (request.year_min || request.year_max) {
             const yearStr = item.getField('date', false, true);
@@ -155,8 +320,8 @@ export async function handleItemSearchByTopicRequest(
             const year = yearMatch ? parseInt(yearMatch[0], 10) : null;
 
             if (year) {
-                if (request.year_min && year < request.year_min) return false;
-                if (request.year_max && year > request.year_max) return false;
+                if (request.year_min && year < request.year_min) continue;
+                if (request.year_max && year > request.year_max) continue;
             }
         }
 
@@ -167,133 +332,28 @@ export async function handleItemSearchByTopicRequest(
             const matchesAuthor = request.author_filter.some(authorName =>
                 creatorLastNames.some(lastName => lastName.includes(authorName.toLowerCase()))
             );
-            if (!matchesAuthor) return false;
+            if (!matchesAuthor) continue;
         }
 
-        // Tags filter
-        if (request.tags_filter && request.tags_filter.length > 0) {
+        // Tags filter, applied to the resolved tag names rather than the request's
+        // own spelling so it matches what the library actually stores.
+        if (tagNames) {
             const itemTags = item.getTags().map(t => t.tag.toLowerCase());
-            const matchesTag = request.tags_filter.some(tag =>
+            const matchesTag = tagNames.some(tag =>
                 itemTags.includes(tag.toLowerCase())
             );
-            if (!matchesTag) return false;
-        }
-
-        // Collections filter
-        if (collectionFilterKeys.size > 0) {
-            const inRequestedCollection = item.getCollections().some(collectionId => {
-                const collection = Zotero.Collections.get(collectionId);
-                return !!collection
-                    && collectionFilterKeys.has(collectionFilterKey(collection.libraryID, collection.key));
-            });
-            if (!inRequestedCollection) return false;
+            if (!matchesTag) continue;
         }
 
         // Validate item is regular item and not in trash
-        return agentItemFilter(item);
-    };
+        const isValidItem = agentItemFilter(item);
+        if (!isValidItem) continue;
 
-    /** Accumulated candidates that passed the filters, best match first. */
-    const similarityByItemId = new Map<number, number>();
-    const matchedItems: Zotero.Item[] = [];
-
-    /**
-     * Load and filter one window of candidates, appending it to the accumulators.
-     *
-     * Filters run before deduplication so a duplicate that fails a filter can
-     * never displace the copy that passes it — most visibly, a personal-library
-     * twin outside the requested collections displacing the item inside them.
-     */
-    const addCandidateWindow = async (candidates: SearchResult[]): Promise<void> => {
-        const items = await Zotero.Items.getAsync(candidates.map(result => result.itemId));
-        const validItems = items.filter((item): item is Zotero.Item => item !== null);
-        if (validItems.length === 0) return;
-
-        // Load item data (needed for the filters and for deduplication, which
-        // checks title, DOI, ISBN and creators)
-        await ta.track('data_loading_ms', () =>
-            Zotero.Items.loadDataTypes(validItems, ["primaryData", "creators", "itemData", "childItems", "tags", "collections", "relations"])
-        );
-
-        const itemById = new Map<number, Zotero.Item>();
-        for (const item of validItems) {
-            itemById.set(item.id, item);
-        }
-
-        for (const searchResult of candidates) {
-            const item = itemById.get(searchResult.itemId);
-            if (!item || similarityByItemId.has(item.id)) continue;
-            if (!passesFilters(item)) continue;
-            similarityByItemId.set(item.id, searchResult.similarity);
-            matchedItems.push(item);
-        }
-    };
-
-    // Only the similarity scoring is topK-independent: it scores every embedding
-    // in the searched libraries either way. The trash filter that follows loads
-    // topK * 2 items, so a deeper ranking costs more item loads on the main
-    // thread. A collection filter can leave its matches far down the ranking, so
-    // it takes a ranking deep enough to reach them while keeping that load
-    // bounded.
-    const COLLECTION_FILTER_TOP_K = 500;
-    const topK = collectionFilterKeys.size > 0
-        // Never below what the requested page needs, so a deep page still reaches
-        // its own candidates.
-        ? Math.max(COLLECTION_FILTER_TOP_K, (offset + request.limit) * 4)
-        : (offset + request.limit) * 4; // Fetch extra to account for filtering and pagination offset
-
-    let searchResults: SearchResult[];
-    try {
-        searchResults = await searchService.search(request.topic_query, {
-            topK,
-            minSimilarity: 0.3,
-            libraryIds,
+        filteredItems.push({
+            item,
+            similarity: searchResult.similarity,
         });
-    } catch (error) {
-        const message = `Semantic search failed: ${error}`;
-        logger(`handleItemSearchByTopicRequest: ${message}`, 1);
-        return {
-            type: 'item_search_by_topic',
-            request_id: request.request_id,
-            items: [],
-            error: message,
-            error_code: 'internal_error',
-            timing: {
-                total_ms: Date.now() - startTime,
-                item_count: 0,
-                attachment_count: 0,
-            },
-        };
     }
-
-    logger(`handleItemSearchByTopicRequest: Semantic search returned ${searchResults.length} results (topK=${topK})`, 1);
-
-    // Loading items is the expensive part, so the ranking is walked in windows
-    // and widened only while the page is still short. Deduplication runs over
-    // every candidate seen so far, so a later window cannot reintroduce an item
-    // an earlier one dropped. Each window costs a round trip, so a
-    // collection-filtered walk — which can cross long stretches of the ranking
-    // that hold no match — takes a floor rather than a page-sized window.
-    const pageWindow = (offset + request.limit) * 4;
-    const windowSize = request.limit > 0
-        ? (collectionFilterKeys.size > 0 ? Math.max(pageWindow, 200) : pageWindow)
-        : searchResults.length;
-    let filteredItems: { item: Zotero.Item; similarity: number }[] = [];
-    for (let processed = 0; processed < searchResults.length; processed += windowSize) {
-        await addCandidateWindow(searchResults.slice(processed, processed + windowSize));
-
-        // Deduplication keeps the first-seen position, so a survivor can score
-        // below the entry after it. Results are ranked by list order, so sort by
-        // the similarity each survivor reports.
-        filteredItems = deduplicateItems(matchedItems, 1)
-            .map(item => ({ item, similarity: similarityByItemId.get(item.id) ?? 0 }))
-            .sort((a, b) => b.similarity - a.similarity || a.item.id - b.item.id);
-
-        if (request.limit > 0 && filteredItems.length >= offset + request.limit) break;
-    }
-
-    // Record search completion time
-    searchEndTime = Date.now();
 
     // Serialize items in parallel in bounded batches (with backfill on failures to ensure limit is reached)
     const targetLimit = request.limit > 0 ? request.limit : filteredItems.length;

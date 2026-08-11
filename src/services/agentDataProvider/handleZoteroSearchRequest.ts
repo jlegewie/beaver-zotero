@@ -12,6 +12,7 @@ import {
     // Library management tools
     WSZoteroSearchRequest,
     WSZoteroSearchResponse,
+    ZoteroSearchCondition,
     ZoteroSearchResultItem,
     RegularSearchResultItem,
     AttachmentRowResult,
@@ -46,6 +47,20 @@ const ITEM_CATEGORY_TYPE_FILTERS = new Map<string, { itemTypes: string[]; mode: 
     // 'all' is absent because it filters nothing; 'annotation' is absent because
     // it returns early (zotero_search cannot return annotations at all).
 ]);
+
+/** Search condition fields that select items by collection membership. */
+const COLLECTION_CONDITION_FIELDS = new Set(['collection', 'collectionID']);
+
+/**
+ * Whether a condition can become a collection *scope* rather than a plain
+ * condition: it must select a collection (`is` with a value), not exclude one.
+ */
+function isScopableCollectionCondition(condition: ZoteroSearchCondition): boolean {
+    return COLLECTION_CONDITION_FIELDS.has(condition.field)
+        && condition.operator === 'is'
+        && condition.value != null
+        && String(condition.value).length > 0;
+}
 
 /**
  * Keep (`include`) or drop (`exclude`) the given itemIDs by item type,
@@ -176,6 +191,21 @@ export async function handleZoteroSearchRequest(
         const search = new Zotero.Search() as unknown as ZoteroSearchWritable;
         search.libraryID = library.libraryID;
 
+        // Collection scope.
+        const scopableCollectionConditions = request.include_children && request.join_mode !== 'any'
+            ? request.conditions.filter(isScopableCollectionCondition)
+            : [];
+        let scopeSearch: Zotero.Search | null = null;
+        let scopedConditionCount = 0;
+        if (scopableCollectionConditions.length > 0) {
+            const scope = new Zotero.Search() as unknown as ZoteroSearchWritable;
+            scope.libraryID = library.libraryID;
+            if (request.recursive) {
+                scope.addCondition('recursive', 'true', '');
+            }
+            scopeSearch = scope as unknown as Zotero.Search;
+        }
+
         // Set join mode first (if 'any')
         if (request.join_mode === 'any') {
             search.addCondition('joinMode', 'any', '');
@@ -214,12 +244,18 @@ export async function handleZoteroSearchRequest(
                 value = '';
             }
 
+            const isScoped = scopeSearch !== null && isScopableCollectionCondition(condition);
+            const field = condition.field as _ZoteroTypes.Search.Conditions;
+            const searchOperator = operator as _ZoteroTypes.Search.Operator;
+            const searchValue = String(value);  // Ensure value is always a string
+
             try {
-                search.addCondition(
-                    condition.field as _ZoteroTypes.Search.Conditions,
-                    operator as _ZoteroTypes.Search.Operator,
-                    String(value)  // Ensure value is always a string
-                );
+                if (isScoped) {
+                    scopeSearch!.addCondition(field, searchOperator, searchValue);
+                    scopedConditionCount++;
+                } else {
+                    search.addCondition(field, searchOperator, searchValue);
+                }
             } catch (err) {
                 const msg = err instanceof Error ? err.message : String(err);
                 logger(`handleZoteroSearchRequest: Invalid condition ${condition.field} ${originalOperator}: ${msg}`, 1);
@@ -259,7 +295,14 @@ export async function handleZoteroSearchRequest(
         if (!request.include_children) {
             search.addCondition('noChildren', 'true', '');
         }
-        
+
+        // Apply the collection scope. Guarded on a condition having actually been
+        // added: a scope search with no conditions matches the whole library, so
+        // attaching an empty one would widen the search instead of narrowing it.
+        if (scopeSearch && scopedConditionCount > 0) {
+            search.setScope(scopeSearch, true);
+        }
+
         // Execute search
         let itemIds = await search.search();
 

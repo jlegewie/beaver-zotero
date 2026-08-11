@@ -34,23 +34,12 @@ import {
     TickIcon,
     CancelIcon,
     ChevronIcon,
-    ClockIcon,
     Spinner,
     Icon,
     RepeatIcon,
     ArrowDownIcon,
     ArrowRightIcon,
-    PropertyEditIcon,
     ArrowUpRightIcon,
-    FolderAddIcon,
-    FolderDetailIcon,
-    TaskDoneIcon,
-    TagIcon,
-    HighlighterIcon,
-    DocumentValidationIcon,
-    DollarCircleIcon,
-    GlobalSearchIcon,
-    NoteIcon,
 } from '../../../components/icons/icons';
 import { revealSource, openNoteByKey, getCurrentCollectionKeyForItem } from '../../../utils/sourceUtils';
 import Button from '../../../components/ui/Button';
@@ -69,8 +58,8 @@ import {
     getActionTitle,
     buildPreviewData,
     PreviewData,
-    getActionCardResolutionStatus,
-    shouldAutoCollapseResolvedApproval,
+    getCreateAnnotationsDisplayStatus,
+    getAgentActionToolIcon,
 } from './agentActionViewHelpers';
 import { ActionPreview } from './ActionPreview';
 import { useApprovalRecovery } from './useApprovalRecovery';
@@ -102,17 +91,6 @@ type HeaderLinkActionRule = HeaderLinkAction & {
     matches: () => boolean;
 };
 
-function getCreateAnnotationsDisplayStatus(action: AgentAction): ActionStatus | null {
-    if (!isCreateAnnotationsAgentAction(action) || action.status !== 'applied') return null;
-    const createdCount = Array.isArray(action.result_data?.created)
-        ? action.result_data.created.length
-        : 0;
-    const failedCount = Array.isArray(action.result_data?.failed)
-        ? action.result_data.failed.length
-        : 0;
-    return createdCount === 0 && failedCount > 0 ? 'error' : null;
-}
-
 export const AgentActionView: React.FC<AgentActionViewProps> = ({
     toolcallId,
     toolName,
@@ -128,10 +106,8 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     const getAgentActionsByToolcall = useAtomValue(getAgentActionsByToolcallAtom);
     const actions = getAgentActionsByToolcall(toolcallId, (a) => a.run_id === runId);
     const action = actions.length > 0 ? actions[0] : null;
-    const isMultiAction = (toolName === 'create_items' || toolName === 'create_item') && actions.length > 1;
-    const actionResolutionStatus = getActionCardResolutionStatus(actions, isMultiAction, hasToolReturn);
 
-    const actionInFinalState = actionResolutionStatus !== 'pending';
+    const actionInFinalState = action && action.status !== 'pending';
     const pendingApproval = actionInFinalState ? null : pendingApprovalProp;
     const isAwaitingApproval = pendingApproval !== null;
 
@@ -150,7 +126,6 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     const isExpanded = expansionState[expansionKey] ?? (isAwaitingApproval || neverAutoCollapse);
 
     const prevAwaitingRef = useRef(isAwaitingApproval);
-    const waitingForTerminalStatusRef = useRef(false);
     const hasInitializedRef = useRef(false);
     useEffect(() => {
         if (!hasInitializedRef.current) {
@@ -161,25 +136,14 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
             return;
         }
 
-        if (!prevAwaitingRef.current && isAwaitingApproval) {
-            waitingForTerminalStatusRef.current = false;
-            setExpanded({ key: expansionKey, expanded: true });
-        } else if (prevAwaitingRef.current && !isAwaitingApproval) {
-            const shouldCollapse = shouldAutoCollapseResolvedApproval(actionResolutionStatus, neverAutoCollapse);
-            waitingForTerminalStatusRef.current = !shouldCollapse && actionResolutionStatus === 'pending';
+        if (prevAwaitingRef.current !== isAwaitingApproval) {
             setExpanded({
                 key: expansionKey,
-                expanded: shouldCollapse ? false : true,
+                expanded: neverAutoCollapse ? true : isAwaitingApproval,
             });
-        } else if (
-            waitingForTerminalStatusRef.current
-            && shouldAutoCollapseResolvedApproval(actionResolutionStatus, neverAutoCollapse)
-        ) {
-            waitingForTerminalStatusRef.current = false;
-            setExpanded({ key: expansionKey, expanded: false });
         }
         prevAwaitingRef.current = isAwaitingApproval;
-    }, [isAwaitingApproval, actionResolutionStatus, expansionKey, hasExistingState, neverAutoCollapse, setExpanded]);
+    }, [isAwaitingApproval, expansionKey, hasExistingState, neverAutoCollapse, setExpanded]);
 
     const [isProcessingApproval, setIsProcessingApproval] = useState(false);
     const [isProcessingAction, setIsProcessingAction] = useState(false);
@@ -190,6 +154,8 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
 
     const isRunPending = useAtomValue(isWSChatPendingAtom);
     const approvalResponseIntents = useAtomValue(approvalResponseIntentsAtom);
+    const isMultiAction = (toolName === 'create_items' || toolName === 'create_item') && actions.length > 1;
+
     const sendApprovalResponse = useSetAtom(sendApprovalResponseAtom);
     const approveToolGroupForRun = useSetAtom(approveToolGroupForRunAtom);
     const removeApprovalResponseIntent = useSetAtom(removeApprovalResponseIntentAtom);
@@ -408,25 +374,10 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     const runApprovalScope = getToolGroupRunApprovalScope(toolName);
 
     const getHeaderIcon = () => {
-        const getToolIcon = () => {
-            if (toolName === 'edit_metadata' || toolName === 'edit_item') return PropertyEditIcon;
-            if (toolName === 'create_note') return NoteIcon;
-            if (toolName === 'create_highlight_annotations') return HighlighterIcon;
-            if (toolName === 'create_note_annotations') return NoteIcon;
-            if (toolName === 'edit_annotations' || toolName === 'delete_annotations') return HighlighterIcon;
-            if (toolName === 'create_collection') return FolderAddIcon;
-            if (toolName === 'organize_items') return TaskDoneIcon;
-            if (toolName === 'manage_tags') return TagIcon;
-            if (toolName === 'manage_collections') return FolderDetailIcon;
-            if (toolName === 'create_items' || toolName === 'create_item') return DocumentValidationIcon;
-            if (toolName === 'confirm_extraction') return DollarCircleIcon;
-            if (toolName === 'confirm_external_search') return GlobalSearchIcon;
-            return ClockIcon;
-        };
-        if (isAwaitingApproval) return getToolIcon();
+        if (isAwaitingApproval) return getAgentActionToolIcon(toolName);
         if (isHovered && isExpanded) return ArrowDownIcon;
         if (isHovered && !isExpanded) return ArrowRightIcon;
-        if (config.icon === null) return getToolIcon();
+        if (config.icon === null) return getAgentActionToolIcon(toolName);
         return config.icon;
     };
 

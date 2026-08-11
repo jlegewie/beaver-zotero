@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
     buildReviewRows,
     getReviewHeaderCopy,
+    hasPendingReviewRows,
     isBulkApplicable,
 } from '../../../react/host/zotero/components/reviewChangeRows';
 import type { AgentAction } from '@beaver/agent-core/agents/agentActionTypes';
@@ -28,6 +29,19 @@ describe('buildReviewRows exclusions', () => {
         ]);
 
         expect(rows.map((row) => row.toolcallId)).toEqual(['call-3']);
+    });
+
+    it('drops legacy action types the shared executor cannot apply', () => {
+        const rows = buildReviewRows([
+            action({ action_type: 'edit_note', toolcall_id: 'call-1' }),
+            action({ action_type: 'edit_note_batch', toolcall_id: 'call-2' }),
+            action({ action_type: 'zotero_note', toolcall_id: 'call-3' }),
+            action({ action_type: 'highlight_annotation', toolcall_id: 'call-4' }),
+            action({ action_type: 'note_annotation', toolcall_id: 'call-5' }),
+            action({ action_type: 'create_note', toolcall_id: 'call-6' }),
+        ]);
+
+        expect(rows.map((row) => row.toolcallId)).toEqual(['call-1', 'call-2', 'call-6']);
     });
 
     it('drops actions with a live approval, by action id', () => {
@@ -78,43 +92,33 @@ describe('buildReviewRows exclusions', () => {
 
         expect(rows.map((row) => row.toolcallId)).toEqual(['call-5']);
     });
-});
 
-describe('buildReviewRows sticky resolution', () => {
-    it('keeps a resolved tool call visible and reports it resolved', () => {
+    it('keeps only pending actions within a mixed-status tool call', () => {
+        const pending = action({ toolcall_id: 'call-1' });
         const rows = buildReviewRows([
+            action({ toolcall_id: 'call-1', status: 'error' }),
             action({ toolcall_id: 'call-1', status: 'applied' }),
-            action({ toolcall_id: 'call-2', status: 'rejected' }),
-        ], {
-            resolvedToolcallIds: new Set(['call-1', 'call-2']),
+            action({ toolcall_id: 'call-1', status: 'rejected' }),
+            pending,
+        ]);
+
+        expect(rows).toHaveLength(1);
+        expect(rows[0].actions).toEqual([pending]);
+    });
+
+    it('retains exactly the resolved actions from the current card snapshot', () => {
+        const applied = action({ toolcall_id: 'call-1', status: 'applied' });
+        const oldError = action({ toolcall_id: 'call-1', status: 'error' });
+        const pending = action({ toolcall_id: 'call-2' });
+        const rows = buildReviewRows([applied, oldError, pending], {
+            retainedActionIds: new Set([applied.id]),
         });
 
         expect(rows.map((row) => row.toolcallId)).toEqual(['call-1', 'call-2']);
-        expect(rows.every((row) => row.resolved)).toBe(true);
-    });
-
-    it('reports a partly applied tool call as unresolved', () => {
-        const rows = buildReviewRows([
-            action({ toolcall_id: 'call-1', status: 'applied' }),
-            action({ toolcall_id: 'call-1', status: 'pending' }),
-        ], {
-            resolvedToolcallIds: new Set(['call-1']),
-        });
-
-        expect(rows).toHaveLength(1);
-        expect(rows[0].actions).toHaveLength(2);
-        expect(rows[0].resolved).toBe(false);
-    });
-
-    it('still drops a live approval whose tool call is resolved', () => {
-        const live = action({ toolcall_id: 'call-1', status: 'applied' });
-
-        const rows = buildReviewRows([live], {
-            liveApprovalActionIds: new Set([live.id]),
-            resolvedToolcallIds: new Set(['call-1']),
-        });
-
-        expect(rows).toEqual([]);
+        expect(rows[0].actions).toEqual([applied]);
+        expect(rows[0].resolved).toBe(true);
+        expect(rows[1].actions).toEqual([pending]);
+        expect(rows[1].resolved).toBe(false);
     });
 });
 
@@ -143,6 +147,24 @@ describe('buildReviewRows grouping', () => {
 
         expect(rows.map((row) => row.toolcallId)).toEqual(['call-b', 'call-a']);
         expect(rows[0].actions.map((item) => item.id)).toEqual(['a1', 'a3']);
+    });
+});
+
+describe('hasPendingReviewRows', () => {
+    it('keeps the snapshot while any row is pending and drops it once all resolve', () => {
+        const applied = action({ toolcall_id: 'call-1', status: 'applied' });
+        const pending = action({ toolcall_id: 'call-2' });
+        const retained = new Set([applied.id]);
+
+        const activeRows = buildReviewRows([applied, pending], { retainedActionIds: retained });
+        expect(hasPendingReviewRows(activeRows)).toBe(true);
+
+        const settledRows = buildReviewRows([
+            applied,
+            { ...pending, status: 'rejected' },
+        ], { retainedActionIds: new Set([applied.id, pending.id]) });
+        expect(settledRows).toHaveLength(2);
+        expect(hasPendingReviewRows(settledRows)).toBe(false);
     });
 });
 
@@ -206,53 +228,28 @@ describe('getReviewHeaderCopy', () => {
         });
     });
 
-    it('stays in review while anything is pending', () => {
+    it('counts only pending actions', () => {
         const rows = buildReviewRows([
             action({ toolcall_id: 'call-1', status: 'applied' }),
             action({ toolcall_id: 'call-2' }),
-        ], {
-            resolvedToolcallIds: new Set(['call-1']),
+        ]);
+
+        expect(getReviewHeaderCopy(rows)).toEqual({
+            text: '1 change needs your review',
+            tone: 'review',
+        });
+    });
+
+    it('counts retained resolved actions while another action is pending', () => {
+        const applied = action({ toolcall_id: 'call-1', status: 'applied' });
+        const pending = action({ toolcall_id: 'call-2' });
+        const rows = buildReviewRows([applied, pending], {
+            retainedActionIds: new Set([applied.id]),
         });
 
         expect(getReviewHeaderCopy(rows)).toEqual({
             text: '2 changes need your review',
             tone: 'review',
-        });
-    });
-
-    it('reports applied when every counted action was applied', () => {
-        const rows = buildReviewRows([
-            action({ toolcall_id: 'call-1', status: 'applied' }),
-            action({ toolcall_id: 'call-2', status: 'applied' }),
-        ], {
-            resolvedToolcallIds: new Set(['call-1', 'call-2']),
-        });
-
-        expect(getReviewHeaderCopy(rows)).toEqual({
-            text: '2 changes applied',
-            tone: 'resolved',
-        });
-        expect(getReviewHeaderCopy([rows[0]])).toEqual({
-            text: '1 change applied',
-            tone: 'resolved',
-        });
-    });
-
-    it('reports reviewed when a resolved action was not applied', () => {
-        const rows = buildReviewRows([
-            action({ toolcall_id: 'call-1', status: 'applied' }),
-            action({ toolcall_id: 'call-2', status: 'rejected' }),
-        ], {
-            resolvedToolcallIds: new Set(['call-1', 'call-2']),
-        });
-
-        expect(getReviewHeaderCopy(rows)).toEqual({
-            text: '2 changes reviewed',
-            tone: 'resolved',
-        });
-        expect(getReviewHeaderCopy([rows[1]])).toEqual({
-            text: '1 change reviewed',
-            tone: 'resolved',
         });
     });
 
@@ -263,10 +260,4 @@ describe('getReviewHeaderCopy', () => {
         expect(getReviewHeaderCopy([...rows, rows[0]]).text).toBe('2 changes need your review');
     });
 
-    it('treats no rows as resolved', () => {
-        expect(getReviewHeaderCopy([])).toEqual({
-            text: '0 changes applied',
-            tone: 'resolved',
-        });
-    });
 });

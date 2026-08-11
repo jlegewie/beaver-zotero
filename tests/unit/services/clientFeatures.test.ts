@@ -51,6 +51,9 @@ const VERSION_GATES: { feature: string; minVersion: string; op: Op }[] = [
 // collection_ids is declaration-only because it gates whether the client accepts
 // scoped collection identifiers in tool arguments — a capability of the handlers,
 // not something derivable from a version.
+// recursive_collections_filter is declaration-only because it describes what
+// the client's two item-search handlers do with collections_filter; without it
+// the backend warns the model that only direct membership was matched.
 const DECLARATION_ONLY_FEATURES = [
     'external_files',
     'ask_user_question',
@@ -61,6 +64,7 @@ const DECLARATION_ONLY_FEATURES = [
     'edit_note_batch',
     'edit_annotations',
     'citations_event',
+    'recursive_collections_filter',
 ];
 
 // The full backend feature vocabulary (ALL_FEATURES in version_gates.py): every

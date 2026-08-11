@@ -101,8 +101,11 @@ export const AgentRunView = React.memo(forwardRef<HTMLDivElement, AgentRunViewPr
     const [suggestionsDismissed, setSuggestionsDismissed] = useState(false);
     const handleDismissSuggestions = useCallback(() => setSuggestionsDismissed(true), []);
 
+    // Terminal statuses: the run is done. `awaiting_deferred` is still live (see isRunActive).
+    const isTerminal = run.status === 'completed' || run.status === 'error' || run.status === 'canceled';
+
     // Allow editing when run is in a terminal state (not actively streaming or awaiting approval)
-    const canEdit = !isStreaming && (run.status === 'completed' || run.status === 'error' || run.status === 'canceled');
+    const canEdit = !isStreaming && isTerminal;
 
     return (
         <div id={`run-${run.id}`} className="display-flex flex-col gap-4" ref={ref}>
@@ -140,7 +143,7 @@ export const AgentRunView = React.memo(forwardRef<HTMLDivElement, AgentRunViewPr
 
             {/* Agent actions (e.g., create item from citations) — client-specific
                 UI injected by the host; absent for clients without it. */}
-            {run.status === 'completed' && (getHost().components?.pendingActionsReview({ run }) ?? null)}
+            {isTerminal && (getHost().components?.pendingActionsReview({ run }) ?? null)}
 
             {/* Suggestions (only for the last run, rendered below footer) */}
             {suggestionParts.length > 0 && !suggestionsDismissed && (

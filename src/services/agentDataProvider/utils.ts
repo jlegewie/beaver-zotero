@@ -34,7 +34,7 @@ import {
 import { activeRunAtom } from '@beaver/agent-core/run-state/atoms';
 import { isAgentSupportedItem } from '../../utils/agentItemSupport';
 import { store } from '../../../react/store';
-import { searchableLibraryIdsAtom } from '../../../react/atoms/profile';
+import { isLibraryAccessReadyAtom, searchableLibraryIdsAtom } from '../../../react/atoms/profile';
 import { TimingAccumulator } from '../../utils/timing';
 import { getAttachmentInfo as resolveAttachmentInfo, type AttachmentInfoOptions } from '../documentExtraction/attachmentInfo';
 export {
@@ -1017,6 +1017,383 @@ export function resolveCollectionForDisplay(
     return null;
 }
 
+/** A collection a `collections_filter` entry matched outside the searched libraries. */
+export interface OutOfScopeCollection {
+    /** The filter entry that matched it. */
+    input: string;
+    /**
+     * Name of the matched collection, or null when it lives in a library
+     * excluded from Beaver — that name is content the user put out of Beaver's
+     * reach, so it is never carried out of the lookup.
+     */
+    name: string | null;
+    /** Library the match lives in. */
+    libraryId: number;
+}
+
+/** Outcome of resolving a `collections_filter` against the searched libraries. */
+export interface CollectionsFilterResolution {
+    /** Collections that resolved inside the searched libraries, deduplicated by ID. */
+    collections: Zotero.Collection[];
+    /** Filter entries that matched no collection at all. */
+    unresolved: string[];
+    /** Filter entries that matched only outside the searched libraries. */
+    outOfScope: OutOfScopeCollection[];
+}
+
+/** A `collections_filter` that left the search with no usable collection. */
+export interface CollectionsFilterError {
+    message: string;
+    error_code: 'collection_not_found' | 'library_not_searchable';
+}
+
+/**
+ * Resolve a `collections_filter` against the libraries a search will cover.
+ *
+ * A name is resolved in every searched library, because the same name can
+ * legitimately exist in several of them. Matches outside those libraries are
+ * reported separately rather than dropped: numeric IDs and key-like entries
+ * resolve through a cross-library fallback that can land in a library the
+ * request is not scoped to, or that the user excluded from Beaver, and the
+ * caller has to tell that apart from a bad reference.
+ *
+ * `libraryIds` must already be the searchable libraries the search will cover;
+ * an empty list resolves nothing at all.
+ */
+export function resolveCollectionsFilter(
+    collectionsFilter: (string | number)[],
+    libraryIds: number[]
+): CollectionsFilterResolution {
+    const collections = new Map<number, Zotero.Collection>();
+    const unresolved: string[] = [];
+    const outOfScope: OutOfScopeCollection[] = [];
+
+    // Nothing to search in: resolve nothing rather than looking the filter up
+    // library-less, which would enumerate every library the user excluded from
+    // Beaver. The searchable set is also empty while the profile is still
+    // loading, so a lookup here could report an allowed collection as excluded.
+    if (libraryIds.length === 0) {
+        return { collections: [], unresolved, outOfScope };
+    }
+
+    for (const filter of collectionsFilter) {
+        const matches: Zotero.Collection[] = [];
+        if (typeof filter === 'number') {
+            const collection = Zotero.Collections.get(filter);
+            if (collection) matches.push(collection);
+        } else {
+            for (const libraryId of libraryIds) {
+                const match = getCollectionByIdOrName(filter, libraryId);
+                if (match) matches.push(match.collection);
+            }
+        }
+
+        const inScope = matches.filter((collection) => libraryIds.includes(collection.libraryID));
+        if (inScope.length > 0) {
+            for (const collection of inScope) collections.set(collection.id, collection);
+        } else if (matches.length > 0) {
+            const [collection] = matches;
+            outOfScope.push({
+                input: String(filter),
+                // Keep an excluded library's collection name out of the resolution
+                // entirely, so no caller can surface it by accident.
+                name: isLibrarySearchable(collection.libraryID) ? collection.name : null,
+                libraryId: collection.libraryID,
+            });
+        } else {
+            unresolved.push(String(filter));
+        }
+    }
+
+    return { collections: Array.from(collections.values()), unresolved, outOfScope };
+}
+
+/**
+ * Error for a `collections_filter` that resolved to no usable collection.
+ *
+ * Such a filter must narrow the search to no results rather than widen it to
+ * the whole library, but returning an empty result alone is misleading: the
+ * model reads it as "that collection holds nothing" and moves on instead of
+ * fixing the reference. Returns null when at least one collection resolved —
+ * a partially resolved filter searches the collections it found.
+ */
+export function collectionsFilterError(
+    resolution: CollectionsFilterResolution
+): CollectionsFilterError | null {
+    if (resolution.collections.length > 0) return null;
+
+    if (resolution.unresolved.length > 0) {
+        const label = resolution.unresolved.length === 1 ? 'Collection not found' : 'Collections not found';
+        const names = resolution.unresolved.map((entry) => `"${entry}"`).join(', ');
+        return {
+            message: `${label}: ${names}. Use list_collections to discover the available collections.`,
+            error_code: 'collection_not_found',
+        };
+    }
+
+    // Report the exclusion without the collection's name: it is content from a
+    // library the user put out of Beaver's reach. The resolution carries no name
+    // for such a match, so this cannot regress into echoing one.
+    const excluded = resolution.outOfScope.find((entry) => !isLibrarySearchable(entry.libraryId));
+    if (excluded) {
+        return {
+            message: excludedLibraryMessage(excluded.libraryId),
+            error_code: 'library_not_searchable',
+        };
+    }
+
+    const [entry] = resolution.outOfScope;
+    if (entry) {
+        const library = Zotero.Libraries?.get?.(entry.libraryId);
+        const libraryName = library ? `"${library.name}"` : `library ${entry.libraryId}`;
+        const collectionLabel = entry.name ? `Collection "${entry.name}"` : `Collection "${entry.input}"`;
+        return {
+            message: (
+                `${collectionLabel} is in ${libraryName}, which is outside the ` +
+                `requested libraries_filter. Drop libraries_filter or set it to that library.`
+            ),
+            error_code: 'collection_not_found',
+        };
+    }
+
+    return null;
+}
+
+/**
+ * Return the IDs of the items held by the given collections and all of their
+ * subcollections. Trashed subcollections and trashed members are excluded, and
+ * an item that sits in several collections in the scope is returned once.
+ */
+export async function getCollectionScopeItemIds(collections: Zotero.Collection[]): Promise<number[]> {
+    const collectionIds = new Set<number>();
+    for (const collection of collections) {
+        collectionIds.add(collection.id);
+        for (const descendant of collection.getDescendents(false, 'collection')) {
+            collectionIds.add(descendant.id);
+        }
+    }
+    if (collectionIds.size === 0) return [];
+
+    const scopeIds = Array.from(collectionIds);
+    const itemIds = new Set<number>();
+    for (let i = 0; i < scopeIds.length; i += 900) {
+        const chunk = scopeIds.slice(i, i + 900);
+        const placeholders = chunk.map(() => '?').join(', ');
+        await Zotero.DB.queryAsync(
+            `SELECT itemID
+             FROM collectionItems
+             WHERE collectionID IN (${placeholders})
+               AND itemID NOT IN (SELECT itemID FROM deletedItems)`,
+            chunk,
+            {
+                onRow: (row: any) => {
+                    itemIds.add(row.getResultByIndex(0) as number);
+                },
+            },
+        );
+    }
+
+    return Array.from(itemIds);
+}
+
+/** A `tags_filter` entry that matched no tag in the searched libraries. */
+export interface UnresolvedTag {
+    /** The filter entry that matched nothing. */
+    input: string;
+    /** Existing tag names that resemble the entry, best first, possibly empty. */
+    suggestions: string[];
+}
+
+/** Outcome of resolving a `tags_filter` against the searched libraries. */
+export interface TagsFilterResolution {
+    /**
+     * Tag names to filter by, spelled as Zotero stores them and deduplicated.
+     * Empty when nothing resolved — callers must then return no results rather
+     * than search without a tag filter.
+     */
+    tags: string[];
+    /** Filter entries that matched no tag in the searched libraries. */
+    unresolved: UnresolvedTag[];
+}
+
+/** A `tags_filter` that left the search with no usable tag. */
+export interface TagsFilterError {
+    message: string;
+    error_code: 'tag_not_found';
+}
+
+/** How many close matches an unresolved tag offers. */
+const TAG_SUGGESTION_LIMIT = 3;
+
+/** Below this length a containment match is noise ("a" is inside half the library). */
+const MIN_CONTAINMENT_LENGTH = 3;
+
+/**
+ * Levenshtein distance between two strings, abandoned as soon as it is known to
+ * exceed `max` (which is then returned as `max + 1`). The bound is what keeps
+ * this cheap enough to run against every tag in the library.
+ */
+function boundedEditDistance(a: string, b: string, max: number): number {
+    if (Math.abs(a.length - b.length) > max) return max + 1;
+
+    let previous = Array.from({ length: b.length + 1 }, (_, i) => i);
+    for (let i = 1; i <= a.length; i++) {
+        const current = [i];
+        let rowBest = i;
+        for (let j = 1; j <= b.length; j++) {
+            const substitution = previous[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1);
+            const distance = Math.min(previous[j] + 1, current[j - 1] + 1, substitution);
+            current.push(distance);
+            if (distance < rowBest) rowBest = distance;
+        }
+        // Every alignment through this row already costs more than the bound.
+        if (rowBest > max) return max + 1;
+        previous = current;
+    }
+    return previous[b.length];
+}
+
+/**
+ * Existing tag names that most resemble `input`, best first.
+ *
+ * Two kinds of near-miss are worth reporting, because both are common in a
+ * model-supplied filter: a misspelling ("Econimics"), caught by edit distance,
+ * and a tag written shorter or longer than the stored one ("econ" for
+ * "economics"), caught by containment. The distance budget scales with the
+ * input so a long tag may be off by more than one character without a short one
+ * matching everything.
+ */
+function suggestTagNames(input: string, inventory: string[]): string[] {
+    const needle = input.toLowerCase();
+    if (!needle) return [];
+    const maxDistance = needle.length <= 4 ? 1 : Math.min(3, Math.floor(needle.length / 3));
+
+    const scored: { name: string; distance: number; lengthDiff: number }[] = [];
+    for (const name of inventory) {
+        const candidate = name.toLowerCase();
+        if (candidate === needle) continue;
+        const lengthDiff = Math.abs(candidate.length - needle.length);
+
+        if (
+            needle.length >= MIN_CONTAINMENT_LENGTH
+            && (candidate.includes(needle) || needle.includes(candidate))
+        ) {
+            scored.push({ name, distance: 0, lengthDiff });
+            continue;
+        }
+
+        const distance = boundedEditDistance(needle, candidate, maxDistance);
+        if (distance <= maxDistance) scored.push({ name, distance, lengthDiff });
+    }
+
+    scored.sort((a, b) => (
+        a.distance - b.distance
+        || a.lengthDiff - b.lengthDiff
+        || a.name.localeCompare(b.name)
+    ));
+    return scored.slice(0, TAG_SUGGESTION_LIMIT).map((entry) => entry.name);
+}
+
+/**
+ * Resolve a `tags_filter` against the libraries a search will cover.
+ *
+ * Entries are matched case-insensitively but resolve to the tag names Zotero
+ * stores, because the metadata search compares tags case-sensitively in SQL: a
+ * filter of "economics" against a stored "Economics" would otherwise match
+ * nothing and read as an empty library. When both casings exist as separate
+ * tags, all of them resolve — the filter ORs its tags, so that widens nothing
+ * beyond what the entry asked for.
+ *
+ * A tag carried only by a trashed item still counts as existing. Reporting it as
+ * unknown would send the model looking for a spelling mistake that isn't there,
+ * which is worse than the empty result the search returns.
+ *
+ * `libraryIds` must already be the searchable libraries the search will cover;
+ * an empty list resolves nothing at all, so no tag from a library the user
+ * excluded from Beaver can be confirmed, suggested, or denied.
+ */
+export async function resolveTagsFilter(
+    tagsFilter: (string | number)[],
+    libraryIds: number[]
+): Promise<TagsFilterResolution> {
+    if (libraryIds.length === 0) return { tags: [], unresolved: [] };
+
+    const inputs: string[] = [];
+    for (const entry of tagsFilter) {
+        // Request payloads are external JSON: skip anything that isn't a string
+        // or number rather than letting one malformed entry fail the search.
+        if (typeof entry !== 'string' && typeof entry !== 'number') continue;
+        const input = String(entry).trim();
+        if (input) inputs.push(input);
+    }
+    if (inputs.length === 0) return { tags: [], unresolved: [] };
+
+    // Every tag in the searched libraries, including tags that only sit on
+    // attachments, notes, or annotations: those are real tags a user can filter
+    // by even though this search only returns regular items.
+    const perLibrary = await Promise.all(
+        libraryIds.map((libraryId) => Zotero.Tags.getAll(libraryId) as Promise<{ tag: string }[]>)
+    );
+    const byFoldedName = new Map<string, string[]>();
+    const inventory: string[] = [];
+    for (const libraryTags of perLibrary) {
+        for (const { tag } of libraryTags) {
+            const folded = tag.toLowerCase();
+            const stored = byFoldedName.get(folded);
+            if (!stored) {
+                byFoldedName.set(folded, [tag]);
+                inventory.push(tag);
+            } else if (!stored.includes(tag)) {
+                stored.push(tag);
+                inventory.push(tag);
+            }
+        }
+    }
+
+    const tags = new Set<string>();
+    const unresolved: UnresolvedTag[] = [];
+    for (const input of inputs) {
+        const stored = byFoldedName.get(input.toLowerCase());
+        if (stored) {
+            for (const name of stored) tags.add(name);
+        } else {
+            unresolved.push({ input, suggestions: suggestTagNames(input, inventory) });
+        }
+    }
+
+    return { tags: Array.from(tags), unresolved };
+}
+
+/**
+ * Error for a `tags_filter` that resolved to no existing tag.
+ *
+ * Without it the model cannot tell its three cases apart: a tag it spelled
+ * wrong, a tag that exists but carries no matching item, and a real result.
+ * Only the first is an error, and it is the one an empty result hides.
+ *
+ * Returns null when at least one tag resolved. A partially resolved filter is
+ * not an error and is reported as none: the filter ORs its tags, so an entry
+ * that matches no tag at all contributes nothing either way, and the search the
+ * model gets back is exactly the one it asked for.
+ */
+export function tagsFilterError(resolution: TagsFilterResolution): TagsFilterError | null {
+    if (resolution.tags.length > 0) return null;
+    if (resolution.unresolved.length === 0) return null;
+
+    const label = resolution.unresolved.length === 1 ? 'Tag not found' : 'Tags not found';
+    const entries = resolution.unresolved
+        .map(({ input, suggestions }) => {
+            if (suggestions.length === 0) return `"${input}"`;
+            const names = suggestions.map((name) => `"${name}"`).join(', ');
+            return `"${input}" (did you mean ${names}?)`;
+        })
+        .join(', ');
+    return {
+        message: `${label}: ${entries}. Tags must match an existing tag; use list_tags to discover them.`,
+        error_code: 'tag_not_found',
+    };
+}
+
 /**
  * Format creators array into a string for display.
  */
@@ -1159,52 +1536,175 @@ export function isLibrarySearchable(libraryId: number): boolean {
 }
 
 /**
- * Resolves a request-supplied `libraries_filter` array to the local, searchable
- * library IDs it denotes. Each entry may be a numeric ID, a numeric ID string, a
- * portable library_ref ("u" | "g<groupID>"), or a library name (case-insensitive
- * substring match). A `library_ref` that doesn't resolve on this device (e.g. a
- * group the user isn't a member of here) contributes nothing — it never falls
- * back to name matching. The result is always intersected with the searchable
- * libraries and deduplicated.
+ * Whether the library-access snapshot has loaded far enough to explain an access
+ * decision. `getSearchableLibraryIds()` is fail-closed `[]` until the profile and
+ * the local library list are both in the store, so before that every library
+ * reads as non-searchable. Gate any message that *attributes* a denial (e.g. "the
+ * user excluded this library") on this; the fail-closed scope itself needs no
+ * gate.
  */
-export function resolveLibrariesFilterToSearchableIds(filters: Array<string | number>): number[] {
+export function isLibraryAccessReady(): boolean {
+    return store.get(isLibraryAccessReadyAtom);
+}
+
+/** A `libraries_filter` entry that matched a library the user excluded from Beaver. */
+export interface ExcludedFilterLibrary {
+    /** The filter entry that matched it. */
+    input: string;
+    /** Library the match lives in. */
+    libraryId: number;
+}
+
+/** Outcome of resolving a `libraries_filter` against this device's libraries. */
+export interface LibrariesFilterResolution {
+    /** Searchable local library IDs the filter resolved to, deduplicated. */
+    libraryIds: number[];
+    /** Filter entries that matched no library on this device. */
+    unresolved: string[];
+    /** Filter entries that matched only libraries excluded from Beaver. */
+    excluded: ExcludedFilterLibrary[];
+}
+
+/** A `libraries_filter` that left the search with no usable library. */
+export interface LibrariesFilterError {
+    message: string;
+    error_code: 'library_not_found' | 'library_not_searchable';
+}
+
+/**
+ * Resolve a request-supplied `libraries_filter` against this device's libraries.
+ *
+ * Each entry may be a portable library_ref ("u" | "g<groupID>"), a numeric ID, a
+ * numeric ID string, or a library name (case-insensitive substring match). Refs
+ * are the documented form; name matching is kept only as a fallback for models
+ * that pass a name anyway, and never applies to an entry that parses as a ref —
+ * a group ref this device doesn't have is unresolved, not a name to look up.
+ *
+ * An explicit reference (ref or numeric ID) is resolved against every local
+ * library and then classified, so the caller can tell a bad reference apart from
+ * a library the user excluded from Beaver — the same contract as
+ * `validateLibraryAccess`. The name fallback is deliberately narrower: it
+ * searches only the searchable libraries, so a substring can never enumerate an
+ * excluded library or surface its name. A name that matches only excluded
+ * libraries is therefore reported as not found.
+ *
+ * An entry with both searchable and excluded matches counts as resolved: the
+ * searchable matches are what the search can honour.
+ */
+export function resolveLibrariesFilter(filters: Array<string | number>): LibrariesFilterResolution {
     const searchableLibraryIds = getSearchableLibraryIds();
-    const resolvedIds = new Set<number>();
+    const libraryIds = new Set<number>();
+    const unresolved: string[] = [];
+    const excluded: ExcludedFilterLibrary[] = [];
+
+    /** Sort one entry's local matches into the resolution's three buckets. */
+    const classify = (input: string, matchedIds: number[]) => {
+        const searchable = matchedIds.filter((id) => searchableLibraryIds.includes(id));
+        if (searchable.length > 0) {
+            for (const id of searchable) libraryIds.add(id);
+        } else if (matchedIds.length > 0) {
+            excluded.push({ input, libraryId: matchedIds[0] });
+        } else {
+            unresolved.push(input);
+        }
+    };
 
     for (const filter of filters) {
-        if (typeof filter === 'number') {
-            if (searchableLibraryIds.includes(filter)) resolvedIds.add(filter);
-            continue;
-        }
         // Request payloads are external JSON: skip anything that isn't a string
         // or number rather than letting one malformed entry fail the search.
-        if (typeof filter !== 'string') continue;
+        if (typeof filter !== 'number' && typeof filter !== 'string') continue;
+
+        if (typeof filter === 'number') {
+            classify(String(filter), Zotero.Libraries?.get?.(filter) ? [filter] : []);
+            continue;
+        }
 
         const parsedRef = parseLibraryRef(filter);
         if (parsedRef) {
             const libraryID = resolveLibraryRef({ library_ref: filter });
-            if (libraryID != null && searchableLibraryIds.includes(libraryID)) {
-                resolvedIds.add(libraryID);
-            }
+            classify(filter, libraryID != null ? [libraryID] : []);
             continue;
         }
 
-        const numericId = parseInt(filter, 10);
-        if (!isNaN(numericId)) {
-            if (searchableLibraryIds.includes(numericId)) resolvedIds.add(numericId);
+        // Strict numeric string, so "5abc" falls through to the name fallback
+        // instead of being silently read as library 5.
+        if (/^[1-9][0-9]*$/.test(filter)) {
+            const numericId = parseInt(filter, 10);
+            classify(filter, Zotero.Libraries?.get?.(numericId) ? [numericId] : []);
             continue;
         }
 
-        // Name lookup: case-insensitive substring match against searchable libraries
+        // Undocumented name fallback: case-insensitive substring match, scoped to
+        // the searchable libraries. A substring match is far looser than an
+        // explicit reference, so it must never reach a library the user excluded
+        // from Beaver — enumerating one here would leak its name through the
+        // exclusion message.
         const needle = filter.toLowerCase();
-        for (const lib of Zotero.Libraries.getAll()) {
-            if (searchableLibraryIds.includes(lib.libraryID) && lib.name.toLowerCase().includes(needle)) {
-                resolvedIds.add(lib.libraryID);
-            }
-        }
+        const byName = Zotero.Libraries.getAll()
+            .filter((lib) => searchableLibraryIds.includes(lib.libraryID)
+                && lib.name.toLowerCase().includes(needle))
+            .map((lib) => lib.libraryID);
+        classify(filter, byName);
     }
 
-    return Array.from(resolvedIds);
+    return { libraryIds: Array.from(libraryIds), unresolved, excluded };
+}
+
+/**
+ * Error for a `libraries_filter` that resolved to no searchable library.
+ *
+ * Such a filter must narrow the search to no results rather than widen it to
+ * every library, but returning an empty result alone is misleading: the model
+ * reads it as "those libraries hold nothing" and moves on instead of fixing the
+ * reference. Returns null when at least one library resolved — a partially
+ * resolved filter searches the libraries it found.
+ */
+export function librariesFilterError(
+    resolution: LibrariesFilterResolution
+): LibrariesFilterError | null {
+    if (resolution.libraryIds.length > 0) return null;
+
+    // Every classification here depends on the searchable set, which is
+    // fail-closed `[]` until the library-access snapshot loads: until then a valid
+    // reference looks excluded and a valid name looks unknown. Give no reason
+    // rather than a wrong one — the caller's empty library scope still returns no
+    // results, so the search stays fail-closed either way.
+    if (!isLibraryAccessReady()) return null;
+
+    if (resolution.unresolved.length > 0) {
+        const label = resolution.unresolved.length === 1 ? 'Library not found' : 'Libraries not found';
+        const names = resolution.unresolved.map((entry) => `"${entry}"`).join(', ');
+        const available = getSearchableLibraries()
+            .map((lib) => `"${lib.name}"${lib.library_ref ? ` (${lib.library_ref})` : ''}`)
+            .join(', ');
+        const availableNote = available
+            ? ` Available libraries: ${available}.`
+            : '';
+        return {
+            message: `${label}: ${names}. Identify a library by its portable ref ("u" for the personal library, "g<groupID>" for a group).${availableNote}`,
+            error_code: 'library_not_found',
+        };
+    }
+
+    const [entry] = resolution.excluded;
+    if (entry) {
+        return {
+            message: excludedLibraryMessage(entry.libraryId),
+            error_code: 'library_not_searchable',
+        };
+    }
+
+    return null;
+}
+
+/**
+ * Resolves a request-supplied `libraries_filter` array to the local, searchable
+ * library IDs it denotes, discarding why any entry failed to resolve. Prefer
+ * `resolveLibrariesFilter` where an unusable filter has to be reported to the
+ * model rather than silently narrowing the search to nothing.
+ */
+export function resolveLibrariesFilterToSearchableIds(filters: Array<string | number>): number[] {
+    return resolveLibrariesFilter(filters).libraryIds;
 }
 
 /**
