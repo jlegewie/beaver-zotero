@@ -252,6 +252,20 @@ export interface ToolCallPart {
 
 export type AgentRunStatus = 'in_progress' | 'completed' | 'error' | 'canceled' | 'awaiting_deferred';
 
+/**
+ * Whether a run is still live: streaming, or paused waiting on the user to
+ * answer a deferred approval.
+ *
+ * A failed run stays in the active slot rather than moving to thread history —
+ * a lost connection never delivers the terminal `done` event that archives it,
+ * and the inline error card and its Retry button need the run to stay there.
+ * So the presence of an active run does NOT mean the agent is still working;
+ * anything asking "is Beaver still generating?" must go through this.
+ */
+export function isRunActive(run: { status: AgentRunStatus } | null | undefined): boolean {
+    return run?.status === 'in_progress' || run?.status === 'awaiting_deferred';
+}
+
 interface AgentRunMetadata {
     citations: Citation[];
 }

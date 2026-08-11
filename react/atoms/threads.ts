@@ -12,12 +12,12 @@ import { isThreadInstanceMismatch } from "../utils/threadMatches";
 import { getHost } from "../host";
 import { logger } from "@beaver/agent-core/platform/logger";
 import { ApiError } from "@beaver/agent-core/types/apiErrors";
-import { resetMessageUIStateAtom } from "./messageUIState";
+import { resetMessageUIStateAtom, retainedReviewActionsAtom } from "./messageUIState";
 import { checkExternalReferencesAtom, clearExternalReferenceCacheAtom, addExternalReferencesToMappingAtom } from "./externalReferences";
 import { ExternalReference } from "@beaver/agent-core/types/externalReferences";
 import { threadRunsAtom, activeRunAtom, currentThreadIdAtom } from "@beaver/agent-core/run-state/atoms";
 import { isWSChatPendingAtom, isWSConnectedAtom, isWSReadyAtom } from "./agentRunAtoms";
-import { AgentRun } from "@beaver/agent-core/agents/types";
+import { AgentRun, isRunActive } from "@beaver/agent-core/agents/types";
 import { 
     threadAgentActionsAtom, 
     isCreateItemAgentAction, 
@@ -270,8 +270,10 @@ async function cancelActiveRunIfNeeded(get: (atom: any) => any, set: (atom: any,
 export const newThreadAtom = atom(
     null,
     async (get, set, options?: { skipAutoPopulate?: boolean; skipActiveRunConfirm?: boolean }) => {
-        // Show loading state immediately if there's an active run to cancel
-        const hasActiveWork = get(isWSChatPendingAtom) || get(activeRunAtom);
+        // Show loading state immediately if there's an active run to cancel.
+        // Gated on run status, not presence: a run that failed keeps sitting in
+        // activeRunAtom, and prompting over it claims Beaver is still working.
+        const hasActiveWork = get(isWSChatPendingAtom) || isRunActive(get(activeRunAtom));
         if (hasActiveWork) {
             if (!options?.skipActiveRunConfirm && !confirmInterruptActiveRun(
                 'Start new chat?',
@@ -364,8 +366,9 @@ export const loadThreadAtom = atom(
             skipInstanceMismatchConfirm?: boolean;
         }
     ): Promise<boolean> => {
-        // Confirm before interrupting a run that's actively streaming in the current thread
-        const hasActiveWork = get(isWSChatPendingAtom) || get(activeRunAtom);
+        // Confirm before interrupting a run that's actively streaming in the
+        // current thread. Status, not presence — see newThreadAtom.
+        const hasActiveWork = get(isWSChatPendingAtom) || isRunActive(get(activeRunAtom));
         if (hasActiveWork && !confirmInterruptActiveRun(
             'Switch chat?',
             'Beaver is still generating a response in this chat. Switching chats will stop it.',
@@ -446,7 +449,9 @@ export const loadThreadAtom = atom(
             // Clear all pending approvals/questions when loading a different thread
             set(clearAllPendingApprovalsAtom);
             set(clearAllPendingQuestionsAtom);
-
+            // A reopened thread takes a fresh snapshot containing only actions
+            // that are still pending.
+            set(retainedReviewActionsAtom, {});
             // Legacy non-stateful path: fetch the name from the local DB when
             // not provided (the stateful path already resolved it above).
             const threadNamePromise = !resolvedName && !statefulChat

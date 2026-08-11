@@ -3,7 +3,9 @@ import { describe, expect, it } from "vitest";
 import {
     getActionLabel,
     getActionTitle,
+    hasFailedUndo,
 } from "../../../react/host/zotero/components/agentActionViewHelpers";
+import type { AgentAction } from "@beaver/agent-core/agents/agentActionTypes";
 
 /**
  * `edit_annotations` and `delete_annotations` are two tools sharing one action
@@ -78,5 +80,41 @@ describe("annotation action labels", () => {
                 ],
             }),
         ).toBe("Edit 2 Annotations");
+    });
+});
+
+describe("hasFailedUndo", () => {
+    const errored = (overrides: Partial<AgentAction> = {}): AgentAction => ({
+        id: "a1",
+        run_id: "run-1",
+        toolcall_id: "call-1",
+        action_type: "create_note",
+        status: "error",
+        proposed_data: {},
+        ...overrides,
+    } as AgentAction);
+
+    // Retry has to know which direction failed, and only an applied action ever
+    // carries result_data — a successful undo clears it.
+    it("is true for an errored action that still carries a result", () => {
+        expect(hasFailedUndo([errored({ result_data: { zotero_key: "ABC" } })])).toBe(true);
+    });
+
+    it("is false for a failed apply, which never produced a result", () => {
+        expect(hasFailedUndo([errored()])).toBe(false);
+        expect(hasFailedUndo([errored({ result_data: null as any })])).toBe(false);
+    });
+
+    it("is false when nothing errored", () => {
+        expect(hasFailedUndo([errored({ status: "applied", result_data: { zotero_key: "ABC" } })])).toBe(false);
+        expect(hasFailedUndo([errored({ status: "undone" })])).toBe(false);
+        expect(hasFailedUndo([])).toBe(false);
+    });
+
+    it("finds the failed undo in a batch that also has failed applies", () => {
+        expect(hasFailedUndo([
+            errored(),
+            errored({ id: "a2", result_data: { zotero_key: "ABC" } }),
+        ])).toBe(true);
     });
 });

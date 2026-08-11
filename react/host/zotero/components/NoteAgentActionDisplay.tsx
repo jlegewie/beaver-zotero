@@ -517,7 +517,7 @@ interface NoteAgentActionDisplayProps {
  * pattern of EditNoteGroupView.
  */
 const NoteAgentActionDisplay: React.FC<NoteAgentActionDisplayProps> = ({ run, actions }) => {
-    // Show pending/error (awaiting user confirmation) and auto-applied notes (allowing undo).
+    // Show created notes and allow undo.
     // Auto-applied notes are tracked in a session-only set — they don't reappear on reload.
     // Manually confirmed notes become 'applied' but aren't in the auto-applied set, so they disappear.
     const visibleActions = actions.filter(a =>

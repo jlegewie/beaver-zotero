@@ -33,7 +33,9 @@ export const ActionPreview: React.FC<{
     actions?: AgentAction[];
     /** Whether tool call arguments are actively streaming */
     isStreaming?: boolean;
-}> = ({ toolName, previewData, status, actions, isStreaming }) => {
+    /** Use the compact presentation intended for the end-of-run review card. */
+    compact?: boolean;
+}> = ({ toolName, previewData, status, actions, isStreaming, compact = false }) => {
     const editNotePreviewKind = getEditNotePreviewKind(toolName, previewData.actionType);
     if (toolName === 'edit_metadata' || previewData.actionType === 'edit_metadata') {
         const edits = previewData.actionData.edits || [];
@@ -431,6 +433,7 @@ export const ActionPreview: React.FC<{
                 resultData={previewData.resultData}
                 status={status}
                 isStreaming={isStreaming}
+                compact={compact}
             />
         );
     }

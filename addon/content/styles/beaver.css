@@ -1282,6 +1282,19 @@
     margin-block-end: 0px !important;
 }
 
+/* The review card repeats action details already shown in the conversation.
+   Keep create-note previews scannable there without changing the full inline
+   note rendered by AgentActionView. */
+[id^="beaver-pane-"] .create-note-preview-compact {
+    max-height: 12em;
+    overflow: hidden;
+}
+
+[id^="beaver-pane-"] .create-note-preview-compact.is-truncated {
+    -webkit-mask-image: linear-gradient(to bottom, #000 0, #000 calc(100% - 2.5em), transparent 100%);
+    mask-image: linear-gradient(to bottom, #000 0, #000 calc(100% - 2.5em), transparent 100%);
+}
+
 [id^="beaver-pane-"] .markdown .katex {
     /* Styles for inline math */
     display: inline-block;

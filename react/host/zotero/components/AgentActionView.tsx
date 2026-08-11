@@ -7,10 +7,6 @@ import {
     PendingApproval,
     getAgentActionsByToolcallAtom,
     removePendingApprovalAtom,
-    undoAgentActionAtom,
-    ackAgentActionsAtom,
-    rejectAgentActionAtom,
-    setAgentActionsToErrorAtom,
     isCreateAnnotationsAgentAction,
 } from '../../../agents/agentActions';
 import {
@@ -26,45 +22,24 @@ import {
     toolExpandedAtom,
     setToolExpandedAtom,
 } from '../../../atoms/messageUIState';
-import { executeEditMetadataAction, undoEditMetadataAction, UndoResult } from '../../../utils/editMetadataActions';
-import { executeCreateCollectionAction, undoCreateCollectionAction } from '../../../utils/createCollectionActions';
-import { executeOrganizeItemsAction, undoOrganizeItemsAction } from '../../../utils/organizeItemsActions';
-import { executeCreateItemActions, undoCreateItemActions } from '../../../utils/createItemActions';
-import { executeCreateNoteAction, undoCreateNoteAction } from '../../../utils/createNoteActions';
-import { executeManageTagsAction, undoManageTagsAction } from '../../../utils/manageTagsActions';
-import { executeManageCollectionsAction, undoManageCollectionsAction } from '../../../utils/manageCollectionsActions';
 import {
-    executeCreateHighlightAnnotationsAction,
-    executeCreateNoteAnnotationsAction,
-    undoCreateAnnotationsAction,
-} from '../../../utils/createAnnotationsActions';
-import { executeEditAnnotationsAction, undoEditAnnotationsAction } from '../../../utils/editAnnotationsActions';
-import type { CreateItemProposedData } from '@beaver/agent-core/types/agentActions/items';
+    applyAgentActionsAtom,
+    rejectAgentActionsAtom,
+    undoAgentActionsAtom,
+} from '../agentActionExecution';
 import { shortItemTitle } from '../../../../src/utils/zoteroUtils';
 import { resolveItemReference, resolveLibraryRef } from '../../../../src/utils/libraryIdentity';
 import { notifyReferenceUnavailable } from '../sourceActions';
-import { logger } from '@beaver/agent-core/platform/logger';
 import {
     TickIcon,
     CancelIcon,
     ChevronIcon,
-    ClockIcon,
     Spinner,
     Icon,
     RepeatIcon,
     ArrowDownIcon,
     ArrowRightIcon,
-    PropertyEditIcon,
     ArrowUpRightIcon,
-    FolderAddIcon,
-    FolderDetailIcon,
-    TaskDoneIcon,
-    TagIcon,
-    HighlighterIcon,
-    DocumentValidationIcon,
-    DollarCircleIcon,
-    GlobalSearchIcon,
-    NoteIcon,
 } from '../../../components/icons/icons';
 import { revealSource, openNoteByKey, getCurrentCollectionKeyForItem } from '../../../utils/sourceUtils';
 import Button from '../../../components/ui/Button';
@@ -74,20 +49,20 @@ import SplitApplyButton from '../../../components/ui/buttons/SplitApplyButton';
 import DeferredToolPreferenceButton from '../../../components/ui/buttons/DeferredToolPreferenceButton';
 import ExtractionApprovalButton from '../../../components/ui/buttons/ExtractionApprovalButton';
 import ExternalSearchApprovalButton from '../../../components/ui/buttons/ExternalSearchApprovalButton';
-import { markExternalReferenceImportedAtom, markExternalReferenceDeletedAtom } from '../../../atoms/externalReferences';
 import {
     ActionStatus,
     STATUS_CONFIGS,
     NEVER_AUTO_COLLAPSE_TOOLS,
-    confirmOverwriteManualChanges,
     getOverallStatus,
     getActionLabel,
     getActionTitle,
     buildPreviewData,
     PreviewData,
+    getCreateAnnotationsDisplayStatus,
+    getAgentActionToolIcon,
 } from './agentActionViewHelpers';
 import { ActionPreview } from './ActionPreview';
-import { currentThreadIdAtom } from '../../../atoms/threads';
+import { useApprovalRecovery } from './useApprovalRecovery';
 import {
     getToolGroupRunApprovalLabel,
     getToolGroupRunApprovalScope,
@@ -115,17 +90,6 @@ type HeaderLinkAction = {
 type HeaderLinkActionRule = HeaderLinkAction & {
     matches: () => boolean;
 };
-
-function getCreateAnnotationsDisplayStatus(action: AgentAction): ActionStatus | null {
-    if (!isCreateAnnotationsAgentAction(action) || action.status !== 'applied') return null;
-    const createdCount = Array.isArray(action.result_data?.created)
-        ? action.result_data.created.length
-        : 0;
-    const failedCount = Array.isArray(action.result_data?.failed)
-        ? action.result_data.failed.length
-        : 0;
-    return createdCount === 0 && failedCount > 0 ? 'error' : null;
-}
 
 export const AgentActionView: React.FC<AgentActionViewProps> = ({
     toolcallId,
@@ -183,7 +147,6 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
 
     const [isProcessingApproval, setIsProcessingApproval] = useState(false);
     const [isProcessingAction, setIsProcessingAction] = useState(false);
-    const threadId = useAtomValue(currentThreadIdAtom);
     const [isUndoError, setIsUndoError] = useState(false);
     const [isExternallyProcessing, setIsExternallyProcessing] = useState(false);
     const [clickedButton, setClickedButton] = useState<'approve' | 'reject' | 'undo' | null>(null);
@@ -197,14 +160,13 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     const approveToolGroupForRun = useSetAtom(approveToolGroupForRunAtom);
     const removeApprovalResponseIntent = useSetAtom(removeApprovalResponseIntentAtom);
     const removePendingApproval = useSetAtom(removePendingApprovalAtom);
-    const ackAgentActions = useSetAtom(ackAgentActionsAtom);
-    const rejectAgentAction = useSetAtom(rejectAgentActionAtom);
-    const setAgentActionsToError = useSetAtom(setAgentActionsToErrorAtom);
-    const undoAgentAction = useSetAtom(undoAgentActionAtom);
-    const markExternalReferenceImported = useSetAtom(markExternalReferenceImportedAtom);
-    const markExternalReferenceDeleted = useSetAtom(markExternalReferenceDeletedAtom);
+    const applyAgentActions = useSetAtom(applyAgentActionsAtom);
+    const rejectAgentActions = useSetAtom(rejectAgentActionsAtom);
+    const undoAgentActions = useSetAtom(undoAgentActionsAtom);
 
-    const itemTitleKey = `${responseIndex}:${toolcallId}`;
+    // Keyed on the tool call id alone: surfaces without a responseIndex then
+    // share the same resolved title and the same fetch.
+    const itemTitleKey = toolcallId;
     const itemTitleMap = useAtomValue(agentActionItemTitlesAtom);
     const itemTitle = itemTitleMap[itemTitleKey] ?? null;
     const setItemTitle = useSetAtom(setAgentActionItemTitleAtom);
@@ -244,6 +206,19 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
         fetchTitle();
     }, [action, pendingApproval, itemTitle, itemTitleKey, hasAssociatedItem, setItemTitle]);
 
+    const handleApprovalRecovered = useCallback(() => {
+        setIsProcessingApproval(false);
+        setIsExternallyProcessing(false);
+        setClickedButton(null);
+    }, []);
+    const { setProcessingApproval } = useApprovalRecovery({
+        isAwaitingDecision: isProcessingApproval || isExternallyProcessing,
+        hasToolReturn,
+        actionStatus: action?.status,
+        onRecover: handleApprovalRecovered,
+        label: `AgentActionView(${toolName})`,
+    });
+
     useEffect(() => {
         const previousPendingApproval = prevPendingApprovalRef.current;
         const wasAwaiting = previousPendingApproval !== null;
@@ -256,6 +231,13 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
             if (!isProcessingApproval && isRunPending && !hasToolReturn) {
                 setIsExternallyProcessing(true);
                 setClickedButton(previousIntent === false ? 'reject' : 'approve');
+                // Record it for recovery too: a decision made from another
+                // surface (Approve All, the composer, the diff-preview banner)
+                // can miss its window exactly like one made here.
+                setProcessingApproval({
+                    actionId: previousActionId,
+                    kind: previousIntent === false ? 'reject' : 'approve',
+                });
             }
 
             if (previousIntent !== undefined) {
@@ -271,19 +253,22 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
         hasToolReturn,
         approvalResponseIntents,
         removeApprovalResponseIntent,
+        setProcessingApproval,
     ]);
 
     useEffect(() => {
         if ((isProcessingApproval || isExternallyProcessing) && action && action.status !== 'pending') {
             setIsProcessingApproval(false);
+            setProcessingApproval(null);
             setIsExternallyProcessing(false);
             setClickedButton(null);
         }
         if (isExternallyProcessing && (hasToolReturn || !isRunPending)) {
             setIsExternallyProcessing(false);
+            setProcessingApproval(null);
             setClickedButton(null);
         }
-    }, [isProcessingApproval, isExternallyProcessing, action?.status, hasToolReturn, isRunPending, action]);
+    }, [isProcessingApproval, isExternallyProcessing, action?.status, hasToolReturn, isRunPending, action, setProcessingApproval]);
 
     const isProcessing = isProcessingApproval || isProcessingAction || isExternallyProcessing;
     const actionDisplayStatus = action ? getCreateAnnotationsDisplayStatus(action) : null;
@@ -304,6 +289,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     const handleApprove = useCallback(() => {
         if (!pendingApproval) return;
         setIsProcessingApproval(true);
+        setProcessingApproval({ actionId: pendingApproval.actionId, kind: 'approve' });
         setClickedButton('approve');
         sendApprovalResponse({ actionId: pendingApproval.actionId, approved: true });
         removePendingApproval(pendingApproval.actionId);
@@ -312,6 +298,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     const handleReject = useCallback(() => {
         if (!pendingApproval) return;
         setIsProcessingApproval(true);
+        setProcessingApproval({ actionId: pendingApproval.actionId, kind: 'reject' });
         setClickedButton('reject');
         sendApprovalResponse({ actionId: pendingApproval.actionId, approved: false });
         removePendingApproval(pendingApproval.actionId);
@@ -320,6 +307,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     const handleApproveForRun = useCallback(() => {
         if (!pendingApproval) return;
         setIsProcessingApproval(true);
+        setProcessingApproval({ actionId: pendingApproval.actionId, kind: 'approve' });
         setClickedButton('approve');
         approveToolGroupForRun({ runId, toolName });
     }, [pendingApproval, approveToolGroupForRun, runId, toolName]);
@@ -331,138 +319,20 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
         setIsProcessingAction(true);
         setClickedButton('approve');
         try {
-            if (toolName === 'edit_metadata') {
-                const result = await executeEditMetadataAction(action!);
-                await ackAgentActions(runId, [{
-                    action_id: action!.id,
-                    result_data: result,
-                }]);
-                logger(`AgentActionView: Applied edit_metadata action ${action!.id}`, 1);
-            } else if (toolName === 'create_collection') {
-                const result = await executeCreateCollectionAction(action!);
-                await ackAgentActions(runId, [{
-                    action_id: action!.id,
-                    result_data: result,
-                }]);
-                logger(`AgentActionView: Applied create_collection action ${action!.id}`, 1);
-            } else if (toolName === 'organize_items') {
-                const result = await executeOrganizeItemsAction(action!);
-                await ackAgentActions(runId, [{
-                    action_id: action!.id,
-                    result_data: result,
-                }]);
-                logger(`AgentActionView: Applied organize_items action ${action!.id}`, 1);
-            } else if (toolName === 'manage_tags') {
-                const result = await executeManageTagsAction(action!);
-                await ackAgentActions(runId, [{
-                    action_id: action!.id,
-                    result_data: result,
-                }]);
-                logger(`AgentActionView: Applied manage_tags action ${action!.id}`, 1);
-            } else if (toolName === 'manage_collections') {
-                const result = await executeManageCollectionsAction(action!);
-                await ackAgentActions(runId, [{
-                    action_id: action!.id,
-                    result_data: result,
-                }]);
-                logger(`AgentActionView: Applied manage_collections action ${action!.id}`, 1);
-            } else if (toolName === 'create_note') {
-                const result = await executeCreateNoteAction(action!, runId);
-                await ackAgentActions(runId, [{
-                    action_id: action!.id,
-                    result_data: result,
-                }]);
-                logger(`AgentActionView: Applied create_note action ${action!.id}`, 1);
-            } else if (toolName === 'create_highlight_annotations') {
-                const result = await executeCreateHighlightAnnotationsAction(action!);
-                await ackAgentActions(runId, [{
-                    action_id: action!.id,
-                    result_data: result,
-                }]);
-                logger(`AgentActionView: Applied create_highlight_annotations action ${action!.id}`, 1);
-            } else if (toolName === 'create_note_annotations') {
-                const result = await executeCreateNoteAnnotationsAction(action!);
-                await ackAgentActions(runId, [{
-                    action_id: action!.id,
-                    result_data: result,
-                }]);
-                logger(`AgentActionView: Applied create_note_annotations action ${action!.id}`, 1);
-            } else if (toolName === 'edit_annotations' || toolName === 'delete_annotations') {
-                const result = await executeEditAnnotationsAction(action!);
-                await ackAgentActions(runId, [{ action_id: action!.id, result_data: result }]);
-                logger(`AgentActionView: Applied edit_annotations action ${action!.id}`, 1);
-            } else if (toolName === 'create_items' || toolName === 'create_item') {
-                const actionsToApply = actions.filter((candidate) => candidate.status !== 'applied');
-                if (actionsToApply.length === 0) return;
-
-                const batchResult = await executeCreateItemActions(actionsToApply, {
-                    runId,
-                    threadId: threadId ?? undefined,
-                });
-                if (batchResult.successes.length > 0) {
-                    await ackAgentActions(runId, batchResult.successes.map((success) => ({
-                        action_id: success.action.id,
-                        result_data: success.result,
-                    })));
-                    logger(`AgentActionView: Applied ${batchResult.successes.length} create_item actions`, 1);
-
-                    for (const success of batchResult.successes) {
-                        const proposedData = success.action.proposed_data as CreateItemProposedData;
-                        if (proposedData?.item?.source_id) {
-                            markExternalReferenceImported(proposedData.item.source_id, {
-                                library_id: success.result.library_id,
-                                zotero_key: success.result.zotero_key,
-                                library_ref: success.result.library_ref,
-                            });
-                        }
-                    }
-                }
-
-                if (batchResult.failures.length > 0) {
-                    for (const failure of batchResult.failures) {
-                        setAgentActionsToError([failure.action.id], failure.error, failure.errorDetails);
-                    }
-                    logger(`AgentActionView: Failed to apply ${batchResult.failures.length} create_item actions`, 1);
-                }
-            }
-        } catch (error: any) {
-            const errorMessage = error?.message || 'Failed to apply action';
-            const stackTrace = error?.stack || '';
-            logger(`AgentActionView: Failed to apply actions: ${errorMessage}\nStack trace:\n${stackTrace}`, 1);
-            setAgentActionsToError(actions.map((candidate) => candidate.id), errorMessage, {
-                stack_trace: stackTrace,
-                error_name: error?.name,
-            });
+            await applyAgentActions({ actions, runId });
         } finally {
             setIsProcessingAction(false);
             setClickedButton(null);
         }
-    }, [
-        action,
-        actions,
-        isProcessing,
-        toolName,
-        runId,
-        threadId,
-        ackAgentActions,
-        setAgentActionsToError,
-        markExternalReferenceImported,
-    ]);
+    }, [actions, isProcessing, runId, applyAgentActions]);
 
     const handleRejectPending = useCallback(() => {
         if (actions.length === 0 || isProcessing) return;
 
         setClickedButton('reject');
-        if (isMultiAction) {
-            for (const candidate of actions) {
-                rejectAgentAction(candidate.id);
-            }
-            logger(`AgentActionView: Rejected ${actions.length} create_item actions`, 1);
-        } else {
-            rejectAgentAction(action!.id);
-        }
+        rejectAgentActions({ actions: isMultiAction ? actions : [action!] });
         setTimeout(() => setClickedButton(null), 100);
-    }, [action, actions, isProcessing, isMultiAction, rejectAgentAction]);
+    }, [action, actions, isProcessing, isMultiAction, rejectAgentActions]);
 
     const handleUndo = useCallback(async () => {
         if (!action || isProcessing) return;
@@ -470,108 +340,13 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
         setIsProcessingAction(true);
         setClickedButton('undo');
         try {
-            if (toolName === 'edit_metadata') {
-                let result: UndoResult = await undoEditMetadataAction(action, false);
-                if (result.needsConfirmation && result.manuallyModified.length > 0) {
-                    const shouldOverwrite = confirmOverwriteManualChanges(result.manuallyModified);
-                    if (shouldOverwrite) {
-                        result = await undoEditMetadataAction(action, true);
-                        logger(`AgentActionView: Force-reverted ${result.fieldsReverted} fields after user confirmation`, 1);
-                    } else {
-                        logger(`AgentActionView: User declined to overwrite ${result.manuallyModified.length} manually modified fields`, 1);
-                    }
-                }
-                if (result.alreadyReverted.length > 0) {
-                    logger(`AgentActionView: Fields already at original value: ${result.alreadyReverted.join(', ')}`, 1);
-                }
-                undoAgentAction(action.id);
-                logger(`AgentActionView: Undone edit_metadata action ${action.id} (${result.fieldsReverted} fields reverted)`, 1);
-            } else if (toolName === 'create_collection') {
-                await undoCreateCollectionAction(action);
-                undoAgentAction(action.id);
-                logger(`AgentActionView: Undone create_collection action ${action.id}`, 1);
-            } else if (toolName === 'organize_items') {
-                await undoOrganizeItemsAction(action);
-                undoAgentAction(action.id);
-                logger(`AgentActionView: Undone organize_items action ${action.id}`, 1);
-            } else if (toolName === 'manage_tags') {
-                await undoManageTagsAction(action);
-                undoAgentAction(action.id);
-                logger(`AgentActionView: Undone manage_tags action ${action.id}`, 1);
-            } else if (toolName === 'manage_collections') {
-                await undoManageCollectionsAction(action);
-                undoAgentAction(action.id);
-                logger(`AgentActionView: Undone manage_collections action ${action.id}`, 1);
-            } else if (toolName === 'create_note') {
-                await undoCreateNoteAction(action);
-                undoAgentAction(action.id);
-                logger(`AgentActionView: Undone create_note action ${action.id}`, 1);
-            } else if (toolName === 'create_highlight_annotations' || toolName === 'create_note_annotations') {
-                await undoCreateAnnotationsAction(action);
-                undoAgentAction(action.id);
-                logger(`AgentActionView: Undone ${toolName} action ${action.id}`, 1);
-            } else if (toolName === 'edit_annotations' || toolName === 'delete_annotations') {
-                let result: UndoResult = await undoEditAnnotationsAction(action, false);
-                if (result.needsConfirmation && result.manuallyModified.length > 0) {
-                    const shouldOverwrite = confirmOverwriteManualChanges(result.manuallyModified);
-                    if (shouldOverwrite) {
-                        result = await undoEditAnnotationsAction(action, true);
-                        logger(`AgentActionView: Force-reverted ${result.fieldsReverted} annotation fields after user confirmation`, 1);
-                    } else {
-                        logger(`AgentActionView: User declined to overwrite ${result.manuallyModified.length} manually modified annotation fields`, 1);
-                    }
-                }
-                undoAgentAction(action.id);
-                logger(`AgentActionView: Undone edit_annotations action ${action.id} (${result.fieldsReverted} fields reverted)`, 1);
-            } else if (toolName === 'create_items' || toolName === 'create_item') {
-                const actionsToUndo = actions.filter((candidate) => candidate.status === 'applied');
-                if (actionsToUndo.length === 0) return;
-
-                const batchResult = await undoCreateItemActions(actionsToUndo);
-                for (const actionId of batchResult.successes) {
-                    undoAgentAction(actionId);
-                    const undoneAction = actionsToUndo.find((candidate) => candidate.id === actionId);
-                    if (undoneAction) {
-                        const proposedData = undoneAction.proposed_data as CreateItemProposedData;
-                        if (proposedData?.item?.source_id) {
-                            markExternalReferenceDeleted(proposedData.item.source_id);
-                        }
-                    }
-                }
-                for (const failure of batchResult.failures) {
-                    setAgentActionsToError([failure.actionId], failure.error, failure.errorDetails);
-                }
-                logger(`AgentActionView: Undone ${batchResult.successes.length} create_item actions`, 1);
-                if (batchResult.failures.length > 0) {
-                    logger(`AgentActionView: Failed to undo ${batchResult.failures.length} create_item actions`, 1);
-                }
-            }
-        } catch (error: any) {
-            const errorMessage = error?.message || 'Failed to undo action';
-            const stackTrace = error?.stack || '';
-            logger(`AgentActionView: Failed to undo actions: ${errorMessage}\nStack trace:\n${stackTrace}`, 1);
-
-            setIsUndoError(true);
-            const appliedActionIds = actions.filter((candidate) => candidate.status === 'applied').map((candidate) => candidate.id);
-            if (appliedActionIds.length > 0) {
-                setAgentActionsToError(appliedActionIds, errorMessage, {
-                    stack_trace: stackTrace,
-                    error_name: error?.name,
-                });
-            }
+            const result = await undoAgentActions({ actions });
+            if (result.fatalError) setIsUndoError(true);
         } finally {
             setIsProcessingAction(false);
             setClickedButton(null);
         }
-    }, [
-        action,
-        actions,
-        isProcessing,
-        toolName,
-        undoAgentAction,
-        setAgentActionsToError,
-        markExternalReferenceDeleted,
-    ]);
+    }, [action, actions, isProcessing, undoAgentActions]);
 
     const handleRetry = useCallback(async () => {
         if (isUndoError) {
@@ -599,25 +374,10 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     const runApprovalScope = getToolGroupRunApprovalScope(toolName);
 
     const getHeaderIcon = () => {
-        const getToolIcon = () => {
-            if (toolName === 'edit_metadata' || toolName === 'edit_item') return PropertyEditIcon;
-            if (toolName === 'create_note') return NoteIcon;
-            if (toolName === 'create_highlight_annotations') return HighlighterIcon;
-            if (toolName === 'create_note_annotations') return NoteIcon;
-            if (toolName === 'edit_annotations' || toolName === 'delete_annotations') return HighlighterIcon;
-            if (toolName === 'create_collection') return FolderAddIcon;
-            if (toolName === 'organize_items') return TaskDoneIcon;
-            if (toolName === 'manage_tags') return TagIcon;
-            if (toolName === 'manage_collections') return FolderDetailIcon;
-            if (toolName === 'create_items' || toolName === 'create_item') return DocumentValidationIcon;
-            if (toolName === 'confirm_extraction') return DollarCircleIcon;
-            if (toolName === 'confirm_external_search') return GlobalSearchIcon;
-            return ClockIcon;
-        };
-        if (isAwaitingApproval) return getToolIcon();
+        if (isAwaitingApproval) return getAgentActionToolIcon(toolName);
         if (isHovered && isExpanded) return ArrowDownIcon;
         if (isHovered && !isExpanded) return ArrowRightIcon;
-        if (config.icon === null) return getToolIcon();
+        if (config.icon === null) return getAgentActionToolIcon(toolName);
         return config.icon;
     };
 
