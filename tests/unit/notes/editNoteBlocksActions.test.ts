@@ -172,6 +172,8 @@ import {
 } from '../../../react/utils/editNoteActions';
 import { deriveEditNoteRows, getEditNoteCallVariant } from '../../../react/components/agentRuns/editNoteShared';
 import { buildAddressSnapshot, snapshotNoteId } from '../../../src/utils/noteSnapshot';
+import { logger } from '@beaver/agent-core/platform/logger';
+import { preloadNotePageLabels } from '../../../src/utils/noteCitationExpand';
 import { invalidateSimplificationCache } from '../../../src/utils/noteHtmlSimplifier';
 import { stripBeaverEditFooter } from '../../../src/utils/noteEditFooter';
 import { checkLibraryExcluded } from '../../../src/services/agentDataProvider/utils';
@@ -243,6 +245,13 @@ function blocksAction(
 /** The same action after a successful apply, ready to be undone. */
 function appliedBlocksAction(result: EditNoteBlocksResultData, edits: EditNoteBlocksEditItem[]): any {
     return { ...blocksAction(edits), status: 'applied', result_data: result };
+}
+
+/** True if undo emitted its `address_post_snapshot` drift diagnostic. */
+function driftLogged(): boolean {
+    return vi.mocked(logger).mock.calls.some(
+        ([message]) => typeof message === 'string' && message.includes('no longer matches the address_post_snapshot'),
+    );
 }
 
 const replaceBlock2: EditNoteBlocksEditItem = {
@@ -635,6 +644,46 @@ describe('undoEditNoteBlocksAction', () => {
 
         expect(invalidateSimplificationCache).toHaveBeenCalledWith(groupNoteId);
         expect(invalidateSimplificationCache).not.toHaveBeenCalledWith('7-NOTE0001');
+    });
+
+    // `address_post_snapshot` is audit-only. Undo reports drift and proceeds:
+    // the user editing the note between apply and undo is exactly what the
+    // context-anchored replay exists to absorb, so a mismatch must not become a
+    // refusal.
+    it('reports drift when the note moved since the apply, and undoes anyway', async () => {
+        const result = await executeEditNoteBlocksAction(blocksAction([replaceBlock2]));
+
+        // The user appends a paragraph of their own after the agent's edit.
+        noteHtml = noteHtml.replace(/<\/div>\s*$/, '<p>User added this.</p></div>');
+        vi.mocked(logger).mockClear();
+
+        await undoEditNoteBlocksAction(appliedBlocksAction(result, [replaceBlock2]));
+
+        expect(driftLogged()).toBe(true);
+        // The undo still ran, and the user's own text survived it.
+        expect(noteHtml).toContain(LINE_2);
+        expect(noteHtml).not.toContain('Bravo REWRITTEN two.');
+        expect(noteHtml).toContain('<p>User added this.</p>');
+    });
+
+    it('reports no drift when the note is exactly where the apply left it', async () => {
+        const result = await executeEditNoteBlocksAction(blocksAction([replaceBlock2]));
+        vi.mocked(logger).mockClear();
+
+        await undoEditNoteBlocksAction(appliedBlocksAction(result, [replaceBlock2]));
+
+        expect(driftLogged()).toBe(false);
+    });
+
+    // The check is a diagnostic; it must not be able to fail an undo that would
+    // otherwise succeed.
+    it('undoes even when the drift check itself throws', async () => {
+        const result = await executeEditNoteBlocksAction(blocksAction([replaceBlock2]));
+        vi.mocked(preloadNotePageLabels).mockRejectedValueOnce(new Error('page label lookup failed'));
+
+        await undoEditNoteBlocksAction(appliedBlocksAction(result, [replaceBlock2]));
+
+        expect(stripBeaverEditFooter(noteHtml)).toBe(NOTE_HTML);
     });
 
     it('respects a library exclusion that appeared after the apply', async () => {

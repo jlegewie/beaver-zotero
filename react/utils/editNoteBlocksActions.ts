@@ -63,7 +63,7 @@ import {
     refreshBlockUndoRecords,
     resolveCitationRejections,
 } from '../../src/services/agentDataProvider/actions/editNoteBlocks';
-import { snapshotNoteId } from '../../src/utils/noteSnapshot';
+import { buildAddressSnapshot, snapshotNoteId } from '../../src/utils/noteSnapshot';
 import { getExternalRefContext } from '../../src/services/agentDataProvider/actions/editNote';
 import { applyBatchUndoRecord, assertNoteLibraryNotExcluded } from './editNoteActions';
 
@@ -311,6 +311,50 @@ function toBatchUndoRecord(record: EditNoteBlocksUndoRecord): EditNoteBatchUndoR
 }
 
 /**
+ * Report, without acting on it, whether the note still stands where this action
+ * left it — recompute the address snapshot for the note as it is now and compare
+ * it against the `address_post_snapshot` the apply recorded.
+ *
+ * DIAGNOSTIC ONLY, DELIBERATELY. A mismatch is not an error and must never
+ * become one here: the user editing the note between apply and undo is precisely
+ * the case the context-anchored replay exists to absorb, so refusing on drift
+ * would break a working feature to report something the replay already handles.
+ * What the log buys is attribution — when a record fails to relocate, this line
+ * says whether the note had moved at all. Any BLOCKING use of these tokens
+ * belongs with the snapshot-and-hash undo work, not here.
+ *
+ * Never throws: a diagnostic must not take down an undo that would otherwise
+ * succeed. Page labels are read from cache only (no extraction) — the digest
+ * masks locator VALUES, and label availability changes only those values, never
+ * a line boundary or a tag's shape.
+ */
+async function logAddressSnapshotDrift(
+    item: Zotero.Item,
+    noteId: string,
+    libraryId: number,
+    expectedPostSnapshot: string | undefined,
+): Promise<void> {
+    // Absent on actions applied before the field existed, and on any result the
+    // backend relayed without it. Nothing to compare against.
+    if (!expectedPostSnapshot) return;
+    try {
+        const html = getLatestNoteHtml(item);
+        const pageLabels = await preloadNotePageLabels(html, libraryId);
+        const { simplified } = getOrSimplify(noteId, html, libraryId, pageLabels);
+        const currentSnapshot = buildAddressSnapshot(noteId, simplified);
+        if (currentSnapshot === expectedPostSnapshot) return;
+        logger(
+            `undoEditNoteBlocksAction: note ${noteId} no longer matches the address_post_snapshot this `
+            + `action recorded (expected ${expectedPostSnapshot}, now ${currentSnapshot}); undoing anyway `
+            + 'by relocating each record',
+            1,
+        );
+    } catch (error) {
+        logger(`undoEditNoteBlocksAction: could not check address_post_snapshot for ${noteId}: ${error}`, 1);
+    }
+}
+
+/**
  * Undo an applied `edit_note_blocks` action by replaying its per-edit undo
  * records in reverse order through the shared relocation machinery. An action
  * whose sole edit was an `op: 'rewrite'` edit restores the full pre-edit body
@@ -359,6 +403,11 @@ export async function undoEditNoteBlocksAction(action: AgentAction): Promise<voi
     // simplification cache key, and a device-local `${libraryID}-KEY` would miss
     // the portable `g<groupID>-KEY` entry the rest of the blocks path writes.
     const noteId = snapshotNoteId(library_id, item.key);
+
+    // Audit the recorded post-edit token. Runs BEFORE the read the undo is
+    // computed from, so its await does not open a window between that read and
+    // the write.
+    await logAddressSnapshotDrift(item, noteId, library_id, resultData?.address_post_snapshot);
 
     const currentHtml = getLatestNoteHtml(item);
     const existingCitationCache = extractDataCitationItems(currentHtml);

@@ -346,13 +346,24 @@ export interface EditNoteBlocksResultData {
     zotero_key: string;
     /** Device-portable library identity ("u" | "g<groupID>"). See `src/utils/libraryIdentity.ts`. */
     library_ref?: string;
-    /** Address snapshot token for the note as it stood immediately before this action */
+    /**
+     * Address snapshot token for the note as it stood immediately before this
+     * action — the numbering the edits were resolved against.
+     *
+     * AUDIT ONLY. Both snapshot fields are a record of which note versions this
+     * action ran between; no code path gates on either one. The one consumer is
+     * the drift check in `undoEditNoteBlocksAction`, which logs when the note has
+     * moved since the apply and undoes regardless — a user editing the note in
+     * between is a supported case, absorbed by the relocation machinery. Adding a
+     * gate here is a behavior change, not a tightening.
+     */
     address_pre_snapshot?: string;
     /**
      * Address snapshot token for the note as it stands after this action.
      *
      * Emitted whether or not the response also shipped the post-edit note: the
-     * token identifies the note version, which is true either way.
+     * token identifies the note version, which is true either way. Audit only —
+     * see `address_pre_snapshot`.
      */
     address_post_snapshot?: string;
     /** Edits that were successfully applied, in request order */
