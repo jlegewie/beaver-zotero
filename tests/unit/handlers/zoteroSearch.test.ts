@@ -87,7 +87,11 @@ function makeItem(overrides: Partial<MockItem> = {}): MockItem {
     };
 }
 
-type MockSearchInstance = { addCondition: ReturnType<typeof vi.fn>; search: ReturnType<typeof vi.fn> };
+type MockSearchInstance = {
+    addCondition: ReturnType<typeof vi.fn>;
+    search: ReturnType<typeof vi.fn>;
+    setScope: ReturnType<typeof vi.fn>;
+};
 
 /** Stable fake itemTypeIDs so the DB mock can map params back to item types. */
 const ITEM_TYPE_IDS: Record<string, number> = {
@@ -101,11 +105,22 @@ const ITEM_TYPE_IDS: Record<string, number> = {
 describe('handleZoteroSearchRequest', () => {
     const itemsById = new Map<number, MockItem>();
     let searchResultIds: number[] = [1, 2, 3, 4];
-    let lastSearch: MockSearchInstance | null = null;
+    /** Every Zotero search the handler constructed, in construction order. */
+    let searches: MockSearchInstance[] = [];
+
+    /** The handler's primary search — always the first one it constructs. */
+    const mainSearch = () => searches[0] ?? null;
+
+    /** The collection-scope search, when the handler built one. */
+    const scopeSearch = () => searches[1] ?? null;
 
     /** Conditions added to the Zotero search, as [field, operator, value] tuples. */
     const addedConditions = () =>
-        (lastSearch?.addCondition.mock.calls ?? []).map(call => call.slice(0, 3));
+        (mainSearch()?.addCondition.mock.calls ?? []).map(call => call.slice(0, 3));
+
+    /** Conditions added to the collection-scope search, same shape. */
+    const scopeConditions = () =>
+        (scopeSearch()?.addCondition.mock.calls ?? []).map(call => call.slice(0, 3));
 
     // Result rows are a discriminated union: attachments carry attachment_id,
     // every other shape carries item_id. Narrow on result_type rather than
@@ -138,15 +153,17 @@ describe('handleZoteroSearchRequest', () => {
             annotations_count: item.isFileAttachment?.() ? item.getAnnotations?.().length ?? 0 : 0,
         } as any));
 
-        lastSearch = null;
-        // Records the instance so tests can assert which conditions the handler
-        // handed to Zotero (the crux of the join-mode fix).
+        searches = [];
+        // Records every instance so tests can assert which conditions the handler
+        // handed to Zotero (the crux of the join-mode fix) and which of them it
+        // routed into a collection scope instead.
         (globalThis as any).Zotero.Search = class MockSearch {
             libraryID = 1;
             addCondition = vi.fn();
             search = vi.fn(async () => searchResultIds);
+            setScope = vi.fn();
             constructor() {
-                lastSearch = this as unknown as MockSearchInstance;
+                searches.push(this as unknown as MockSearchInstance);
             }
         };
         (globalThis as any).Zotero.Items = {
@@ -466,7 +483,7 @@ describe('handleZoteroSearchRequest', () => {
                 // Point the agent at the tool that can actually answer this.
                 expect(response.warnings?.join(' ')).toContain('find_annotations');
                 // The result is knowable up front — no search, no itemType scans.
-                expect(lastSearch).toBeNull();
+                expect(mainSearch()).toBeNull();
                 expect((globalThis as any).Zotero.DB.queryAsync).not.toHaveBeenCalled();
             },
         );
@@ -529,6 +546,127 @@ describe('handleZoteroSearchRequest', () => {
             });
         },
     );
+
+    // Only top-level items belong to a Zotero collection, so a `collection`
+    // condition cannot match the child notes and attachments the items tree shows
+    // inside that collection. When child items are wanted, the condition becomes a
+    // scope applied with includeChildren instead.
+    describe('collection scope', () => {
+        const collectionCondition = { field: 'collection', operator: 'is', value: 'ABCD2345' };
+
+        function searchRequest(overrides: Record<string, any> = {}) {
+            return {
+                event: 'zotero_search_request',
+                request_id: 'req-collection',
+                conditions: [collectionCondition],
+                join_mode: 'all',
+                item_category: 'note',
+                include_children: true,
+                recursive: true,
+                limit: 50,
+                offset: 0,
+                ...overrides,
+            } as any;
+        }
+
+        it('moves the collection condition into an includeChildren scope', async () => {
+            searchResultIds = [];
+
+            const response = await handleZoteroSearchRequest(searchRequest());
+
+            expect(response.error).toBeUndefined();
+            // The condition must leave the main search: kept there it would
+            // restrict results to direct members and hide every child note.
+            expect(addedConditions()).not.toContainEqual(
+                expect.arrayContaining(['collection'])
+            );
+            expect(addedConditions()).toContainEqual(['itemType', 'is', 'note']);
+            expect(scopeConditions()).toContainEqual(['collection', 'is', 'ABCD2345']);
+            expect(scopeConditions()).toContainEqual(['recursive', 'true', '']);
+            expect(mainSearch()!.setScope).toHaveBeenCalledWith(scopeSearch(), true);
+        });
+
+        it('leaves subcollections out of the scope when recursive is false', async () => {
+            searchResultIds = [];
+
+            await handleZoteroSearchRequest(searchRequest({ recursive: false }));
+
+            expect(scopeConditions()).toContainEqual(['collection', 'is', 'ABCD2345']);
+            expect(scopeConditions()).not.toContainEqual(
+                expect.arrayContaining(['recursive'])
+            );
+        });
+
+        it('scopes an all-category listing so child items come back too', async () => {
+            searchResultIds = [];
+
+            await handleZoteroSearchRequest(searchRequest({ item_category: 'all' }));
+
+            expect(addedConditions()).not.toContainEqual(
+                expect.arrayContaining(['collection'])
+            );
+            expect(mainSearch()!.setScope).toHaveBeenCalledWith(scopeSearch(), true);
+        });
+
+        // A scope is an intersection; under 'any' the collection condition is one
+        // disjunct of an OR, so scoping it would silently narrow the search.
+        it('keeps the collection as a plain condition under join_mode="any"', async () => {
+            searchResultIds = [];
+
+            await handleZoteroSearchRequest(searchRequest({ join_mode: 'any' }));
+
+            expect(addedConditions()).toContainEqual(['collection', 'is', 'ABCD2345']);
+            expect(searches).toHaveLength(1);
+            expect(mainSearch()!.setScope).not.toHaveBeenCalled();
+        });
+
+        it('keeps the collection as a plain condition when child items are excluded', async () => {
+            searchResultIds = [];
+
+            await handleZoteroSearchRequest(searchRequest({
+                item_category: 'regular',
+                include_children: false,
+            }));
+
+            expect(addedConditions()).toContainEqual(['collection', 'is', 'ABCD2345']);
+            expect(searches).toHaveLength(1);
+            expect(mainSearch()!.setScope).not.toHaveBeenCalled();
+        });
+
+        // 'isNot' excludes a collection; that is a filter on the item itself, and
+        // expanding it into a scope would invert its meaning.
+        it('does not scope a negated collection condition', async () => {
+            searchResultIds = [];
+
+            await handleZoteroSearchRequest(searchRequest({
+                conditions: [{ field: 'collection', operator: 'isNot', value: 'ABCD2345' }],
+            }));
+
+            expect(addedConditions()).toContainEqual(['collection', 'isNot', 'ABCD2345']);
+            expect(searches).toHaveLength(1);
+            expect(mainSearch()!.setScope).not.toHaveBeenCalled();
+        });
+
+        // An empty scope search matches the whole library, so a collection
+        // condition Zotero rejects must not leave one attached.
+        it('does not attach a scope when the collection condition is rejected', async () => {
+            searchResultIds = [];
+            const originalSearch = (globalThis as any).Zotero.Search;
+            (globalThis as any).Zotero.Search = class RejectingSearch extends originalSearch {
+                constructor() {
+                    super();
+                    this.addCondition = vi.fn((field: string) => {
+                        if (field === 'collection') throw new Error('Invalid search condition');
+                    });
+                }
+            };
+
+            const response = await handleZoteroSearchRequest(searchRequest());
+
+            expect(response.warnings?.join(' ')).toContain('collection');
+            expect(mainSearch()!.setScope).not.toHaveBeenCalled();
+        });
+    });
 
     it('returns attachment rows with attachment_id and resolver metadata', async () => {
         const parent = makeItem({

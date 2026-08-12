@@ -1224,6 +1224,47 @@ export class BeaverDB {
     }
 
     /**
+     * Get embeddings restricted to a set of item IDs, optionally also restricted to libraries.
+     * @param itemIds Array of Zotero item IDs; an empty array returns no results
+     * @param libraryIds Optional array of library IDs to additionally restrict results;
+     *                   an empty array returns no results
+     * @returns Array of embedding records
+     */
+    public async getEmbeddingsByItemIds(itemIds: number[], libraryIds?: number[]): Promise<EmbeddingRecord[]> {
+        if (itemIds.length === 0) return [];
+        if (libraryIds && libraryIds.length === 0) return [];
+
+        const libraryFilter = libraryIds ?? [];
+
+        // SQLite rejects statements over MAX_BOUND_PARAMS parameters, and the
+        // library IDs share that budget with the item IDs. A library filter too
+        // large to leave room for a useful item chunk is applied in JS instead.
+        const MAX_BOUND_PARAMS = 999;
+        const filterInSql = libraryFilter.length > 0 && libraryFilter.length * 2 <= MAX_BOUND_PARAMS;
+        const chunkSize = MAX_BOUND_PARAMS - (filterInSql ? libraryFilter.length : 0);
+        const libraryPlaceholders = libraryFilter.map(() => '?').join(',');
+
+        const records: EmbeddingRecord[] = [];
+        for (let i = 0; i < itemIds.length; i += chunkSize) {
+            const chunk = itemIds.slice(i, i + chunkSize);
+            const itemPlaceholders = chunk.map(() => '?').join(',');
+            const sql = filterInSql
+                ? `SELECT * FROM embeddings WHERE library_id IN (${libraryPlaceholders}) AND item_id IN (${itemPlaceholders})`
+                : `SELECT * FROM embeddings WHERE item_id IN (${itemPlaceholders})`;
+
+            const rows = await this.conn.queryAsync(sql, filterInSql ? [...libraryFilter, ...chunk] : chunk);
+            records.push(...rows.map((row: any) => BeaverDB.rowToEmbeddingRecord(row)));
+        }
+
+        if (!filterInSql && libraryFilter.length > 0) {
+            const allowed = new Set(libraryFilter);
+            return records.filter(record => allowed.has(record.library_id));
+        }
+
+        return records;
+    }
+
+    /**
      * Get content hashes for items to check what needs re-indexing.
      * @param itemIds Array of Zotero item IDs
      * @returns Map of item ID to content hash
