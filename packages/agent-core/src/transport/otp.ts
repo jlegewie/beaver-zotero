@@ -1,4 +1,15 @@
-import { supabase } from '@beaver/agent-core/transport/supabaseClient'
+/**
+ * Email one-time-code sign-in, against Supabase auth.
+ *
+ * Shared rather than per-client because none of it is about a host: it is the
+ * Supabase auth contract plus the reading every client has to give the errors
+ * that contract returns. Two clients spelling `shouldCreateUser` differently
+ * would mean two different answers to "may an unknown email sign in here", and
+ * an outage that one client explains and the other reports as "Unexpected token
+ * <" is the same outage twice.
+ */
+
+import { supabase } from './supabaseClient'
 import { EmailOtpType } from '@supabase/supabase-js'
 
 export interface OTPSendOptions {

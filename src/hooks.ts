@@ -613,12 +613,15 @@ async function onMainWindowUnload(win: Window): Promise<void> {
  * so they are generated, not checked in. `agent-ui-tokens.css` holds Beaver's own
  * custom properties plus the documented contract of platform tokens Zotero
  * supplies; `agent-ui-utilities.css` holds the utility layer, scoped
- * `.beaver-root`.
+ * `.beaver-root`; `agent-ui-components.css` holds the shared component rules —
+ * today the sign-in surface and the link vocabulary.
  *
  * Order is the cascade. The shared sheets are registered *before* `beaver.css` so
  * this client's own rules win at equal specificity — the package supplies the
  * shared baseline, this client adapts it. Tokens precede the utilities that
- * consume them.
+ * consume them, and the components sheet follows both: it is written in that
+ * vocabulary and has to beat it where the two land on one element, which
+ * `.text-link` beside `.font-color-secondary` does.
  *
  * Kept as separate sheets rather than concatenated, so provenance stays readable
  * and the shared files are byte-identical to what the Word add-in imports. Keep
@@ -628,6 +631,7 @@ async function onMainWindowUnload(win: Window): Promise<void> {
 const GLOBAL_STYLESHEETS = [
     "agent-ui-tokens.css",
     "agent-ui-utilities.css",
+    "agent-ui-components.css",
     "beaver.css",
 ];
 

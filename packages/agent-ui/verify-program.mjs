@@ -262,6 +262,7 @@ const entryPaths = [
   "src/primitives/index.ts",
   "src/host/index.ts",
   "src/chat/index.ts",
+  "src/auth/index.ts",
 ].map((p) => path.join(pkgDir, p));
 
 const listed = parsed.fileNames.map((f) => path.resolve(f));
