@@ -8,7 +8,12 @@ import { SourceMenuItemContext, createSourceMenuItem } from '../utils/menuItemFa
 
 interface UseSourcesMenuOptions {
     isActive: boolean;
+    /** Query typed after the `@` in the chat editor; drives `searchResults`. */
+    searchQuery: string;
     searchResults: ItemSearchResult[];
+    /** What is currently selected in Zotero's items tree. */
+    selectedZoteroItems: Zotero.Item[];
+    selectedItemsLimit: number;
     sourceMenuItemContext: SourceMenuItemContext;
     searchableLibraryIds: number[];
     activeZoteroLibraryId: number | null;
@@ -27,9 +32,15 @@ interface UseSourcesMenuResult {
     menuItems: SearchMenuItem[];
 }
 
+const divider = (): SearchMenuItem => ({ label: '', isDivider: true, onClick: () => {} });
+const header = (label: string): SearchMenuItem => ({ label, isGroupHeader: true, onClick: () => {} });
+
 export const useSourcesMenu = ({
     isActive,
+    searchQuery,
     searchResults,
+    selectedZoteroItems,
+    selectedItemsLimit,
     sourceMenuItemContext,
     searchableLibraryIds,
     activeZoteroLibraryId,
@@ -62,23 +73,68 @@ export const useSourcesMenu = ({
 
         let isCancelled = false;
 
-        const buildMenuItems = async () => {
-            // Never surface items from excluded libraries — stored recents can
-            // predate an exclusion.
-            const searchableOnly = (items: (Zotero.Item | null | undefined)[]) =>
-                items.filter((item): item is Zotero.Item =>
-                    Boolean(item) && searchableLibraryIds.includes(item!.libraryID));
+        // Never surface items from excluded libraries — a Zotero selection or a
+        // stored recent can predate an exclusion.
+        const searchableOnly = (items: (Zotero.Item | null | undefined)[]) =>
+            items.filter((item): item is Zotero.Item =>
+                Boolean(item) && searchableLibraryIds.includes(item!.libraryID));
 
-            const recentItems = searchableOnly(await getRecentItems());
+        // Already-attached items are excluded: the input-area chips are the
+        // "what's attached" affordance, so the menu lists only addable items.
+        const notAlreadyAttached = (item: Zotero.Item) =>
+            !sourceMenuItemContext.currentMessageItems.some((existing) => existing.id === item.id);
+
+        // A headed group of item rows. 'above' menus display the array
+        // reversed, so the header follows its rows there to land above them
+        // on screen.
+        const itemSection = (title: string, rows: SearchMenuItem[]): SearchMenuItem[] =>
+            rows.length === 0
+                ? []
+                : verticalPosition === 'above'
+                    ? [...rows, header(title)]
+                    : [header(title), ...rows];
+
+        /** The rows for a typed query: matching items, nothing else. */
+        const buildSearchSections = async (): Promise<SearchMenuItem[]> => {
+            const items: SearchMenuItem[] = [];
+            for (const result of searchResults) {
+                // A portable library ref that couldn't be resolved on this device
+                // carries library_id 0, which throws synchronously if looked up.
+                if (result.library_id === UNRESOLVED_LIBRARY_ID) {
+                    continue;
+                }
+                const item = await Zotero.Items.getByLibraryAndKeyAsync(result.library_id, result.zotero_key);
+                if (!item) {
+                    continue;
+                }
+                items.push(await createSourceMenuItem(item, sourceMenuItemContext));
+            }
+            return itemSection('Search Results', items);
+        };
+
+        /**
+         * The rows shown before anything is typed: the action rows, plus one
+         * section of items.
+         *
+         * A Zotero selection is what the user is most likely to attach, so it
+         * takes the item section over the recently-used items; with nothing
+         * selected the menu falls back to recents, as before.
+         */
+        const buildDefaultSections = async (): Promise<SearchMenuItem[]> => {
+            const selectedItems = searchableOnly(selectedZoteroItems)
+                .filter((item) => item.isRegularItem() || item.isAttachment() || item.isNote())
+                .filter(notAlreadyAttached)
+                .slice(0, selectedItemsLimit);
+            const hasSelection = selectedItems.length > 0;
+
+            const recentItems = hasSelection ? [] : searchableOnly(await getRecentItems());
             // Don't read the personal library's recently-modified items when the
             // user excluded it from Beaver.
-            const recentlyModifiedItems = searchableLibraryIds.includes(1)
+            const recentlyModifiedItems = !hasSelection && searchableLibraryIds.includes(1)
                 ? searchableOnly(await getRecentAsync(1, { limit: recentItemsLimit * 3 }) as Zotero.Item[])
                 : [];
 
-            const allItems = [...recentItems, ...recentlyModifiedItems];
-
-            await loadFullItemData(allItems);
+            await loadFullItemData([...selectedItems, ...recentItems, ...recentlyModifiedItems]);
 
             const activeLibraryIdRaw = activeZoteroLibraryId ?? getActiveZoteroLibraryId();
             const effectiveLibraryId = getEffectiveLibraryId(activeLibraryIdRaw);
@@ -117,12 +173,12 @@ export const useSourcesMenu = ({
             );
 
             // Action rows are self-describing ("Filter by …" / "Add …"), so
-            // the group carries no header; a divider separates it from the
-            // item sections below.
+            // the group carries no header; dividers separate it from the item
+            // sections around it. Listed in display order, top to bottom.
             const filterItems: SearchMenuItem[] = [];
 
             if (searchableLibraryIds.length > 1) {
-                filterItems.unshift({
+                filterItems.push({
                     label: '"Filter by Library"',
                     onClick: async () => {
                         onNavigateToLibraries();
@@ -140,7 +196,7 @@ export const useSourcesMenu = ({
                 });
             }
 
-            filterItems.unshift({
+            filterItems.push({
                 label: '"Filter by Collections"',
                 onClick: async () => {
                     const latestLibraryIdRaw = getActiveZoteroLibraryId();
@@ -165,7 +221,7 @@ export const useSourcesMenu = ({
                 )
             });
 
-            filterItems.unshift({
+            filterItems.push({
                 label: '"Filter by Tags"',
                 onClick: async () => {
                     const latestLibraryIdRaw = getActiveZoteroLibraryId();
@@ -193,7 +249,7 @@ export const useSourcesMenu = ({
                 )
             });
 
-            filterItems.unshift({
+            filterItems.push({
                 label: '"Add Note"',
                 onClick: async () => {
                     onNavigateToNotes();
@@ -210,7 +266,7 @@ export const useSourcesMenu = ({
                 )
             });
 
-            filterItems.unshift({
+            filterItems.push({
                 label: '"Add File"',
                 onClick: async () => {
                     onSelectFiles();
@@ -227,59 +283,53 @@ export const useSourcesMenu = ({
                 )
             });
 
-            const recentlyUsedHeader: SearchMenuItem = { label: 'Recent Items', isGroupHeader: true, onClick: () => {} };
+            let itemRows: SearchMenuItem[];
+            if (hasSelection) {
+                itemRows = itemSection('Selected in Zotero', await Promise.all(
+                    selectedItems.map((item) => createSourceMenuItem(item, sourceMenuItemContext))
+                ));
+            } else {
+                const recentCandidates = [...recentItems, ...recentlyModifiedItems
+                    .map((item) => (item.parentItem ? item.parentItem : item))
+                    .filter((item): item is Zotero.Item => Boolean(item))
+                    .filter((item) => item.isRegularItem() || item.isAttachment() || item.isNote())]
+                    .filter((item, index, self) => index === self.findIndex((candidate) => candidate.id === item.id))
+                    .filter(notAlreadyAttached)
+                    .slice(0, recentItemsLimit);
 
-            const recentlyModifiedItemsFiltered = recentlyModifiedItems
-                .map((item) => (item.parentItem ? item.parentItem : item))
-                .filter((item): item is Zotero.Item => Boolean(item))
-                .filter((item) => item.isRegularItem() || item.isAttachment() || item.isNote());
+                await loadFullItemData(recentCandidates);
 
-            // Already-attached items are excluded: the input-area chips are
-            // the "what's attached" affordance, so the menu lists only
-            // addable items.
-            const combinedItems = [...recentItems, ...recentlyModifiedItemsFiltered]
-                .filter((item, index, self) => index === self.findIndex((candidate) => candidate.id === item.id))
-                .filter((item) => !sourceMenuItemContext.currentMessageItems.some((existing) => existing.id === item.id))
-                .slice(0, recentItemsLimit);
-
-            await loadFullItemData(combinedItems);
-
-            const menuItemsRecentItems = await Promise.all(
-                combinedItems.map(async (item) => await createSourceMenuItem(item, sourceMenuItemContext))
-            );
-
-            const hasItemSections = menuItemsRecentItems.length > 0;
-            const groupDivider: SearchMenuItem[] = filterItems.length > 0 && hasItemSections
-                ? [{ label: '', isDivider: true, onClick: () => {} }]
-                : [];
-
-            // 'above' menus display the array reversed, so the divider follows
-            // the group rows here to land between the group and the item
-            // sections on screen.
-            const sections: SearchMenuItem[] = verticalPosition === 'above'
-                ? [
-                    ...(filterItems.length > 0 ? filterItems : []),
-                    ...groupDivider,
-                    ...(menuItemsRecentItems.length > 0 ? [...menuItemsRecentItems, recentlyUsedHeader] : [])
-                ]
-                : [
-                    ...(filterItems.length > 0 ? [...filterItems].reverse() : []),
-                    ...groupDivider,
-                    ...(menuItemsRecentItems.length > 0 ? [recentlyUsedHeader, ...menuItemsRecentItems] : [])
-                ];
-
-            if (!isCancelled) {
-                setMenuItems(sections);
+                itemRows = itemSection('Recent Items', await Promise.all(
+                    recentCandidates.map((item) => createSourceMenuItem(item, sourceMenuItemContext))
+                ));
             }
+
+            // The action rows are listed above in display order; 'above' menus
+            // display the array reversed, so hand them the reverse.
+            const filterRows = verticalPosition === 'above' ? [...filterItems].reverse() : filterItems;
+            const groupDivider = filterRows.length > 0 && itemRows.length > 0 ? [divider()] : [];
+
+            return [...filterRows, ...groupDivider, ...itemRows];
         };
 
-        buildMenuItems();
+        const build = async () => {
+            const sections = searchQuery.trim()
+                ? await buildSearchSections()
+                : await buildDefaultSections();
+            if (!isCancelled) setMenuItems(sections);
+        };
+
+        build();
 
         return () => {
             isCancelled = true;
         };
     }, [
         isActive,
+        searchQuery,
+        searchResults,
+        selectedZoteroItems,
+        selectedItemsLimit,
         sourceMenuItemContext,
         searchableLibraryIds,
         activeZoteroLibraryId,
@@ -292,50 +342,6 @@ export const useSourcesMenu = ({
         recentItemsLimit,
         verticalPosition
     ]);
-
-    useEffect(() => {
-        if (!isActive) {
-            return;
-        }
-
-        let isCancelled = false;
-
-        const applySearchResults = async () => {
-            const searchResultsHeader: SearchMenuItem = { label: 'Search Results', isGroupHeader: true, onClick: () => {} };
-            const items: SearchMenuItem[] = [];
-
-            for (const result of searchResults) {
-                // A portable library ref that couldn't be resolved on this device
-                // carries library_id 0, which throws synchronously if looked up.
-                if (result.library_id === UNRESOLVED_LIBRARY_ID) {
-                    continue;
-                }
-                const item = await Zotero.Items.getByLibraryAndKeyAsync(result.library_id, result.zotero_key);
-                if (!item) {
-                    continue;
-                }
-                const menuItem = await createSourceMenuItem(item, sourceMenuItemContext);
-                items.push(menuItem);
-            }
-
-            if (!isCancelled) {
-                if (items.length > 0) {
-                    setMenuItems(verticalPosition === 'above'
-                        ? [...items, searchResultsHeader]
-                        : [searchResultsHeader, ...items]
-                    );
-                } else {
-                    setMenuItems([]);
-                }
-            }
-        };
-
-        applySearchResults();
-
-        return () => {
-            isCancelled = true;
-        };
-    }, [isActive, searchResults, sourceMenuItemContext, verticalPosition]);
 
     return { menuItems };
 };

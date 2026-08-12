@@ -1,5 +1,5 @@
 import React from 'react';
-import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo, useImperativeHandle, forwardRef } from 'react';
 import { PlusSignIcon, Icon } from '../../icons/icons';
 import { ItemSearchResult } from '@beaver/agent-core/transport/clients/searchService';
 import { itemSearchResultFromZoteroItem } from '../../../../src/utils/zoteroSerializers';
@@ -14,6 +14,7 @@ import { libraryRefForLibraryID, UNRESOLVED_LIBRARY_ID } from '../../../../src/u
 import { searchTitleCreatorYear, scoreSearchResult } from '../../../utils/search';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { searchableLibraryIdsAtom } from '../../../atoms/profile';
+import { selectedZoteroItemsAtom } from '../../../atoms/zoteroContext';
 import { store } from '../../../store';
 import { SourceMenuItemContext, LibraryMenuItemContext, CollectionMenuItemContext, TagMenuItemContext } from './utils/menuItemFactories';
 import { useSourcesMenu } from './hooks/useSourcesMenu';
@@ -23,8 +24,11 @@ import { useTagsMenu } from './hooks/useTagsMenu';
 import { useNotesMenu } from './hooks/useNotesMenu';
 import { ZoteroTag } from '@beaver/agent-core/types/zotero';
 import Tooltip from '@beaver/agent-ui/primitives/Tooltip';
+import { AddSourcesMenuHandle } from '../../../hooks/useAddSourcesMenu';
 
 const RECENT_ITEMS_LIMIT = 5;
+/** How many of Zotero's selected items are offered at the top of the menu. */
+const SELECTED_ITEMS_LIMIT = 3;
 
 type MenuMode = 'sources' | 'libraries' | 'collections' | 'tags' | 'notes';
 
@@ -97,25 +101,47 @@ const getRecentItems = async (): Promise<Zotero.Item[]> => {
 }
 
 
-const AddSourcesMenu: React.FC<{
-    showText: boolean,
-    onClose: () => void,
-    onOpen: () => void,
-    isMenuOpen: boolean,
-    menuPosition: MenuPosition,
-    setMenuPosition: (position: MenuPosition) => void,
-    menuPortalContainer?: HTMLElement | null,
-    onAfterMenuInitialFocus?: () => void,
-    disabled?: boolean,
-    verticalPosition?: 'above' | 'below'
-}> = ({ showText, onClose, onOpen, isMenuOpen, menuPosition, setMenuPosition, menuPortalContainer, onAfterMenuInitialFocus, disabled = false, verticalPosition = 'above' }) => {
+export interface AddSourcesMenuProps {
+    showText: boolean;
+    isMenuOpen: boolean;
+    menuPosition: MenuPosition;
+    /** The query typed after the `@` in the chat editor. */
+    searchQuery: string;
+    /** Open from the "+" button, anchored at the given position. */
+    onOpen: (position: MenuPosition) => void;
+    /** Close without touching the typed text (Escape, click outside). */
+    onDismiss: () => void;
+    /** Close because something was picked — the typed `@query` is consumed. */
+    onCommit: () => void;
+    /** Clear the typed query but leave the menu open (entering a submenu). */
+    onResetQuery: () => void;
+    menuPortalContainer?: HTMLElement | null;
+    onAfterMenuInitialFocus?: () => void;
+    disabled?: boolean;
+    verticalPosition?: 'above' | 'below';
+}
+
+const AddSourcesMenu = forwardRef<AddSourcesMenuHandle, AddSourcesMenuProps>(function AddSourcesMenu({
+    showText,
+    isMenuOpen,
+    menuPosition,
+    searchQuery,
+    onOpen,
+    onDismiss,
+    onCommit,
+    onResetQuery,
+    menuPortalContainer,
+    onAfterMenuInitialFocus,
+    disabled = false,
+    verticalPosition = 'above',
+}, ref) {
     const [isLoading, setIsLoading] = useState(false);
-    const [searchQuery, setSearchQuery] = useState('');
     const [searchResults, setSearchResults] = useState<ItemSearchResult[]>([]);
     const [menuMode, setMenuMode] = useState<MenuMode>('sources');
     const [activeZoteroLibraryId, setActiveZoteroLibraryId] = useState<number | null>(null);
     const buttonRef = useRef<HTMLButtonElement | null>(null);
     const searchableLibraryIds = useAtomValue(searchableLibraryIdsAtom);
+    const selectedZoteroItems = useAtomValue(selectedZoteroItemsAtom);
     const currentMessageFilters = useAtomValue(currentMessageFiltersAtom);
     const setCurrentMessageFilters = useSetAtom(currentMessageFiltersAtom);
     const { libraryIds: currentLibraryIds, collectionIds: currentCollectionIds, tagSelections: currentTagSelections } = currentMessageFilters;
@@ -124,30 +150,48 @@ const AddSourcesMenu: React.FC<{
     const currentMessageItems = useAtomValue(currentMessageItemsAtom);
     const removeItemFromMessage = useSetAtom(removeItemFromMessageAtom);
 
-    // Add ref for tracking the current search request
-    const currentSearchRef = useRef<string>('');
+    // Identifies the search whose results may still be applied. A counter, not
+    // a timestamp: keystrokes land well within the same millisecond, and two
+    // searches sharing an id would both consider themselves current.
+    const searchSequenceRef = useRef(0);
+    const currentSearchRef = useRef<number>(0);
 
     useEffect(() => {
         if (!isMenuOpen) return;
         setActiveZoteroLibraryId(getActiveZoteroLibraryId());
     }, [isMenuOpen, menuMode]);
 
-    const handleOnClose = useCallback(() => {
-        setSearchQuery('');
+    // Reset the menu's own state; the typed query lives in the editor and is
+    // handled by the caller (left alone on dismiss, consumed on commit).
+    const resetMenuState = useCallback(() => {
+        currentSearchRef.current = 0;
         setSearchResults([]);
         setMenuMode('sources');
-        // Delay the onClose call to ensure focus happens after menu is fully closed
-        setTimeout(() => {
-            onClose();
-        }, 5);
-    }, [onClose, setMenuMode, setSearchQuery, setSearchResults]);
+    }, []);
+
+    const handleDismiss = useCallback(() => {
+        resetMenuState();
+        onDismiss();
+    }, [onDismiss, resetMenuState]);
+
+    const handleCommit = useCallback(() => {
+        resetMenuState();
+        onCommit();
+    }, [onCommit, resetMenuState]);
+
+    useImperativeHandle(ref, () => ({
+        goBack: () => {
+            if (menuMode === 'sources') return false;
+            setMenuMode('sources');
+            return true;
+        },
+    }), [menuMode]);
 
     // Improved search function with debouncing and cancellation
     const handleSearch = useCallback(async (query: string, limit: number = 10) => {
         if (!query.trim()) return [];
         
-        // Generate unique search ID for this request
-        const searchId = Date.now().toString();
+        const searchId = ++searchSequenceRef.current;
         currentSearchRef.current = searchId;
         
         try {
@@ -213,31 +257,31 @@ const AddSourcesMenu: React.FC<{
     }, [scoreSearchResult, searchableLibraryIds]);
 
     const handleNavigateToLibraries = useCallback(() => {
-        setSearchQuery('');
+        onResetQuery();
         setMenuMode('libraries');
-    }, [setMenuMode, setSearchQuery]);
+    }, [onResetQuery]);
 
     const handleNavigateToCollections = useCallback((libraryId: number) => {
         setActiveZoteroLibraryId(libraryId);
-        setSearchQuery('');
+        onResetQuery();
         setMenuMode('collections');
-    }, [setActiveZoteroLibraryId, setMenuMode, setSearchQuery]);
+    }, [onResetQuery]);
 
     const handleNavigateToTags = useCallback((libraryId: number) => {
         setActiveZoteroLibraryId(libraryId);
-        setSearchQuery('');
+        onResetQuery();
         setMenuMode('tags');
-    }, [setActiveZoteroLibraryId, setMenuMode, setSearchQuery]);
+    }, [onResetQuery]);
 
     const handleNavigateToNotes = useCallback(() => {
-        setSearchQuery('');
+        onResetQuery();
         setMenuMode('notes');
-    }, [setMenuMode, setSearchQuery]);
+    }, [onResetQuery]);
 
     // Open a native file picker and attach the chosen files as external files
     // (copied into the Beaver-managed folder, sent as metadata-only attachments).
     const handleSelectFiles = useCallback(() => {
-        handleOnClose();
+        handleCommit();
         (async () => {
             const { FilePicker } = ChromeUtils.importESModule(
                 'chrome://zotero/content/modules/filePicker.mjs'
@@ -252,7 +296,7 @@ const AddSourcesMenu: React.FC<{
         })().catch((error) => {
             logger(`AddSourcesMenu.handleSelectFiles: ${error}`, 1);
         });
-    }, [handleOnClose, attachExternalFiles]);
+    }, [handleCommit, attachExternalFiles]);
 
     // Handler functions for menu item callbacks
     const handleAddSourceItem = useCallback((item: Zotero.Item) => {
@@ -262,13 +306,13 @@ const AddSourcesMenu: React.FC<{
             library_ref: libraryRefForLibraryID(item.libraryID) ?? undefined,
         }]);
         addItemToCurrentMessageItems(item);
-        handleOnClose();
-    }, [addItemToCurrentMessageItems, handleOnClose]);
+        handleCommit();
+    }, [addItemToCurrentMessageItems, handleCommit]);
 
     const handleRemoveSourceItem = useCallback((item: Zotero.Item) => {
         removeItemFromMessage(item);
-        handleOnClose();
-    }, [removeItemFromMessage, handleOnClose]);
+        handleCommit();
+    }, [removeItemFromMessage, handleCommit]);
 
     const handleSelectLibrary = useCallback((libraryId: number) => {
         setCurrentMessageFilters((prev) => {
@@ -280,8 +324,8 @@ const AddSourcesMenu: React.FC<{
                 tagSelections: []
             };
         });
-        handleOnClose();
-    }, [setCurrentMessageFilters, handleOnClose]);
+        handleCommit();
+    }, [setCurrentMessageFilters, handleCommit]);
 
     const handleSelectCollection = useCallback((collectionId: number) => {
         setCurrentMessageFilters((prev) => {
@@ -295,8 +339,8 @@ const AddSourcesMenu: React.FC<{
                 tagSelections: []
             };
         });
-        handleOnClose();
-    }, [setCurrentMessageFilters, handleOnClose]);
+        handleCommit();
+    }, [setCurrentMessageFilters, handleCommit]);
 
     const handleSelectTag = useCallback((tag: ZoteroTag) => {
         setCurrentMessageFilters((prev) => {
@@ -310,8 +354,8 @@ const AddSourcesMenu: React.FC<{
                     : [...prev.tagSelections, tag]
             };
         });
-        handleOnClose();
-    }, [setCurrentMessageFilters, handleOnClose]);
+        handleCommit();
+    }, [setCurrentMessageFilters, handleCommit]);
 
     const sourceMenuItemContext = useMemo<SourceMenuItemContext>(() => ({
         currentMessageItems,
@@ -334,9 +378,27 @@ const AddSourcesMenu: React.FC<{
         onSelect: handleSelectTag
     }), [currentTagSelections, handleSelectTag]);
 
+    // The query lives in the chat editor, so nothing calls back into this
+    // component when it changes — run the item search from the query itself.
+    // Previous results are left in place until the new ones land, so the list
+    // does not blink through "No results found" on every keystroke.
+    useEffect(() => {
+        if (!isMenuOpen || menuMode !== 'sources') return;
+        if (!searchQuery.trim()) {
+            currentSearchRef.current = 0;
+            setSearchResults([]);
+            setIsLoading(false);
+            return;
+        }
+        handleSearch(searchQuery);
+    }, [isMenuOpen, menuMode, searchQuery, handleSearch]);
+
     const sourcesMenu = useSourcesMenu({
         isActive: isMenuOpen && menuMode === 'sources',
+        searchQuery,
         searchResults,
+        selectedZoteroItems,
+        selectedItemsLimit: SELECTED_ITEMS_LIMIT,
         sourceMenuItemContext,
         searchableLibraryIds,
         activeZoteroLibraryId,
@@ -399,13 +461,9 @@ const AddSourcesMenu: React.FC<{
         if (buttonRef.current) {
             const rect = buttonRef.current.getBoundingClientRect();
             const y = verticalPosition === 'above' ? rect.top - 5 : rect.bottom;
-            setMenuPosition({
-                x: rect.left,
-                y,
-            });
             setMenuMode('sources');
-            onOpen();
-            
+            onOpen({ x: rect.left, y });
+
             // Remove focus from the button after opening the menu
             buttonRef.current.blur();
             
@@ -425,28 +483,6 @@ const AddSourcesMenu: React.FC<{
                 : menuMode === 'tags'
                     ? "No tags found"
                     : "No notes found";
-
-    const placeholderText = menuMode === 'sources'
-        ? "Search by author, year and title"
-        : menuMode === 'libraries'
-            ? "Search libraries"
-            : menuMode === 'collections'
-                ? "Search collections"
-                : menuMode === 'tags'
-                    ? "Search tags"
-                    : "Search notes";
-
-    // Handle backspace/delete when search input is empty
-    const handleEmptyBackspace = useCallback(() => {
-        if (menuMode === 'libraries' || menuMode === 'collections' || menuMode === 'tags' || menuMode === 'notes') {
-            // Navigate back to sources mode
-            setSearchQuery('');
-            setMenuMode('sources');
-        } else {
-            // In sources mode, close the menu
-            handleOnClose();
-        }
-    }, [menuMode, setSearchQuery, setMenuMode, handleOnClose]);
 
     return (
         <>
@@ -468,24 +504,27 @@ const AddSourcesMenu: React.FC<{
             <SearchMenu
                 menuItems={menuItems}
                 isOpen={isMenuOpen}
-                onClose={handleOnClose}
+                onClose={handleDismiss}
                 position={menuPosition}
                 useFixedPosition={true}
                 verticalPosition={verticalPosition}
                 width="250px"
                 maxHeight="300px"
-                onSearch={menuMode === 'sources' ? handleSearch : () => {}}
+                onSearch={() => {}}
                 noResultsText={noResultsText}
-                placeholder={placeholderText}
+                placeholder=""
                 closeOnSelect={false}
                 searchQuery={searchQuery}
-                setSearchQuery={setSearchQuery}
-                onEmptyBackspace={handleEmptyBackspace}
+                setSearchQuery={() => {}}
+                // The chat editor is the search box: the caret stays there and
+                // whatever follows the `@` is the query.
+                showSearchInput={false}
+                selectOnTab={true}
                 portalContainer={menuPortalContainer}
                 onAfterInitialFocus={onAfterMenuInitialFocus}
             />
         </>
     );
-};
+});
 
 export default AddSourcesMenu;

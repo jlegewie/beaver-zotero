@@ -6,6 +6,7 @@ import { removePopupMessagesByTypeAtom } from '../../atoms/ui';
 import { TextSelectionButton } from '../input/TextSelectionButton';
 // import { ZoteroIcon, ZOTERO_ICONS } from './icons/ZoteroIcon';
 import AddSourcesMenu from '../ui/menus/AddSourcesMenu';
+import { AddSourcesMenuHandle } from '../../hooks/useAddSourcesMenu';
 import { LibraryButton } from '../library/LibraryButton';
 import { CollectionButton } from '../library/CollectionButton';
 import { TagButton } from '../library/TagButton';
@@ -20,22 +21,27 @@ const MAX_ATTACHMENTS = 4;
 
 const MessageAttachmentDisplay = ({
     isAddAttachmentMenuOpen,
-    setIsAddAttachmentMenuOpen,
     menuPosition,
-    setMenuPosition,
-    inputRef,
-    focusInput,
+    addSourcesSearchQuery,
+    onOpenAddSourcesMenu,
+    onDismissAddSourcesMenu,
+    onCommitAddSourcesMenu,
+    onResetAddSourcesQuery,
+    addSourcesMenuRef,
     menuPortalContainer,
     onAfterMenuInitialFocus,
     disabled = false,
     verticalPosition = 'above',
 }: {
     isAddAttachmentMenuOpen: boolean;
-    setIsAddAttachmentMenuOpen: (isAddAttachmentMenuOpen: boolean) => void;
     menuPosition: { x: number; y: number };
-    setMenuPosition: (menuPosition: { x: number; y: number }) => void;
-    inputRef: React.RefObject<HTMLElement | null>;
-    focusInput?: () => void;
+    /** Text typed after the `@` in the chat editor; the menu's search query. */
+    addSourcesSearchQuery: string;
+    onOpenAddSourcesMenu: (menuPosition: { x: number; y: number }) => void;
+    onDismissAddSourcesMenu: () => void;
+    onCommitAddSourcesMenu: () => void;
+    onResetAddSourcesQuery: () => void;
+    addSourcesMenuRef?: React.Ref<AddSourcesMenuHandle>;
     menuPortalContainer?: HTMLElement | null;
     onAfterMenuInitialFocus?: () => void;
     disabled?: boolean;
@@ -123,14 +129,14 @@ const MessageAttachmentDisplay = ({
                     currentMessageExternalFiles.length == 0 &&
                     currentMessageCollections.length == 0
                 }
-                onClose={() => {
-                    focusInput?.();
-                    setIsAddAttachmentMenuOpen(false);
-                }}
+                ref={addSourcesMenuRef}
                 isMenuOpen={isAddAttachmentMenuOpen}
-                onOpen={() => setIsAddAttachmentMenuOpen(true)}
                 menuPosition={menuPosition}
-                setMenuPosition={setMenuPosition}
+                searchQuery={addSourcesSearchQuery}
+                onOpen={onOpenAddSourcesMenu}
+                onDismiss={onDismissAddSourcesMenu}
+                onCommit={onCommitAddSourcesMenu}
+                onResetQuery={onResetAddSourcesQuery}
                 menuPortalContainer={menuPortalContainer}
                 onAfterMenuInitialFocus={onAfterMenuInitialFocus}
                 disabled={disabled}

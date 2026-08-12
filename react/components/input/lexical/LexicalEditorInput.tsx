@@ -108,13 +108,13 @@ function $collectSlashCommandDescriptors(): SlashCommandDescriptor[] {
     return result;
 }
 
-/** Remove the trailing `/query` the user typed (the `/` trigger plus the typed
- *  query) by character count from the end of the document. The slash menu
- *  closes on whitespace, so the query never spans nodes and always lives in the
- *  final plain-text node(s) — never inside an existing pill. Must be called
- *  inside an update context, while that text is still the tail of the document. */
-function $deleteTrailingSlashQuery(queryLength: number): void {
-    let remaining = queryLength + 1; // +1 for the leading '/'
+/** Remove `length` characters of plain text from the end of the document,
+ *  stopping at a /command pill so a menu's typed query can never eat into one.
+ *  Used to take back the `/query` or `@query` a menu consumed as its search
+ *  box. Must be called inside an update context, while that text is still the
+ *  tail of the document. */
+function $deleteTrailingQuery(length: number): void {
+    let remaining = length;
     const textNodes = $getRoot().getAllTextNodes();
     for (let i = textNodes.length - 1; i >= 0 && remaining > 0; i--) {
         const node = textNodes[i];
@@ -314,10 +314,11 @@ export type LexicalEditorInputHandle = {
     focus: () => void;
     clear: () => void;
     setText: (text: string, caretOffset?: number) => void;
-    /** Delete the last character of the editor content in place (no full
-     *  rebuild), leaving the caret at the end. Used to strip the `@` that opens
-     *  the attachment menu without flattening colored command nodes. */
-    deleteTrailingCharacter: () => void;
+    /** Delete the last `length` characters of the editor content in place (no
+     *  full rebuild), leaving the caret at the end. Used to take back the
+     *  `@query` the Add Sources menu consumed as its search box, without
+     *  flattening colored command nodes. */
+    deleteTrailingQuery: (length: number) => void;
     selectRange: (start: number, end: number, options?: { skipFocus?: boolean }) => void;
     getSelectionOffset: () => number | null;
     /** Insert a styled command pill followed by a space, caret left at the
@@ -487,22 +488,14 @@ const EditorApi = forwardRef<LexicalEditorInputHandle, {
                 setText: (text, caretOffset = text.length) => {
                     setPlainText(text, caretOffset);
                 },
-                deleteTrailingCharacter: () => {
+                deleteTrailingQuery: (length) => {
+                    if (length <= 0) return;
                     selectionRepairGenerationRef.current++;
                     pinnedEndCaretRef.current = false;
                     blurSelectionRef.current = null;
                     editor.update(() => {
-                        const root = $getRoot();
-                        const textNodes = root.getAllTextNodes();
-                        const last = textNodes[textNodes.length - 1];
-                        if (!last) return;
-                        const text = last.getTextContent();
-                        if (text.length <= 1) {
-                            last.remove();
-                        } else {
-                            last.setTextContent(text.slice(0, -1));
-                        }
-                        root.selectEnd();
+                        $deleteTrailingQuery(length);
+                        $getRoot().selectEnd();
                     });
                 },
                 selectRange: (start, end, options) => {
@@ -527,7 +520,7 @@ const EditorApi = forwardRef<LexicalEditorInputHandle, {
                     editor.update(() => {
                         const root = $getRoot();
                         if (queryLength !== null) {
-                            $deleteTrailingSlashQuery(queryLength);
+                            $deleteTrailingQuery(queryLength + 1); // +1 for the leading '/'
                         }
 
                         // Resolve token collisions against pills already in the
@@ -1847,7 +1840,7 @@ const BlurSelectionSnapshotPlugin: React.FC<{
  * end of the content is corrected back to the end. The pin is released on the
  * first real user interaction (keydown in the editor, pointerdown anywhere,
  * IME composition) and whenever the caret is placed explicitly through the
- * imperative handle (setText / selectRange / clear / deleteTrailingCharacter).
+ * imperative handle (setText / selectRange / clear / deleteTrailingQuery).
  */
 const PinnedEndCaretPlugin: React.FC<{
     pinnedRef: React.MutableRefObject<boolean>;
