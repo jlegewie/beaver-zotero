@@ -7,6 +7,7 @@ import {
     externalCompatKey,
     getRequestedRef,
     getResolvedRef,
+    legacyLibraryBaseCitationKey,
     normalizeCitationTag,
     parseRawCitationAttributes,
     requestedCitationKey,
@@ -23,7 +24,17 @@ import {
  */
 export const citationKeyToMarkerAtom = atom<Record<string, string>>({});
 
-function getNextCitationMarker(current: Record<string, string>): string {
+/**
+ * The number the next source cited will be given.
+ *
+ * One past the highest already handed out, not one past the number of entries:
+ * a source is filed under every identity that names it — the one the model
+ * wrote and the one the backend resolved it to — so the map holds more keys
+ * than it does numbers. Counting keys would predict a number ahead of the one
+ * the assignment then makes, which a citation rendered before its metadata
+ * arrives would show until the metadata corrected it.
+ */
+export function getNextCitationMarker(current: Record<string, string>): string {
     const maxMarker = Object.values(current).reduce((max, marker) => {
         const parsed = parseInt(marker, 10);
         return Number.isFinite(parsed) && parsed > max ? parsed : max;
@@ -239,6 +250,11 @@ export function getCitationMarkerBaseKeys(citation: Citation): string[] {
     for (const ref of [getRequestedRef(citation), getResolvedRef(citation)]) {
         if (!ref) continue;
         keys.push(baseCitationKey(ref));
+        // The same identity under the library id a tag may have named it by,
+        // so a client that cannot resolve that id into the portable ref does
+        // not number one source twice.
+        const legacyKey = legacyLibraryBaseCitationKey(ref);
+        if (legacyKey) keys.push(legacyKey);
         if (ref.kind === 'external') keys.push(externalCompatKey(ref.external_id));
     }
     return [...new Set(keys.filter(Boolean))];

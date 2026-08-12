@@ -1,6 +1,10 @@
 import { useEffect } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { citationKeyToMarkerAtom, getOrAssignCitationMarkerAtom } from '@beaver/agent-core/citations/atoms';
+import {
+    citationKeyToMarkerAtom,
+    getNextCitationMarker,
+    getOrAssignCitationMarkerAtom,
+} from '@beaver/agent-core/citations/atoms';
 import { useIsomorphicLayoutEffect } from '../utils/useIsomorphicLayoutEffect';
 
 /**
@@ -48,8 +52,9 @@ export function useCitationMarker(citationKey: string, isStaticRender: boolean =
         }
     }, [citationKey, existingMarker, assignMarker]);
     
-    // Return existing marker, or compute what it will be after assignment
-    // The prediction is accurate because we assign (size + 1) in the atom
-    return existingMarker || (Object.keys(markerMap).length + 1).toString();
+    // Return existing marker, or compute what it will be after assignment.
+    // Predicted with the same rule the atom assigns by, so the number shown
+    // before the effect runs is the number the effect goes on to hand out.
+    return existingMarker || getNextCitationMarker(markerMap);
 }
 
