@@ -1030,6 +1030,8 @@ export interface WSReadNoteResponse {
     next_offset?: number;
     /** Range of lines returned, e.g. '1-50' */
     lines_returned?: string;
+    /** Whether the character ceiling ended this page before the requested limit. */
+    truncated?: boolean;
     /**
      * Address snapshot token pinning the block numbering this response shows,
      * for later use by `edit_note_blocks`.

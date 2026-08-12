@@ -34,6 +34,27 @@ import { getNoteContentPreviewText } from '../../../react/utils/noteText';
 
 const CITED_NOTE_PREVIEW_LENGTH = 500;
 
+/** Maximum simplified note content per page. An indivisible block may exceed it. */
+export const READ_NOTE_MAX_CHARS = 40_000;
+
+/**
+ * Returns the leading block count within `maxChars`. The first non-empty block
+ * is kept whole, while blank-only prefixes remain capped.
+ */
+function linesWithinCharBudget(lines: string[], maxChars: number): number {
+    let used = 0;
+    let hasContent = false;
+    for (let i = 0; i < lines.length; i++) {
+        const cost = lines[i].length + (i === 0 ? 0 : 1);
+        if (i > 0 && used + cost > maxChars && (hasContent || used >= maxChars)) {
+            return i;
+        }
+        used += cost;
+        hasContent = hasContent || lines[i].length > 0;
+    }
+    return lines.length;
+}
+
 function isAnnotationItem(item: Zotero.Item): boolean {
     return String(item.itemType) === 'annotation' || (item as { isAnnotation?: () => boolean }).isAnnotation?.() === true;
 }
@@ -343,10 +364,16 @@ export async function handleReadNoteRequest(
         // nothing, which is long-standing behavior and the only answer that does
         // not invent a page the model did not ask for.
         const start = safeOffset - 1;
-        const end = safeLimit === undefined
+        const requestedEnd = safeLimit === undefined
             ? totalLines
             : Math.min(start + safeLimit, totalLines);
-        const slice = lines.slice(start, end);
+        const requested = lines.slice(start, requestedEnd);
+
+        // Apply the size ceiling after offset/limit and keep blocks intact.
+        const keptLines = linesWithinCharBudget(requested, READ_NOTE_MAX_CHARS);
+        const truncated = keptLines < requested.length;
+        const slice = truncated ? requested.slice(0, keptLines) : requested;
+        const end = start + slice.length;
 
         const content = slice.join('\n');
         const hasMore = end < totalLines;
@@ -391,8 +418,8 @@ export async function handleReadNoteRequest(
             parentSummary = serializeItemStub(item.parentItem);
         }
 
-        // 9. Resolve cited items from the visible slice only
-        const citedRefs = extractCitedItemRefs(slice.join('\n'));
+        // 9. Resolve cited items from the visible content only
+        const citedRefs = extractCitedItemRefs(content);
         const citedItems = await resolveCitedItems(citedRefs);
 
         // 10. Return response
@@ -413,6 +440,7 @@ export async function handleReadNoteRequest(
             has_more: hasMore,
             next_offset: nextOffset,
             lines_returned: linesReturned,
+            truncated: truncated || undefined,
             snapshot,
             cited_items: citedItems.length > 0 ? citedItems : undefined,
         };

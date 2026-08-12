@@ -347,7 +347,9 @@ const READ_NOTE_TOOL = {
         "Read a Zotero note's content from the user's library as simplified HTML. " +
         'Use note IDs returned by `get_item_details` with `include_notes: true`, or by search/list tools. ' +
         'The simplified format represents citations, annotations, and images as self-closing tags. ' +
-        'Use `offset` and `limit` to page through long notes by line.',
+        'Use `offset` and `limit` to page through long notes by line. ' +
+        'A read is also capped by size: when `truncated` is true the note was too large to return ' +
+        'in one response, so continue from `next_offset` rather than re-reading it whole.',
     inputSchema: {
         type: 'object' as const,
         properties: {
@@ -1061,6 +1063,7 @@ export async function handleReadNote(args: any): Promise<any> {
         lines_returned: response.lines_returned ?? null,
         has_more: response.has_more ?? false,
         next_offset: response.next_offset ?? null,
+        truncated: response.truncated ?? false,
         content: response.content ?? '',
         cited_items: (response.cited_items ?? []).map((item) => ({
             item_id: modelObjectIdFromReference(item),

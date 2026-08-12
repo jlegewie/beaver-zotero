@@ -70,7 +70,10 @@ vi.mock('../../../react/store', () => ({
     store: { get: vi.fn(), set: vi.fn(), sub: vi.fn() },
 }));
 
-import { handleReadNoteRequest } from '../../../src/services/agentDataProvider/handleReadNoteRequest';
+import {
+    handleReadNoteRequest,
+    READ_NOTE_MAX_CHARS,
+} from '../../../src/services/agentDataProvider/handleReadNoteRequest';
 import { getOrSimplify } from '../../../src/utils/noteHtmlSimplifier';
 import { getLatestNoteHtml, getNoteHtmlForRead } from '../../../src/utils/noteEditorIO';
 import { checkAddressSnapshot, snapshotNoteId } from '../../../src/utils/noteSnapshot';
@@ -292,6 +295,121 @@ describe('handleReadNoteRequest — pagination', () => {
         expect(response.lines_returned).toBe('3');
         expect(response.has_more).toBe(true);
         expect(response.next_offset).toBe(4);
+    });
+});
+
+// =============================================================================
+// Size ceiling
+// =============================================================================
+
+function sizedProjection(lineCount: number, lineChars: number): string {
+    const body = 'x'.repeat(Math.max(lineChars - '<p></p>'.length, 0));
+    return Array.from({ length: lineCount }, () => `<p>${body}</p>`).join('\n');
+}
+
+function mockProjection(simplified: string) {
+    vi.mocked(getOrSimplify).mockReturnValueOnce({
+        simplified,
+        metadata: { elements: new Map() },
+        isStale: false,
+    } as any);
+}
+
+// 101 + 102(k - 1) <= 40,000 gives the expected cut point.
+const CUT_LINES = 392;
+const CUT_CHARS = 39_983;
+
+describe('handleReadNoteRequest — size ceiling', () => {
+    it('returns an over-size note as a page instead of whole', async () => {
+        const projection = sizedProjection(1000, 101);
+        mockProjection(projection);
+
+        const response = await handleReadNoteRequest(makeRequest());
+
+        expect(response.success).toBe(true);
+        expect(response.truncated).toBe(true);
+        expect(response.total_lines).toBe(1000);
+        expect(response.content!.split('\n')).toHaveLength(CUT_LINES);
+        expect(response.content!.length).toBe(CUT_CHARS);
+        expect(response.content!.endsWith('</p>')).toBe(true);
+        expect(response.lines_returned).toBe(`1-${CUT_LINES}`);
+        expect(response.has_more).toBe(true);
+        expect(response.next_offset).toBe(CUT_LINES + 1);
+    });
+
+    it('withholds the snapshot from a note it could not show whole', async () => {
+        mockProjection(sizedProjection(1000, 101));
+
+        const response = await handleReadNoteRequest(makeRequest());
+
+        expect(response.snapshot).toBeUndefined();
+    });
+
+    it('caps a paged read too, so an enormous limit is not a way around it', async () => {
+        mockProjection(sizedProjection(1000, 101));
+
+        const response = await handleReadNoteRequest(makeRequest({ offset: 101, limit: 100000 }));
+
+        expect(response.truncated).toBe(true);
+        expect(response.content!.split('\n')).toHaveLength(CUT_LINES);
+        expect(response.lines_returned).toBe(`101-${100 + CUT_LINES}`);
+        expect(response.next_offset).toBe(101 + CUT_LINES);
+    });
+
+    it('leaves a note under the ceiling completely alone', async () => {
+        const response = await handleReadNoteRequest(makeRequest());
+
+        expect(response.truncated).toBeUndefined();
+        expect(response.content).toBe(WHOLE_NOTE);
+        expect(response.snapshot).toBeTypeOf('string');
+    });
+
+    it('returns a single over-long block whole rather than cutting it', async () => {
+        const giant = `<p>${'x'.repeat(READ_NOTE_MAX_CHARS * 2)}</p>`;
+        mockProjection(`${giant}\n<p>second</p>`);
+
+        const response = await handleReadNoteRequest(makeRequest());
+
+        expect(response.content).toBe(giant);
+        expect(response.truncated).toBe(true);
+        expect(response.lines_returned).toBe('1');
+        expect(response.next_offset).toBe(2);
+    });
+
+    it('never answers an over-size read with a blank page', async () => {
+        const giant = `<p>${'x'.repeat(READ_NOTE_MAX_CHARS * 2)}</p>`;
+        mockProjection(`\n${giant}\n<p>third</p>`);
+
+        const response = await handleReadNoteRequest(makeRequest());
+
+        expect(response.content).toBe(`\n${giant}`);
+        expect(response.truncated).toBe(true);
+        expect(response.lines_returned).toBe('1-2');
+        expect(response.next_offset).toBe(3);
+    });
+
+    it('a blank run cannot spend more than the ceiling', async () => {
+        const blanks = Array.from({ length: READ_NOTE_MAX_CHARS + 100 }, () => '').join('\n');
+        mockProjection(`${blanks}\n<p>text</p>`);
+
+        const response = await handleReadNoteRequest(makeRequest());
+
+        expect(response.truncated).toBe(true);
+        expect(response.content!.length).toBeLessThanOrEqual(READ_NOTE_MAX_CHARS);
+        expect(response.has_more).toBe(true);
+    });
+
+    it('a note that is one over-size block is complete, not truncated', async () => {
+        const giant = `<p>${'x'.repeat(READ_NOTE_MAX_CHARS * 2)}</p>`;
+        mockProjection(giant);
+
+        const response = await handleReadNoteRequest(makeRequest());
+
+        expect(response.content).toBe(giant);
+        expect(response.content!.length).toBeGreaterThan(READ_NOTE_MAX_CHARS);
+        expect(response.truncated).toBeUndefined();
+        expect(response.has_more).toBe(false);
+        expect(response.snapshot).toBeTypeOf('string');
     });
 });
 
