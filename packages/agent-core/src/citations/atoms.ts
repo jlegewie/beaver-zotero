@@ -7,6 +7,7 @@ import {
     externalCompatKey,
     getRequestedRef,
     getResolvedRef,
+    legacyLibraryBaseCitationKey,
     normalizeCitationTag,
     parseRawCitationAttributes,
     requestedCitationKey,
@@ -23,7 +24,17 @@ import {
  */
 export const citationKeyToMarkerAtom = atom<Record<string, string>>({});
 
-function getNextCitationMarker(current: Record<string, string>): string {
+/**
+ * The number the next source cited will be given.
+ *
+ * One past the highest already handed out, not one past the number of entries:
+ * a source is filed under every identity that names it — the one the model
+ * wrote and the one the backend resolved it to — so the map holds more keys
+ * than it does numbers. Counting keys would predict a number ahead of the one
+ * the assignment then makes, which a citation rendered before its metadata
+ * arrives would show until the metadata corrected it.
+ */
+export function getNextCitationMarker(current: Record<string, string>): string {
     const maxMarker = Object.values(current).reduce((max, marker) => {
         const parsed = parseInt(marker, 10);
         return Number.isFinite(parsed) && parsed > max ? parsed : max;
@@ -43,6 +54,32 @@ function getEarliestExistingMarker(current: Record<string, string>, keys: string
     if (numericMarkers.length === 0) return markers[0];
 
     return Math.min(...numericMarkers).toString();
+}
+
+/**
+ * Renumber assigned markers 1..N, preserving their order.
+ *
+ * Aliasing folds a group onto its earliest marker, freeing the numbers its
+ * other members held: a source cited under two names before its metadata
+ * arrives is numbered twice, and closing that pair leaves everything numbered
+ * after it stranded above a number nothing holds — a thread reading
+ * `[1] [1] [3]` for two sources. A map that is already contiguous is returned
+ * unchanged, so callers can apply this unconditionally.
+ */
+export function compactCitationMarkers(current: Record<string, string>): Record<string, string> {
+    const distinct = [...new Set(Object.values(current))];
+    // Only a wholly numeric map can be renumbered without inventing an order.
+    if (distinct.length === 0 || distinct.some((marker) => !/^\d+$/.test(marker))) return current;
+
+    distinct.sort((a, b) => parseInt(a, 10) - parseInt(b, 10));
+    const renumbered = new Map(distinct.map((marker, index) => [marker, (index + 1).toString()]));
+    if (distinct.every((marker) => renumbered.get(marker) === marker)) return current;
+
+    const compacted: Record<string, string> = {};
+    for (const [key, marker] of Object.entries(current)) {
+        compacted[key] = renumbered.get(marker) ?? marker;
+    }
+    return compacted;
 }
 
 /**
@@ -239,6 +276,11 @@ export function getCitationMarkerBaseKeys(citation: Citation): string[] {
     for (const ref of [getRequestedRef(citation), getResolvedRef(citation)]) {
         if (!ref) continue;
         keys.push(baseCitationKey(ref));
+        // The same identity under the library id a tag may have named it by,
+        // so a client that cannot resolve that id into the portable ref does
+        // not number one source twice.
+        const legacyKey = legacyLibraryBaseCitationKey(ref);
+        if (legacyKey) keys.push(legacyKey);
         if (ref.kind === 'external') keys.push(externalCompatKey(ref.external_id));
     }
     return [...new Set(keys.filter(Boolean))];
@@ -328,6 +370,14 @@ export const processCitationsAtom = atom(
             if (!citation.invalid) {
                 set(aliasCitationMarkerKeysAtom, getCitationMarkerBaseKeys(citation));
             }
+        }
+
+        // Close the gaps aliasing leaves behind, so a thread numbered as it
+        // streamed reads the same as one numbered from metadata on load.
+        const merged = get(citationKeyToMarkerAtom);
+        const compacted = compactCitationMarkers(merged);
+        if (compacted !== merged) {
+            set(citationKeyToMarkerAtom, compacted);
         }
     }
 );

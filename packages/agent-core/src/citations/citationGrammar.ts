@@ -307,6 +307,32 @@ export function baseCitationKey(ref: CitationRef): string {
     return `${unknown.kind}:${JSON.stringify(identity)}`;
 }
 
+/**
+ * The base key for the same identity named by its device-local library id
+ * rather than by its portable `library_ref`, or null when there is no such
+ * second name.
+ *
+ * A citation tag may name the library the legacy way (`id="1-KEY"`), and a
+ * client with no local Zotero — so no `ObjectIdResolver` registered — has
+ * nothing to map that number onto and keys the tag exactly as written. Every
+ * key derived from the citation itself uses the portable ref the backend
+ * stamps, so without this the two forms of one identity never meet.
+ *
+ * Derived from the reference, never by resolving the number against this
+ * device: a rowid is only meaningful on the device that issued it, and looking
+ * it up here would name a different library on a different computer. Two
+ * references meet on this key only when they share the rowid *and* the item
+ * key — the same ambiguity a legacy numeric key has always carried, since on a
+ * client that cannot name the library portably it is all the citation has.
+ */
+export function legacyLibraryBaseCitationKey(ref: CitationRef): string | null {
+    if (ref.kind !== 'zotero' || !ref.library_ref) return null;
+    // Rowids start at 1; 0 is the unresolved sentinel and -1 the external-file one.
+    if (!Number.isInteger(ref.library_id) || ref.library_id <= 0) return null;
+    const { library_ref: _portable, ...local } = ref;
+    return baseCitationKey(local);
+}
+
 export function requestedCitationKey(ref: CitationRef): string {
     const base = baseCitationKey(ref);
     return ref.loc ? `${base}:${ref.loc.raw}` : base;
