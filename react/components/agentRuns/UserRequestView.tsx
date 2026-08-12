@@ -1,11 +1,11 @@
 import React, { useRef, useState, useEffect, useCallback, useMemo } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { BeaverAgentPrompt } from '@beaver/agent-core/agents/types';
-import ContextMenu from '../ui/menu/ContextMenu';
+import ContextMenu from '@beaver/agent-ui/primitives/ContextMenu';
 import useSelectionContextMenu from '../../hooks/useSelectionContextMenu';
 import { RequestChips } from './requestChips';
 import { EditIcon, Spinner } from '../icons/icons';
-import Button from '../ui/Button';
+import Button from '@beaver/agent-ui/primitives/Button';
 import ModelSelectionButton from '../ui/buttons/ModelSelectionButton';
 import SearchMenu from '../ui/menus/SearchMenu';
 import { regenerateWithEditedPromptAtom, isWSChatPendingAtom } from '../../atoms/agentRunAtoms';

@@ -6,10 +6,10 @@ import { getActionCommand, toSlashToken } from "../../utils/slashCommands";
 import { hasUserInputVariables } from "../../utils/userInputVariables";
 import { exportActionToFile } from "../../utils/actionShareFile";
 import { addPopupMessageAtom } from "../../utils/popupMessageUtils";
-import Button from "../ui/Button";
-import MenuButton from "../ui/MenuButton";
-import Tooltip from "../ui/Tooltip";
-import { MenuItem } from "../ui/menu/ContextMenu";
+import Button from "@beaver/agent-ui/primitives/Button";
+import MenuButton from "@beaver/agent-ui/primitives/MenuButton";
+import Tooltip from "@beaver/agent-ui/primitives/Tooltip";
+import { MenuItem } from "@beaver/agent-ui/primitives/ContextMenu";
 import {
     Icon,
     ArrowDownIcon,

@@ -1,4 +1,4 @@
-import { citationsAtom, citationMapAtom, citationsByRunIdAtom } from "../atoms/citations"
+import { citationsAtom, citationMapAtom, citationsByRunIdAtom } from "@beaver/agent-core/citations/atoms"
 import { userAtom, isAuthenticatedAtom, isWaitingForProfileAtom, authLoadingAtom } from "../atoms/auth"
 import { fileStatusAtom, errorCodeStatsAtom, errorCodeStatsIsLoadingAtom, errorCodeStatsErrorAtom, lastFetchedErrorCountsAtom, aggregatedErrorMessagesForFailedFilesAtom, aggregatedErrorMessagesForSkippedFilesAtom, fileStatusSummaryAtom, isUploadProcessedAtom } from "../atoms/files"
 import { readerTextSelectionAtom, currentMessageContentAtom, currentReaderAttachmentAtom, currentReaderAttachmentKeyAtom, currentNoteTabItemKeyAtom } from "../atoms/messageComposition"

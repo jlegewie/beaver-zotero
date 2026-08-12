@@ -1,8 +1,8 @@
 import React, { useCallback } from 'react';
 import { useSetAtom } from 'jotai';
 import { ChartIcon, ChattingIcon, CancelIcon, HighlighterIcon, Icon, LibraryIcon } from '../../icons/icons';
-import IconButton from '../IconButton';
-import Button from '../Button';
+import IconButton from '@beaver/agent-ui/primitives/IconButton';
+import Button from '@beaver/agent-ui/primitives/Button';
 import { eventManager } from '../../../events/eventManager';
 import { stageActionPillAtom } from '../../../atoms/actions';
 import { useActionRunner } from '../../../hooks/useActionRunner';

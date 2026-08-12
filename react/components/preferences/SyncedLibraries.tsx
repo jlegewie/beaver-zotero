@@ -8,7 +8,7 @@ import { accountService } from '@beaver/agent-core/transport/clients/accountServ
 import { isLibraryValidForSync, syncZoteroDatabase } from '../../../src/utils/sync';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { serializeZoteroLibrary } from '../../../src/utils/zoteroSerializers';
-import IconButton from '../ui/IconButton';
+import IconButton from '@beaver/agent-ui/primitives/IconButton';
 import AddLibraryButton from '../ui/buttons/AddLibraryButton';
 import { syncStatusAtom, deletionJobsAtom } from '../../atoms/sync';
 import { isLibrarySynced } from '../../../src/utils/zoteroUtils';

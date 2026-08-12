@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { citationKeyToMarkerAtom, getOrAssignCitationMarkerAtom } from '../atoms/citations';
-import { useIsomorphicLayoutEffect } from './useIsomorphicLayoutEffect';
+import { citationKeyToMarkerAtom, getOrAssignCitationMarkerAtom } from '@beaver/agent-core/citations/atoms';
+import { useIsomorphicLayoutEffect } from '../utils/useIsomorphicLayoutEffect';
 
 /**
  * Hook to get or assign a numeric citation marker for a given citation key.

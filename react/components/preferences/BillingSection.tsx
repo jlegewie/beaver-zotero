@@ -1,5 +1,5 @@
 import React, { useEffect } from "react";
-import Button from "../ui/Button";
+import Button from "@beaver/agent-ui/primitives/Button";
 import {SettingsGroup, SettingsRow, SectionLabel, DocLink} from "./components/SettingsElements";
 import { Spinner } from '../icons/icons';
 import { activePreferencePageTabAtom } from "../../atoms/ui";

@@ -29,7 +29,7 @@ import {
 import type { SimplificationMetadata } from './noteHtmlSimplifier';
 import type { ExternalReference } from '@beaver/agent-core/types/externalReferences';
 import type { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
-import type { PageLabelsByAttachmentId } from '../../react/atoms/citations';
+import type { PageLabelsByAttachmentId } from '@beaver/agent-core/citations/atoms';
 import {
     citationIndexCandidateIdsForLocator,
     getPageLocator,

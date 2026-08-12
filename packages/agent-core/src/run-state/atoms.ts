@@ -38,6 +38,12 @@ export const activeRunAtom = atom<AgentRun | null>(null);
  */
 export const currentThreadIdAtom = atom<string | null>(null);
 
+/** Display name of the open thread (null when it has none yet). */
+export const currentThreadNameAtom = atom<string | null>(null);
+
+/** True while a thread's history is being loaded. */
+export const isLoadingThreadAtom = atom<boolean>(false);
+
 // =============================================================================
 // Derived Atoms
 // =============================================================================

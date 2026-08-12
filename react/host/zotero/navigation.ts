@@ -1,4 +1,4 @@
-import type { NavigationHost, AttachmentMatchNavigation } from '../types';
+import type { NavigationHost, AttachmentMatchNavigation } from '@beaver/agent-ui/host/types';
 import type { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import type { AttachmentMatchTarget } from '@beaver/agent-core/run-state/toolResultTypes';
 import { revealSource, openSource as openZoteroSource } from '../../utils/sourceUtils';

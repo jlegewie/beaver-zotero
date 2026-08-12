@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState, ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { Icon, SearchIcon } from '../../icons/icons';
-import { getWindowFromElement, getDocumentFromElement } from '../../../utils/windowContext';
+import { getWindowFromElement, getDocumentFromElement } from '@beaver/agent-ui/utils/windowContext';
 import { isImeKeyEvent } from '../../../utils/ime';
 
 /**
@@ -145,7 +145,8 @@ const SearchMenu: React.FC<SearchMenuProps> = ({
         
         // Get the correct document context for this component
         const doc = getDocumentFromElement(menuRef.current);
-        
+        if (!doc) return;
+
         // Prevent scroll on all elements when menu is open except for the menu itself
         const preventScroll = (e: Event) => {
             // Check if the event originated from within the menu
@@ -186,7 +187,8 @@ const SearchMenu: React.FC<SearchMenuProps> = ({
         
         // Get the correct window context for this component
         const win = getWindowFromElement(menuRef.current);
-        
+        if (!win) return;
+
         // Get viewport dimensions
         const viewportWidth = win.innerWidth;
         const viewportHeight = win.innerHeight;
@@ -238,7 +240,8 @@ const SearchMenu: React.FC<SearchMenuProps> = ({
         
         // Get the correct document context for this component
         const doc = getDocumentFromElement(menuRef.current);
-        
+        if (!doc) return;
+
         const handleClickOutside = (e: MouseEvent) => {
             if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
                 onClose();
@@ -335,6 +338,7 @@ const SearchMenu: React.FC<SearchMenuProps> = ({
         
         // Get the correct document context for this component
         const doc = getDocumentFromElement(menuRef.current);
+        if (!doc) return;
         doc.addEventListener('keydown', handleKeyNav);
         return () => doc.removeEventListener('keydown', handleKeyNav);
     }, [isOpen, menuItems, focusedIndex, onClose, closeOnSelect, verticalPosition, selectOnTab]);

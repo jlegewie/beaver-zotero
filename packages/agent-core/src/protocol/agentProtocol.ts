@@ -1862,6 +1862,22 @@ export const CLIENT_FEATURES = {
 /** Client type identifier for the Zotero plugin. */
 export const ZOTERO_PLUGIN_CLIENT_TYPE = 'zotero-plugin';
 
+/** Client type identifier for the Word add-in. */
+export const WORD_ADDIN_CLIENT_TYPE = 'word-addin';
+
+/**
+ * The Beaver clients this build knows about, for code that has to branch on
+ * which client it is running as. These are wire values: the handshake sends one
+ * as `WSAuthMessage.client_type` and the backend keys its per-client agent
+ * mapping on them, so a client cannot rename one on its own.
+ *
+ * `WSAuthMessage.client_type` itself stays a plain `string` — a backend may
+ * know clients a given build does not.
+ */
+export type BeaverClientType =
+    | typeof ZOTERO_PLUGIN_CLIENT_TYPE
+    | typeof WORD_ADDIN_CLIENT_TYPE;
+
 /**
  * Agent the backend runs for, and stamps on threads created by, the Zotero
  * plugin. Threads are listed per agent, so this is what scopes the plugin's

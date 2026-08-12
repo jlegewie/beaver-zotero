@@ -1,13 +1,13 @@
 import React, { useEffect, useState }  from 'react';
 import { useAtom, useAtomValue, useSetAtom } from 'jotai';
 import { currentThreadIdAtom, recentThreadsAtom, loadThreadAtom, ThreadData } from '../../../atoms/threads';
-import MenuButton from '../MenuButton';
-import { MenuItem } from '../menu/ContextMenu';
+import MenuButton from '@beaver/agent-ui/primitives/MenuButton';
+import { MenuItem } from '@beaver/agent-ui/primitives/ContextMenu';
 import { threadService } from '@beaver/agent-core/transport/threadService';
 import { ChattingIcon } from '../../icons/icons';
 import { ZoteroIcon, ZOTERO_ICONS } from '../../icons/ZoteroIcon';
 import { userAtom } from '../../../atoms/auth';
-import Spinner from '../../icons/Spinner';
+import Spinner from '@beaver/agent-ui/icons/Spinner';
 import { getDateGroup } from '../../../utils/dateUtils';
 import { getPref } from '../../../../src/utils/prefs';
 import { clearThreadListCache } from '../../ThreadListView';

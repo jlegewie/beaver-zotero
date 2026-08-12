@@ -1,7 +1,7 @@
 import React from 'react';
 import { CSSIcon, CSSItemTypeIcon, LibraryIcon, NoteIcon, HighlighterIcon, ExternalLinkIcon } from '../../icons/icons';
 import { ZoteroIcon, ZOTERO_ICONS } from '../../icons/ZoteroIcon';
-import { getHost } from '../../../host';
+import { getHost } from '@beaver/agent-ui/host';
 import type { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import type { ContentKind } from '@beaver/agent-core/types/zotero';
 import { truncateText } from '../../../utils/stringUtils';

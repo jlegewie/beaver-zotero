@@ -11,7 +11,7 @@ import { importActionAtom, stageActionPillAtom } from '../../atoms/actions';
 import { readActionFile, isActionFilePath } from '../../utils/actionShareFile';
 import { addPopupMessageAtom } from '../../utils/popupMessageUtils';
 import { getActionCommand } from '../../utils/slashCommands';
-import { getHost } from '../../host';
+import { getHost } from '@beaver/agent-ui/host';
 import { SettingsIcon } from '../icons/icons';
 
 interface DragDropWrapperProps {

@@ -13,9 +13,9 @@ import { libraryRefForLibraryID } from '../../src/utils/libraryIdentity';
 import { getReaderOrNoteContextItem } from '../utils/zoteroTabContext';
 import { buildThreadItemFilter } from '../utils/threadItemFilter';
 import { buildRecentChatsCacheKey, buildRecentChatsItemLookup } from '../utils/recentChatsLookup';
-import Spinner from './icons/Spinner';
+import Spinner from '@beaver/agent-ui/icons/Spinner';
 import { logger } from '@beaver/agent-core/platform/logger';
-import Button from './ui/Button';
+import Button from '@beaver/agent-ui/primitives/Button';
 
 const MAX_RECENT = 3;
 const CACHE_TTL = 60_000; // 1 minute

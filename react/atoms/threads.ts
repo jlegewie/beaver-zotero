@@ -2,20 +2,23 @@ import { atom } from "jotai";
 import { currentMessageItemsAtom, clearComposerAtom, currentMessageCollectionsAtom, currentMessageExternalFilesAtom, updateMessageItemsFromZoteroSelectionAtom, updateReaderAttachmentAtom } from "./messageComposition";
 import { isLibraryTabAtom, isWebSearchEnabledAtom, removePopupMessagesByTypeAtom, userScrolledAtom, windowUserScrolledAtom } from "./ui";
 
-import { citationsAtom, citationMapAtom, processCitationsAtom, resetCitationMarkersAtom, mergePageLabelsByAttachmentIdAtom } from "./citations";
+import { citationsAtom, citationMapAtom, processCitationsAtom, resetCitationMarkersAtom, mergePageLabelsByAttachmentIdAtom } from "@beaver/agent-core/citations/atoms";
+import { maybeShowCitationTipAtom } from "./citationTip";
 import { preloadPageLabelsForCitations } from "../utils/pageLabels";
-import { agentRunService, agentService } from "@beaver/agent-core/transport/agentService";
+import { agentService } from "@beaver/agent-core/transport/agentService";
 import { threadService, ZoteroInstanceRef } from "@beaver/agent-core/transport/threadService";
 import { getPref } from "../../src/utils/prefs";
 import { loadFullItemDataWithAllTypes, currentZoteroInstanceRef } from "../../src/utils/zoteroUtils";
 import { isThreadInstanceMismatch } from "../utils/threadMatches";
-import { getHost } from "../host";
+import { getHost } from '@beaver/agent-ui/host';
 import { logger } from "@beaver/agent-core/platform/logger";
 import { ApiError } from "@beaver/agent-core/types/apiErrors";
 import { resetMessageUIStateAtom, retainedReviewActionsAtom } from "./messageUIState";
-import { checkExternalReferencesAtom, clearExternalReferenceCacheAtom, addExternalReferencesToMappingAtom } from "./externalReferences";
+import { checkExternalReferencesAtom } from "./externalReferences";
+import { clearExternalReferenceCacheAtom, addExternalReferencesToMappingAtom } from "@beaver/agent-core/citations/externalReferences";
 import { ExternalReference } from "@beaver/agent-core/types/externalReferences";
-import { threadRunsAtom, activeRunAtom, currentThreadIdAtom } from "@beaver/agent-core/run-state/atoms";
+import { threadRunsAtom, activeRunAtom, currentThreadIdAtom, currentThreadNameAtom, isLoadingThreadAtom } from "@beaver/agent-core/run-state/atoms";
+import { loadThreadRuns } from "@beaver/agent-core/run-state/loadThreadRuns";
 import { isWSChatPendingAtom, isWSConnectedAtom, isWSReadyAtom } from "./agentRunAtoms";
 import { AgentRun, isRunActive } from "@beaver/agent-core/agents/types";
 import { 
@@ -128,10 +131,9 @@ export interface ThreadData {
 }
 
 // Thread messages and attachments
-// currentThreadIdAtom is defined alongside the run state in the shared core and
-// re-exported here so thread consumers can import it from either module.
-export { currentThreadIdAtom };
-export const currentThreadNameAtom = atom<string | null>(null);
+// These are defined alongside the run state in the shared core and re-exported
+// here so thread consumers can import them from either module.
+export { currentThreadIdAtom, currentThreadNameAtom, isLoadingThreadAtom };
 
 /**
  * Atom to store the scroll position of the current thread
@@ -338,11 +340,6 @@ export const newThreadAtom = atom(
 );
 
 /**
- * Atom to check if a thread is loading
- */
-export const isLoadingThreadAtom = atom<boolean>(false);
-
-/**
  * Atom to load a thread
  */
 export const loadThreadAtom = atom(
@@ -468,23 +465,20 @@ export const loadThreadAtom = atom(
                 })()
                 : null;
 
-            // Load agent runs with actions from the backend
-            const { runs, agent_actions } = await agentRunService.getThreadRuns(threadId, true);
-
-            console.log("loadThreadAtom: runs", runs);
-            console.log("loadThreadAtom: agent_actions", agent_actions);
-            
-            // Mark any in_progress runs as canceled since they're no longer active
-            const processedRuns = runs.map(run => {
-                if (run.status === 'in_progress') {
-                    logger(`loadThreadAtom: Marking in_progress run ${run.id} as canceled`, 1);
-                    return {
-                        ...run,
-                        status: 'canceled' as const,
-                        completed_at: run.completed_at || new Date().toISOString(),
-                    };
-                }
-                return run;
+            // Load agent runs with actions from the backend, and hydrate each
+            // tool return as the shared loader walks the runs.
+            const {
+                runs: processedRuns,
+                citations: citationMetadata,
+                agentActions: agent_actions,
+            } = await loadThreadRuns(threadId, {
+                onToolReturn: async (part, toolCallArgs) => {
+                    await processToolReturnResults(part, set);
+                    // Synthesize a hydrated `view` for legacy results that lack
+                    // one, so the shared render layer can render old threads
+                    // from `metadata.view`.
+                    await upgradeToolReturn(part, toolCallArgs);
+                },
             });
 
             // Protocol deep-links can request a run that does not exist in the target thread.
@@ -496,47 +490,6 @@ export const loadThreadAtom = atom(
             }
             
             if (processedRuns.length > 0) {
-                // Extract citations from runs
-                const citationMetadata = processedRuns.flatMap(run => 
-                    (run.metadata?.citations || []).map(citation => ({
-                        ...citation,
-                        run_id: run.id
-                    }))
-                );
-                
-                // Build a tool_call_id → args map so the compat layer can derive
-                // the annotation-list variant (it needs the originating call args).
-                const toolCallArgsById = new Map<string, string | Record<string, any> | null>();
-                for (const run of processedRuns) {
-                    for (const message of run.model_messages) {
-                        if (message.kind === 'response') {
-                            for (const part of message.parts) {
-                                if (part.part_kind === 'tool-call' && part.tool_call_id) {
-                                    toolCallArgsById.set(part.tool_call_id, part.args);
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // Process tool return results
-                const externalReferences: ExternalReference[] = [];
-                for (const run of processedRuns) {
-                    for (const message of run.model_messages) {
-                        if (message.kind === 'request') {
-                            for (const part of message.parts) {
-                                if (part.part_kind === "tool-return") {
-                                    await processToolReturnResults(part, set);
-                                    // Synthesize a hydrated `view` for legacy results
-                                    // that lack one, so the shared render layer can
-                                    // render old threads from `metadata.view`.
-                                    await upgradeToolReturn(part, toolCallArgsById.get(part.tool_call_id));
-                                }
-                            }
-                        }
-                    }
-                }
-                
                 // Load item data for user attachments. Citations no longer
                 // need item preloading: they render from backend metadata
                 // alone (citation v2).
@@ -584,6 +537,7 @@ export const loadThreadAtom = atom(
                 // Update citation state (synchronous: markers + citation tip)
                 set(citationsAtom, citationMetadata);
                 set(processCitationsAtom);
+                set(maybeShowCitationTipAtom);
 
                 // Preload PDF page labels in the background so subsequent
                 // renders can resolve page locators to their display labels.

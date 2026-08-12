@@ -14,7 +14,7 @@ import { UNRESOLVED_LIBRARY_ID } from '../../../../src/utils/libraryIdentity';
 import { searchTitleCreatorYear, scoreSearchResult } from '../../../utils/search';
 import { getPref } from '../../../../src/utils/prefs';
 import { logger } from '@beaver/agent-core/platform/logger';
-import Tooltip from '../Tooltip';
+import Tooltip from '@beaver/agent-ui/primitives/Tooltip';
 
 const RECENT_ITEMS_LIMIT = 5;
 const RECENTLY_MODIFIED_LIMIT = 15;

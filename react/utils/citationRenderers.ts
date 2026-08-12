@@ -4,14 +4,14 @@ import { Provider, createStore } from 'jotai';
 import { store } from '../store';
 import MarkdownRenderer from '../components/messages/MarkdownRenderer';
 import { Citation } from '../../src/services/CitationService';
-import { citationsAtom, citationByKeyAtom, citationKeyToMarkerAtom, pageLabelsByAttachmentIdAtom, externalFileLocalPathsAtom, type PageLabelsByAttachmentId } from '../atoms/citations';
-import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '../atoms/externalReferences';
+import { citationsAtom, citationByKeyAtom, citationKeyToMarkerAtom, pageLabelsByAttachmentIdAtom, externalFileLocalPathsAtom, type PageLabelsByAttachmentId } from '@beaver/agent-core/citations/atoms';
+import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '@beaver/agent-core/citations/externalReferences';
 import { Citation as BeaverCitation } from '@beaver/agent-core/types/citations';
 import { CITATION_TAG_PATTERN } from '../utils/citationPreprocessing';
 import { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { ExternalReference } from '@beaver/agent-core/types/externalReferences';
-import { formatExternalCitation } from '../atoms/externalReferences';
+import { formatExternalCitation } from '@beaver/agent-core/citations/externalReferences';
 import { UNRESOLVED_LIBRARY_ID } from '../../src/utils/libraryIdentity';
 import {
     baseCitationKey,

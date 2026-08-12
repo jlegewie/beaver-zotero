@@ -120,6 +120,108 @@ const l1CoreAmbientTypeBan = [
     },
 ];
 
+/**
+ * Globals banned in the shared React layer (`packages/agent-ui`).
+ *
+ * Derived from `restrictedGlobals`, minus its `window` / `document` entries.
+ * Those are banned repo-wide because Zotero plugin code runs across several
+ * windows and must ask `Zotero.getMainWindow()` which one it is in — reasoning
+ * that does not transfer here, since a shared component has no Zotero to ask.
+ * The rule this package follows instead, which lint cannot express: derive the
+ * window and document from an element (`ownerDocument` /
+ * `ownerDocument.defaultView`) or from a prop, never from a global. A bare
+ * `window` reference inside a component is a bug in a client that renders into
+ * a second window — review for it.
+ */
+const l2UiGlobals = [
+    { message: "Use `Zotero.getActiveZoteroPane()` instead.", name: "ZoteroPane" },
+    "Zotero_Tabs",
+    {
+        name: "Zotero",
+        message:
+            "The shared React layer must stay client-agnostic — Zotero specifics belong behind the host registry, not here.",
+    },
+    {
+        name: "Office",
+        message:
+            "The shared React layer must stay client-agnostic — Office specifics belong in the Word add-in, behind the host registry.",
+    },
+    {
+        name: "Word",
+        message:
+            "The shared React layer must stay client-agnostic — Word specifics belong in the Word add-in, behind the host registry.",
+    },
+];
+
+/**
+ * The `Zotero` global ban above covers value references but not `zotero-types`
+ * ambient TYPE namespaces, which are equally unavailable once the shared React
+ * layer is typechecked outside the Zotero plugin host.
+ */
+const l2UiAmbientTypeBan = [
+    {
+        selector: 'Identifier[name="_ZoteroTypes"]',
+        message:
+            "The shared React layer must not use ambient Zotero types — it has to typecheck without zotero-types.",
+    },
+    // `no-restricted-globals` only sees a bare identifier reference, so
+    // `(globalThis as unknown as { Zotero: … }).Zotero` slips past it while
+    // reaching the same host surface. Screening the property name does not help —
+    // a cast, a temporary or a computed key defeats any access-shape match — so
+    // the identifier itself is banned. A shared component has no use for it.
+    // `verify-program.mjs` rejects this too; this block is the fast local signal.
+    {
+        selector: 'Identifier[name="globalThis"]',
+        message:
+            "The shared React layer must not name `globalThis` — derive window/document from an element's ownerDocument, and reach host behavior through the host registry.",
+    },
+    // A `declare global` block inside the package hands it a host global while
+    // every other check stays green.
+    {
+        selector: 'TSModuleDeclaration[global=true]',
+        message:
+            "The shared React layer must not declare a global — a global it declares is one the other client does not have.",
+    },
+];
+
+/**
+ * Import bans for the shared React layer. The `react` / `react-dom` / `jotai`
+ * bans that apply to the L1 core are deliberately absent: this package is React
+ * by definition. What it must not reach is either client's own graph — the
+ * matched specifiers are all relative escapes out of `packages/agent-ui`, which
+ * `verify-program.mjs` also rejects; this block is the fast local signal.
+ */
+const l2UiImportBans = [
+    {
+        // The registry itself lives in this package (`src/host/`), so any
+        // specifier naming a `host/zotero` path from here is necessarily a
+        // relative escape into the plugin's implementation of it.
+        group: ["**/host/zotero", "**/host/zotero/**"],
+        message:
+            "The shared React layer defines the host registry; it must not import a client's implementation of it (react/host/zotero).",
+    },
+    {
+        group: ["**/utils/prefs"],
+        message:
+            "The shared React layer must read config through the host registry, not Zotero prefs.",
+    },
+    {
+        group: ["**/react/atoms/*", "**/react/atoms/**"],
+        message:
+            "The shared React layer must not import the Zotero plugin's Jotai atoms (react/atoms) — client-agnostic state belongs in @beaver/agent-core.",
+    },
+    {
+        group: ["**/react/utils/*", "**/react/utils/**"],
+        message:
+            "The shared React layer must not import the Zotero plugin's react/utils — that pulls in the app graph.",
+    },
+    {
+        group: ["**/src/services/*", "**/src/services/**"],
+        message:
+            "The shared React layer must not import the Zotero plugin's services (src/services).",
+    },
+];
+
 export default tseslint.config(
     {
         ignores: [
@@ -266,14 +368,15 @@ export default tseslint.config(
         },
     },
     // The shared render layer must stay client-agnostic so it can be reused
-    // across clients. It may use the host registry (`react/host`) but must NOT
-    // touch the `Zotero` global or import the Zotero host implementation / prefs
-    // directly — those couplings go through `getHost()`.
+    // across clients. It may use the host registry (`@beaver/agent-ui/host`) but
+    // must NOT touch the `Zotero` global or import the Zotero host implementation
+    // / prefs directly — those couplings go through `getHost()`.
     // See docs-zotero/client-host-architecture.md.
     {
         files: [
-            "react/components/citations/**/*.{ts,tsx}",
-            "react/components/sources/CitedSourcesList.tsx",
+            // The citation stack (Citation, useCitationViewModel, CitedSourcesList)
+            // graduated into packages/agent-ui and is covered by that package's own
+            // block below, which is stricter.
             "react/components/agentRuns/toolResultViews/**/*.{ts,tsx}",
             // The tool-result dispatcher: renders only from hydrated view models and
             // a generic fallback (dev-mode check via getHost().config), no Zotero global.
@@ -302,7 +405,7 @@ export default tseslint.config(
                 {
                     name: "Zotero",
                     message:
-                        "The citation render layer must stay client-agnostic — use getHost() (react/host) for Zotero-specific behavior.",
+                        "The citation render layer must stay client-agnostic — use getHost() (@beaver/agent-ui/host) for Zotero-specific behavior.",
                 },
             ],
             "no-restricted-imports": [
@@ -312,7 +415,7 @@ export default tseslint.config(
                         {
                             group: ["**/host/zotero/*", "**/host/zotero"],
                             message:
-                                "Render layer must use the host registry (react/host), not the Zotero implementation (react/host/zotero).",
+                                "Render layer must use the host registry (@beaver/agent-ui/host), not the Zotero implementation (react/host/zotero).",
                         },
                         {
                             group: ["**/utils/prefs"],
@@ -340,6 +443,22 @@ export default tseslint.config(
                 { paths: l1CorePackageBans, patterns: l1CoreImportBans },
             ],
             "no-restricted-syntax": ["error", ...l1CoreAmbientTypeBan],
+        },
+    },
+    // The shared React layer (theme, icons, primitives, render components) is
+    // consumed by the Zotero plugin and the Word add-in from the same source, so
+    // it must not name either host. Client behavior reaches it through the host
+    // registry or a prop. `npm run typecheck:ui` is the stronger gate — it
+    // typechecks the package standalone with no Zotero and no Office types and
+    // verifies its whole import closure stays inside the package — but it only
+    // sees files in the tsconfig `files` list; this block covers every file in
+    // the package as you write it. See docs-zotero/client-host-architecture.md.
+    {
+        files: ["packages/agent-ui/src/**/*.{ts,tsx}"],
+        rules: {
+            "no-restricted-globals": ["error", ...l2UiGlobals],
+            "no-restricted-imports": ["error", { patterns: l2UiImportBans }],
+            "no-restricted-syntax": ["error", ...l2UiAmbientTypeBan],
         },
     },
 );

@@ -9,6 +9,9 @@ import { notifyApprovalRequest } from '../../src/services/systemNotifications';
 import type { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import type { ActionStatus } from '@beaver/agent-core/types/agentActions/base';
 import type { WSDeferredApprovalRequest, AgentActionType } from '@beaver/agent-core/protocol/agentProtocol';
+// Declared in the shared host contract, since the render layer hands it to the
+// host's in-stream action UI.
+import type { PendingApproval } from '@beaver/agent-ui/host';
 import {
     AgentAction,
     CreateItemAgentAction,
@@ -483,20 +486,6 @@ export const clearAgentActionsAtom = atom(
 // =============================================================================
 // Deferred Tool Approval State
 // =============================================================================
-
-/**
- * Pending approval request from the backend.
- * When set, the UI should show an approval dialog for this action.
- * Multiple approvals can be pending simultaneously for parallel tool calls.
- */
-export interface PendingApproval {
-    actionId: string;
-    /** Tool call ID for UI matching (always provided by backend) */
-    toolcallId: string;
-    actionType: AgentActionType;
-    actionData: Record<string, any>;
-    currentValue?: any;
-}
 
 /**
  * Atom storing all pending approval requests, keyed by actionId.

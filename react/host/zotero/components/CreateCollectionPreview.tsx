@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { CSSIcon, Icon, PlusSignIcon } from '../../../components/icons/icons';
-import { getHost } from '../..';
+import { getHost } from '@beaver/agent-ui/host';
 import { libraryRefForLibraryID } from '../../../../src/utils/libraryIdentity';
 import { resolveLibraryRef } from '../../../../src/utils/libraryIdentity';
 

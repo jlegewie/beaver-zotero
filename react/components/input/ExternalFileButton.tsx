@@ -1,7 +1,7 @@
 import React, { forwardRef } from 'react';
 import { CSSItemTypeIcon, CSSIcon, Icon } from "../icons/icons";
 import { useRemoveContextMenu } from '../../hooks/useRemoveContextMenu';
-import { MenuItem } from '../ui/menu/ContextMenu';
+import { MenuItem } from '@beaver/agent-ui/primitives/ContextMenu';
 import { truncateText } from '../../utils/stringUtils';
 import { FileViewIcon, ExternalLinkIcon } from '../icons/icons';
 import type { ExternalFileContentKind } from '@beaver/agent-core/types/attachments/apiTypes';
@@ -9,7 +9,7 @@ import { logger } from '@beaver/agent-core/platform/logger';
 import { ChipWithPopup, type ChipPopupContent } from '../agentRuns/requestChips/ChipPopup';
 import { ChipButton } from '../agentRuns/requestChips/ChipButton';
 import { ChipRemovableIcon } from '../agentRuns/requestChips/ChipRemovableIcon';
-import { getHost } from '../../host';
+import { getHost } from '@beaver/agent-ui/host';
 
 const MAX_FILENAME_LENGTH = 25;
 

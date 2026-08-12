@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { LinkIcon, ArrowRightIcon, Spinner, TickIcon, AlertIcon, Icon, InformationCircleIcon } from '../icons/icons';
-import IconButton from "../ui/IconButton";
-import Button from "../ui/Button";
+import IconButton from "@beaver/agent-ui/primitives/IconButton";
+import Button from "@beaver/agent-ui/primitives/Button";
 import { useSetAtom, useAtomValue } from 'jotai';
 import { chatService, ErrorType } from '@beaver/agent-core/transport/clients/chatService';
 import { ProviderType } from '../../atoms/models';

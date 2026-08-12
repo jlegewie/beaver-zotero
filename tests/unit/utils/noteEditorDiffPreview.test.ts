@@ -4,7 +4,7 @@ vi.mock('../../../react/store', () => ({
     store: { get: vi.fn(() => null) },
 }));
 
-vi.mock('../../../react/atoms/externalReferences', () => ({
+vi.mock('@beaver/agent-core/citations/externalReferences', () => ({
     externalReferenceMappingAtom: Symbol('externalReferenceMappingAtom'),
     externalReferenceItemMappingAtom: Symbol('externalReferenceItemMappingAtom'),
 }));

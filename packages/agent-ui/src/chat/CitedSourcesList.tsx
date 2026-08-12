@@ -1,9 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAtomValue } from 'jotai';
-import { CSSItemTypeIcon, ExternalLinkIcon, PdfIcon } from '../icons/icons';
-import IconButton from '../ui/IconButton';
-import { ZOTERO_ICONS } from '../icons/ZoteroIcon';
-import { ZoteroIcon } from '../icons/ZoteroIcon';
+import { ExternalLinkIcon, FileIcon, Icon, LibraryIcon, PdfIcon } from '../icons';
+import IconButton from '../primitives/IconButton';
 import {
     CitedSource,
     getCitationKey,
@@ -13,11 +11,11 @@ import {
     isExternalFileCitation,
     itemTypeToIconName,
 } from '@beaver/agent-core/types/citations';
-import Tooltip from '../ui/Tooltip';
-import { externalReferenceMappingAtom, externalReferenceItemMappingAtom, formatExternalCitation } from '../../atoms/externalReferences';
+import Tooltip from '../primitives/Tooltip';
+import { externalReferenceMappingAtom, externalReferenceItemMappingAtom, formatExternalCitation } from '@beaver/agent-core/citations/externalReferences';
 import { ExternalReference } from '@beaver/agent-core/types/externalReferences';
 import { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
-import { getHost, type ResolvedItemDisplay } from '../../host';
+import { getHost, type ResolvedItemDisplay } from '../host';
 
 interface CitedSourcesListProps {
     citations: CitedSource[];
@@ -159,7 +157,10 @@ const CitedSourcesList: React.FC<CitedSourcesListProps> = ({
                                         {/* Icon */}
                                         {iconName && (
                                             <span className="mr-2 flex-shrink-0" style={{ transform: 'translateY(-2px)' }}>
-                                                <CSSItemTypeIcon className="scale-85" itemType={iconName} />
+                                                {/* The client owns its item-type artwork; the generic
+                                                    document glyph is the honest fallback when it has none. */}
+                                                {getHost().components?.itemTypeIcon({ itemType: iconName, className: 'scale-85' })
+                                                    ?? <Icon icon={FileIcon} className="scale-85" />}
                                             </span>
                                         )}
                                         {/* Author-year heading */}
@@ -202,7 +203,12 @@ const CitedSourcesList: React.FC<CitedSourcesListProps> = ({
                                             <>
                                                 <Tooltip content="Reveal in Zotero" singleLine>
                                                     <IconButton
-                                                        icon={() => <ZoteroIcon icon={ZOTERO_ICONS.SHOW_ITEM} size={10} />}
+                                                        icon={() => (
+                                                            <>
+                                                                {getHost().components?.revealInLibraryIcon({})
+                                                                    ?? <Icon icon={LibraryIcon} />}
+                                                            </>
+                                                        )}
                                                         variant="ghost-secondary"
                                                         onClick={() => {
                                                             const target = mappedZoteroItem || zoteroRef;

@@ -2,6 +2,7 @@ import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vitest/config';
 
 const agentCoreSrc = fileURLToPath(new URL('./packages/agent-core/src', import.meta.url));
+const agentUiSrc = fileURLToPath(new URL('./packages/agent-ui/src', import.meta.url));
 
 export default defineConfig({
     test: {
@@ -26,6 +27,7 @@ export default defineConfig({
     resolve: {
         alias: {
             '@beaver/agent-core': agentCoreSrc,
+            '@beaver/agent-ui': agentUiSrc,
         },
     },
 });

@@ -3,11 +3,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AgentRunStatus, ToolCallPart } from '@beaver/agent-core/agents/types';
 import {
     AgentAction,
-    PendingApproval,
     agentActionsByToolcallAtom,
     pendingApprovalsAtom,
     removePendingApprovalAtom,
 } from '../../../agents/agentActions';
+import type { EditNoteResolvedTarget, PendingApproval } from '@beaver/agent-ui/host';
 import {
     approvalResponseIntentsAtom,
     isWSChatPendingAtom,
@@ -33,7 +33,6 @@ import {
 } from '../agentActionExecution';
 import {
     EditNoteDisplayStatus,
-    EditNoteResolvedTarget,
     findPendingApprovalForToolcall,
     getEditNoteDisplayStatus,
     getEffectiveEditNotePendingApproval,

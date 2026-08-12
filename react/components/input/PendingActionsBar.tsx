@@ -4,7 +4,7 @@ import { pendingApprovalsAtom } from '../../agents/agentActions';
 import { sendApprovalResponseAtom } from '../../atoms/agentRunAtoms';
 import { dismissDiffPreview } from '../../utils/noteEditorDiffPreview';
 import { diffPreviewNoteKeyAtom } from '../../utils/diffPreviewCoordinator';
-import Button from '../ui/Button';
+import Button from '@beaver/agent-ui/primitives/Button';
 
 /**
  * Bar that appears above the input area when there are pending agent actions.

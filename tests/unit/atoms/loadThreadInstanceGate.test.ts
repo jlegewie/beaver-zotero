@@ -29,7 +29,7 @@ vi.mock('../../../src/utils/prefs', () => ({
 }));
 
 const confirmMock = vi.fn();
-vi.mock('../../../react/host', () => ({
+vi.mock('@beaver/agent-ui/host', () => ({
     getHost: () => ({ dialogs: { confirm: confirmMock } }),
 }));
 
@@ -66,7 +66,7 @@ vi.mock('../../../react/atoms/ui', async () => {
     };
 });
 
-vi.mock('../../../react/atoms/citations', async () => {
+vi.mock('@beaver/agent-core/citations/atoms', async () => {
     const { atom } = await import('jotai');
     return {
         citationsAtom: atom<unknown[]>([]),
@@ -81,6 +81,13 @@ vi.mock('../../../react/utils/pageLabels', () => ({
     preloadPageLabelsForCitations: vi.fn(async () => new Map()),
 }));
 
+// The Zotero-only citation onboarding tip; stubbing it keeps the popup/prefs
+// chain out of the thread atoms' import graph.
+vi.mock('../../../react/atoms/citationTip', async () => {
+    const { atom } = await import('jotai');
+    return { maybeShowCitationTipAtom: atom(null, () => {}) };
+});
+
 // Partial mock: the module only pulls in jotai, so keep every atom real and stub
 // just the reset. A hand-written export list would silently resolve any atom
 // added later to `undefined`, and loadThreadAtom writes to several of them.
@@ -94,6 +101,12 @@ vi.mock('../../../react/atoms/externalReferences', async () => {
     const { atom } = await import('jotai');
     return {
         checkExternalReferencesAtom: atom(null, () => {}),
+    };
+});
+
+vi.mock('@beaver/agent-core/citations/externalReferences', async () => {
+    const { atom } = await import('jotai');
+    return {
         clearExternalReferenceCacheAtom: atom(null, () => {}),
         addExternalReferencesToMappingAtom: atom(null, () => {}),
     };
@@ -104,8 +117,11 @@ vi.mock('@beaver/agent-core/run-state/atoms', async () => {
     return {
         threadRunsAtom: atom<unknown[]>([]),
         activeRunAtom: atom<unknown | null>(null),
-        // threads.ts re-exports this from the run state, so the stub must provide it
+        // threads.ts re-exports these three from the run state, so the stub must
+        // provide them
         currentThreadIdAtom: atom<string | null>(null),
+        currentThreadNameAtom: atom<string | null>(null),
+        isLoadingThreadAtom: atom<boolean>(false),
     };
 });
 

@@ -9,9 +9,9 @@ import {
     closeWSConnectionAtom,
     sendAskUserQuestionResponseAtom,
 } from '../../atoms/agentRunAtoms';
-import Button from '../ui/Button';
-import IconButton from '../ui/IconButton';
-import Tooltip from '../ui/Tooltip';
+import Button from '@beaver/agent-ui/primitives/Button';
+import IconButton from '@beaver/agent-ui/primitives/IconButton';
+import Tooltip from '@beaver/agent-ui/primitives/Tooltip';
 import {
     ArrowLeftIcon,
     ArrowRightIcon,

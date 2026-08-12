@@ -4,8 +4,8 @@ import { firstRunReturnRequestedAtom } from '../../../atoms/firstRun';
 import { whereToStartVisibleAtom } from '../../../atoms/whereToStart';
 import { currentMessageContentAtom } from '../../../atoms/messageComposition';
 import { Icon, IdeaIcon, PlusSignIcon } from '../../icons/icons';
-import ArrowLeftIcon from '../../icons/ArrowLeftIcon';
-import Button from '../../ui/Button';
+import ArrowLeftIcon from '@beaver/agent-ui/icons/ArrowLeftIcon';
+import Button from '@beaver/agent-ui/primitives/Button';
 
 
 /** Which onboarding surface produced this panel */

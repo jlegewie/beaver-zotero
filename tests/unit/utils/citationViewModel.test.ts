@@ -15,7 +15,7 @@ vi.mock('../../../src/utils/prefs', () => ({
 
 vi.mock('@beaver/agent-core/platform/logger', () => ({ logger: vi.fn() }));
 
-import { readCitationProps } from '../../../react/components/citations/useCitationViewModel';
+import { readCitationProps } from '@beaver/agent-ui/chat/useCitationViewModel';
 
 describe('readCitationProps', () => {
     it('accepts an unresolved portable group citation identity', () => {

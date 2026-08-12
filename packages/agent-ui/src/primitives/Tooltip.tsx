@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState, ReactNode } from 'react';
 import ReactDOM from 'react-dom';
-import { getWindowFromElement, getDocumentFromElement } from '../../utils/windowContext';
+import { getWindowFromElement, getDocumentFromElement } from '../utils/windowContext';
 
 /**
 * Props for the Tooltip component
@@ -81,6 +81,7 @@ const Tooltip: React.FC<TooltipProps> = ({
         
         // Get the correct window context for this component
         const win = getWindowFromElement(anchorRef.current);
+        if (!win) return;
         const anchorRect = anchorRef.current.getBoundingClientRect();
         const tooltipRect = tooltipRef.current.getBoundingClientRect();
         
@@ -145,16 +146,17 @@ const Tooltip: React.FC<TooltipProps> = ({
     // Update position when tooltip is shown
     useEffect(() => {
         if (!isOpen) return;
-        
+
+        // Get the correct window context for this component
+        const win = getWindowFromElement(anchorRef.current);
+        if (!win) return;
+
         // Initial position calculation with a slight delay to ensure
         // the tooltip has been rendered and can be measured
         const initialPositionTimer = setTimeout(() => {
             calculatePosition();
         }, 10);
-        
-        // Get the correct window context for this component
-        const win = getWindowFromElement(anchorRef.current);
-        
+
         // Handle window resize
         const handleResize = () => calculatePosition();
         win.addEventListener('resize', handleResize);
@@ -301,17 +303,21 @@ const Tooltip: React.FC<TooltipProps> = ({
     // Use portal if requested - this helps when the tooltip needs to 
     // break out of a container with overflow:hidden or similar
     if (usePortal && isOpen) {
-        // Use the correct document context for this component
+        // Portal into the document the anchor lives in. While the anchor is not
+        // attached there is no document to portal into, so render inline rather
+        // than guess a window and land the tooltip in the wrong one.
         const doc = getDocumentFromElement(anchorRef.current);
-        return (
-            <>
-            {wrappedChildren}
-            {ReactDOM.createPortal(
-                tooltipElement,
-                doc.body
-            )}
-            </>
-        );
+        if (doc) {
+            return (
+                <>
+                {wrappedChildren}
+                {ReactDOM.createPortal(
+                    tooltipElement,
+                    doc.body
+                )}
+                </>
+            );
+        }
     }
     
     return (

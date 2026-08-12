@@ -1,5 +1,5 @@
 import React from 'react';
-import { Icon } from '../icons/icons';
+import Icon from '../icons/Icon';
 import Spinner from '../icons/Spinner';
 
 export type ButtonVariant = 'solid' | 'surface' | 'outline' | 'subtle' | 'ghost' | 'surface-light' | 'ghost-secondary' | 'ghost-tertiary' | 'error';

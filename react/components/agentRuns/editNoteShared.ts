@@ -1,12 +1,8 @@
 import { ToolCallPart } from '@beaver/agent-core/agents/types';
 import type { ToolCallStatus } from '@beaver/agent-core/run-state/atoms';
-import type { AgentAction, PendingApproval } from '../../agents/agentActions';
+import type { AgentAction } from '../../agents/agentActions';
+import type { EditNoteResolvedTarget, PendingApproval } from '@beaver/agent-ui/host';
 import { resolveObjectId } from '../../../src/utils/libraryIdentity';
-
-export interface EditNoteResolvedTarget {
-    libraryId: number;
-    zoteroKey: string;
-}
 
 export type EditNoteDisplayStatus =
     | 'awaiting'

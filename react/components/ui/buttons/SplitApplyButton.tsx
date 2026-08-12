@@ -1,7 +1,7 @@
 import React from 'react';
-import Button from '../Button';
-import MenuButton from '../MenuButton';
-import { MenuItem } from '../menu/ContextMenu';
+import Button from '@beaver/agent-ui/primitives/Button';
+import MenuButton from '@beaver/agent-ui/primitives/MenuButton';
+import { MenuItem } from '@beaver/agent-ui/primitives/ContextMenu';
 import { ArrowDownIcon } from '../../icons/icons';
 
 interface SplitApplyButtonProps {

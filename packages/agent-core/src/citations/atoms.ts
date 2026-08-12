@@ -1,10 +1,6 @@
-import { atom } from 'jotai';
-import { logger } from '@beaver/agent-core/platform/logger';
-import {
-    Citation,
-    isExternalCitation,
-    getCitationPages,
-} from '@beaver/agent-core/types/citations';
+import { atom } from 'jotai/vanilla';
+import { logger } from '../platform/logger';
+import { Citation } from '../types/citations';
 import {
     baseCitationKey,
     type CitationRef,
@@ -14,12 +10,7 @@ import {
     normalizeCitationTag,
     parseRawCitationAttributes,
     requestedCitationKey,
-} from '@beaver/agent-core/citations/citationGrammar';
-import { getPref, setPref } from '../../src/utils/prefs';
-import { addPopupMessageAtom } from '../utils/popupMessageUtils';
-import { isFirstRunVisibleAtom } from './firstRun';
-import { activeRunAtom, threadRunsAtom } from '@beaver/agent-core/run-state/atoms';
-import { isFirstRunOrigin } from '@beaver/agent-core/agents/types';
+} from './citationGrammar';
 
 /**
  * Thread-scoped citation marker assignment.
@@ -103,7 +94,8 @@ export const aliasCitationMarkerKeysAtom = atom(
 );
 
 /**
- * PDF page labels keyed by Zotero attachment item ID, then 0-based page index.
+ * PDF page labels keyed by attachment ID (the client's numeric attachment
+ * identifier), then 0-based page index.
  */
 export type PageLabelsByAttachmentId = Record<number, Record<number, string>>;
 
@@ -111,8 +103,8 @@ export const pageLabelsByAttachmentIdAtom = atom<PageLabelsByAttachmentId>({});
 
 /**
  * Absolute local paths for external-file citations, keyed by ext key. Populated
- * only in the isolated render store during note export (see `renderToHTML`), and
- * only for files that exist on this computer. Carries host-resolved data into the
+ * only in the isolated render store a client uses for static note export, and
+ * only for files that exist on that computer. Carries host-resolved data into the
  * synchronous static render so the export layer can offer a clickable file link;
  * empty for clients without locally stored external files.
  */
@@ -165,7 +157,7 @@ export const mergePageLabelsByAttachmentIdAtom = atom(
  * citations during streaming and (b) run metadata citations on thread load.
  *
  * Citations arrive render-ready from the backend (citation v2): the lookup
- * maps below are pure derivations — no Zotero item loading happens here.
+ * maps below are pure derivations — no host item loading happens here.
  */
 export const citationsAtom = atom<Citation[]>([]);
 
@@ -317,40 +309,14 @@ export const citationByKeyAtom = atom<Record<string, Citation>>((get) => {
 });
 
 /**
- * One-time citation tip: shown when the first external or page-locator citation
- * is processed. Persistent pref ensures it fires at most once.
+ * Synchronous post-processing after citations enter the thread state: assigns
+ * thread-scoped numeric markers in list order, aliasing the requested and
+ * resolved identities of a citation to one marker.
  *
- * Suppressed without setting the pref while: (1) FirstRunPage is visible, or
- * (2) the active thread is a first-run thread (any run carries a first-run
- * origin — `first_run_card` or `first_run_followup`). Avoids overlapping the
- * citation popup with the NextStepsPanel / BackToSuggestions panels.
- */
-function maybeTriggerCitationTip(get: (...args: any[]) => any, set: (...args: any[]) => any) {
-    if (get(isFirstRunVisibleAtom)) return;
-    const activeRun = get(activeRunAtom);
-    const threadRuns = get(threadRunsAtom);
-    const isFirstRunThread =
-        isFirstRunOrigin(activeRun?.user_prompt?.origin) ||
-        threadRuns.some((r: any) => isFirstRunOrigin(r.user_prompt?.origin));
-    if (isFirstRunThread) return;
-    if (getPref('onboardingCitationTipShown')) return;
-    setPref('onboardingCitationTipShown', true);
-
-    set(addPopupMessageAtom, {
-        type: 'citation_tip' as const,
-        title: 'Understanding Citations',
-        expire: false,
-    });
-}
-
-/**
- * Synchronous post-processing after citations enter the thread state:
- * assigns thread-scoped numeric markers (in list order, aliasing requested
- * and resolved identities to one marker) and fires the one-time citation tip.
- *
- * Call after writing citationsAtom on thread load and run completion. This
- * replaced the async Zotero-enrichment atom — citations now arrive
- * render-ready from the backend.
+ * Call after writing citationsAtom on thread load and run completion. Markers
+ * must be assigned in the same store update as the citations themselves —
+ * marker components read the run phase at mount, so citations that land in a
+ * later update render as permanently unresolved.
  */
 export const processCitationsAtom = atom(
     null,
@@ -358,17 +324,9 @@ export const processCitationsAtom = atom(
         const citations = get(citationsAtom);
         logger(`processCitationsAtom: Processing ${citations.length} citations`);
 
-        let tipTriggered = false;
         for (const citation of citations) {
             if (!citation.invalid) {
                 set(aliasCitationMarkerKeysAtom, getCitationMarkerBaseKeys(citation));
-            }
-            if (
-                !tipTriggered
-                && (isExternalCitation(citation) || getCitationPages(citation).length > 0)
-            ) {
-                maybeTriggerCitationTip(get, set);
-                tipTriggered = true;
             }
         }
     }

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import ContextMenu, { MenuItem, MenuPosition } from '../components/ui/menu/ContextMenu';
+import ContextMenu, { MenuItem, MenuPosition } from '@beaver/agent-ui/primitives/ContextMenu';
 import { CancelIcon, DeleteIcon } from '../components/icons/icons';
 
 interface UseRemoveContextMenuOptions {

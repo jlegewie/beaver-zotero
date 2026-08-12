@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
     explicitPageLabel,
     formatLocationChip,
-} from '../../../react/utils/locationDisplay';
+} from '@beaver/agent-ui/utils/locationDisplay';
 
 describe('locationDisplay', () => {
     it('resolves explicit 0-based page labels from 1-based page numbers', () => {
