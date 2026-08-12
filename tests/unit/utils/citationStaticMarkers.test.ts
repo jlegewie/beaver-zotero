@@ -56,4 +56,22 @@ describe('computeStaticCitationMarkers', () => {
         expect(markers['zotero:5-ITEMKEY1']).toBe('1');
         expect(markers['zotero:u-ITEMKEY1']).toBe('1');
     });
+
+    it('keeps numbering contiguous for sources cited after a merged pair', () => {
+        const markers = computeStaticCitationMarkers(
+            'Legacy<citation id="5-ITEMKEY1"/> portable<citation id="u-ITEMKEY1"/> other<citation id="u-ITEMKEY2"/>',
+            {
+                c1: citation({
+                    requested_ref: { kind: 'zotero', library_id: 5, library_ref: 'u', zotero_key: 'ITEMKEY1' },
+                    resolved_ref: { kind: 'zotero', library_id: 5, library_ref: 'u', zotero_key: 'ITEMKEY1' },
+                }),
+            },
+        );
+
+        expect(markers).toEqual({
+            'zotero:5-ITEMKEY1': '1',
+            'zotero:u-ITEMKEY1': '1',
+            'zotero:u-ITEMKEY2': '2',
+        });
+    });
 });

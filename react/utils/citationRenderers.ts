@@ -54,6 +54,27 @@ function getEarliestExistingMarker(markerMap: Record<string, string>, keys: stri
 }
 
 /**
+ * Renumber the assigned markers 1..N, preserving their order.
+ *
+ * Merging an alias group onto its earliest marker frees the numbers its other
+ * members held, so the sources cited after it keep numbers that no longer have
+ * anything below them — an export reading `[1] [1] [3]` for two sources.
+ */
+function compactMarkers(markerMap: Record<string, string>): Record<string, string> {
+    const renumbered = new Map(
+        [...new Set(Object.values(markerMap))]
+            .sort((a, b) => parseInt(a, 10) - parseInt(b, 10))
+            .map((marker, index) => [marker, (index + 1).toString()]),
+    );
+
+    const compacted: Record<string, string> = {};
+    for (const [key, marker] of Object.entries(markerMap)) {
+        compacted[key] = renumbered.get(marker) ?? marker;
+    }
+    return compacted;
+}
+
+/**
  * Preprocesses markdown content to replace note tags with headers and separators.
  * @param text Raw markdown text containing note tags
  * @returns Processed markdown with note tags replaced by headers/lines
@@ -236,7 +257,9 @@ export interface RenderContextData {
  * order first, then merged across the identities that name one source. The
  * alias groups come from `getCitationMarkerBaseKeys`, the same grouping the
  * live path assigns by, so a source cited by one name in the text and carrying
- * another in its metadata is numbered once in either path.
+ * another in its metadata is numbered once in either path. Merging frees the
+ * numbers the folded-in aliases held, so the result is compacted back to a
+ * contiguous 1..N.
  */
 export function computeStaticCitationMarkers(
     content: string,
@@ -267,13 +290,17 @@ export function computeStaticCitationMarkers(
         const uniqueKeys = getCitationMarkerBaseKeys(citation);
         if (uniqueKeys.length > 1) aliasGroups.push(uniqueKeys);
     }
+    let merged = false;
     for (const keys of aliasGroups) {
         const existing = getEarliestExistingMarker(markerMap, keys);
         if (!existing) continue;
-        for (const key of keys) markerMap[key] = existing;
+        for (const key of keys) {
+            if (markerMap[key] !== existing) merged = true;
+            markerMap[key] = existing;
+        }
     }
 
-    return markerMap;
+    return merged ? compactMarkers(markerMap) : markerMap;
 }
 
 /**
