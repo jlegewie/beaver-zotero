@@ -122,6 +122,7 @@ vi.mock('../../../react/atoms/agentRunAtoms', async () => {
         isWSConnectedAtom: atom(false),
         isWSReadyAtom: atom(false),
         pendingRetryAtom: atom<unknown | null>(null),
+        cancellingRunIdAtom: atom<string | null>(null),
         // No pending retry in these fixtures, so the canceled run is appended
         // to the thread as usual.
         abortPendingRetryAtom: atom(null, () => ({ aborted: false, popupId: null })),

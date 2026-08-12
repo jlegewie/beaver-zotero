@@ -976,9 +976,17 @@ export class AgentService {
         // during the flush wait below, the deferred close must not tear it down.
         const connectionIdToCancel = this.connectionId;
 
-        // Send cancel message to backend
+        // Send cancel message to backend. Same TOCTOU as send(): the socket
+        // can leave OPEN between the check above and this call. Swallow that
+        // so Stop / thread-switch still finish local teardown.
         logger('AgentService: Sending cancel message', 1);
-        this.ws.send(JSON.stringify({ type: 'cancel' }));
+        try {
+            this.ws.send(JSON.stringify({ type: 'cancel' }));
+        } catch (error) {
+            logger(`AgentService: Cancel send failed: ${error}`, 1);
+            this.close(1000, 'User cancelled', { onlyIfConnectionId: connectionIdToCancel });
+            return;
+        }
 
         // Wait briefly to allow the message to be flushed
         await new Promise(resolve => setTimeout(resolve, waitMs));

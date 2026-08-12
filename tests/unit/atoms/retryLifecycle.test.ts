@@ -77,6 +77,8 @@ import { threadAgentActionsAtom, type AgentAction } from '../../../react/agents/
 import {
     closeWSConnectionAtom,
     isWSChatPendingAtom,
+    isWSConnectedAtom,
+    isWSReadyAtom,
     pendingRetryAtom,
     regenerateFromRunAtom,
     regenerateWithEditedPromptAtom,
@@ -295,11 +297,153 @@ describe('retry lifecycle', () => {
 
         await store.set(closeWSConnectionAtom);
 
+        expect(cancelMock).toHaveBeenCalledTimes(1);
         expect(store.get(threadRunsAtom).map((r: AgentRun) => r.id)).toEqual(['a', 'b']);
         expect(store.get(pendingRetryAtom)).toBeNull();
         expect(store.get(activeRunAtom)).toBeNull();
         // Cancel is intentional — no error popup for it.
         expect(addPopupMessageMock).not.toHaveBeenCalled();
+    });
+
+    it('still tears down the stopped run when cancel rejects', async () => {
+        await store.set(regenerateFromRunAtom, 'a');
+
+        cancelMock.mockRejectedValueOnce(new Error('InvalidStateError'));
+
+        await store.set(closeWSConnectionAtom);
+
+        expect(store.get(threadRunsAtom).map((r: AgentRun) => r.id)).toEqual(['a', 'b']);
+        expect(store.get(pendingRetryAtom)).toBeNull();
+        expect(store.get(activeRunAtom)).toBeNull();
+        expect(store.get(isWSConnectedAtom)).toBe(false);
+        expect(store.get(isWSReadyAtom)).toBe(false);
+        expect(addPopupMessageMock).not.toHaveBeenCalled();
+    });
+
+    it('applies a truncation that lands while cancel is flushing, then marks the new run canceled', async () => {
+        await store.set(regenerateFromRunAtom, 'a');
+        const newRunId = store.get(pendingRetryAtom)?.runId;
+
+        cancelMock.mockImplementationOnce(async () => {
+            wsCallbacks().onThread(THREAD_ID, threadEvent(THREAD_ID, ['a', 'b']));
+        });
+
+        await store.set(closeWSConnectionAtom);
+
+        expect(store.get(pendingRetryAtom)).toBeNull();
+        expect(store.get(activeRunAtom)).toBeNull();
+        expect(store.get(threadRunsAtom).map((r: AgentRun) => r.id)).toEqual([newRunId]);
+        expect(store.get(threadRunsAtom)[0].status).toBe('canceled');
+        expect(addPopupMessageMock).not.toHaveBeenCalled();
+    });
+
+    it('does not pop a retry-failed error when the backend errors during cancel', async () => {
+        await store.set(regenerateFromRunAtom, 'a');
+        const newRunId = store.get(pendingRetryAtom)?.runId;
+
+        cancelMock.mockImplementationOnce(async () => {
+            wsCallbacks().onError({
+                event: 'error',
+                type: 'internal_error',
+                message: 'boom',
+                run_id: newRunId,
+            });
+        });
+
+        await store.set(closeWSConnectionAtom);
+
+        expect(store.get(threadRunsAtom).map((r: AgentRun) => r.id)).toEqual(['a', 'b']);
+        expect(store.get(pendingRetryAtom)).toBeNull();
+        expect(store.get(activeRunAtom)).toBeNull();
+        expect(addPopupMessageMock).not.toHaveBeenCalled();
+    });
+
+    it('does not auto-resume a run the user is stopping', async () => {
+        await store.set(regenerateFromRunAtom, 'a');
+        const newRunId = store.get(pendingRetryAtom)?.runId;
+        wsCallbacks().onThread(THREAD_ID, threadEvent(THREAD_ID, ['a', 'b']));
+        const connectCount = connectMock.mock.calls.length;
+
+        cancelMock.mockImplementationOnce(async () => {
+            wsCallbacks().onError({
+                event: 'error',
+                type: 'internal_error',
+                message: 'boom',
+                run_id: newRunId,
+                try_auto_resume: true,
+            });
+        });
+
+        await store.set(closeWSConnectionAtom);
+
+        expect(connectMock.mock.calls.length).toBe(connectCount);
+        expect(store.get(activeRunAtom)).toBeNull();
+        expect(store.get(threadRunsAtom).map((r: AgentRun) => r.id)).toEqual([newRunId]);
+        expect(store.get(threadRunsAtom)[0].status).toBe('canceled');
+        expect(addPopupMessageMock).not.toHaveBeenCalled();
+    });
+
+    it('does not auto-resume a run while switching threads', async () => {
+        const { loadThreadAtom } = await import('../../../react/atoms/threads');
+        await store.set(regenerateFromRunAtom, 'a');
+        const newRunId = store.get(pendingRetryAtom)?.runId;
+        wsCallbacks().onThread(THREAD_ID, threadEvent(THREAD_ID, ['a', 'b']));
+        const connectCount = connectMock.mock.calls.length;
+
+        cancelMock.mockImplementationOnce(async () => {
+            wsCallbacks().onError({
+                event: 'error',
+                type: 'internal_error',
+                message: 'boom',
+                run_id: newRunId,
+                try_auto_resume: true,
+            });
+        });
+
+        await store.set(loadThreadAtom, { user_id: 'user-1', threadId: 'thread-2' });
+
+        expect(connectMock.mock.calls.length).toBe(connectCount);
+        expect(store.get(activeRunAtom)).toBeNull();
+        expect(store.get(threadRunsAtom).some((r: AgentRun) => r.id === newRunId)).toBe(false);
+    });
+
+    it('does not cancel a newer run that started during the cancel flush', async () => {
+        await store.set(regenerateFromRunAtom, 'a');
+
+        cancelMock.mockImplementationOnce(async () => {
+            store.set(activeRunAtom, { ...makeRun('newer'), status: 'in_progress' });
+            store.set(pendingRetryAtom, null);
+            store.set(isWSConnectedAtom, true);
+            store.set(isWSReadyAtom, true);
+        });
+
+        await store.set(closeWSConnectionAtom);
+
+        expect(store.get(activeRunAtom)?.id).toBe('newer');
+        expect(store.get(activeRunAtom)?.status).toBe('in_progress');
+        expect(store.get(threadRunsAtom).map((r: AgentRun) => r.id)).toEqual(['a', 'b']);
+        expect(store.get(isWSConnectedAtom)).toBe(true);
+        expect(store.get(isWSReadyAtom)).toBe(true);
+    });
+
+    it('does not cancel a newer run when cancel rejects after that run started', async () => {
+        await store.set(regenerateFromRunAtom, 'a');
+
+        cancelMock.mockImplementationOnce(async () => {
+            store.set(activeRunAtom, { ...makeRun('newer'), status: 'in_progress' });
+            store.set(pendingRetryAtom, null);
+            store.set(isWSConnectedAtom, true);
+            store.set(isWSReadyAtom, true);
+            throw new Error('InvalidStateError');
+        });
+
+        await store.set(closeWSConnectionAtom);
+
+        expect(store.get(activeRunAtom)?.id).toBe('newer');
+        expect(store.get(activeRunAtom)?.status).toBe('in_progress');
+        expect(store.get(threadRunsAtom).map((r: AgentRun) => r.id)).toEqual(['a', 'b']);
+        expect(store.get(isWSConnectedAtom)).toBe(true);
+        expect(store.get(isWSReadyAtom)).toBe(true);
     });
 
     it('applies the truncation on streamed content when no thread event arrived', async () => {
@@ -385,6 +529,37 @@ describe('retry lifecycle', () => {
         expect(store.get(activeRunAtom)).toBeNull();
         // The retry's run was never shown, so the thread switch does not leave
         // it behind as a canceled turn.
+        expect(store.get(threadRunsAtom).some((r: AgentRun) => r.id === newRunId)).toBe(false);
+    });
+
+    it('still switches threads when cancel rejects', async () => {
+        const { loadThreadAtom } = await import('../../../react/atoms/threads');
+        await store.set(regenerateFromRunAtom, 'a');
+        const newRunId = store.get(pendingRetryAtom)?.runId;
+
+        cancelMock.mockRejectedValueOnce(new Error('InvalidStateError'));
+
+        await store.set(loadThreadAtom, { user_id: 'user-1', threadId: 'thread-2' });
+
+        expect(store.get(pendingRetryAtom)).toBeNull();
+        expect(store.get(activeRunAtom)).toBeNull();
+        expect(store.get(currentThreadIdAtom)).toBe('thread-2');
+        expect(store.get(threadRunsAtom).some((r: AgentRun) => r.id === newRunId)).toBe(false);
+    });
+
+    it('does not carry a retry that committed during cancel onto the thread being opened', async () => {
+        const { loadThreadAtom } = await import('../../../react/atoms/threads');
+        await store.set(regenerateFromRunAtom, 'a');
+        const newRunId = store.get(pendingRetryAtom)?.runId;
+
+        cancelMock.mockImplementationOnce(async () => {
+            wsCallbacks().onThread(THREAD_ID, threadEvent(THREAD_ID, ['a', 'b']));
+        });
+
+        await store.set(loadThreadAtom, { user_id: 'user-1', threadId: 'thread-2' });
+
+        expect(store.get(pendingRetryAtom)).toBeNull();
+        expect(store.get(activeRunAtom)).toBeNull();
         expect(store.get(threadRunsAtom).some((r: AgentRun) => r.id === newRunId)).toBe(false);
     });
 

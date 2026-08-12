@@ -19,7 +19,7 @@ import { clearExternalReferenceCacheAtom, addExternalReferencesToMappingAtom } f
 import { ExternalReference } from "@beaver/agent-core/types/externalReferences";
 import { threadRunsAtom, activeRunAtom, uncommittedRunIdAtom, currentThreadIdAtom, currentThreadNameAtom, isLoadingThreadAtom } from "@beaver/agent-core/run-state/atoms";
 import { loadThreadRuns } from "@beaver/agent-core/run-state/loadThreadRuns";
-import { abortPendingRetryAtom, isWSChatPendingAtom, isWSConnectedAtom, isWSReadyAtom, pendingRetryAtom } from "./agentRunAtoms";
+import { abortPendingRetryAtom, cancellingRunIdAtom, isWSChatPendingAtom, isWSConnectedAtom, isWSReadyAtom, pendingRetryAtom } from "./agentRunAtoms";
 import { AgentRun, isRunActive } from "@beaver/agent-core/agents/types";
 import { 
     threadAgentActionsAtom, 
@@ -247,32 +247,43 @@ async function cancelActiveRunIfNeeded(get: (atom: any) => any, set: (atom: any,
         // Set pending to false immediately for responsive UI
         set(isWSChatPendingAtom, false);
 
-        // Mark active run as canceled if it exists
-        if (activeRun && activeRun.status === 'in_progress') {
-            // A retry the server never confirmed the truncation for replaced
-            // nothing, and its run was never shown. Dropping it keeps a run the
-            // user never saw out of the thread they are leaving.
-            const { aborted } = set(abortPendingRetryAtom, activeRun.id) as { aborted: boolean };
-            if (!aborted) {
-                const canceledRun: AgentRun = {
-                    ...activeRun,
-                    status: 'canceled',
-                    completed_at: new Date().toISOString(),
-                };
-                // Move canceled run to completed runs before clearing
-                set(threadRunsAtom, (runs: AgentRun[]) => [...runs, canceledRun]);
+        // Cancel first so a truncation the server already applied can still
+        // land during the flush window, matching closeWSConnectionAtom.
+        const canceledRunId = activeRun?.id;
+        if (canceledRunId) set(cancellingRunIdAtom, canceledRunId);
+        try {
+            await agentService.cancel();
+        } catch (error) {
+            logger(`cancelActiveRunIfNeeded: cancel failed: ${error}`, 1);
+        } finally {
+            set(isWSConnectedAtom, false);
+            set(isWSReadyAtom, false);
+
+            const run = get(activeRunAtom);
+            if (canceledRunId && run?.id === canceledRunId) {
+                // A retry the server never confirmed the truncation for replaced
+                // nothing, and its run was never shown. Dropping it keeps a run the
+                // user never saw out of the thread they are leaving. A confirmed
+                // one (or an error that arrived during the flush) is marked canceled.
+                const { aborted } = set(abortPendingRetryAtom, run.id) as { aborted: boolean };
+                if (!aborted && (run.status === 'in_progress' || run.status === 'error')) {
+                    const canceledRun: AgentRun = {
+                        ...run,
+                        status: 'canceled',
+                        completed_at: new Date().toISOString(),
+                    };
+                    set(threadRunsAtom, (runs: AgentRun[]) => [...runs, canceledRun]);
+                }
+            }
+            set(activeRunAtom, null);
+            // Covers a retry whose shell is already gone (abort was a no-op).
+            set(pendingRetryAtom, null);
+            set(uncommittedRunIdAtom, null);
+
+            if (get(cancellingRunIdAtom) === canceledRunId) {
+                set(cancellingRunIdAtom, null);
             }
         }
-        set(activeRunAtom, null);
-        // Nothing of a pending retry was applied, so leaving the thread just
-        // drops the plan (covers a retry whose shell is already gone).
-        set(pendingRetryAtom, null);
-        set(uncommittedRunIdAtom, null);
-
-        // Cancel the WebSocket connection
-        await agentService.cancel();
-        set(isWSConnectedAtom, false);
-        set(isWSReadyAtom, false);
     }
 }
 

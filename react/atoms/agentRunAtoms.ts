@@ -1471,6 +1471,12 @@ async function handleMissingZoteroData(
 /** Whether a WebSocket chat request is currently in progress */
 export const isWSChatPendingAtom = atom(false);
 
+/**
+ * The run Stop / thread-switch is currently cancelling, if any.
+ * onError skips auto-resume/retry for this id during the cancel flush window.
+ */
+export const cancellingRunIdAtom = atom<string | null>(null);
+
 /** Run IDs where LLM streaming finished but post-processing (citations) is still in progress */
 export const streamingDoneRunIdsAtom = atom<Set<string>>(new Set<string>());
 
@@ -2044,7 +2050,9 @@ function createWSCallbacks(set: Setter): WSCallbacks {
             const { aborted } = errorRunId
                 ? set(abortPendingRetryAtom, {
                       runId: errorRunId,
-                      notify: true,
+                      // Stop already cleared the pending flag; don't also pop
+                      // "Retry failed" for the cancel that follows.
+                      notify: store.get(isWSChatPendingAtom),
                       type: event.type,
                       message: event.message,
                       hasBeaverFallback: event.has_beaver_fallback,
@@ -2094,6 +2102,7 @@ function createWSCallbacks(set: Setter): WSCallbacks {
                 !aborted &&
                 event.try_auto_resume &&
                 errorRunId &&
+                errorRunId !== store.get(cancellingRunIdAtom) &&
                 !store.get(scheduledAutoResumeRunIdsAtom).has(errorRunId)
             ) {
                 // Retry when only thinking has streamed so far (nothing
@@ -2973,37 +2982,54 @@ export const closeWSConnectionAtom = atom(null, async (get, set) => {
     set(clearApprovalResponseIntentsAtom);
     set(clearRunApprovalPolicyAtom);
 
-    // Mark active run as canceled if it exists
-    const activeRun = get(activeRunAtom);
-    if (activeRun && activeRun.status === 'in_progress') {
-        // A retry cancelled before the server confirmed the truncation never
-        // replaced anything, and was never persisted itself. Dropping it leaves
-        // the thread exactly as the server holds it, which is what cancelling a
-        // regeneration should leave behind.
-        //
-        // No notify: cancel is intentional. The abort drops the shell itself.
-        const { aborted } = set(abortPendingRetryAtom, activeRun.id);
-        if (aborted) {
-            set(activeRunAtom, null);
-        } else {
-            const canceledRun: AgentRun = {
-                ...activeRun,
-                status: 'canceled',
-                completed_at: new Date().toISOString(),
-            };
-            // Move canceled run to completed runs
-            set(threadRunsAtom, (runs) => [...runs, canceledRun]);
-            set(activeRunAtom, null);
+    // Send cancel first so a truncation the server already applied can still
+    // land (`thread` / first part) during the flush window. Aborting the
+    // pending retry beforehand would ignore that proof and leave this client
+    // holding turns the server deleted.
+    const canceledRunId = get(activeRunAtom)?.id;
+    if (canceledRunId) set(cancellingRunIdAtom, canceledRunId);
+    try {
+        await agentService.cancel();
+    } catch (error) {
+        logger(`closeWSConnectionAtom: cancel failed: ${error}`, 1);
+    } finally {
+        // Re-read after cancel: a `thread` event in the flush window may have
+        // committed the retry, in which case the new run is what we cancel.
+        // The composer is unblocked for that window, so a newer send can replace
+        // the active run — only tear down the run Stop was pressed on.
+        // Runs even when cancel() rejects, so Stop cannot leave the old run
+        // active with the pending flag already cleared.
+        const activeRun = get(activeRunAtom);
+        if (canceledRunId && activeRun?.id === canceledRunId) {
+            // No notify: cancel is intentional. An unconfirmed retry drops its
+            // shell and keeps the turns it would have replaced; a confirmed one
+            // (or an error that arrived during the flush) is marked canceled.
+            const { aborted } = set(abortPendingRetryAtom, activeRun.id);
+            if (aborted) {
+                set(activeRunAtom, null);
+            } else if (activeRun.status === 'in_progress' || activeRun.status === 'error') {
+                const canceledRun: AgentRun = {
+                    ...activeRun,
+                    status: 'canceled',
+                    completed_at: new Date().toISOString(),
+                };
+                set(threadRunsAtom, (runs) => [...runs, canceledRun]);
+                set(activeRunAtom, null);
+            }
+        }
+
+        // Connection flags belong to the stopped run. A send that started during
+        // the flush already owns a newer connection — don't tear that down.
+        if (!get(activeRunAtom) || get(activeRunAtom)?.id === canceledRunId) {
+            set(streamingDoneRunIdsAtom, new Set<string>());
+            set(isWSConnectedAtom, false);
+            set(isWSReadyAtom, false);
+        }
+
+        if (get(cancellingRunIdAtom) === canceledRunId) {
+            set(cancellingRunIdAtom, null);
         }
     }
-
-    // Clear streaming-done state (user canceled during post-processing)
-    set(streamingDoneRunIdsAtom, new Set<string>());
-
-    // Send cancel message and close connection
-    await agentService.cancel();
-    set(isWSConnectedAtom, false);
-    set(isWSReadyAtom, false);
 });
 
 /**

@@ -131,6 +131,7 @@ vi.mock('../../../react/atoms/agentRunAtoms', async () => {
         isWSChatPendingAtom: atom(false),
         isWSConnectedAtom: atom(false),
         isWSReadyAtom: atom(false),
+        cancellingRunIdAtom: atom<string | null>(null),
     };
 });
 

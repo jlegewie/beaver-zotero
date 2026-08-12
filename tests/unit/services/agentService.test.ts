@@ -120,6 +120,11 @@ function createCallbacks(): WSCallbacks {
     };
 }
 
+/** These tests exercise transport, not request shape. */
+function stubRequest(): AgentRunRequest {
+    return {} as unknown as AgentRunRequest;
+}
+
 async function flushMicrotasks(ticks = 10): Promise<void> {
     for (let i = 0; i < ticks; i++) {
         await Promise.resolve();
@@ -201,8 +206,8 @@ describe('AgentService reconnect handling', () => {
         const service = new AgentService('https://api.example.com');
         const firstCallbacks = createCallbacks();
         const secondCallbacks = createCallbacks();
-        const firstRequest = { type: 'first' } as AgentRunRequest;
-        const secondRequest = { type: 'second' } as AgentRunRequest;
+        const firstRequest = stubRequest();
+        const secondRequest = stubRequest();
 
         const firstSocket = await completeConnect(service, firstCallbacks, firstRequest);
         const secondSocket = await completeConnect(service, secondCallbacks, secondRequest);
@@ -234,7 +239,7 @@ describe('AgentService reconnect handling', () => {
     it('notifies close once for an explicit client close and ignores the later socket event', async () => {
         const service = new AgentService('https://api.example.com');
         const callbacks = createCallbacks();
-        const request = { type: 'close-test' } as AgentRunRequest;
+        const request = stubRequest();
 
         const socket = await completeConnect(service, callbacks, request);
 
@@ -252,7 +257,7 @@ describe('AgentService reconnect handling', () => {
     it('notifies onClose for an unexpected transport close on the active socket', async () => {
         const service = new AgentService('https://api.example.com');
         const callbacks = createCallbacks();
-        const request = { type: 'close-test' } as AgentRunRequest;
+        const request = stubRequest();
 
         const socket = await completeConnect(service, callbacks, request);
 
@@ -283,7 +288,7 @@ describe('AgentService reconnect handling', () => {
     it('rejects connect() and notifies onClose when the socket closes before ready', async () => {
         const service = new AgentService('https://api.example.com');
         const callbacks = createCallbacks();
-        const request = { type: 'pre-ready-close-test' } as AgentRunRequest;
+        const request = stubRequest();
 
         const initialCount = MockWebSocket.instances.length;
         const connectPromise = service.connect(request, callbacks);
@@ -335,7 +340,7 @@ describe('AgentService reconnect handling', () => {
         const callbacks = createCallbacks();
         const initialCount = MockWebSocket.instances.length;
         const outcomePromise = service.connect(
-            { type: 'refused-connection-test' } as AgentRunRequest,
+            stubRequest(),
             callbacks,
         ).then(
             () => ({ ok: true as const }),
@@ -366,7 +371,7 @@ describe('AgentService reconnect handling', () => {
     it('resolves a canceled pre-ready connect and allows the next run to connect', async () => {
         const service = new AgentService('https://api.example.com');
         const firstCallbacks = createCallbacks();
-        const request = { type: 'cancel-handshake-test' } as AgentRunRequest;
+        const request = stubRequest();
 
         const initialCount = MockWebSocket.instances.length;
         const firstConnect = service.connect(request, firstCallbacks);
@@ -406,7 +411,7 @@ describe('AgentService reconnect handling', () => {
     it('ignores a deferred cancel close when a newer connection has taken over', async () => {
         const service = new AgentService('https://api.example.com');
         const firstCallbacks = createCallbacks();
-        const firstRequest = { type: 'first' } as AgentRunRequest;
+        const firstRequest = stubRequest();
 
         const firstSocket = await completeConnect(service, firstCallbacks, firstRequest);
 
@@ -416,7 +421,7 @@ describe('AgentService reconnect handling', () => {
         // A new run connects during that wait and supersedes the first
         // connection (bumping the connection generation).
         const secondCallbacks = createCallbacks();
-        const secondRequest = { type: 'second' } as AgentRunRequest;
+        const secondRequest = stubRequest();
         const secondSocket = await completeConnect(service, secondCallbacks, secondRequest);
         expect(secondSocket).not.toBe(firstSocket);
 
@@ -440,10 +445,28 @@ describe('AgentService reconnect handling', () => {
         expect(secondCallbacks.onPart).toHaveBeenCalledTimes(1);
     });
 
+    it('closes without rejecting when sending the cancel message fails', async () => {
+        const service = new AgentService('https://api.example.com');
+        const callbacks = createCallbacks();
+        const socket = await completeConnect(
+            service,
+            callbacks,
+            stubRequest(),
+        );
+
+        socket.send.mockImplementation(() => {
+            throw new Error('InvalidStateError');
+        });
+
+        await expect(service.cancel(250)).resolves.toBeUndefined();
+        expect(socket.close).toHaveBeenCalled();
+        expect(callbacks.onClose).toHaveBeenCalled();
+    });
+
     it('fails a connect attempt that never reaches ready via the backstop timeout', async () => {
         const service = new AgentService('https://api.example.com');
         const callbacks = createCallbacks();
-        const request = { type: 'timeout-test' } as AgentRunRequest;
+        const request = stubRequest();
 
         const initialCount = MockWebSocket.instances.length;
         const connectPromise = service.connect(request, callbacks);
@@ -487,7 +510,7 @@ describe('AgentService reconnect handling', () => {
     it('identifies a timeout that occurs while checking the auth session', async () => {
         const service = new AgentService('https://api.example.com');
         const callbacks = createCallbacks();
-        const request = { type: 'auth-timeout-test' } as AgentRunRequest;
+        const request = stubRequest();
         mockSupabase.auth.getSession.mockReturnValueOnce(new Promise(() => {}));
 
         const outcomePromise = service.connect(request, callbacks).then(
@@ -512,7 +535,7 @@ describe('AgentService reconnect handling', () => {
     it('drops a queued done when the socket closes while run_complete is processing', async () => {
         const service = new AgentService('https://api.example.com');
         const callbacks = createCallbacks();
-        const request = { type: 'queued-done-test' } as AgentRunRequest;
+        const request = stubRequest();
 
         // Hold the run_complete handler open so the queued `done` message
         // stays behind it in the message queue.
@@ -567,7 +590,7 @@ describe('AgentService reconnect handling', () => {
         await completeConnect(
             serverCloseService,
             serverCloseCallbacks,
-            { type: 'server-close-test' } as AgentRunRequest,
+            stubRequest(),
         );
         const serverSocket = MockWebSocket.instances[MockWebSocket.instances.length - 1];
         serverSocket.emitClose({ code: 1011, reason: 'transport lost', wasClean: false });
@@ -587,7 +610,7 @@ describe('AgentService reconnect handling', () => {
         await completeConnect(
             clientCloseService,
             clientCloseCallbacks,
-            { type: 'client-close-test' } as AgentRunRequest,
+            stubRequest(),
         );
         clientCloseService.close(1000, 'User cancelled');
 
@@ -601,7 +624,7 @@ describe('AgentService reconnect handling', () => {
     it('does not let a stale backstop timeout tear down a newer connection', async () => {
         const service = new AgentService('https://api.example.com');
         const firstCallbacks = createCallbacks();
-        const request = { type: 'stale-timeout-test' } as AgentRunRequest;
+        const request = stubRequest();
 
         // The first attempt's auth-token lookup hangs indefinitely.
         mockSupabase.auth.getSession.mockReturnValueOnce(new Promise(() => {}));
