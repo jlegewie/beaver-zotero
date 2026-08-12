@@ -108,6 +108,37 @@ export async function closeNoteEditor(
     });
 }
 
+export interface SetUnsavedNoteResult {
+    ok?: boolean;
+    /** The editor holds content the DB has not seen. False means the harness failed. */
+    dirty?: boolean;
+    /** True if the DB moved while the text was being typed (a leaked autosave). */
+    saved_changed?: boolean;
+    instances_matched?: number;
+    saved_html?: string;
+    live_html?: string | null;
+    error?: string;
+}
+
+/**
+ * Type `text` into the note's open editor WITHOUT letting it save, leaving the
+ * editor dirty (live HTML ≠ stored HTML) — what a user produces by typing and
+ * not waiting for the autosave.
+ *
+ * Takes ~1.4s: the endpoint has to wait the editor's save debounce out. The
+ * note must already be open (`openNoteEditor`).
+ */
+export async function setUnsavedNoteText(
+    libraryId: number,
+    zoteroKey: string,
+    text: string,
+    at: 'end' | 'start' = 'end',
+): Promise<SetUnsavedNoteResult> {
+    return post<SetUnsavedNoteResult>('/beaver/test/note-editor-set-unsaved', {
+        library_id: libraryId, zotero_key: zoteroKey, text, at,
+    });
+}
+
 export async function undoEditNote(action: {
     proposed_data: Record<string, any>;
     result_data?: Record<string, any>;

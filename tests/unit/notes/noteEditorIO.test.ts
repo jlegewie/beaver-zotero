@@ -28,6 +28,8 @@ import {
     getLatestNoteHtml,
     getLiveNoteHtmlCandidates,
     getNoteHtmlForRead,
+    isNoteEditorFrameConnected,
+    isNoteInEditor,
 } from '../../../src/utils/noteEditorIO';
 
 // =============================================================================
@@ -41,17 +43,28 @@ interface InstanceShape {
     connected?: boolean;
     tabId?: string;
     viewMode?: string;
+    /**
+     * Model the Zotero 10 / Firefox 140 shape: the editor's `type="content"`
+     * iframe gets its own top-level browsing context, so `frameElement` reads
+     * null from the parent and only `browsingContext.embedderElement` resolves.
+     */
+    frameVia?: 'frameElement' | 'embedderElement';
 }
 
 function makeInstance(shape: InstanceShape): any {
-    const { html, itemId, disabled = false, connected = true, tabId, viewMode } = shape;
+    const {
+        html, itemId, disabled = false, connected = true, tabId, viewMode,
+        frameVia = 'frameElement',
+    } = shape;
+    const frame = { isConnected: connected };
     return {
         _item: { id: itemId },
         _disableSaving: disabled,
         tabID: tabId,
         viewMode,
         _iframeWindow: {
-            frameElement: { isConnected: connected },
+            frameElement: frameVia === 'frameElement' ? frame : null,
+            browsingContext: frameVia === 'embedderElement' ? { embedderElement: frame } : undefined,
             wrappedJSObject: {
                 getDataSync: () => {
                     const value = typeof html === 'function' ? html() : html;
@@ -78,6 +91,53 @@ function makeItem(opts: { id?: number; getNote?: () => string; setNote?: any } =
 
 beforeEach(() => {
     setEditors([]);
+});
+
+// =============================================================================
+// Editor liveness
+// =============================================================================
+
+describe('note editor liveness', () => {
+    // Regression guard. Zotero hosts the note editor in an `<iframe
+    // type="content">`; once Gecko gives that its own top-level browsing
+    // context, `contentWindow.frameElement` is null. Reading liveness from
+    // `frameElement` alone therefore reported "no editor is open" for EVERY
+    // note, which made unsaved editor content invisible to `getLatestNoteHtml`
+    // and turned `flushLiveEditorToDB` into a no-op.
+    it('reads liveness from the embedder element when frameElement is null', () => {
+        const instance = makeInstance({ html: '<p>x</p>', itemId: 1, frameVia: 'embedderElement' });
+        expect(instance._iframeWindow.frameElement).toBeNull();
+        expect(isNoteEditorFrameConnected(instance)).toBe(true);
+    });
+
+    it('still reads liveness from frameElement when it resolves', () => {
+        expect(isNoteEditorFrameConnected(makeInstance({ html: '<p>x</p>', itemId: 1 }))).toBe(true);
+    });
+
+    it('treats a detached frame as not live, whichever accessor exposes it', () => {
+        for (const frameVia of ['frameElement', 'embedderElement'] as const) {
+            expect(isNoteEditorFrameConnected(
+                makeInstance({ html: '<p>x</p>', itemId: 1, connected: false, frameVia }),
+            )).toBe(false);
+        }
+    });
+
+    it('treats an instance with neither accessor as not live', () => {
+        expect(isNoteEditorFrameConnected({ _iframeWindow: {} })).toBe(false);
+        expect(isNoteEditorFrameConnected({})).toBe(false);
+        expect(isNoteEditorFrameConnected(null)).toBe(false);
+    });
+
+    it('collects candidates from an embedder-only instance', () => {
+        setEditors([makeInstance({ html: '<p>unsaved</p>', itemId: 1, frameVia: 'embedderElement' })]);
+        expect(getLiveNoteHtmlCandidates(makeItem({ id: 1 }))).toEqual(['<p>unsaved</p>']);
+    });
+
+    it('isNoteInEditor sees an embedder-only instance', () => {
+        setEditors([makeInstance({ html: '<p>x</p>', itemId: 7, frameVia: 'embedderElement' })]);
+        expect(isNoteInEditor(7)).toBe(true);
+        expect(isNoteInEditor(8)).toBe(false);
+    });
 });
 
 // =============================================================================

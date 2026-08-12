@@ -83,6 +83,7 @@ import {
     handleTestNoteReadHttpRequest,
     handleTestNoteOpenEditorHttpRequest,
     handleTestNoteCloseEditorHttpRequest,
+    handleTestNoteSetUnsavedHttpRequest,
     handleTestNoteUndoHttpRequest,
 } from './httpHandlers/testNoteHandlers';
 import {
@@ -256,6 +257,7 @@ const ENDPOINT_PATHS = [
     '/beaver/test/note-read',
     '/beaver/test/note-open-editor',
     '/beaver/test/note-close-editor',
+    '/beaver/test/note-editor-set-unsaved',
     '/beaver/test/note-undo',
     // Test-only endpoints (headless PDF annotations)
     '/beaver/test/annotation-create',
@@ -996,6 +998,9 @@ function registerEndpoints(): boolean {
 
         Zotero.Server.Endpoints['/beaver/test/note-close-editor'] =
             createEndpoint(handleTestNoteCloseEditorHttpRequest);
+
+        Zotero.Server.Endpoints['/beaver/test/note-editor-set-unsaved'] =
+            createEndpoint(handleTestNoteSetUnsavedHttpRequest);
 
         Zotero.Server.Endpoints['/beaver/test/note-undo'] =
             createEndpoint(handleTestNoteUndoHttpRequest);

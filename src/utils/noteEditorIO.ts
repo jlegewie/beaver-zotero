@@ -29,6 +29,38 @@ interface LiveCandidate {
 }
 
 /**
+ * The element hosting an editor instance's iframe, or null.
+ *
+ * `Zotero.Notes._editorInstances` keeps entries after their editor is gone:
+ * closing a note tab runs `disconnectedCallback` → `destroy()` but never
+ * `EditorInstance.uninit()`. Liveness therefore has to be read off the DOM, and
+ * this is the element to read it from.
+ *
+ * `contentWindow.frameElement` is NOT enough on its own. The note editor lives
+ * in a `<iframe type="content">`, and once Gecko gives that its own top-level
+ * browsing context (Zotero 10 / Firefox 140) `frameElement` reads null from the
+ * parent — which silently turned every liveness check below into "no editor is
+ * open", so unsaved editor content became invisible to Beaver.
+ * `browsingContext.embedderElement` still resolves to the same `<iframe>`, so
+ * it is the fallback. Keep both: `frameElement` remains correct on builds where
+ * the frame is not split out.
+ */
+export function noteEditorFrameElement(instance: any): any | null {
+    try {
+        const win = instance?._iframeWindow;
+        if (!win) return null;
+        return win.frameElement ?? win.browsingContext?.embedderElement ?? null;
+    } catch {
+        return null;
+    }
+}
+
+/** True when this editor instance's iframe is still attached to a document. */
+export function isNoteEditorFrameConnected(instance: any): boolean {
+    return noteEditorFrameElement(instance)?.isConnected === true;
+}
+
+/**
  * Walk `Zotero.Notes._editorInstances` and return every connected, non-disabled
  * editor instance that points at `item`. Empty/whitespace-only snapshots are
  * INCLUDED so callers can decide whether to skip them. Throws are absorbed —
@@ -46,8 +78,7 @@ function collectLiveCandidates(item: any, excludeInstance?: any): LiveCandidate[
         // — their content is not authoritative.
         if (instance._disableSaving) continue;
         try {
-            const frameElement = instance._iframeWindow?.frameElement;
-            if (frameElement?.isConnected !== true) continue;
+            if (!isNoteEditorFrameConnected(instance)) continue;
             let noteData = instance._iframeWindow.wrappedJSObject.getDataSync(true);
             if (noteData) {
                 // Clone out of XPCOM sandbox wrapper
@@ -198,25 +229,14 @@ export async function getNoteHtmlForRead(item: any): Promise<string> {
 /**
  * Check if a note is currently open in the Zotero editor.
  *
- * Zotero's `_editorInstances` array can contain stale entries: when a note tab
- * is closed, `disconnectedCallback` → `destroy()` runs but never calls
- * `EditorInstance.uninit()`, so the instance stays in the array. We guard
- * against this by also checking that the editor's iframe is still connected
- * to the DOM.
+ * Stale `_editorInstances` entries are filtered out by checking that the
+ * editor's iframe is still attached — see `noteEditorFrameElement`.
  */
 export function isNoteInEditor(itemId: number): boolean {
     try {
         return (Zotero as any).Notes._editorInstances.some(
-            (instance: any) => {
-                if (!instance._item || instance._item.id !== itemId) return false;
-                // Verify the editor is still alive (iframe attached to the DOM)
-                try {
-                    const frameElement = instance._iframeWindow?.frameElement;
-                    return frameElement?.isConnected === true;
-                } catch {
-                    return false;
-                }
-            }
+            (instance: any) =>
+                instance._item?.id === itemId && isNoteEditorFrameConnected(instance),
         );
     } catch {
         return false;

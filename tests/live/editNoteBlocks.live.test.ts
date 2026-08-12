@@ -45,6 +45,12 @@
  *  10. Destructive escalation: `delete block:1 to:<last>` over a
  *      long note sets `destructive_rewrite: true` on the normalized action,
  *      and executing it WITHOUT that approval flag is refused.
+ *  11. Note open in the editor with UNSAVED changes: the one case where
+ *      validate's reader (`getNoteHtmlForRead`, live editor) and execute's
+ *      (`item.getNote()` after `flushLiveEditorToDB`) can disagree. Both an
+ *      edit to an untouched block and an edit to the block the user typed in
+ *      must apply without a spurious `snapshot_mismatch`, and the unsaved text
+ *      must survive.
  *
  * ── Harness notes (read before extending this file) ─────────────────────────
  *
@@ -70,6 +76,14 @@
  * comparisons strip the edit footer (see `stripEditFooter`) so they hold either
  * way.
  *
+ * UNSAVED EDITOR CONTENT. Section 11 needs the editor to hold text the DB has
+ * never seen. `/beaver/test/note-editor-set-unsaved` produces exactly that by
+ * typing into the live ProseMirror document with `EditorInstance._disableSaving`
+ * held across the editor's 1s save debounce — see the handler in
+ * `react/hooks/httpHandlers/testNoteHandlers.ts`. Opening an editor window can
+ * fail in a headless setup, so those tests SKIP (never silently pass) when
+ * `openNoteEditor` reports no instance.
+ *
  * KNOWN HARNESS GAPS (not worked around, not invented over):
  *   - The `preference` field carries the RESOLVED user preference value
  *     ('always_ask' | 'always_apply' | 'continue_without_applying'), not the
@@ -91,6 +105,9 @@ import {
     readNote,
     undoEditNote,
     executeEditNote,
+    openNoteEditor,
+    closeNoteEditor,
+    setUnsavedNoteText,
 } from './helpers/noteTestClient';
 
 const LIBRARY_ID = Number(process.env.ZOTERO_TEST_LIBRARY_ID ?? 1);
@@ -411,6 +428,10 @@ beforeAll(async () => {
 
 afterEach(async () => {
     for (const { library_id, zotero_key } of createdNotes) {
+        // Close before deleting: erasing a note that is open in an editor makes
+        // Zotero tear the tab/window down on its own, and section 11 is the
+        // only place that opens one.
+        try { await closeNoteEditor(library_id, zotero_key); } catch { /* ignore */ }
         try { await deleteNote(library_id, zotero_key); } catch { /* ignore */ }
     }
     createdNotes.length = 0;
@@ -1388,4 +1409,176 @@ describe('edit_note_blocks destructive escalation', () => {
         expect(exec.error_code).toBe('note_changed');
         expect(await readSaved(ref)).toBe(beforeHtml);
     }, 45000);
+});
+
+// ---------------------------------------------------------------------------
+// 11. Note open in the editor with UNSAVED changes
+// ---------------------------------------------------------------------------
+
+/**
+ * Marker text typed into the live editor; deliberately unlikely to collide.
+ * No leading or trailing whitespace — it is inserted at a block boundary in
+ * one of the two tests, and ProseMirror is free to drop edge whitespace.
+ */
+const UNSAVED_MARKER = '[UNSAVED USER TEXT ZQXJ]';
+
+/**
+ * Wait for the stored note to stop moving. Opening an editor can make
+ * ProseMirror re-serialize and save the note back, and that save must land
+ * BEFORE the unsaved-content marker goes in — otherwise it arrives during the
+ * harness's save-debounce window and looks like the editor leaked a save.
+ */
+async function settleStoredNote(ref: { library_id: number; zotero_key: string }): Promise<void> {
+    let last = '';
+    let stable = 0;
+    for (let i = 0; i < 12 && stable < 2; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 150));
+        const html = await readSaved(ref);
+        if (html === last) stable++;
+        else { last = html; stable = 0; }
+    }
+}
+
+/**
+ * Open `ref` in an editor window and type `UNSAVED_MARKER` into it without
+ * letting the editor save. Returns the read-back state, or null when the
+ * instance refuses to open an editor window — the caller SKIPS on null rather
+ * than passing vacuously.
+ */
+async function dirtyOpenEditor(
+    ref: { library_id: number; zotero_key: string },
+    at: 'end' | 'start',
+): Promise<{ saved_html: string; live_html: string } | null> {
+    const opened = await openNoteEditor(ref.library_id, ref.zotero_key, true);
+    if (!opened.in_editor) return null;
+    await settleStoredNote(ref);
+
+    const dirtied = await setUnsavedNoteText(ref.library_id, ref.zotero_key, UNSAVED_MARKER, at);
+    expect(dirtied.error, dirtied.error ?? '').toBeUndefined();
+    // The harness contract. `saved_changed` false means the editor's autosave
+    // really was held off, so what follows is testing the unsaved path and not
+    // an ordinary already-persisted edit.
+    expect(dirtied.dirty, JSON.stringify(dirtied)).toBe(true);
+    expect(dirtied.saved_changed).toBe(false);
+
+    // Re-read through the note-read endpoint rather than trusting the writer:
+    // stored HTML must NOT have the marker, the live editor MUST.
+    const state = await readNote(ref.library_id, ref.zotero_key);
+    expect(state.in_editor).toBe(true);
+    expect(state.saved_html).not.toContain(UNSAVED_MARKER);
+    expect(state.live_html).toContain(UNSAVED_MARKER);
+    return { saved_html: state.saved_html, live_html: state.live_html as string };
+}
+
+describe('edit_note_blocks with the note open and unsaved', () => {
+    beforeEach((ctx) => skipIfNoZotero(ctx, zoteroAvailable));
+
+    it('edits an untouched block without a spurious snapshot_mismatch and keeps the unsaved text', async (ctx) => {
+        const ref = await seedNote(THREE_PARA_HTML);
+        const dirty = await dirtyOpenEditor(ref, 'end');
+        if (!dirty) {
+            console.warn('Zotero refused to open a note editor window — skipping.');
+            ctx.skip();
+            return;
+        }
+
+        // read_note reads the LIVE editor, so the model sees the typing. This
+        // is also what the snapshot token is a digest over.
+        const view = await readBlocks(ref);
+        const dirtiedBlock = blockOf(view.lines, UNSAVED_MARKER);
+        expect(dirtiedBlock).toBe(lastContentBlock(view.lines));
+
+        const block = blockOf(view.lines, 'Alpha paragraph about block addressing.');
+        expect(block).not.toBe(dirtiedBlock);
+        const newLine = '<p>ALPHA rewritten while the user had unsaved typing.</p>';
+
+        const actionData: BlocksActionData = {
+            library_id: ref.library_id,
+            zotero_key: ref.zotero_key,
+            snapshot: view.snapshot,
+            edits: [{
+                index: 0,
+                op: 'replace',
+                block,
+                expect: view.lines[block - 1],
+                content: newLine,
+            }],
+        };
+
+        // THE ASYMMETRY UNDER TEST: validate digests the live editor,
+        // execute digests the DB after flushLiveEditorToDB. A token minted
+        // from the live read has to verify on BOTH sides of that flush.
+        const validation = await validateBlocks(actionData);
+        expect(validation.error_code).not.toBe('snapshot_mismatch');
+        expect(validation.valid, validation.error ?? undefined).toBe(true);
+        expect(validation.current_value?.snapshot).toBe(view.snapshot);
+
+        const exec = await executeBlocks(actionData);
+        expect(exec.error_code).not.toBe('snapshot_mismatch');
+        expect(exec.success, exec.error ?? undefined).toBe(true);
+        expect(exec.result_data?.skipped).toEqual([]);
+        expect(exec.result_data?.address_pre_snapshot).toBe(view.snapshot);
+
+        // The user's typing was promoted to the DB by the flush, not discarded.
+        const savedAfter = await readSaved(ref);
+        expect(savedAfter).toContain(UNSAVED_MARKER);
+        expect(savedAfter).toContain('ALPHA rewritten while the user had unsaved typing.');
+
+        // EXACTLY one line differs from what the model was shown, and it is the
+        // addressed one — the unsaved block included.
+        const after = await readBlocks(ref);
+        const expectedLines = [...view.lines];
+        expectedLines[block - 1] = newLine;
+        expect(after.lines).toEqual(expectedLines);
+    }, 60000);
+
+    it('edits the very block the user typed in, addressed from the live listing', async (ctx) => {
+        const ref = await seedNote(THREE_PARA_HTML);
+        const dirty = await dirtyOpenEditor(ref, 'start');
+        if (!dirty) {
+            console.warn('Zotero refused to open a note editor window — skipping.');
+            ctx.skip();
+            return;
+        }
+
+        const view = await readBlocks(ref);
+        const block = blockOf(view.lines, UNSAVED_MARKER);
+        // `expect` is the live line, marker and all — the model can only quote
+        // what the read gave it, so this is the realistic addressing.
+        expect(view.lines[block - 1]).toContain('Alpha paragraph about block addressing.');
+        const newLine = '<p>ALPHA replaced, unsaved typing and all.</p>';
+
+        const actionData: BlocksActionData = {
+            library_id: ref.library_id,
+            zotero_key: ref.zotero_key,
+            snapshot: view.snapshot,
+            edits: [{
+                index: 0,
+                op: 'replace',
+                block,
+                expect: view.lines[block - 1],
+                content: newLine,
+            }],
+        };
+
+        const validation = await validateBlocks(actionData);
+        expect(validation.error_code).not.toBe('snapshot_mismatch');
+        expect(validation.valid, validation.error ?? undefined).toBe(true);
+
+        const exec = await executeBlocks(actionData);
+        expect(exec.error_code).not.toBe('snapshot_mismatch');
+        expect(exec.success, exec.error ?? undefined).toBe(true);
+        // The edit replaced the block the marker was in, so the marker is gone
+        // by intent — not silently dropped by the flush.
+        expect(exec.result_data?.skipped).toEqual([]);
+
+        const savedAfter = await readSaved(ref);
+        expect(savedAfter).toContain('ALPHA replaced, unsaved typing and all.');
+        expect(savedAfter).not.toContain(UNSAVED_MARKER);
+
+        const after = await readBlocks(ref);
+        const expectedLines = [...view.lines];
+        expectedLines[block - 1] = newLine;
+        expect(after.lines).toEqual(expectedLines);
+    }, 60000);
 });
