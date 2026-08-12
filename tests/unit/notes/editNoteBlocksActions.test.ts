@@ -254,6 +254,13 @@ function driftLogged(): boolean {
     );
 }
 
+/** True if undo emitted the weaker locators-render-differently diagnostic. */
+function locatorDriftLogged(): boolean {
+    return vi.mocked(logger).mock.calls.some(
+        ([message]) => typeof message === 'string' && message.includes('renders its citation locators differently'),
+    );
+}
+
 const replaceBlock2: EditNoteBlocksEditItem = {
     index: 0,
     op: 'replace',
@@ -707,6 +714,64 @@ describe('undoEditNoteBlocksAction', () => {
         await undoEditNoteBlocksAction(appliedBlocksAction(result, [replaceBlock2]));
 
         expect(driftLogged()).toBe(false);
+    });
+
+    // Undo reads page labels from cache only (no extraction for a log line), so
+    // the same note can render its citation locators differently here than it
+    // did at apply time. That moves the token's unmasked lane while relocating
+    // nothing, so it must not be reported as the note having moved.
+    it('reports no drift when only a citation locator changed', async () => {
+        const citedBody = [
+            LINE_1,
+            '<p>Bravo <citation id="1-CITED001" loc="page3" ref="c_CITED001_0"/> two.</p>',
+            LINE_3,
+        ].join('\n');
+        noteHtml = `<div data-schema-version="9">${citedBody}</div>`;
+        const edit = { ...replaceBlock2, expect: LINE_1, block: 1, content: '<p>Alpha REWRITTEN one.</p>' };
+        const result = await executeEditNoteBlocksAction(blocksAction(
+            [edit],
+            { snapshot: buildAddressSnapshot(NOTE_ID, citedBody) },
+        ));
+
+        // The locator, and nothing else, renders differently by undo time.
+        noteHtml = noteHtml.replace('loc="page3"', 'loc="page17"');
+        vi.mocked(logger).mockClear();
+
+        await undoEditNoteBlocksAction(appliedBlocksAction(result, [edit]));
+
+        // Reported, but as the weaker claim it is: the locators render
+        // differently, NOT "the note no longer matches".
+        expect(driftLogged()).toBe(false);
+        expect(locatorDriftLogged()).toBe(true);
+        expect(noteHtml).toContain(LINE_1);
+        expect(noteHtml).not.toContain('Alpha REWRITTEN one.');
+    });
+
+    // An action applied before the token format gained its second digest lane
+    // recorded a token that cannot be recomputed today. Comparing anyway would
+    // report drift on every such undo — a false signal, and a noisy one, since
+    // the recompute differs by FORMAT rather than by note state.
+    it('reports no drift for a post-snapshot recorded in an older token format', async () => {
+        const result = await executeEditNoteBlocksAction(blocksAction([replaceBlock2]));
+        const [, digest, length] = result.address_post_snapshot!.split(':');
+        vi.mocked(logger).mockClear();
+
+        await undoEditNoteBlocksAction(appliedBlocksAction(
+            { ...result, address_post_snapshot: `h:${digest}:${length}` },
+            [replaceBlock2],
+        ));
+
+        // Not silence: an incomparable token is reported as incomparable, which
+        // is a different thing from "the note has not moved".
+        expect(driftLogged()).toBe(false);
+        expect(locatorDriftLogged()).toBe(false);
+        expect(vi.mocked(logger).mock.calls.some(
+            ([message]) => typeof message === 'string'
+                && message.includes('is not a token of the current format'),
+        )).toBe(true);
+        // …and the undo itself still ran.
+        expect(noteHtml).toContain(LINE_2);
+        expect(noteHtml).not.toContain('Bravo REWRITTEN two.');
     });
 
     // The check is a diagnostic; it must not be able to fail an undo that would

@@ -4,8 +4,9 @@ import {
     quickHash64,
     snapshotNoteId,
     buildAddressSnapshot,
+    checkAddressSnapshot,
     isAddressSnapshotToken,
-    verifyAddressSnapshot,
+    type AddressSnapshotStatus,
 } from '../../../src/utils/noteSnapshot';
 
 // =============================================================================
@@ -25,6 +26,18 @@ function compoundCitation(items: string, ref = 'c_AAAA1111+BBBB2222_0'): string 
 /** A simplified note projection with `lines` joined by newlines. */
 function note(...lines: string[]): string {
     return lines.join('\n');
+}
+
+/**
+ * "Do these block numbers still resolve?" — true for `match` AND
+ * `locator_drift`, since drift moves attribute values only and never a line
+ * boundary. Local to this file on purpose: the module exports the VERDICT, so
+ * no caller can ask the weaker question without seeing that it is the weaker
+ * one.
+ */
+function addressable(token: string, noteId: string, simplified: string): boolean {
+    const status: AddressSnapshotStatus = checkAddressSnapshot(token, noteId, simplified);
+    return status === 'match' || status === 'locator_drift';
 }
 
 
@@ -173,7 +186,7 @@ describe('quickHash64', () => {
 });
 
 // =============================================================================
-// snapshotNoteId / buildAddressSnapshot / isAddressSnapshotToken / verifyAddressSnapshot
+// snapshotNoteId / buildAddressSnapshot / isAddressSnapshotToken / checkAddressSnapshot
 // =============================================================================
 
 describe('address snapshot token', () => {
@@ -181,13 +194,22 @@ describe('address snapshot token', () => {
     const NOTE_A = snapshotNoteId(1, 'ABCD1234');
     const NOTE_B = snapshotNoteId(1, 'ZZZZ9999');
 
-    it('has the documented three-part shape', () => {
+    it('has the documented four-part shape', () => {
         const token = buildAddressSnapshot(NOTE_A, simplified);
         const parts = token.split(':');
-        expect(parts).toHaveLength(3);
-        expect(parts[0]).toBe('h');
+        expect(parts).toHaveLength(4);
+        expect(parts[0]).toBe('h2');
         expect(parts[1]).toMatch(/^[0-9a-f]{16}$/);
         expect(parts[2]).toBe(String(simplified.length));
+        expect(parts[3]).toMatch(/^[0-9a-f]{16}$/);
+    });
+
+    // The two lanes must genuinely differ, or the unmasked one carries no
+    // information and the locator-drift verdict can never fire.
+    it('gives the two lanes different digests for a note carrying a locator', () => {
+        const withLocator = note('<p>Claim ' + citation('1-ABCD1234', 'page3') + '</p>');
+        const parts = buildAddressSnapshot(NOTE_A, withLocator).split(':');
+        expect(parts[1]).not.toBe(parts[3]);
     });
 
     // The library part is PORTABLE (`u` / `g<groupID>`), not the device-local
@@ -246,8 +268,8 @@ describe('address snapshot token', () => {
 
     it('refuses a token issued for a DIFFERENT note with identical content', () => {
         const token = buildAddressSnapshot(NOTE_A, simplified);
-        expect(verifyAddressSnapshot(token, NOTE_A, simplified)).toBe(true);
-        expect(verifyAddressSnapshot(token, NOTE_B, simplified)).toBe(false);
+        expect(addressable(token, NOTE_A, simplified)).toBe(true);
+        expect(addressable(token, NOTE_B, simplified)).toBe(false);
     });
 
     it('distinguishes the same key in different libraries', () => {
@@ -261,18 +283,19 @@ describe('address snapshot token', () => {
 
     it('rejects malformed tokens structurally', () => {
         const token = buildAddressSnapshot(NOTE_A, simplified);
-        const digest = token.split(':')[1];
+        const [, digest, length, unmasked] = token.split(':');
         expect(isAddressSnapshotToken('')).toBe(false);
         expect(isAddressSnapshotToken('garbage')).toBe(false);
-        expect(isAddressSnapshotToken(`x:${digest}:10`)).toBe(false);            // wrong prefix
-        expect(isAddressSnapshotToken(`h:${digest}`)).toBe(false);               // missing length
-        expect(isAddressSnapshotToken(`h:${digest}:10:1-3`)).toBe(false);        // stale 4-part form
-        expect(isAddressSnapshotToken(`h:nothex:10`)).toBe(false);               // bad digest
-        expect(isAddressSnapshotToken(`h:${digest.slice(1)}:10`)).toBe(false);   // short digest
-        expect(isAddressSnapshotToken(`h:${digest}:ten`)).toBe(false);           // bad length
-        expect(isAddressSnapshotToken(`h:${digest}:-1`)).toBe(false);            // negative length
-        expect(isAddressSnapshotToken(`h:${digest}:1.5`)).toBe(false);           // fractional length
-        expect(isAddressSnapshotToken(`h:${digest}: 10`)).toBe(false);           // whitespace
+        expect(isAddressSnapshotToken(`x:${digest}:${length}:${unmasked}`)).toBe(false);       // wrong prefix
+        expect(isAddressSnapshotToken(`h2:${digest}:${length}`)).toBe(false);                  // missing lane
+        expect(isAddressSnapshotToken(`h2:${digest}:${length}:${unmasked}:1-3`)).toBe(false);  // extra part
+        expect(isAddressSnapshotToken(`h2:nothex:${length}:${unmasked}`)).toBe(false);         // bad digest
+        expect(isAddressSnapshotToken(`h2:${digest.slice(1)}:${length}:${unmasked}`)).toBe(false); // short digest
+        expect(isAddressSnapshotToken(`h2:${digest}:${length}:nothex`)).toBe(false);           // bad second lane
+        expect(isAddressSnapshotToken(`h2:${digest}:ten:${unmasked}`)).toBe(false);            // bad length
+        expect(isAddressSnapshotToken(`h2:${digest}:-1:${unmasked}`)).toBe(false);             // negative length
+        expect(isAddressSnapshotToken(`h2:${digest}:1.5:${unmasked}`)).toBe(false);            // fractional length
+        expect(isAddressSnapshotToken(`h2:${digest}: 10:${unmasked}`)).toBe(false);            // whitespace
     });
 
     // The old format carried a trailing `<from>-<to>` read window. A token from
@@ -281,29 +304,41 @@ describe('address snapshot token', () => {
     it('rejects the retired window-bearing token form', () => {
         const token = buildAddressSnapshot(NOTE_A, simplified);
         expect(isAddressSnapshotToken(`${token}:1-3`)).toBe(false);
-        expect(verifyAddressSnapshot(`${token}:1-3`, NOTE_A, simplified)).toBe(false);
+        expect(addressable(`${token}:1-3`, NOTE_A, simplified)).toBe(false);
+    });
+
+    // A single-lane `h:` token cannot say whether locators drifted, so accepting
+    // one would silently reopen the hole the second lane closes. It must fail
+    // STRUCTURALLY (→ `snapshot_malformed`), not as a mismatch: a fresh listing
+    // cannot fix it, only a fresh read can.
+    it('rejects a single-lane token from an older build', () => {
+        const parts = buildAddressSnapshot(NOTE_A, simplified).split(':');
+        const legacy = `h:${parts[1]}:${parts[2]}`;
+        expect(isAddressSnapshotToken(legacy)).toBe(false);
+        expect(checkAddressSnapshot(legacy, NOTE_A, simplified)).toBe('malformed');
     });
 
     it('verifies an unmodified token against its own note', () => {
         const token = buildAddressSnapshot(NOTE_A, simplified);
-        expect(verifyAddressSnapshot(token, NOTE_A, simplified)).toBe(true);
+        expect(addressable(token, NOTE_A, simplified)).toBe(true);
     });
 
     it('fails verification when the note changed underneath the token', () => {
         const token = buildAddressSnapshot(NOTE_A, simplified);
         const edited = note('<h1>Title</h1>', '<p>First para</p>', '<p>Second para (edited)</p>');
-        expect(verifyAddressSnapshot(token, NOTE_A, edited)).toBe(false);
+        expect(addressable(token, NOTE_A, edited)).toBe(false);
     });
 
     it('fails verification on garbage', () => {
-        expect(verifyAddressSnapshot('', NOTE_A, simplified)).toBe(false);
-        expect(verifyAddressSnapshot('h:deadbeefdeadbeef:12', NOTE_A, simplified)).toBe(false);
+        expect(addressable('', NOTE_A, simplified)).toBe(false);
+        expect(addressable('h2:deadbeefdeadbeef:12:deadbeefdeadbeef', NOTE_A, simplified))
+            .toBe(false);
     });
 
     it('fails verification when the length term was tampered with', () => {
         const parts = buildAddressSnapshot(NOTE_A, simplified).split(':');
-        const tampered = [parts[0], parts[1], String(Number(parts[2]) + 1)].join(':');
-        expect(verifyAddressSnapshot(tampered, NOTE_A, simplified)).toBe(false);
+        const tampered = [parts[0], parts[1], String(Number(parts[2]) + 1), parts[3]].join(':');
+        expect(addressable(tampered, NOTE_A, simplified)).toBe(false);
     });
 
     it('survives citation locator drift (the reason masking exists)', () => {
@@ -319,14 +354,63 @@ describe('address snapshot token', () => {
         );
         expect(read).not.toBe(laterWithDriftedLabels);
         const token = buildAddressSnapshot(NOTE_A, read);
-        expect(verifyAddressSnapshot(token, NOTE_A, laterWithDriftedLabels)).toBe(true);
+        expect(addressable(token, NOTE_A, laterWithDriftedLabels)).toBe(true);
     });
 
     it('still fails when real content changed alongside locator drift', () => {
         const read = note('<p>Claim ' + citation('1-ABCD1234', 'page3') + '</p>');
         const later = note('<p>Claim REWRITTEN ' + citation('1-ABCD1234', 'page17') + '</p>');
         const token = buildAddressSnapshot(NOTE_A, read);
-        expect(verifyAddressSnapshot(token, NOTE_A, later)).toBe(false);
+        expect(addressable(token, NOTE_A, later)).toBe(false);
+    });
+
+    // ── checkAddressSnapshot: the three-way verdict ─────────────────────────
+    //
+    // `addressable()` above answers only "can these block numbers still be
+    // resolved". The verdict below is what the blocks path acts on, because the
+    // answer to "is a locator difference the model's doing?" is different in
+    // each of the three reachable states.
+
+    it('reports match for an untouched note', () => {
+        const token = buildAddressSnapshot(NOTE_A, simplified);
+        expect(checkAddressSnapshot(token, NOTE_A, simplified)).toBe('match');
+    });
+
+    it('reports locator_drift when only citation locators moved', () => {
+        const read = note(
+            '<p>Claim ' + citation('1-ABCD1234', 'page3') + '</p>',
+            '<p>Both ' + compoundCitation('1-AAAA1111:page=3, 1-BBBB2222:page=9') + '</p>',
+        );
+        const drifted = note(
+            '<p>Claim ' + citation('1-ABCD1234', 'page17') + '</p>',
+            '<p>Both ' + compoundCitation('1-AAAA1111:page=xii, 1-BBBB2222:page=101') + '</p>',
+        );
+        const token = buildAddressSnapshot(NOTE_A, read);
+        expect(checkAddressSnapshot(token, NOTE_A, drifted)).toBe('locator_drift');
+        // …and the numbering is still good, which is why validation proceeds.
+        expect(addressable(token, NOTE_A, drifted)).toBe(true);
+    });
+
+    it('reports mismatch when the note itself changed, drift or no drift', () => {
+        const read = note('<p>Claim ' + citation('1-ABCD1234', 'page3') + '</p>');
+        const token = buildAddressSnapshot(NOTE_A, read);
+        expect(checkAddressSnapshot(token, NOTE_A, note('<p>Claim REWRITTEN ' + citation('1-ABCD1234', 'page3') + '</p>')))
+            .toBe('mismatch');
+        expect(checkAddressSnapshot(token, NOTE_A, note('<p>Claim REWRITTEN ' + citation('1-ABCD1234', 'page17') + '</p>')))
+            .toBe('mismatch');
+    });
+
+    // The note id is inside BOTH lanes, so a token echoed from another note is a
+    // mismatch — never a drift report about a note it was never minted for.
+    it('reports mismatch for a token minted against a different note', () => {
+        const withLocator = note('<p>Claim ' + citation('1-ABCD1234', 'page3') + '</p>');
+        const token = buildAddressSnapshot(NOTE_B, withLocator);
+        expect(checkAddressSnapshot(token, NOTE_A, withLocator)).toBe('mismatch');
+    });
+
+    it('reports malformed for garbage', () => {
+        expect(checkAddressSnapshot('', NOTE_A, simplified)).toBe('malformed');
+        expect(checkAddressSnapshot('garbage', NOTE_A, simplified)).toBe('malformed');
     });
 
     // This module has no notion of a displayed range — the decision to withhold
@@ -337,8 +421,8 @@ describe('address snapshot token', () => {
         const whole = note(...Array.from({ length: 300 }, (_, i) => `<p>Line ${i + 1}</p>`));
         const token = buildAddressSnapshot(NOTE_A, whole);
 
-        expect(verifyAddressSnapshot(token, NOTE_A, whole)).toBe(true);
+        expect(addressable(token, NOTE_A, whole)).toBe(true);
         const firstFifty = whole.split('\n').slice(0, 50).join('\n');
-        expect(verifyAddressSnapshot(token, NOTE_A, firstFifty)).toBe(false);
+        expect(addressable(token, NOTE_A, firstFifty)).toBe(false);
     });
 });

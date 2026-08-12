@@ -73,7 +73,7 @@ vi.mock('../../../react/store', () => ({
 import { handleReadNoteRequest } from '../../../src/services/agentDataProvider/handleReadNoteRequest';
 import { getOrSimplify } from '../../../src/utils/noteHtmlSimplifier';
 import { getLatestNoteHtml, getNoteHtmlForRead } from '../../../src/utils/noteEditorIO';
-import { snapshotNoteId, verifyAddressSnapshot } from '../../../src/utils/noteSnapshot';
+import { checkAddressSnapshot, snapshotNoteId } from '../../../src/utils/noteSnapshot';
 import type { WSReadNoteRequest } from '@beaver/agent-core/protocol/agentProtocol';
 
 
@@ -312,16 +312,17 @@ describe('handleReadNoteRequest — address snapshot', () => {
 
         expect(response.success).toBe(true);
         expect(response.snapshot).toBeTypeOf('string');
-        expect(verifyAddressSnapshot(response.snapshot!, NOTE_ID, WHOLE_NOTE)).toBe(true);
+        expect(checkAddressSnapshot(response.snapshot!, NOTE_ID, WHOLE_NOTE))
+            .toBe('match');
     });
 
     it('refuses to verify against a different note with the same content', async () => {
         const response = await handleReadNoteRequest(makeRequest());
 
-        expect(verifyAddressSnapshot(response.snapshot!, snapshotNoteId(1, 'OTHER999'), WHOLE_NOTE))
-            .toBe(false);
-        expect(verifyAddressSnapshot(response.snapshot!, snapshotNoteId(2, 'ABCD1234'), WHOLE_NOTE))
-            .toBe(false);
+        expect(checkAddressSnapshot(response.snapshot!, snapshotNoteId(1, 'OTHER999'), WHOLE_NOTE))
+            .toBe('mismatch');
+        expect(checkAddressSnapshot(response.snapshot!, snapshotNoteId(2, 'ABCD1234'), WHOLE_NOTE))
+            .toBe('mismatch');
     });
 
     // THE SAFETY RULE. The token covers the WHOLE note, so handing one out
@@ -393,7 +394,8 @@ describe('handleReadNoteRequest — address snapshot', () => {
         }
         // A token iff the sanitized page covered the whole note.
         if (linesReturned === '1-5') {
-            expect(verifyAddressSnapshot(response.snapshot!, NOTE_ID, WHOLE_NOTE)).toBe(true);
+            expect(checkAddressSnapshot(response.snapshot!, NOTE_ID, WHOLE_NOTE))
+            .toBe('match');
         } else {
             expect(response.snapshot).toBeUndefined();
         }

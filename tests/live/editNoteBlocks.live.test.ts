@@ -25,6 +25,9 @@
  *      applies and undoes byte-exactly. The address snapshot is UNCHANGED
  *      across the edit (locators are masked out of the digest), which is
  *      exactly the shape that can fool a normalizing "already undone" check.
+ *  4b. Locator DRIFT: the same difference, but with the note's locator moved
+ *      out of band first, so the model's copy is stale. Refused rather than
+ *      written back, while an edit to a citation-free block still applies.
  *   5. Partial application against real ProseMirror normalization: one edit of
  *      three carries a stale `expect`; the other two apply, and the stale one
  *      comes back skipped with `expect_mismatch` and the real block text in
@@ -440,7 +443,7 @@ describe('edit_note_blocks dispatch', () => {
             // Structurally well-formed token: the shape gate only requires a
             // non-empty string, so validation gets past it and fails on the
             // note lookup — which is the dispatch signal we want.
-            snapshot: 'h:0000000000000000:0',
+            snapshot: 'h2:0000000000000000:0:0000000000000000',
             edits: [{
                 index: 0,
                 op: 'replace',
@@ -458,7 +461,7 @@ describe('edit_note_blocks dispatch', () => {
         const res = await executeBlocks({
             library_id: LIBRARY_ID,
             zotero_key: 'ZZZZZZZZ',
-            snapshot: 'h:0000000000000000:0',
+            snapshot: 'h2:0000000000000000:0:0000000000000000',
             edits: [{
                 index: 0,
                 op: 'replace',
@@ -484,9 +487,11 @@ describe('edit_note_blocks numeric replace from a read_note snapshot', () => {
         const ref = await seedNote(THREE_PARA_HTML);
 
         const view = await readBlocks(ref);
-        // A note VERSION identifier: digest + masked length, no displayed
-        // range. The digest covers the whole note however much of it was shown.
-        expect(view.snapshot).toMatch(/^h:[0-9a-f]{16}:\d+$/);
+        // A note VERSION identifier: masked digest + masked length + unmasked
+        // digest, no displayed range. The digests cover the whole note however
+        // much of it was shown; the second lane is what separates citation
+        // locator drift from a real change.
+        expect(view.snapshot).toMatch(/^h2:[0-9a-f]{16}:\d+:[0-9a-f]{16}$/);
 
         const block = blockOf(view.lines, 'Bravo paragraph about numbered edits.');
         const newLine = '<p>BRAVO rewritten by block number.</p>';
@@ -587,7 +592,7 @@ describe('edit_note_blocks snapshot mismatch', () => {
         expect(validation.current_value?.total_lines).toBeGreaterThan(view.total_lines);
         expect(validation.current_value?.snapshot).toBeTruthy();
         expect(validation.current_value?.snapshot).not.toBe(view.snapshot);
-        expect(validation.current_value?.snapshot).toMatch(/^h:[0-9a-f]{16}:\d+$/);
+        expect(validation.current_value?.snapshot).toMatch(/^h2:[0-9a-f]{16}:\d+:[0-9a-f]{16}$/);
 
         // Execute is fail-closed on the same token, and carries its own recovery
         // payload: the fresh note plus the token that identifies it.
@@ -597,7 +602,7 @@ describe('edit_note_blocks snapshot mismatch', () => {
         expect(exec.refreshed_note?.note).toContain('OUT OF BAND PARAGRAPH QXZV.');
         expect(exec.refreshed_note?.snapshot).toBeTruthy();
         expect(exec.refreshed_note?.snapshot).not.toBe(view.snapshot);
-        expect(exec.refreshed_note?.snapshot).toMatch(/^h:[0-9a-f]{16}:\d+$/);
+        expect(exec.refreshed_note?.snapshot).toMatch(/^h2:[0-9a-f]{16}:\d+:[0-9a-f]{16}$/);
 
         const afterRefusal = await readSaved(ref);
         expect(afterRefusal).toBe(driftedHtml);
@@ -687,16 +692,16 @@ describe('edit_note_blocks undo + re-apply', () => {
 // 4. Locator-only edit
 // ---------------------------------------------------------------------------
 //
-// A citation locator is masked out of the address digest (page-label caches
-// drift asynchronously), so an edit that changes NOTHING but a locator leaves
-// the snapshot token bit-identical while genuinely changing the note. That is
-// precisely the shape a normalizing "already undone" check can mistake for a
-// no-op, so undo has to revert it anyway.
+// A citation locator is masked out of the address digest's ADDRESSABILITY lane
+// (page-label caches drift asynchronously), so an edit that changes NOTHING but
+// a locator leaves every block number valid while genuinely changing the note.
+// That is precisely the shape a normalizing "already undone" check can mistake
+// for a no-op, so undo has to revert it anyway.
 
 describe('edit_note_blocks locator-only edit', () => {
     beforeEach((ctx) => skipIfNoZotero(ctx, zoteroAvailable));
 
-    it('applies a locator-only change and undoes it byte-exactly, with the snapshot unchanged throughout', async () => {
+    it('applies a locator-only change and undoes it byte-exactly, with the block numbering pinned throughout', async () => {
         const citation = rawCitation({ key: PARENT_ITEM.zotero_key, locator: '3' });
         const ref = await seedNote(
             `<p>Prose before the citation ${citation} and prose after it.</p>`
@@ -739,9 +744,14 @@ describe('edit_note_blocks locator-only edit', () => {
         expect(comparableBody(appliedHtml)).not.toBe(comparableBody(beforeHtml));
         const appliedView = await readBlocks(ref);
         expect(appliedView.lines[block - 1]).toContain(`loc="page${newLoc}"`);
-        // …while the address snapshot did NOT: locators are masked out of the
-        // digest, which is the whole reason this case needs its own guard.
-        expect(appliedView.snapshot).toBe(view.snapshot);
+        // …while the ADDRESSABILITY lane of the token did not: locators are
+        // masked out of it, which is the whole reason this case needs its own
+        // guard. The unmasked lane is the part that moves, and it is what lets
+        // section 4b tell this deliberate change from drift.
+        const [, maskedDigest, maskedLength, unmaskedDigest] = view.snapshot.split(':');
+        const applied = appliedView.snapshot.split(':');
+        expect([applied[1], applied[2]]).toEqual([maskedDigest, maskedLength]);
+        expect(applied[3]).not.toBe(unmaskedDigest);
 
         const undo = await undoBlocks(actionData, exec);
         expect(undo.ok, undo.error ?? '').toBe(true);
@@ -752,6 +762,166 @@ describe('edit_note_blocks locator-only edit', () => {
         const restoredView = await readBlocks(ref);
         expect(restoredView.lines[block - 1]).toBe(line);
         expect(restoredView.lines[block - 1]).toContain(`loc="page${originalLoc}"`);
+        // Undo put the note back on the exact projection the edit was addressed
+        // against — both lanes, so the original token verifies wholesale again.
+        expect(restoredView.snapshot).toBe(view.snapshot);
+    }, 60000);
+});
+
+// ---------------------------------------------------------------------------
+// 4b. Locator DRIFT (the other side of section 4)
+// ---------------------------------------------------------------------------
+//
+// Section 4 changes a locator deliberately, against a token that still matches
+// the note exactly, and the change applies. This section changes the note's
+// locator OUT OF BAND first, so the model's copy of the citation is stale
+// through no fault of its own — and the same difference must now be refused
+// rather than written back.
+//
+// In production the out-of-band change is a page-label cache resolving between
+// the read and the edit. Over HTTP that is not forceable, so a v1 `edit_note`
+// str_replace stands in: it produces the identical end state — a projection
+// whose locators moved while every other byte held — which is the only thing
+// either side of the guard can observe.
+
+describe('edit_note_blocks locator drift', () => {
+    beforeEach((ctx) => skipIfNoZotero(ctx, zoteroAvailable));
+
+    it('refuses a stale locator instead of writing it back, while unrelated blocks still apply', async () => {
+        const citation = rawCitation({ key: PARENT_ITEM.zotero_key, locator: '3' });
+        const ref = await seedNote(
+            `<p>Prose before the citation ${citation} and prose after it.</p>`
+            + '<p>Second paragraph left untouched.</p>',
+        );
+
+        // What the model reads — and the token it will echo back.
+        const view = await readBlocks(ref);
+        const block = blockOf(view.lines, '<citation ');
+        const staleLine = view.lines[block - 1];
+        const locMatch = /loc="page(\d+)"/.exec(staleLine);
+        if (!locMatch) {
+            throw new Error(`Seeded citation lost its locator in the simplified projection: ${staleLine}`);
+        }
+        const staleLoc = Number(locMatch[1]);
+        const driftedLoc = staleLoc + 41;
+
+        const drift = await executeEditNote({
+            library_id: ref.library_id,
+            zotero_key: ref.zotero_key,
+            operation: 'str_replace',
+            old_string: staleLine,
+            new_string: staleLine.replace(/loc="page\d+"/, `loc="page${driftedLoc}"`),
+        }, { timeout: 20000 });
+        expect(drift.success, drift.error ?? undefined).toBe(true);
+
+        const driftedHtml = await readSaved(ref);
+        const driftedView = await readBlocks(ref);
+        expect(driftedView.lines[block - 1]).toContain(`loc="page${driftedLoc}"`);
+        // The two lanes disagree, which is the whole signal: the numbering is
+        // untouched (same line count, same everything else) while the token no
+        // longer reproduces the projection byte-for-byte.
+        expect(driftedView.lines).toHaveLength(view.lines.length);
+        expect(driftedView.snapshot).not.toBe(view.snapshot);
+
+        // ── The unsafe edit: content carrying the citation as the model was
+        // shown it. Applying it would silently restore the stale page.
+        const staleCitationEdit: BlocksActionData = {
+            library_id: ref.library_id,
+            zotero_key: ref.zotero_key,
+            snapshot: view.snapshot,
+            edits: [{
+                index: 0,
+                op: 'replace',
+                block,
+                expect: staleLine,
+                content: staleLine.replace('prose after it.', 'PROSE AFTER IT, EDITED.'),
+            }],
+        };
+
+        const validation = await validateBlocks(staleCitationEdit);
+        expect(validation.valid).toBe(false);
+        // NOT `snapshot_mismatch`: the block numbers are fine. The edit is
+        // refused for what it would do to the citation, and it is the only
+        // edit, so the action has nothing left to apply.
+        expect(validation.error_code).toBe('no_applicable_edits');
+        expect(validation.edit_errors?.[0]).toMatchObject({ index: 0, error_code: 'expansion_failed' });
+        expect(validation.edit_errors?.[0].error).toContain('read_note');
+
+        const exec = await executeBlocks(staleCitationEdit);
+        expect(exec.success).toBe(false);
+        expect(exec.error_code).toBe('no_applicable_edits');
+        expect(await readSaved(ref)).toBe(driftedHtml);
+
+        // ── Drift is note-wide; the refusal is not. An edit to a block with no
+        // citation in it still applies against the very same stale token —
+        // masking is what keeps the numbering addressable.
+        const otherBlock = blockOf(view.lines, 'Second paragraph left untouched.');
+        const unrelatedEdit: BlocksActionData = {
+            library_id: ref.library_id,
+            zotero_key: ref.zotero_key,
+            snapshot: view.snapshot,
+            edits: [{
+                index: 0,
+                op: 'replace',
+                block: otherBlock,
+                expect: view.lines[otherBlock - 1],
+                content: '<p>Second paragraph rewritten under drift.</p>',
+            }],
+        };
+
+        const unrelatedExec = await executeBlocks(unrelatedEdit);
+        expect(unrelatedExec.success, unrelatedExec.error ?? undefined).toBe(true);
+
+        const finalView = await readBlocks(ref);
+        expect(finalView.lines[otherBlock - 1]).toContain('rewritten under drift');
+        // The citation kept the DRIFTED locator — the note's own value, never
+        // the model's stale copy.
+        expect(finalView.lines[block - 1]).toContain(`loc="page${driftedLoc}"`);
+    }, 60000);
+
+    // A sole `op:'rewrite'` may be sent with no token at all, and it re-emits
+    // every citation in the note — so "no token" cannot mean "no drift". Only a
+    // token that reproduces the current projection licenses a locator change.
+    it('refuses a locator change in an untokened whole-body rewrite, and applies it with a matching token', async () => {
+        const citation = rawCitation({ key: PARENT_ITEM.zotero_key, locator: '3' });
+        const ref = await seedNote(
+            `<p>Prose before the citation ${citation} and prose after it.</p>`
+            + '<p>Second paragraph left untouched.</p>',
+        );
+
+        const view = await readBlocks(ref);
+        const block = blockOf(view.lines, '<citation ');
+        const locMatch = /loc="page(\d+)"/.exec(view.lines[block - 1]);
+        if (!locMatch) {
+            throw new Error(`Seeded citation lost its locator in the simplified projection: ${view.lines[block - 1]}`);
+        }
+        const newLoc = Number(locMatch[1]) + 41;
+        const rewrittenBody = view.content.replace(/loc="page\d+"/, `loc="page${newLoc}"`);
+        expect(rewrittenBody).not.toBe(view.content);
+
+        const untokened: BlocksActionData = {
+            library_id: ref.library_id,
+            zotero_key: ref.zotero_key,
+            edits: [{ index: 0, op: 'rewrite', content: rewrittenBody }],
+        };
+        const refused = await validateBlocks(untokened);
+        expect(refused.valid).toBe(false);
+        // A rewrite is the sole edit, so an unresolvable citation fails the
+        // whole action rather than becoming a per-edit skip.
+        expect(refused.error_code).toBe('expansion_failed');
+        expect(refused.error).toContain('read_note');
+
+        const refusedExec = await executeBlocks(untokened);
+        expect(refusedExec.success).toBe(false);
+        const afterRefusal = await readBlocks(ref);
+        expect(afterRefusal.lines).toEqual(view.lines);
+
+        // The capability itself is intact: the same rewrite, echoing the token
+        // from the read it was written against, applies.
+        const tokened: BlocksActionData = { ...untokened, snapshot: view.snapshot };
+        const exec = await executeBlocks(tokened);
+        expect(exec.success, exec.error ?? undefined).toBe(true);
+        expect((await readBlocks(ref)).lines[block - 1]).toContain(`loc="page${newLoc}"`);
     }, 60000);
 });
 

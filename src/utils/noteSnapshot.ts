@@ -11,20 +11,40 @@
  *
  * Token format (see `WSReadNoteResponse.snapshot` for the wire contract):
  *
- *     'h:' + <digest> + ':' + <length>
+ *     'h2:' + <maskedDigest> + ':' + <maskedLength> + ':' + <unmaskedDigest>
  *
  * The token is a NOTE VERSION IDENTIFIER and nothing more: it answers "is this
  * the same note, in the same state, that produced the numbering you are
  * addressing?" Three design points worth stating explicitly, because each one is
  * load-bearing and none is obvious from the format alone:
  *
- * 1. WHY MASKING. Citation locators are rendered from page-label caches that
+ * 1. WHY TWO LANES. Citation locators are rendered from page-label caches that
  *    populate asynchronously and can change between a read and a later edit
  *    (`loc="page3"` becoming `loc="page17"` for the very same citation). That
  *    drift changes ATTRIBUTE VALUES only — never line counts, never block
  *    numbering — so treating it as a note change would false-fail edits that are
- *    perfectly well addressed. {@link maskVolatileLocators} removes exactly that
- *    class of drift from the digest input, and nothing else.
+ *    perfectly well addressed. The MASKED lane therefore decides addressability:
+ *    {@link maskVolatileLocators} removes exactly that class of drift from its
+ *    digest input, and nothing else.
+ *
+ *    Addressability is not the only question, though. A model that copies a
+ *    block verbatim also copies the locator it was shown, and the expansion
+ *    layer reads a locator that differs from the note's current projection as a
+ *    deliberate page change and REWRITES the citation. Under drift that rewrite
+ *    stores a stale page in the user's note, silently. The UNMASKED lane exists
+ *    to tell the two apart: it digests the projection with locators intact, so
+ *    "masked matches, unmasked differs" means the locators — and only the
+ *    locators — moved since the read. {@link checkAddressSnapshot} returns that
+ *    as `locator_drift`, and the blocks path refuses a locator change on an
+ *    existing citation while it holds, rather than guessing at intent. See
+ *    `expandToRawHtml`'s `guardLocatorDrift` parameter.
+ *
+ *    The lane is note-wide, not per-citation: any locator anywhere in the note
+ *    having moved makes every locator difference in that edit ambiguous. It is
+ *    deliberately coarse — the guard it feeds only bites on an edit that
+ *    actually changes a locator, so the cost of the coarseness is bounded and
+ *    the alternative (per-citation read-time state in the token) would put
+ *    unbounded data on the wire.
  *
  * 2. WHY THE NOTE ID IS INSIDE THE DIGEST. Without it the token identifies a
  *    STRING, not a note, so a token issued for note A verifies against any note
@@ -209,10 +229,23 @@ export function quickHash64(input: string): string {
 // Snapshot token
 // =============================================================================
 
-/** Prefix identifying a hash-form address snapshot token. */
-const TOKEN_PREFIX = 'h';
+/**
+ * Prefix identifying a hash-form address snapshot token.
+ *
+ * VERSIONED. The single-lane `h:` form carried no way to distinguish locator
+ * drift from an intentional locator edit, so a token minted by an older build —
+ * echoed back from a thread that was resumed across the upgrade — must not be
+ * accepted as if it did. It fails {@link isAddressSnapshotToken} on the prefix
+ * and lands on the `snapshot_malformed` path, which tells the model to re-read.
+ *
+ * No compatibility branch reads the old form, and none should be added for it:
+ * `edit_note_blocks` had not shipped when the second lane landed, so the only
+ * `h:` tokens that ever existed are in development threads. A LATER format
+ * change would face a real installed base and is a different decision.
+ */
+const TOKEN_PREFIX = 'h2';
 /** Number of `:`-separated parts in a well-formed token. */
-const TOKEN_PARTS = 3;
+const TOKEN_PARTS = 4;
 
 const DIGEST_RE = new RegExp(`^[0-9a-f]{${DIGEST_HEX_WIDTH}}$`);
 /** A non-negative decimal integer. Rejects signs, points, exponents, spaces. */
@@ -258,18 +291,24 @@ export function snapshotNoteId(libraryId: number, itemKey: string): string {
  */
 export function buildAddressSnapshot(noteId: string, simplified: string): string {
     const masked = maskVolatileLocators(simplified);
-    const digest = quickHash64(`${noteId}|${masked}`);
-    return `${TOKEN_PREFIX}:${digest}:${masked.length}`;
+    const maskedDigest = quickHash64(`${noteId}|${masked}`);
+    // Same input MINUS the masking, so the two lanes differ exactly when a
+    // citation locator differs. Hashed over the unmasked string rather than over
+    // the extracted locators so a locator that moves BETWEEN citations (rather
+    // than merely changing value) also registers.
+    const unmaskedDigest = quickHash64(`${noteId}|${simplified}`);
+    return `${TOKEN_PREFIX}:${maskedDigest}:${masked.length}:${unmaskedDigest}`;
 }
 
 /**
  * Structurally check a snapshot token WITHOUT checking it against a note.
  *
- * Validates the `h:` prefix, the digest shape and the length term; returns false
- * on anything malformed. Useful for cheap pre-flight rejection (e.g. an edit
+ * Validates the `h2:` prefix, both digest terms and the length term; returns
+ * false on anything malformed, INCLUDING a well-formed token of an older format
+ * (see {@link TOKEN_PREFIX}). Useful for cheap pre-flight rejection (e.g. an edit
  * request carrying obvious garbage) — but it proves nothing about the note.
  * Anything that is about to act on block numbers must use
- * {@link verifyAddressSnapshot}.
+ * {@link checkAddressSnapshot}.
  */
 export function isAddressSnapshotToken(token: string): boolean {
     if (typeof token !== 'string') return false;
@@ -277,21 +316,54 @@ export function isAddressSnapshotToken(token: string): boolean {
     if (parts.length !== TOKEN_PARTS) return false;
     if (parts[0] !== TOKEN_PREFIX) return false;
     if (!DIGEST_RE.test(parts[1])) return false;
-    return LENGTH_RE.test(parts[2]);
+    if (!LENGTH_RE.test(parts[2])) return false;
+    return DIGEST_RE.test(parts[3]);
 }
 
 /**
- * Verify a snapshot token against a note and its simplified projection.
+ * What a snapshot token says about the note it is being checked against.
  *
- * RECOMPUTES the token and requires byte equality — the note id participates, so
- * a token issued for a different note fails even when the two notes read
- * identically. Returns false on any mismatch or malformed token.
+ * - `match` — the projection is byte-identical to the one that minted the token.
+ * - `locator_drift` — the block numbering still holds, but citation locators
+ *   have moved since the read. Addressing is safe; INTERPRETING a locator
+ *   difference as intent is not (see the module header).
+ * - `mismatch` — the numbering the token pins is gone, or the token was minted
+ *   for a different note. The two are indistinguishable here by design.
+ * - `malformed` — not a token of the current format at all; no note state can
+ *   make it verify.
  */
-export function verifyAddressSnapshot(
+export type AddressSnapshotStatus = 'match' | 'locator_drift' | 'mismatch' | 'malformed';
+
+/**
+ * Check a snapshot token against a note and its simplified projection.
+ *
+ * RECOMPUTES the token — the note id participates, so a token issued for a
+ * different note fails even when the two notes read identically.
+ *
+ * The verdict is deliberately not collapsed to a boolean: "addressable" and
+ * "the locators are current" are different questions, and a caller that only
+ * needs the first must still be unable to answer the second by accident.
+ */
+export function checkAddressSnapshot(
     token: string,
     noteId: string,
     simplified: string,
-): boolean {
-    if (!isAddressSnapshotToken(token)) return false;
-    return buildAddressSnapshot(noteId, simplified) === token;
+): AddressSnapshotStatus {
+    if (!isAddressSnapshotToken(token)) return 'malformed';
+    const current = buildAddressSnapshot(noteId, simplified);
+    if (current === token) return 'match';
+    const currentParts = current.split(':');
+    const tokenParts = token.split(':');
+    // The masked lane is the whole of the addressability question: digest plus
+    // the length term that goes with it.
+    if (currentParts[1] !== tokenParts[1] || currentParts[2] !== tokenParts[2]) return 'mismatch';
+    return 'locator_drift';
 }
+
+/**
+ * THERE IS NO BOOLEAN `verify`. There was, and it answered only "do the block
+ * numbers still resolve" — true for `match` and `locator_drift` alike. That is
+ * the right answer for addressing and the wrong one for a citation rebuild, and
+ * a boolean gives a caller no way to notice the difference. Ask
+ * {@link checkAddressSnapshot} and handle the verdict you actually got.
+ */

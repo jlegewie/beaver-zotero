@@ -680,6 +680,61 @@ export function isCitationRefNotFoundError(error: unknown): boolean {
 }
 
 /**
+ * The locator attribute as WRITTEN on a simplified citation tag, quoted for a
+ * message (`loc="s42"` / `page="4"`), or undefined when the tag carries none.
+ *
+ * Deliberately the written form rather than the parsed one: a structural
+ * locator parses to the page it resolves to (or to nothing when it cannot be
+ * resolved at all), and neither is a string the caller can find in its own
+ * content.
+ */
+function writtenLocator(attrStr: string): string | undefined {
+    // Read with the citation grammar's OWN attribute reader, in its own
+    // precedence, so every spelling it accepts is seen here too: `loc`, `sid`
+    // and legacy `page`, in single, double or escaped quotes. A narrower reader
+    // would report "no locator written" for a tag that carries one, and the
+    // caller would rebuild the citation without the note's page instead of
+    // refusing (see {@link citationLocatorDriftError}).
+    const attrs = parseRawCitationAttributes(attrStr);
+    for (const name of ['loc', 'sid', 'page'] as const) {
+        if (attrs[name]) return `${name}="${attrs[name]}"`;
+    }
+    return undefined;
+}
+
+/**
+ * Refuse a locator change that cannot be attributed to the model.
+ *
+ * The content carries one locator and the note now projects another for the
+ * same citation, while the caller cannot vouch that the model was shown the
+ * note's current locators. Applying the difference would store the value the
+ * content carries — which, when the projection has moved since the read, is the
+ * STALE one — so the edit stops here and the message says which two disagree.
+ *
+ * `sentAttrs` is the RAW attribute string of the tag the caller wrote, so the
+ * quoted locator is the one it can find in its own content. Quoting the parsed
+ * value instead would show a structural locator (`loc="s42"`) as the page it
+ * resolved to, while the same message tells the model to copy its tag verbatim.
+ *
+ * A plain Error on purpose: every caller maps expansion failures to one code,
+ * and the message is what the model acts on.
+ */
+function citationLocatorDriftError(ref: string, current: string, sentAttrs: string): Error {
+    const shown = writtenLocator(sentAttrs) ?? 'no locator';
+    return new Error(
+        `Citation ref="${ref}" carries ${shown}, but this note shows loc="page${current}" for it, and `
+        + 'this edit carries no `snapshot` token establishing that you were shown the note as it now '
+        + 'stands — either none was sent, or the one sent describes an older state of it. Page '
+        + 'labels resolve in the background, so a citation can render a different page than it did '
+        + 'when you read it; Beaver therefore cannot tell a deliberate page change from a locator '
+        + 'copied out of an older reading, and guessing would silently store the wrong page. Call '
+        + 'read_note again and reissue this edit against the current text, echoing that response\'s '
+        + '`snapshot` — copy the citation tag verbatim to keep its locator, or set the locator you '
+        + 'want on the refreshed tag.'
+    );
+}
+
+/**
  * Expand simplified tags in a string back to their raw HTML equivalents.
  * Handles citations, annotations, images, and math dollar notation.
  *
@@ -695,6 +750,25 @@ export function isCitationRefNotFoundError(error: unknown): boolean {
  *   → 0-based page index → label). Used to translate model-provided 1-based
  *   page numbers on NEW citations into display labels. Resolve it up-front via
  *   `preloadPageLabelsForNewCitations`.
+ * @param resolvedLocatorPages - Optional pre-resolved pages for non-page
+ *   structural locators; see {@link ResolvedLocatorPages}.
+ * @param guardLocatorDrift - Set when the caller cannot vouch that `str` was
+ *   written against this note's CURRENT citation locators — either they are
+ *   known to have moved, or there is no snapshot token proving otherwise (see
+ *   `guardLocatorDriftFor` in `editNoteBlocks.ts`). A locator difference on an
+ *   existing `ref` is then ambiguous — intent, or a stale value copied out of
+ *   an older reading — so it throws {@link citationLocatorDriftError} instead
+ *   of rebuilding the citation.
+ *
+ *   ONLY THE BLOCK-ADDRESSED PATH PASSES THIS, because only it has a token to
+ *   decide it from. `edit_note` / `edit_note_batch` remain unguarded, and are
+ *   only PARTLY covered by `old_string` matching: a drifted locator inside an
+ *   `old_string` makes the match fail, which is the same refusal by another
+ *   route, but a citation carried only in `new_string` — and every citation in
+ *   an `operation: 'rewrite'`, which has no `old_string` at all — still reaches
+ *   the rebuild below with nothing checking it. That is pre-existing exposure
+ *   on those paths; closing it means giving v1 a token, which is a larger
+ *   change than this one.
  */
 export function expandToRawHtml(
     str: string,
@@ -703,6 +777,7 @@ export function expandToRawHtml(
     externalRefContext?: ExternalRefContext,
     pageLabels?: PageLabelsByAttachmentId,
     resolvedLocatorPages?: ResolvedLocatorPages,
+    guardLocatorDrift?: boolean,
 ): string {
     // Expand citations (all self-closing: <citation ... />)
     str = str.replace(
@@ -728,6 +803,41 @@ export function expandToRawHtml(
                     if (itemId) {
                         const newAttrs = parseSimplifiedCitationAttrs(attrStr, resolvedLocatorPages);
                         if (attrsChanged(stored.originalAttrs, newAttrs)) {
+                            // The guard covers a citation that HAD a locator and
+                            // is being sent back carrying a different one. Two
+                            // differences are deliberately outside it, because a
+                            // stale reading cannot counterfeit either:
+                            //
+                            //   - a changed item id — identity, never rendered
+                            //     from a cache, so the change is the model's;
+                            //   - a locator DISAPPEARING, or appearing on a
+                            //     citation that had none — the simplifier emits
+                            //     `loc` if and only if the stored citation has a
+                            //     locator, whatever the page-label cache holds,
+                            //     so presence tracks the raw note alone.
+                            //
+                            // The sent side is read from the tag as WRITTEN, not
+                            // from the parse: a structural locator that resolves
+                            // to nothing still means the caller asked for a
+                            // locator, and rebuilding would drop the note's page
+                            // without saying so.
+                            const storedPage = stored.originalAttrs?.item_id === newAttrs.item_id
+                                ? stored.originalAttrs?.page
+                                : undefined;
+                            if (storedPage && writtenLocator(attrStr)) {
+                                if (guardLocatorDrift) {
+                                    throw citationLocatorDriftError(ref, storedPage, attrStr);
+                                }
+                                // Logged, not warned: this is the supported
+                                // "change a page" edit. It is also the path a
+                                // silent locator regression would take, so it
+                                // leaves a trace that can be counted in the wild.
+                                logger(
+                                    `expandToRawHtml: locator-only rebuild of ref="${ref}" `
+                                    + `(${storedPage} → ${newAttrs.page ?? 'unresolvable'})`,
+                                    1,
+                                );
+                            }
                             // Existing page citations are shown to the agent as
                             // physical page numbers. When the page changes,
                             // store the corresponding Zotero page label just

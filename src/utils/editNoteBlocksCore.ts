@@ -205,6 +205,13 @@ export interface SelectBlockEditsContext {
     pageLabels?: PageLabelsByAttachmentId;
     resolvedLocatorPages?: ResolvedLocatorPages;
     /**
+     * Set when the note's citation locators have moved since the projection
+     * these edits were written against (`checkAddressSnapshot` →
+     * `locator_drift`). Content that changes only a locator on an existing
+     * citation is then refused rather than applied; see `expandToRawHtml`.
+     */
+    guardLocatorDrift?: boolean;
+    /**
      * Optional caller hook applied to `content` BEFORE expansion, so the action
      * layer can plug in Zotero-dependent content checks without this module
      * knowing about Zotero. Returning `error` rejects the edit — the caller uses
@@ -1707,6 +1714,7 @@ export function selectBlockEdits(
                     ctx.externalRefContext,
                     ctx.pageLabels,
                     ctx.resolvedLocatorPages,
+                    ctx.guardLocatorDrift,
                 );
             } catch (e: any) {
                 const message = e?.message || String(e);

@@ -9,8 +9,10 @@
  * format as the other two variants (with <citation/>, <annotation/>, etc.).
  *
  * Addressing by number requires an agreed-upon numbering, so any edit that
- * addresses by number carries a `snapshot` token issued by `read_note`
- * (see `EditNoteBlocksProposedData.snapshot`).
+ * addresses by number carries a `snapshot` token issued by `read_note`. A sole
+ * `op: 'rewrite'` addresses nothing and may omit it — but the token doubles as
+ * the evidence that the content's citation locators are current, so omitting it
+ * costs the ability to change one. See `EditNoteBlocksProposedData.snapshot`.
  */
 
 import type { ProposedAction } from './base';
@@ -225,6 +227,15 @@ export interface EditNoteBlocksProposedData {
      * against, so a note that changed underneath the model fails loudly instead
      * of editing the wrong line. The token also binds the note's identity, so
      * one issued for a different note never verifies here.
+     *
+     * OPTIONAL BUT LOAD-BEARING FOR A SOLE `op: 'rewrite'`, which addresses no
+     * numbers and so may omit it. The token is ALSO what lets the plugin tell a
+     * deliberate citation-locator change from a locator copied out of a stale
+     * reading (page labels resolve in the background and can render the same
+     * citation on a different page). Without one, a rewrite that changes an
+     * existing citation's locator is refused rather than guessed at; send the
+     * token from the `read_note` the rewrite was written against to change a
+     * locator. Nothing else about a rewrite depends on it.
      */
     snapshot?: string;
     /** Ordered list of block edits to apply to the note */

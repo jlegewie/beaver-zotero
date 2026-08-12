@@ -112,9 +112,9 @@ import {
 } from '../../../utils/editNoteBlocksCore';
 import {
     buildAddressSnapshot,
-    isAddressSnapshotToken,
+    checkAddressSnapshot,
     snapshotNoteId,
-    verifyAddressSnapshot,
+    type AddressSnapshotStatus,
 } from '../../../utils/noteSnapshot';
 
 // =============================================================================
@@ -302,6 +302,19 @@ function toBlockEditSpecs(edits: EditNoteBlocksEditItem[]): BlockEditSpec[] {
  * BACKEND's call — it drops both together, at its OWN (tighter) caps. See
  * {@link MAX_INLINE_NOTE_LINES} for why this side deliberately does not match
  * any single one of them.
+ *
+ * THAT PAIRING IS NOW LOAD-BEARING FOR CONTENT, NOT ONLY FOR ADDRESSING. A
+ * token that verifies also certifies that the model was shown this note's
+ * CURRENT citation locators, and that certification is what licenses a locator
+ * change (see {@link guardLocatorDriftFor}). A token handed back beside a body
+ * the model never saw would license changing a locator it never read.
+ *
+ * The backend does enforce it — `edit_note_blocks.py` emits its `snapshot` only
+ * when it also rendered the updated content, and its caps are tighter than the
+ * ones here, so anything this layer truncates it truncates too. Verified rather
+ * than assumed because this side ships a token it does not itself justify.
+ * Neither side may relax the pairing without moving that certification
+ * somewhere else.
  */
 export function buildInlineNoteState(noteId: string, simplified: string): RefreshedNoteState {
     const totalLines = simplified.split('\n').length;
@@ -333,6 +346,52 @@ function buildSnapshotMismatchValue(noteId: string, simplified: string): Record<
 }
 
 /**
+ * The one place a request's `snapshot` field is turned into a verdict.
+ *
+ * A missing or empty token reads as `malformed`: no note state can make it
+ * verify, and — the part that matters for the locator-drift guard — it carries
+ * no information about what the model was shown, so nothing may be inferred
+ * from it. `checkBlocksShape` has already refused an ABSENT token on every path
+ * that addresses by number, so reaching here without one means a sole
+ * `op:'rewrite'`, which is allowed to run untokened.
+ */
+function checkSnapshotStatus(
+    snapshot: unknown,
+    noteId: string,
+    simplified: string,
+): AddressSnapshotStatus {
+    if (typeof snapshot !== 'string' || snapshot === '') return 'malformed';
+    return checkAddressSnapshot(snapshot, noteId, simplified);
+}
+
+/**
+ * Whether a locator change on an EXISTING citation may be applied.
+ *
+ * ONLY `match` licenses one. The rule is "apply the difference only when the
+ * token PROVES the model was shown the locators the note currently has", not
+ * "refuse when drift is proven" — because the three non-matching verdicts are
+ * all states in which the content's locators cannot be vouched for:
+ *
+ *   - `locator_drift` — proven stale: the note's locators moved after the read.
+ *   - `mismatch`      — the note changed; nothing is known about its locators.
+ *   - `malformed`     — includes NO TOKEN AT ALL, which a sole `op:'rewrite'`
+ *                       is allowed to send. That path re-emits every citation
+ *                       in the note, so it is the widest exposure there is;
+ *                       treating "no information" as "no drift" would leave it
+ *                       open.
+ *
+ * The numeric path never sees the last two (both are refused outright before
+ * any content is expanded), so this only widens the rewrite path. What it costs
+ * there is a deliberate locator change made without a verifiable token: it is
+ * refused, with a message that says to re-read. What it buys is that no
+ * untokened rewrite can quietly restore a page number the model copied out of
+ * a stale reading.
+ */
+function guardLocatorDriftFor(status: AddressSnapshotStatus): boolean {
+    return status !== 'match';
+}
+
+/**
  * A well-formed token that does not verify against this note.
  *
  * The note id is part of the digest, so a token minted for a DIFFERENT note
@@ -350,11 +409,17 @@ const SNAPSHOT_MISMATCH_MESSAGE =
  * A token that is not a snapshot token at all. Distinct from
  * {@link SNAPSHOT_MISMATCH_MESSAGE} because no note state can make it verify, so
  * a fresh listing fixes nothing — only echoing the real token does.
+ *
+ * The "call read_note again" clause is load-bearing, not filler: a token minted
+ * by an older Beaver build lands here too (the format is versioned), and a
+ * thread resumed across that upgrade has no current token to copy. Without the
+ * clause the only instruction is to copy something that does not exist.
  */
 const SNAPSHOT_MALFORMED_MESSAGE =
     'The `snapshot` value is not a valid address snapshot token, so these block numbers cannot be '
     + 'resolved. Copy the `snapshot` string from the read_note response for this note verbatim — '
-    + 'do not shorten, edit or reconstruct it.';
+    + 'do not shorten, edit or reconstruct it. If you do not have one, call read_note again and use '
+    + 'the token it returns.';
 
 /**
  * `buildRewrittenNoteBody` plus a wrapper for a note that has NO wrapper div at
@@ -894,6 +959,7 @@ function runBlockSelection(
     externalRefContext: ExternalRefContext,
     labels: PreloadedLabels,
     citationRejections: Map<string, CitationRejection>,
+    guardLocatorDrift: boolean,
 ): BlockSelection | { refusal: { error: string; errorCode: string } } {
     const built = buildBlockRawIndex(simplified, strippedHtml, metadata);
     if (!built.ok) return { refusal: { error: built.error, errorCode: built.errorCode } };
@@ -926,6 +992,7 @@ function runBlockSelection(
             externalRefContext,
             pageLabels: labels.pageLabels,
             resolvedLocatorPages: labels.resolvedLocatorPages,
+            guardLocatorDrift,
             preprocessContent: makeCitationPrecheck(citationRejections, metadata),
         },
         toBlockEditSpecs(eligible),
@@ -1048,6 +1115,12 @@ async function validateEditNoteBlocksAction(
     const { simplified, metadata } = getOrSimplify(noteId, rawHtml, resolvedLibraryId, pageLabelsByItemId);
     const strippedHtml = stripDataCitationItems(normalizeNoteHtml(rawHtml));
 
+    // ONE snapshot verdict for the whole request, computed before either branch
+    // so the rewrite path — which requires no token — still honors a token it
+    // was given.
+    const snapshotStatus = checkSnapshotStatus(snapshot, noteId, simplified);
+    const guardLocatorDrift = guardLocatorDriftFor(snapshotStatus);
+
     const externalRefContext = getExternalRefContext();
     const labels = await preloadBlockLabels(edits);
     const citationRejections = await resolveCitationRejections(editContents(edits), externalRefContext);
@@ -1076,7 +1149,7 @@ async function validateEditNoteBlocksAction(
         try {
             expandedNew = expandToRawHtml(
                 pre.content, metadata, 'new', externalRefContext,
-                labels.pageLabels, labels.resolvedLocatorPages,
+                labels.pageLabels, labels.resolvedLocatorPages, guardLocatorDrift,
             );
         } catch (e: any) {
             return validateError(request.request_id, e?.message || String(e), 'expansion_failed');
@@ -1129,20 +1202,22 @@ async function validateEditNoteBlocksAction(
     }
 
     // ── Numeric addressing ──────────────────────────────────────────────────
-    // Structural garbage first: `verifyAddressSnapshot` cannot tell a fabricated
+    // Structural garbage first: a mismatch verdict cannot tell a fabricated
     // token from real drift, and the drift recovery cannot fix a fabricated one.
-    if (!isAddressSnapshotToken(snapshot as string)) {
+    if (snapshotStatus === 'malformed') {
         return validateError(request.request_id, SNAPSHOT_MALFORMED_MESSAGE, 'snapshot_malformed');
     }
-    if (!verifyAddressSnapshot(snapshot as string, noteId, simplified)) {
+    if (snapshotStatus === 'mismatch') {
         return validateError(request.request_id, SNAPSHOT_MISMATCH_MESSAGE, 'snapshot_mismatch', {
             current_value: buildSnapshotMismatchValue(noteId, simplified),
         });
     }
+    // `locator_drift` still addresses: masking keeps every block number valid.
+    // It is carried into the selection as `guardLocatorDrift` instead.
 
     const selection = runBlockSelection(
         simplified, strippedHtml, metadata, edits,
-        externalRefContext, labels, citationRejections,
+        externalRefContext, labels, citationRejections, guardLocatorDrift,
     );
     if ('refusal' in selection) {
         return validateError(request.request_id, selection.refusal.error, selection.refusal.errorCode);
@@ -1232,10 +1307,16 @@ async function validateEditNoteBlocksAction(
         current_value: {
             note_title: noteTitle,
             total_lines: totalLines,
-            // Nothing has been applied, so this is still the token for the note
-            // the edits were addressed against — the same one the caller sent.
-            // It licenses no MORE than that token already did.
-            snapshot: buildAddressSnapshot(noteId, simplified),
+            // ECHOED, NOT RECOMPUTED. Nothing has been applied, so the token the
+            // caller sent still describes the note the edits were addressed
+            // against, and handing it straight back licenses no MORE than it
+            // already did. A recomputed one would, under `locator_drift`: it
+            // reports `match`, so echoing it back on a follow-up edit would
+            // switch the locator guard off — and this payload carries no note
+            // body, so the model would never have seen the locators that token
+            // certifies. (Under `match`, which is the ordinary case, the two are
+            // byte-identical.)
+            snapshot: snapshot as string,
             applicable_count: selection.applied.length,
             skipped_count: selection.skipped.length,
         },
@@ -1387,11 +1468,12 @@ export function planBlockEditsExecution(inputs: BlockExecutionInputs): BlockExec
 
     const soleRewrite = isSoleWholeBodyRewrite(eligibleEdits);
     // Structural garbage is not drift, so it ships no recovery payload (see the
-    // validator). `isAddressSnapshotToken` is sync — the no-await contract holds.
-    if (!soleRewrite && !isAddressSnapshotToken(snapshot as string)) {
+    // validator). `checkSnapshotStatus` is sync — the no-await contract holds.
+    const snapshotStatus = checkSnapshotStatus(snapshot, noteId, simplified);
+    if (!soleRewrite && snapshotStatus === 'malformed') {
         return { ok: false, error: SNAPSHOT_MALFORMED_MESSAGE, errorCode: 'snapshot_malformed' };
     }
-    if (!soleRewrite && !verifyAddressSnapshot(snapshot as string, noteId, simplified)) {
+    if (!soleRewrite && snapshotStatus === 'mismatch') {
         // Approval-delay drift. The caller hands back the CURRENT note so the
         // model can re-address without a follow-up read_note round trip.
         return {
@@ -1401,11 +1483,20 @@ export function planBlockEditsExecution(inputs: BlockExecutionInputs): BlockExec
             simplified,
         };
     }
+    // The locator verdict is reached at BOTH gates, never carried over from
+    // validation: page labels can finish resolving while the action waits for
+    // approval, so an edit validation saw as unambiguous can become ambiguous
+    // by the time the user clicks Apply. Whichever gate sees it refuses the
+    // locator change; neither trusts the other's verdict.
+    const guardLocatorDrift = guardLocatorDriftFor(snapshotStatus);
 
-    // `address_pre_snapshot` reproduces the token the edits were addressed
-    // against, so a consumer can confirm the action ran on the numbering the
-    // model used. An `op: 'rewrite'` edit carries no token, so this is simply
-    // the identifier for the note as it stood immediately before the write.
+    // `address_pre_snapshot` identifies the note as it stood immediately before
+    // the write, so a consumer can confirm the action ran on the numbering the
+    // model used. RECOMPUTED, not echoed — it must be comparable with
+    // `address_post_snapshot`, which is also a recompute. It therefore equals
+    // the request's token in the ordinary case but not under `locator_drift`,
+    // where the two agree on the addressability lane and differ on the other.
+    // (An `op: 'rewrite'` edit carries no token to echo in any case.)
     const addressPreSnapshot = buildAddressSnapshot(noteId, simplified);
 
     let newStrippedHtml: string;
@@ -1436,7 +1527,7 @@ export function planBlockEditsExecution(inputs: BlockExecutionInputs): BlockExec
         try {
             expandedNew = expandToRawHtml(
                 pre.content, metadata, 'new', externalRefContext,
-                labels.pageLabels, labels.resolvedLocatorPages,
+                labels.pageLabels, labels.resolvedLocatorPages, guardLocatorDrift,
             );
         } catch (e: any) {
             return { ok: false, error: e?.message || String(e), errorCode: 'expansion_failed' };
@@ -1484,7 +1575,7 @@ export function planBlockEditsExecution(inputs: BlockExecutionInputs): BlockExec
     } else {
         const selection = runBlockSelection(
             simplified, strippedHtml, metadata, eligibleEdits,
-            externalRefContext, labels, citationRejections,
+            externalRefContext, labels, citationRejections, guardLocatorDrift,
         );
         if ('refusal' in selection) {
             return { ok: false, error: selection.refusal.error, errorCode: selection.refusal.errorCode };

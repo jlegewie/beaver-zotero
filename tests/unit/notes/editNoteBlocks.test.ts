@@ -196,7 +196,7 @@ import { expandToRawHtml } from '../../../src/utils/noteCitationExpand';
 import { getDeferredToolPreference, checkLibraryExcluded } from '../../../src/services/agentDataProvider/utils';
 import { store } from '../../../react/store';
 import { searchableLibraryIdsAtom } from '../../../react/atoms/profile';
-import { buildAddressSnapshot, snapshotNoteId, verifyAddressSnapshot } from '../../../src/utils/noteSnapshot';
+import { buildAddressSnapshot, checkAddressSnapshot, snapshotNoteId } from '../../../src/utils/noteSnapshot';
 import { hasSchemaVersionWrapper } from '../../../src/utils/noteWrapper';
 import { undoEditNoteBatchAction } from '../../../react/utils/editNoteActions';
 import { buildPreviewableEditOperations } from '../../../react/utils/editNotePreviewOperations';
@@ -514,6 +514,20 @@ describe('validateEditNoteBlocksAction', () => {
         expect(response.error).toContain('verbatim');
     });
 
+    // Upgrade path: a thread resumed across a Beaver update can echo back a
+    // single-lane token. It says nothing about locator drift, so it must be
+    // refused as malformed — sending the model to re-read — rather than
+    // accepted or reported as a note change it cannot act on.
+    it('reports a single-lane token from an older build as malformed', async () => {
+        const [, digest, length] = SNAPSHOT.split(':');
+        const response = await handleAgentActionValidateRequest(
+            validateRequest([replaceBlock2], { snapshot: `h:${digest}:${length}` }),
+        );
+
+        expect(response).toMatchObject({ valid: false, error_code: 'snapshot_malformed' });
+        expect(response.error).toContain('call read_note again');
+    });
+
     it('reports a truncated snapshot token as malformed', async () => {
         const response = await handleAgentActionValidateRequest(
             validateRequest([replaceBlock2], { snapshot: SNAPSHOT.slice(0, 12) }),
@@ -553,6 +567,128 @@ describe('validateEditNoteBlocksAction', () => {
 });
 
 // =============================================================================
+// Locator drift
+// =============================================================================
+//
+// Masking keeps a page-label change out of the addressability lane, so an edit
+// addressed against the pre-drift numbering still resolves — that part must not
+// regress. What the second lane adds is that both gates KNOW the locators moved
+// and say so to the expansion layer, which is where a copied stale locator
+// would otherwise be written back into the note as if the model had chosen it.
+// What expansion then does with the flag is pinned in
+// `noteCitationLocatorDrift.test.ts`.
+
+describe('edit_note_blocks locator drift', () => {
+    // Same note, same line count, same everything except a citation locator —
+    // exactly what a page-label cache resolving between the read and the edit
+    // produces.
+    const READ_BODY = [
+        LINE_1,
+        '<p>Bravo <citation id="1-EXISTS01" loc="page3" ref="c_EXISTS01_0"/> two.</p>',
+        LINE_3,
+    ].join('\n');
+    const DRIFTED_BODY = READ_BODY.replace('loc="page3"', 'loc="page17"');
+    const READ_SNAPSHOT = buildAddressSnapshot(NOTE_ID, READ_BODY);
+    const edit: EditNoteBlocksEditItem = {
+        index: 0,
+        op: 'replace',
+        block: 2,
+        // The PRE-drift line, as the model copied it. `expect` compares visible
+        // text only, so it cannot notice the locator — which is exactly why the
+        // drift needs catching somewhere else.
+        expect: READ_BODY.split('\n')[1],
+        content: '<p>Bravo <citation id="1-EXISTS01" loc="page3" ref="c_EXISTS01_0"/> REWRITTEN.</p>',
+    };
+
+    /** The `guardLocatorDrift` argument of the last content expansion. */
+    function lastGuardArg(): unknown {
+        const calls = vi.mocked(expandToRawHtml).mock.calls;
+        expect(calls.length).toBeGreaterThan(0);
+        return calls[calls.length - 1][6];
+    }
+
+    beforeEach(() => {
+        useNote(`<div data-schema-version="9">${DRIFTED_BODY}</div>`);
+    });
+
+    it('still validates the edit — drift changes no block number', async () => {
+        const response = await handleAgentActionValidateRequest(
+            validateRequest([edit], { snapshot: READ_SNAPSHOT }),
+        );
+        expect(response).toMatchObject({ valid: true });
+        expect(response.error_code).toBeUndefined();
+    });
+
+    it('tells the expansion layer that locators drifted, at validate', async () => {
+        await handleAgentActionValidateRequest(validateRequest([edit], { snapshot: READ_SNAPSHOT }));
+        expect(lastGuardArg()).toBe(true);
+    });
+
+    // A successful validation echoes the caller's token back rather than a
+    // freshly minted one. A fresh one would read as `match` and disarm the guard
+    // on any follow-up edit that echoed it — while this payload ships no note
+    // body, so the model would never have seen the locators it certifies.
+    it('echoes the caller\'s token rather than minting one for the drifted note', async () => {
+        const response = await handleAgentActionValidateRequest(
+            validateRequest([edit], { snapshot: READ_SNAPSHOT }),
+        );
+        expect(response.valid).toBe(true);
+        expect(response.current_value.snapshot).toBe(READ_SNAPSHOT);
+        expect(response.current_value.snapshot).not.toBe(buildAddressSnapshot(NOTE_ID, DRIFTED_BODY));
+        expect(response.current_value).not.toHaveProperty('note');
+    });
+
+    // The gate is re-run rather than carried over: page labels can resolve while
+    // the action waits for approval, so execute must reach its own verdict.
+    it('tells the expansion layer that locators drifted, at execute', async () => {
+        await handleAgentActionExecuteRequest(executeRequest([edit], { snapshot: READ_SNAPSHOT }));
+        expect(lastGuardArg()).toBe(true);
+    });
+
+    it('does not flag drift when the token matches the note exactly', async () => {
+        useNote(`<div data-schema-version="9">${READ_BODY}</div>`);
+        await handleAgentActionValidateRequest(validateRequest([edit], { snapshot: READ_SNAPSHOT }));
+        expect(lastGuardArg()).toBe(false);
+    });
+
+    // A sole `op:"rewrite"` needs no token, but it re-emits every citation in
+    // the note — the widest exposure there is. When it DOES carry one, the
+    // verdict is honored.
+    it('honors a token supplied with a sole rewrite', async () => {
+        await handleAgentActionValidateRequest(validateRequest(
+            [{ index: 0, op: 'rewrite', content: DRIFTED_BODY }],
+            { snapshot: READ_SNAPSHOT },
+        ));
+        expect(lastGuardArg()).toBe(true);
+    });
+
+    // …and only a token can license a locator change. "No token" and "a token
+    // for some other note state" are both "these locators cannot be vouched
+    // for", not "there was no drift" — otherwise the untokened rewrite path,
+    // which re-emits every citation, would stay open.
+    it.each([
+        ['no token', undefined],
+        ['a token that does not match this note', buildAddressSnapshot(NOTE_ID, '<p>Some other note.</p>')],
+        ['a token that is not a token', 'not-a-token'],
+    ])('guards a sole rewrite sent with %s', async (_label, snapshot) => {
+        await handleAgentActionValidateRequest(validateRequest(
+            [{ index: 0, op: 'rewrite', content: DRIFTED_BODY }],
+            { snapshot },
+        ));
+        expect(lastGuardArg()).toBe(true);
+    });
+
+    it('does not guard a sole rewrite whose token matches the note exactly', async () => {
+        useNote(`<div data-schema-version="9">${READ_BODY}</div>`);
+        await handleAgentActionValidateRequest(validateRequest(
+            [{ index: 0, op: 'rewrite', content: READ_BODY }],
+            { snapshot: READ_SNAPSHOT },
+        ));
+        expect(lastGuardArg()).toBe(false);
+    });
+});
+
+// =============================================================================
 // Large-note truncation
 // =============================================================================
 
@@ -575,7 +711,8 @@ describe('edit_note_blocks large-note truncation', () => {
         // The token identifies the note version either way; `truncated` is what
         // tells the model it has not been shown the content. Withholding the
         // token alongside the listing is the backend's call, not this layer's.
-        expect(verifyAddressSnapshot(response.current_value.snapshot, NOTE_ID, body())).toBe(true);
+        expect(checkAddressSnapshot(response.current_value.snapshot, NOTE_ID, body()))
+            .toBe('match');
     });
 
     it.each([
@@ -593,7 +730,8 @@ describe('edit_note_blocks large-note truncation', () => {
         expect(response.refreshed_note!.truncated).toBe(true);
 
         const postBody = [...lines().slice(0, 1), '<p>Replaced.</p>', ...lines().slice(2)].join('\n');
-        expect(verifyAddressSnapshot(response.refreshed_note!.snapshot, NOTE_ID, postBody)).toBe(true);
+        expect(checkAddressSnapshot(response.refreshed_note!.snapshot, NOTE_ID, postBody))
+            .toBe('match');
         const result = response.result_data as unknown as EditNoteBlocksResultData;
         expect(result.address_post_snapshot).toBe(response.refreshed_note!.snapshot);
     });
@@ -602,8 +740,8 @@ describe('edit_note_blocks large-note truncation', () => {
         const response = await handleAgentActionExecuteRequest(executeRequest([replaceBlock2]));
         expect(response.refreshed_note!.truncated).toBeUndefined();
         expect(response.refreshed_note!.note).toBeDefined();
-        expect(verifyAddressSnapshot(response.refreshed_note!.snapshot, NOTE_ID, response.refreshed_note!.note!))
-            .toBe(true);
+        expect(checkAddressSnapshot(response.refreshed_note!.snapshot, NOTE_ID, response.refreshed_note!.note!))
+            .toBe('match');
     });
 });
 
