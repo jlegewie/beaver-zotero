@@ -121,6 +121,27 @@ function wsRequest(): any {
     return connectMock.mock.calls[connectMock.mock.calls.length - 1][0];
 }
 
+/**
+ * The `thread` event, as the server sends it.
+ *
+ * `deletedRunIds` names the rows a retry's truncation actually deleted, and
+ * `anchoredBy` which anchor it used — null for a retry where none ran. Leaving
+ * the truncation out entirely models a backend too old to report one.
+ */
+function threadEvent(
+    threadId: string,
+    deletedRunIds?: string[],
+    anchoredBy: 'keep_set' | 'retry_run_id' | null = 'retry_run_id',
+): any {
+    return {
+        event: 'thread',
+        thread_id: threadId,
+        ...(deletedRunIds
+            ? { retry_truncation: { deleted_run_ids: deletedRunIds, anchored_by: anchoredBy } }
+            : {}),
+    };
+}
+
 /** Seed a two-run thread: `a` (the retry target) and `b` behind it. */
 function seedThread(): void {
     store.set(threadRunsAtom, [makeRun('a'), makeRun('b')]);
@@ -153,7 +174,7 @@ describe('retry lifecycle', () => {
 
         // Nothing removed yet, and both anchors describe what the server should
         // delete once it gets there.
-        expect(store.get(threadRunsAtom).map(r => r.id)).toEqual(['a', 'b']);
+        expect(store.get(threadRunsAtom).map((r: AgentRun) => r.id)).toEqual(['a', 'b']);
         expect(store.get(citationsAtom)).toHaveLength(2);
         expect(wsRequest().retry_run_id).toBe('a');
         expect(wsRequest().retry_keep_run_ids).toBeUndefined();
@@ -165,19 +186,86 @@ describe('retry lifecycle', () => {
         // The retry's own run is live but stays out of the rendered thread, so
         // the prompt is not shown twice.
         expect(store.get(activeRunAtom)?.id).toBe(pending?.runId);
-        expect(store.get(allRunsAtom).map(r => r.id)).toEqual(['a', 'b']);
+        expect(store.get(allRunsAtom).map((r: AgentRun) => r.id)).toEqual(['a', 'b']);
     });
 
     it('applies the truncation when the thread event confirms it', async () => {
         await store.set(regenerateFromRunAtom, 'a');
         const newRunId = store.get(pendingRetryAtom)?.runId;
 
-        wsCallbacks().onThread(THREAD_ID);
+        wsCallbacks().onThread(THREAD_ID, threadEvent(THREAD_ID, ['a', 'b']));
 
         expect(store.get(threadRunsAtom)).toEqual([]);
         expect(store.get(citationsAtom)).toEqual([]);
         expect(store.get(pendingRetryAtom)).toBeNull();
-        expect(store.get(allRunsAtom).map(r => r.id)).toEqual([newRunId]);
+        expect(store.get(allRunsAtom).map((r: AgentRun) => r.id)).toEqual([newRunId]);
+    });
+
+    it('takes the server truncation as it comes, including runs it never held', async () => {
+        // Both truncation paths delete a trailing block at or after the retry
+        // point, so the extra ids are runs this client never loaded — one
+        // another client wrote to the same thread. Nothing local answers to
+        // them, and the ones that do are still removed.
+        await store.set(regenerateFromRunAtom, 'a');
+
+        wsCallbacks().onThread(THREAD_ID, threadEvent(THREAD_ID, ['a', 'b', 'written-elsewhere']));
+
+        expect(store.get(threadRunsAtom)).toEqual([]);
+        expect(store.get(citationsAtom)).toEqual([]);
+    });
+
+    it('removes a planned run the server had no row to delete for', async () => {
+        // 'b' never reached the database — the request that started it died
+        // before the run row was written — so an anchored truncation deletes
+        // 'a' alone and reports only that. The turn is still replaced.
+        await store.set(regenerateFromRunAtom, 'a');
+        expect(store.get(pendingRetryAtom)?.runIdsToRemove).toEqual(['a', 'b']);
+
+        wsCallbacks().onThread(THREAD_ID, threadEvent(THREAD_ID, ['a'], 'keep_set'));
+
+        expect(store.get(threadRunsAtom)).toEqual([]);
+        expect(store.get(citationsAtom)).toEqual([]);
+    });
+
+    it('removes the planned tail when an anchored truncation had nothing to delete', async () => {
+        // The server's thread already ended at the run the client keeps, so
+        // every turn the retry replaces was a local-only one. Anchoring is what
+        // makes that "already truncated", not "never truncated".
+        await store.set(regenerateFromRunAtom, 'a');
+
+        wsCallbacks().onThread(THREAD_ID, threadEvent(THREAD_ID, [], 'keep_set'));
+
+        expect(store.get(threadRunsAtom)).toEqual([]);
+        expect(store.get(pendingRetryAtom)).toBeNull();
+    });
+
+    it('keeps every run when the server truncation never anchored', async () => {
+        await store.set(regenerateFromRunAtom, 'a');
+        const newRunId = store.get(pendingRetryAtom)?.runId;
+
+        // The run-id anchor found no run to delete from — it was never
+        // persisted — and there was no keep set to fall back on. The turns the
+        // retry meant to replace are still in the history the replacement run
+        // was given.
+        wsCallbacks().onThread(THREAD_ID, threadEvent(THREAD_ID, [], 'retry_run_id'));
+
+        expect(store.get(threadRunsAtom).map((r: AgentRun) => r.id)).toEqual(['a', 'b']);
+        expect(store.get(citationsAtom)).toHaveLength(2);
+        expect(store.get(pendingRetryAtom)).toBeNull();
+        // The retry is no longer waiting on anything, so its run stops hiding —
+        // the repeated prompt is what the server is answering.
+        expect(store.get(allRunsAtom).map((r: AgentRun) => r.id)).toEqual(['a', 'b', newRunId]);
+    });
+
+    it('falls back to its own plan when the server reports no truncation', async () => {
+        await store.set(regenerateFromRunAtom, 'a');
+
+        // A backend too old to report one. Nothing has changed for it.
+        wsCallbacks().onThread(THREAD_ID, threadEvent(THREAD_ID));
+
+        expect(store.get(threadRunsAtom)).toEqual([]);
+        expect(store.get(citationsAtom)).toEqual([]);
+        expect(store.get(pendingRetryAtom)).toBeNull();
     });
 
     it('leaves the thread untouched when the run fails before that confirmation', async () => {
@@ -191,12 +279,12 @@ describe('retry lifecycle', () => {
             run_id: newRunId,
         });
 
-        expect(store.get(threadRunsAtom).map(r => r.id)).toEqual(['a', 'b']);
+        expect(store.get(threadRunsAtom).map((r: AgentRun) => r.id)).toEqual(['a', 'b']);
         expect(store.get(citationsAtom)).toHaveLength(2);
         expect(store.get(pendingRetryAtom)).toBeNull();
         // The failed shell is dropped; the popup is what carries the error.
         expect(store.get(activeRunAtom)).toBeNull();
-        expect(store.get(allRunsAtom).map(r => r.id)).toEqual(['a', 'b']);
+        expect(store.get(allRunsAtom).map((r: AgentRun) => r.id)).toEqual(['a', 'b']);
         expect(addPopupMessageMock).toHaveBeenCalledWith(
             expect.objectContaining({ type: 'error', title: expect.stringContaining('Retry failed') }),
         );
@@ -207,7 +295,7 @@ describe('retry lifecycle', () => {
 
         await store.set(closeWSConnectionAtom);
 
-        expect(store.get(threadRunsAtom).map(r => r.id)).toEqual(['a', 'b']);
+        expect(store.get(threadRunsAtom).map((r: AgentRun) => r.id)).toEqual(['a', 'b']);
         expect(store.get(pendingRetryAtom)).toBeNull();
         expect(store.get(activeRunAtom)).toBeNull();
         // Cancel is intentional — no error popup for it.
@@ -246,14 +334,14 @@ describe('retry lifecycle', () => {
 
         expect(store.get(pendingRetryAtom)).toBeNull();
         // The completed run took the place of the runs it replaced.
-        expect(store.get(threadRunsAtom).map(r => r.id)).toEqual([newRunId]);
+        expect(store.get(threadRunsAtom).map((r: AgentRun) => r.id)).toEqual([newRunId]);
         expect(store.get(isWSChatPendingAtom)).toBe(false);
     });
 
     it('surfaces a failure after the commit on the run itself, not in a popup', async () => {
         await store.set(regenerateFromRunAtom, 'a');
         const newRunId = store.get(pendingRetryAtom)?.runId;
-        wsCallbacks().onThread(THREAD_ID);
+        wsCallbacks().onThread(THREAD_ID, threadEvent(THREAD_ID, ['a', 'b']));
 
         wsCallbacks().onError({
             event: 'error',
@@ -283,7 +371,7 @@ describe('retry lifecycle', () => {
         wsCallbacks().onError(errorEvent);
 
         expect(addPopupMessageMock).toHaveBeenCalledTimes(1);
-        expect(store.get(threadRunsAtom).map(r => r.id)).toEqual(['a', 'b']);
+        expect(store.get(threadRunsAtom).map((r: AgentRun) => r.id)).toEqual(['a', 'b']);
     });
 
     it('drops the plan when the user switches threads mid-flight', async () => {
@@ -297,7 +385,7 @@ describe('retry lifecycle', () => {
         expect(store.get(activeRunAtom)).toBeNull();
         // The retry's run was never shown, so the thread switch does not leave
         // it behind as a canceled turn.
-        expect(store.get(threadRunsAtom).some(r => r.id === newRunId)).toBe(false);
+        expect(store.get(threadRunsAtom).some((r: AgentRun) => r.id === newRunId)).toBe(false);
     });
 
     describe('applied Zotero changes', () => {
@@ -319,7 +407,7 @@ describe('retry lifecycle', () => {
             // reconciles it against Zotero.
             expect(store.get(threadAgentActionsAtom)[0].status).toBe('applied');
 
-            wsCallbacks().onThread(THREAD_ID);
+            wsCallbacks().onThread(THREAD_ID, threadEvent(THREAD_ID, ['a', 'b']));
             expect(store.get(threadAgentActionsAtom)).toEqual([]);
         });
 
@@ -336,7 +424,7 @@ describe('retry lifecycle', () => {
             // so the thread is left exactly as it is for the user to act on.
             expect(connectMock).not.toHaveBeenCalled();
             expect(store.get(pendingRetryAtom)).toBeNull();
-            expect(store.get(threadRunsAtom).map(r => r.id)).toEqual(['a', 'b']);
+            expect(store.get(threadRunsAtom).map((r: AgentRun) => r.id)).toEqual(['a', 'b']);
             expect(store.get(threadAgentActionsAtom)[0].status).toBe('applied');
         });
 
@@ -367,7 +455,7 @@ describe('retry lifecycle', () => {
             // The user asked for the undo and got it, and the turns it belonged
             // to come back. The record stays applied and keeps its result data,
             // so a second attempt at the reversal is still possible.
-            expect(store.get(threadRunsAtom).map(r => r.id)).toEqual(['a', 'b']);
+            expect(store.get(threadRunsAtom).map((r: AgentRun) => r.id)).toEqual(['a', 'b']);
             expect(store.get(threadAgentActionsAtom)[0].status).toBe('applied');
         });
 
@@ -378,7 +466,7 @@ describe('retry lifecycle', () => {
 
             expect(connectMock).not.toHaveBeenCalled();
             expect(store.get(pendingRetryAtom)).toBeNull();
-            expect(store.get(threadRunsAtom).map(r => r.id)).toEqual(['a', 'b']);
+            expect(store.get(threadRunsAtom).map((r: AgentRun) => r.id)).toEqual(['a', 'b']);
         });
 
         it('keeps them when the user chooses to retry without undoing', async () => {
@@ -443,9 +531,9 @@ describe('retry lifecycle', () => {
         store.set(currentThreadIdAtom, 'thread-2');
         store.set(threadRunsAtom, [makeRun('other')]);
 
-        wsCallbacks().onThread('thread-2');
+        wsCallbacks().onThread('thread-2', threadEvent('thread-2', ['a', 'b']));
 
-        expect(store.get(threadRunsAtom).map(r => r.id)).toEqual(['other']);
+        expect(store.get(threadRunsAtom).map((r: AgentRun) => r.id)).toEqual(['other']);
         expect(store.get(pendingRetryAtom)).toBeNull();
     });
 });

@@ -16,6 +16,12 @@
  * - Even then the two views can drift, because a run the client believes it
  *   sent may never have been persisted. `RetryAnchor` carries a second anchor
  *   the server can match, which lets any later retry express the drift.
+ *
+ * The two halves of that are a request and a response. `RetryAnchor` is what
+ * the client asks for; the `thread` event reports what the server's truncation
+ * did — whether it anchored, and which rows it deleted. The client needs both
+ * that and the plan below, and `commitPendingRetryAtom` explains why neither
+ * one answers for the other.
  */
 
 import type { AgentRun } from '@beaver/agent-core/agents/types';
@@ -51,9 +57,10 @@ export interface RetryAnchor {
  * It resolves exactly one of two ways:
  *
  * - commit — the server sent the `thread` event, which it does only after
- *   loading the thread and applying the truncation. That is positive proof the
- *   runs are gone server-side, and the only point at which the client destroys
- *   its own copy.
+ *   loading the thread and applying the truncation. That is positive proof of
+ *   what is gone server-side, and the only point at which the client destroys
+ *   its own copy. A truncation that never anchored deleted nothing, and then a
+ *   commit destroys nothing either.
  * - abort — the run reached a terminal failure, or the user cancelled, before
  *   that proof arrived. Nothing was destroyed, so nothing has to be put back:
  *   the record is dropped and the failed run shell with it.
@@ -74,10 +81,13 @@ export interface PendingRetry {
     /** Thread the plan was made against, so it is never applied to another. */
     threadId: string | null;
     /**
-     * Runs to remove from the thread on commit: the run the request is anchored
-     * on and everything after it. That anchor can sit earlier than
+     * Runs the retry expects to remove from the thread: the run the request is
+     * anchored on and everything after it. That anchor can sit earlier than
      * `sourceRunId`, which is the run the user clicked — retrying a resume run
      * replaces the whole chain from its root.
+     *
+     * Still needed once the server reports what it deleted: that report names
+     * rows, and a planned run that was never persisted has no row to name.
      */
     runIdsToRemove: string[];
 }

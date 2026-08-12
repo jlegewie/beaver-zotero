@@ -133,10 +133,33 @@ export interface WSStreamingDoneEvent extends WSBaseEvent {
     run_id: string;
 }
 
+/**
+ * What a retry actually removed from the thread, as the server applied it.
+ *
+ * The client cannot derive this. It predicts the truncation from its own view
+ * of the thread, and the two can disagree: the server may delete more (runs
+ * another client wrote, or a keep set that anchored earlier than the retry
+ * point) or nothing at all (a retry anchored on a run that was never
+ * persisted, with no usable keep set). An empty `deleted_run_ids` is therefore
+ * an answer — the thread was left as it was — not a missing one.
+ */
+export interface WSRetryTruncation {
+    /** Runs deleted from the thread by this retry, oldest first. */
+    deleted_run_ids: string[];
+    /** Which anchor the truncation used, or null when none ran. */
+    anchored_by?: 'keep_set' | 'retry_run_id' | null;
+}
+
 /** Thread event sent when a thread is initialized or created */
 export interface WSThreadEvent extends WSBaseEvent {
     event: 'thread';
     thread_id: string;
+    /**
+     * Sent on every retry, absent otherwise — and absent from every backend
+     * too old to report it, which is what lets a client tell "nothing was
+     * deleted" from "this server does not say".
+     */
+    retry_truncation?: WSRetryTruncation | null;
 }
 
 /** Thread name event sent after background thread name generation completes */
@@ -2160,8 +2183,10 @@ export interface WSCallbacks {
     /**
      * Called when a thread is initialized or created
      * @param threadId The thread ID
+     * @param event The full event, which for a retry also reports the
+     *              truncation the server applied
      */
-    onThread: (threadId: string) => void;
+    onThread: (threadId: string, event: WSThreadEvent) => void;
 
     /**
      * Called when the backend generates a name for a new thread
