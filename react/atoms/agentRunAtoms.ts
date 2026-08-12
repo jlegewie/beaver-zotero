@@ -87,7 +87,8 @@ import {
     resetRunMessages,
 } from '@beaver/agent-core/run-state/atoms';
 import { userIdAtom } from './auth';
-import { citationsAtom, processCitationsAtom, resetCitationMarkersAtom, mergePageLabelsByAttachmentIdAtom } from './citations';
+import { citationsAtom, processCitationsAtom, resetCitationMarkersAtom, mergePageLabelsByAttachmentIdAtom } from '@beaver/agent-core/citations/atoms';
+import { maybeShowCitationTipAtom } from './citationTip';
 import type { Citation } from '@beaver/agent-core/types/citations';
 import { preloadPageLabelsForCitations } from '../utils/pageLabels';
 import { sanitizeMessageFiltersForSearchableLibraries } from '../utils/messageFilters';
@@ -442,6 +443,7 @@ const rollbackUnconfirmedRetryAtom = atom(
         set(citationsAtom, (citations) =>
             restoreRemoved(citations, removed.citations, (citation) => citation.citation_id));
         set(processCitationsAtom);
+        set(maybeShowCitationTipAtom);
 
         // The snapshot predates the revert these actions already went through, so
         // they come back reading as applied. Re-apply the undo transition now that
@@ -791,6 +793,7 @@ async function startAutoRetryRun(
             set(threadAgentActionsAtom, prev => prev.filter(a => !runIdsToRemove.includes(a.run_id)));
             set(citationsAtom, prev => prev.filter(c => !runIdsToRemove.includes(c.run_id ?? '')));
             set(processCitationsAtom);
+            set(maybeShowCitationTipAtom);
         }
 
         set(prepareForNewRunAtom);
@@ -1467,6 +1470,7 @@ function applyRunCitations(
         ...citations.map(c => ({ ...c, run_id: runId }))
     ]);
     set(processCitationsAtom);
+    set(maybeShowCitationTipAtom);
 
     // Preload PDF page labels for cited attachments so the rendering path can
     // resolve page numbers from explicit render state. Runs after metadata is
@@ -2759,6 +2763,7 @@ export const regenerateFromRunAtom = atom(
                 prev.filter(c => !runIdsToRemove.includes(c.run_id ?? ''))
             );
             set(processCitationsAtom);
+            set(maybeShowCitationTipAtom);
 
             // Reset WS state and set pending
             set(prepareForNewRunAtom);
@@ -2995,6 +3000,7 @@ export const regenerateWithEditedPromptAtom = atom(
                 prev.filter(c => !runIdsToRemove.includes(c.run_id ?? ''))
             );
             set(processCitationsAtom);
+            set(maybeShowCitationTipAtom);
 
             // Reset WS state and set pending
             set(prepareForNewRunAtom);

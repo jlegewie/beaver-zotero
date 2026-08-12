@@ -17,6 +17,8 @@
  * writers persist the `targets` shape.
  */
 
+import type { BeaverClientType } from "../protocol/agentProtocol";
+
 // ---------------------------------------------------------------------------
 // Core types
 // ---------------------------------------------------------------------------
@@ -25,14 +27,40 @@ export type ActionTargetType = "items" | "attachment" | "note" | "collection" | 
 
 /**
  * Clients an action can run in. An action is only usable in a client listed
- * here (or in any client when the field is absent — the default). Today Beaver
- * only ships the Zotero client, so `zotero` is the sole valid value; the field
- * exists so shared actions can declare compatibility as more clients appear.
+ * here (or in any client when the field is absent — the default).
+ *
+ * Spelled with the same identifiers as the handshake's `client_type` rather
+ * than a vocabulary of its own, so one client id means one thing everywhere.
  */
-export type ActionClient = "zotero";
+export type ActionClient = BeaverClientType;
+
+/**
+ * Defaults to the Zotero plugin so that a bundle which never registers still
+ * reports the right client for it — the Zotero plugin has always been this
+ * value, and a forgotten registration must not change its behavior. Every other
+ * host has to register: running as, say, the Word add-in while reporting
+ * `zotero-plugin` would show the user actions their client cannot execute.
+ */
+const DEFAULT_ACTION_CLIENT: ActionClient = "zotero-plugin";
+
+let actionClient: ActionClient = DEFAULT_ACTION_CLIENT;
+
+/**
+ * Register the client this build runs as. Call once at host bundle init, before
+ * any action is imported or exported.
+ *
+ * Each bundle carries its own copy of this module state (the Zotero plugin
+ * ships two: esbuild and webpack), so a host with more than one bundle must
+ * register in each of them.
+ */
+export function setActionClient(client: ActionClient): void {
+    actionClient = client;
+}
 
 /** The client this build runs as. Used to gate imported/shared actions. */
-export const CURRENT_ACTION_CLIENT: ActionClient = "zotero";
+export function getActionClient(): ActionClient {
+    return actionClient;
+}
 
 /**
  * Skill category for the homepage launcher. Orthogonal to `targets`:

@@ -34,9 +34,9 @@ import {
     ArrowDownIcon,
     ArrowRightIcon,
 } from '../../../../components/icons/icons';
-import Button from '../../../../components/ui/Button';
-import IconButton from '../../../../components/ui/IconButton';
-import Tooltip from '../../../../components/ui/Tooltip';
+import Button from '@beaver/agent-ui/primitives/Button';
+import IconButton from '@beaver/agent-ui/primitives/IconButton';
+import Tooltip from '@beaver/agent-ui/primitives/Tooltip';
 
 interface ReviewActionRowProps {
     runId: string;

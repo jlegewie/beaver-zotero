@@ -33,7 +33,7 @@ import {
     preloadNotePageLabels,
     type ExternalRefContext,
 } from '../../src/utils/noteCitationExpand';
-import type { PageLabelsByAttachmentId } from '../atoms/citations';
+import type { PageLabelsByAttachmentId } from '@beaver/agent-core/citations/atoms';
 import { getLatestNoteHtml } from '../../src/utils/noteEditorIO';
 import {
     stripDataCitationItems,
@@ -52,7 +52,7 @@ import { store } from '../store';
 import {
     externalReferenceMappingAtom,
     externalReferenceItemMappingAtom,
-} from '../atoms/externalReferences';
+} from '@beaver/agent-core/citations/externalReferences';
 
 /**
  * Snapshot the thread's external-reference state from the Jotai store so

@@ -5,7 +5,7 @@ import { errorMapping } from '../../atoms/errors';
 import { selectItemById } from '../../../src/utils/selectItem';
 import { UNRESOLVED_LIBRARY_ID } from '../../../src/utils/libraryIdentity';
 import { safeAttachmentFilename } from '../../../src/utils/attachmentFiles';
-import IconButton from './IconButton';
+import IconButton from '@beaver/agent-ui/primitives/IconButton';
 
 interface ItemWithSelectionId {
     item: Zotero.Item;

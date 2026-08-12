@@ -4,10 +4,10 @@ import { AgentRunStatus, ToolCallPart } from '@beaver/agent-core/agents/types';
 import { getToolCallStatus, toolResultsMapAtom } from '@beaver/agent-core/run-state/atoms';
 import {
     AgentAction,
-    PendingApproval,
     agentActionsByToolcallAtom,
     pendingApprovalsAtom,
 } from '../../../agents/agentActions';
+import type { EditNoteResolvedTarget, PendingApproval } from '@beaver/agent-ui/host';
 import {
     approveToolGroupForRunAtom,
     isWSChatPendingAtom,
@@ -43,9 +43,9 @@ import {
     Spinner,
     TickIcon,
 } from '../../../components/icons/icons';
-import Button from '../../../components/ui/Button';
-import IconButton from '../../../components/ui/IconButton';
-import Tooltip from '../../../components/ui/Tooltip';
+import Button from '@beaver/agent-ui/primitives/Button';
+import IconButton from '@beaver/agent-ui/primitives/IconButton';
+import Tooltip from '@beaver/agent-ui/primitives/Tooltip';
 import SplitApplyButton from '../../../components/ui/buttons/SplitApplyButton';
 import { openNoteByKey } from '../../../utils/sourceUtils';
 import { logger } from '@beaver/agent-core/platform/logger';
@@ -67,7 +67,6 @@ import {
 } from '../agentActionExecution';
 import {
     deriveEditNoteRows,
-    type EditNoteResolvedTarget,
     type EditNoteRowDescriptor,
     findPendingApprovalForToolcall,
     getEditNoteDisplayStatus,

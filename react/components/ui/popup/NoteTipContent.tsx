@@ -1,7 +1,7 @@
 import React from 'react';
 import { CancelIcon } from '../../icons/icons';
-import IconButton from '../IconButton';
-import Button from '../Button';
+import IconButton from '@beaver/agent-ui/primitives/IconButton';
+import Button from '@beaver/agent-ui/primitives/Button';
 import { eventManager } from '../../../events/eventManager';
 
 interface NoteTipContentProps {

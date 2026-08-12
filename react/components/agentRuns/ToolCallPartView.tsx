@@ -11,7 +11,7 @@ import {
 } from '@beaver/agent-core/run-state/toolResultViews';
 import { ToolResultView } from './ToolResultView';
 import { GenericAgentActionView } from './GenericAgentActionView';
-import { getHost } from '../../host';
+import { getHost } from '@beaver/agent-ui/host';
 import { getPendingApprovalForToolcallAtom, getAgentActionsByToolcallAtom } from '../../agents/agentActions';
 import {
     Spinner,

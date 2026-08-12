@@ -1,7 +1,7 @@
 import React from "react";
 import { useAtomValue } from "jotai";
-import Button from "./ui/Button";
-import Tooltip from "./ui/Tooltip";
+import Button from "@beaver/agent-ui/primitives/Button";
+import Tooltip from "@beaver/agent-ui/primitives/Tooltip";
 import { CSSIcon, CSSItemTypeIcon } from "./icons/zotero";
 import { ArrowUpRightIcon, ArrowRightIcon } from "./icons/icons";
 import { Action, ActionCategory, TARGET_TYPE_LABELS } from "@beaver/agent-core/types/actions";

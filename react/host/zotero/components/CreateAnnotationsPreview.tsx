@@ -4,7 +4,7 @@ import { ZoteroIcon, ZOTERO_ICONS } from '../../../components/icons/ZoteroIcon';
 import { AlertIcon, Icon } from '../../../components/icons/icons';
 import { navigateToAnnotation, navigateToPage } from '../../../utils/readerUtils';
 import { flashHighlightBoundingBoxes } from '../../../utils/citationNavigation';
-import { formatLocationChip } from '../../../utils/locationDisplay';
+import { formatLocationChip } from '@beaver/agent-ui/utils/locationDisplay';
 import { resolveEpubAnnotationTarget } from '../../../../src/services/annotations/epub/epubAnnotationResolver';
 import { BeaverTemporaryAnnotations } from '../../../utils/annotationUtils';
 import { logger } from '@beaver/agent-core/platform/logger';

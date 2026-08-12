@@ -1,8 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { Icon, AlertIcon, RepeatIcon, ArrowDownIcon, ArrowRightIcon, LinkForwardIcon, DollarCircleIcon } from '../icons/icons';
-import Button from '../ui/Button';
-import ContextMenu from '../ui/menu/ContextMenu';
+import Button from '@beaver/agent-ui/primitives/Button';
+import ContextMenu from '@beaver/agent-ui/primitives/ContextMenu';
 import useSelectionContextMenu from '../../hooks/useSelectionContextMenu';
 import { parseTextWithLinksAndNewlines } from '../../utils/parseTextWithLinksAndNewlines';
 import { regenerateFromRunAtom, resumeFromRunAtom } from '../../atoms/agentRunAtoms';

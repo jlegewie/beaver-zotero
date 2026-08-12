@@ -1,6 +1,6 @@
 import { FileStatusSummary } from "./fileStatus";
 import { FeatureStep } from "../constants/versionUpdateMessages";
-import { ButtonVariant } from "../components/ui/Button";
+import { ButtonVariant } from "@beaver/agent-ui/primitives/Button";
 
 export const POPUP_MESSAGE_DURATION = 4000; // 4 seconds
 

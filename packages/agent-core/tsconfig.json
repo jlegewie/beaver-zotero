@@ -56,6 +56,8 @@
     "./src/types/profile.ts",
     "./src/types/zotero.ts",
     "./src/citations/citationGrammar.ts",
+    "./src/citations/atoms.ts",
+    "./src/citations/externalReferences.ts",
 
     // Reached through the inline `import('../agents/agentActionTypes')` type
     // references in agentProtocol.ts, and from there the agent-action payload
@@ -102,6 +104,7 @@
     "./src/run-state/toolResultTypes.ts",
     "./src/run-state/toolCallRequest.ts",
     "./src/run-state/runResumeHelpers.ts",
+    "./src/run-state/loadThreadRuns.ts",
     "./src/run-state/atoms.ts",
     "./src/run-state/pendingQuestions.ts",
     "./src/run-state/toolLabels.ts"

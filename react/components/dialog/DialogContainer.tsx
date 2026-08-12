@@ -13,7 +13,7 @@ import {
 import ErrorReportDialog from './ErrorReportDialog';
 import SkippedFilesDialog from './SkippedFilesDialog';
 import ExternalReferenceDetailsDialog from './ExternalReferenceDetailsDialog';
-import { getDocumentFromElement } from '../../utils/windowContext';
+import { getDocumentFromElement } from '@beaver/agent-ui/utils/windowContext';
 
 const dialogs: Record<Exclude<DialogType, null>, React.ComponentType<any>> = {
     errorReport: ErrorReportDialog,
@@ -54,6 +54,7 @@ const DialogContainer: React.FC = () => {
         if (activeDialog) {
             // Get the correct document context for this component
             const doc = getDocumentFromElement(containerRef.current);
+            if (!doc) return;
             doc.addEventListener('keydown', handleKeyDown);
             return () => doc.removeEventListener('keydown', handleKeyDown);
         }

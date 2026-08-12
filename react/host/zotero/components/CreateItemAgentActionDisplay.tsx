@@ -10,8 +10,8 @@ import {
     DocumentValidationIcon,
     Icon,
 } from '../../../components/icons/icons';
-import IconButton from '../../../components/ui/IconButton';
-import Tooltip from '../../../components/ui/Tooltip';
+import IconButton from '@beaver/agent-ui/primitives/IconButton';
+import Tooltip from '@beaver/agent-ui/primitives/Tooltip';
 import { applyCreateItemData } from '../../../utils/addItemActions';
 import { ensureItemSynced, ensureItemsSynced } from '../../../../src/utils/sync';
 import { logger } from '@beaver/agent-core/platform/logger';

@@ -1,5 +1,5 @@
 import { getPref } from '../../../src/utils/prefs';
-import type { ConfigHost } from '../types';
+import type { ConfigHost } from '@beaver/agent-ui/host/types';
 
 /** Zotero implementation of {@link ConfigHost} — reads Beaver prefs. */
 export const zoteroConfig: ConfigHost = {

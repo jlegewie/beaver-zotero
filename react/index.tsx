@@ -38,7 +38,8 @@ import { registerZoteroDataProvider } from '../src/services/zoteroDataProvider';
 import { registerZoteroLibraryIdentity } from '../src/utils/libraryIdentity';
 import { registerZoteroClientIdentity } from '../src/services/zoteroClientIdentity';
 import { setThreadAgentName } from '@beaver/agent-core/transport/threadService';
-import { ZOTERO_AGENT_NAME } from '@beaver/agent-core/protocol/agentProtocol';
+import { setActionClient } from '@beaver/agent-core/types/actions';
+import { ZOTERO_AGENT_NAME, ZOTERO_PLUGIN_CLIENT_TYPE } from '@beaver/agent-core/protocol/agentProtocol';
 import { registerZoteroSupabaseStorage, registerZoteroSupabaseReloadBridge } from '../src/services/zoteroSupabaseStorage';
 import { setSupabaseAuthPolicy } from '@beaver/agent-core/transport/supabaseClient';
 import { registerZoteroBusyContext } from '../src/services/busyContext';
@@ -86,6 +87,11 @@ registerZoteroLibraryIdentity();
 // handshake's frontend_version/client_type/client_features/zotero_instance
 // fields. Must run before ProviderConnection opens its first connection.
 registerZoteroClientIdentity();
+
+// Declare the client actions are gated on, so a shared action declaring which
+// clients it supports is matched against this one. The esbuild bundle registers
+// the same value from `src/hooks.ts` for its own copy of that module state.
+setActionClient(ZOTERO_PLUGIN_CLIENT_TYPE);
 
 // Scope every thread list to the Zotero agent, matching the agent name the
 // backend stamps on threads this client creates. Without it the list would

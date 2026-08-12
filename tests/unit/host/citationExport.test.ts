@@ -5,8 +5,11 @@ vi.mock('../../../react/host/zotero/itemData', () => ({
 }));
 
 vi.mock('../../../react/utils/pageLabels', () => ({
-    resolvePageLabelFromLabels: vi.fn((_labels, page: number) => String(page)),
     translatePageNumberToLabelFromLabels: vi.fn((_labels, page: string) => page),
+}));
+
+vi.mock('@beaver/agent-ui/utils/pageLabels', () => ({
+    resolvePageLabelFromLabels: vi.fn((_labels, page: number) => String(page)),
 }));
 
 vi.mock('../../../src/utils/zoteroLinkCitation', () => ({

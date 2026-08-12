@@ -1,6 +1,6 @@
 import React from 'react';
 import { CancelIcon } from '../../icons/icons';
-import IconButton from '../IconButton';
+import IconButton from '@beaver/agent-ui/primitives/IconButton';
 
 interface PopupMessageHeaderProps {
     icon: React.ReactNode;

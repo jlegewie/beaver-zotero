@@ -1,8 +1,8 @@
 import type { Citation, PartLocation } from '@beaver/agent-core/types/citations';
 import type { RenderContextData } from './citationRenderers';
 import { store } from '../store';
-import { citationMapAtom } from '../atoms/citations';
-import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '../atoms/externalReferences';
+import { citationMapAtom } from '@beaver/agent-core/citations/atoms';
+import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '@beaver/agent-core/citations/externalReferences';
 import { CITATION_TAG_PATTERN } from './citationPreprocessing';
 import {
     citationIndexCandidateIdsForLocator,

@@ -1,11 +1,11 @@
-import { type PageLabelsByAttachmentId } from '../../atoms/citations';
+import { type PageLabelsByAttachmentId } from '@beaver/agent-core/citations/atoms';
 import { getBestPDFAttachment } from '../../../src/utils/zoteroItemHelpers';
 import { getLibraryByIdOrName, resolveCollectionForDisplay } from '../../../src/services/agentDataProvider/utils';
 import type { CitationRef } from '@beaver/agent-core/citations/citationGrammar';
 import type { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { resolveLibraryRef } from '../../../src/utils/libraryIdentity';
-import type { ItemDataHost, ResolvedItemDisplay } from '../types';
+import type { ItemDataHost, ResolvedItemDisplay } from '@beaver/agent-ui/host/types';
 
 /**
  * Bibliographic display name for a tool-call header label.

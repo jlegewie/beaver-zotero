@@ -24,7 +24,7 @@ import {
     citationMapAtom,
     getOrAssignCitationMarkerAtom,
     processCitationsAtom,
-} from '../../../react/atoms/citations';
+} from '@beaver/agent-core/citations/atoms';
 import {
     getCitationBoundingBoxes,
     getCitationPages,

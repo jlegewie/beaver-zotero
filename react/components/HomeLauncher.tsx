@@ -1,7 +1,7 @@
 import React from "react";
 import { useAtom } from "jotai";
-import Button from "./ui/Button";
-import Tooltip from "./ui/Tooltip";
+import Button from "@beaver/agent-ui/primitives/Button";
+import Tooltip from "@beaver/agent-ui/primitives/Tooltip";
 import { QuillWriteIcon, BookSearchIcon, LayersIcon, HighlighterIcon } from "./icons/icons";
 import CategoryPanel from "./CategoryPanel";
 import { ActionCategory } from "@beaver/agent-core/types/actions";

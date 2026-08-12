@@ -1,5 +1,6 @@
 import React from 'react';
-import { AgentAction, PendingApproval, isCreateAnnotationsAgentAction } from '../../../agents/agentActions';
+import { AgentAction, isCreateAnnotationsAgentAction } from '../../../agents/agentActions';
+import type { PendingApproval } from '@beaver/agent-ui/host';
 import {
     CheckmarkCircleIcon,
     CancelCircleIcon,

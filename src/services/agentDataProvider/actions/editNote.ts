@@ -54,12 +54,12 @@ import {
 } from '../../../utils/editNoteMatcher';
 import { clearNoteEditorSelection } from '../../../../react/utils/sourceUtils';
 import { store } from '../../../../react/store';
-import { citationMapAtom } from '../../../../react/atoms/citations';
+import { citationMapAtom } from '@beaver/agent-core/citations/atoms';
 import { currentThreadIdAtom } from '../../../../react/atoms/threads';
 import {
     externalReferenceMappingAtom,
     externalReferenceItemMappingAtom,
-} from '../../../../react/atoms/externalReferences';
+} from '@beaver/agent-core/citations/externalReferences';
 import { renderToHTML, type RenderContextData } from '../../../../react/utils/citationRenderers';
 import { prepareCitationRenderContext } from '../../../../react/utils/citationRenderContext';
 import { addOrUpdateEditFooter, getBeaverFooterAppendPoint } from '../../../utils/noteEditFooter';

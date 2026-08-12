@@ -1,5 +1,6 @@
 import { Setter } from "jotai";
-import { addExternalReferencesToMappingAtom, checkExternalReferencesAtom } from "../atoms/externalReferences";
+import { checkExternalReferencesAtom } from "../atoms/externalReferences";
+import { addExternalReferencesToMappingAtom } from "@beaver/agent-core/citations/externalReferences";
 import { loadFullItemDataWithAllTypes } from "../../src/utils/zoteroUtils";
 import { resolveItemReference } from "../../src/utils/libraryIdentity";
 import { extractExternalSearchData, extractLookupWorkData, isExternalSearchResult, isLookupWorkResult } from "@beaver/agent-core/run-state/toolResultTypes";

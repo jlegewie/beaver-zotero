@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
-import MenuButton from '../MenuButton';
-import { MenuItem } from '../menu/ContextMenu';
+import MenuButton from '@beaver/agent-ui/primitives/MenuButton';
+import { MenuItem } from '@beaver/agent-ui/primitives/ContextMenu';
 import { ArrowDownIcon, Icon, TickIcon } from '../../icons/icons';
 import { getPref, setPref } from '../../../../src/utils/prefs';
 

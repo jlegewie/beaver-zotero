@@ -12,7 +12,7 @@ import { RunResumeDisplay } from './RunResumeDisplay';
 import { threadWarningsAtom } from '../../atoms/warnings';
 import { getToolCallStatus, toolResultsMapAtom, resumedRunIdsAtom } from '@beaver/agent-core/run-state/atoms';
 import { streamingDoneRunIdsAtom } from '../../atoms/agentRunAtoms';
-import { getHost } from '../../host';
+import { getHost } from '@beaver/agent-ui/host';
 
 interface AgentRunViewProps {
     run: AgentRun;
