@@ -172,6 +172,12 @@
     "./src/primitives/MenuButton.tsx",
     "./src/primitives/Tag.tsx",
     "./src/primitives/Tooltip.tsx",
+    // The shared sign-in screen: the code entry and its input behavior. The
+    // form around it stays per-client (see src/auth/index.ts).
+    "./src/auth/index.ts",
+    "./src/auth/OTPVerification.tsx",
+    "./src/auth/otp-ui.ts",
+
     "./src/chat/index.ts",
     "./src/chat/Citation.tsx",
     "./src/chat/CitedSourcesList.tsx",

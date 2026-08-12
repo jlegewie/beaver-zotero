@@ -158,13 +158,15 @@ if (!parsed.options.lib || nonEsLibs.length > 0) {
 //
 // `citations/atoms.ts` is a root on the same rule: it is the citation render
 // state a client reads and writes directly, and nothing else in the package
-// imports it.
+// imports it. So is `transport/otp.ts`: a client's sign-in form calls it, and
+// nothing inside the package has a reason to send anyone a code.
 const entryPaths = [
   "src/globals.d.ts",
   "src/protocol/agentProtocol.ts",
   "src/protocol/wordProtocol.ts",
   "src/transport/providerConnection.ts",
   "src/transport/threadService.ts",
+  "src/transport/otp.ts",
   "src/transport/agentActionQueue.ts",
   "src/transport/attachmentLimits.ts",
   "src/transport/clients/accountService.ts",

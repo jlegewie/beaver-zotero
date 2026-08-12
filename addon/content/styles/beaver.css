@@ -3,13 +3,16 @@
 /*
  * Beaver's Zotero stylesheet.
  *
- * Two shared sheets from @beaver/agent-ui are registered before this file (see
+ * Three shared sheets from @beaver/agent-ui are registered before this file (see
  * GLOBAL_STYLESHEETS in `src/hooks.ts` and the `<?xml-stylesheet?>` links in
  * `beaverWindow.xhtml` / `beaverPreferences.xhtml`):
  *
- *   agent-ui-tokens.css     Beaver's own custom properties, plus the documented
- *                           contract of platform tokens Zotero supplies.
- *   agent-ui-utilities.css  the utility layer, scoped `.beaver-root`.
+ *   agent-ui-tokens.css      Beaver's own custom properties, plus the documented
+ *                            contract of platform tokens Zotero supplies.
+ *   agent-ui-utilities.css   the utility layer, scoped `.beaver-root`.
+ *   agent-ui-components.css  shared component rules — the sign-in surface, the
+ *                            link vocabulary, and `@keyframes spin`, which the
+ *                            `.animate-spin` rule below still resolves by name.
  *
  * `.beaver-root` sits on every element that carries a `beaver-pane-*` id, so
  * `.beaver-root .foo` matches exactly what `[id^="beaver-pane-"] .foo` matched.
@@ -2016,11 +2019,6 @@
     gap: 6px;
 }
 
-@keyframes spin {
-    0% { transform: rotate(0deg); }
-    100% { transform: rotate(360deg); }
-}
-
 [id^="beaver-pane-"] .animate-spin {
     animation: spin 1.2s linear infinite;
 }
@@ -2040,208 +2038,6 @@
 [id^="beaver-pane-"] .beaver-flash-text-failed {
     /* Use !important to override base color during animation */
     color: var(--tag-red) !important; 
-}
-
-/* Webapp button styles for login forms - using existing theme colors */
-[id^="beaver-pane-"] .webapp-btn {
-    padding: 12px;
-    font-size: 0.875rem;
-    font-weight: 500;
-    border-radius: 0.5rem;
-    transition: all 300ms ease-in-out;
-    border: 1px solid;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    /* align-self: center; */
-    gap: 0.5rem;
-    cursor: pointer;
-    width: 100%;
-    box-sizing: border-box;
-}
-
-/* Primary button variant (Send code to email / Sign in) */
-[id^="beaver-pane-"] .webapp-btn-primary {
-    /* background-color: var(--accent-blue); */
-    font-size: 0.9rem;
-    background-color: var(--fill-primary);
-    color: var(--material-sidepane);
-    border-color: var(--fill-primary);
-}
-
-[id^="beaver-pane-"] .webapp-btn-primary:hover:not(:disabled) {
-    filter: opacity(0.9);
-}
-
-[id^="beaver-pane-"] .webapp-btn-primary:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-    filter: none;
-}
-
-/* Secondary button variant (Use password / Sign in with email code) */
-[id^="beaver-pane-"] .webapp-btn-secondary {
-    background-color: var(--fill-quarternary);
-    color: var(--fill-secondary);
-    border-color: var(--fill-quarternary);
-}
-
-[id^="beaver-pane-"] .webapp-btn-secondary:hover:not(:disabled) {
-    background-color: var(--fill-tertiary);
-    color: var(--fill-primary);
-}
-
-[id^="beaver-pane-"] .webapp-btn-secondary:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-}
-
-/* Input styles for login forms */
-[id^="beaver-pane-"] .webapp-input {
-    width: 100%;
-    padding: 0.75rem 1rem;
-    border: 1px solid var(--fill-quarternary);
-    border-radius: 0.5rem;
-    background-color: var(--material-mix-quarternary);
-    color: var(--fill-primary);
-    font-size: 0.875rem;
-    transition: border-color 0.2s ease-in-out;
-    outline: none;
-    box-sizing: border-box;
-    margin: 0;
-}
-
-[id^="beaver-pane-"] .webapp-input::placeholder {
-    color: var(--fill-tertiary);
-}
-
-[id^="beaver-pane-"] .webapp-input:focus {
-    border-color: var(--fill-tertiary);
-    outline: none;
-}
-
-/* Typography styles for login forms */
-[id^="beaver-pane-"] .webapp-text-3xl {
-    font-size: 1.875rem;
-    line-height: 2.25rem;
-}
-
-[id^="beaver-pane-"] .webapp-text-2xl {
-    font-size: 1.5rem;
-    line-height: 2rem;
-}
-
-[id^="beaver-pane-"] .webapp-text-lg {
-    font-size: 1.125rem;
-    line-height: 1.75rem;
-}
-
-[id^="beaver-pane-"] .webapp-font-bold {
-    font-weight: 700;
-}
-
-/* Layout utilities for login forms */
-[id^="beaver-pane-"] .webapp-space-y-6 > * + * {
-    margin-top: 1.5rem;
-}
-
-[id^="beaver-pane-"] .webapp-space-y-5 > * + * {
-    margin-top: 1.25rem;
-}
-
-[id^="beaver-pane-"] .webapp-space-y-3 > * + * {
-    margin-top: 0.75rem;
-}
-
-[id^="beaver-pane-"] .webapp-space-y-2 > * + * {
-    margin-top: 0.5rem;
-}
-
-[id^="beaver-pane-"] .webapp-max-w-md {
-    max-width: 28rem;
-}
-
-[id^="beaver-pane-"] .webapp-mx-auto {
-    margin-left: auto;
-    margin-right: auto;
-}
-
-/* OTP input styles */
-[id^="beaver-pane-"] .webapp-otp-input {
-    width: 3rem;
-    height: 3rem;
-    text-align: center;
-    border: 1px solid var(--fill-quarternary);
-    border-radius: 0.5rem;
-    background-color: var(--material-mix-quarternary);
-    color: var(--fill-primary);
-    font-size: 1.125rem;
-    font-weight: 500;
-    outline: none;
-    transition: border-color 0.2s ease-in-out;
-    box-sizing: border-box;
-}
-
-[id^="beaver-pane-"] .webapp-otp-input:focus {
-    border-color: var(--fill-secondary);
-}
-
-[id^="beaver-pane-"] .webapp-otp-input:disabled {
-    opacity: 0.5;
-}
-
-/* Spinner for loading states */
-[id^="beaver-pane-"] .webapp-spinner {
-    width: 11px;
-    height: 11px;
-    border: 2px solid transparent;
-    border-top: 2px solid currentColor;
-    border-radius: 50%;
-    animation: spin 1s linear infinite;
-}
-
-/* Link styles */
-[id^="beaver-pane-"] .text-link {
-    color: var(--accent-blue);
-    opacity: 0.8;
-    text-decoration: none;
-    cursor: pointer;
-    border: 0px solid transparent;
-    box-shadow: none;
-    background-color: transparent;
-}
-
-[id^="beaver-pane-"] .text-link:hover {
-    text-decoration: underline;
-}
-
-[id^="beaver-pane-"] .text-link-muted {
-    color: var(--fill-secondary);
-    text-decoration: none;
-    cursor: pointer;
-    border: 0px solid transparent;
-    box-shadow: none;
-    background-color: transparent;
-}
-
-[id^="beaver-pane-"] .text-link-muted:hover {
-    color: var(--fill-primary);
-    text-decoration: underline;
-}
-
-[id^="beaver-pane-"] .text-link-red {
-    color: var(--tag-red);
-    opacity: 0.8;
-    text-decoration: underline;
-    cursor: pointer;
-    border: 0px solid transparent;
-    box-shadow: none;
-    background-color: transparent;
-}
-
-[id^="beaver-pane-"] .text-link-red:hover {
-    color: var(--tag-red-primary);
-    opacity: 1;
 }
 
 [id^="beaver-pane-"] .icon-css.icon-tag {
