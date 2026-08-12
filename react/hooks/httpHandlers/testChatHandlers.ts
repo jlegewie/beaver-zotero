@@ -31,14 +31,22 @@ import {
     currentThreadIdAtom,
     currentThreadNameAtom,
 } from '../../atoms/threads';
-import { activeRunAtom, threadRunsAtom } from '@beaver/agent-core/run-state/atoms';
-import { isWSChatPendingAtom, sendApprovalResponseAtom } from '../../atoms/agentRunAtoms';
+import { activeRunAtom, allRunsAtom, threadRunsAtom } from '@beaver/agent-core/run-state/atoms';
+import {
+    closeWSConnectionAtom,
+    isWSChatPendingAtom,
+    pendingRetryAtom,
+    regenerateFromRunAtom,
+    regenerateWithEditedPromptAtom,
+    sendApprovalResponseAtom,
+} from '../../atoms/agentRunAtoms';
 import {
     pendingApprovalsAtom,
     threadAgentActionsAtom,
     undoAgentActionAtom,
     type AgentAction,
 } from '../../agents/agentActions';
+import type { AgentRun } from '@beaver/agent-core/agents/types';
 import type { PendingApproval } from '@beaver/agent-ui/host';
 import { pendingQuestionsAtom } from '@beaver/agent-core/run-state/pendingQuestions';
 import {
@@ -266,6 +274,98 @@ export async function handleTestChatSendHttpRequest(request: any) {
 /** Read the current thread/run/approval identity. Poll this to detect completion. */
 export async function handleTestCurrentIdsHttpRequest(_request: any) {
     return { ok: true, ...currentIds() };
+}
+
+/**
+ * Retry a run through the real regenerate path, sampling the window in which the
+ * retry is waiting on the server.
+ *
+ * That window — the retry started, its own run hidden, the runs it replaces
+ * still on screen — is what a caller needs to observe and is too short to catch
+ * by polling from outside. The retry is therefore started without awaiting it
+ * and sampled from here.
+ *
+ * Body:
+ *   runId          run to retry (defaults to the last run in the thread)
+ *   editedPrompt   optional text — retries with an edited user prompt instead
+ *   cancelAfterMs  cancel once the pending retry is observed, to exercise the
+ *                  abort path without waiting for the model
+ *   sampleMs       how long to sample the pending window (default 8000)
+ *   waitForDone    default true — poll until the run settles
+ */
+export async function handleTestRetryRunHttpRequest(request: any) {
+    if (!store.get(isAuthenticatedAtom)) {
+        return { ok: false, error: 'Not authenticated; chat endpoints require a logged-in plugin' };
+    }
+    if (store.get(isWSChatPendingAtom)) {
+        return { ok: false, error: 'A run is already in progress; wait for it to settle', ...currentIds() };
+    }
+    const runs = store.get(threadRunsAtom);
+    const runId = request?.runId ?? (runs.length ? runs[runs.length - 1].id : null);
+    if (typeof runId !== 'string' || !runId) {
+        return { ok: false, error: 'runId is required (and the thread has no runs to default to)' };
+    }
+
+    const runIdsBefore = runs.map((r: AgentRun) => r.id);
+    const editedPrompt = request?.editedPrompt;
+
+    const retryPromise = typeof editedPrompt === 'string' && editedPrompt
+        ? store.set(regenerateWithEditedPromptAtom, { runId, editedPrompt: { content: editedPrompt } })
+        : store.set(regenerateFromRunAtom, runId);
+    // Errors surface through the samples and the final state below.
+    void Promise.resolve(retryPromise).catch(() => {});
+
+    // Sample until the pending retry resolves one way or the other.
+    const sampleMs = typeof request?.sampleMs === 'number' ? request.sampleMs : 8000;
+    const cancelAfterMs = typeof request?.cancelAfterMs === 'number' ? request.cancelAfterMs : null;
+    const start = Date.now();
+    let sawPending: any = null;
+    let hiddenWhilePending: string[] | null = null;
+    let canceled = false;
+    while (Date.now() - start < sampleMs) {
+        const pending = store.get(pendingRetryAtom);
+        if (pending) {
+            if (!sawPending) {
+                sawPending = {
+                    runId: pending.runId,
+                    sourceRunId: pending.sourceRunId,
+                    threadId: pending.threadId,
+                    runIdsToRemove: pending.runIdsToRemove,
+                    atMs: Date.now() - start,
+                };
+                // What the thread renders while the retry is in flight: the runs
+                // it will replace, and not the retry's own run.
+                hiddenWhilePending = store.get(allRunsAtom).map((r: AgentRun) => r.id);
+            }
+            if (cancelAfterMs !== null && Date.now() - start >= cancelAfterMs && !canceled) {
+                canceled = true;
+                await store.set(closeWSConnectionAtom);
+                break;
+            }
+        } else if (sawPending) {
+            break;
+        }
+        await sleep(25);
+    }
+
+    const settle = request?.waitForDone !== false && !canceled
+        ? await waitForRunSettle(typeof request?.timeoutMs === 'number' ? request.timeoutMs : 180000)
+        : null;
+
+    return {
+        ok: true,
+        retriedRunId: runId,
+        runIdsBefore,
+        // Null means the retry never registered a pending truncation (it had
+        // nothing to replace, or it failed before recording one).
+        pendingRetry: sawPending,
+        allRunIdsWhilePending: hiddenWhilePending,
+        canceled,
+        settle,
+        pendingRetryAfter: store.get(pendingRetryAtom),
+        allRunIdsAfter: store.get(allRunsAtom).map((r: AgentRun) => r.id),
+        ...currentIds(),
+    };
 }
 
 /**

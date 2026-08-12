@@ -156,6 +156,7 @@ import {
     handleTestNewThreadHttpRequest,
     handleTestChatSendHttpRequest,
     handleTestCurrentIdsHttpRequest,
+    handleTestRetryRunHttpRequest,
     handleTestLoadThreadHttpRequest,
     handleTestListActionsHttpRequest,
     handleTestApproveActionHttpRequest,
@@ -336,6 +337,7 @@ const ENDPOINT_PATHS = [
     '/beaver/test/new-thread',
     '/beaver/test/chat-send',
     '/beaver/test/current-ids',
+    '/beaver/test/retry-run',
     '/beaver/test/load-thread',
     '/beaver/test/list-actions',
     '/beaver/test/approve-action',
@@ -1177,6 +1179,8 @@ function registerEndpoints(): boolean {
             createEndpoint(handleTestChatSendHttpRequest);
         Zotero.Server.Endpoints['/beaver/test/current-ids'] =
             createEndpoint(handleTestCurrentIdsHttpRequest);
+        Zotero.Server.Endpoints['/beaver/test/retry-run'] =
+            createEndpoint(handleTestRetryRunHttpRequest);
         Zotero.Server.Endpoints['/beaver/test/load-thread'] =
             createEndpoint(handleTestLoadThreadHttpRequest);
         Zotero.Server.Endpoints['/beaver/test/list-actions'] =
