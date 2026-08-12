@@ -29,7 +29,7 @@ vi.mock("../../../src/services/agentDataProvider/utils", async () => {
   };
 });
 
-import { validateOrganizeItemsAction } from "../../../src/services/agentDataProvider/actions/organizeItems";
+import { validateOrganizeItemsAction, executeOrganizeItemsAction } from "../../../src/services/agentDataProvider/actions/organizeItems";
 import { store } from "../../../react/store";
 import type { WSAgentActionValidateRequest } from "@beaver/agent-core/protocol/agentProtocol";
 
@@ -401,5 +401,211 @@ describe("validateOrganizeItemsAction", () => {
     expect(res.error_code).toBe("multiple_item_errors");
     expect(res.error).toContain("1-MISSING01");
     expect(res.error).toContain("5abc-BADFORMAT");
+  });
+
+  // An off-contract collection entry must still produce the batch diagnostic:
+  // parsing it as an item reference throws, which would replace every
+  // per-reference message with a bare TypeError.
+  it.each([
+    ["a number", 12345, "12345"],
+    ["a boolean", true, "true"],
+    ["an object", { key: "ABCD1234" }, "ABCD1234"],
+    ["null", null, "null"],
+  ])(
+    "reports %s collection reference by name without losing the batch diagnostic",
+    async (_label, value, expectedInMessage) => {
+      const res = await validateOrganizeItemsAction(
+        buildRequest({
+          item_ids: ["1-GOODKEY1"],
+          collections: { add: [value] },
+        }),
+      );
+
+      expect(res.valid).toBe(false);
+      expect(res.error_code).not.toBe("validation_failed");
+      expect(res.error).not.toContain("TypeError");
+      expect(res.error).toContain("list_collections");
+      // The offending entry must name itself, or the model is told a collection
+      // is missing without being told which one to fix.
+      expect(res.error).toContain(expectedInMessage);
+    },
+  );
+
+  it("names an empty-string collection reference in the batch report", async () => {
+    const res = await validateOrganizeItemsAction(
+      buildRequest({ item_ids: ["1-GOODKEY1"], collections: { add: [""] } }),
+    );
+
+    expect(res.valid).toBe(false);
+    expect(res.error).toContain('""');
+  });
+
+  // An off-contract container must be rejected outright. Reading undefined
+  // leaves off it would report success for a change that was never applied;
+  // iterating a bare string walks it character by character, writing one tag or
+  // collection per letter.
+  it.each([
+    ['collections.add', { collections: { add: "ABCD1234" } }],
+    ['collections.remove', { collections: { remove: "ABCD1234" } }],
+    ['tags.add', { tags: { add: "urgent" } }],
+    ['tags.remove', { tags: { remove: "urgent" } }],
+  ])("rejects a non-array %s container", async (field, actionData) => {
+    const res = await validateOrganizeItemsAction(
+      buildRequest({ item_ids: ["1-GOODKEY1"], ...actionData }),
+    );
+
+    expect(res.valid).toBe(false);
+    expect(res.error_code).toBe("invalid_request");
+    expect(res.error).toContain(`"${field}"`);
+    expect(res.error).not.toMatch(/A, B, C, D/);
+    expect(res.error).not.toMatch(/u, r, g, e/);
+  });
+
+  // An empty list is the wrong shape but unambiguously means "no changes here",
+  // so it must not fail a request whose other group carries real changes.
+  it.each([
+    ['tags', { tags: [], collections: { add: ["CLLKEY23"] } }],
+    ['collections', { collections: [], tags: { add: ["x"] } }],
+  ])("treats an empty %s list as no changes rather than malformed", async (_field, actionData) => {
+    const res = await validateOrganizeItemsAction(
+      buildRequest({ item_ids: ["1-GOODKEY1"], ...actionData }),
+    );
+
+    expect(res.valid).toBe(true);
+  });
+
+  it.each([
+    ['collections', { collections: ["ABCD1234"], tags: { add: ["x"] } }],
+    ['collections', { collections: "ABCD1234", tags: { add: ["x"] } }],
+    ['tags', { tags: ["x"], collections: { add: ["CLLKEY23"] } }],
+    ['tags', { tags: "x", collections: { add: ["CLLKEY23"] } }],
+  ])("rejects a %s container that is not an add/remove object", async (field, actionData) => {
+    const res = await validateOrganizeItemsAction(
+      buildRequest({ item_ids: ["1-GOODKEY1"], ...actionData }),
+    );
+
+    // Silently dropping it would report success for a change never applied.
+    expect(res.valid).toBe(false);
+    expect(res.error_code).toBe("invalid_request");
+    expect(res.error).toContain(`"${field}"`);
+  });
+
+  // Tag entries have no downstream validator: Zotero coerces a number into the
+  // literal tag "123", which undo's strict comparison can then never match.
+  // Collection entries are deliberately left to the resolver so they are
+  // reported alongside the batch's other reference problems.
+  it.each([
+    ['tags.add', { tags: { add: ["ok", 123] } }],
+    ['tags.remove', { tags: { remove: [null] } }],
+  ])("rejects a non-string entry in %s", async (field, actionData) => {
+    const res = await validateOrganizeItemsAction(
+      buildRequest({ item_ids: ["1-GOODKEY1"], ...actionData }),
+    );
+
+    expect(res.valid).toBe(false);
+    expect(res.error_code).toBe("invalid_request");
+    expect(res.error).toContain(`Every entry in "${field}"`);
+  });
+
+  // The batch diagnostic below parses every item id, so an off-contract one has
+  // to be rejected before it reaches the parser rather than throwing there.
+  it.each([
+    ['a number entry', [12345]],
+    ['a null entry', [null]],
+    ['a bare string instead of a list', "1-GOODKEY1"],
+  ])("rejects %s in item_ids with a typed error", async (_label, item_ids) => {
+    const res = await validateOrganizeItemsAction(
+      buildRequest({ item_ids, tags: { add: ["x"] } }),
+    );
+
+    expect(res.valid).toBe(false);
+    expect(res.error_code).toBe("invalid_request");
+    expect(res.error).not.toContain("TypeError");
+    expect(res.error).toContain("item_ids");
+  });
+
+  // The batch contract is to report every bad id in one round trip, so each one
+  // has to be named rather than only the rule being restated.
+  it("names every off-contract item_ids entry in one error", async () => {
+    const res = await validateOrganizeItemsAction(
+      buildRequest({ item_ids: [12345, null, "1-GOODKEY1"], tags: { add: ["x"] } }),
+    );
+
+    expect(res.valid).toBe(false);
+    expect(res.error).toContain("12345");
+    expect(res.error).toContain("null");
+    expect(res.error).not.toContain("GOODKEY1");
+  });
+
+  // The payload is checked before it is destructured, so a null one reports a
+  // typed error instead of throwing out of the destructuring.
+  it.each([
+    ["null", null],
+    ["a number", 42],
+    ["a list", ["1-GOODKEY1"]],
+  ])("rejects %s action_data with a typed error", async (_label, actionData) => {
+    const res = await validateOrganizeItemsAction({
+      type: "agent_action_validate_request",
+      request_id: "req-1",
+      action_type: "organize_items",
+      action_data: actionData,
+    } as any);
+
+    expect(res.valid).toBe(false);
+    expect(res.error_code).toBe("invalid_request");
+    expect(res.error).not.toContain("TypeError");
+    expect(res.error).toContain("Action data must be an object");
+  });
+
+  // Shape is checked before entries are counted: a bare string has a `length`,
+  // so counting first would report "too many items" for a type error.
+  it("reports a long bare-string item_ids as a shape error, not too_many_items", async () => {
+    const res = await validateOrganizeItemsAction(
+      buildRequest({ item_ids: "A".repeat(130), tags: { add: ["x"] } }),
+    );
+
+    expect(res.error_code).toBe("invalid_request");
+    expect(res.error).toContain('"item_ids" must be a list');
+  });
+});
+
+describe("executeOrganizeItemsAction input guards", () => {
+  const buildExecuteRequest = (actionData: any): any => ({
+    type: "agent_action_execute_request",
+    request_id: "req-1",
+    action_type: "organize_items",
+    action_data: actionData,
+  });
+  const ctx: any = { signal: new AbortController().signal, timeoutSeconds: 30, startTime: Date.now() };
+
+  // The execute path is reachable without validate, and it has no batch
+  // reference report — anything it cannot apply is skipped, so a malformed
+  // payload has to be rejected here or it reports success for a change that
+  // never happened.
+  it.each([
+    ["null action_data", null, "Action data must be an object"],
+    ["a non-array collections.add", { item_ids: ["1-GOODKEY1"], collections: { add: "ABCD1234" } }, '"collections.add" must be a list'],
+    ["a non-array tags.add", { item_ids: ["1-GOODKEY1"], tags: { add: "urgent" } }, '"tags.add" must be a list'],
+    ["a non-string collection entry", { item_ids: ["1-GOODKEY1"], collections: { add: [true] } }, 'Every entry in "collections.add"'],
+    ["a non-string tag entry", { item_ids: ["1-GOODKEY1"], tags: { add: [42] } }, 'Every entry in "tags.add"'],
+    ["a non-string item id", { item_ids: [12345], tags: { add: ["x"] } }, 'Every entry in "item_ids"'],
+  ])("rejects %s", async (_label, actionData, expected) => {
+    const res = await executeOrganizeItemsAction(buildExecuteRequest(actionData), ctx);
+
+    expect(res.success).toBe(false);
+    expect(res.error_code).toBe("invalid_request");
+    expect(res.error).toContain(expected as string);
+    expect(res.error).not.toContain("TypeError");
+  });
+
+  it("reports missing item_ids as no_items rather than throwing", async () => {
+    const res = await executeOrganizeItemsAction(
+      buildExecuteRequest({ tags: { add: ["x"] } }),
+      ctx,
+    );
+
+    expect(res.success).toBe(false);
+    expect(res.error_code).toBe("no_items");
+    expect(res.error).not.toContain("TypeError");
   });
 });

@@ -40,6 +40,13 @@ export interface CreateNoteResultData {
 
 
 /**
+ * The string entries of a persisted list argument.
+ */
+function asStringList(value: unknown): string[] {
+    return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === 'string') : [];
+}
+
+/**
  * Execute a create_note action from the UI (post-run manual apply).
  * Creates the Zotero note item from the action's proposed_data.
  */
@@ -102,12 +109,21 @@ export async function executeCreateNoteAction(action: AgentAction, runId?: strin
     // (covers pending actions persisted before validation normalized them).
     let collectionKeysToApply: string[] = [];
     if (!parentKey) {
-        if (proposed.collection_keys && proposed.collection_keys.length > 0) {
-            collectionKeysToApply = [...proposed.collection_keys];
+        // Persisted `proposed_data` is model-authored JSON applied without
+        // re-validation, and a bare string has a `length`: spreading or iterating
+        // one yields a single-character key per letter. Only lists of strings are
+        // used; anything else is dropped rather than applied.
+        // Each fallback keys on whether the *raw* field was sent, not on what
+        // survived filtering: a list that held nothing usable must not fall
+        // through and file the note somewhere that was never requested.
+        const sentPluralKeys = Array.isArray(proposed.collection_keys) && proposed.collection_keys.length > 0;
+        const sentCollections = Array.isArray(proposed.collections) && proposed.collections.length > 0;
+        if (sentPluralKeys) {
+            collectionKeysToApply = asStringList(proposed.collection_keys);
         } else {
-            const rawCollections = (proposed.collections && proposed.collections.length > 0)
-                ? proposed.collections
-                : (proposed.collection ? [proposed.collection] : []);
+            const rawCollections = sentCollections
+                ? asStringList(proposed.collections)
+                : (typeof proposed.collection === 'string' && proposed.collection ? [proposed.collection] : []);
             for (const entry of rawCollections) {
                 const resolution = resolveSingleCollection(entry, {
                     eligibleLibraryIds: [targetLibraryId],
@@ -125,7 +141,7 @@ export async function executeCreateNoteAction(action: AgentAction, runId?: strin
                 const key = resolution.match.collection.key;
                 if (!collectionKeysToApply.includes(key)) collectionKeysToApply.push(key);
             }
-            if (collectionKeysToApply.length === 0 && proposed.collection_key) {
+            if (collectionKeysToApply.length === 0 && typeof proposed.collection_key === 'string' && proposed.collection_key) {
                 collectionKeysToApply = [proposed.collection_key];
             }
         }
@@ -210,8 +226,17 @@ export async function executeCreateNoteAction(action: AgentAction, runId?: strin
     const appliedCollectionKeys: string[] = [];
     if (!parentKey) {
         for (const key of collectionKeysToApply) {
+            // The row id is looked up rather than passing the key: `addToCollection`
+            // reads an all-digit argument as a row id, and an all-digit collection
+            // key is valid in Zotero's key alphabet — it would be taken as a
+            // nonexistent id and fail the whole save on the foreign key.
+            const collectionId = Zotero.Collections.getIDFromLibraryAndKey(targetLibraryId, key);
+            if (!collectionId) {
+                logger(`executeCreateNoteAction: Collection "${key}" not found in library ${targetLibraryId}, skipping`, 1);
+                continue;
+            }
             try {
-                zoteroNote.addToCollection(key);
+                zoteroNote.addToCollection(collectionId);
                 appliedCollectionKeys.push(key);
             } catch (error: any) {
                 logger(`executeCreateNoteAction: Failed to stage collection assignment for ${key}: ${error.message}`, 1);
@@ -222,8 +247,8 @@ export async function executeCreateNoteAction(action: AgentAction, runId?: strin
     // Stage tags (create_note_tags_collections). Valid on child notes too.
     // Skip duplicates so result_data reports each applied tag once.
     const appliedTags: string[] = [];
-    for (const tag of proposed.tags ?? []) {
-        const trimmed = typeof tag === 'string' ? tag.trim() : '';
+    for (const tag of asStringList(proposed.tags)) {
+        const trimmed = tag.trim();
         if (!trimmed || appliedTags.includes(trimmed)) continue;
         try {
             zoteroNote.addTag(trimmed);

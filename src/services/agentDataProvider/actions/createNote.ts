@@ -114,6 +114,20 @@ async function validateCreateNoteAction(
         ...ta.getAll(),
     });
 
+    // Checked before the payload is destructured, so a null one reports a typed
+    // error instead of throwing out of the destructuring itself.
+    if (request.action_data == null || typeof request.action_data !== 'object' || Array.isArray(request.action_data)) {
+        return {
+            type: 'agent_action_validate_response',
+            request_id: request.request_id,
+            valid: false,
+            error: 'Action data must be an object.',
+            error_code: 'invalid_request',
+            preference: 'always_ask',
+            timing: buildTiming(),
+        };
+    }
+
     const {
         title,
         content,
@@ -126,16 +140,57 @@ async function validateCreateNoteAction(
         tags: rawTags,
     } = request.action_data as CreateNoteActionData;
 
+    // Action data is external JSON, so the container and its entries are checked
+    // before either is used. A bare string has a `length` but no `map`, and a
+    // non-string entry must be rejected rather than dropped — the note would
+    // otherwise be created with fewer tags than were asked for, and nothing in
+    // the result would say so. Blank entries carry no request and are dropped.
+    if (rawTags != null && !Array.isArray(rawTags)) {
+        return {
+            type: 'agent_action_validate_response',
+            request_id: request.request_id,
+            valid: false,
+            error: `The "tags" parameter must be a list of tag names, but was of type ${typeof rawTags}.`,
+            error_code: 'invalid_request',
+            preference: 'always_ask',
+            timing: buildTiming(),
+        };
+    }
+    if (rawTags?.some(t => typeof t !== 'string')) {
+        return {
+            type: 'agent_action_validate_response',
+            request_id: request.request_id,
+            valid: false,
+            error: 'Every entry in "tags" must be a tag name string.',
+            error_code: 'invalid_request',
+            preference: 'always_ask',
+            timing: buildTiming(),
+        };
+    }
+
     // Tags to apply to the new note (create_note_tags_collections feature).
     // Deduplicated so the normalized data and current_value report each tag once.
     const tagsInput: string[] = [...new Set(
-        (rawTags ?? [])
-            .map(t => (typeof t === 'string' ? t.trim() : ''))
-            .filter(Boolean)
+        (rawTags ?? []).map(t => t.trim()).filter(Boolean)
     )];
 
-    // Validate required fields
-    if (!title || !title.trim()) {
+    // Validate required fields. An off-contract type gets its own message: told
+    // only that the value is "empty", the model can resend the same value.
+    for (const [field, value] of [['title', title], ['content', content]] as const) {
+        if (value != null && typeof value !== 'string') {
+            return {
+                type: 'agent_action_validate_response',
+                request_id: request.request_id,
+                valid: false,
+                error: `The "${field}" parameter must be a string, but was of type ${typeof value}.`,
+                error_code: field === 'title' ? 'invalid_title' : 'invalid_content',
+                preference: 'always_ask',
+                timing: buildTiming(),
+            };
+        }
+    }
+
+    if (typeof title !== 'string' || !title.trim()) {
         return {
             type: 'agent_action_validate_response',
             request_id: request.request_id,
@@ -147,7 +202,7 @@ async function validateCreateNoteAction(
         };
     }
 
-    if (!content || !content.trim()) {
+    if (typeof content !== 'string' || !content.trim()) {
         return {
             type: 'agent_action_validate_response',
             request_id: request.request_id,
@@ -164,13 +219,51 @@ async function validateCreateNoteAction(
     // queue ever stalls before dispatch this captures it.
     ta.record('pre_resolve_ms', Date.now() - start);
 
+    // The reference parsers below index into this value, so an off-contract type
+    // has to be rejected here rather than throwing out of `resolveObjectId`.
+    if (rawParentItemId != null && typeof rawParentItemId !== 'string') {
+        return {
+            type: 'agent_action_validate_response',
+            request_id: request.request_id,
+            valid: false,
+            error: `The "parent_item_id" parameter must be an item id string, but was of type ${typeof rawParentItemId}.`,
+            error_code: 'invalid_parent_id',
+            preference: 'always_ask',
+            timing: buildTiming(),
+        };
+    }
+
     // Detect collection key passed as parent_id.
     let parentItemIdInput: string | null | undefined = rawParentItemId;
+    // Action data is external JSON, so the container is checked before use: a
+    // malformed `collections` is not an absent one, and silently ignoring it
+    // would create the note outside every collection asked for. Entries are left
+    // to resolution below, which reports them precisely; a child note never
+    // reaches it, so its collection arguments are dropped from the normalized
+    // data instead (see the `parentKey` branch there).
+    if (rawCollections != null && !Array.isArray(rawCollections)) {
+        return {
+            type: 'agent_action_validate_response',
+            request_id: request.request_id,
+            valid: false,
+            error: `The "collections" parameter must be a list of collection identifiers, keys or names, but was of type ${typeof rawCollections}.`,
+            error_code: 'invalid_request',
+            preference: 'always_ask',
+            timing: buildTiming(),
+        };
+    }
     // Prefer the plural shape (create_note_tags_collections feature); fall back
-    // to the legacy singular field for older backends and stored actions.
+    // to the legacy singular field for older backends and stored actions. Blank
+    // entries carry no request and are dropped.
+    // Blank entries carry no request and are dropped. Everything else is kept as
+    // authored: for a standalone note the resolver below reports an off-contract
+    // entry precisely (a row id gets its own instruction), and for a child note
+    // the arguments are zeroed out of the normalized data instead of rejected.
     let collectionsInput: string[] = (rawCollections && rawCollections.length > 0)
-        ? rawCollections.filter(c => typeof c === 'string' && c.trim())
-        : (collectionNameOrKey ? [collectionNameOrKey] : []);
+        ? rawCollections.filter(c => typeof c !== 'string' || c.trim() !== '')
+        : (typeof collectionNameOrKey === 'string' && collectionNameOrKey.trim() === ''
+            ? []
+            : (collectionNameOrKey != null ? [collectionNameOrKey as string] : []));
     let parentToCollectionWarning: string | null = null;
     let collectionDerivedLibraryId: number | null = null;
 
@@ -522,8 +615,11 @@ async function validateCreateNoteAction(
         library_id: resolvedLibraryId,
         library_ref: libraryRefForLibraryID(resolvedLibraryId) ?? undefined,
         parent_item_id: parentItemIdInput ?? null,
-        collection: collectionsInput[0] ?? null,
-        collections: collectionsInput,
+        // A child note cannot be in a collection, so its collection arguments are
+        // dropped rather than echoed: they are neither applied nor rejected, and
+        // an off-contract one must not reach the backend's persisted copy.
+        collection: parentKey ? null : (collectionsInput[0] ?? null),
+        collections: parentKey ? [] : collectionsInput,
         tags: tagsInput,
         parent_key: parentKey,
         collection_key: resolvedCollectionKey,
@@ -567,6 +663,19 @@ async function executeCreateNoteAction(
         ...ta.getAll(),
     });
 
+    // Checked before the payload is destructured, so a null one reports a typed
+    // error instead of throwing out of the destructuring itself.
+    if (request.action_data == null || typeof request.action_data !== 'object' || Array.isArray(request.action_data)) {
+        return {
+            type: 'agent_action_execute_response',
+            request_id: request.request_id,
+            success: false,
+            error: 'Action data must be an object.',
+            error_code: 'invalid_request',
+            timing: buildTiming(),
+        };
+    }
+
     // action_data is the merged original + normalized_action_data from validation
     const actionData = request.action_data as {
         title: string;
@@ -594,6 +703,19 @@ async function executeCreateNoteAction(
         warning,
     } = actionData;
 
+    for (const [field, value] of [['title', title], ['content', content]] as const) {
+        if (value != null && typeof value !== 'string') {
+            return {
+                type: 'agent_action_execute_response',
+                request_id: request.request_id,
+                success: false,
+                error: `"${field}" must be a string, but was of type ${typeof value}.`,
+                error_code: 'invalid_request',
+                timing: buildTiming(),
+            };
+        }
+    }
+
     if (!title || !content) {
         return {
             type: 'agent_action_execute_response',
@@ -601,6 +723,43 @@ async function executeCreateNoteAction(
             success: false,
             error: 'Title and content are required',
             error_code: 'missing_data',
+            timing: buildTiming(),
+        };
+    }
+
+    // Shape is re-checked here because an execute request may skip validation. A
+    // container of the wrong type is rejected: iterating a bare string would walk
+    // it character by character, writing one tag per letter across the whole note.
+    // Entries are a different matter — this path deliberately creates the note
+    // and skips what it cannot apply, so that a collection deleted between
+    // proposal and apply does not cost the note its content. Malformed entries
+    // are dropped on the same principle rather than failing the action.
+    for (const [field, value] of [['tags', tags], ['collection_keys', collectionKeys]] as const) {
+        if (value != null && !Array.isArray(value)) {
+            return {
+                type: 'agent_action_execute_response',
+                request_id: request.request_id,
+                success: false,
+                error: `"${field}" must be a list, but was of type ${typeof value}.`,
+                error_code: 'invalid_request',
+                timing: buildTiming(),
+            };
+        }
+    }
+    const usableTags = (tags ?? []).filter((tag): tag is string => typeof tag === 'string');
+    const usableCollectionKeys = (collectionKeys ?? []).filter((key): key is string => typeof key === 'string');
+    // The legacy singular field is the fallback when `collection_keys` is absent.
+    const usableCollectionKey = typeof collectionKey === 'string' ? collectionKey : null;
+
+    // `parent_key` is handed to Zotero's key validator, which throws on a
+    // non-string, so it gets the same typed rejection as the fields above.
+    if (parentKey != null && typeof parentKey !== 'string') {
+        return {
+            type: 'agent_action_execute_response',
+            request_id: request.request_id,
+            success: false,
+            error: `"parent_key" must be an item key string, but was of type ${typeof parentKey}.`,
+            error_code: 'invalid_request',
             timing: buildTiming(),
         };
     }
@@ -704,9 +863,12 @@ async function executeCreateNoteAction(
         // Child notes (with parentKey) cannot be in collections — Zotero's
         // fki_collectionItems_itemID_parentItemID trigger aborts saveTx if we try.
         // Validation should already have dropped the keys in that case; guard anyway.
-        const collectionKeysToApply = (collectionKeys && collectionKeys.length > 0)
-            ? collectionKeys
-            : (collectionKey ? [collectionKey] : []);
+        // The fallback keys on the raw plural field, not the filtered one: a list
+        // that was sent but held nothing usable must not silently fall back to
+        // the legacy singular field and file the note somewhere never requested.
+        const collectionKeysToApply = (Array.isArray(collectionKeys) && collectionKeys.length > 0)
+            ? usableCollectionKeys
+            : (usableCollectionKey ? [usableCollectionKey] : []);
         const appliedCollectionKeys: string[] = [];
         if (collectionKeysToApply.length > 0 && !parentKey) {
             for (const reference of collectionKeysToApply) {
@@ -721,9 +883,13 @@ async function executeCreateNoteAction(
                     logger(`executeCreateNoteAction: Collection "${reference}" not resolved (${resolution.code}), skipping`, 1);
                     continue;
                 }
-                const key = resolution.match.collection.key;
+                // The resolved row id is passed, not the key: `addToCollection`
+                // treats an all-digit argument as a row id, and an all-digit
+                // collection key is valid in Zotero's key alphabet — it would be
+                // read as a nonexistent id and fail the whole save on the FK.
+                const { id, key } = resolution.match.collection;
                 try {
-                    zoteroNote.addToCollection(key);
+                    zoteroNote.addToCollection(id);
                     appliedCollectionKeys.push(key);
                 } catch (collectionError: any) {
                     logger(`executeCreateNoteAction: Failed to stage collection assignment for ${key}: ${collectionError.message}`, 1);
@@ -738,8 +904,8 @@ async function executeCreateNoteAction(
         // notes too; addTag creates missing tags implicitly. Skip duplicates so
         // result_data reports each applied tag once.
         const appliedTags: string[] = [];
-        for (const tag of tags ?? []) {
-            const trimmed = typeof tag === 'string' ? tag.trim() : '';
+        for (const tag of usableTags) {
+            const trimmed = tag.trim();
             if (!trimmed || appliedTags.includes(trimmed)) continue;
             try {
                 zoteroNote.addTag(trimmed);

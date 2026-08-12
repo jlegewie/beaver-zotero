@@ -76,6 +76,39 @@ function cleanString(value: string | null | undefined): string | null {
     return cleaned.length > 0 ? cleaned : null;
 }
 
+/**
+ * Request fields declared as strings that scope or narrow the search.
+ * `collection` is handled separately: the collection resolver tells a
+ * device-local row id apart from a malformed type, which is more actionable.
+ */
+const STRING_FILTER_FIELDS = [
+    'text_contains',
+    'comment_contains',
+    'tag',
+    'color',
+    'annotation_type',
+    'author',
+    'attachment_id',
+    'modified_in_last',
+] as const;
+
+/**
+ * The first filter field sent as something other than a string, or null.
+ *
+ * A present-but-non-string value has to be rejected rather than cleaned away:
+ * `cleanString` reads it as absent, which would drop the filter and return
+ * annotations from outside the scope the caller asked for, with nothing in the
+ * response to say the search was widened.
+ */
+function firstMalformedFilterField(request: WSFindAnnotationsRequest): string | null {
+    const fields = request as unknown as Record<string, unknown>;
+    for (const field of STRING_FILTER_FIELDS) {
+        const value = fields[field];
+        if (value != null && typeof value !== 'string') return field;
+    }
+    return null;
+}
+
 function hasNarrowingFilter(request: WSFindAnnotationsRequest): boolean {
     return Boolean(
         cleanString(request.text_contains) ||
@@ -588,6 +621,16 @@ export async function handleFindAnnotationsRequest(
     logger('handleFindAnnotationsRequest: Finding annotations', 1);
 
     try {
+        const malformedField = firstMalformedFilterField(request);
+        if (malformedField) {
+            const value = (request as unknown as Record<string, unknown>)[malformedField];
+            return invalidResponse(
+                request,
+                `The "${malformedField}" parameter must be a string, but was of type ${typeof value}.`,
+                'invalid_request',
+            );
+        }
+
         const validation = validateLibraryAccess(request.library_id);
         if (!validation.valid) {
             return invalidResponse(
@@ -602,8 +645,12 @@ export async function handleFindAnnotationsRequest(
         let collection: any | null = null;
         let attachmentScopeItemID: number | null = null;
         let attachmentScopeItem: Zotero.Item | null = null;
-        const collectionInput = cleanString(request.collection);
-        if (collectionInput) {
+        // The reference is handed to the resolver uncleaned: it trims, and it
+        // rejects a row id or a malformed type with its own typed error.
+        // Cleaning first would drop an off-contract value and leave the search
+        // unscoped, returning annotations from outside the requested collection.
+        const collectionInput = request.collection;
+        if (collectionInput != null && collectionInput !== '') {
             // An explicitly requested library confines resolution to that
             // library; otherwise the library in play is tried first and any
             // other searchable library is eligible. A *name* never widens:

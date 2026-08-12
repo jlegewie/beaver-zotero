@@ -69,6 +69,7 @@ vi.mock('../../../src/services/documentExtraction', () => ({
 
 import {
     getCollectionByIdOrName,
+    getLibraryByIdOrName,
     librariesForCollectionError,
     resolveCollectionForDisplay,
     resolveCollectionForWrite,
@@ -233,6 +234,38 @@ describe('resolveSingleCollection', () => {
         expect((globalThis as any).Zotero.Collections.get).not.toHaveBeenCalled();
     });
 
+    // Request payloads are external JSON, so a reference of the wrong type must
+    // come back as a typed failure. Throwing would surface to the model as an
+    // internal error string instead of an actionable one.
+    it.each([
+        ['a boolean', true],
+        ['an array', ['ABCD2345']],
+        ['an object', { zotero_key: 'ABCD2345' }],
+    ])('rejects %s reference as a malformed request rather than throwing', (_label, value) => {
+        const resolved = resolveSingleCollection(value as never, { eligibleLibraryIds: searchableIds() });
+        expect(resolved).toMatchObject({ ok: false, code: 'invalid_request' });
+        expect((resolved as { message: string }).message).toContain('must be a collection identifier');
+    });
+
+    // Trimming lives in the resolver so a padded reference behaves the same in
+    // every handler, instead of resolving in whichever one happens to clean it.
+    it('tolerates surrounding whitespace on a bare key, identifier and name', () => {
+        expect(resolveSingleCollection(`  ${personalCollection.key}  `, { eligibleLibraryIds: searchableIds() }))
+            .toMatchObject({ ok: true, matchKind: 'key', match: { collection: personalCollection } });
+        expect(resolveSingleCollection(`  u-${personalCollection.key}  `, { eligibleLibraryIds: searchableIds() }))
+            .toMatchObject({ ok: true, matchKind: 'identifier', match: { collection: personalCollection } });
+        expect(resolveSingleCollection('  Reading  ', { eligibleLibraryIds: [PERSONAL_LIBRARY] }))
+            .toMatchObject({ ok: true, matchKind: 'name' });
+    });
+
+    // Quoted, so the message names something instead of trailing off into
+    // whitespace the caller cannot see.
+    it('reads a whitespace-only reference as not found, quoting what was sent', () => {
+        const resolved = resolveSingleCollection('   ', { eligibleLibraryIds: searchableIds() });
+        expect(resolved).toMatchObject({ ok: false, code: 'collection_not_found' });
+        expect((resolved as { message: string }).message).toBe('Collection not found: "   "');
+    });
+
     it('resolves a scoped identifier in its embedded library', () => {
         expect(resolveSingleCollection(`u-${personalCollection.key}`, { eligibleLibraryIds: searchableIds() })).toMatchObject({
             ok: true,
@@ -329,15 +362,23 @@ describe('resolveSingleCollection', () => {
         expect(resolveSingleCollection(`g67890-${excludedCollection.key}`, options)).toMatchObject(expected);
     });
 
-    it('returns collection_not_found for empty and null input', () => {
-        expect(resolveSingleCollection(null, { eligibleLibraryIds: searchableIds() })).toMatchObject({
-            ok: false,
-            code: 'collection_not_found',
-        });
+    it('returns collection_not_found for a blank reference', () => {
         expect(resolveSingleCollection('   ', { eligibleLibraryIds: searchableIds() })).toMatchObject({
             ok: false,
             code: 'collection_not_found',
         });
+    });
+
+    // A null reference is malformed rather than missing, and it names itself:
+    // a caller reporting a batch otherwise says a collection was not found
+    // without saying which entry to fix.
+    it.each([
+        ['null', null, 'null'],
+        ['undefined', undefined, 'undefined'],
+    ])('reports %s as a malformed reference that names itself', (_label, value, expected) => {
+        const resolved = resolveSingleCollection(value, { eligibleLibraryIds: searchableIds() });
+        expect(resolved).toMatchObject({ ok: false, code: 'invalid_request' });
+        expect((resolved as { message: string }).message).toContain(expected);
     });
 });
 
@@ -541,5 +582,26 @@ describe('librariesForCollectionError', () => {
         // A missing collection is about the collection, not the library scope,
         // so the library list would be noise.
         expect(librariesForCollectionError('collection_not_found')).toBeUndefined();
+    });
+});
+
+describe('getLibraryByIdOrName', () => {
+    // Requests are external JSON; the string lookups index into the value, so an
+    // off-contract type has to read as a named library that does not exist.
+    it.each([
+        ['a boolean', true],
+        ['an object', { library_ref: 'u' }],
+        ['a list', ['u']],
+    ])('reports %s as a library that was explicitly requested and not found', (_label, value) => {
+        const result = getLibraryByIdOrName(value as never);
+
+        expect(result.library).toBeNull();
+        expect(result.wasExplicitlyRequested).toBe(true);
+        expect(typeof result.searchInput).toBe('string');
+    });
+
+    it('still resolves a numeric id and a portable ref', () => {
+        expect(getLibraryByIdOrName(PERSONAL_LIBRARY).library).toBeTruthy();
+        expect(getLibraryByIdOrName('u').library).toBeTruthy();
     });
 });

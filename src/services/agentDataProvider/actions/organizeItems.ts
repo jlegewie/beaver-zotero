@@ -22,6 +22,85 @@ import { logger } from '@beaver/agent-core/platform/logger';
 import { TimingAccumulator } from '../../../utils/timing';
 
 
+/** Reader-friendly type name for an off-contract JSON value. */
+function describeJsonType(value: unknown): string {
+    if (value === null) return 'null';
+    if (Array.isArray(value)) return 'a list';
+    return `of type ${typeof value}`;
+}
+
+/**
+ * Reject off-contract action data, returning the error message or null when it
+ * is well formed.
+ *
+ * Action data is external JSON. A value of the wrong shape is a malformed
+ * request, not an absent one: reading undefined leaves off a container would
+ * report success for a change that was never applied, and iterating a bare
+ * string walks it character by character, writing one tag or collection per
+ * letter. Both validate and execute run this, since an execute request may skip
+ * validation entirely.
+ *
+ * Entries are checked where nothing downstream reports them: an item id reaches
+ * a parser that throws on a non-string, and a non-string tag is coerced by
+ * Zotero into a literal `"123"` that undo's strict comparison can never match.
+ * Collection entries are the exception at validate time only, where the
+ * collection resolver reports them alongside the batch's other reference
+ * problems; execute has no such batch report and silently skips what it cannot
+ * resolve, so it passes `checkCollectionEntries` to catch them here instead.
+ */
+function actionDataError(
+    actionData: unknown,
+    options: { checkCollectionEntries: boolean },
+): string | null {
+    // Checked before the callers destructure it, so a null payload reports a
+    // typed error instead of throwing out of the destructuring itself.
+    if (actionData == null || typeof actionData !== 'object' || Array.isArray(actionData)) {
+        return `Action data must be an object, but was ${describeJsonType(actionData)}.`;
+    }
+    const data = actionData as Record<string, unknown>;
+
+    const itemIds = data.item_ids;
+    if (itemIds != null) {
+        if (!Array.isArray(itemIds)) {
+            return `"item_ids" must be a list of item ids, but was ${describeJsonType(itemIds)}.`;
+        }
+        const badIds = itemIds.filter(id => typeof id !== 'string');
+        if (badIds.length > 0) {
+            // Named individually, matching the batch contract: every bad id is
+            // reported in one round trip rather than one per retry.
+            const named = badIds.map(id => JSON.stringify(id) ?? String(id)).join(', ');
+            return `Every entry in "item_ids" must be an item id string, but ` +
+                `${named} ${badIds.length === 1 ? 'is' : 'are'} not.`;
+        }
+    }
+
+    for (const group of ['tags', 'collections'] as const) {
+        const container = data[group];
+        if (container == null) continue;
+        // An empty list is the wrong shape but an unambiguous "no changes here",
+        // so it reads as absent rather than failing a request whose other group
+        // carries real changes.
+        if (Array.isArray(container) && container.length === 0) continue;
+        if (typeof container !== 'object' || Array.isArray(container)) {
+            return `"${group}" must be an object with "add" and/or "remove" lists, but was ${describeJsonType(container)}.`;
+        }
+        for (const field of ['add', 'remove'] as const) {
+            const value = (container as Record<string, unknown>)[field];
+            if (value == null) continue;
+            if (!Array.isArray(value)) {
+                return `"${group}.${field}" must be a list, but was ${describeJsonType(value)}.`;
+            }
+            const checkEntries = group === 'tags' || options.checkCollectionEntries;
+            if (checkEntries && value.some(entry => typeof entry !== 'string')) {
+                return group === 'tags'
+                    ? `Every entry in "${group}.${field}" must be a tag name string.`
+                    : `Every entry in "${group}.${field}" must be a collection identifier string.`;
+            }
+        }
+    }
+    return null;
+}
+
 /**
  * Restore in-memory tags and collections on items after a transaction rollback.
  * The DB transaction rolls back automatically, but in-memory item objects still
@@ -54,6 +133,21 @@ function restoreItemSnapshots(
 export async function validateOrganizeItemsAction(
     request: WSAgentActionValidateRequest
 ): Promise<WSAgentActionValidateResponse> {
+    // Shape first, before the payload is destructured or its entries counted: a
+    // null payload would throw out of the destructuring, and a bare string has a
+    // `length`, so counting first reports a 130-character id as "too many items".
+    const containerError = actionDataError(request.action_data, { checkCollectionEntries: false });
+    if (containerError) {
+        return {
+            type: 'agent_action_validate_response',
+            request_id: request.request_id,
+            valid: false,
+            error: containerError,
+            error_code: 'invalid_request',
+            preference: 'always_ask',
+        };
+    }
+
     const { item_ids, tags, collections } = request.action_data as {
         item_ids: string[];
         tags?: { add?: string[]; remove?: string[] } | null;
@@ -355,17 +449,28 @@ export async function validateOrganizeItemsAction(
                 const itemZoteroKeys = new Set(
                     item_ids.map(id => parseItemReference(id)?.zotero_key).filter(Boolean) as string[]
                 );
+                // A collection reference of the wrong type reaches here (only
+                // tags and item ids are type-checked up front), and parsing it
+                // would throw and lose the whole batch diagnostic.
                 const overlapWithItemKeys = invalidColls
                     .map(x => x.ref)
-                    .filter(ref => itemZoteroKeys.has(parseItemReference(ref)?.zotero_key ?? ref));
+                    .filter(ref => typeof ref === 'string'
+                        && itemZoteroKeys.has(parseItemReference(ref)?.zotero_key ?? ref));
 
                 const currentLibrary = Zotero.Libraries.get(libraryId);
                 const currentLibraryName = currentLibrary ? currentLibrary.name : `library ${libraryId}`;
 
+                // A reference is echoed via JSON so an off-contract one still
+                // names itself: `null` and `""` would otherwise render as
+                // nothing, telling the model a collection is missing but not
+                // which entry to fix.
+                const describeRef = (ref: unknown): string =>
+                    typeof ref === 'string' && ref.trim() !== '' ? ref : JSON.stringify(ref) ?? String(ref);
+
                 const parts: string[] = [];
                 if (notFound.length > 0) {
                     parts.push(
-                        `Collection${notFound.length === 1 ? '' : 's'} not found in '${currentLibraryName}' (library ${libraryId}): ${notFound.map(x => x.ref).join(', ')}.`
+                        `Collection${notFound.length === 1 ? '' : 's'} not found in '${currentLibraryName}' (library ${libraryId}): ${notFound.map(x => describeRef(x.ref)).join(', ')}.`
                     );
                 }
                 if (inOtherLib.length > 0) {
@@ -503,11 +608,38 @@ export async function executeOrganizeItemsAction(
         ...(extra ?? {}),
     });
 
+    // Shape first, before the payload is destructured. Collection entries are
+    // checked here but not at validate: this path has no batch reference report,
+    // and the resolve step below skips what it cannot resolve, which would
+    // report success for a change never applied.
+    const containerError = actionDataError(request.action_data, { checkCollectionEntries: true });
+    if (containerError) {
+        return {
+            type: 'agent_action_execute_response',
+            request_id: request.request_id,
+            success: false,
+            error: containerError,
+            error_code: 'invalid_request',
+            timing: buildTiming(),
+        };
+    }
+
     const { item_ids, tags, collections } = request.action_data as {
         item_ids: string[];
         tags?: { add?: string[]; remove?: string[] } | null;
         collections?: { add?: string[]; remove?: string[] } | null;
     };
+
+    if (!item_ids || item_ids.length === 0) {
+        return {
+            type: 'agent_action_execute_response',
+            request_id: request.request_id,
+            success: false,
+            error: 'At least one item_id must be provided',
+            error_code: 'no_items',
+            timing: buildTiming(),
+        };
+    }
 
     // TOCTOU guard: never mutate items in a library the user excluded from Beaver,
     // even if validation passed earlier or the execute request skipped it.

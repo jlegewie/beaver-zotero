@@ -61,7 +61,7 @@ vi.mock('../../../src/services/agentDataProvider/actions/resolveCreateNoteParent
     resolveCreateNoteParent: vi.fn(),
 }));
 
-import { validateCreateNoteAction } from '../../../src/services/agentDataProvider/actions/createNote';
+import { validateCreateNoteAction, executeCreateNoteAction } from '../../../src/services/agentDataProvider/actions/createNote';
 import { resolveCreateNoteParent } from '../../../src/services/agentDataProvider/actions/resolveCreateNoteParent';
 import { resolveSingleCollection } from '../../../src/services/agentDataProvider/utils';
 
@@ -71,6 +71,18 @@ function buildRequest(actionData: Record<string, any>): any {
         request_id: 'req-1',
         action_type: 'create_note',
         action_data: { title: 'Title', content: 'Body', ...actionData },
+    };
+}
+
+/** Minimal timeout context; the guards under test run before any abort check. */
+const executeCtx: any = { signal: new AbortController().signal, timeoutSeconds: 30, startTime: Date.now() };
+
+function buildExecuteRequest(actionData: Record<string, any>): any {
+    return {
+        event: 'agent_action_execute',
+        request_id: 'req-1',
+        action_type: 'create_note',
+        action_data: { title: 'Title', content: 'Body', library_id: 1, ...actionData },
     };
 }
 
@@ -145,6 +157,227 @@ describe('validateCreateNoteAction collections', () => {
 
         expect(res.valid).toBe(false);
         expect(res.error_code).toBe('invalid_request');
+    });
+
+    // The contract is that every requested collection resolves or the action is
+    // rejected. Dropping an off-contract entry would file the note in fewer
+    // collections than asked for, with nothing in the result to say so.
+    it.each([
+        ['a number', 12345],
+        ['a boolean', true],
+        ['an object', { key: 'RLKEY234' }],
+    ])('rejects %s collection entry rather than dropping it', async (_label, value) => {
+        const res = await validateCreateNoteAction(
+            buildRequest({ collections: ['Reading List', value] }),
+        );
+
+        expect(res.valid).toBe(false);
+        expect(res.normalized_action_data?.collection_keys).toBeUndefined();
+    });
+
+    // A child note never resolves its collection arguments, so an off-contract
+    // entry has to be rejected up front — otherwise it survives into the
+    // normalized data that is sent to the backend and persisted.
+    it.each([
+        ['a number', 12345],
+        ['an object', { key: 'RLKEY234' }],
+    ])('drops %s in the legacy singular collection field on a child note', async (_label, value) => {
+        vi.mocked(resolveCreateNoteParent).mockResolvedValue({
+            ok: true,
+            parentKey: 'PRNTKEY2',
+            resolvedLibraryId: 1,
+            relatedItemKey: null,
+            warning: null,
+        });
+
+        const res = await validateCreateNoteAction(
+            buildRequest({ parent_item_id: '1-PRNTKEY2', collection: value }),
+        );
+
+        expect(res.valid).toBe(true);
+        expect(res.normalized_action_data?.collection).toBeNull();
+        expect(res.normalized_action_data?.collections).toEqual([]);
+    });
+
+    it.each([
+        ['a number', 12345],
+        ['an object', { key: 'RLKEY234' }],
+    ])('rejects %s collection entry on a child note too', async (_label, value) => {
+        vi.mocked(resolveCreateNoteParent).mockResolvedValue({
+            ok: true,
+            parentKey: 'PRNTKEY2',
+            resolvedLibraryId: 1,
+            relatedItemKey: null,
+            warning: null,
+        });
+
+        const res = await validateCreateNoteAction(
+            buildRequest({ parent_item_id: '1-PRNTKEY2', collections: [value] }),
+        );
+
+        expect(res.valid).toBe(true);
+        expect(res.normalized_action_data?.collections).toEqual([]);
+        expect(res.normalized_action_data?.collection).toBeNull();
+        expect(res.normalized_action_data?.collection_keys).toEqual([]);
+    });
+
+    // A nullish entry is malformed rather than blank: it must be rejected before
+    // it reaches the blank-entry filter, which would throw on it.
+    it.each([
+        ['null', null],
+        ['undefined', undefined],
+    ])('rejects %s collection entry without throwing', async (_label, value) => {
+        const res = await validateCreateNoteAction(
+            buildRequest({ collections: ['Reading List', value] }),
+        );
+
+        expect(res.valid).toBe(false);
+        expect(res.error_code).toBe('invalid_request');
+        expect(res.error).not.toContain('TypeError');
+    });
+
+    // Blank carries no request on either shape; the singular field must not
+    // reject the whole note over it while the plural quietly drops it.
+    it.each([
+        ['an empty singular collection', { collection: '' }],
+        ['a whitespace-only singular collection', { collection: '   ' }],
+    ])('drops %s and still creates the note', async (_label, override) => {
+        const res = await validateCreateNoteAction(buildRequest(override));
+
+        expect(res.valid).toBe(true);
+        expect(res.normalized_action_data?.collection_keys).toEqual([]);
+    });
+
+    it.each([
+        ['an empty string', ''],
+        ['whitespace only', '   '],
+    ])('drops %s entry as carrying no request', async (_label, value) => {
+        const res = await validateCreateNoteAction(
+            buildRequest({ collections: ['Reading List', value] }),
+        );
+
+        expect(res.valid).toBe(true);
+        expect(res.normalized_action_data?.collection_keys).toEqual(['RLKEY234']);
+    });
+
+    it('rejects a non-array collections container instead of ignoring it', async () => {
+        const res = await validateCreateNoteAction(
+            buildRequest({ collections: 'Reading List' }),
+        );
+
+        expect(res.valid).toBe(false);
+        expect(res.error_code).toBe('invalid_request');
+        expect(res.error).toContain('"collections" parameter must be a list');
+    });
+
+    it('rejects a non-array tags container instead of throwing', async () => {
+        const res = await validateCreateNoteAction(buildRequest({ tags: 'urgent' }));
+
+        expect(res.valid).toBe(false);
+        expect(res.error_code).toBe('invalid_request');
+        expect(res.error).not.toContain('TypeError');
+    });
+
+    // Same rule as collections: an off-contract entry is rejected, not dropped,
+    // so the note is never created with fewer tags than were asked for.
+    it('rejects a non-string tags entry rather than dropping it', async () => {
+        const res = await validateCreateNoteAction(buildRequest({ tags: ['urgent', 123] }));
+
+        expect(res.valid).toBe(false);
+        expect(res.error_code).toBe('invalid_request');
+        expect(res.error).toContain('Every entry in "tags"');
+    });
+
+    it('still drops blank tag entries', async () => {
+        const res = await validateCreateNoteAction(buildRequest({ tags: ['urgent', '  ', ''] }));
+
+        expect(res.valid).toBe(true);
+        expect(res.normalized_action_data?.tags).toEqual(['urgent']);
+    });
+
+    // Execute repeats the container check because a request may skip validation.
+    // Without it a bare string is walked character by character, writing one tag
+    // per letter onto the created note.
+    it.each([
+        ['tags', { tags: 'urgent' }],
+        ['collection_keys', { collection_keys: 'RLKEY234' }],
+    ])('rejects a non-array %s on the execute path too', async (field, override) => {
+        const res = await executeCreateNoteAction(
+            buildExecuteRequest(override),
+            executeCtx,
+        );
+
+        expect(res.success).toBe(false);
+        expect(res.error_code).toBe('invalid_request');
+        expect(res.error).toContain(`"${field}" must be a list`);
+    });
+
+    // Execute creates the note and skips what it cannot apply, so a reference that
+    // went stale between proposal and apply does not cost the note its content; a
+    // malformed entry is dropped on the same principle. A malformed *container* is
+    // still rejected, since iterating it would corrupt every tag on the note.
+    // This harness cannot construct a Zotero item, so it pins only the half that
+    // is observable here: a malformed entry must not reject the action. The drop
+    // itself is covered end to end against a live Zotero.
+    it.each([
+        ['tags', { tags: ['ok', 123] }],
+        ['collection_keys', { collection_keys: ['RLKEY234', 123] }],
+    ])('does not reject a non-string %s entry on the execute path', async (_field, override) => {
+        const res = await executeCreateNoteAction(
+            buildExecuteRequest(override),
+            executeCtx,
+        );
+
+        // Contrast with the container cases above, which return invalid_request
+        // through this same harness: a malformed entry must not reject the action.
+        expect(res.error_code).not.toBe('invalid_request');
+        expect(res.error ?? '').not.toContain('must be a list');
+    });
+
+    it('rejects a non-string parent_key on the execute path instead of throwing', async () => {
+        const res = await executeCreateNoteAction(
+            buildExecuteRequest({ parent_key: 12345 }),
+            executeCtx,
+        );
+
+        expect(res.success).toBe(false);
+        expect(res.error_code).toBe('invalid_request');
+        expect(res.error).toContain('"parent_key" must be an item key string');
+    });
+
+    it('rejects a non-string parent_item_id instead of throwing', async () => {
+        const res = await validateCreateNoteAction(buildRequest({ parent_item_id: 12345 }));
+
+        expect(res.valid).toBe(false);
+        expect(res.error_code).toBe('invalid_parent_id');
+        expect(res.error).not.toContain('TypeError');
+    });
+
+    // An off-contract title/content must stay on the typed error path rather
+    // than throwing on `.trim()` and surfacing a raw JS error to the model.
+    // The message has to name the type: told only that the value is "empty", the
+    // model can resend the same off-contract value unchanged.
+    it.each([
+        ['title', { title: 42 }, 'invalid_title'],
+        ['content', { content: 42 }, 'invalid_content'],
+    ])('rejects a non-string %s with its own error code and names the type', async (field, override, code) => {
+        const res = await validateCreateNoteAction(buildRequest(override));
+
+        expect(res.valid).toBe(false);
+        expect(res.error_code).toBe(code);
+        expect(res.error).toContain(`"${field}" parameter must be a string`);
+        expect(res.error).not.toContain('empty');
+        expect(res.error).not.toContain('TypeError');
+    });
+
+    it.each([
+        ['title', { title: 42 }],
+        ['content', { content: 42 }],
+    ])('names the offending type for a non-string %s on the execute path', async (field, override) => {
+        const res = await executeCreateNoteAction(buildExecuteRequest(override), executeCtx);
+
+        expect(res.success).toBe(false);
+        expect(res.error).toContain(`"${field}" must be a string`);
     });
 
     it('ignores a child note\'s collection arguments without resolving them', async () => {

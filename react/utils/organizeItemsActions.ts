@@ -48,6 +48,15 @@ function createCollectionResolver(): (libraryID: number, reference: string) => R
 }
 
 /**
+ * The string entries of a persisted list argument (`item_ids`, `tags.*`,
+ * `collections.*`).
+ */
+function changeList(value: unknown): string[] {
+    return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === 'string') : [];
+}
+
+
+/**
  * Execute an organize_items agent action.
  * Adds/removes tags and collection memberships for items.
  * @param action The agent action to execute
@@ -71,8 +80,28 @@ export async function executeOrganizeItemsAction(
     const actualCollectionsRemoved = new Set<string>();
     const resolveCollection = createCollectionResolver();
 
+    // A malformed shape is thrown, not recorded: `failed_items` is keyed by item
+    // id (the preview counts its keys), and returning no failure at all would let
+    // the caller ack the action as applied with nothing done.
+    if (!Array.isArray(item_ids) || item_ids.length === 0) {
+        throw new Error('organize_items: "item_ids" must be a non-empty list of item ids');
+    }
+    for (const [field, value] of [
+        ['tags.add', tags?.add], ['tags.remove', tags?.remove],
+        ['collections.add', collections?.add], ['collections.remove', collections?.remove],
+    ] as const) {
+        if (value != null && !Array.isArray(value)) {
+            throw new Error(`organize_items: "${field}" must be a list, but was of type ${typeof value}`);
+        }
+    }
+    // Non-string entries occupy item-id slots, so they belong in failed_items.
+    const usableItemIds = changeList(item_ids);
+    for (const raw of item_ids) {
+        if (typeof raw !== 'string') failedItems[String(raw)] = 'Invalid item id';
+    }
+
     // Process each item
-    for (const itemId of item_ids) {
+    for (const itemId of usableItemIds) {
         try {
             // Accept both portable "<library_ref>-<key>" and legacy numeric ids.
             const parsed = parseItemReference(itemId);
@@ -103,8 +132,9 @@ export async function executeOrganizeItemsAction(
                 : new Set<string>();
 
             // Add tags (only if not already present)
-            if (tags?.add && tags.add.length > 0) {
-                for (const tagName of tags.add) {
+            const tagsToAdd = changeList(tags?.add);
+            if (tagsToAdd.length > 0) {
+                for (const tagName of tagsToAdd) {
                     if (!existingTags.has(tagName)) {
                         item.addTag(tagName);
                         actualTagsAdded.add(tagName);
@@ -114,8 +144,9 @@ export async function executeOrganizeItemsAction(
             }
 
             // Remove tags (only if present)
-            if (tags?.remove && tags.remove.length > 0) {
-                for (const tagName of tags.remove) {
+            const tagsToRemove = changeList(tags?.remove);
+            if (tagsToRemove.length > 0) {
+                for (const tagName of tagsToRemove) {
                     if (existingTags.has(tagName) && item.removeTag(tagName)) {
                         actualTagsRemoved.add(tagName);
                         modified = true;
@@ -124,8 +155,9 @@ export async function executeOrganizeItemsAction(
             }
 
             // Add to collections (only top-level items; only if not already member)
-            if (isTopLevel && collections?.add && collections.add.length > 0) {
-                for (const collectionRef of collections.add) {
+            const collectionsToAdd = changeList(collections?.add);
+            if (isTopLevel && collectionsToAdd.length > 0) {
+                for (const collectionRef of collectionsToAdd) {
                     const collection = resolveCollection(item.libraryID, collectionRef);
                     if (!collection || existingCollections.has(collection.key)) continue;
                     item.addToCollection(collection.id);
@@ -135,8 +167,9 @@ export async function executeOrganizeItemsAction(
             }
 
             // Remove from collections (only top-level items; only if member)
-            if (isTopLevel && collections?.remove && collections.remove.length > 0) {
-                for (const collectionRef of collections.remove) {
+            const collectionsToRemove = changeList(collections?.remove);
+            if (isTopLevel && collectionsToRemove.length > 0) {
+                for (const collectionRef of collectionsToRemove) {
                     const collection = resolveCollection(item.libraryID, collectionRef);
                     if (!collection || !existingCollections.has(collection.key)) continue;
                     item.removeFromCollection(collection.id);
@@ -197,7 +230,7 @@ export async function undoOrganizeItemsAction(
     // scoped identifier in the action still matches its snapshot.
     const resolveCollection = createCollectionResolver();
 
-    for (const itemId of item_ids) {
+    for (const itemId of changeList(item_ids)) {
         try {
             // Accept both portable "<library_ref>-<key>" and legacy numeric ids.
             const parsed = parseItemReference(itemId);
@@ -220,7 +253,7 @@ export async function undoOrganizeItemsAction(
                 
                 // Restore tags: remove added tags, add back removed tags
                 if (tags?.add) {
-                    for (const tagName of tags.add) {
+                    for (const tagName of changeList(tags.add)) {
                         // Only remove if it wasn't in the original state
                         if (!originalState.tags.includes(tagName)) {
                             item.removeTag(tagName);
@@ -229,7 +262,7 @@ export async function undoOrganizeItemsAction(
                     }
                 }
                 if (tags?.remove) {
-                    for (const tagName of tags.remove) {
+                    for (const tagName of changeList(tags.remove)) {
                         // Only add back if it was in the original state
                         if (originalState.tags.includes(tagName)) {
                             item.addTag(tagName);
@@ -240,7 +273,7 @@ export async function undoOrganizeItemsAction(
 
                 // Restore collections
                 if (collections?.add) {
-                    for (const collectionRef of collections.add) {
+                    for (const collectionRef of changeList(collections.add)) {
                         const collection = resolveCollection(item.libraryID, collectionRef);
                         // Only remove if it wasn't in the original state
                         if (!collection || originalState.collections.includes(collection.key)) continue;
@@ -249,7 +282,7 @@ export async function undoOrganizeItemsAction(
                     }
                 }
                 if (collections?.remove) {
-                    for (const collectionRef of collections.remove) {
+                    for (const collectionRef of changeList(collections.remove)) {
                         const collection = resolveCollection(item.libraryID, collectionRef);
                         // Only add back if it was in the original state
                         if (!collection || !originalState.collections.includes(collection.key)) continue;
@@ -261,19 +294,19 @@ export async function undoOrganizeItemsAction(
                 // Fallback: reverse using result_data which contains actual changes made
                 // This is safe because result_data now tracks actual changes, not requested changes
                 if (resultData.tags_added) {
-                    for (const tagName of resultData.tags_added) {
+                    for (const tagName of changeList(resultData.tags_added)) {
                         item.removeTag(tagName);
                         modified = true;
                     }
                 }
                 if (resultData.tags_removed) {
-                    for (const tagName of resultData.tags_removed) {
+                    for (const tagName of changeList(resultData.tags_removed)) {
                         item.addTag(tagName);
                         modified = true;
                     }
                 }
                 if (resultData.collections_added) {
-                    for (const collectionRef of resultData.collections_added) {
+                    for (const collectionRef of changeList(resultData.collections_added)) {
                         const collection = resolveCollection(item.libraryID, collectionRef);
                         if (!collection) continue;
                         item.removeFromCollection(collection.id);
@@ -281,7 +314,7 @@ export async function undoOrganizeItemsAction(
                     }
                 }
                 if (resultData.collections_removed) {
-                    for (const collectionRef of resultData.collections_removed) {
+                    for (const collectionRef of changeList(resultData.collections_removed)) {
                         const collection = resolveCollection(item.libraryID, collectionRef);
                         if (!collection) continue;
                         item.addToCollection(collection.id);

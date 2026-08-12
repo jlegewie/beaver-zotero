@@ -36,7 +36,23 @@ type Failure = { ok: false; code: string; message: string };
 type Match = { collection: FakeCollection; libraryID: number };
 
 function notFound(input: unknown): Failure {
-    return { ok: false, code: 'collection_not_found', message: `Collection not found: ${input}` };
+    // Mirrors the real resolver, which quotes a blank or padded reference so the
+    // message names something.
+    const shown = typeof input === 'string' && input.trim() === input && input !== ''
+        ? input
+        : JSON.stringify(input);
+    return { ok: false, code: 'collection_not_found', message: `Collection not found: ${shown}` };
+}
+
+/** Mirrors the real resolver's rejection of a reference that is not a string or number. */
+function malformedReference(input: unknown): Failure {
+    return {
+        ok: false,
+        code: 'invalid_request',
+        message:
+            `A collection reference must be a collection identifier, key or name, but ` +
+            `${JSON.stringify(input) ?? String(input)} is of type ${typeof input}.`,
+    };
 }
 
 export function createCollectionResolverFake(state: CollectionResolverFakeState) {
@@ -61,10 +77,19 @@ export function createCollectionResolverFake(state: CollectionResolverFakeState)
         return Object.prototype.hasOwnProperty.call(state.libraryRefs, libraryID);
     }
 
-    function resolveRowId(rowId: number, eligible: number[], input: unknown) {
-        const collection = state.collections.find((c) => c.id === rowId);
-        if (!collection || !eligible.includes(collection.libraryID)) return notFound(input);
-        return { ok: true as const, matchKind: 'row_id' as const, match: { collection, libraryID: collection.libraryID } };
+    /**
+     * Mirrors the real resolver: a device-local row id is always rejected on the
+     * data paths, whether it arrived as a number or as a digit-only string. It
+     * never resolves, so the fake must not resolve one either.
+     */
+    function rowIdNotAllowed(input: unknown): Failure {
+        return {
+            ok: false,
+            code: 'invalid_request',
+            message:
+                `Collection row ID "${input}" is device-local and cannot be used here. ` +
+                'Pass the collection identifier returned by list_collections instead.',
+        };
     }
 
     /**
@@ -84,13 +109,16 @@ export function createCollectionResolverFake(state: CollectionResolverFakeState)
         return matches;
     }
 
-    function resolveSingleCollection(input: unknown, options: any) {
-        if (input == null) return notFound('');
+    function resolveSingleCollection(rawInput: unknown, options: any) {
         const eligible = [...new Set<number>(options?.eligibleLibraryIds ?? [])];
         const nameLibraryIds = [...new Set<number>(options?.nameLibraryIds ?? eligible)];
 
-        if (typeof input === 'number') return resolveRowId(input, eligible, input);
-        if (typeof input !== 'string' || !input.trim()) return notFound(input);
+        if (typeof rawInput === 'number') return rowIdNotAllowed(rawInput);
+        // Same order as the real resolver: a non-string is malformed, and the
+        // reference is trimmed before any grammar is tried.
+        if (typeof rawInput !== 'string') return malformedReference(rawInput);
+        const input = rawInput.trim();
+        if (input === '') return notFound(rawInput);
 
         const scoped = parseScoped(input);
         if (scoped) {
@@ -136,7 +164,7 @@ export function createCollectionResolverFake(state: CollectionResolverFakeState)
         const nameMatches = matchesInLibraryOrder(nameLibraryIds, (c) => c.name.toLowerCase() === inputLower);
         if (nameMatches.length > 0) return { ok: true as const, matchKind: 'name' as const, match: nameMatches[0] };
 
-        if (/^\d+$/.test(input)) return resolveRowId(parseInt(input, 10), eligible, input);
+        if (/^\d+$/.test(input)) return rowIdNotAllowed(input);
 
         return notFound(input);
     }

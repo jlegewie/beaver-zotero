@@ -88,6 +88,61 @@ describe('executeOrganizeItemsAction', () => {
         expect(vi.mocked(resolveCollectionForWrite)).toHaveBeenCalledTimes(2);
     });
 
+    // A bare string has a `length`, so iterating one writes a single-letter tag or
+    // collection key per character to every item in the batch. This path applies
+    // persisted proposed_data without re-validating, so it must not iterate one.
+    it('surfaces a bare-string tags container without writing one tag per character', async () => {
+        items.ITEMKEY2 = makeItem('ITEMKEY2');
+
+        await expect(executeOrganizeItemsAction({
+            proposed_data: {
+                item_ids: ['u-ITEMKEY2'],
+                tags: { add: 'urgent' },
+            },
+        } as any)).rejects.toThrow(/"tags\.add" must be a list/);
+
+        expect(items.ITEMKEY2.addTag).not.toHaveBeenCalled();
+    });
+
+    it('surfaces a bare-string collections container without resolving each character', async () => {
+        items.ITEMKEY2 = makeItem('ITEMKEY2');
+
+        await expect(executeOrganizeItemsAction({
+            proposed_data: {
+                item_ids: ['u-ITEMKEY2'],
+                collections: { add: 'RLKEY234' },
+            },
+        } as any)).rejects.toThrow(/"collections\.add" must be a list/);
+
+        expect(items.ITEMKEY2.addToCollection).not.toHaveBeenCalled();
+    });
+
+    // A malformed persisted list must surface as a failure; reporting an applied
+    // action with nothing done would tell the user the change went through.
+    it.each([
+        ['a bare string', 'u-ITEMKEY2'],
+        ['null', null],
+        ['an empty list', []],
+    ])('surfaces %s item_ids instead of reporting an applied action', async (_label, item_ids) => {
+        await expect(executeOrganizeItemsAction({
+            proposed_data: { item_ids, tags: { add: ['urgent'] } },
+        } as any)).rejects.toThrow(/"item_ids" must be a non-empty list/);
+    });
+
+    it('processes the usable item ids and reports the rest as failures', async () => {
+        items.ITEMKEY2 = makeItem('ITEMKEY2');
+
+        const result = await executeOrganizeItemsAction({
+            proposed_data: {
+                item_ids: ['u-ITEMKEY2', 12345],
+                tags: { add: ['urgent'] },
+            },
+        } as any);
+
+        expect(items.ITEMKEY2.addTag).toHaveBeenCalledWith('urgent');
+        expect(result.failed_items).toMatchObject({ '12345': 'Invalid item id' });
+    });
+
     it('skips a collection reference that only matches a collection name', async () => {
         // A stored reference is a key or identifier. If the key is gone and a
         // different collection happens to carry it as its name, the write must

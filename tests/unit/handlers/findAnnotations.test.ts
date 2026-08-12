@@ -41,7 +41,7 @@ vi.mock('../../../src/utils/zoteroSerializers', () => ({
 }));
 
 import { handleFindAnnotationsRequest } from '../../../src/services/agentDataProvider/handleFindAnnotationsRequest';
-import { checkLibraryExcluded } from '../../../src/services/agentDataProvider/utils';
+import { checkLibraryExcluded, resolveSingleCollection } from '../../../src/services/agentDataProvider/utils';
 import type { WSFindAnnotationsRequest } from '@beaver/agent-core/protocol/agentProtocol';
 
 type MockAnnotation = Zotero.Item & {
@@ -274,6 +274,109 @@ describe('handleFindAnnotationsRequest', () => {
         expect(response.error_code).toBe('invalid_color');
         expect(response.annotations).toEqual([]);
         expect(response.total_count).toBe(0);
+    });
+
+    describe('collection scoping', () => {
+        // The hazard is silent widening: a filter that never reaches the
+        // resolver leaves the search unscoped, so the caller gets annotations
+        // from outside the collection it asked for with nothing in the response
+        // to say so. Every reference the caller supplies must be resolved.
+        it.each([
+            ['a numeric row id', 42],
+            ['a boolean', true],
+            ['an array', ['ABCD2345']],
+        ])('resolves %s reference instead of dropping the filter', async (_label, value) => {
+            const response = await handleFindAnnotationsRequest({
+                ...baseRequest,
+                collection: value as never,
+            });
+
+            // The contract under test is that the reference reaches the resolver.
+            // The specific code comes from the resolver (`invalid_request` for a
+            // row id or a malformed type), so it is deliberately not asserted
+            // against the canned mock here — only that the request failed rather
+            // than returning an unscoped page.
+            expect(resolveSingleCollection).toHaveBeenCalledWith(value, expect.anything());
+            expect(response.error_code).toBeTruthy();
+            expect(response.annotations).toEqual([]);
+            expect(response.total_count).toBe(0);
+        });
+
+        it.each([
+            ['an empty string', ''],
+            ['null', null],
+            ['undefined', undefined],
+        ])('treats %s as no collection filter', async (_label, value) => {
+            const response = await handleFindAnnotationsRequest({
+                ...baseRequest,
+                collection: value as never,
+            });
+
+            expect(resolveSingleCollection).not.toHaveBeenCalled();
+            expect(response.error_code).toBeUndefined();
+            expect(response.total_count).toBeGreaterThan(0);
+        });
+
+        // Padding and whitespace are the resolver's business, so every handler
+        // treats a padded reference the same way instead of one of them cleaning
+        // it first.
+        it('hands a padded reference to the resolver untouched', async () => {
+            await handleFindAnnotationsRequest({
+                ...baseRequest,
+                collection: '  g12345-ABCD2345  ',
+            });
+
+            expect(resolveSingleCollection).toHaveBeenCalledWith('  g12345-ABCD2345  ', expect.anything());
+        });
+
+        it('resolves a whitespace-only reference rather than reading it as absent', async () => {
+            const response = await handleFindAnnotationsRequest({
+                ...baseRequest,
+                collection: '   ',
+            });
+
+            expect(resolveSingleCollection).toHaveBeenCalledWith('   ', expect.anything());
+            expect(response.total_count).toBe(0);
+        });
+    });
+
+    describe('malformed string filters', () => {
+        // Same hazard as a dropped collection filter: cleanString() reads a
+        // non-string as absent, so the search would silently run wider than the
+        // caller asked for.
+        it.each([
+            ['attachment_id', 12345],
+            ['attachment_id', true],
+            ['tag', 42],
+            ['color', 42],
+            ['annotation_type', 42],
+            ['author', 42],
+            ['text_contains', 42],
+            ['comment_contains', 42],
+            ['modified_in_last', 7],
+        ])('rejects a non-string %s instead of dropping the filter', async (field, value) => {
+            const response = await handleFindAnnotationsRequest({
+                ...baseRequest,
+                [field]: value,
+            } as never);
+
+            expect(response.error_code).toBe('invalid_request');
+            expect(response.error).toContain(`"${field}" parameter must be a string`);
+            expect(response.annotations).toEqual([]);
+            expect(response.total_count).toBe(0);
+        });
+
+        it('still accepts every filter as a string', async () => {
+            const response = await handleFindAnnotationsRequest({
+                ...baseRequest,
+                tag: 'match',
+                color: 'red',
+                annotation_type: 'highlight',
+                author: 'alice',
+            });
+
+            expect(response.error_code).toBeUndefined();
+        });
     });
 
     describe('attachment_id scoping', () => {

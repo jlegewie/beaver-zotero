@@ -498,6 +498,18 @@ export function getLibraryByIdOrName(libraryIdOrName: number | string | null | u
             searchInput: String(libraryIdOrName),
         };
     }
+
+    // Requests are external JSON, so an off-contract type is reported as a named
+    // library that does not exist rather than being handed to the string lookups
+    // below, which index into it and throw. Every caller already renders a
+    // not-found library from this shape.
+    if (typeof libraryIdOrName !== 'string') {
+        return {
+            library: null,
+            wasExplicitlyRequested: true,
+            searchInput: JSON.stringify(libraryIdOrName) ?? String(libraryIdOrName),
+        };
+    }
     
     // It's a string - a portable library_ref ("u" | "g<groupID>") is authoritative:
     // resolve it directly and never fall through to numeric/name lookup, even when
@@ -605,7 +617,10 @@ function libraryDisplayName(libraryID: number): string {
 }
 
 function collectionNotFound(input: string): CollectionResolutionFailure {
-    return { ok: false, code: 'collection_not_found', message: `Collection not found: ${input}` };
+    // A blank or padded reference is quoted so the message names something the
+    // caller can act on rather than trailing off into whitespace.
+    const shown = input.trim() === input && input !== '' ? input : JSON.stringify(input);
+    return { ok: false, code: 'collection_not_found', message: `Collection not found: ${shown}` };
 }
 
 function collectionRowIdNotAllowed(input: string): CollectionResolutionFailure {
@@ -653,7 +668,8 @@ export function parseScopedCollectionId(input: string): ObjectIdReference | null
  *
  * Grammars, in precedence order:
  * 1. `number` — rejected because a device-local row id cannot be authorized
- *    by library before lookup.
+ *    by library before lookup. Any other non-string type is rejected as a
+ *    malformed reference rather than throwing.
  * 2. Scoped identifier (`u-KEY`, `g<groupID>-KEY`, `<libraryID>-KEY`). Authoritative:
  *    it resolves in its embedded library or fails, never falling through to a name.
  *    Its library must be eligible, or — for a caller that named no library —
@@ -673,8 +689,6 @@ export function resolveCollectionMatches(
     collectionIdOrName: number | string | null | undefined,
     options: ResolveCollectionOptions
 ): CollectionResolution {
-    if (collectionIdOrName == null) return collectionNotFound('');
-
     const eligibleLibraryIds = uniqueLibraryIds(options.eligibleLibraryIds ?? []);
     const nameLibraryIds = uniqueLibraryIds(options.nameLibraryIds ?? eligibleLibraryIds);
 
@@ -683,8 +697,26 @@ export function resolveCollectionMatches(
         return collectionRowIdNotAllowed(String(collectionIdOrName));
     }
 
-    const input = collectionIdOrName;
-    if (input.trim() === '') return collectionNotFound(input);
+    // Request payloads are external JSON, so the reference is type-checked like
+    // the entries in resolveCollectionFilters: a malformed reference is a typed
+    // failure, not an exception for every caller to translate. The value is
+    // echoed as well as its type — a caller reporting a batch of references
+    // needs to know which entry to fix.
+    if (typeof collectionIdOrName !== 'string') {
+        return {
+            ok: false,
+            code: 'invalid_request',
+            message:
+                `A collection reference must be a collection identifier, key or name, but ` +
+                `${JSON.stringify(collectionIdOrName) ?? String(collectionIdOrName)} is of type ${typeof collectionIdOrName}.`,
+        };
+    }
+
+    // References come from model-authored JSON, so surrounding whitespace is
+    // tolerated here rather than at each call site — otherwise the same padded
+    // reference resolves in one handler and fails in the next.
+    const input = collectionIdOrName.trim();
+    if (input === '') return collectionNotFound(collectionIdOrName);
 
     const identifier = parseScopedCollectionId(input);
     if (identifier) {

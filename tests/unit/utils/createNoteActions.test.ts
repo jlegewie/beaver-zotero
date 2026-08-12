@@ -117,6 +117,11 @@ describe('executeCreateNoteAction', () => {
             },
             Collections: {
                 get: vi.fn((id: number) => id === 99 ? { key: 'COLLKEY' } : null),
+                // Mirrors Zotero: false when the key is not in that library. The
+                // note staging path looks the row id up rather than handing the
+                // key to addToCollection, which misreads an all-digit key as an id.
+                getIDFromLibraryAndKey: vi.fn((libraryID: number, key: string) =>
+                    harness.collections.find((c: any) => c.libraryID === libraryID && c.key === key)?.id ?? false),
             },
             Item: MockNote,
         };
@@ -133,6 +138,8 @@ describe('executeCreateNoteAction', () => {
         harness.collections = [
             { id: 1, key: 'RLKEY234', libraryID: 1, name: 'Reading List' },
             { id: 2, key: 'INBXKEY2', libraryID: 1, name: 'Inbox' },
+            { id: 3, key: 'LGCYKEY2', libraryID: 1, name: 'Legacy' },
+            { id: 99, key: 'COLLKEY', libraryID: 1, name: 'Inherited' },
         ];
         harness.searchableLibraryIds = [1, 7];
     });
@@ -150,7 +157,7 @@ describe('executeCreateNoteAction', () => {
         expect((globalThis as any).Zotero.Items.loadDataTypes).toHaveBeenCalledWith([relatedItem], ['collections']);
         expect(relatedItem.getCollections).toHaveBeenCalled();
         expect(noteInstances).toHaveLength(1);
-        expect(noteInstances[0].addToCollection).toHaveBeenCalledWith('COLLKEY');
+        expect(noteInstances[0].addToCollection).toHaveBeenCalledWith(99);
         expect(result).toMatchObject({
             library_id: 1,
             zotero_key: 'NOTEKEY',
@@ -261,8 +268,8 @@ describe('executeCreateNoteAction', () => {
 
         const note = noteInstances[0];
         expect(note.addToCollection).toHaveBeenCalledTimes(2);
-        expect(note.addToCollection).toHaveBeenCalledWith('RLKEY234');
-        expect(note.addToCollection).toHaveBeenCalledWith('INBXKEY2');
+        expect(note.addToCollection).toHaveBeenCalledWith(1);
+        expect(note.addToCollection).toHaveBeenCalledWith(2);
         expect(note.addTag).toHaveBeenCalledWith('alpha');
         expect(note.addTag).toHaveBeenCalledWith('beta');
 
@@ -318,7 +325,7 @@ describe('executeCreateNoteAction', () => {
             },
         } as any, 'run-1');
 
-        expect(noteInstances[0].addToCollection).toHaveBeenCalledExactlyOnceWith('RLKEY234');
+        expect(noteInstances[0].addToCollection).toHaveBeenCalledExactlyOnceWith(1);
         expect(vi.mocked(resolveSingleCollection)).not.toHaveBeenCalled();
     });
 
@@ -331,7 +338,7 @@ describe('executeCreateNoteAction', () => {
             },
         } as any, 'run-1');
 
-        expect(noteInstances[0].addToCollection).toHaveBeenCalledExactlyOnceWith('LGCYKEY2');
+        expect(noteInstances[0].addToCollection).toHaveBeenCalledExactlyOnceWith(3);
         expect(result).toMatchObject({
             collection_key: 'LGCYKEY2',
             collection_keys: ['LGCYKEY2'],

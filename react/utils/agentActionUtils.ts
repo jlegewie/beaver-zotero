@@ -473,8 +473,19 @@ export async function autoCreateNoteAgentActions(
                         result.library_id, result.zotero_key
                     );
                     if (noteItem) {
-                        noteItem.addToCollection(collectionKey);
-                        await noteItem.saveTx();
+                        // The row id is looked up rather than passing the key:
+                        // `addToCollection` reads an all-digit argument as a row
+                        // id, and an all-digit collection key is valid in Zotero's
+                        // key alphabet.
+                        const collectionId = Zotero.Collections.getIDFromLibraryAndKey(
+                            result.library_id, collectionKey
+                        );
+                        if (collectionId) {
+                            noteItem.addToCollection(collectionId);
+                            await noteItem.saveTx();
+                        } else {
+                            logger(`autoCreateNoteAgentActions: Collection "${collectionKey}" not found, skipping`, 1);
+                        }
                     }
                 } catch (collectionError: any) {
                     logger(`autoCreateNoteAgentActions: Failed to add note to collection: ${collectionError.message}`, 1);
