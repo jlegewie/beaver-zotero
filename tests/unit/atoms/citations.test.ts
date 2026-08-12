@@ -279,6 +279,32 @@ describe('processCitationsAtom', () => {
         });
     });
 
+    it('closes the numbering gap aliasing leaves behind', () => {
+        const store = createStore();
+        // Mid-stream, one source cited under both of its names is numbered twice
+        // before its metadata arrives, and the next source takes the number after
+        // both. Folding the pair together must not strand that number.
+        store.set(citationKeyToMarkerAtom, {
+            'zotero:1-ITEM': '1',
+            'zotero:u-ITEM': '2',
+            'zotero:u-OTHER': '3',
+        });
+        store.set(citationsAtom, [citation({
+            citation_id: 'c1',
+            requested_ref: { kind: 'zotero', library_id: 1, library_ref: 'u', zotero_key: 'ITEM' },
+            resolved_ref: { kind: 'zotero', library_id: 1, library_ref: 'u', zotero_key: 'ITEM' },
+            raw_tag: '<citation id="1-ITEM"/>',
+        })]);
+
+        store.set(processCitationsAtom);
+
+        expect(store.get(citationKeyToMarkerAtom)).toEqual({
+            'zotero:1-ITEM': '1',
+            'zotero:u-ITEM': '1',
+            'zotero:u-OTHER': '2',
+        });
+    });
+
     it('takes the local-library form from the reference, not from the written tag', () => {
         const store = createStore();
         // A library id in a tag is a rowid from whichever device wrote it, so it

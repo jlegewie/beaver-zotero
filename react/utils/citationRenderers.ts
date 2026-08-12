@@ -4,7 +4,7 @@ import { Provider, createStore } from 'jotai';
 import { store } from '../store';
 import MarkdownRenderer from '../components/messages/MarkdownRenderer';
 import { Citation } from '../../src/services/CitationService';
-import { citationsAtom, citationByKeyAtom, citationKeyToMarkerAtom, getCitationMarkerBaseKeys, pageLabelsByAttachmentIdAtom, externalFileLocalPathsAtom, type PageLabelsByAttachmentId } from '@beaver/agent-core/citations/atoms';
+import { citationsAtom, citationByKeyAtom, citationKeyToMarkerAtom, compactCitationMarkers, getCitationMarkerBaseKeys, pageLabelsByAttachmentIdAtom, externalFileLocalPathsAtom, type PageLabelsByAttachmentId } from '@beaver/agent-core/citations/atoms';
 import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '@beaver/agent-core/citations/externalReferences';
 import { Citation as BeaverCitation } from '@beaver/agent-core/types/citations';
 import { CITATION_TAG_PATTERN } from '../utils/citationPreprocessing';
@@ -51,27 +51,6 @@ function getEarliestExistingMarker(markerMap: Record<string, string>, keys: stri
     if (numericMarkers.length === 0) return markers[0];
 
     return Math.min(...numericMarkers).toString();
-}
-
-/**
- * Renumber the assigned markers 1..N, preserving their order.
- *
- * Merging an alias group onto its earliest marker frees the numbers its other
- * members held, so the sources cited after it keep numbers that no longer have
- * anything below them — an export reading `[1] [1] [3]` for two sources.
- */
-function compactMarkers(markerMap: Record<string, string>): Record<string, string> {
-    const renumbered = new Map(
-        [...new Set(Object.values(markerMap))]
-            .sort((a, b) => parseInt(a, 10) - parseInt(b, 10))
-            .map((marker, index) => [marker, (index + 1).toString()]),
-    );
-
-    const compacted: Record<string, string> = {};
-    for (const [key, marker] of Object.entries(markerMap)) {
-        compacted[key] = renumbered.get(marker) ?? marker;
-    }
-    return compacted;
 }
 
 /**
@@ -290,17 +269,13 @@ export function computeStaticCitationMarkers(
         const uniqueKeys = getCitationMarkerBaseKeys(citation);
         if (uniqueKeys.length > 1) aliasGroups.push(uniqueKeys);
     }
-    let merged = false;
     for (const keys of aliasGroups) {
         const existing = getEarliestExistingMarker(markerMap, keys);
         if (!existing) continue;
-        for (const key of keys) {
-            if (markerMap[key] !== existing) merged = true;
-            markerMap[key] = existing;
-        }
+        for (const key of keys) markerMap[key] = existing;
     }
 
-    return merged ? compactMarkers(markerMap) : markerMap;
+    return compactCitationMarkers(markerMap);
 }
 
 /**

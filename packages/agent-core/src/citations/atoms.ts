@@ -57,6 +57,32 @@ function getEarliestExistingMarker(current: Record<string, string>, keys: string
 }
 
 /**
+ * Renumber assigned markers 1..N, preserving their order.
+ *
+ * Aliasing folds a group onto its earliest marker, freeing the numbers its
+ * other members held: a source cited under two names before its metadata
+ * arrives is numbered twice, and closing that pair leaves everything numbered
+ * after it stranded above a number nothing holds — a thread reading
+ * `[1] [1] [3]` for two sources. A map that is already contiguous is returned
+ * unchanged, so callers can apply this unconditionally.
+ */
+export function compactCitationMarkers(current: Record<string, string>): Record<string, string> {
+    const distinct = [...new Set(Object.values(current))];
+    // Only a wholly numeric map can be renumbered without inventing an order.
+    if (distinct.length === 0 || distinct.some((marker) => !/^\d+$/.test(marker))) return current;
+
+    distinct.sort((a, b) => parseInt(a, 10) - parseInt(b, 10));
+    const renumbered = new Map(distinct.map((marker, index) => [marker, (index + 1).toString()]));
+    if (distinct.every((marker) => renumbered.get(marker) === marker)) return current;
+
+    const compacted: Record<string, string> = {};
+    for (const [key, marker] of Object.entries(current)) {
+        compacted[key] = renumbered.get(marker) ?? marker;
+    }
+    return compacted;
+}
+
+/**
  * Get or assign a numeric marker for a citation key.
  * Returns the existing marker if already assigned, otherwise assigns the next number.
  */
@@ -344,6 +370,14 @@ export const processCitationsAtom = atom(
             if (!citation.invalid) {
                 set(aliasCitationMarkerKeysAtom, getCitationMarkerBaseKeys(citation));
             }
+        }
+
+        // Close the gaps aliasing leaves behind, so a thread numbered as it
+        // streamed reads the same as one numbered from metadata on load.
+        const merged = get(citationKeyToMarkerAtom);
+        const compacted = compactCitationMarkers(merged);
+        if (compacted !== merged) {
+            set(citationKeyToMarkerAtom, compacted);
         }
     }
 );
