@@ -37,8 +37,8 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
         const win = Zotero.getMainWindow();
         const runs = useAtomValue(allRunsAtom);
         // A retry waiting on the server is not in `runs` — it stays hidden while
-        // the turns it replaces are still on screen — so its progress is shown
-        // here, in the slot the new run will occupy once it is committed.
+        // the turns it replaces are still on screen. The footer spinner covers
+        // the healthy path; this slot only shows reconnect / backend-retry.
         const pendingRetry = useAtomValue(pendingRetryAtom);
         const pendingRunId = useAtomValue(pendingScrollToRunAtom);
         const isLoadingThread = useAtomValue(isLoadingThreadAtom);
@@ -320,8 +320,8 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
                     isAnimatingRef.current = false;
                 }, ANIMATION_LOCKOUT_MS);
             }
-            // A starting retry adds no run — its progress indicator is the only
-            // new content, so scroll for it as well.
+            // A starting retry adds no run — scroll so the footer spinner (and
+            // any reconnect / backend-retry status) stays in view.
         }, [pendingRunId, isProtocolScrollLocked, runs, pendingRetry?.runId, scrolledAtom, win]);
 
         // Scroll to bottom when a new pending approval appears
@@ -440,7 +440,7 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
                 ))}
                 {pendingRetry && (
                     <div className="px-4">
-                        <RunStatusIndicator status="in_progress" runId={pendingRetry.runId} />
+                        <RunStatusIndicator status="in_progress" runId={pendingRetry.runId} hideWhenIdle />
                     </div>
                 )}
             </div>

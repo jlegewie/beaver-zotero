@@ -10,6 +10,12 @@ interface RunStatusIndicatorProps {
     runId?: string;
     /** Whether the previous message has a tool call */
     lastMessageHasToolCall?: boolean;
+    /**
+     * Skip the generic "Generating" state. Used for a pending retry, where the
+     * footer spinner already covers the healthy path and this row should only
+     * appear for reconnect / backend-retry.
+     */
+    hideWhenIdle?: boolean;
 }
 
 /**
@@ -19,12 +25,16 @@ interface RunStatusIndicatorProps {
  * connection.
  * Note: Errors are displayed separately by RunErrorDisplay.
  */
-export const RunStatusIndicator: React.FC<RunStatusIndicatorProps> = ({ status, runId, lastMessageHasToolCall }) => {
+export const RunStatusIndicator: React.FC<RunStatusIndicatorProps> = ({ status, runId, lastMessageHasToolCall, hideWhenIdle }) => {
     const retryState = useAtomValue(wsRetryAtom);
     const reconnectState = useAtomValue(wsReconnectingAtom);
 
     // Check if retry state applies to this run
     const isRetrying = retryState && runId && retryState.runId === runId;
+
+    if (hideWhenIdle && !reconnectState && !isRetrying) {
+        return null;
+    }
 
     // Reconnect state is connection-scoped (one active connection at a time),
     // so it applies to whichever run the indicator is spinning for.
@@ -33,8 +43,9 @@ export const RunStatusIndicator: React.FC<RunStatusIndicatorProps> = ({ status, 
             ? `Reconnecting… (${reconnectState.attempt}/${reconnectState.maxAttempts})`
             : 'Reconnecting…')
         : isRetrying
-            // ? `Retrying (${retryState.attempt}/${retryState.maxAttempts}): ${retryState.reason}`
-            ? `Retrying...`
+            ? (retryState.attempt > 1
+                ? `Trying again… (${retryState.attempt}/${retryState.maxAttempts})`
+                : 'Trying again…')
             : 'Generating';
 
     // Structure matches ThinkingPartView for smooth visual transition
