@@ -89,8 +89,8 @@ const Button: React.FC<ButtonProps> = ({
         >
             {icon && (React.isValidElement(icon) ? icon : <Icon icon={icon as React.ComponentType<React.SVGProps<SVGSVGElement>>} className={iconClassName} />)}
             {children}
-            {rightIcon && (React.isValidElement(rightIcon) ? rightIcon : <Icon icon={rightIcon as React.ComponentType<React.SVGProps<SVGSVGElement>>} className={iconClassName} />)}
-            {loading && <Spinner />}
+            {!loading && rightIcon && (React.isValidElement(rightIcon) ? rightIcon : <Icon icon={rightIcon as React.ComponentType<React.SVGProps<SVGSVGElement>>} className={iconClassName} />)}
+            {loading && <Spinner size={12}/>}
             {loading && loadingText && <span>{loadingText}</span>}
         </button>
     );
