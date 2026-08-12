@@ -168,6 +168,12 @@ const LIBRARY_NAMES = new Map([
     [42, 'Excluded Library'],
 ]);
 
+/** Group IDs of the group libraries above, so scoped identifiers resolve. */
+const GROUP_LIBRARY_IDS = new Map([
+    [700, 100],
+    [420, 42],
+]);
+
 describe('resolveCollectionsFilter', () => {
     let previousZotero: any;
 
@@ -184,9 +190,13 @@ describe('resolveCollectionsFilter', () => {
                     COLLECTIONS.filter(c => (c as any).libraryID === libraryId),
             },
             Libraries: {
+                userLibraryID: 1,
                 getAll: () => [{ libraryID: 1 }, { libraryID: 100 }, { libraryID: 42 }],
                 get: (libraryId: number) =>
                     LIBRARY_NAMES.has(libraryId) ? { name: LIBRARY_NAMES.get(libraryId) } : false,
+            },
+            Groups: {
+                getLibraryIDFromGroupID: (groupId: number) => GROUP_LIBRARY_IDS.get(groupId) ?? false,
             },
         };
     });
@@ -219,13 +229,49 @@ describe('resolveCollectionsFilter', () => {
 
     it('separates a key that resolves outside the searched libraries from a missing one', () => {
         // Key-like entries resolve through a cross-library fallback that can
-        // land in a library the request is not scoped to.
-        const resolution = resolveCollectionsFilter(['CCCCCCCC'], [1]);
+        // land in a searchable library the request is not scoped to.
+        const resolution = resolveCollectionsFilter(['BBBBBBBB'], [1]);
 
         expect(resolution.collections).toEqual([]);
         expect(resolution.unresolved).toEqual([]);
-        // Library 42 is excluded, so its collection name is not carried out.
-        expect(resolution.outOfScope).toEqual([{ input: 'CCCCCCCC', name: null, libraryId: 42 }]);
+        expect(resolution.outOfScope).toEqual([{ input: 'BBBBBBBB', name: 'Papers', libraryId: 100 }]);
+    });
+
+    it('does not disclose an excluded library behind a bare key', () => {
+        // The cross-library fallback never reads an excluded library, so a key
+        // that only exists there is indistinguishable from a bad reference —
+        // which is what keeps the library's existence private.
+        const resolution = resolveCollectionsFilter(['CCCCCCCC'], [1]);
+
+        expect(resolution.collections).toEqual([]);
+        expect(resolution.unresolved).toEqual(['CCCCCCCC']);
+        expect(resolution.outOfScope).toEqual([]);
+    });
+
+    it('resolves a scoped identifier in the library it names', () => {
+        const resolution = resolveCollectionsFilter(['u-AAAAAAAA', 'g700-BBBBBBBB'], [1, 100]);
+
+        expect(resolution.collections.map(c => (c as any).id)).toEqual([11, 12]);
+        expect(resolution.unresolved).toEqual([]);
+        expect(resolution.outOfScope).toEqual([]);
+    });
+
+    it('reports the excluded library a scoped identifier names, without its collection name', () => {
+        // The identifier states the library, so reporting the exclusion
+        // discloses only what the caller already sent.
+        const resolution = resolveCollectionsFilter(['g420-CCCCCCCC'], [1]);
+
+        expect(resolution.collections).toEqual([]);
+        expect(resolution.unresolved).toEqual([]);
+        expect(resolution.outOfScope).toEqual([{ input: 'g420-CCCCCCCC', name: null, libraryId: 42 }]);
+    });
+
+    it('treats a scoped identifier for a library this device lacks as unresolved', () => {
+        const resolution = resolveCollectionsFilter(['g999-AAAAAAAA'], [1]);
+
+        expect(resolution.collections).toEqual([]);
+        expect(resolution.unresolved).toEqual(['g999-AAAAAAAA']);
+        expect(resolution.outOfScope).toEqual([]);
     });
 
     it('reports a numeric ID from an unsearched library as out of scope', () => {

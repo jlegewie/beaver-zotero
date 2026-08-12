@@ -813,106 +813,6 @@ export function resolveCollectionForWrite(
     return { ok: true, match: resolution.match };
 }
 
-/** A collection filter resolved to the library that holds it. */
-export interface ResolvedCollectionFilter {
-    libraryID: number;
-    key: string;
-}
-
-/** Resolved collection filters, or the typed failure that stopped the search. */
-export type CollectionFilterResolution =
-    | { ok: true; filters: ResolvedCollectionFilter[] }
-    | CollectionResolutionFailure;
-
-/**
- * Membership key for a collection filter. A collection key is unique only
- * within its library, so comparing bare keys would match an item that sits in a
- * same-keyed collection of a different library.
- */
-export function collectionFilterKey(libraryID: number, collectionKey: string): string {
-    return `${libraryID}-${collectionKey}`;
-}
-
-/**
- * Resolve a search request's `collections_filter` into (library, key) pairs.
- *
- * Every entry must resolve. Dropping an unresolvable filter would run a search
- * the caller believes is collection-scoped and hand back items from outside the
- * filter, so a single failure fails the whole search instead.
- *
- * Filters are OR'd, so an entry matching several collections contributes all of
- * them — a *name* repeated across libraries, or a bare *key* that hits in more
- * than one eligible library. A scoped identifier narrows an entry to exactly
- * one collection.
- *
- * `eligibleLibraryIds` must already be intersected with the searchable
- * libraries. Pass `explicitLibrary` when the request named its libraries, so a
- * scoped identifier from another library is reported as a scope conflict rather
- * than widening the search past the libraries that were asked for.
- */
-export function resolveCollectionFilters(
-    collectionsFilter: (string | number)[] | null | undefined,
-    options: { eligibleLibraryIds: number[]; explicitLibrary?: boolean }
-): CollectionFilterResolution {
-    if (!collectionsFilter) return { ok: true, filters: [] };
-
-    // Request payloads are external JSON, so the container is checked like its
-    // entries: a non-array filter is a malformed request, not an absent one.
-    if (!Array.isArray(collectionsFilter)) {
-        return {
-            ok: false,
-            code: 'invalid_request',
-            message: `A collections filter must be a list of collection identifiers, keys or names, but was of type ${typeof collectionsFilter}.`,
-        };
-    }
-    if (collectionsFilter.length === 0) return { ok: true, filters: [] };
-
-    const filters: ResolvedCollectionFilter[] = [];
-    const seen = new Set<string>();
-    const failures: CollectionResolutionFailure[] = [];
-
-    for (const entry of collectionsFilter) {
-        // Request payloads are external JSON. A malformed entry counts as an
-        // unresolvable filter rather than being dropped, so it can never shrink
-        // the scope of a search the caller believes is filtered.
-        if (typeof entry !== 'string' && typeof entry !== 'number') {
-            failures.push({
-                ok: false,
-                code: 'invalid_request',
-                message: `A collection filter must be a collection identifier, key or name, but one was of type ${typeof entry}.`,
-            });
-            continue;
-        }
-
-        const resolution = resolveCollectionMatches(entry, {
-            eligibleLibraryIds: options.eligibleLibraryIds,
-            explicitLibrary: options.explicitLibrary,
-        });
-        if (!resolution.ok) {
-            failures.push(resolution);
-            continue;
-        }
-        for (const match of resolution.matches) {
-            const dedupKey = collectionFilterKey(match.libraryID, match.collection.key);
-            if (seen.has(dedupKey)) continue;
-            seen.add(dedupKey);
-            filters.push({ libraryID: match.libraryID, key: match.collection.key });
-        }
-    }
-
-    if (failures.length > 0) {
-        return {
-            ok: false,
-            code: failures[0].code,
-            message:
-                `No search was run: ${failures.length} of ${collectionsFilter.length} collection filters ` +
-                `could not be resolved. ${failures.map((failure) => failure.message).join(' ')}`,
-        };
-    }
-
-    return { ok: true, filters };
-}
-
 /**
  * Libraries to echo alongside a failed collection resolution. Only library-scope
  * failures get the list, since it tells the caller where it may retry; a
@@ -1048,14 +948,33 @@ export interface CollectionsFilterError {
 }
 
 /**
+ * The library a scoped collection identifier names, when that library exists on
+ * this device but is not one the search covers. Returns null for every other
+ * input, including a bare key, a name, and an identifier for a library this
+ * device does not have.
+ *
+ * Nothing is read out of the named library: the identifier states it, so
+ * reporting it discloses only what the caller already sent.
+ */
+function scopedIdentifierLibraryOutsideScope(filter: string, libraryIds: number[]): number | null {
+    const identifier = parseScopedCollectionId(filter);
+    if (!identifier) return null;
+    const libraryID = identifier.library_id;
+    if (libraryID === UNRESOLVED_LIBRARY_ID) return null;
+    if (libraryIds.includes(libraryID)) return null;
+    return Zotero.Libraries?.get?.(libraryID) ? libraryID : null;
+}
+
+/**
  * Resolve a `collections_filter` against the libraries a search will cover.
  *
  * A name is resolved in every searched library, because the same name can
  * legitimately exist in several of them. Matches outside those libraries are
  * reported separately rather than dropped: numeric IDs and key-like entries
  * resolve through a cross-library fallback that can land in a library the
- * request is not scoped to, or that the user excluded from Beaver, and the
- * caller has to tell that apart from a bad reference.
+ * request is not scoped to, and a scoped identifier can name a library the user
+ * excluded from Beaver — the caller has to tell those apart from a bad
+ * reference.
  *
  * `libraryIds` must already be the searchable libraries the search will cover;
  * an empty list resolves nothing at all.
@@ -1091,6 +1010,19 @@ export function resolveCollectionsFilter(
         const inScope = matches.filter((collection) => libraryIds.includes(collection.libraryID));
         if (inScope.length > 0) {
             for (const collection of inScope) collections.set(collection.id, collection);
+        } else if (matches.length === 0 && typeof filter === 'string') {
+            // A scoped identifier names its library outright, and the lookup
+            // above refuses to read a library excluded from Beaver — so such an
+            // entry arrives here with no match at all. Classify it by the library
+            // it names, so the caller reports the exclusion instead of a missing
+            // collection. The name is never read, so nothing from the excluded
+            // library leaves this lookup.
+            const excludedLibraryId = scopedIdentifierLibraryOutsideScope(filter, libraryIds);
+            if (excludedLibraryId !== null) {
+                outOfScope.push({ input: filter, name: null, libraryId: excludedLibraryId });
+            } else {
+                unresolved.push(filter);
+            }
         } else if (matches.length > 0) {
             const [collection] = matches;
             outOfScope.push({

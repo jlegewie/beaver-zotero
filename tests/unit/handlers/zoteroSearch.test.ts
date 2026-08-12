@@ -238,6 +238,27 @@ describe('handleZoteroSearchRequest', () => {
                 nameLibraryIds: [1],
                 explicitLibrary: true,
             });
+            // This request scopes by collection, so the normalized condition
+            // lands on the scope search rather than the main one.
+            expect(scopeConditions()).toContainEqual(['collection', 'is', 'ABCD2345']);
+        });
+
+        it('normalizes the identifier on a condition that stays on the main search', async () => {
+            searchResultIds = [];
+
+            const response = await handleZoteroSearchRequest({
+                event: 'zotero_search_request',
+                request_id: 'req-scoped-collection-no-children',
+                conditions: [{ field: 'collection', operator: 'is', value: 'u-ABCD2345' }],
+                join_mode: 'all',
+                item_category: 'all',
+                include_children: false,
+                recursive: false,
+                limit: 50,
+                offset: 0,
+            });
+
+            expect(response.error).toBeUndefined();
             expect(addedConditions()).toContainEqual(['collection', 'is', 'ABCD2345']);
         });
 
@@ -265,7 +286,8 @@ describe('handleZoteroSearchRequest', () => {
                 total_count: 0,
                 error_code: 'invalid_request',
             });
-            expect(lastSearch).toBeNull();
+            // The handler returns before constructing a search at all.
+            expect(mainSearch()).toBeNull();
         });
     });
 

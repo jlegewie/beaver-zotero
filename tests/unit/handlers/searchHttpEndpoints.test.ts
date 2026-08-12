@@ -55,7 +55,7 @@ describe('metadata search HTTP endpoint', () => {
         );
     });
 
-    it('leaves error fields unset on a successful search', async () => {
+    it('reports null error fields on a successful search', async () => {
         metadataHandler.mockResolvedValue({
             type: 'item_search_by_metadata',
             request_id: 'req-1',
@@ -65,8 +65,8 @@ describe('metadata search HTTP endpoint', () => {
         const response = await handleMetadataSearchHttpRequest({ title_query: 'anything', limit: 10 });
 
         expect(response.items).toHaveLength(1);
-        expect(response.error).toBeUndefined();
-        expect(response.error_code).toBeUndefined();
+        expect(response.error).toBeNull();
+        expect(response.error_code).toBeNull();
     });
 });
 
@@ -93,7 +93,7 @@ describe('topic search HTTP endpoint', () => {
         expect(response.error).toContain('No Such Collection');
     });
 
-    it('leaves error fields unset on a successful search', async () => {
+    it('reports null error fields on a successful search', async () => {
         topicHandler.mockResolvedValue({
             type: 'item_search_by_topic',
             request_id: 'req-1',
@@ -103,7 +103,7 @@ describe('topic search HTTP endpoint', () => {
         const response = await handleTopicSearchHttpRequest({ topic_query: 'anything', limit: 10 });
 
         expect(response.items).toHaveLength(1);
-        expect(response.error).toBeUndefined();
-        expect(response.error_code).toBeUndefined();
+        expect(response.error).toBeNull();
+        expect(response.error_code).toBeNull();
     });
 });

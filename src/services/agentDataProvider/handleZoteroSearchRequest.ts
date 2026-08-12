@@ -192,8 +192,10 @@ export async function handleZoteroSearchRequest(
         search.libraryID = library.libraryID;
 
         // Collection scope.
+        // Read from the normalized conditions, so this and the loop below always
+        // classify the same values.
         const scopableCollectionConditions = request.include_children && request.join_mode !== 'any'
-            ? request.conditions.filter(isScopableCollectionCondition)
+            ? normalizedConditions.filter(isScopableCollectionCondition)
             : [];
         let scopeSearch: Zotero.Search | null = null;
         let scopedConditionCount = 0;
