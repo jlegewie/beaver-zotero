@@ -32,6 +32,16 @@ export const threadRunsAtom = atom<AgentRun[]>([]);
 export const activeRunAtom = atom<AgentRun | null>(null);
 
 /**
+ * A started run whose place in the thread is not settled yet, kept out of the
+ * rendered thread until it is.
+ *
+ * A retry leaves the runs it replaces in place until the server confirms it
+ * removed them. Until that point the thread still holds the old turns, so
+ * rendering the retry alongside them would show the same prompt twice.
+ */
+export const uncommittedRunIdAtom = atom<string | null>(null);
+
+/**
  * ID of the thread the runs above belong to (null before a thread is opened).
  * Lives here with the run state so run-state code has no dependency on the
  * thread module; a client may re-export it from its own thread module.
@@ -52,7 +62,8 @@ export const isLoadingThreadAtom = atom<boolean>(false);
 export const allRunsAtom = atom((get) => {
     const completed = get(threadRunsAtom);
     const active = get(activeRunAtom);
-    return active ? [...completed, active] : completed;
+    if (!active || active.id === get(uncommittedRunIdAtom)) return completed;
+    return [...completed, active];
 });
 
 /** Set of run IDs that were resumed (for hiding error runs that were resumed) */

@@ -1,6 +1,6 @@
 /**
  * User-facing titles for agent-run error types (shared by the in-chat error
- * card and the retry-restore popup).
+ * card and the retry-failure popup).
  */
 const RUN_ERROR_TITLE_BY_TYPE: Record<string, string> = {
     // Account & Auth
@@ -66,10 +66,10 @@ export function getRunErrorTitle(type: string | undefined): string {
 }
 
 /**
- * Popup body for a failed retry that restored the previous thread: typed title
+ * Popup body for a retry that failed before it replaced anything: typed title
  * plus the user-facing message and optional longer details.
  */
-export function formatRetryRestorePopupText(params: {
+export function formatRetryFailurePopupText(params: {
     type?: string;
     message?: string;
     details?: string;

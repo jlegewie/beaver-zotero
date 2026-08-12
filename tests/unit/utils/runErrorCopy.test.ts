@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-    formatRetryRestorePopupText,
+    formatRetryFailurePopupText,
     getRunErrorTitle,
 } from '../../../react/utils/runErrorCopy';
 
@@ -17,16 +17,16 @@ describe('getRunErrorTitle', () => {
     });
 });
 
-describe('formatRetryRestorePopupText', () => {
+describe('formatRetryFailurePopupText', () => {
     it('formats typed title plus message', () => {
-        expect(formatRetryRestorePopupText({
+        expect(formatRetryFailurePopupText({
             type: 'usage_limit_exceeded',
             message: "You've used all your Beaver credits.",
         })).toBe("Limit Reached. You've used all your Beaver credits.");
     });
 
     it('appends longer connection details after the short message', () => {
-        expect(formatRetryRestorePopupText({
+        expect(formatRetryFailurePopupText({
             type: 'connection_error',
             message: 'Could not connect to Beaver.',
             details: 'Your device appears to be offline. Reconnect to the internet and try again.',
@@ -36,7 +36,7 @@ describe('formatRetryRestorePopupText', () => {
     });
 
     it('strips a duplicated error-type prefix from the message', () => {
-        expect(formatRetryRestorePopupText({
+        expect(formatRetryFailurePopupText({
             type: 'internal_error',
             message: 'internal_error: Something went wrong',
         })).toBe('System Error. Something went wrong.');

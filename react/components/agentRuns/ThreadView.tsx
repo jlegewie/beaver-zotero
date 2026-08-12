@@ -2,6 +2,8 @@ import React, { useEffect, useRef, forwardRef, useLayoutEffect, useCallback } fr
 import { useAtomValue, useSetAtom } from "jotai";
 import { allRunsAtom } from "@beaver/agent-core/run-state/atoms";
 import { AgentRunView } from "./AgentRunView";
+import { RunStatusIndicator } from "./RunStatusIndicator";
+import { pendingRetryAtom } from "../../atoms/agentRunAtoms";
 import { scrollToBottom } from "../../utils/scrollToBottom";
 import { userScrolledAtom, windowUserScrolledAtom } from "../../atoms/ui";
 import { currentThreadScrollPositionAtom, windowScrollPositionAtom, currentThreadIdAtom, pendingScrollToRunAtom, isLoadingThreadAtom } from "../../atoms/threads";
@@ -34,6 +36,10 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
     function ThreadView({ className, isWindow = false }: ThreadViewProps, ref: React.ForwardedRef<HTMLDivElement>) {
         const win = Zotero.getMainWindow();
         const runs = useAtomValue(allRunsAtom);
+        // A retry waiting on the server is not in `runs` — it stays hidden while
+        // the turns it replaces are still on screen — so its progress is shown
+        // here, in the slot the new run will occupy once it is committed.
+        const pendingRetry = useAtomValue(pendingRetryAtom);
         const pendingRunId = useAtomValue(pendingScrollToRunAtom);
         const isLoadingThread = useAtomValue(isLoadingThreadAtom);
         const setPendingScrollToRun = useSetAtom(pendingScrollToRunAtom);
@@ -308,13 +314,15 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
                 
                 // Pass the correct scroll atom for this context
                 scrollToBottom(scrollContainerRef as React.RefObject<HTMLElement>, undefined, scrolledAtom);
-                
+
                 // Clear animation flag after animation completes (with buffer)
                 win.setTimeout(() => {
                     isAnimatingRef.current = false;
                 }, ANIMATION_LOCKOUT_MS);
             }
-        }, [pendingRunId, isProtocolScrollLocked, runs, scrolledAtom, win]);
+            // A starting retry adds no run — its progress indicator is the only
+            // new content, so scroll for it as well.
+        }, [pendingRunId, isProtocolScrollLocked, runs, pendingRetry?.runId, scrolledAtom, win]);
 
         // Scroll to bottom when a new pending approval appears
         // This ensures the approval buttons are visible, even if user had scrolled up
@@ -430,6 +438,11 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
                         isLastRun={index === runs.length - 1}
                     />
                 ))}
+                {pendingRetry && (
+                    <div className="px-4">
+                        <RunStatusIndicator status="in_progress" runId={pendingRetry.runId} />
+                    </div>
+                )}
             </div>
         );
     }

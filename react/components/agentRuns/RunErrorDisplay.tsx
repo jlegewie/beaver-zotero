@@ -5,7 +5,7 @@ import Button from '@beaver/agent-ui/primitives/Button';
 import ContextMenu from '@beaver/agent-ui/primitives/ContextMenu';
 import useSelectionContextMenu from '../../hooks/useSelectionContextMenu';
 import { parseTextWithLinksAndNewlines } from '../../utils/parseTextWithLinksAndNewlines';
-import { regenerateFromRunAtom, resumeFromRunAtom } from '../../atoms/agentRunAtoms';
+import { isWSChatPendingAtom, pendingRetryAtom, regenerateFromRunAtom, resumeFromRunAtom } from '../../atoms/agentRunAtoms';
 import { runErrorVisibilityAtom, setRunErrorVisibilityAtom } from '../../atoms/messageUIState';
 import { remainingBeaverCreditsAtom, errorCreditCheckAtom } from '../../atoms/profile';
 import { beaverDefaultModelAtom, updateSelectedModelAtom, type ModelConfig } from '../../atoms/models';
@@ -41,6 +41,11 @@ export const RunErrorDisplay: React.FC<RunErrorDisplayProps> = ({ runId, error, 
     const hasCredits = remainingCredits > 0;
     const defaultBeaverModel = useAtomValue(beaverDefaultModelAtom);
     const setErrorCreditCheck = useSetAtom(errorCreditCheckAtom);
+    const pendingRetry = useAtomValue(pendingRetryAtom);
+    // A retry this card started, still waiting on the server. Any run under way
+    // owns the connection, so no button here may start a second one.
+    const isRetrying = pendingRetry?.sourceRunId === runId;
+    const isBusy = useAtomValue(isWSChatPendingAtom);
 
     // Visibility state
     const runErrorVisibility = useAtomValue(runErrorVisibilityAtom);
@@ -172,7 +177,7 @@ export const RunErrorDisplay: React.FC<RunErrorDisplayProps> = ({ runId, error, 
                                         iconClassName="font-color-red"
                                         rightIcon={DollarCircleIcon}
                                         onClick={handleRetryWithBeaver}
-                                        disabled={!defaultBeaverModel}
+                                        disabled={!defaultBeaverModel || isBusy}
                                         data-run-error-action="try-with-beaver"
                                         data-run-error-primary-action={primaryActionAttr('try-with-beaver')}
                                     >
@@ -197,6 +202,7 @@ export const RunErrorDisplay: React.FC<RunErrorDisplayProps> = ({ runId, error, 
                                         iconClassName="font-color-red"
                                         rightIcon={LinkForwardIcon}
                                         onClick={handleResume}
+                                        disabled={isBusy}
                                         data-run-error-action="resume"
                                         data-run-error-primary-action={primaryActionAttr('resume')}
                                     >
@@ -209,6 +215,8 @@ export const RunErrorDisplay: React.FC<RunErrorDisplayProps> = ({ runId, error, 
                                         iconClassName="font-color-red"
                                         rightIcon={RepeatIcon}
                                         onClick={handleRetry}
+                                        loading={isRetrying}
+                                        disabled={isBusy}
                                         data-run-error-action="retry"
                                         data-run-error-primary-action={primaryActionAttr('retry')}
                                     >

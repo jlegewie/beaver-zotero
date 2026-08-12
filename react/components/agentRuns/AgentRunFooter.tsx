@@ -17,7 +17,7 @@ import { messageSourcesVisibilityAtom, toggleMessageSourcesVisibilityAtom, setMe
 import { toolResultsMapAtom, allRunsAtom } from '@beaver/agent-core/run-state/atoms';
 import { extractRunResponseContent } from '../../utils/threadContent';
 import TokenUsageDisplay from './TokenUsageDisplay';
-import { regenerateFromRunAtom, streamingDoneRunIdsAtom } from '../../atoms/agentRunAtoms';
+import { isWSChatPendingAtom, pendingRetryAtom, regenerateFromRunAtom, streamingDoneRunIdsAtom } from '../../atoms/agentRunAtoms';
 import { currentThreadIdAtom } from '../../atoms/threads';
 import { store } from '../../store';
 import Tooltip from '@beaver/agent-ui/primitives/Tooltip';
@@ -226,6 +226,11 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
     };
 
     const regenerateFromRun = useSetAtom(regenerateFromRunAtom);
+    const pendingRetry = useAtomValue(pendingRetryAtom);
+    const isPending = useAtomValue(isWSChatPendingAtom);
+    // The retry this run started, still waiting on the server to confirm the
+    // turns it replaces are gone.
+    const isRetrying = pendingRetry?.sourceRunId === run.id;
 
     const handleRegenerate = async () => {
         // regenerateFromRunAtom walks the resume chain back to the root
@@ -287,7 +292,7 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
                         tooltipContent="More options"
                     />
                     <Tooltip
-                        content="Retry"
+                        content={isRetrying ? 'Retrying…' : 'Retry'}
                         showArrow
                     >
                         <IconButton
@@ -295,6 +300,10 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
                             onClick={handleRegenerate}
                             className="scale-11"
                             ariaLabel="Retry"
+                            loading={isRetrying}
+                            // A run already under way owns the connection, so a
+                            // second retry would replace it mid-flight.
+                            disabled={isPending}
                         />
                     </Tooltip>
                     <Tooltip

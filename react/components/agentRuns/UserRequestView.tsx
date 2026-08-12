@@ -8,7 +8,7 @@ import { EditIcon, Spinner } from '../icons/icons';
 import Button from '@beaver/agent-ui/primitives/Button';
 import ModelSelectionButton from '../ui/buttons/ModelSelectionButton';
 import SearchMenu from '../ui/menus/SearchMenu';
-import { regenerateWithEditedPromptAtom, isWSChatPendingAtom } from '../../atoms/agentRunAtoms';
+import { regenerateWithEditedPromptAtom, isWSChatPendingAtom, pendingRetryAtom } from '../../atoms/agentRunAtoms';
 import { selectedModelAtom } from '../../atoms/models';
 import { isStreamingAtom } from '@beaver/agent-core/run-state/atoms';
 import { actionsAtom, buildEditedPromptActionsAtom } from '../../atoms/actions';
@@ -65,6 +65,11 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
     const regenerateWithEditedPrompt = useSetAtom(regenerateWithEditedPromptAtom);
     const buildEditedPromptActions = useSetAtom(buildEditedPromptActionsAtom);
     const isPending = useAtomValue(isWSChatPendingAtom);
+    const pendingRetry = useAtomValue(pendingRetryAtom);
+    // This message's edit is on its way to the server. The editor stays open
+    // and untouched until the retry is confirmed (this view is then replaced)
+    // or fails — in which case the text the user typed is still here.
+    const isSubmittingEdit = pendingRetry?.sourceRunId === runId;
     const selectedModel = useAtomValue(selectedModelAtom);
     const isStreaming = useAtomValue(isStreamingAtom);
     const allActions = useAtomValue(actionsAtom);
@@ -118,9 +123,11 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
         }
     }, [displayContent, maxContentHeight]);
 
-    // Handle click outside to close edit mode
+    // Handle click outside to close edit mode. Suspended while the edit is in
+    // flight: closing here also resets the text, which would discard the edit
+    // the user is waiting on if the retry comes back failed.
     useEffect(() => {
-        if (!isEditing) return;
+        if (!isEditing || isSubmittingEdit) return;
 
         // Get the document from the container element (works in both sidebar and separate window)
         const doc = containerRef.current?.ownerDocument;
@@ -149,11 +156,11 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
         return () => {
             doc.removeEventListener('mousedown', handleClickOutside, true);
         };
-    }, [isEditing, displayContent]);
+    }, [isEditing, isSubmittingEdit, displayContent]);
 
     // Close edit mode when scrolled out of view
     useEffect(() => {
-        if (!isEditing || !containerRef.current) return;
+        if (!isEditing || isSubmittingEdit || !containerRef.current) return;
 
         const observer = new IntersectionObserver(
             ([entry]) => {
@@ -172,7 +179,7 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
         observer.observe(containerRef.current);
 
         return () => observer.disconnect();
-    }, [isEditing]);
+    }, [isEditing, isSubmittingEdit]);
 
     // Focus the editor when entering edit mode (caret lands at the end).
     useEffect(() => {
@@ -260,7 +267,9 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
                 : userPrompt.attachments,
         };
 
-        setIsEditing(false);
+        // The editor deliberately stays open: this view is only replaced once
+        // the server confirms the retry, and until then it is what holds the
+        // user's edit.
         await regenerateWithEditedPrompt({ runId, editedPrompt });
     }, [isPending, editedContent, userPrompt, runId, regenerateWithEditedPrompt, buildEditedPromptActions]);
 
@@ -278,9 +287,12 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
         if (handleSlashMenuKeyDown(e)) return;
         if (e.key === 'Escape') {
             e.preventDefault();
-            setIsEditing(false);
+            // Closing while the edit is in flight would discard it: reopening
+            // reseeds the editor from the message, which still holds the text
+            // the user replaced.
+            if (!isSubmittingEdit) setIsEditing(false);
         }
-    }, [handleSlashMenuKeyDown]);
+    }, [handleSlashMenuKeyDown, isSubmittingEdit]);
 
     const menuPortalContainer = editInputRef.current?.closest('[id^="beaver-react-root-"], #beaver-pane-window') as HTMLElement | null;
 
@@ -406,6 +418,7 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
                                     variant="ghost"
                                     style={{ padding: '2px 5px' }}
                                     onClick={() => setIsEditing(false)}
+                                    disabled={isSubmittingEdit}
                                 >
                                     Cancel
                                 </Button>
@@ -414,6 +427,7 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
                                     variant="solid"
                                     style={{ padding: '2px 5px' }}
                                     onClick={handleSubmit}
+                                    loading={isSubmittingEdit}
                                     disabled={editedContent.length === 0 || isPending || !selectedModel || isSlashMenuOpen}
                                 >
                                     <span>Send <span className="opacity-50">⏎</span></span>

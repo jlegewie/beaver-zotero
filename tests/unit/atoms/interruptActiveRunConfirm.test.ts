@@ -106,6 +106,7 @@ vi.mock('@beaver/agent-core/run-state/atoms', async () => {
     return {
         threadRunsAtom: atom<unknown[]>([]),
         activeRunAtom: atom<unknown | null>(null),
+        uncommittedRunIdAtom: atom<string | null>(null),
         // threads.ts re-exports these three from the run state, so the stub must
         // provide them
         currentThreadIdAtom: atom<string | null>(null),
@@ -120,6 +121,10 @@ vi.mock('../../../react/atoms/agentRunAtoms', async () => {
         isWSChatPendingAtom: atom(false),
         isWSConnectedAtom: atom(false),
         isWSReadyAtom: atom(false),
+        pendingRetryAtom: atom<unknown | null>(null),
+        // No pending retry in these fixtures, so the canceled run is appended
+        // to the thread as usual.
+        abortPendingRetryAtom: atom(null, () => ({ aborted: false, popupId: null })),
     };
 });
 

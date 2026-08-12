@@ -17,9 +17,9 @@ import { resetMessageUIStateAtom, retainedReviewActionsAtom } from "./messageUIS
 import { checkExternalReferencesAtom } from "./externalReferences";
 import { clearExternalReferenceCacheAtom, addExternalReferencesToMappingAtom } from "@beaver/agent-core/citations/externalReferences";
 import { ExternalReference } from "@beaver/agent-core/types/externalReferences";
-import { threadRunsAtom, activeRunAtom, currentThreadIdAtom, currentThreadNameAtom, isLoadingThreadAtom } from "@beaver/agent-core/run-state/atoms";
+import { threadRunsAtom, activeRunAtom, uncommittedRunIdAtom, currentThreadIdAtom, currentThreadNameAtom, isLoadingThreadAtom } from "@beaver/agent-core/run-state/atoms";
 import { loadThreadRuns } from "@beaver/agent-core/run-state/loadThreadRuns";
-import { isWSChatPendingAtom, isWSConnectedAtom, isWSReadyAtom } from "./agentRunAtoms";
+import { abortPendingRetryAtom, isWSChatPendingAtom, isWSConnectedAtom, isWSReadyAtom, pendingRetryAtom } from "./agentRunAtoms";
 import { AgentRun, isRunActive } from "@beaver/agent-core/agents/types";
 import { 
     threadAgentActionsAtom, 
@@ -237,28 +237,38 @@ function confirmOpenMismatchedThread(): boolean {
  * Cancel any active run when switching threads.
  * This ensures the WebSocket connection is closed and UI state is consistent.
  */
-async function cancelActiveRunIfNeeded(get: (atom: any) => any, set: (atom: any, value?: any) => void): Promise<void> {
+async function cancelActiveRunIfNeeded(get: (atom: any) => any, set: (atom: any, value?: any) => any): Promise<void> {
     const isPending = get(isWSChatPendingAtom);
     const activeRun = get(activeRunAtom);
-    
+
     if (isPending || activeRun) {
         logger('cancelActiveRunIfNeeded: Canceling active run before switching threads', 1);
-        
+
         // Set pending to false immediately for responsive UI
         set(isWSChatPendingAtom, false);
-        
+
         // Mark active run as canceled if it exists
         if (activeRun && activeRun.status === 'in_progress') {
-            const canceledRun: AgentRun = {
-                ...activeRun,
-                status: 'canceled',
-                completed_at: new Date().toISOString(),
-            };
-            // Move canceled run to completed runs before clearing
-            set(threadRunsAtom, (runs: AgentRun[]) => [...runs, canceledRun]);
+            // A retry the server never confirmed the truncation for replaced
+            // nothing, and its run was never shown. Dropping it keeps a run the
+            // user never saw out of the thread they are leaving.
+            const { aborted } = set(abortPendingRetryAtom, activeRun.id) as { aborted: boolean };
+            if (!aborted) {
+                const canceledRun: AgentRun = {
+                    ...activeRun,
+                    status: 'canceled',
+                    completed_at: new Date().toISOString(),
+                };
+                // Move canceled run to completed runs before clearing
+                set(threadRunsAtom, (runs: AgentRun[]) => [...runs, canceledRun]);
+            }
         }
         set(activeRunAtom, null);
-        
+        // Nothing of a pending retry was applied, so leaving the thread just
+        // drops the plan (covers a retry whose shell is already gone).
+        set(pendingRetryAtom, null);
+        set(uncommittedRunIdAtom, null);
+
         // Cancel the WebSocket connection
         await agentService.cancel();
         set(isWSConnectedAtom, false);
