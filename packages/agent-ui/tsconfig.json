@@ -27,7 +27,11 @@
   //   - `types`: exactly react + react-dom. Listing them explicitly is what
   //     keeps every *other* installed @types package — zotero-types and
   //     @types/office-js above all — out of the automatic program. Omitting the
-  //     line would make all of them ambient.
+  //     line would make all of them ambient. It is not the package's dependency
+  //     list: it names only the @types packages that must be ambient. A
+  //     dependency that ships its own declarations (lexical and its
+  //     @lexical/* packages do) resolves them through the import and needs no
+  //     entry here, so this stays at two even as the declared set grows.
   //
   // `skipLibCheck: true` mirrors agent-core: dependency declarations are not
   // checked here, while this package's own code is still fully checked against
