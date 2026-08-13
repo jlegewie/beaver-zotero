@@ -475,6 +475,13 @@ const SearchMenu: React.FC<SearchMenuProps> = ({
                     item.onClick();
                     if(closeOnSelect) onClose('select');
                 }}
+                onMouseDown={(e) => {
+                    // A menu without its own search field is driven by an
+                    // external editor. Keep the caret there when a row is
+                    // clicked so mouse navigation into a submenu does not
+                    // stop subsequent typing from reaching that editor.
+                    if (!showSearchInput) e.preventDefault();
+                }}
                 // Hover moves the focused item rather than highlighting on top
                 // of it: a separate hover highlight would keep showing the row
                 // under the pointer while the arrow keys moved the real focus
