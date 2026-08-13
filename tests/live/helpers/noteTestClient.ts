@@ -42,6 +42,12 @@ export interface ReadNoteResult {
     item_id: number;
     saved_html: string;
     live_html: string | null;
+    /**
+     * The open editor's own serialization of its ProseMirror document, or null
+     * when no editor is open. Unlike `live_html` it is produced even when the
+     * document has not changed since the last save.
+     */
+    editor_html: string | null;
     in_editor: boolean;
     error?: string;
 }

@@ -294,7 +294,7 @@ the React bundle only once the plugin is authenticated, so the port answers
 | `POST /beaver/test/resolve-item` | Resolve library_id + zotero_key to item_id |
 | `POST /beaver/test/note-create` | Create a Zotero note (optionally wrapped with schema-version) — used by `editNote.live.test.ts` |
 | `POST /beaver/test/note-delete` | Erase a note by library_id + zotero_key |
-| `POST /beaver/test/note-read` | Return `{saved_html, live_html, in_editor}` for a note |
+| `POST /beaver/test/note-read` | Return `{saved_html, live_html, editor_html, in_editor}` for a note (`editor_html` is the open editor's own serialization, produced even when the document is unchanged) |
 | `POST /beaver/test/note-open-editor` | Open a note in the Zotero editor (tab or window) |
 | `POST /beaver/test/note-close-editor` | Close all editor instances for a note |
 | `POST /beaver/test/note-undo` | Invoke `undoEditNoteAction()` given an AgentAction payload |

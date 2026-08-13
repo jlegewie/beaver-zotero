@@ -2457,6 +2457,65 @@ describe('Stored locator tokens in citation expansion', () => {
         expect(createCitationHTML).not.toHaveBeenCalled();
     });
 
+    it('returns the stored raw HTML when a page locator is copied back verbatim', () => {
+        // The recorded token is the physical page the agent wrote; the citation
+        // separately stores the printed label that page carries.
+        const noteHtml = wrap(`<p>Text ${rawCitationWithToken('PGVERB', 'page15', { page: '352' })} more text</p>`);
+        const { simplified, metadata } = simplifyNoteHtml(noteHtml, 1);
+
+        expect(simplified).toContain('loc="page15"');
+
+        const expanded = expandToRawHtml(simplified, metadata, 'old');
+
+        expect(expanded).toBe(roundtripExpected(noteHtml));
+        expect(createCitationHTML).not.toHaveBeenCalled();
+    });
+
+    it('returns the stored raw HTML when a citation with no locator is copied back verbatim', () => {
+        const noteHtml = wrap(`<p>Text ${rawCitation('NOLOC1', 1, '', 'Author, 2024')} more text</p>`);
+        const { simplified, metadata } = simplifyNoteHtml(noteHtml, 1);
+
+        // Nothing to project, so the tag carries no locator at all — and a tag
+        // without one must still compare equal to the citation it came from.
+        expect(simplified).toContain('id="1-NOLOC1"');
+        expect(simplified).not.toContain('loc=');
+
+        const expanded = expandToRawHtml(simplified, metadata, 'old');
+
+        expect(expanded).toBe(roundtripExpected(noteHtml));
+        expect(createCitationHTML).not.toHaveBeenCalled();
+    });
+
+    it('returns a compound citation verbatim', () => {
+        const noteHtml = wrap(`<p>Both ${rawCompoundCitation(['CMPA', 'CMPB'], 1, 'A, 2020; B, 2021')}.</p>`);
+        const { simplified, metadata } = simplifyNoteHtml(noteHtml, 1);
+
+        // Compound citations project no locator and are never rebuilt.
+        expect(simplified).toContain('items="1-CMPA, 1-CMPB"');
+        expect(simplified).not.toContain('loc=');
+
+        const expanded = expandToRawHtml(simplified, metadata, 'old');
+
+        expect(expanded).toBe(roundtripExpected(noteHtml));
+        expect(createCitationHTML).not.toHaveBeenCalled();
+    });
+
+    it('rebuilds without a locator when one is dropped from the tag', () => {
+        const noteHtml = wrap(`<p>Text ${rawCitationWithToken('DROP1', 's56-s59')} more text</p>`);
+        const { simplified, metadata } = simplifyNoteHtml(noteHtml, 1);
+
+        const editedSimplified = simplified.replace(' loc="s56-s59"', '');
+        expandToRawHtml(editedSimplified, metadata, 'new');
+
+        // There is no locator left to store, so neither a page nor a token is
+        // recorded — the citation stops claiming a position in the document.
+        expect(createCitationHTML).toHaveBeenCalledWith(
+            expect.objectContaining({ key: 'DROP1' }),
+            undefined,
+            {},
+        );
+    });
+
     it('rebuilds and records the new token when a structural locator is changed', () => {
         const noteHtml = wrap(`<p>Text ${rawCitationWithToken('SENT1', 's56-s59')} more text</p>`);
         const { simplified, metadata } = simplifyNoteHtml(noteHtml, 1);

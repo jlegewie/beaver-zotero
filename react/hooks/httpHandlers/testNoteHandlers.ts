@@ -57,6 +57,14 @@ export async function handleTestNoteDeleteHttpRequest(request: any) {
     return { ok: true, deleted: true };
 }
 
+/**
+ * Return three views of a note:
+ *   - `saved_html`  what the DB holds,
+ *   - `live_html`   what Beaver's read path sees (unsaved editor content
+ *                   included),
+ *   - `editor_html` the open editor's own serialization, unconditionally
+ *                   (see `editorSerializedHtml`), or null when none is open.
+ */
 export async function handleTestNoteReadHttpRequest(request: any) {
     const { library_id, zotero_key } = request;
     if (library_id == null || zotero_key == null || library_id === UNRESOLVED_LIBRARY_ID) {
@@ -80,6 +88,7 @@ export async function handleTestNoteReadHttpRequest(request: any) {
         item_id: item.id,
         saved_html: savedHtml,
         live_html: liveHtml,
+        editor_html: editorSerializedHtml(item.id),
         in_editor: inEditor,
     };
 }
@@ -163,6 +172,31 @@ function connectedEditorInstances(itemId: number): any[] {
     return instances.filter(
         (inst: any) => inst?._item?.id === itemId && isNoteEditorFrameConnected(inst),
     );
+}
+
+/**
+ * The note editor's own serialization of its live ProseMirror document.
+ *
+ * `getDataSync(true)` — what the read path uses — returns null unless the
+ * document changed since the last save, so it cannot show what an untouched
+ * editor made of the stored HTML. Called with no argument it always serializes,
+ * which is the only way to observe a ProseMirror parse + serialize round trip
+ * from outside the editor.
+ *
+ * Returns null when no connected editor instance produces one.
+ */
+function editorSerializedHtml(itemId: number): string | null {
+    for (const inst of connectedEditorInstances(itemId)) {
+        try {
+            const data = inst._iframeWindow.wrappedJSObject.getDataSync();
+            // Clone out of the XPCOM sandbox wrapper before reading.
+            const html = data ? JSON.parse(JSON.stringify(data)).html : null;
+            if (typeof html === 'string') return html;
+        } catch {
+            continue;
+        }
+    }
+    return null;
 }
 
 /** The note-editor's `EditorCore` inside the iframe, or null if uninitialized. */
