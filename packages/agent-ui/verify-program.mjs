@@ -257,12 +257,18 @@ if (
 // than by way of a sibling that could stop importing it. The host barrel is a
 // root because nothing else in the package imports the registry — a client and
 // a shared component both reach it from outside.
+//
+// src/utils/platform.ts is a root for the same reason: it is a standalone helper
+// that clients import by its own subpath, and no module inside the package
+// imports it. Drop it from this list once one does — the orphan scan then keeps
+// it honest through its importer, which is the stronger signal.
 const entryPaths = [
   "src/icons/index.tsx",
   "src/primitives/index.ts",
   "src/host/index.ts",
   "src/chat/index.ts",
   "src/auth/index.ts",
+  "src/utils/platform.ts",
 ].map((p) => path.join(pkgDir, p));
 
 const listed = parsed.fileNames.map((f) => path.resolve(f));

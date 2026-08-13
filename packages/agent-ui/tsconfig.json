@@ -185,6 +185,7 @@
     "./src/chat/useCitationViewModel.ts",
     "./src/utils/windowContext.ts",
     "./src/utils/locationDisplay.ts",
+    "./src/utils/platform.ts",
     "./src/utils/pageLabels.ts",
     "./src/utils/pageRanges.ts",
     "./src/utils/useIsomorphicLayoutEffect.ts",

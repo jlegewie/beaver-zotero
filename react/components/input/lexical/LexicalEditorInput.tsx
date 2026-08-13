@@ -42,6 +42,7 @@ import {
 } from '../../../utils/slashCommands';
 import { isImeKeyEvent } from '../../../utils/ime';
 import { getHost } from '@beaver/agent-ui/host';
+import { isMacPlatform, isWindowsPlatform } from '@beaver/agent-ui/utils/platform';
 import { getPref } from '../../../../src/utils/prefs';
 import {
     createCompositionGatedEmitter,
@@ -1044,7 +1045,11 @@ const ClipboardAttachmentPlugin: React.FC<{
     useEffect(() => {
         const handler = (e: KeyboardEvent) => {
             if (e.key !== 'v' && e.key !== 'V') return;
-            const accel = Zotero.isMac ? e.metaKey : e.ctrlKey;
+            // The handler is only ever attached to the current root element, so
+            // its window is the one the editor renders in.
+            const win = editor.getRootElement()?.ownerDocument.defaultView;
+            if (!win) return;
+            const accel = isMacPlatform(win.navigator) ? e.metaKey : e.ctrlKey;
             if (!accel || e.altKey || e.shiftKey) return;
             // An input method may use the same chord.
             if (isImeKeyEvent(e) || ime.isComposing()) return;
@@ -1085,11 +1090,24 @@ const ImeCompositionTrackerPlugin: React.FC<{ ime: ImeCompositionTracker }> = ({
 const WindowsImeCompositionOrderPlugin: React.FC = () => {
     const [editor] = useLexicalComposerContext();
     useEffect(() => {
-        if (!Zotero.isWin) return;
         if (getPref('imeCompositionOrderFix') === false) return;
-        return registerCompositionEndDeferral(editor, {
-            trace: getPref('debugImeTrace') === true,
+        // The platform is read from the window the editor renders in, so the
+        // Windows gate waits for a root element instead of assuming one is
+        // already attached.
+        let disposeDeferral: (() => void) | undefined;
+        const unregisterRoot = editor.registerRootListener((rootElement) => {
+            disposeDeferral?.();
+            disposeDeferral = undefined;
+            const win = rootElement?.ownerDocument.defaultView;
+            if (!win || !isWindowsPlatform(win.navigator)) return;
+            disposeDeferral = registerCompositionEndDeferral(editor, {
+                trace: getPref('debugImeTrace') === true,
+            });
         });
+        return () => {
+            unregisterRoot();
+            disposeDeferral?.();
+        };
     }, [editor]);
     return null;
 };
@@ -1195,7 +1213,7 @@ const CaretNavigationPlugin: React.FC<{
             const sel = win.getSelection();
             if (!sel) return;
 
-            const isMac = Zotero.isMac;
+            const isMac = isMacPlatform(win.navigator);
             const shift = e.shiftKey;
             const alter = shift ? 'extend' : 'move';
 
