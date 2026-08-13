@@ -15,7 +15,7 @@ import { escapeAttr, unescapeAttr } from './noteHtmlEntities';
 import { stripDataCitationItems, stripNoteWrapperDiv } from './noteWrapper';
 import { normalizeNoteHtml } from '../prosemirror/normalize';
 import { parseZoteroCitationLinkHref } from './zoteroLinkCitation';
-import { translatePageLabelToNumber } from './pageLabelTranslation';
+import { readBeaverLoc } from './noteCitationLoc';
 import { extractItemKeyFromUri } from './zoteroUri';
 import { modelObjectId } from './libraryIdentity';
 import type { PageLabels } from '../services/documentCache';
@@ -40,8 +40,13 @@ export interface StoredElement {
     type: 'citation' | 'compound-citation' | 'annotation' | 'annotation-image' | 'image' | 'link';
     originalAttrs?: {
         item_id: string;
-        page?: string;
-        pageConvention?: 'number' | 'label';
+        /**
+         * Exactly the token written into the tag's `loc="…"` attribute, so a tag
+         * the model sends back can be compared against it as a string. Absent
+         * when the citation projects no locator.
+         */
+        loc?: string;
+        /** The citation's stored CSL `label` (e.g. `chapter`), when it has one. */
         cslLabel?: string;
     };
     isCompound?: boolean;
@@ -162,7 +167,9 @@ export function invalidateSimplificationCache(noteId: string): void {
 export function simplifyNoteHtml(
     rawHtml: string,
     libraryID: number,
-    pageLabelsByItemId?: Record<string, PageLabels>,
+    // Citation locators are projected exactly as stored, so page labels are not
+    // consulted here. The parameter stays for callers that still pass one.
+    _pageLabelsByItemId?: Record<string, PageLabels>,
 ): SimplificationResult {
     const metadata: SimplificationMetadata = { elements: new Map() };
 
@@ -297,17 +304,18 @@ export function simplifyNoteHtml(
                     const uri = ci.uris?.[0] || '';
                     const itemKey = extractItemKeyFromUri(uri) || 'unknown';
                     const itemId = modelObjectId(libraryID, itemKey);
-                    const rawPage = ci.locator != null ? String(ci.locator) : '';
-                    let page = rawPage;
-                    let pageConvention: 'number' | 'label' | undefined = page ? 'label' : undefined;
-                    const pageLabels = pageLabelsByItemId?.[itemId];
-                    if (page && pageLabels && (ci.label == null || ci.label === 'page')) {
-                        const translated = translatePageLabelToNumber(pageLabels, page);
-                        if (translated !== rawPage) {
-                            page = translated;
-                            pageConvention = 'number';
-                        }
-                    }
+                    // The locator is projected exactly as the citation stores it,
+                    // so an unchanged citation always reads the same way:
+                    // Beaver's own token when it wrote one, otherwise the CSL
+                    // locator as a page locator.
+                    // A CSL locator under a non-page label (`chapter`, `section`,
+                    // …) gets no `loc`: writing it as `page…` would claim a page
+                    // the citation never recorded. The label is kept in
+                    // `cslLabel` so a rebuild can preserve it.
+                    const storedLocator = ci.locator != null ? String(ci.locator) : '';
+                    const isPageLocator = ci.label == null || ci.label === 'page';
+                    const loc = readBeaverLoc(ci)
+                        ?? (storedLocator && isPageLocator ? `page${storedLocator}` : undefined);
 
                     // Content-based ref with occurrence counter
                     const keyForCount = itemKey;
@@ -320,14 +328,13 @@ export function simplifyNoteHtml(
                         type: 'citation',
                         originalAttrs: {
                             item_id: itemId,
-                            ...(page ? { page } : {}),
-                            ...(pageConvention ? { pageConvention } : {}),
+                            ...(loc ? { loc } : {}),
                             ...(ci.label !== undefined ? { cslLabel: ci.label } : {}),
                         },
                     });
 
                     let tag = `<citation id="${itemId}"`;
-                    if (page) tag += ` loc="${escapeAttr(`page${page}`)}"`;
+                    if (loc) tag += ` loc="${escapeAttr(loc)}"`;
                     tag += ` ref="${ref}"/>`;
                     return tag;
                 } else {
@@ -342,18 +349,11 @@ export function simplifyNoteHtml(
                     citationKeyCounts.set(compoundKey, occurrence + 1);
                     const ref = `c_${compoundKey}_${occurrence}`;
 
-                    // Build items attribute: "LIB-KEY1:page=P1, LIB-KEY2:page=P2"
-                    const itemsAttr = citationItems.map((ci: any) => {
-                        const uri = ci.uris?.[0] || '';
-                        const key = extractItemKeyFromUri(uri) || 'unknown';
-                        const itemId = modelObjectId(libraryID, key);
-                        let page = ci.locator != null ? String(ci.locator) : '';
-                        const pageLabels = pageLabelsByItemId?.[itemId];
-                        if (page && pageLabels && (ci.label == null || ci.label === 'page')) {
-                            page = translatePageLabelToNumber(pageLabels, page);
-                        }
-                        return page ? `${itemId}:page=${page}` : itemId;
-                    }).join(', ');
+                    // Build items attribute: "ITEM_ID1, ITEM_ID2". Compound
+                    // citations are immutable here — expansion always returns
+                    // their stored raw HTML — so their locators are detail the
+                    // agent cannot act on and are left out of the projection.
+                    const itemsAttr = keys.map((key: string) => modelObjectId(libraryID, key)).join(', ');
 
                     metadata.elements.set(ref, {
                         rawHtml: match,

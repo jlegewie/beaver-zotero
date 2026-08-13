@@ -9,9 +9,8 @@
  *      unified `id="..."`, legacy `item_id="..."`, and compound
  *      `items="..."`; attachment-only `<citation att_id="..."/>` no longer
  *      contributes to `cited_items`.
- *   3. Locator-on-compound parts: `items="LIB-KEY:page=N"` round-trips
- *      through the locator stripper without leaking the `:page=N` suffix
- *      into the resolved key.
+ *   3. Compound citations project item ids only (`items="LIB-KEY1, LIB-KEY2"`)
+ *      and resolve to clean keys.
  *
  * Prerequisites:
  *   - Zotero running with a dev build of Beaver loaded and authenticated.
@@ -159,10 +158,9 @@ describe('/beaver/note/read — single citation simplified output', () => {
         expect(res.content).not.toMatch(/\bpage="42"/);
     });
 
-    it('compound citations keep items="..." (still legacy, immutable)', async () => {
-        // The compound branch in `simplifyNoteHtml` was intentionally left
-        // on the items="LIB-KEY1, LIB-KEY2" form by the v0.20 diff — only
-        // single citations switched to the unified id/loc grammar. This
+    it('compound citations keep items="..." and carry item ids only', async () => {
+        // Compound citations stay on the items="LIB-KEY1, LIB-KEY2" form —
+        // they are immutable, so the projection carries no locators. This
         // test pins that contract so a future refactor doesn't silently
         // break read_note's compound-citation parsing.
         const compound = rawCompoundCitation({
@@ -177,12 +175,14 @@ describe('/beaver/note/read — single citation simplified output', () => {
         const res = await readNote(`${ref.library_id}-${ref.zotero_key}`);
         expect(res.success, res.error).toBe(true);
         expect(res.content).toMatch(/<citation items="[^"]+"/);
-        // Items value includes both keys and the second one's `:page=7` suffix.
+        // Items value lists both keys; the second item's stored locator is
+        // not part of the projection.
         const itemsMatch = res.content!.match(/items="([^"]+)"/);
         expect(itemsMatch).not.toBeNull();
         const itemsValue = itemsMatch![1];
         expect(itemsValue).toContain(`${LIBRARY_PREFIX}-${PARENT_ITEM.zotero_key}`);
-        expect(itemsValue).toContain(`${LIBRARY_PREFIX}-${NORMAL_PDF.zotero_key}:page=7`);
+        expect(itemsValue).toContain(`${LIBRARY_PREFIX}-${NORMAL_PDF.zotero_key}`);
+        expect(itemsValue).not.toContain(':page=');
     });
 });
 
@@ -216,11 +216,10 @@ describe('/beaver/note/read — cited_items extraction', () => {
         expect(occurrences).toBe(1);
     });
 
-    it('strips the :page=N locator suffix from compound items before parsing', async () => {
-        // Bug guard: the simplifier emits items="LIB-KEY1, LIB-KEY2:page=7".
-        // `extractCitedItemRefs` must strip everything after the colon
-        // before handing the id to `parseZoteroId`, otherwise the
-        // second-item parse fails and cited_items drops it.
+    it('resolves compound items to clean ids', async () => {
+        // `extractCitedItemRefs` still strips everything after a colon, so
+        // notes and threads carrying the older `items="LIB-KEY:page=7"` form
+        // keep parsing; the ids it hands to `parseZoteroId` must be clean.
         const compound = rawCompoundCitation({
             items: [
                 { key: PARENT_ITEM.zotero_key },

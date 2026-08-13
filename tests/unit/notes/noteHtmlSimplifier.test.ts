@@ -434,21 +434,20 @@ describe('simplifyNoteHtml', () => {
         expect(simplified).toContain('loc="page42"');
     });
 
-    it('translates cached page labels to physical page numbers for page citations', () => {
+    it('projects the stored page locator verbatim, ignoring cached page labels', () => {
         const html = wrap(`<p>${rawCitation('ROMANPG1', 1, 'xiv')}</p>`);
         const { simplified, metadata } = simplifyNoteHtml(html, 1, {
             'u-ROMANPG1': { 13: 'xiv' },
         });
 
-        expect(simplified).toContain('loc="page14"');
+        expect(simplified).toContain('loc="pagexiv"');
         expect(metadata.elements.get('c_ROMANPG1_0')!.originalAttrs).toEqual({
             item_id: 'u-ROMANPG1',
-            page: '14',
-            pageConvention: 'number',
+            loc: 'pagexiv',
         });
     });
 
-    it('re-simplifies the same note when page labels are seeded', () => {
+    it('projects the same locator whether or not page labels are seeded', () => {
         const noteId = 'test-note-page-label-seed';
         const html = wrap(`<p>${rawCitation('LABELPG1', 1, '341')}</p>`);
         invalidateSimplificationCache(noteId);
@@ -459,20 +458,40 @@ describe('simplifyNoteHtml', () => {
         });
 
         expect(cold.simplified).toContain('loc="page341"');
-        expect(seeded.simplified).toContain('loc="page1"');
+        expect(seeded.simplified).toContain('loc="page341"');
     });
 
-    it('does not translate non-page CSL locators', () => {
-        const html = wrap(`<p>${rawCitationWithCSLLabel('CHAPTER1', 1, 'xiv', 'chapter')}</p>`);
-        const { simplified, metadata } = simplifyNoteHtml(html, 1, {
-            'u-CHAPTER1': { 13: 'xiv' },
-        });
+    it('projects the citation\'s own Beaver locator token verbatim', () => {
+        const citationData = {
+            citationItems: [{
+                uris: ['http://zotero.org/users/1/items/BEAVLOC1'],
+                locator: '58',
+                label: 'page',
+                beaver: { v: 1, loc: 's56-s59' },
+            }],
+        };
+        const raw = `<span class="citation" data-citation="${encodeURIComponent(JSON.stringify(citationData))}">`
+            + '<span class="citation-item">Author, 2024</span></span>';
+        const { simplified, metadata } = simplifyNoteHtml(wrap(`<p>${raw}</p>`), 1);
 
-        expect(simplified).toContain('loc="pagexiv"');
+        // The recorded token wins over the printed page label it resolved to.
+        expect(simplified).toContain('loc="s56-s59"');
+        expect(metadata.elements.get('c_BEAVLOC1_0')!.originalAttrs).toEqual({
+            item_id: 'u-BEAVLOC1',
+            loc: 's56-s59',
+            cslLabel: 'page',
+        });
+    });
+
+    it('omits the locator for a non-page CSL label', () => {
+        const html = wrap(`<p>${rawCitationWithCSLLabel('CHAPTER1', 1, 'xiv', 'chapter')}</p>`);
+        const { simplified, metadata } = simplifyNoteHtml(html, 1);
+
+        // "xiv" is a chapter, not a page — projecting it as `loc="pagexiv"`
+        // would claim a page the citation never recorded.
+        expect(simplified).not.toContain('loc=');
         expect(metadata.elements.get('c_CHAPTER1_0')!.originalAttrs).toEqual({
             item_id: 'u-CHAPTER1',
-            page: 'xiv',
-            pageConvention: 'label',
             cslLabel: 'chapter',
         });
     });
@@ -547,7 +566,7 @@ describe('expandToRawHtml', () => {
         const metadata: SimplificationMetadata = {
             elements: new Map([
                 ['c_EX1_0', { rawHtml: rawCit, type: 'citation' as const, originalAttrs: { item_id: 'u-EX1' } }],
-                ['c_EX1_1', { rawHtml: rawCitation('EX1', 1, '10'), type: 'citation' as const, originalAttrs: { item_id: 'u-EX1', page: '10' } }],
+                ['c_EX1_1', { rawHtml: rawCitation('EX1', 1, '10'), type: 'citation' as const, originalAttrs: { item_id: 'u-EX1', loc: 'page10' } }],
                 ['c_K1+K2_0', { rawHtml: rawCompoundCitation(['K1', 'K2']), type: 'compound-citation' as const, isCompound: true }],
                 ['a_EA1', { rawHtml: rawAnnot, type: 'annotation' as const, originalText: 'text here' }],
                 ['ai_EAI1', { rawHtml: rawAI, type: 'annotation-image' as const }],
@@ -1599,30 +1618,23 @@ describe('getOrSimplify', () => {
         expect(result2.isStale).toBe(false);
     });
 
-    it('keeps labeled and unlabeled simplifications separate in cache', () => {
+    it('returns the same locator with or without page labels, in either order', () => {
+        // Page labels take no part in the projection, so neither supplying a
+        // label map nor the order of the reads changes what a note reads as.
         const html = wrap(rawCitation('ABC12345', 1, 'xiv'));
         const labels = { 'u-ABC12345': { 13: 'xiv' } };
 
-        const labeled = getOrSimplify('label-cache-note', html, 1, labels);
-        const unlabeled = getOrSimplify('label-cache-note', html, 1);
-        const labeledAgain = getOrSimplify('label-cache-note', html, 1, labels);
+        expect(getOrSimplify('label-cache-note', html, 1, labels).simplified)
+            .toContain('loc="pagexiv"');
+        expect(getOrSimplify('label-cache-note', html, 1).simplified)
+            .toContain('loc="pagexiv"');
+        expect(getOrSimplify('label-cache-note', html, 1, labels).simplified)
+            .toContain('loc="pagexiv"');
 
-        expect(labeled.simplified).toContain('loc="page14"');
-        expect(unlabeled.simplified).toContain('loc="pagexiv"');
-        expect(labeledAgain.simplified).toContain('loc="page14"');
-    });
-
-    it('keeps unlabeled and labeled simplifications separate in cache', () => {
-        const html = wrap(rawCitation('DEF12345', 1, 'xiv'));
-        const labels = { 'u-DEF12345': { 13: 'xiv' } };
-
-        const unlabeled = getOrSimplify('label-cache-note-reverse', html, 1);
-        const labeled = getOrSimplify('label-cache-note-reverse', html, 1, labels);
-        const unlabeledAgain = getOrSimplify('label-cache-note-reverse', html, 1);
-
-        expect(unlabeled.simplified).toContain('loc="pagexiv"');
-        expect(labeled.simplified).toContain('loc="page14"');
-        expect(unlabeledAgain.simplified).toContain('loc="pagexiv"');
+        expect(getOrSimplify('label-cache-note-reverse', html, 1).simplified)
+            .toContain('loc="pagexiv"');
+        expect(getOrSimplify('label-cache-note-reverse', html, 1, labels).simplified)
+            .toContain('loc="pagexiv"');
     });
 
     it('cache stale: re-simplifies when content changes, isStale: true', () => {
@@ -2093,7 +2105,9 @@ describe('enrichOldStringCitationRefs', () => {
                         type: 'citation' as const,
                         originalAttrs: {
                             item_id: attrs.item_id,
-                            ...(attrs.page ? { page: attrs.page } : {}),
+                            // The simplifier stores the `loc` token it projects
+                            // for the entry's page locator.
+                            ...(attrs.page ? { loc: `page${attrs.page}` } : {}),
                         },
                     },
                 ]),

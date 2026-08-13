@@ -69,10 +69,6 @@ const STORED_RAW = '<span class="citation" data-citation="stored">(Author, 2024,
 /**
  * Metadata as the simplifier would have produced it for a note whose citation
  * currently projects `loc="page<page>"`.
- *
- * `pageConvention: 'number'` is the realistic setting for a page citation whose
- * label cache has resolved — and the setting that makes drift dangerous, since
- * it is what turns the model's value back into a label on rebuild.
  */
 function metadataFor(page: string | undefined, extra: Partial<StoredElement> = {}): SimplificationMetadata {
     const elements = new Map<string, StoredElement>();
@@ -81,7 +77,7 @@ function metadataFor(page: string | undefined, extra: Partial<StoredElement> = {
         type: 'citation',
         originalAttrs: {
             item_id: ITEM_ID,
-            ...(page ? { page, pageConvention: 'number' as const } : {}),
+            ...(page ? { loc: `page${page}` } : {}),
         },
         ...extra,
     });

@@ -2257,7 +2257,7 @@ describe('Page label translation during citation expansion', () => {
         expect(expanded).toContain('ORIG1');
     });
 
-    it('translates page numbers when an existing citation target changes', () => {
+    it('keeps the stored locator when an existing citation target changes', () => {
         const labels = ['i', 'ii', 'iii', '1', '2', '3'];
         setupPageLabels(labels);
 
@@ -2275,11 +2275,11 @@ describe('Page label translation during citation expansion', () => {
         };
         (globalThis as any).Zotero.Items.getByLibraryAndKey = vi.fn(() => mockItem);
 
-        const { simplified, metadata } = simplifyNoteHtml(noteHtml, 1, {
-            '1-ITEMKEY': { ...labels },
-        });
+        const { simplified, metadata } = simplifyNoteHtml(noteHtml, 1);
 
-        expect(simplified).toContain('loc="page2"');
+        // The note stores the printed label "ii" and that is what the agent is
+        // shown; retargeting the citation stores it again unchanged.
+        expect(simplified).toContain('loc="pageii"');
         const editedSimplified = simplified.replace(/id="1-ITEMKEY"/, 'id="1-NEWKEY"');
         expandToRawHtml(editedSimplified, metadata, 'new', undefined, pageLabels);
 
@@ -2312,7 +2312,7 @@ describe('Page label translation during citation expansion', () => {
         expect(createCitationHTML).toHaveBeenCalledWith(mockItem, '100');
     });
 
-    it('does not translate numeric non-page locators on edited existing citations', () => {
+    it('stores a page locator added to a chapter-labelled citation as sent', () => {
         const labels = ['i', 'ii', 'iii', '1', '2', '3'];
         setupPageLabels(labels);
 
@@ -2338,10 +2338,14 @@ describe('Page label translation during citation expansion', () => {
         };
         (globalThis as any).Zotero.Items.getByLibraryAndKey = vi.fn(() => mockItem);
 
-        const { simplified, metadata } = simplifyNoteHtml(noteHtml, 1, {
-            '1-ITEMKEY': { 1: 'ii', 2: 'iii' },
-        });
-        const editedSimplified = simplified.replace(/loc="page3"/, 'loc="page4"');
+        const { simplified, metadata } = simplifyNoteHtml(noteHtml, 1);
+
+        // A chapter locator is not a page, so the citation projects none.
+        expect(simplified).not.toContain('loc=');
+        const editedSimplified = simplified.replace(
+            '<citation id="1-ITEMKEY"',
+            '<citation id="1-ITEMKEY" loc="page4"',
+        );
         expandToRawHtml(editedSimplified, metadata, 'new', undefined, pageLabels);
 
         expect(createCitationHTML).toHaveBeenCalledWith(mockItem, '4');
@@ -2355,17 +2359,15 @@ describe('Page label translation during citation expansion', () => {
         const citHtml = rawCitation('ITEMKEY', 1, 'xiv', '(Author, 2024, p. xiv)');
         const noteHtml = wrap(`<p>Text ${citHtml} more text</p>`);
 
-        const { simplified, metadata } = simplifyNoteHtml(noteHtml, 1, {
-            '1-ITEMKEY': { 13: 'xiv' },
-        });
+        const { simplified, metadata } = simplifyNoteHtml(noteHtml, 1);
 
-        expect(simplified).toContain('loc="page14"');
+        expect(simplified).toContain('loc="pagexiv"');
         const expanded = expandToRawHtml(simplified, metadata, 'old', undefined, pageLabels);
 
         expect(expanded).toBe(roundtripExpected(noteHtml));
     });
 
-    it('translates edited existing citation page numbers to stored labels', () => {
+    it('stores an edited existing citation locator as sent, without label translation', () => {
         const labels = Array.from({ length: 20 }, (_, i) => String(i + 1));
         labels[13] = 'xiv';
         labels[14] = 'xv';
@@ -2386,11 +2388,11 @@ describe('Page label translation during citation expansion', () => {
         };
         (globalThis as any).Zotero.Items.getByLibraryAndKey = vi.fn(() => mockItem);
 
-        const { simplified, metadata } = simplifyNoteHtml(noteHtml, 1, {
-            '1-ITEMKEY': { 13: 'xiv', 14: 'xv' },
-        });
+        const { simplified, metadata } = simplifyNoteHtml(noteHtml, 1);
 
-        const editedSimplified = simplified.replace(/loc="page14"/, 'loc="page15"');
+        // The agent is shown the stored label and sends the next one back; it
+        // is stored verbatim rather than read as a physical page number.
+        const editedSimplified = simplified.replace(/loc="pagexiv"/, 'loc="pagexv"');
         expandToRawHtml(editedSimplified, metadata, 'new', undefined, pageLabels);
 
         expect(createCitationHTML).toHaveBeenCalledWith(mockItem, 'xv');

@@ -34,6 +34,7 @@ import {
     citationIndexCandidateIdsForLocator,
     getPageLocator,
     normalizeCitationTag,
+    parseLoc,
     parseRawCitationAttributes,
     requestedCitationKey,
     type CitationRef,
@@ -412,7 +413,6 @@ export function extractAttr(attrStr: string, name: string): string | undefined {
 interface SimplifiedCitationAttrs {
     item_id: string;
     page?: string;
-    pageConvention?: 'number' | 'label';
     cslLabel?: string;
     /**
      * True when `page` was resolved from a structural locator and is already a
@@ -456,13 +456,24 @@ function parseSimplifiedCitationAttrs(
     return { item_id, ...(page ? { page, pageIsResolvedLabel } : {}) };
 }
 
+/**
+ * The page a stored `loc` token addresses, or undefined when the token is not a
+ * page locator. The simplifier stores the token the note projects; the rebuild
+ * path below compares and stores pages.
+ */
+function pageFromStoredLoc(loc: string | undefined): string | undefined {
+    const parsed = parseLoc(loc);
+    return parsed?.kind === 'page' ? parsed.value : undefined;
+}
+
 /** Check if citation attributes have changed */
 function attrsChanged(
-    original: { item_id: string; page?: string } | undefined,
+    original: { item_id: string; loc?: string } | undefined,
     current: { item_id: string; page?: string }
 ): boolean {
     if (!original) return true;
-    return original.item_id !== current.item_id || original.page !== current.page;
+    return original.item_id !== current.item_id
+        || pageFromStoredLoc(original.loc) !== current.page;
 }
 
 /**
@@ -822,7 +833,7 @@ export function expandToRawHtml(
                             // locator, and rebuilding would drop the note's page
                             // without saying so.
                             const storedPage = stored.originalAttrs?.item_id === newAttrs.item_id
-                                ? stored.originalAttrs?.page
+                                ? pageFromStoredLoc(stored.originalAttrs?.loc)
                                 : undefined;
                             if (storedPage && writtenLocator(attrStr)) {
                                 if (guardLocatorDrift) {
@@ -838,15 +849,12 @@ export function expandToRawHtml(
                                     1,
                                 );
                             }
-                            // Existing page citations are shown to the agent as
-                            // physical page numbers. When the page changes,
-                            // store the corresponding Zotero page label just
-                            // like a newly inserted citation.
-                            const shouldTranslatePage = stored.originalAttrs?.pageConvention === 'number'
-                                && (stored.originalAttrs.cslLabel == null || stored.originalAttrs.cslLabel === 'page');
+                            // An existing citation is shown to the agent with the
+                            // locator it stores, so a changed locator is stored
+                            // as sent — no page-number → label translation.
                             return buildCitationFromSimplifiedAttrs(
                                 newAttrs,
-                                shouldTranslatePage,
+                                false,
                                 pageLabels,
                             );
                         }

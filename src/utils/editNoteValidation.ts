@@ -169,22 +169,30 @@ export function checkDuplicateCitations(
 // =============================================================================
 
 /**
+ * The `loc` token the simplifier projects for a page locator, so a citation the
+ * model wrote in any accepted spelling (`loc="page5"`, legacy `page="5"`)
+ * compares against the stored token.
+ */
+function pageLocToken(page: string | undefined): string | undefined {
+    return page ? `page${page}` : undefined;
+}
+
+/**
  * Find the unique ref in `metadata.elements` for a citation identified by
- * `item_id` + optional `page`. Returns `null` if zero or multiple entries
+ * `item_id` + optional `loc` token. Returns `null` if zero or multiple entries
  * match (caller should skip enrichment and let the validator error path run).
  */
 function findUniqueCitationRef(
     metadata: SimplificationMetadata,
     itemId: string,
-    page: string | undefined,
+    loc: string | undefined,
 ): string | null {
     let candidateRef: string | null = null;
     let candidateCount = 0;
     for (const [ref, el] of metadata.elements) {
         if (el.type !== 'citation') continue;
         if (el.originalAttrs?.item_id !== itemId) continue;
-        const storedPage = el.originalAttrs.page || undefined;
-        if (storedPage !== page) continue;
+        if ((el.originalAttrs.loc || undefined) !== loc) continue;
         candidateRef = ref;
         candidateCount++;
         if (candidateCount > 1) return null;
@@ -270,9 +278,9 @@ function addParentCitationRefReplacement(
     // so compare both translated and raw page locators before giving up.
     const translatedPage = translateAttIdPageLocator(attachmentItem, page, pageLabels);
     let matchedPage = translatedPage;
-    let candidateRef = findUniqueCitationRef(metadata, parentItemId, translatedPage);
+    let candidateRef = findUniqueCitationRef(metadata, parentItemId, pageLocToken(translatedPage));
     if (candidateRef === null && translatedPage !== page) {
-        candidateRef = findUniqueCitationRef(metadata, parentItemId, page);
+        candidateRef = findUniqueCitationRef(metadata, parentItemId, pageLocToken(page));
         if (candidateRef !== null) matchedPage = page;
     }
     if (candidateRef === null) return false;
@@ -340,7 +348,7 @@ export function enrichOldStringCitationRefs(
             : rawItemId;
         const unifiedAttId = resolvedUnifiedId.attId;
         if (itemId) {
-            const candidateRef = findUniqueCitationRef(metadata, itemId, page);
+            const candidateRef = findUniqueCitationRef(metadata, itemId, pageLocToken(page));
             if (candidateRef === null) continue;
 
             // Inject ` ref="..."` before the self-closing `/>`, preserving all

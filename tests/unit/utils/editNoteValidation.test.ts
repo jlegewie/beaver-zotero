@@ -49,7 +49,9 @@ function buildMetadata(
     for (const { ref, itemId, page } of entries) {
         elements.set(ref, {
             type: 'citation',
-            originalAttrs: { item_id: itemId, ...(page ? { page } : {}) },
+            // `page` is the entry's page locator; the simplifier stores the
+            // `loc` token it projects for it.
+            originalAttrs: { item_id: itemId, ...(page ? { loc: `page${page}` } : {}) },
         });
     }
     return { elements } as SimplificationMetadata;
