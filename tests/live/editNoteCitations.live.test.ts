@@ -308,7 +308,7 @@ describe('edit_note execute — structural locator resolved to a page', () => {
         expect(decoded).toMatch(/"locator":"\d+","label":"page"/);
     });
 
-    it('re-reads the resolved sentence locator as a loc="pageN" tag', async () => {
+    it('re-reads the sentence locator it was given, not the page it resolved to', async () => {
         const ref = await seedNote('<p>Body to edit.</p>');
 
         const exec = await executeEditNote({
@@ -320,10 +320,18 @@ describe('edit_note execute — structural locator resolved to a page', () => {
         }, { timeout: 20000 });
         expect(exec.success, exec.error ?? '').toBe(true);
 
+        // The citation stores a page locator for Zotero to navigate by, and the
+        // sentence locator it was written with for the agent to read back. The
+        // page is a write-time resolution, so it never reaches the projection.
+        const readBack = await post<{ saved_html: string; error?: string }>(
+            '/beaver/test/note-read',
+            { library_id: ref.library_id, zotero_key: ref.zotero_key },
+        );
+        expect(decodeURIComponent(readBack.saved_html)).toMatch(/"locator":"\d+","label":"page"/);
+
         const simplified = await readSimplified(`${ref.library_id}-${ref.zotero_key}`);
-        // The stored locator round-trips as a page locator, never a sentence one.
-        expect(simplified).toMatch(/loc="page\d+"/);
-        expect(simplified).not.toMatch(/loc="s\d+"/);
+        expect(simplified).toMatch(/loc="s200"/);
+        expect(simplified).not.toMatch(/loc="page\d+"/);
     });
 
     it('resolves a structural locator on a legacy att_id citation', async () => {
