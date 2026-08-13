@@ -470,9 +470,13 @@ function buildCitationHTML(
     projectedSpace: LocatorSpace,
     pageLabels?: PageLabelsByAttachmentId,
 ): string {
-    const pageToken = isPageToken(attrs.loc);
-    const isDocumentSpace = !pageToken || projectedSpace === 'document';
-    const page = pageToken
+    // Only a page the AGENT wrote as a page token is normalized and translated.
+    // Every other page reaching here is already final — a structural token's
+    // page came from the extraction cache, and a restored one is the citation's
+    // own — and rewriting either would address a page it never named.
+    const wrotePageToken = attrs.loc !== undefined && isPageToken(attrs.loc);
+    const isDocumentSpace = !wrotePageToken || projectedSpace === 'document';
+    const page = wrotePageToken
         ? resolvePageForCitation(item, attrs.page, isDocumentSpace, pageLabels)
         : attrs.page;
     return stripInlineItemDataFromDataCitations(createCitationHTML(item, page, {

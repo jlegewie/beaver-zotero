@@ -2648,6 +2648,39 @@ describe('Stored locator tokens in citation expansion', () => {
         );
     });
 
+    it('keeps every part of an unprojected multi-part locator', () => {
+        // "45-60" is a chapter range, not a page range. Trimming it to its first
+        // number is a page-locator convention and would silently narrow a
+        // locator the agent was never shown.
+        const citationItem: any = {
+            uris: ['http://zotero.org/users/1/items/RANGEKEY'],
+            locator: '45-60',
+            label: 'chapter',
+        };
+        const citHtml = `<span class="citation" data-citation="${encodeURIComponent(JSON.stringify({
+            citationItems: [citationItem],
+        }))}"><span class="citation-item">(Author, ch. 45-60)</span></span>`;
+        const noteHtml = wrap(`<p>Text ${citHtml} more text</p>`);
+
+        const mockItem = {
+            id: 99,
+            key: 'NEWKEY',
+            libraryID: 1,
+            getField: vi.fn(() => 'Other Paper'),
+            isAttachment: vi.fn(() => false),
+            isRegularItem: vi.fn(() => true),
+            parentItem: null,
+            getAttachments: vi.fn(() => []),
+        };
+        (globalThis as any).Zotero.Items.getByLibraryAndKey = vi.fn(() => mockItem);
+
+        const { simplified, metadata } = simplifyNoteHtml(noteHtml, 1);
+        const editedSimplified = simplified.replace('id="1-RANGEKEY"', 'id="1-NEWKEY"');
+        expandToRawHtml(editedSimplified, metadata, 'new');
+
+        expect(createCitationHTML).toHaveBeenCalledWith(mockItem, '45-60', { cslLabel: 'chapter' });
+    });
+
     it('keeps an unprojected chapter locator when the citation is retargeted', () => {
         // A chapter locator is not a page, so the projection carries no `loc`
         // at all. The agent cannot have changed what it was never shown, so
