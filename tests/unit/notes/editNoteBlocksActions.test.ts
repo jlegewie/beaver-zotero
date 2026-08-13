@@ -62,6 +62,8 @@ vi.mock('../../../src/utils/noteCitationExpand', () => ({
     normalizePageLocator: vi.fn((s: string) => s),
     translatePageNumberToLabel: vi.fn((s: string) => s),
     preloadPageLabelsForNewCitations: vi.fn(async () => ({})),
+    // Identity by default: staleness is exercised in noteCitationPin.test.ts.
+    dropStaleResolvedLocators: vi.fn((preload: any) => preload),
     preloadStructuralLocatorPages: vi.fn(async () => ({ pages: {}, unresolved: [] })),
     buildUnresolvedLocatorWarning: vi.fn(() => null),
 }));

@@ -17,7 +17,7 @@ vi.mock('@beaver/agent-core/transport/supabaseClient', () => ({
 }));
 vi.mock('../../../react/store', () => ({ store: { get: vi.fn(), set: vi.fn(), sub: vi.fn() } }));
 
-import { readBeaverLoc, buildBeaverCitationMeta } from '../../../src/utils/noteCitationLoc';
+import { readBeaverLoc, readBeaverAtt, buildBeaverCitationMeta } from '../../../src/utils/noteCitationLoc';
 import { createCitationHTML } from '../../../src/utils/zoteroUtils';
 
 /** Parse the citation object back out of the `data-citation` attribute. */
@@ -89,6 +89,22 @@ describe('createCitationHTML — Beaver locator key', () => {
         expect(firstItem(createCitationHTML(mockItem, '4')).label).toBe('page');
         expect(firstItem(createCitationHTML(mockItem, '4', { beaverLoc: 'page4' })).label).toBe('page');
     });
+
+    it('pins the attachment the locator addresses alongside the token', () => {
+        const item = firstItem(
+            createCitationHTML(mockItem, '3', { beaverLoc: 's56-s59', beaverAtt: 'G7TTJKFH' }),
+        );
+        expect(item.beaver).toEqual({ v: 1, loc: 's56-s59', att: 'G7TTJKFH' });
+        expect(readBeaverAtt(item)).toBe('G7TTJKFH');
+    });
+
+    it('stores the token unpinned when no attachment could be determined', () => {
+        // Token survives even when no attachment could be determined.
+        const item = firstItem(createCitationHTML(mockItem, '3', { beaverLoc: 's56-s59' }));
+        expect(item.beaver).toEqual({ v: 1, loc: 's56-s59' });
+        expect(readBeaverLoc(item)).toBe('s56-s59');
+        expect(readBeaverAtt(item)).toBeUndefined();
+    });
 });
 
 describe('readBeaverLoc', () => {
@@ -120,5 +136,39 @@ describe('readBeaverLoc', () => {
 
     it('returns undefined for an empty loc string', () => {
         expect(readBeaverLoc({ beaver: { v: 1, loc: '' } })).toBeUndefined();
+    });
+});
+
+describe('readBeaverAtt', () => {
+    it('returns the pinned attachment key', () => {
+        expect(readBeaverAtt({ beaver: buildBeaverCitationMeta('s1', 'G7TTJKFH') })).toBe('G7TTJKFH');
+    });
+
+    it('returns undefined when nothing was pinned', () => {
+        expect(readBeaverAtt({ beaver: buildBeaverCitationMeta('s1') })).toBeUndefined();
+        expect(readBeaverAtt({ beaver: { v: 1, loc: 's1', att: '' } })).toBeUndefined();
+        expect(readBeaverAtt({ beaver: { v: 1, loc: 's1', att: 42 } })).toBeUndefined();
+    });
+});
+
+/** `v` versions the grammar of `loc`, not the object shape. */
+describe('meta versioning contract', () => {
+    it('reads loc from a payload carrying fields this build does not know', () => {
+        const future = { beaver: { v: 1, loc: 's56-s59', att: 'G7TTJKFH', somethingNew: { a: 1 } } };
+        expect(readBeaverLoc(future)).toBe('s56-s59');
+        expect(readBeaverAtt(future)).toBe('G7TTJKFH');
+    });
+
+    it('does not let an unknown sibling field change what loc means', () => {
+        expect(readBeaverLoc({ beaver: { v: 1, loc: 'page5', locSpace: 'note' } })).toBe('page5');
+    });
+
+    it('refuses a payload whose loc grammar version is unknown', () => {
+        expect(readBeaverLoc({ beaver: { v: 2, loc: 's56-s59' } })).toBeUndefined();
+        expect(readBeaverAtt({ beaver: { v: 2, loc: 's1', att: 'G7TTJKFH' } })).toBeUndefined();
+    });
+
+    it('reads a pinned attachment even when the payload carries no loc', () => {
+        expect(readBeaverAtt({ beaver: { v: 1, att: 'G7TTJKFH' } })).toBe('G7TTJKFH');
     });
 });

@@ -159,7 +159,10 @@ export async function executeEditNoteBlocksAction(
     //    verifies a digest of the note, so nothing may be awaited between the
     //    read the digest is taken over and the write — see the critical-section
     //    rule on the agent-side executor.
-    const labels = await preloadBlockLabels(edits);
+    // Current pins (synchronous — no await ahead of the authoritative read).
+    const { metadata: pinMetadata } = getOrSimplify(noteId, item.getNote(), library_id);
+
+    const labels = await preloadBlockLabels(edits, pinMetadata);
     const externalRefContext = getExternalRefContext();
     const citationRejections = await resolveCitationRejections(editContents(edits), externalRefContext);
     const threadId = store.get(currentThreadIdAtom);

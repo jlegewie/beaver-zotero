@@ -2158,7 +2158,8 @@ describe('page locator normalization in citation expansion', () => {
         expect(createCitationHTML).toHaveBeenCalledWith(
             mockAttItem,
             '30', // normalized from "30-35"
-            { beaverLoc: 'page30-35' }
+            // The citation names the attachment itself, so it pins itself.
+            { beaverLoc: 'page30-35', beaverAtt: 'ATTKEY' }
         );
     });
 });
@@ -2200,7 +2201,7 @@ describe('Page label translation during citation expansion', () => {
         expandToRawHtml(input, metadata, 'new', undefined, pageLabels);
 
         // Page 15 → pageLabels[14] = "352"
-        expect(createCitationHTML).toHaveBeenCalledWith(mockItem, '352', { beaverLoc: 'page15' });
+        expect(createCitationHTML).toHaveBeenCalledWith(mockItem, '352', { beaverLoc: 'page15' , beaverAtt: 'ABC123' });
     });
 
     it('translates to same value for sequential labels (identity case)', () => {
@@ -2227,7 +2228,7 @@ describe('Page label translation during citation expansion', () => {
         expandToRawHtml(input, metadata, 'new', undefined, pageLabels);
 
         // Page 15 → pageLabels[14] = "15" (identity)
-        expect(createCitationHTML).toHaveBeenCalledWith(mockItem, '15', { beaverLoc: 'page15' });
+        expect(createCitationHTML).toHaveBeenCalledWith(mockItem, '15', { beaverLoc: 'page15' , beaverAtt: 'DEF456' });
     });
 
     it('passes through page when no labels are cached', () => {
@@ -2251,7 +2252,7 @@ describe('Page label translation during citation expansion', () => {
         const input = '<citation att_id="1-GHI789" page="15"/>';
         expandToRawHtml(input, metadata, 'new', undefined, pageLabels);
 
-        expect(createCitationHTML).toHaveBeenCalledWith(mockItem, '15', { beaverLoc: 'page15' });
+        expect(createCitationHTML).toHaveBeenCalledWith(mockItem, '15', { beaverLoc: 'page15' , beaverAtt: 'GHI789' });
     });
 
     it('preserves existing citation rawHtml when not edited', () => {
@@ -2365,7 +2366,7 @@ describe('Page label translation during citation expansion', () => {
         // citation projected no locator, so the added one counts document
         // pages: physical page 4 is stored as the label "1", and the token is
         // recorded so later reads project what the agent wrote.
-        expect(createCitationHTML).toHaveBeenCalledWith(mockItem, '1', { beaverLoc: 'page4' });
+        expect(createCitationHTML).toHaveBeenCalledWith(mockItem, '1', { beaverLoc: 'page4', beaverAtt: 'ITEMKEY' });
     });
 
     it('restores unchanged label-backed citations verbatim when labels are supplied', () => {
@@ -2430,14 +2431,14 @@ describe('Stored locator tokens in citation expansion', () => {
     function rawCitationWithToken(
         key: string,
         loc: string,
-        { page = '12', cslLabel }: { page?: string; cslLabel?: string } = {},
+        { page = '12', cslLabel, att }: { page?: string; cslLabel?: string; att?: string } = {},
     ): string {
         const citationData = {
             citationItems: [{
                 uris: [`http://zotero.org/users/1/items/${key}`],
                 locator: page,
                 ...(cslLabel ? { label: cslLabel } : {}),
-                beaver: { v: 1, loc },
+                beaver: { v: 1, loc, ...(att ? { att } : {}) },
             }],
         };
         return `<span class="citation" data-citation="${encodeURIComponent(JSON.stringify(citationData))}">`
@@ -2521,13 +2522,13 @@ describe('Stored locator tokens in citation expansion', () => {
         const { simplified, metadata } = simplifyNoteHtml(noteHtml, 1);
 
         const editedSimplified = simplified.replace('loc="s56-s59"', 'loc="s60-s62"');
-        const resolvedLocatorPages = { 'zotero:1-SENT1:s60-s62': '13' };
+        const resolvedLocatorPages = { 'zotero:1-SENT1:s60-s62': { page: '13', attKey: 'ATTSENT1' } };
         expandToRawHtml(editedSimplified, metadata, 'new', undefined, undefined, resolvedLocatorPages);
 
         expect(createCitationHTML).toHaveBeenCalledWith(
             expect.objectContaining({ key: 'SENT1' }),
             '13',
-            { beaverLoc: 's60-s62' },
+            { beaverLoc: 's60-s62', beaverAtt: 'ATTSENT1' },
         );
     });
 
@@ -2558,7 +2559,7 @@ describe('Stored locator tokens in citation expansion', () => {
         const editedSimplified = simplified.replace('loc="page15"', 'loc="page16"');
         expandToRawHtml(editedSimplified, metadata, 'new', undefined, pageLabels);
 
-        expect(createCitationHTML).toHaveBeenCalledWith(mockItem, '353', { beaverLoc: 'page16' });
+        expect(createCitationHTML).toHaveBeenCalledWith(mockItem, '353', { beaverLoc: 'page16' , beaverAtt: 'PGDOC' });
     });
 
     it('stores an edited printed label as sent and keeps the citation in note space', () => {
@@ -2628,10 +2629,10 @@ describe('Stored locator tokens in citation expansion', () => {
         // A structural locator only ever counts document positions, so the
         // citation is recorded with the token even though it had none before.
         const editedSimplified = simplified.replace('loc="page352"', 'loc="s10-s12"');
-        const resolvedLocatorPages = { 'zotero:1-PGSTRUCT:s10-s12': '353' };
+        const resolvedLocatorPages = { 'zotero:1-PGSTRUCT:s10-s12': { page: '353', attKey: 'ATTPGS' } };
         expandToRawHtml(editedSimplified, metadata, 'new', undefined, pageLabels, resolvedLocatorPages);
 
-        expect(createCitationHTML).toHaveBeenCalledWith(mockItem, '353', { beaverLoc: 's10-s12' });
+        expect(createCitationHTML).toHaveBeenCalledWith(mockItem, '353', { beaverLoc: 's10-s12', beaverAtt: 'ATTPGS' });
     });
 
     it('keeps the CSL label when a citation is retargeted without touching its locator', () => {
@@ -2716,5 +2717,119 @@ describe('Stored locator tokens in citation expansion', () => {
         // Locator and label both survive, and no token is recorded: the value
         // is the citation's own, not a position read off a document.
         expect(createCitationHTML).toHaveBeenCalledWith(mockItem, 'xiv', { cslLabel: 'chapter' });
+    });
+});
+
+/** A carried-over token must keep resolving against the file it was written against. */
+describe('pinned attachment on note citations', () => {
+    function pinnedCitation(key: string, loc: string, att: string): string {
+        const citationData = {
+            citationItems: [{
+                uris: [`http://zotero.org/users/1/items/${key}`],
+                locator: '12',
+                beaver: { v: 1, loc, att },
+            }],
+        };
+        return `<span class="citation" data-citation="${encodeURIComponent(JSON.stringify(citationData))}">`
+            + '<span class="citation-item">(Author, 2024)</span></span>';
+    }
+
+    it('carries the stored pin through simplification', () => {
+        const noteHtml = wrap(`<p>Text ${pinnedCitation('PINNED', 's56-s59', 'ATT_OLD')} more</p>`);
+        const { metadata } = simplifyNoteHtml(noteHtml, 1);
+        const stored = [...metadata.elements.values()][0];
+        expect(stored.originalAttrs?.att).toBe('ATT_OLD');
+        expect(stored.originalAttrs?.loc).toBe('s56-s59');
+    });
+
+    it('records no pin for a citation that never had one', () => {
+        const cd = {
+            citationItems: [{
+                uris: ['http://zotero.org/users/1/items/NOPIN'],
+                locator: '12',
+                beaver: { v: 1, loc: 's1-s2' },
+            }],
+        };
+        const cit = `<span class="citation" data-citation="${encodeURIComponent(JSON.stringify(cd))}">`
+            + '<span class="citation-item">(Author, 2024)</span></span>';
+        const { metadata } = simplifyNoteHtml(wrap(`<p>Text ${cit} more</p>`), 1);
+        expect([...metadata.elements.values()][0].originalAttrs?.att).toBeUndefined();
+    });
+
+    it('does not claim a pin for a CSL locator, which is a label rather than a position', () => {
+        const cd = {
+            citationItems: [{
+                uris: ['http://zotero.org/users/1/items/PLAIN'],
+                locator: '7',
+                beaver: { v: 1, att: 'ATT_OLD' },
+            }],
+        };
+        const cit = `<span class="citation" data-citation="${encodeURIComponent(JSON.stringify(cd))}">`
+            + '<span class="citation-item">(Author, 2024, p. 7)</span></span>';
+        const { metadata } = simplifyNoteHtml(wrap(`<p>Text ${cit}</p>`), 1);
+        expect([...metadata.elements.values()][0].originalAttrs?.att).toBeUndefined();
+    });
+
+    it('translates the page label in the PINNED document, not the current best', () => {
+        // Parent now prefers ATT_BEST; the citation is pinned to ATT_OLD.
+        const pinnedAtt = { id: 501, key: 'ATT_OLD', libraryID: 1, isAttachment: () => true };
+        const bestAtt = { id: 502, key: 'ATT_BEST', attachmentContentType: 'application/pdf' };
+        const parent = {
+            id: 500, key: 'PINNED', libraryID: 1,
+            getField: vi.fn(() => 'Paper'),
+            isAttachment: vi.fn(() => false),
+            isRegularItem: vi.fn(() => true),
+            parentItem: null,
+            getAttachments: vi.fn(() => [502]),
+        };
+        (globalThis as any).Zotero.Items.getByLibraryAndKey = vi.fn((_l: number, key: string) =>
+            key === 'ATT_OLD' ? pinnedAtt : parent);
+        (globalThis as any).Zotero.Items.get = vi.fn(() => bestAtt);
+
+        const labels = { 501: { 1: 'PIN-ii' }, 502: { 1: 'BEST-ii' } };
+
+        const noteHtml = wrap(`<p>Text ${pinnedCitation('PINNED', 'page1', 'ATT_OLD')} more</p>`);
+        const { simplified, metadata } = simplifyNoteHtml(noteHtml, 1);
+        expandToRawHtml(
+            simplified.replace('loc="page1"', 'loc="page2"'),
+            metadata, 'new', undefined, labels as any,
+        );
+
+        expect(createCitationHTML).toHaveBeenCalledWith(
+            expect.objectContaining({ key: 'PINNED' }),
+            'PIN-ii',
+            expect.objectContaining({ beaverLoc: 'page2', beaverAtt: 'ATT_OLD' }),
+        );
+    });
+
+    it('keeps the pin when a PAGE locator changes and the item does not', () => {
+        // Page tokens are not structurally resolved; the pin must be inherited.
+        const noteHtml = wrap(`<p>Text ${pinnedCitation('PINNED', 'page4', 'ATT_OLD')} more</p>`);
+        const { simplified, metadata } = simplifyNoteHtml(noteHtml, 1);
+        expandToRawHtml(simplified.replace('loc="page4"', 'loc="page9"'), metadata, 'new');
+
+        expect(createCitationHTML).toHaveBeenCalledWith(
+            expect.objectContaining({ key: 'PINNED' }),
+            expect.anything(),
+            expect.objectContaining({ beaverLoc: 'page9', beaverAtt: 'ATT_OLD' }),
+        );
+    });
+
+    it('does not carry the pin onto a citation retargeted to another item', () => {
+        const noteHtml = wrap(`<p>Text ${pinnedCitation('PINNED', 'page4', 'ATT_OLD')} more</p>`);
+        const { simplified, metadata } = simplifyNoteHtml(noteHtml, 1);
+        expandToRawHtml(simplified.replace('id="1-PINNED"', 'id="1-NEWITEM"'), metadata, 'new');
+
+        const opts = (createCitationHTML as any).mock.calls.at(-1)[2];
+        expect(opts.beaverAtt).not.toBe('ATT_OLD');
+    });
+
+    it('keeps the pin when the citation is copied back verbatim', () => {
+        const noteHtml = wrap(`<p>Alpha ${pinnedCitation('PINNED', 's56-s59', 'ATT_OLD')} omega</p>`);
+        const { simplified, metadata } = simplifyNoteHtml(noteHtml, 1);
+        const out = expandToRawHtml(simplified.replace('Alpha', 'ALPHA'), metadata, 'new');
+        const payload = decodeURIComponent(/data-citation="([^"]*)"/.exec(out)![1]);
+        expect(JSON.parse(payload).citationItems[0].beaver)
+            .toEqual({ v: 1, loc: 's56-s59', att: 'ATT_OLD' });
     });
 });

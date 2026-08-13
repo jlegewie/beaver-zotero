@@ -13,7 +13,7 @@
  */
 
 import { createCitationHTML } from './zoteroUtils';
-import { getBestPDFAttachment, getBestPDFAttachmentAsync } from './zoteroItemHelpers';
+import { getBestPDFAttachment, getBestPDFAttachmentAsync, locatorAttachmentKey } from './zoteroItemHelpers';
 import { getAttachmentFileStatus, checkLibraryExcluded } from '../services/agentDataProvider/utils';
 import { logger } from '@beaver/agent-core/platform/logger';
 import {
@@ -50,14 +50,120 @@ import {
 export { translatePageNumberToLabel } from './pageLabelTranslation';
 
 /**
- * Map of `requestedCitationKey` (e.g. `zotero:1-KEY:s4`) → resolved page string
- * for citations whose locator is a non-page structural locator (sentence,
- * paragraph, heading, …). Native Zotero citations only store page locators, so
- * structural locators are resolved to the page they appear on (via the
- * structured extraction cache) before being stored. Resolve up-front with
- * `preloadStructuralLocatorPages`.
+ * What a structural locator resolved to.
+ *
+ * Native Zotero citations only store page locators, so a non-page structural
+ * locator is resolved to its page via the extraction cache. Resolve up-front
+ * with `preloadStructuralLocatorPages`. The attachment is part of the same
+ * lookup — the page is only meaningful in the document it was read from.
  */
-export type ResolvedLocatorPages = Record<string, string>;
+export interface ResolvedLocator {
+    /** Printed page label the structural locator maps to. */
+    page: string;
+    /** Zotero key of the attachment it was resolved against. */
+    attKey?: string;
+    /** Pin this resolution used, so {@link dropStaleResolvedLocators} can re-check it after the await. */
+    pinUsed?: string;
+}
+
+/** Occurrence-specific key: same item+locator can be pinned to different files. */
+function locatorResultKey(citationKey: string, tagRef?: string): string {
+    return tagRef ? `${citationKey}#${tagRef}` : citationKey;
+}
+
+/** Look a resolution up for one occurrence, falling back to the shared entry. */
+function resolvedLocatorFor(
+    pages: ResolvedLocatorPages,
+    citationKey: string,
+    tagRef?: string,
+): ResolvedLocator | undefined {
+    return (tagRef ? pages[locatorResultKey(citationKey, tagRef)] : undefined)
+        ?? pages[citationKey];
+}
+
+/**
+ * Drop resolutions whose pin no longer matches the note being written.
+ * The preload awaits, so a citation can be repinned underneath it; discarded
+ * rather than written against the wrong document. Synchronous.
+ */
+export function dropStaleResolvedLocators(
+    preload: StructuralLocatorPreload,
+    metadata: SimplificationMetadata | undefined,
+): StructuralLocatorPreload {
+    if (!metadata) return preload;
+    const entries = Object.entries(preload.pages);
+
+    // Include unpinned entries: a pin can appear during the await.
+    const pins = indexPinnedAttachments(metadata);
+    const pages: ResolvedLocatorPages = {};
+    const unresolved = [...preload.unresolved];
+    for (const [key, value] of entries) {
+        const hash = key.lastIndexOf('#');
+        const tagRef = hash >= 0 ? key.slice(hash + 1) : undefined;
+        const citationKey = hash >= 0 ? key.slice(0, hash) : key;
+        // `requestedCitationKey` is `zotero:<item_id>:<loc>`.
+        const parts = citationKey.split(':');
+        const itemId = parts[1] ?? '';
+        const loc = parts.slice(2).join(':');
+        const current = storedPinFor(pins, tagRef ? { ref: tagRef } : {}, itemId, loc);
+        if (current === value.pinUsed) { pages[key] = value; continue; }
+        unresolved.push(`id="${itemId}" loc="${loc}"`);
+    }
+    return { pages, unresolved };
+}
+
+export type ResolvedLocatorPages = Record<string, ResolvedLocator>;
+
+/**
+ * Pins indexed for lookup from an edit. A pin belongs to a citation
+ * occurrence, not a locator value — changing `loc` does not retarget the file.
+ * `byRef` is authoritative; `byItemLoc` covers a tag whose `ref` was dropped
+ * (ambiguous if the same token appears twice with disagreeing pins).
+ */
+interface PinnedAttachments {
+    byRef: Map<string, { itemId: string; att: string }>;
+    byItemLoc: Map<string, string | undefined>;
+}
+
+function itemLocKey(itemId: string, loc: string): string {
+    return `${itemId}|${loc}`;
+}
+
+/** Index the pins a note's stored citations carry. */
+function indexPinnedAttachments(metadata?: SimplificationMetadata): PinnedAttachments {
+    const byRef = new Map<string, { itemId: string; att: string }>();
+    const byItemLoc = new Map<string, string | undefined>();
+    if (!metadata) return { byRef, byItemLoc };
+    for (const [ref, el] of metadata.elements) {
+        const attrs = el.originalAttrs;
+        if (el.type !== 'citation' || !attrs?.att) continue;
+        byRef.set(ref, { itemId: attrs.item_id, att: attrs.att });
+        if (!attrs.loc) continue;
+        const key = itemLocKey(attrs.item_id, attrs.loc);
+        // Second, disagreeing sighting of the same token ⇒ ambiguous.
+        if (byItemLoc.has(key) && byItemLoc.get(key) !== attrs.att) byItemLoc.set(key, undefined);
+        else byItemLoc.set(key, attrs.att);
+    }
+    return { byRef, byItemLoc };
+}
+
+/**
+ * Pin for an edited citation, or undefined if it is new, retargeted, or never
+ * pinned. A `ref` that now cites a different item drops the old pin.
+ */
+function storedPinFor(
+    pins: PinnedAttachments,
+    rawAttrs: Record<string, string>,
+    itemId: string,
+    loc: string,
+): string | undefined {
+    const ref = rawAttrs.ref;
+    if (ref) {
+        const stored = pins.byRef.get(ref);
+        return stored && stored.itemId === itemId ? stored.att : undefined;
+    }
+    return pins.byItemLoc.get(itemLocKey(itemId, loc));
+}
 
 export interface StructuralLocatorPreload {
     pages: ResolvedLocatorPages;
@@ -84,10 +190,16 @@ export interface StructuralLocatorPreload {
  * On a metadata cache miss a full extraction is run via
  * `getAttachmentFileStatus`; the freshly written labels are then read back.
  */
-export async function preloadPageLabelsForNewCitations(str: string): Promise<PageLabelsByAttachmentId> {
+export async function preloadPageLabelsForNewCitations(
+    str: string,
+    metadata?: SimplificationMetadata,
+): Promise<PageLabelsByAttachmentId> {
     const labelsByAttachmentId: PageLabelsByAttachmentId = {};
     const cache = Zotero.Beaver?.documentCache;
     if (!cache) return labelsByAttachmentId;
+
+    // Use the pinned document so the printed page and the pin name the same file.
+    const pins = indexPinnedAttachments(metadata);
 
     const seen = new Set<number>();
     const regex = /<citation\s+([^/]*?)\s*\/>/g;
@@ -109,7 +221,13 @@ export async function preloadPageLabelsForNewCitations(str: string): Promise<Pag
         let attachmentItem: any = null;
         const item = Zotero.Items.getByLibraryAndKey(normalized.ref.library_id, normalized.ref.zotero_key);
         if (item && typeof item !== 'boolean') {
-            attachmentItem = item.isAttachment() ? item : getBestPDFAttachment(item);
+            const pin = storedPinFor(
+                pins,
+                normalized.rawAttrs,
+                modelObjectIdFromReference(normalized.ref),
+                normalized.ref.loc?.raw ?? '',
+            );
+            attachmentItem = attachmentForLabels(item, pin);
         }
 
         if (!attachmentItem || seen.has(attachmentItem.id)) continue;
@@ -174,11 +292,17 @@ function resolvePageFromStructuredResult(
  * extraction. Callers thread the returned `pages` map into `expandToRawHtml`
  * and surface `unresolved` as a save warning.
  */
-export async function preloadStructuralLocatorPages(str: string): Promise<StructuralLocatorPreload> {
+export async function preloadStructuralLocatorPages(
+    str: string,
+    metadata?: SimplificationMetadata,
+): Promise<StructuralLocatorPreload> {
     const pages: ResolvedLocatorPages = {};
     const unresolved: string[] = [];
     const cache = Zotero.Beaver?.documentCache;
     if (!cache) return { pages, unresolved };
+
+    // Resolve carried-over tokens against the document they were written against.
+    const pinned = indexPinnedAttachments(metadata);
 
     const seen = new Set<string>();
     const resultsByAttachment = new Map<number, Promise<StructuredExtractResult | null>>();
@@ -194,8 +318,11 @@ export async function preloadStructuralLocatorPages(str: string): Promise<Struct
         if (!loc || loc.kind === 'page') continue;
 
         const citationKey = requestedCitationKey(normalized.ref);
-        if (seen.has(citationKey)) continue;
-        seen.add(citationKey);
+        // Per occurrence: same item+locator can be pinned to different files.
+        const tagRef = normalized.rawAttrs.ref;
+        const resultKey = locatorResultKey(citationKey, tagRef);
+        if (seen.has(resultKey)) continue;
+        seen.add(resultKey);
 
         // A portable ref whose library isn't on this device can't be looked
         // up; skip it here rather than misreport it as an unresolved locator —
@@ -210,12 +337,23 @@ export async function preloadStructuralLocatorPages(str: string): Promise<Struct
         const describe = `id="${modelObjectIdFromReference(normalized.ref)}" loc="${loc.raw}"`;
         try {
             const item = Zotero.Items.getByLibraryAndKey(normalized.ref.library_id, normalized.ref.zotero_key);
+            // Prefer the stored pin; fall through to best-attachment if the file is gone.
+            const pin = storedPinFor(
+                pinned,
+                normalized.rawAttrs,
+                modelObjectIdFromReference(normalized.ref),
+                loc.raw,
+            );
+            const pinnedItem = pin
+                ? Zotero.Items.getByLibraryAndKey(normalized.ref.library_id, pin)
+                : null;
             // Use the async helper so a regular parent item's child attachments
             // are loaded before lookup — the sync variant calls getAttachments()
             // which throws or returns nothing when childItems is lazily unloaded.
-            const attachmentItem = item && typeof item !== 'boolean'
-                ? (item.isAttachment() ? item : await getBestPDFAttachmentAsync(item))
-                : null;
+            const attachmentItem = (pinnedItem && typeof pinnedItem !== 'boolean' ? pinnedItem : null)
+                ?? (item && typeof item !== 'boolean'
+                    ? (item.isAttachment() ? item : await getBestPDFAttachmentAsync(item))
+                    : null);
             if (!attachmentItem) { unresolved.push(describe); continue; }
 
             let resultPromise = resultsByAttachment.get(attachmentItem.id);
@@ -237,7 +375,11 @@ export async function preloadStructuralLocatorPages(str: string): Promise<Struct
 
             const page = resolvePageFromStructuredResult(result, loc);
             if (page == null) { unresolved.push(describe); continue; }
-            pages[citationKey] = page;
+            pages[resultKey] = {
+                page,
+                attKey: attachmentItem.key,
+                ...(pin ? { pinUsed: pin } : {}),
+            };
         } catch {
             unresolved.push(describe);
         }
@@ -344,6 +486,12 @@ interface SimplifiedCitationAttrs {
     page?: string;
     /** CSL label to store `page` under. Defaults to `page`. */
     cslLabel?: string;
+    /**
+     * Zotero key of the attachment `loc` addresses, when the structural preload
+     * already resolved one. Absent for a page token, which needs no lookup — the
+     * write path pins the attachment for those.
+     */
+    att?: string;
 }
 
 /**
@@ -368,12 +516,14 @@ export function locatorToken(rawAttrs: Record<string, string>): string | undefin
 function resolveLocatorPage(
     ref: CitationRef,
     resolvedLocatorPages?: ResolvedLocatorPages,
-): string | undefined {
+    tagRef?: string,
+): ResolvedLocator | undefined {
     const page = getPageLocator(ref);
-    if (page) return page;
+    // Page locators need no lookup; the write path pins the attachment itself.
+    if (page) return { page };
 
     if (ref.loc && ref.loc.kind !== 'page' && resolvedLocatorPages) {
-        return resolvedLocatorPages[requestedCitationKey(ref)];
+        return resolvedLocatorFor(resolvedLocatorPages, requestedCitationKey(ref), tagRef);
     }
     return undefined;
 }
@@ -388,8 +538,13 @@ function parseSimplifiedCitationAttrs(
     }
     const item_id = modelObjectIdFromReference(normalized.ref);
     const loc = locatorToken(normalized.rawAttrs);
-    const page = resolveLocatorPage(normalized.ref, resolvedLocatorPages);
-    return { item_id, ...(loc ? { loc } : {}), ...(page ? { page } : {}) };
+    const resolved = resolveLocatorPage(normalized.ref, resolvedLocatorPages, normalized.rawAttrs.ref);
+    return {
+        item_id,
+        ...(loc ? { loc } : {}),
+        ...(resolved?.page ? { page: resolved.page } : {}),
+        ...(resolved?.attKey ? { att: resolved.attKey } : {}),
+    };
 }
 
 /**
@@ -423,26 +578,34 @@ function attrsChanged(
  * @param page - Raw page string from the citation attributes
  * @param shouldTranslate - If true, translate 1-based page numbers to labels (for model-provided pages)
  * @param pageLabels - Pre-resolved label map keyed by attachment item ID
+ * @param attKey - pinned attachment; labels must come from the same document
  */
 function resolvePageForCitation(
     item: any,
     page: string | undefined,
     shouldTranslate: boolean,
     pageLabels?: PageLabelsByAttachmentId,
+    attKey?: string,
 ): string | undefined {
     if (!page) return undefined;
     let resolved = normalizePageLocator(page);
     if (shouldTranslate && resolved) {
-        if (item.isAttachment()) {
-            resolved = translatePageNumberToLabel(pageLabels?.[item.id] ?? null, resolved);
-        } else {
-            const att = getBestPDFAttachment(item);
-            if (att) {
-                resolved = translatePageNumberToLabel(pageLabels?.[att.id] ?? null, resolved);
-            }
+        const att = attachmentForLabels(item, attKey);
+        if (att) {
+            resolved = translatePageNumberToLabel(pageLabels?.[att.id] ?? null, resolved);
         }
     }
     return resolved;
+}
+
+/** Attachment to read page labels from: the pin if present, otherwise best PDF. */
+function attachmentForLabels(item: any, attKey?: string): any {
+    if (item.isAttachment()) return item;
+    if (attKey) {
+        const pinned = Zotero.Items.getByLibraryAndKey(item.libraryID, attKey);
+        if (pinned && typeof pinned !== 'boolean') return pinned;
+    }
+    return getBestPDFAttachment(item);
 }
 
 /**
@@ -463,10 +626,13 @@ function resolvePageForCitation(
  * The key is written only for a document-space token. Recording a note-space
  * label under it would relabel that label as a physical page, and the next edit
  * of the citation would translate it — silently changing its numbering mid-life.
+ *
+ * The attachment is pinned alongside the token when known (`attrs.att`, else
+ * {@link locatorAttachmentKey}); otherwise the token is stored unpinned.
  */
 function buildCitationHTML(
     item: any,
-    attrs: { loc?: string; page?: string; cslLabel?: string },
+    attrs: { loc?: string; page?: string; cslLabel?: string; att?: string },
     projectedSpace: LocatorSpace,
     pageLabels?: PageLabelsByAttachmentId,
 ): string {
@@ -476,12 +642,14 @@ function buildCitationHTML(
     // own — and rewriting either would address a page it never named.
     const wrotePageToken = attrs.loc !== undefined && isPageToken(attrs.loc);
     const isDocumentSpace = !wrotePageToken || projectedSpace === 'document';
+    // Same attachment for the printed label and the pin, so they cannot disagree.
+    const beaverAtt = attrs.att ?? locatorAttachmentKey(item);
     const page = wrotePageToken
-        ? resolvePageForCitation(item, attrs.page, isDocumentSpace, pageLabels)
+        ? resolvePageForCitation(item, attrs.page, isDocumentSpace, pageLabels, beaverAtt)
         : attrs.page;
     return stripInlineItemDataFromDataCitations(createCitationHTML(item, page, {
         ...(attrs.cslLabel ? { cslLabel: attrs.cslLabel } : {}),
-        ...(attrs.loc && isDocumentSpace ? { beaverLoc: attrs.loc } : {}),
+        ...(attrs.loc && isDocumentSpace ? { beaverLoc: attrs.loc, beaverAtt } : {}),
     }));
 }
 
@@ -517,7 +685,7 @@ function buildCitationFromSimplifiedAttrs(
 /** Build a new citation from an attachment ID (att_id: portable "u-KEY" / "gGROUP-KEY", or legacy "LIB-KEY") */
 function buildCitationFromAttId(
     attId: string,
-    attrs: { loc?: string; page?: string },
+    attrs: { loc?: string; page?: string; att?: string },
     projectedSpace: LocatorSpace,
     pageLabels?: PageLabelsByAttachmentId,
 ): string {
@@ -745,9 +913,24 @@ export function expandToRawHtml(
                                 );
                             }
 
-                            const rebuilt = keepsStoredLocator
-                                ? { ...newAttrs, cslLabel: stored.originalAttrs?.cslLabel }
-                                : newAttrs;
+                            // The document the citation addresses survives a
+                            // locator change: moving the locator WITHIN a
+                            // citation does not retarget it to another file.
+                            // Dropped only when the cited ITEM changed, which is
+                            // a real retarget and makes the old document
+                            // irrelevant. A pin resolved by the preload wins —
+                            // it is the attachment the new page was actually
+                            // read from.
+                            const sameItem = stored.originalAttrs?.item_id === newAttrs.item_id;
+                            const inheritedAtt = sameItem
+                                ? newAttrs.att ?? stored.originalAttrs?.att
+                                : newAttrs.att;
+                            const rebuilt = {
+                                ...(keepsStoredLocator
+                                    ? { ...newAttrs, cslLabel: stored.originalAttrs?.cslLabel }
+                                    : newAttrs),
+                                ...(inheritedAtt ? { att: inheritedAtt } : {}),
+                            };
                             // A citation that projected no locator has no space
                             // of its own: there was nothing for the agent to
                             // copy, so a locator it adds was read off the
@@ -815,11 +998,15 @@ export function expandToRawHtml(
             if (attId) {
                 // Resolve structural locators on legacy att_id/attachment_id
                 // citations the same way as the unified id path.
+                const resolved = normalizedCitation.ok
+                    ? resolveLocatorPage(
+                        normalizedCitation.ref, resolvedLocatorPages, normalizedCitation.rawAttrs.ref,
+                    )
+                    : undefined;
                 const attrs = {
                     loc: locatorToken(normalizedCitation.rawAttrs),
-                    page: normalizedCitation.ok
-                        ? resolveLocatorPage(normalizedCitation.ref, resolvedLocatorPages)
-                        : extractAttr(attrStr, 'page'),
+                    page: normalizedCitation.ok ? resolved?.page : extractAttr(attrStr, 'page'),
+                    ...(resolved?.attKey ? { att: resolved.attKey } : {}),
                 };
                 return buildCitationFromAttId(attId, attrs, 'document', pageLabels);
             }

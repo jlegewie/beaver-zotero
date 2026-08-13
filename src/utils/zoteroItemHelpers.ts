@@ -20,6 +20,26 @@ export function getBestPDFAttachment(item: any): any {
 }
 
 /**
+ * Attachment a locator provably addresses, or undefined if it cannot be known.
+ *
+ * Only two certain cases: the item is the attachment, or it has exactly one.
+ * A parent with several files returns undefined — guessing "best" would
+ * permanently pin today's preference. Undefined means unpinned (resolve live).
+ * Synchronous; unloaded child items also return undefined.
+ */
+export function locatorAttachmentKey(item: any): string | undefined {
+    try {
+        if (!item) return undefined;
+        if (item.isAttachment()) return item.key || undefined;
+        const attachmentIDs = item.getAttachments?.();
+        if (!attachmentIDs || attachmentIDs.length !== 1) return undefined;
+        return Zotero.Items.get(attachmentIDs[0])?.key || undefined;
+    } catch {
+        return undefined;
+    }
+}
+
+/**
  * Find the best PDF attachment after loading the parent item's child list and
  * attachment objects. Use this when the parent item may have only primary data.
  */

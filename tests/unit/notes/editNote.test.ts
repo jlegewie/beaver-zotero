@@ -146,6 +146,8 @@ vi.mock('../../../src/utils/noteEditorIO', () => ({
 vi.mock('../../../src/utils/noteCitationExpand', () => ({
     expandToRawHtml: vi.fn((str: string, _metadata: any, _context: string) => str),
     preloadPageLabelsForNewCitations: vi.fn().mockResolvedValue({}),
+    // Identity by default: staleness is exercised in noteCitationPin.test.ts.
+    dropStaleResolvedLocators: vi.fn((preload: any) => preload),
     preloadStructuralLocatorPages: vi.fn().mockResolvedValue({ pages: {}, unresolved: [] }),
     buildUnresolvedLocatorWarning: vi.fn(() => null),
     isCitationRefNotFoundError: vi.fn(() => false),

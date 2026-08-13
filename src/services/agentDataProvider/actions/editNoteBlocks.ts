@@ -92,6 +92,7 @@ import {
     MAX_BATCH_EDITS,
     buildRewrittenNoteBody,
     preloadBatchLabels,
+    revalidatePreloadedLabels,
     type PreloadedLabels,
 } from './editNoteBatch';
 import {
@@ -591,13 +592,16 @@ export function makeCitationPrecheck(
  * carry new citations, `expect` is the confirmation text. One scan over the
  * concatenation of all of them, exactly as the batch path does.
  */
-export async function preloadBlockLabels(edits: EditNoteBlocksEditItem[]): Promise<PreloadedLabels> {
+export async function preloadBlockLabels(
+    edits: EditNoteBlocksEditItem[],
+    metadata?: SimplificationMetadata,
+): Promise<PreloadedLabels> {
     const asBatch: EditNoteBatchEditItem[] = edits.map((edit) => ({
         index: edit.index,
         new_string: edit.content ?? '',
         old_string: `${edit.expect ?? ''}\n${edit.expect_end ?? ''}`,
     }));
-    return preloadBatchLabels(asBatch);
+    return preloadBatchLabels(asBatch, metadata);
 }
 
 /** Every string an edit contributes that can contain a citation tag. */
@@ -1075,7 +1079,7 @@ async function validateEditNoteBlocksAction(
     const snapshotStatus = checkSnapshotStatus(snapshot, noteId, simplified);
 
     const externalRefContext = getExternalRefContext();
-    const labels = await preloadBlockLabels(edits);
+    const labels = await preloadBlockLabels(edits, metadata);
     const citationRejections = await resolveCitationRejections(editContents(edits), externalRefContext);
     const citationPrecheck = makeCitationPrecheck(citationRejections, metadata);
 
@@ -1365,13 +1369,15 @@ export type BlockExecutionPlan =
 export function planBlockEditsExecution(inputs: BlockExecutionInputs): BlockExecutionPlan {
     const {
         oldHtml, noteId, libraryId, edits, snapshot, destructiveRewrite,
-        labels, externalRefContext, citationRejections, threadId,
+        externalRefContext, citationRejections, threadId,
     } = inputs;
 
     const normalizedOldHtml = normalizeNoteHtml(oldHtml);
     const existingCitationCache = extractDataCitationItems(normalizedOldHtml);
     const strippedHtml = stripDataCitationItems(normalizedOldHtml);
     const { simplified, metadata } = getOrSimplify(noteId, oldHtml, libraryId);
+    // The preload ran before this read; drop resolutions whose pin moved.
+    const labels = revalidatePreloadedLabels(inputs.labels, metadata);
 
     // THE APPROVAL BOUNDARY. An edit validation skipped was shown to the user as
     // "Skipped" with NO diff, so execute must not apply it — not even if the
@@ -1755,8 +1761,11 @@ async function executeEditNoteBlocksAction(
 
     const noteId = snapshotNoteId(resolvedLibraryId, item.key);
 
+    // Current pins (synchronous — no await ahead of the authoritative read).
+    const { metadata: pinMetadata } = getOrSimplify(noteId, item.getNote(), resolvedLibraryId);
+
     // ── STEP 1: every async preload, all of it derived from the edits ───────
-    const labels = await preloadBlockLabels(edits);
+    const labels = await preloadBlockLabels(edits, pinMetadata);
     const externalRefContext = getExternalRefContext();
     const citationRejections = await resolveCitationRejections(editContents(edits), externalRefContext);
     const threadId = store.get(currentThreadIdAtom);

@@ -636,10 +636,10 @@ export async function executeEditNoteAction(
     // 5. Pre-load page labels so new citations resolve page indices to labels.
     //    The resolved map is threaded explicitly into every expandToRawHtml
     //    call below so expansion stays synchronous.
-    const newPageLabels = await preloadPageLabelsForNewCitations(new_string);
+    const newPageLabels = await preloadPageLabelsForNewCitations(new_string, metadata);
     // 5b. Resolve structural (non-page) locators in new_string to their page so
     //     citations keep a page locator instead of dropping it on save.
-    const structuralLocators = await preloadStructuralLocatorPages(new_string);
+    const structuralLocators = await preloadStructuralLocatorPages(new_string, metadata);
     const resolvedLocatorPages = structuralLocators.pages;
     const locatorWarning = buildUnresolvedLocatorWarning(structuralLocators.unresolved);
 
@@ -1291,8 +1291,8 @@ async function executeBatchSingleRewrite(
     threadId: string | null,
     noteId: string,
 ): Promise<EditNoteBatchResultData> {
-    const newPageLabels = await preloadPageLabelsForNewCitations(edit.new_string);
-    const structuralLocators = await preloadStructuralLocatorPages(edit.new_string);
+    const newPageLabels = await preloadPageLabelsForNewCitations(edit.new_string, metadata);
+    const structuralLocators = await preloadStructuralLocatorPages(edit.new_string, metadata);
     const resolvedLocatorPages = structuralLocators.pages;
     const locatorWarning = buildUnresolvedLocatorWarning(structuralLocators.unresolved);
 
@@ -1470,7 +1470,7 @@ export async function executeEditNoteBatchAction(
     // 4. Preload page labels + structural locators for every edit, then run
     //    the same no-op/precheck/enrichment/Markdown-fallback pass the WS
     //    executor runs before resolution.
-    const labels = await preloadBatchLabels(edits);
+    const labels = await preloadBatchLabels(edits, metadata);
     const { specs, failures: prepFailures } = await prepareSpecs(
         edits, metadata, externalRefContext, labels, library_id,
     );

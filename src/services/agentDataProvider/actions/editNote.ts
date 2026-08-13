@@ -22,6 +22,7 @@ import {
     expandToRawHtml,
     preloadPageLabelsForNewCitations,
     preloadStructuralLocatorPages,
+    dropStaleResolvedLocators,
     buildUnresolvedLocatorWarning,
     type ExternalRefContext,
     type ResolvedLocatorPages,
@@ -556,14 +557,14 @@ async function validateEditNoteAction(
     //      translates 1-based page numbers to the display labels stored at
     //      insert time. The resolved map is threaded explicitly into the
     //      matcher and enrichment so expansion stays synchronous.
-    const newPageLabels = await preloadPageLabelsForNewCitations(new_string);
-    const oldPageLabels = await preloadPageLabelsForNewCitations(old_string ?? '');
+    const newPageLabels = await preloadPageLabelsForNewCitations(new_string, metadata);
+    const oldPageLabels = await preloadPageLabelsForNewCitations(old_string ?? '', metadata);
     const pageLabels = { ...newPageLabels, ...oldPageLabels };
     // 10b-ii. Resolve structural (non-page) locators in new_string to the page
     //      they sit on. Note citations only store page locators, so a sentence/
     //      paragraph/heading locator is mapped to its page here; unresolved ones
     //      are surfaced as a non-blocking warning on success.
-    const structuralLocators = await preloadStructuralLocatorPages(new_string);
+    const structuralLocators = await preloadStructuralLocatorPages(new_string, metadata);
     const resolvedLocatorPages = structuralLocators.pages;
     // 10c. Enrich no-ref citations in old_string with refs from metadata.
     //      When the model reuses the form it wrote in an earlier edit_note
@@ -844,14 +845,18 @@ async function executeEditNoteAction(
         }
     }
 
-    // 3. Pre-load page labels so new citations resolve page indices to labels.
-    //    Done before reading the note to avoid async gaps between read and write.
-    const newPageLabels = await preloadPageLabelsForNewCitations(new_string);
+    // Current pins so the preloads resolve against the document each citation
+    // names. Synchronous — no await ahead of the note read.
+    const { metadata: pinMetadata } = getOrSimplify(
+        `${resolvedLibraryId}-${zotero_key}`, item.getNote(), resolvedLibraryId,
+    );
+
+    // 3a. Pre-load page labels so new citations resolve page indices to labels.
+    //     Done before reading the note to avoid async gaps between read and write.
+    const newPageLabels = await preloadPageLabelsForNewCitations(new_string, pinMetadata);
     // 3b. Resolve structural (non-page) locators in new_string to their page so
     //     citations keep a page locator instead of dropping it on save.
-    const structuralLocators = await preloadStructuralLocatorPages(new_string);
-    const resolvedLocatorPages = structuralLocators.pages;
-    const locatorWarning = buildUnresolvedLocatorWarning(structuralLocators.unresolved);
+    const structuralLocators = await preloadStructuralLocatorPages(new_string, pinMetadata);
 
     // 4. Get current note HTML (kept for rollback on save failure)
     //    Avoid async operations between here and item.setNote() to preserve atomicity.
@@ -860,6 +865,11 @@ async function executeEditNoteAction(
     // 5. Get metadata from cache or re-simplify
     const noteId = `${resolvedLibraryId}-${zotero_key}`;
     const { simplified, metadata } = getOrSimplify(noteId, oldHtml, resolvedLibraryId);
+
+    // Discard resolutions whose pin moved during the preload await.
+    const checkedLocators = dropStaleResolvedLocators(structuralLocators, metadata);
+    const resolvedLocatorPages = checkedLocators.pages;
+    const locatorWarning = buildUnresolvedLocatorWarning(checkedLocators.unresolved);
 
     // Snapshot external-reference state once so every expandToRawHtml('new', ...)
     // below can resolve `<citation external_id="..."/>` consistently.

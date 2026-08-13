@@ -30,6 +30,7 @@ import {
     expandToRawHtml,
     preloadPageLabelsForNewCitations,
     preloadStructuralLocatorPages,
+    dropStaleResolvedLocators,
     buildUnresolvedLocatorWarning,
     type ExternalRefContext,
     type ResolvedLocatorPages,
@@ -171,6 +172,24 @@ export interface PreloadedLabels {
     locatorWarnings: string[];
 }
 
+/** Drop preload resolutions whose pin no longer matches the note being written. */
+export function revalidatePreloadedLabels(
+    labels: PreloadedLabels,
+    metadata: SimplificationMetadata | undefined,
+): PreloadedLabels {
+    const checked = dropStaleResolvedLocators(
+        { pages: labels.resolvedLocatorPages, unresolved: [] },
+        metadata,
+    );
+    if (checked.unresolved.length === 0) return labels;
+    const warning = buildUnresolvedLocatorWarning(checked.unresolved);
+    return {
+        pageLabels: labels.pageLabels,
+        resolvedLocatorPages: checked.pages,
+        locatorWarnings: warning ? [...labels.locatorWarnings, warning] : labels.locatorWarnings,
+    };
+}
+
 /**
  * Separator inserted between edits' strings before they're concatenated for a
  * single preload scan. It contains a literal `/`, which the citation-tag
@@ -193,15 +212,18 @@ const BATCH_LABEL_SEPARATOR = '\n<!-- /edit-boundary/ -->\n';
  * while cutting a batch of N edits down from up to 3N sequential lookups to
  * two.
  */
-export async function preloadBatchLabels(edits: EditNoteBatchEditItem[]): Promise<PreloadedLabels> {
+export async function preloadBatchLabels(
+    edits: EditNoteBatchEditItem[],
+    metadata?: SimplificationMetadata,
+): Promise<PreloadedLabels> {
     const forPageLabels = edits
         .map((edit) => `${edit.new_string}${BATCH_LABEL_SEPARATOR}${edit.old_string ?? ''}`)
         .join(BATCH_LABEL_SEPARATOR);
     const forStructuralLocators = edits.map((edit) => edit.new_string).join(BATCH_LABEL_SEPARATOR);
 
     const [pageLabels, structural] = await Promise.all([
-        preloadPageLabelsForNewCitations(forPageLabels),
-        preloadStructuralLocatorPages(forStructuralLocators),
+        preloadPageLabelsForNewCitations(forPageLabels, metadata),
+        preloadStructuralLocatorPages(forStructuralLocators, metadata),
     ]);
 
     const locatorWarnings: string[] = [];
@@ -482,7 +504,7 @@ async function validateEditNoteBatchAction(
     const { simplified, metadata } = getOrSimplify(noteId, rawHtml, resolvedLibraryId);
 
     const externalRefContext = getExternalRefContext();
-    const labels = await preloadBatchLabels(edits);
+    const labels = await preloadBatchLabels(edits, metadata);
 
     // Strip data-citation-items ONCE — the shared match/apply haystack.
     const strippedHtml = stripDataCitationItems(normalizeNoteHtml(rawHtml));
@@ -664,13 +686,20 @@ async function executeEditNoteBatchAction(
         }
     }
 
+    // Current pins (synchronous — no await ahead of the note read).
+    const { metadata: pinMetadata } = getOrSimplify(
+        `${resolvedLibraryId}-${zotero_key}`, item.getNote(), resolvedLibraryId,
+    );
+
     // Preload page labels for ALL edits before the final note snapshot.
-    const labels = await preloadBatchLabels(edits);
+    const preloadedLabels = await preloadBatchLabels(edits, pinMetadata);
 
     // Snapshot the note. Avoid async between here and item.setNote() to keep atomicity.
     const oldHtml: string = item.getNote();
     const noteId = `${resolvedLibraryId}-${zotero_key}`;
     const { simplified, metadata } = getOrSimplify(noteId, oldHtml, resolvedLibraryId);
+    // Discard preload resolutions whose pin moved during the await window.
+    const labels = revalidatePreloadedLabels(preloadedLabels, metadata);
     const externalRefContext = getExternalRefContext();
 
     const normalizedOldHtml = normalizeNoteHtml(oldHtml);

@@ -69,6 +69,8 @@ vi.mock('../../../src/utils/noteCitationExpand', () => ({
         callLog.push('async:preloadPageLabelsForNewCitations');
         return {};
     }),
+    // Identity by default: staleness is exercised in noteCitationPin.test.ts.
+    dropStaleResolvedLocators: vi.fn((preload: any) => preload),
     preloadStructuralLocatorPages: vi.fn(async () => {
         callLog.push('async:preloadStructuralLocatorPages');
         return { pages: {}, unresolved: [] };

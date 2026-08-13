@@ -3,6 +3,8 @@ import { getPageLocator } from '@beaver/agent-core/citations/citationGrammar';
 import { resolvePageLabelFromLabels, translatePageNumberToLabelFromLabels } from '../../utils/pageLabels';
 import { buildZoteroCitationLinkHTML, isLinkCitationItem } from '../../../src/utils/zoteroLinkCitation';
 import { resolveLibraryRef } from '../../../src/utils/libraryIdentity';
+import { BEAVER_CITATION_META_KEY, buildBeaverCitationMeta } from '../../../src/utils/noteCitationLoc';
+import { locatorAttachmentKey } from '../../../src/utils/zoteroItemHelpers';
 import { logger } from '@beaver/agent-core/platform/logger';
 import type {
     CitationExportRequest,
@@ -57,11 +59,25 @@ function renderCitation(request: CitationExportRequest): CitationExportRender | 
         const navLocator = startPage
             ? resolvePageLabelFromLabels(exportLabels, startPage)
             : (requestedPage ? translatePageNumberToLabelFromLabels(exportLabels, requestedPage) : undefined);
-        const citationObj = {
+        // Locator token next to the printed CSL locator. Read `loc.raw` —
+        // `getPageLocator` is undefined for structural locators.
+        const beaverLoc = requestedRef?.loc?.raw;
+        // Pin only when the citation itself identifies the attachment. A parent
+        // with several files stays unpinned rather than freezing today's "best".
+        const sourceAttachment = locatorAttachmentKey(item);
+        const citationObj: Record<string, unknown> = {
             citationItems: [{
                 uris: [Zotero.URI.getItemURI(item.parentItem || item)],
                 itemData: itemData,
                 locator: navLocator,
+                ...(beaverLoc
+                    ? {
+                        [BEAVER_CITATION_META_KEY]: buildBeaverCitationMeta(
+                            beaverLoc,
+                            sourceAttachment,
+                        ),
+                    }
+                    : {}),
             }],
             properties: {},
         };

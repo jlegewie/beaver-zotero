@@ -845,12 +845,13 @@ export function getCurrentLibrary(): _ZoteroTypes.Library.LibraryLike | null {
  * @param {String} [options.cslLabel] - CSL locator label for `page` (defaults to "page")
  * @param {String} [options.beaverLoc] - Beaver locator token to record privately on the
  *   citation item; attachable even when no `page` could be resolved
+ * @param {String} [options.beaverAtt] - Attachment `beaverLoc` addresses
  * @returns {String} HTML string with citation markup
  */
 export function createCitationHTML(
     itemOrID: Zotero.Item | number | string,
     page?: string,
-    options?: { cslLabel?: string; beaverLoc?: string }
+    options?: { cslLabel?: string; beaverLoc?: string; beaverAtt?: string }
 ): string {
     // Get the item if an ID was passed
     const item = typeof itemOrID === 'object' ? itemOrID : Zotero.Items.get(itemOrID);
@@ -894,10 +895,12 @@ export function createCitationHTML(
         citationItem.label = options?.cslLabel || "page";
     }
 
-    // Record Beaver's own locator token, which a printed page label cannot express.
-    // Independent of `page`: a token that resolved to no page label is still worth keeping.
+    // Record Beaver's locator token, independent of `page`.
     if (options?.beaverLoc) {
-        citationItem[BEAVER_CITATION_META_KEY] = buildBeaverCitationMeta(options.beaverLoc);
+        citationItem[BEAVER_CITATION_META_KEY] = buildBeaverCitationMeta(
+            options.beaverLoc,
+            options.beaverAtt,
+        );
     }
 
     // Create citation object

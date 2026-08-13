@@ -15,7 +15,7 @@ import { escapeAttr, unescapeAttr } from './noteHtmlEntities';
 import { stripDataCitationItems, stripNoteWrapperDiv } from './noteWrapper';
 import { normalizeNoteHtml } from '../prosemirror/normalize';
 import { parseZoteroCitationLinkHref } from './zoteroLinkCitation';
-import { readBeaverLoc } from './noteCitationLoc';
+import { readBeaverLoc, readBeaverAtt } from './noteCitationLoc';
 import { extractItemKeyFromUri } from './zoteroUri';
 import { modelObjectId } from './libraryIdentity';
 
@@ -73,6 +73,8 @@ export interface StoredElement {
         cslLocator?: string;
         /** The citation's stored CSL `label` (e.g. `chapter`), when it has one. */
         cslLabel?: string;
+        /** Attachment `loc` was resolved against when the citation was written. */
+        att?: string;
     };
     isCompound?: boolean;
     originalText?: string;
@@ -314,6 +316,8 @@ export function simplifyNoteHtml(
                     // Beaver's token counts document positions; the CSL fallback
                     // is the printed label the citation already stores.
                     const locSpace: LocatorSpace = beaverLoc ? 'document' : 'note';
+                    // Pins only apply to Beaver tokens; a CSL locator is a printed label.
+                    const beaverAtt = beaverLoc ? readBeaverAtt(ci) : undefined;
 
                     // Content-based ref with occurrence counter
                     const keyForCount = itemKey;
@@ -329,6 +333,7 @@ export function simplifyNoteHtml(
                             ...(loc ? { loc, locSpace } : {}),
                             ...(!loc && storedLocator ? { cslLocator: storedLocator } : {}),
                             ...(ci.label !== undefined ? { cslLabel: ci.label } : {}),
+                            ...(beaverAtt ? { att: beaverAtt } : {}),
                         },
                     });
 
