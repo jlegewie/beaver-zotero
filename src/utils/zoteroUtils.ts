@@ -1029,15 +1029,95 @@ export function areItemsDuplicates(item1: Zotero.Item, item2: Zotero.Item): bool
  * @param preferredLibraryId Library ID to prioritize when choosing between duplicates (default: 1)
  * @returns Deduplicated array of items
  */
+/**
+ * Position of the first entry greater than `value` in an ascending array.
+ * Returns `sorted.length` when there is none.
+ */
+function firstIndexAbove(sorted: number[], value: number): number {
+    let low = 0;
+    let high = sorted.length;
+    while (low < high) {
+        const mid = (low + high) >>> 1;
+        if (sorted[mid] > value) high = mid;
+        else low = mid + 1;
+    }
+    return low;
+}
+
 export function deduplicateItems(
     items: Zotero.Item[],
     preferredLibraryId: number = 1
 ): Zotero.Item[] {
     if (items.length <= 1) return items;
 
-    // Comparison is all-pairs, so extract each item's fields once instead of on
-    // every comparison. This keeps deep result pages cheap.
+    // Extract each item's fields once instead of on every comparison.
     const signatures = items.map(buildItemDuplicateSignature);
+
+    // Every rule in areSignaturesDuplicates needs an exact match on the id, the
+    // DOI, the ISBN or the normalized title, so only items sharing one of those
+    // can possibly pair. Bucketing on them replaces the all-pairs scan with a
+    // scan of the few real candidates — without it a broad search across
+    // several libraries compares tens of millions of pairs on Zotero's main
+    // thread. The predicate itself is unchanged and still decides every pair,
+    // so the result is identical to comparing all of them.
+    const buckets = new Map<string, number[]>();
+    const addToBucket = (key: string, index: number): void => {
+        const bucket = buckets.get(key);
+        if (bucket) bucket.push(index);
+        else buckets.set(key, [index]);
+    };
+
+    // The title bucket is split by how each item's DOI participates in the rule
+    // that outranks the title one, because a shared title is by far the easiest
+    // key for many items to collide on — thousands of "Editorial" rows are
+    // ordinary in a large library, and comparing all of them pairwise is the
+    // cost bucketing is supposed to remove.
+    //
+    // For a pair that both carry a DOI field and where at least one value
+    // survives normalization, the DOI decides the match outright. Equal DOIs
+    // are already paired by the `d` bucket, so those pairs need never be drawn
+    // from the title bucket at all — which is what makes a bucket of
+    // same-titled, separately-identified items cost nothing.
+    const DOI_LIVE = 0;    // carries a DOI that survived normalization
+    const DOI_BLANK = 1;   // carries a DOI field that normalized away
+    const DOI_ABSENT = 2;  // carries no DOI field
+    const doiClass = (signature: ItemDuplicateSignature): number => {
+        if (!signature.hasDoi) return DOI_ABSENT;
+        return signature.doi ? DOI_LIVE : DOI_BLANK;
+    };
+    const TITLE_PREFIX = ['tL', 'tZ', 'tN'];
+
+    signatures.forEach((signature, index) => {
+        // Empty values are never a match (the predicate requires a surviving
+        // value on both sides), so they must not become a shared bucket key.
+        addToBucket(`#${signature.id}`, index);
+        if (signature.doi) addToBucket(`d${signature.doi}`, index);
+        if (signature.isbn) addToBucket(`i${signature.isbn}`, index);
+        if (signature.title) {
+            addToBucket(`${TITLE_PREFIX[doiClass(signature)]}${signature.title}`, index);
+        }
+    });
+
+    /**
+     * Title-bucket keys holding items whose match with `signature` is *not*
+     * already settled by the DOI rule, and so still has to be examined.
+     */
+    const titleKeysFor = (signature: ItemDuplicateSignature): string[] => {
+        if (!signature.title) return [];
+        switch (doiClass(signature)) {
+            // A live DOI settles the pair against anything else carrying the
+            // field, so only items with no DOI at all remain.
+            case DOI_LIVE:
+                return [`tN${signature.title}`];
+            // A blank DOI settles nothing against another blank or an absent
+            // one, but is settled by any live DOI.
+            case DOI_BLANK:
+                return [`tZ${signature.title}`, `tN${signature.title}`];
+            // No DOI field, so the DOI rule never applies: everything remains.
+            default:
+                return [`tL${signature.title}`, `tZ${signature.title}`, `tN${signature.title}`];
+        }
+    };
 
     const result: Zotero.Item[] = [];
     const processedIndices = new Set<number>();
@@ -1047,8 +1127,46 @@ export function deduplicateItems(
 
         let bestItem = items[i];
 
-        // Find all duplicates of this item
-        for (let j = i + 1; j < items.length; j++) {
+        // Merge i's buckets rather than collecting and sorting them. Each
+        // bucket is already ascending, so a k-way merge over at most four of
+        // them yields each candidate once, in ascending index order, without
+        // allocating or sorting per item — a bucket whose members mostly do not
+        // pair (same title, differing DOIs) is otherwise re-sorted on every
+        // pass, which costs more than the all-pairs scan this replaces.
+        // Ascending order is what keeps the surviving copy the same one the
+        // all-pairs scan would have kept.
+        const lists: number[][] = [];
+        const cursors: number[] = [];
+        for (const key of [
+            `#${signatures[i].id}`,
+            signatures[i].doi && `d${signatures[i].doi}`,
+            signatures[i].isbn && `i${signatures[i].isbn}`,
+            ...titleKeysFor(signatures[i]),
+        ]) {
+            if (!key) continue;
+            const bucket = buckets.get(key);
+            if (!bucket) continue;
+            const start = firstIndexAbove(bucket, i);
+            if (start < bucket.length) {
+                lists.push(bucket);
+                cursors.push(start);
+            }
+        }
+
+        for (;;) {
+            let j = -1;
+            for (let b = 0; b < lists.length; b++) {
+                if (cursors[b] >= lists[b].length) continue;
+                const value = lists[b][cursors[b]];
+                if (j === -1 || value < j) j = value;
+            }
+            if (j === -1) break;
+            // Advance every cursor sitting on it, so a candidate held by
+            // several of i's buckets is still examined only once.
+            for (let b = 0; b < lists.length; b++) {
+                if (cursors[b] < lists[b].length && lists[b][cursors[b]] === j) cursors[b]++;
+            }
+
             if (processedIndices.has(j)) continue;
 
             const otherItem = items[j];

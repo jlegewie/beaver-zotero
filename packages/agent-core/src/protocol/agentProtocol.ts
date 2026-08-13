@@ -614,6 +614,120 @@ export interface WSItemSearchByTopicResponse {
     timing?: FrontendTimingMetadata;
 }
 
+// =============================================================================
+// Zotero Item Quick Search (one string, ORed across title / creators / year)
+// =============================================================================
+
+/**
+ * How much each quick-search hit carries.
+ *
+ * - `compact`: a `QuickSearchHit` — what a chip, a menu row and a hover card
+ *   need, and nothing else.
+ * - `full`: today's `ItemSearchFrontendResultItem` (full item metadata plus the
+ *   attachment list), the same shape the fielded searches return.
+ */
+export type QuickSearchDetail = 'compact' | 'full';
+
+/**
+ * A single quick-search hit in the `compact` projection.
+ *
+ * `display_name` and `formatted_citation` are computed by the Zotero client
+ * (`item.firstCreator` and the citation service), so every surface calls the
+ * same item the same thing. A client must render these rather than rebuild a
+ * label from creators, or its chips drift from what citations and tool-call
+ * headers show for the same item.
+ */
+export interface QuickSearchHit {
+    /** Device-local library id. Portable identity is `library_ref`. */
+    library_id: number;
+    /** Device-portable library identity ("u" | "g<groupID>"). */
+    library_ref?: string;
+    zotero_key: string;
+    /** Zotero item type, for the row's icon */
+    item_type: string;
+    /** Chip label, e.g. "Legewie and DiPrete 2014" */
+    display_name: string;
+    title?: string;
+    year?: number;
+    /** Formatted bibliography entry, for a hover card */
+    formatted_citation?: string;
+    /** Whether the item has at least one child attachment */
+    has_attachment?: boolean;
+    /** Ranking score; higher ranks first. Explains the result order. */
+    score?: number;
+}
+
+/**
+ * Request from backend to run a quick search over the user's Zotero library.
+ *
+ * Unlike `item_search_by_metadata`, which ANDs separate title/creator/
+ * publication conditions, this takes one raw string and ORs it across
+ * title-like fields, creator fields and the year — Zotero's own
+ * `quicksearch-titleCreatorYear`. That is the shape a picker needs, which has
+ * one string and no idea which field it belongs to.
+ */
+export interface WSItemQuickSearchRequest extends WSBaseEvent {
+    event: 'item_quick_search_request';
+    request_id: string;
+
+    /** The user's raw string. ORed across title-like fields, creators and year. */
+    query: string;
+
+    // Filters (optional, narrow results further)
+    /** Filter by item type (e.g., "journalArticle") */
+    item_type_filter?: string;
+    /** Filter by library names, refs or IDs (OR logic) */
+    libraries_filter?: (string | number)[];
+    /** Filter by tag names (OR logic) */
+    tags_filter?: string[];
+    /** Filter by collection names or keys (OR logic) */
+    collections_filter?: (string | number)[];
+
+    // Options
+    /** What each hit carries. Default 'compact'. */
+    detail?: QuickSearchDetail;
+    /** Maximum number of results to return. Default 20. */
+    limit?: number;
+    /** Number of results to skip for pagination. Default 0. */
+    offset?: number;
+}
+
+/** Response to a quick search request */
+export interface WSItemQuickSearchResponse {
+    type: 'item_quick_search';
+    request_id: string;
+    /**
+     * Ranked hits, highest score first. `QuickSearchHit[]` when `detail` is
+     * 'compact', `ItemSearchFrontendResultItem[]` when 'full' — branch on the
+     * echoed `detail` rather than sniffing the rows.
+     */
+    items: QuickSearchHit[] | ItemSearchFrontendResultItem[];
+    /** Projection the items are in; echoes the request's resolved `detail`. */
+    detail: QuickSearchDetail;
+    /**
+     * Ranked matches before pagination — every one of them reachable with
+     * `offset`, so a client can page the whole set.
+     *
+     * When `truncated` is true this is a floor, not the library's true match
+     * count: ranking every match of a very common query is unbounded work, so
+     * the provider ranks a bounded candidate set per library.
+     */
+    total_count: number;
+    /**
+     * True when a library held more matches than the provider's ranking budget,
+     * so `total_count` undercounts and the ranking covers only part of the
+     * matches. A client should treat it as "too many — keep typing" rather than
+     * paging deeper. Omitted by older providers.
+     */
+    truncated?: boolean;
+    /** Error message if search failed */
+    error?: string | null;
+    /** Error code for programmatic handling */
+    error_code?: ItemSearchErrorCode | null;
+    /** Optional timing breakdown for diagnostics */
+    timing?: FrontendTimingMetadata;
+}
+
 /** Level of file status analysis to perform for attachments */
 export type FileStatusLevel = 'none' | 'lightweight' | 'full';
 
@@ -1717,6 +1831,7 @@ export type WSEvent =
     | WSZoteroDataRequest
     | WSItemSearchByMetadataRequest
     | WSItemSearchByTopicRequest
+    | WSItemQuickSearchRequest
     // Library management tools
     | WSZoteroSearchRequest
     | WSListItemsRequest
@@ -1857,6 +1972,13 @@ export const CLIENT_FEATURES = {
      * feature is absent.
      */
     RECURSIVE_COLLECTIONS_FILTER: 'recursive_collections_filter',
+    /**
+     * `item_quick_search_request`: one-string search ORed across title-like
+     * fields, creators and the year. A client asking for it without this
+     * feature would get no handler and wait out the request timeout, so the
+     * backend refuses the op up front instead.
+     */
+    ITEM_QUICK_SEARCH: 'item_quick_search',
 } as const;
 
 /** Client type identifier for the Zotero plugin. */

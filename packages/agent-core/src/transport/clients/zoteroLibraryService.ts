@@ -13,6 +13,8 @@ import type {
     CollectionInfo,
     ItemSearchFrontendResultItem,
     LibrarySummary,
+    QuickSearchDetail,
+    QuickSearchHit,
     TagInfo,
 } from '../../protocol/agentProtocol';
 
@@ -59,6 +61,52 @@ export interface ItemSearchByMetadataParams {
 export interface ItemSearchByMetadataData {
     items: ItemSearchFrontendResultItem[];
 }
+
+/** Params for `item_quick_search` */
+export interface ItemQuickSearchParams {
+    /**
+     * The user's raw string, ORed across title-like fields, creators and the
+     * year — what a picker has. Use `item_search_by_metadata` when the query is
+     * already parsed into fields, which are ANDed.
+     */
+    query: string;
+    /** Library names or refs; OR'd */
+    libraries_filter?: string[];
+    /** Collection names or keys; OR'd */
+    collections_filter?: string[];
+    /** Tag names; OR'd */
+    tags_filter?: string[];
+    item_type_filter?: string;
+    /** What each hit carries. Default 'compact'. */
+    detail?: QuickSearchDetail;
+    /** 1–50, default 20 */
+    limit?: number;
+    offset?: number;
+}
+
+/**
+ * Result of `item_quick_search`, ranked highest-score first.
+ *
+ * Discriminated on `detail` so the hit type follows the projection that was
+ * actually served rather than the one that was asked for.
+ */
+export type ItemQuickSearchData =
+    | {
+        detail: 'compact';
+        items: QuickSearchHit[];
+        /** Ranked matches, which may exceed the page returned. See `truncated`. */
+        total_count: number;
+        /** True when the library held more matches than could be ranked, so
+         * `total_count` undercounts — prompt for a narrower query rather than
+         * paging deeper. */
+        truncated?: boolean;
+    }
+    | {
+        detail: 'full';
+        items: ItemSearchFrontendResultItem[];
+        total_count: number;
+        truncated?: boolean;
+    };
 
 /** `list_libraries` takes no parameters. */
 export type ListLibrariesParams = Record<string, never>;
@@ -123,6 +171,11 @@ export interface ZoteroLibraryOpMap {
     item_search_by_metadata: {
         params: ItemSearchByMetadataParams;
         data: ItemSearchByMetadataData;
+    };
+    /** Search the user's library with one string, ranked like Zotero's picker */
+    item_quick_search: {
+        params: ItemQuickSearchParams;
+        data: ItemQuickSearchData;
     };
     /** List the libraries this user's Zotero can see */
     list_libraries: {

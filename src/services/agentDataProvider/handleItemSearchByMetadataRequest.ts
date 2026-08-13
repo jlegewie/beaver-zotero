@@ -10,7 +10,7 @@
 import { logger } from '@beaver/agent-core/platform/logger';
 import { deduplicateItems } from '../../utils/zoteroUtils';
 import { agentItemFilter } from '../../utils/agentItemSupport';
-import { serializeItem } from '../../utils/zoteroSerializers';
+import { serializeItemSearchRows } from './itemSearchSerialization';
 import {
     WSItemSearchByMetadataRequest,
     WSItemSearchByMetadataResponse,
@@ -22,8 +22,6 @@ import {
     collectionsFilterError,
     getSearchableLibraryIds,
     librariesFilterError,
-    prepareAttachmentInfoBatchData,
-    processAttachmentInfoBatch,
     resolveCollectionsFilter,
     resolveLibrariesFilter,
     resolveTagsFilter,
@@ -312,52 +310,14 @@ export async function handleItemSearchByMetadataRequest(
     // Serialize items in parallel in bounded batches (with backfill on failures to ensure limit is reached)
     const targetLimit = request.limit > 0 ? request.limit : items.length;
     const candidates = items.slice(offset).filter(item => agentItemFilter(item));
-    const BATCH_SIZE = Math.min(targetLimit, 20);
 
-    const resultItems: ItemSearchFrontendResultItem[] = [];
-    for (let batchStart = 0; batchStart < candidates.length && resultItems.length < targetLimit; batchStart += BATCH_SIZE) {
-        const batch = candidates.slice(batchStart, batchStart + BATCH_SIZE);
+    const resultItems = await serializeItemSearchRows(
+        candidates,
+        targetLimit,
+        ta,
+        'handleItemSearchByMetadataRequest',
+    );
 
-        // Prepared per batch, so the cost tracks what the page actually
-        // serializes: the search over-fetches to survive deduplication and the
-        // page slice, and only the rows reached here are ever serialized.
-        // The search itself loads only the fields deduplication compares.
-        await ta.track('data_loading_ms', () =>
-            Zotero.Items.loadDataTypes(batch, ["primaryData", "tags", "collections", "relations", "childItems"])
-        );
-        const batchAttachmentData = await prepareAttachmentInfoBatchData(batch, ta);
-
-        const serialized = await Promise.all(
-            batch.map(async (item): Promise<ItemSearchFrontendResultItem | null> => {
-                try {
-                    const [itemData, attachments] = await Promise.all([
-                        ta.track('item_serialization_ms', () => serializeItem(item, undefined, { skipHash: true })),
-                        ta.track('attachment_processing_ms', () => processAttachmentInfoBatch(
-                            item,
-                            batchAttachmentData,
-                            {
-                                skipWorkerFallback: true,
-                                timing: ta,
-                                includeAnnotationsCount: true,
-                            },
-                        )),
-                    ]);
-                    return { item: itemData, attachments };
-                } catch (error) {
-                    logger(`handleItemSearchByMetadataRequest: Failed to serialize item ${item.key}: ${error}`, 1);
-                    return null;
-                }
-            })
-        );
-
-        for (const result of serialized) {
-            if (result !== null) {
-                resultItems.push(result);
-                if (resultItems.length >= targetLimit) break;
-            }
-        }
-    }
-    
     // Record serialization completion time
     serializationEndTime = Date.now();
     

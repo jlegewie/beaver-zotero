@@ -34,6 +34,7 @@ import {
     handleZoteroAttachmentSearchRequest,
     handleItemSearchByMetadataRequest,
     handleItemSearchByTopicRequest,
+    handleItemQuickSearchRequest,
     // Library management tools
     handleZoteroSearchRequest,
     handleListItemsRequest,
@@ -175,6 +176,7 @@ import type {
     WSZoteroAttachmentSearchRequest,
     WSItemSearchByMetadataRequest,
     WSItemSearchByTopicRequest,
+    WSItemQuickSearchRequest,
     // Library management tools
     WSZoteroSearchRequest,
     WSListItemsRequest,
@@ -215,6 +217,7 @@ const ENDPOINT_PATHS = [
     '/beaver/external-reference-check',
     '/beaver/search/metadata',
     '/beaver/search/topic',
+    '/beaver/search/quick',
     '/beaver/attachment/document',
     '/beaver/attachment/page-images',
     '/beaver/attachment/search',
@@ -472,6 +475,34 @@ async function handleTopicSearchHttpRequest(request: any) {
 
     return {
         items: response.items,
+        error: response.error ?? null,
+        error_code: response.error_code ?? null,
+    };
+}
+
+async function handleQuickSearchHttpRequest(request: any) {
+    const wsRequest: WSItemQuickSearchRequest = {
+        event: 'item_quick_search_request',
+        request_id: generateRequestId(),
+        query: request.query,
+        item_type_filter: request.item_type_filter,
+        libraries_filter: request.libraries_filter,
+        tags_filter: request.tags_filter,
+        collections_filter: request.collections_filter,
+        detail: request.detail,
+        limit: request.limit,
+        offset: request.offset,
+    };
+
+    const response = await handleItemQuickSearchRequest(wsRequest);
+
+    return {
+        items: response.items,
+        detail: response.detail,
+        total_count: response.total_count,
+        // Without this a caller reads a truncated total as the complete match
+        // count and pages into a hole. LocalhostFrontendCapability reads it.
+        truncated: response.truncated ?? false,
         error: response.error ?? null,
         error_code: response.error_code ?? null,
     };
@@ -859,9 +890,12 @@ function registerEndpoints(): boolean {
     Zotero.Server.Endpoints['/beaver/search/metadata'] = 
         createEndpoint(handleMetadataSearchHttpRequest);
     
-    Zotero.Server.Endpoints['/beaver/search/topic'] = 
+    Zotero.Server.Endpoints['/beaver/search/topic'] =
         createEndpoint(handleTopicSearchHttpRequest);
-    
+
+    Zotero.Server.Endpoints['/beaver/search/quick'] =
+        createEndpoint(handleQuickSearchHttpRequest);
+
     Zotero.Server.Endpoints['/beaver/attachment/document'] =
         createEndpoint(handleAttachmentDocumentHttpRequest);
     
