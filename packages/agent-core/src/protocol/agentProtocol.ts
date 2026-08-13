@@ -1036,28 +1036,22 @@ export interface WSReadNoteResponse {
      * Address snapshot token pinning the block numbering this response shows,
      * for later use by `edit_note_blocks`.
      *
-     * Format: `'h2:' + <maskedDigest> + ':' + <maskedLength> + ':' + <unmaskedDigest>`.
+     * Format: `'h3:' + <digest> + ':' + <length>`.
      *
-     * `<maskedDigest>` is a 64-bit non-cryptographic hash over the note's
-     * PORTABLE `{library_ref}-{itemKey}` identity (`u-KEY` / `g<groupID>-KEY`,
-     * falling back to the numeric `libraryID` for a library with no portable
-     * form) and the simplified note projection (the exact string whose
-     * `split('\n')` defines the block numbering) with volatile citation locator
-     * values masked, joined by `'|'`. The identity is portable rather than
-     * device-local because the token travels in the thread transcript: a note
-     * read on one computer can be edited from another, where the same group
-     * library has a different `libraryID`. `<maskedLength>` is
-     * the character length of that masked projection alone — an independent
-     * term, not a second view of the digest input. `<unmaskedDigest>` is the
-     * same hash over the projection WITHOUT masking, so that a difference
-     * confined to the two lanes' disagreement isolates citation-locator drift
-     * from a real note change; the plugin needs that distinction to tell a
-     * deliberate page change from a stale locator copied out of an older
-     * reading. Producer and comparator must agree byte-for-byte on all three;
-     * see `src/utils/noteSnapshot.ts`, the single implementation of both
-     * directions.
+     * `<digest>` is a 64-bit non-cryptographic hash over the note's PORTABLE
+     * `{library_ref}-{itemKey}` identity (`u-KEY` / `g<groupID>-KEY`, falling
+     * back to the numeric `libraryID` for a library with no portable form) and
+     * the simplified note projection (the exact string whose `split('\n')`
+     * defines the block numbering), joined by `'|'`. The identity is portable
+     * rather than device-local because the token travels in the thread
+     * transcript: a note read on one computer can be edited from another, where
+     * the same group library has a different `libraryID`. `<length>` is the
+     * character length of that projection alone — an independent term, not a
+     * second view of the digest input. Producer and comparator must agree
+     * byte-for-byte on both; see `src/utils/noteSnapshot.ts`, the single
+     * implementation of both directions.
      *
-     * OPAQUE TO THE BACKEND, which echoes it and never parses it — the `h2:`
+     * OPAQUE TO THE BACKEND, which echoes it and never parses it — the `h3:`
      * versioning exists so a token minted by an older plugin build is rejected
      * as malformed rather than trusted by a newer one.
      *

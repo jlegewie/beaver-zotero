@@ -515,10 +515,10 @@ describe('validateEditNoteBlocksAction', () => {
     });
 
     // Upgrade path: a thread resumed across a Beaver update can echo back a
-    // single-lane token. It says nothing about locator drift, so it must be
+    // token of an older format, which digests a different input. It must be
     // refused as malformed — sending the model to re-read — rather than
     // accepted or reported as a note change it cannot act on.
-    it('reports a single-lane token from an older build as malformed', async () => {
+    it('reports a token from an older build as malformed', async () => {
         const [, digest, length] = SNAPSHOT.split(':');
         const response = await handleAgentActionValidateRequest(
             validateRequest([replaceBlock2], { snapshot: `h:${digest}:${length}` }),
@@ -567,60 +567,69 @@ describe('validateEditNoteBlocksAction', () => {
 });
 
 // =============================================================================
-// Locator drift
+// Citation locator change
 // =============================================================================
 //
-// Masking keeps a page-label change out of the addressability lane, so an edit
-// addressed against the pre-drift numbering still resolves.
+// A locator is projected exactly as the note stores it, so a note whose locators
+// read differently is a note that reads differently — and the token says so,
+// like any other content change. `expect` cannot stand in for that: it compares
+// visible text only, so it never sees the locator.
 
-describe('edit_note_blocks locator drift', () => {
-    // Same note, same line count, same everything except a citation locator —
-    // exactly what a page-label cache resolving between the read and the edit
-    // produces.
+describe('edit_note_blocks citation locator change', () => {
+    // Same note, same line count, same everything except a citation locator.
     const READ_BODY = [
         LINE_1,
         '<p>Bravo <citation id="1-EXISTS01" loc="page3" ref="c_EXISTS01_0"/> two.</p>',
         LINE_3,
     ].join('\n');
-    const DRIFTED_BODY = READ_BODY.replace('loc="page3"', 'loc="page17"');
+    const CHANGED_BODY = READ_BODY.replace('loc="page3"', 'loc="page17"');
     const READ_SNAPSHOT = buildAddressSnapshot(NOTE_ID, READ_BODY);
     const edit: EditNoteBlocksEditItem = {
         index: 0,
         op: 'replace',
         block: 2,
-        // The PRE-drift line, as the model copied it. `expect` compares visible
-        // text only, so it cannot notice the locator — which is exactly why the
-        // drift needs catching somewhere else.
+        // The line as the model copied it out of the earlier read.
         expect: READ_BODY.split('\n')[1],
         content: '<p>Bravo <citation id="1-EXISTS01" loc="page3" ref="c_EXISTS01_0"/> REWRITTEN.</p>',
     };
 
     beforeEach(() => {
-        useNote(`<div data-schema-version="9">${DRIFTED_BODY}</div>`);
+        useNote(`<div data-schema-version="9">${CHANGED_BODY}</div>`);
     });
 
-    it('still validates the edit — drift changes no block number', async () => {
+    it('refuses to validate and hands back the current note for re-addressing', async () => {
         const response = await handleAgentActionValidateRequest(
             validateRequest([edit], { snapshot: READ_SNAPSHOT }),
         );
-        expect(response).toMatchObject({ valid: true });
-        expect(response.error_code).toBeUndefined();
+
+        expect(response).toMatchObject({ valid: false, error_code: 'snapshot_mismatch' });
+        expect(response.current_value).toMatchObject({
+            kind: 'snapshot_mismatch',
+            total_lines: 3,
+            note: CHANGED_BODY,
+        });
+        expect(response.current_value.snapshot).toBe(buildAddressSnapshot(NOTE_ID, CHANGED_BODY));
     });
 
-    // A successful validation echoes the caller's token back rather than a
-    // freshly minted one: nothing has been applied, so the token the caller sent
-    // still describes the note the edits were addressed against.
-    it('echoes the caller\'s token rather than minting one for the drifted note', async () => {
-        const response = await handleAgentActionValidateRequest(
+    it('refuses to execute and writes nothing', async () => {
+        const response = await handleAgentActionExecuteRequest(
+            executeRequest([edit], { snapshot: READ_SNAPSHOT }),
+        );
+
+        expect(response).toMatchObject({ success: false, error_code: 'snapshot_mismatch' });
+        expect(response.refreshed_note).toMatchObject({ total_lines: 3, note: CHANGED_BODY });
+        expect(mockItem.setNote).not.toHaveBeenCalled();
+    });
+
+    it('validates and executes against the note the token was minted for', async () => {
+        useNote(`<div data-schema-version="9">${READ_BODY}</div>`);
+
+        const validation = await handleAgentActionValidateRequest(
             validateRequest([edit], { snapshot: READ_SNAPSHOT }),
         );
-        expect(response.valid).toBe(true);
-        expect(response.current_value.snapshot).toBe(READ_SNAPSHOT);
-        expect(response.current_value.snapshot).not.toBe(buildAddressSnapshot(NOTE_ID, DRIFTED_BODY));
-        expect(response.current_value).not.toHaveProperty('note');
-    });
+        expect(validation).toMatchObject({ valid: true });
+        expect(validation.current_value.snapshot).toBe(READ_SNAPSHOT);
 
-    it('still executes the edit — drift changes no block number', async () => {
         const response = await handleAgentActionExecuteRequest(
             executeRequest([edit], { snapshot: READ_SNAPSHOT }),
         );

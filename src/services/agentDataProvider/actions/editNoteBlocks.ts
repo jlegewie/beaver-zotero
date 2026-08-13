@@ -1167,7 +1167,6 @@ async function validateEditNoteBlocksAction(
             current_value: buildSnapshotMismatchValue(noteId, simplified),
         });
     }
-    // `locator_drift` still addresses: masking keeps every block number valid.
 
     const selection = runBlockSelection(
         simplified, strippedHtml, metadata, edits,

@@ -331,14 +331,6 @@ function toBatchUndoRecord(record: EditNoteBlocksUndoRecord): EditNoteBatchUndoR
  * from the one that minted the token reports drift on a note nobody touched. The
  * one deliberate divergence is that page labels are read from cache only: an
  * extraction is not worth running to produce a log line.
- *
- * That divergence is why a locator difference is reported SEPARATELY from a
- * numbering change rather than folded into it. A cache-cold recompute renders
- * the same note's citation locators differently, which moves the token's
- * unmasked lane without anything in the note having moved; a user editing a page
- * moves the same lane and does change the raw HTML the replay relocates against.
- * The token cannot separate them, so the two verdicts get two lines, and only
- * the masked lane licenses the claim that the note moved.
  */
 async function logAddressSnapshotDrift(
     item: Zotero.Item,
@@ -373,21 +365,6 @@ async function logAddressSnapshotDrift(
             return;
         }
         const currentSnapshot = buildAddressSnapshot(noteId, simplified);
-        // A locator difference gets its own, weaker line. It CAN be a real edit
-        // (a user changed a page), which does change the raw HTML the replay
-        // relocates against — but it is also what a cold page-label cache looks
-        // like here, and the token cannot tell the two apart. Claiming the note
-        // moved would assert the stronger of the two.
-        if (status === 'locator_drift') {
-            logger(
-                `undoEditNoteBlocksAction: note ${noteId} renders its citation locators differently than `
-                + `when this action was applied (recorded ${expectedPostSnapshot}, now ${currentSnapshot}); `
-                + 'block numbering is unchanged, and this may be a page-label cache difference rather than '
-                + 'an edit',
-                1,
-            );
-            return;
-        }
         logger(
             `undoEditNoteBlocksAction: note ${noteId} no longer matches the address_post_snapshot this `
             + `action recorded (expected ${expectedPostSnapshot}, now ${currentSnapshot}); undoing anyway `
