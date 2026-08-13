@@ -26,9 +26,13 @@ import { ZoteroTag } from '@beaver/agent-core/types/zotero';
 import Tooltip from '@beaver/agent-ui/primitives/Tooltip';
 import { AddSourcesMenuHandle } from '../../../hooks/useAddSourcesMenu';
 
+/** How many recent items are carried in the `recentItems` preference. */
 const RECENT_ITEMS_LIMIT = 5;
-/** How many of Zotero's selected items are offered at the top of the menu. */
-const SELECTED_ITEMS_LIMIT = 3;
+/**
+ * How many item rows the menu offers at the top before anything is typed —
+ * the Zotero selection, or the recently used items when nothing is selected.
+ */
+const PROPOSED_ITEMS_LIMIT = 3;
 
 type MenuMode = 'sources' | 'libraries' | 'collections' | 'tags' | 'notes';
 
@@ -402,7 +406,7 @@ const AddSourcesMenu = forwardRef<AddSourcesMenuHandle, AddSourcesMenuProps>(fun
         searchQuery,
         searchResults,
         selectedZoteroItems,
-        selectedItemsLimit: SELECTED_ITEMS_LIMIT,
+        proposedItemsLimit: PROPOSED_ITEMS_LIMIT,
         sourceMenuItemContext,
         searchableLibraryIds,
         activeZoteroLibraryId,

@@ -13,7 +13,8 @@ interface UseSourcesMenuOptions {
     searchResults: ItemSearchResult[];
     /** What is currently selected in Zotero's items tree. */
     selectedZoteroItems: Zotero.Item[];
-    selectedItemsLimit: number;
+    /** How many item rows the menu offers before anything is typed. */
+    proposedItemsLimit: number;
     sourceMenuItemContext: SourceMenuItemContext;
     searchableLibraryIds: number[];
     activeZoteroLibraryId: number | null;
@@ -24,6 +25,7 @@ interface UseSourcesMenuOptions {
     /** Open a file picker to attach external files (files from disk). */
     onSelectFiles: () => void;
     getRecentItems: () => Promise<Zotero.Item[]>;
+    /** How many recently-modified items to read before filtering them down. */
     recentItemsLimit: number;
     verticalPosition?: 'above' | 'below';
 }
@@ -40,7 +42,7 @@ export const useSourcesMenu = ({
     searchQuery,
     searchResults,
     selectedZoteroItems,
-    selectedItemsLimit,
+    proposedItemsLimit,
     sourceMenuItemContext,
     searchableLibraryIds,
     activeZoteroLibraryId,
@@ -84,15 +86,14 @@ export const useSourcesMenu = ({
         const notAlreadyAttached = (item: Zotero.Item) =>
             !sourceMenuItemContext.currentMessageItems.some((existing) => existing.id === item.id);
 
-        // A headed group of item rows. 'above' menus display the array
-        // reversed, so the header follows its rows there to land above them
-        // on screen.
-        const itemSection = (title: string, rows: SearchMenuItem[]): SearchMenuItem[] =>
-            rows.length === 0
-                ? []
-                : verticalPosition === 'above'
-                    ? [...rows, header(title)]
-                    : [header(title), ...rows];
+        // A group of item rows, optionally headed. 'above' menus display the
+        // array reversed, so the header follows its rows there to land above
+        // them on screen.
+        const itemSection = (title: string | null, rows: SearchMenuItem[]): SearchMenuItem[] => {
+            if (rows.length === 0) return [];
+            if (!title) return rows;
+            return verticalPosition === 'above' ? [...rows, header(title)] : [header(title), ...rows];
+        };
 
         /** The rows for a typed query: matching items, nothing else. */
         const buildSearchSections = async (): Promise<SearchMenuItem[]> => {
@@ -124,7 +125,7 @@ export const useSourcesMenu = ({
             const selectedItems = searchableOnly(selectedZoteroItems)
                 .filter((item) => item.isRegularItem() || item.isAttachment() || item.isNote())
                 .filter(notAlreadyAttached)
-                .slice(0, selectedItemsLimit);
+                .slice(0, proposedItemsLimit);
             const hasSelection = selectedItems.length > 0;
 
             const recentItems = hasSelection ? [] : searchableOnly(await getRecentItems());
@@ -173,8 +174,9 @@ export const useSourcesMenu = ({
             );
 
             // Action rows are self-describing ("Filter by …" / "Add …"), so
-            // the group carries no header; dividers separate it from the item
-            // sections around it. Listed in display order, top to bottom.
+            // the group carries no header; a divider separates it from the
+            // item rows. Listed nearest-the-input first, like everything
+            // below — see the return.
             const filterItems: SearchMenuItem[] = [];
 
             if (searchableLibraryIds.length > 1) {
@@ -295,21 +297,27 @@ export const useSourcesMenu = ({
                     .filter((item) => item.isRegularItem() || item.isAttachment() || item.isNote())]
                     .filter((item, index, self) => index === self.findIndex((candidate) => candidate.id === item.id))
                     .filter(notAlreadyAttached)
-                    .slice(0, recentItemsLimit);
+                    .slice(0, proposedItemsLimit);
 
                 await loadFullItemData(recentCandidates);
 
-                itemRows = itemSection('Recent Items', await Promise.all(
+                // Unheaded: recents are the menu's resting state, so a header
+                // would label the obvious. A Zotero selection does get one,
+                // since it explains why those particular items are offered.
+                itemRows = itemSection(null, await Promise.all(
                     recentCandidates.map((item) => createSourceMenuItem(item, sourceMenuItemContext))
                 ));
             }
 
-            // The action rows are listed above in display order; 'above' menus
-            // display the array reversed, so hand them the reverse.
-            const filterRows = verticalPosition === 'above' ? [...filterItems].reverse() : filterItems;
-            const groupDivider = filterRows.length > 0 && itemRows.length > 0 ? [divider()] : [];
+            const groupDivider = filterItems.length > 0 && itemRows.length > 0 ? [divider()] : [];
 
-            return [...filterRows, ...groupDivider, ...itemRows];
+            // Ordered by distance from the chat input, nearest first: the
+            // proposed items, then the action rows out to "Add External File".
+            // That reads the same whichever way the menu opens, and needs no
+            // per-layout special case — a menu that opens above the input
+            // displays this array reversed, which walks it back out from the
+            // input in the same order.
+            return [...itemRows, ...groupDivider, ...filterItems];
         };
 
         const build = async () => {
@@ -329,7 +337,7 @@ export const useSourcesMenu = ({
         searchQuery,
         searchResults,
         selectedZoteroItems,
-        selectedItemsLimit,
+        proposedItemsLimit,
         sourceMenuItemContext,
         searchableLibraryIds,
         activeZoteroLibraryId,

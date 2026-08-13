@@ -602,6 +602,14 @@ const InputArea: React.FC<InputAreaProps> = ({
                         onPillsChange={setMessagePills}
                         onSubmit={handleEditorSubmit}
                         pasteHandlers={pasteHandlers}
+                        // Nothing else tells the user that what they type after
+                        // the `@` searches — the menu has no input of its own.
+                        // Drops away the moment they start typing.
+                        inlineHint={
+                            isAddSourcesMenuOpen && addSourcesSearchQuery.length === 0
+                                ? 'Type to search'
+                                : null
+                        }
                         placeholder={getPlaceholderText()}
                         ariaLabel="Message Beaver"
                         disabled={isAwaitingApproval}
