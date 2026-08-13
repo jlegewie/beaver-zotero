@@ -16,6 +16,7 @@ import { ensurePromptActionTokens, promptActionsToDescriptors, type SlashCommand
 import { renderContentWithSlashPills } from './slashCommandRendering';
 import { LexicalEditorInput, LexicalEditorInputHandle } from '../input/lexical/LexicalEditorInput';
 import { useSlashMenu } from '../../hooks/useSlashMenu';
+import { useActionPopupResolver } from '../../hooks/useActionPopupResolver';
 
 interface UserRequestViewProps {
     userPrompt: BeaverAgentPrompt;
@@ -68,6 +69,9 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
     const selectedModel = useAtomValue(selectedModelAtom);
     const isStreaming = useAtomValue(isStreamingAtom);
     const allActions = useAtomValue(actionsAtom);
+    // Supplies the edit overlay's /command pill hover cards with the live
+    // action definitions, matching the chat composer.
+    const resolveAction = useActionPopupResolver();
     const displayContent = useMemo(
         () => ensurePromptActionTokens(userPrompt.content, userPrompt.actions),
         [userPrompt.content, userPrompt.actions],
@@ -386,6 +390,7 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
                                 pills={editedPills}
                                 onPillsChange={setEditedPills}
                                 onSubmit={handleEditorSubmit}
+                                resolveAction={resolveAction}
                                 placeholder="Edit your message..."
                                 ariaLabel="Edit message"
                                 onKeyDown={handleEditorKeyDown}

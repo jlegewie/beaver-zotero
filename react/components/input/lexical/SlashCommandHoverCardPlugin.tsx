@@ -1,9 +1,7 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext';
-import { useAtomValue } from 'jotai';
-import { actionsAtom } from '../../../atoms/actions';
 import { ChipPopupCard, type ChipPopupContent } from '@beaver/agent-ui/chat/ChipPopup';
-import { buildActionPopup } from '@beaver/agent-ui/chat/actionPopup';
+import { buildActionPopup, type ActionPopupSource } from '@beaver/agent-ui/chat/actionPopup';
 
 /** Delay before the card opens, so mousing across the input doesn't flash it. */
 const HOVER_OPEN_DELAY_MS = 300;
@@ -74,6 +72,16 @@ const FloatingPopupCard: React.FC<{ anchor: HTMLElement; popup: ChipPopupContent
     );
 };
 
+export interface SlashCommandHoverCardPluginProps {
+    /**
+     * Looks up the live action behind a pill by its id, returning null when the
+     * action no longer exists. Actions live in the client's own store, so the
+     * caller subscribes and passes the lookup in rather than this plugin
+     * reaching for it. Omit it to render from the pill's own snapshot only.
+     */
+    resolveAction?: (actionId: string) => ActionPopupSource | null;
+}
+
 /**
  * Hover card for in-input /command pills: action title, the first part of the
  * action's prompt, and an "Click to edit in Preferences" hint (clicking the pill opens
@@ -81,11 +89,10 @@ const FloatingPopupCard: React.FC<{ anchor: HTMLElement; popup: ChipPopupContent
  *
  * The card content comes from the live action definition (looked up by the
  * pill's data-action-id), falling back to the pill's data-title snapshot when
- * the action no longer exists.
+ * the action no longer exists or no lookup was supplied.
  */
-export const SlashCommandHoverCardPlugin: React.FC = () => {
+export const SlashCommandHoverCardPlugin: React.FC<SlashCommandHoverCardPluginProps> = ({ resolveAction }) => {
     const [editor] = useLexicalComposerContext();
-    const actions = useAtomValue(actionsAtom);
     const [anchor, setAnchor] = useState<HTMLElement | null>(null);
     const openTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -153,11 +160,9 @@ export const SlashCommandHoverCardPlugin: React.FC = () => {
     if (!anchor) return null;
 
     const actionId = anchor.getAttribute('data-action-id');
-    const action = actionId ? actions.find((a) => a.id === actionId) : undefined;
+    const action = actionId ? resolveAction?.(actionId) ?? null : null;
     const popup = buildActionPopup(
-        action
-            ? { title: action.title, description: action.description, prompt: action.text, category: action.category }
-            : { title: anchor.getAttribute('data-title'), command: anchor.getAttribute('data-command') },
+        action ?? { title: anchor.getAttribute('data-title'), command: anchor.getAttribute('data-command') },
     );
 
     return <FloatingPopupCard anchor={anchor} popup={popup} />;

@@ -31,6 +31,7 @@ import { isImeKeyEvent } from '../../utils/ime';
 import { useSlashMenu } from '../../hooks/useSlashMenu';
 import { useAddSourcesMenu, AddSourcesMenuHandle } from '../../hooks/useAddSourcesMenu';
 import { useComposerPasteHandlers } from '../../hooks/useComposerPasteHandlers';
+import { useActionPopupResolver } from '../../hooks/useActionPopupResolver';
 import { sendComposedMessageAtom } from '../../atoms/actions';
 
 const HIGH_INPUT_TOKEN_WARNING_THRESHOLD = 100_000;
@@ -79,6 +80,9 @@ const InputArea: React.FC<InputAreaProps> = ({
 
     // Turns a paste carrying files or image bytes into message attachments.
     const pasteHandlers = useComposerPasteHandlers();
+
+    // Supplies the /command pill hover cards with the live action definitions.
+    const resolveAction = useActionPopupResolver();
 
     // Imperative handle exposed by the Lexical editor (focus / clear).
     const editorHandleRef = useRef<LexicalEditorInputHandle | null>(null);
@@ -592,6 +596,7 @@ const InputArea: React.FC<InputAreaProps> = ({
                         onPillsChange={setMessagePills}
                         onSubmit={handleEditorSubmit}
                         pasteHandlers={pasteHandlers}
+                        resolveAction={resolveAction}
                         // Nothing else tells the user that what they type after
                         // the `@` searches — that menu has no input of its own.
                         // Drops away the moment they start typing.

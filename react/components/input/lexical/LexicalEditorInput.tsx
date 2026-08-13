@@ -43,7 +43,7 @@ import {
 import { isImeKeyEvent } from '../../../utils/ime';
 import { getHost } from '@beaver/agent-ui/host';
 import { isMacPlatform, isWindowsPlatform } from '@beaver/agent-ui/utils/platform';
-import { getPref } from '../../../../src/utils/prefs';
+import type { ActionPopupSource } from '@beaver/agent-ui/chat/actionPopup';
 import {
     createCompositionGatedEmitter,
     createImeCompositionTracker,
@@ -422,6 +422,15 @@ export interface LexicalEditorInputProps {
      * reads what the user types but renders no input of its own.
      */
     inlineHint?: string | null;
+    /**
+     * Looks up the live action behind a /command pill, for its hover card.
+     * Returns null when the action no longer exists.
+     *
+     * Actions live in the client's own store, so the caller subscribes and
+     * passes the lookup in rather than the editor reaching for it. Omit it and
+     * hover cards fall back to the snapshot the pill itself carries.
+     */
+    resolveAction?: (actionId: string) => ActionPopupSource | null;
 }
 
 // Exposes a textarea-like focus()/clear() API to the parent via ref so the
@@ -1084,13 +1093,15 @@ const ImeCompositionTrackerPlugin: React.FC<{ ime: ImeCompositionTracker }> = ({
 
 /**
  * Applies the Windows IME composition-order workaround to this editor (see
- * registerCompositionEndDeferral). Windows-only; the `imeCompositionOrderFix`
- * pref is a kill-switch in case an IME interacts badly with the deferral.
+ * registerCompositionEndDeferral). Windows-only; the host's
+ * `isImeCompositionOrderFixEnabled` is a kill-switch in case an IME interacts
+ * badly with the deferral, and a host that supplies none leaves it enabled.
  */
 const WindowsImeCompositionOrderPlugin: React.FC = () => {
     const [editor] = useLexicalComposerContext();
     useEffect(() => {
-        if (getPref('imeCompositionOrderFix') === false) return;
+        const config = getHost().config;
+        if (config?.isImeCompositionOrderFixEnabled?.() === false) return;
         // The platform is read from the window the editor renders in, so the
         // Windows gate waits for a root element instead of assuming one is
         // already attached.
@@ -1101,7 +1112,7 @@ const WindowsImeCompositionOrderPlugin: React.FC = () => {
             const win = rootElement?.ownerDocument.defaultView;
             if (!win || !isWindowsPlatform(win.navigator)) return;
             disposeDeferral = registerCompositionEndDeferral(editor, {
-                trace: getPref('debugImeTrace') === true,
+                trace: config?.isImeTracingEnabled?.() === true,
             });
         });
         return () => {
@@ -1113,13 +1124,13 @@ const WindowsImeCompositionOrderPlugin: React.FC = () => {
 };
 
 /**
- * Compact IME event tracing (pref `debugImeTrace`), for diagnosing
- * composition issues without a local reproduction.
+ * Compact IME event tracing (host config `isImeTracingEnabled`), for diagnosing
+ * composition issues without a local reproduction. Off unless the host opts in.
  */
 const ImeTracePlugin: React.FC<{ ime: ImeCompositionTracker }> = ({ ime }) => {
     const [editor] = useLexicalComposerContext();
     useEffect(() => {
-        if (!getPref('debugImeTrace')) return;
+        if (getHost().config?.isImeTracingEnabled?.() !== true) return;
         return registerImeTrace(editor, ime);
     }, [editor, ime]);
     return null;
@@ -2074,7 +2085,7 @@ const editorConfig = {
 
 export const LexicalEditorInput = forwardRef<LexicalEditorInputHandle, LexicalEditorInputProps>(
     function LexicalEditorInput(
-        { value, onChange, pills, onPillsChange, onSubmit, placeholder, ariaLabel, disabled = false, onKeyDown, suspendKeyboardNavigation = false, onContentEditableRef, pasteHandlers, inlineHint = null },
+        { value, onChange, pills, onPillsChange, onSubmit, placeholder, ariaLabel, disabled = false, onKeyDown, suspendKeyboardNavigation = false, onContentEditableRef, pasteHandlers, inlineHint = null, resolveAction },
         ref,
     ) {
         const contentEditableRef = useRef<HTMLDivElement | null>(null);
@@ -2190,7 +2201,7 @@ export const LexicalEditorInput = forwardRef<LexicalEditorInputHandle, LexicalEd
                     <BlurSelectionSnapshotPlugin blurSelectionRef={blurSelectionRef} />
                     <PinnedEndCaretPlugin pinnedRef={pinnedEndCaretRef} ime={ime} />
                     <SlashCommandClickPlugin />
-                    <SlashCommandHoverCardPlugin />
+                    <SlashCommandHoverCardPlugin resolveAction={resolveAction} />
                     <SubmitOnEnterPlugin onSubmit={onSubmit} />
                     <ClipboardAttachmentPlugin handlers={pasteHandlers} ime={ime} />
                     <WindowsImeCompositionOrderPlugin />
