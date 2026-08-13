@@ -1,8 +1,8 @@
 import type React from 'react';
 import type { ChipPopupContent } from './ChipPopup';
 import type { ActionCategory } from '@beaver/agent-core/types/actions';
-import { ZapIcon, BookSearchIcon, LayersIcon, HighlighterIcon, QuillWriteIcon } from '../../icons/icons';
-import { truncateText } from '../../../utils/stringUtils';
+import { ZapIcon, BookSearchIcon, LayersIcon, HighlighterIcon, QuillWriteIcon } from '../icons';
+import { truncateText } from '../utils/stringUtils';
 
 /**
  * Hover-card content for /command action pills — both the live pill in the

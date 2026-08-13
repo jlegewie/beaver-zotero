@@ -19,6 +19,18 @@ export { default as MenuButton } from './MenuButton';
 export { default as ContextMenu } from './ContextMenu';
 export type { ContextMenuProps, MenuItem, MenuPosition } from './ContextMenu';
 
+export { default as SearchMenu } from './SearchMenu';
+// `MenuPosition` is deliberately not re-exported here: SearchMenu declares its
+// own, structurally identical to ContextMenu's, and the barrel can only carry
+// one under that name. Import it from './SearchMenu' directly, which is how
+// consumers take the rest of this component's types anyway.
+export type { SearchMenuProps, SearchMenuItem, SearchMenuCloseReason } from './SearchMenu';
+
+// The IME predicate SearchMenu and the composer both gate their key handling
+// on. Not a component, but it belongs to the same layer: every shared surface
+// that reads a key event has to yield to an active composition.
+export { isImeKeyEvent } from './ime';
+
 export {
     TagRoot,
     TagLabel,

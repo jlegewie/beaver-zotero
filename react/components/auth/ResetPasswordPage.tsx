@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '@beaver/agent-core/transport/supabaseClient';
-import { isServiceUnavailableError, SERVICE_UNAVAILABLE_MESSAGE } from './otp';
+import { isServiceUnavailableError, SERVICE_UNAVAILABLE_MESSAGE } from '@beaver/agent-core/transport/otp';
 
 /**
  * Fully‑featured password‑reset page that mimics the look & feel of `LoginPage`.

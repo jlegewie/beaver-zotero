@@ -76,7 +76,7 @@ vi.mock('../../../src/utils/zoteroUtils', () => ({
     safeFileExists: vi.fn(),
 }));
 
-vi.mock('../../../react/utils/stringUtils', () => ({
+vi.mock('@beaver/agent-ui/utils/stringUtils', () => ({
     truncateText: vi.fn((s: string) => s),
 }));
 

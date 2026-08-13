@@ -19,7 +19,7 @@ import {
     NoteIcon,
     EditIcon,
 } from '../../../components/icons/icons';
-import { truncateText } from '../../../utils/stringUtils';
+import { truncateText } from '@beaver/agent-ui/utils/stringUtils';
 
 export type ActionStatus = 'pending' | 'applied' | 'rejected' | 'undone' | 'error';
 

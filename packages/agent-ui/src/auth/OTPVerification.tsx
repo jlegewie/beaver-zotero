@@ -1,7 +1,16 @@
+/**
+ * The six-digit code screen, shared by every client that signs in by email.
+ *
+ * It owns the entry and nothing else: verifying the code, remembering how the
+ * user chose to sign in, and deciding where they land afterwards all belong to
+ * the caller, which is the only party that knows them. `onVerify` rejecting is
+ * how this component learns a code was wrong, and clearing the boxes is what it
+ * does about it.
+ */
+
 import React, { useState, useEffect, useRef, useCallback } from 'react'
-import { validateOTPCode } from './otp'
+import { validateOTPCode } from '@beaver/agent-core/transport/otp'
 import { createOTPInputHandlers } from './otp-ui'
-import { setPref } from '../../../src/utils/prefs'
 
 export interface OTPVerificationProps {
   /** The email address to display */
@@ -61,10 +70,10 @@ export function OTPVerification({
     try {
       isVerifying.current = true
       await onVerify(otpCode)
-      setPref("authMethod", "otp")
-    } catch (error) {
-      console.log('handleVerify error', error)
-      // On any error during verification, clear the input
+    } catch {
+      // On any error during verification, clear the input. The message belongs
+      // to the caller, which is what knows why the code was refused and passes
+      // it back in through `error`.
       clearOTP()
     } finally {
       // This needs to be in a finally block to correctly handle multiple submissions

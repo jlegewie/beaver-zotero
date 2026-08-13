@@ -27,7 +27,11 @@
   //   - `types`: exactly react + react-dom. Listing them explicitly is what
   //     keeps every *other* installed @types package — zotero-types and
   //     @types/office-js above all — out of the automatic program. Omitting the
-  //     line would make all of them ambient.
+  //     line would make all of them ambient. It is not the package's dependency
+  //     list: it names only the @types packages that must be ambient. A
+  //     dependency that ships its own declarations (lexical and its
+  //     @lexical/* packages do) resolves them through the import and needs no
+  //     entry here, so this stays at two even as the declared set grows.
   //
   // `skipLibCheck: true` mirrors agent-core: dependency declarations are not
   // checked here, while this package's own code is still fully checked against
@@ -170,15 +174,45 @@
     "./src/primitives/ContextMenu.tsx",
     "./src/primitives/IconButton.tsx",
     "./src/primitives/MenuButton.tsx",
+    "./src/primitives/SearchMenu.tsx",
     "./src/primitives/Tag.tsx",
     "./src/primitives/Tooltip.tsx",
+    "./src/primitives/ime.ts",
+    // The shared sign-in screen: the code entry and its input behavior. The
+    // form around it stays per-client (see src/auth/index.ts).
+    "./src/auth/index.ts",
+    "./src/auth/OTPVerification.tsx",
+    "./src/auth/otp-ui.ts",
+
     "./src/chat/index.ts",
     "./src/chat/Citation.tsx",
     "./src/chat/CitedSourcesList.tsx",
+    "./src/chat/ChipPopup.tsx",
+    "./src/chat/actionPopup.ts",
     "./src/chat/useCitationMarker.ts",
     "./src/chat/useCitationViewModel.ts",
+
+    // The message composer: the Lexical editor both clients share, its nodes
+    // and plugins, the caret/IME/selection helpers that make it behave the same
+    // in a chrome document and a task pane, and the React-free slash-token layer
+    // it renders from.
+    "./src/composer/index.ts",
+    "./src/composer/LexicalEditorInput.tsx",
+    "./src/composer/MentionNode.tsx",
+    "./src/composer/MentionPill.tsx",
+    "./src/composer/SlashCommandNode.tsx",
+    "./src/composer/SlashCommandsPlugin.tsx",
+    "./src/composer/SlashCommandHoverCardPlugin.tsx",
+    "./src/composer/caretNavigation.ts",
+    "./src/composer/imeComposition.ts",
+    "./src/composer/selectionOffsets.ts",
+    "./src/composer/useAddSourcesMenu.ts",
+    "./src/composer/slashCommands.ts",
+
     "./src/utils/windowContext.ts",
     "./src/utils/locationDisplay.ts",
+    "./src/utils/platform.ts",
+    "./src/utils/stringUtils.ts",
     "./src/utils/pageLabels.ts",
     "./src/utils/pageRanges.ts",
     "./src/utils/useIsomorphicLayoutEffect.ts",

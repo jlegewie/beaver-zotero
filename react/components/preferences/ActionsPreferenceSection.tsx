@@ -9,7 +9,7 @@ import { actionsAtom, saveActionsAtom, hideActionAtom, restoreActionAtom, resetA
 import { pendingActionsCategoryFilterAtom, pendingActionEditRequestAtom } from "../../atoms/ui";
 import { importActionFromFile } from "../../utils/actionShareFile";
 import { addPopupMessageAtom } from "../../utils/popupMessageUtils";
-import { getActionCommand } from "../../utils/slashCommands";
+import { getActionCommand } from "@beaver/agent-ui/composer/slashCommands";
 import { isBuiltinAction, getActionCustomizations, getHiddenBuiltinActions, hasOldCustomPrompts } from "../../types/actionStorage";
 import ActionCard from "./ActionCard";
 import MenuButton from "@beaver/agent-ui/primitives/MenuButton";

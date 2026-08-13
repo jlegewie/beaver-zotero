@@ -78,6 +78,7 @@
     "./src/transport/agentService.ts",
     "./src/transport/apiService.ts",
     "./src/transport/supabaseClient.ts",
+    "./src/transport/otp.ts",
     "./src/transport/config.ts",
     "./src/transport/clientIdentity.ts",
     "./src/transport/agentDataDispatch.ts",

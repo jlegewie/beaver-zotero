@@ -28,8 +28,9 @@
 // 3. Every bare import specifier written by a package file names a dependency
 //    the package declares, and never a Node builtin — the package runs in a
 //    Zotero chrome window and in an Office task pane, neither of which is
-//    Node. Because the declared set is exactly react / react-dom / jotai /
-//    @beaver/agent-core, this is also what enforces "no external import
+//    Node. Because the declared set is deliberately small — react, react-dom,
+//    jotai, lexical with @lexical/react and @lexical/utils, and
+//    @beaver/agent-core — this is also what enforces "no external import
 //    outside the allow-list". It is checked on specifiers rather than on
 //    resolved paths because a single declared dependency pulls in the .d.ts
 //    graph of packages this one never names, which must not have to be
@@ -90,10 +91,20 @@ if (parsed.errors.length > 0) {
 // `dependencies` and `peerDependencies` are both part of the package's declared
 // external contract, so both satisfy the specifier rule. `devDependencies`
 // deliberately do not — they are not available to a consumer of the package.
-// In practice this package declares only peers: React, react-dom and jotai must
-// be the consumer's single copy (a second React or a second jotai store means
-// broken hooks and state the rest of the add-in cannot see), and agent-core is
-// shared source rather than an install.
+// In practice this package declares only peers: React, react-dom, jotai and
+// Lexical must be the consumer's single copy (a second React or a second jotai
+// store means broken hooks and state the rest of the add-in cannot see; a second
+// Lexical means a second editor registry, so the `$`-prefixed functions read a
+// different active editor than the one the component rendered), and agent-core
+// is shared source rather than an install.
+//
+// Lexical is the one deliberate widening of this list. It is here because the
+// message composer is shared: it is expensive-correctness code — IME
+// composition, caret navigation across decorator nodes, paste handling — that
+// both clients have to get identically right, and a fork would put its subtlest
+// bugs in whichever client is least equipped to debug them. Adding to this set
+// is meant to be this rare; everything else a component needs from its client
+// comes through the host registry.
 const manifest = JSON.parse(
   readFileSync(path.join(pkgDir, "package.json"), "utf8"),
 );
@@ -257,11 +268,20 @@ if (
 // than by way of a sibling that could stop importing it. The host barrel is a
 // root because nothing else in the package imports the registry — a client and
 // a shared component both reach it from outside.
+//
+// The composer barrel is the same shape again, and it is why neither
+// src/utils/platform.ts nor src/composer/slashCommands.ts is rooted here any
+// more: both were standalone helpers that moved in ahead of the Lexical editor,
+// and the editor now imports both, so the orphan scan keeps them honest through
+// their real importer. That is the stronger signal — a root that no longer needs
+// to be one only hides a file falling out of the closure.
 const entryPaths = [
   "src/icons/index.tsx",
   "src/primitives/index.ts",
   "src/host/index.ts",
   "src/chat/index.ts",
+  "src/auth/index.ts",
+  "src/composer/index.ts",
 ].map((p) => path.join(pkgDir, p));
 
 const listed = parsed.fileNames.map((f) => path.resolve(f));

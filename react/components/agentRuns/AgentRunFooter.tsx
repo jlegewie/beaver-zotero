@@ -1,7 +1,7 @@
 import React, { useMemo, useEffect, useState, useCallback } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { AgentRun } from '@beaver/agent-core/agents/types';
-import { RepeatIcon, ShareIcon, ArrowDownIcon, ArrowRightIcon } from '../icons/icons';
+import { RepeatIcon, MoreHorizontalIcon, ArrowDownIcon, ArrowRightIcon } from '../icons/icons';
 import { copyToClipboard } from '../../utils/clipboard';
 import IconButton from '@beaver/agent-ui/primitives/IconButton';
 import MenuButton from '@beaver/agent-ui/primitives/MenuButton';
@@ -282,7 +282,8 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
                     )}
                     {/* Share button */}
                     <MenuButton
-                        icon={ShareIcon}
+                        icon={MoreHorizontalIcon}
+                        iconClassName="scale-12"
                         menuItems={getShareMenuItems()}
                         className="scale-11"
                         ariaLabel="Share"

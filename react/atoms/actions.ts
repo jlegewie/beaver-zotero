@@ -35,7 +35,7 @@ import { CollectionReference, collectionReferenceKey } from '@beaver/agent-core/
 import { addPopupMessageAtom } from '../utils/popupMessageUtils';
 import { isRejectedItemValidation, itemValidationResultsAtom } from './itemValidation';
 import { searchableLibraryIdsAtom } from './profile';
-import { getActionCommand, toSlashToken, type SlashCommandDescriptor } from '../utils/slashCommands';
+import { getActionCommand, toSlashToken, type SlashCommandDescriptor } from '@beaver/agent-ui/composer/slashCommands';
 import type { PromptAction } from '@beaver/agent-core/agents/types';
 import { MessageAttachment, messageAttachmentKey, messageAttachmentLookupKeys } from '@beaver/agent-core/types/attachments/apiTypes';
 import { toMessageAttachment } from '../types/attachments/converters';

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { isImeKeyEvent } from '../../../react/utils/ime';
+import { isImeKeyEvent } from '@beaver/agent-ui/primitives/ime';
 
 describe('isImeKeyEvent', () => {
     it('detects events flagged as composing', () => {

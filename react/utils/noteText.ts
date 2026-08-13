@@ -1,4 +1,4 @@
-import { truncateText } from './stringUtils';
+import { truncateText } from '@beaver/agent-ui/utils/stringUtils';
 
 function unescapeHtml(text: string): string {
     // @ts-ignore unescapeHTML exists on Zotero.Utilities

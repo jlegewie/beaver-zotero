@@ -1,8 +1,8 @@
 import React, { useEffect, useRef, useState, ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { Icon, SearchIcon } from '../../icons/icons';
-import { getWindowFromElement, getDocumentFromElement } from '@beaver/agent-ui/utils/windowContext';
-import { isImeKeyEvent } from '../../../utils/ime';
+import { Icon, SearchIcon } from '../icons';
+import { getWindowFromElement, getDocumentFromElement } from '../utils/windowContext';
+import { isImeKeyEvent } from './ime';
 
 /**
 * Menu item interface for search menu
@@ -26,6 +26,13 @@ export interface SearchMenuItem {
 
 const isFocusableItem = (item: SearchMenuItem) =>
     !item.disabled && !item.isGroupHeader && !item.isDivider;
+
+/**
+* Why the menu closed. A caller that moved DOM focus into the menu needs this
+* to decide where focus belongs afterwards: back where it came from for a
+* keyboard dismissal, but not when the user clicked some other target.
+*/
+export type SearchMenuCloseReason = 'keyboard' | 'outside-click' | 'select';
 
 /**
 * Position interface for menu placement
@@ -54,7 +61,7 @@ export interface SearchMenuProps {
     /** Optional max height for the menu */
     maxHeight?: string;
     /** Callback when menu should close */
-    onClose: () => void;
+    onClose: (reason: SearchMenuCloseReason) => void;
     /** Position coordinates for menu placement */
     position: MenuPosition;
     /** Optional CSS class name */
@@ -126,7 +133,6 @@ const SearchMenu: React.FC<SearchMenuProps> = ({
     const inputRef = useRef<HTMLInputElement | null>(null);
     const wasOpen = useRef(false);
     const [focusedIndex, setFocusedIndex] = useState<number>(-1);
-    const [hoveredIndex, setHoveredIndex] = useState<number>(-1);
     const [adjustedPosition, setAdjustedPosition] = useState<MenuPosition>(position);
     // const [menuItems, setMenuItems] = useState<SearchMenuItem[]>(initialMenuItems);
     
@@ -244,16 +250,16 @@ const SearchMenu: React.FC<SearchMenuProps> = ({
 
         const handleClickOutside = (e: MouseEvent) => {
             if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-                onClose();
+                onClose('outside-click');
             }
         };
-        
+
         const handleEscape = (e: KeyboardEvent) => {
             // An Escape owned by an IME composition cancels the composition,
             // not the menu.
             if (isImeKeyEvent(e)) return;
             if (e.key === 'Escape') {
-                onClose();
+                onClose('keyboard');
             }
         };
         
@@ -328,7 +334,7 @@ const SearchMenu: React.FC<SearchMenuProps> = ({
                         isFocusableItem(displayOrderMenuItems[focusedIndex])
                     ) {
                         displayOrderMenuItems[focusedIndex].onClick();
-                        if(closeOnSelect) onClose();
+                        if(closeOnSelect) onClose('select');
                     }
                     break;
                 default:
@@ -385,7 +391,6 @@ const SearchMenu: React.FC<SearchMenuProps> = ({
             }
         } else {
             setFocusedIndex(-1);
-            setHoveredIndex(-1);
         }
     }, [isOpen, menuItems, onAfterInitialFocus, verticalPosition]);
     
@@ -460,7 +465,7 @@ const SearchMenu: React.FC<SearchMenuProps> = ({
                 tabIndex={focusedIndex === index ? 0 : -1}
                 className={`
                     display-flex items-center gap-2 px-2 py-15 transition user-select-none
-                    ${(hoveredIndex >= 0 ? hoveredIndex === index : focusedIndex === index) && !item.disabled ? 'bg-quinary' : ''}
+                    ${focusedIndex === index && !item.disabled ? 'bg-quinary' : ''}
                     ${item.disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
                 `}
                 style={{ maxWidth: '100%', minWidth: 0 }}
@@ -468,16 +473,23 @@ const SearchMenu: React.FC<SearchMenuProps> = ({
                     e.stopPropagation();
                     if (item.disabled) return;
                     item.onClick();
-                    if(closeOnSelect) onClose();
+                    if(closeOnSelect) onClose('select');
                 }}
+                onMouseDown={(e) => {
+                    // A menu without its own search field is driven by an
+                    // external editor. Keep the caret there when a row is
+                    // clicked so mouse navigation into a submenu does not
+                    // stop subsequent typing from reaching that editor.
+                    if (!showSearchInput) e.preventDefault();
+                }}
+                // Hover moves the focused item rather than highlighting on top
+                // of it: a separate hover highlight would keep showing the row
+                // under the pointer while the arrow keys moved the real focus
+                // elsewhere, so Enter picked a row the user could not see.
                 onMouseEnter={() => {
                     if (isFocusableItem(item)) {
-                        setHoveredIndex(index);
                         setFocusedIndex(index);
                     }
-                }}
-                onMouseLeave={() => {
-                    setHoveredIndex(-1);
                 }}
                 onFocus={() => {
                     if (isFocusableItem(item)) {
@@ -516,7 +528,8 @@ const SearchMenu: React.FC<SearchMenuProps> = ({
                 onKeyDown={(e) => {
                     if ((e.key === 'Backspace' || e.key === 'Delete') && searchQuery.length === 0) {
                         e.preventDefault();
-                        (onEmptyBackspace ?? onClose)();
+                        if (onEmptyBackspace) onEmptyBackspace();
+                        else onClose('keyboard');
                     }
                 }}
                 placeholder={placeholder}

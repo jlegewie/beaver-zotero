@@ -1,9 +1,22 @@
-import { MutableRefObject } from 'react'
+/**
+ * Keyboard and paste behavior for a row of single-character code boxes.
+ *
+ * Split from the component because it is the fiddly half and the half that must
+ * not vary between clients: advancing on entry, stepping back through empties on
+ * backspace, arrowing without editing, and taking a pasted code from any box.
+ *
+ * `KeyboardEvent` and `ClipboardEvent` are React's synthetic events, imported
+ * rather than reached for through a `React.` namespace: this package's program
+ * has no UMD global, so the DOM's same-named types would otherwise be picked up
+ * silently and describe a different object.
+ */
+
+import { ClipboardEvent, KeyboardEvent, MutableRefObject } from 'react'
 
 export interface OTPInputHandlers {
   handleOTPChange: (index: number, value: string) => void
-  handleOTPKeyDown: (index: number, e: React.KeyboardEvent) => void
-  handleOTPPaste: (index: number, e: React.ClipboardEvent) => void
+  handleOTPKeyDown: (index: number, e: KeyboardEvent) => void
+  handleOTPPaste: (index: number, e: ClipboardEvent) => void
   clearOTP: () => void
   focusFirstInput: () => void
 }
@@ -17,7 +30,7 @@ export const createOTPInputHandlers = (
   inputRefs: MutableRefObject<(HTMLInputElement | null)[]>
 ): OTPInputHandlers => {
   
-  const handleOTPPaste = (index: number, e: React.ClipboardEvent) => {
+  const handleOTPPaste = (index: number, e: ClipboardEvent) => {
     e.preventDefault()
     
     // Get pasted text and extract only digits
@@ -68,7 +81,7 @@ export const createOTPInputHandlers = (
     // Note: Multi-digit input (paste) is now handled by handleOTPPaste
   }
   
-  const handleOTPKeyDown = (index: number, e: React.KeyboardEvent) => {
+  const handleOTPKeyDown = (index: number, e: KeyboardEvent) => {
     if (e.key === 'Backspace') {
       e.preventDefault()
       const newOtp = otpCode.split('')
@@ -117,17 +130,3 @@ export const createOTPInputHandlers = (
     focusFirstInput
   }
 }
-
-/**
- * Hook for managing OTP countdown timer
- */
-export const useOTPCountdown = (
-  initialCountdown: number,
-  setCountdown: (count: number) => void
-) => {
-  const startCountdown = () => {
-    setCountdown(initialCountdown)
-  }
-  
-  return { startCountdown }
-} 

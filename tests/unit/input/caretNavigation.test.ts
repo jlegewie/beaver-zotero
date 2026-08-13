@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { collapsesToRangeEnd } from '../../../react/components/input/lexical/caretNavigation';
+import { collapsesToRangeEnd } from '@beaver/agent-ui/composer/caretNavigation';
 
 describe('collapsesToRangeEnd', () => {
     it('collapses a range to its start for backward keys', () => {

@@ -2016,8 +2016,12 @@ export interface ApplicationStateInput {
      * `current_collections`.
      */
     current_searches?: CurrentSavedSearch[];
-    /** Currently selected library items (optional) */
+    /**
+     * Currently selected library items, truncated to a client-defined maximum.
+     */
     library_selection?: ZoteroItemReference[];
+    /** Number of items the user actually has selected, before truncation. */
+    library_selection_total_count?: number;
     /** Frontend embedding index status */
     indexing_status?: IndexingStatus;
     /** Per-library summary stats (counts) for searchable libraries. */

@@ -1,9 +1,10 @@
 import React from 'react';
 import { Icon, TickIcon, CSSItemTypeIcon, CSSIcon } from '../../../icons/icons';
-import { SearchMenuItem } from '../SearchMenu';
+import { SearchMenuItem } from '@beaver/agent-ui/primitives/SearchMenu';
 import { getDisplayNameFromItem, isValidZoteroItem } from '../../../../utils/sourceUtils';
 import { ZoteroTag } from '@beaver/agent-core/types/zotero';
 import { ThreadItemFilter } from '../../../../atoms/ui';
+import { highlightQuery } from './highlightQuery';
 
 /**
  * Context for creating source menu items
@@ -51,7 +52,9 @@ export interface TagMenuItemContext {
  */
 export async function createSourceMenuItem(
     item: Zotero.Item,
-    context: SourceMenuItemContext
+    context: SourceMenuItemContext,
+    /** Active search query, for highlighting what matched. */
+    searchQuery = ''
 ): Promise<SearchMenuItem> {
     const { currentMessageItems, onAdd, onRemove } = context;
     
@@ -99,12 +102,12 @@ export async function createSourceMenuItem(
                 <div className="display-flex flex-col gap-2 min-w-0 font-color-secondary">
                     <div className="display-flex flex-row justify-between min-w-0">
                         <span className={`truncate ${isValid ? 'font-color-secondary' : 'font-color-red'}`}>
-                            {getDisplayNameFromItem(item)}
+                            {highlightQuery(getDisplayNameFromItem(item), searchQuery)}
                         </span>
                         {isInCurrentMessageItems && <Icon icon={TickIcon} className="scale-12 ml-2" />}
                     </div>
                     <span className={`truncate text-sm ${isValid ? 'font-color-tertiary' : 'font-color-red'} min-w-0`}>
-                        {title}
+                        {highlightQuery(title, searchQuery)}
                     </span>
                 </div>
             </div>
@@ -168,7 +171,9 @@ export function createThreadFilterMenuItem(
  */
 export function createLibraryMenuItem(
     library: _ZoteroTypes.Library.LibraryLike,
-    context: LibraryMenuItemContext
+    context: LibraryMenuItemContext,
+    /** Active search query, for highlighting what matched. */
+    searchQuery = ''
 ): SearchMenuItem {
     const { currentLibraryIds, onSelect } = context;
     const isSelected = currentLibraryIds.includes(library.libraryID);
@@ -189,7 +194,7 @@ export function createLibraryMenuItem(
                 {getIconElement(library)}
                 <div className="display-flex flex-row justify-between flex-1 min-w-0 font-color-secondary">
                     <span className="truncate">
-                        {library.name}
+                        {highlightQuery(library.name, searchQuery)}
                     </span>
                     {isSelected && <Icon icon={TickIcon} className="scale-12 ml-2" />}
                 </div>
@@ -203,7 +208,9 @@ export function createLibraryMenuItem(
  */
 export function createCollectionMenuItem(
     collection: Zotero.Collection,
-    context: CollectionMenuItemContext
+    context: CollectionMenuItemContext,
+    /** Active search query, for highlighting what matched. */
+    searchQuery = ''
 ): SearchMenuItem {
     const { currentCollectionIds, onSelect } = context;
     const isSelected = currentCollectionIds.includes(collection.id);
@@ -216,7 +223,7 @@ export function createCollectionMenuItem(
                 <CSSIcon name="collection" className="icon-16 scale-90" />
                 <div className="display-flex flex-row justify-between flex-1 min-w-0 font-color-secondary">
                     <span className="truncate">
-                        {collection.name}
+                        {highlightQuery(collection.name, searchQuery)}
                     </span>
                     {isSelected && <Icon icon={TickIcon} className="scale-12 ml-2" />}
                 </div>
@@ -233,7 +240,9 @@ export function createCollectionMenuItem(
  */
 export async function createNoteMenuItem(
     note: Zotero.Item,
-    context: SourceMenuItemContext
+    context: SourceMenuItemContext,
+    /** Active search query, for highlighting what matched. */
+    searchQuery = ''
 ): Promise<SearchMenuItem> {
     const { currentMessageItems, onAdd, onRemove } = context;
 
@@ -293,13 +302,13 @@ export async function createNoteMenuItem(
                 <div className="display-flex flex-col gap-2 min-w-0 font-color-secondary">
                     <div className="display-flex flex-row justify-between min-w-0">
                         <span className="truncate font-color-secondary">
-                            {title}
+                            {highlightQuery(title, searchQuery)}
                         </span>
                         {isInCurrentMessageItems && <Icon icon={TickIcon} className="scale-12 ml-2" />}
                     </div>
                     {secondaryText && (
                         <span className="truncate text-sm font-color-tertiary min-w-0">
-                            {secondaryText}
+                            {highlightQuery(secondaryText, searchQuery)}
                         </span>
                     )}
                 </div>
@@ -313,7 +322,9 @@ export async function createNoteMenuItem(
  */
 export function createTagMenuItem(
     tag: ZoteroTag,
-    context: TagMenuItemContext
+    context: TagMenuItemContext,
+    /** Active search query, for highlighting what matched. */
+    searchQuery = ''
 ): SearchMenuItem {
     const { currentTags, onSelect } = context;
     const isSelected = currentTags.some((selected) => selected.id === tag.id);
@@ -346,7 +357,7 @@ export function createTagMenuItem(
                 {tagIndicator}
                 <div className={`display-flex flex-row justify-between flex-1 min-w-0 font-color-secondary ${tag.type === 0 ? 'font-semibold' : ''}`}>
                     <span className="truncate">
-                        {tag.tag}
+                        {highlightQuery(tag.tag, searchQuery)}
                     </span>
                     {isSelected && <Icon icon={TickIcon} className="scale-12 ml-2" />}
                 </div>

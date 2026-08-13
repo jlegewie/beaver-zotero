@@ -3,9 +3,9 @@
 import React, { act, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ComposerPasteHandlers } from '../../../react/components/input/lexical/LexicalEditorInput';
+import type { ComposerPasteHandlers } from '@beaver/agent-ui/composer/LexicalEditorInput';
 
-vi.mock('../../../react/components/input/lexical/SlashCommandHoverCardPlugin', () => ({
+vi.mock('@beaver/agent-ui/composer/SlashCommandHoverCardPlugin', () => ({
     SlashCommandHoverCardPlugin: () => null,
 }));
 
@@ -46,6 +46,16 @@ describe('composer paste handling', () => {
         Object.defineProperty(target, key, { configurable: true, value });
     };
 
+    /**
+     * The accelerator key is derived from the navigator of the window the editor
+     * renders in, so the platform is stubbed there. An own data property shadows
+     * jsdom's `Navigator.prototype.platform` getter and is removed again by the
+     * descriptor restore in `afterEach`.
+     */
+    const patchPlatform = (platform: string) => {
+        patchProperty(globalThis.window.navigator, 'platform', platform);
+    };
+
     beforeEach(() => {
         patchProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT', true);
         patchProperty(InputEvent.prototype, 'getTargetRanges', () => []);
@@ -54,8 +64,7 @@ describe('composer paste handling', () => {
         patchProperty(Document.prototype, 'hasFocus', () => true);
         patchProperty(globalThis, 'ClipboardEvent', TestClipboardEvent);
         patchProperty(globalThis.window, 'ClipboardEvent', TestClipboardEvent);
-        (globalThis as any).Zotero.isMac = true;
-        (globalThis as any).Zotero.isWin = false;
+        patchPlatform('MacIntel');
     });
 
     afterEach(async () => {
@@ -74,7 +83,7 @@ describe('composer paste handling', () => {
 
     const mountEditor = async (pasteHandlers: ComposerPasteHandlers) => {
         const { LexicalEditorInput } = await import(
-            '../../../react/components/input/lexical/LexicalEditorInput'
+            '@beaver/agent-ui/composer/LexicalEditorInput'
         );
         container = globalThis.document.createElement('div');
         globalThis.document.body.append(container);
@@ -269,7 +278,7 @@ describe('composer paste handling', () => {
         });
 
         it('uses Ctrl as the accelerator off macOS', async () => {
-            (globalThis as any).Zotero.isMac = false;
+            patchPlatform('Linux x86_64');
             const hasClipboardFile = vi.fn(() => true);
             const onPasteFromClipboard = vi.fn();
             const editable = await mountEditor({ hasClipboardFile, onPasteFromClipboard });

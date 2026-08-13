@@ -1,5 +1,5 @@
 import { atom } from "jotai";
-import { truncateText } from "../utils/stringUtils";
+import { truncateText } from "@beaver/agent-ui/utils/stringUtils";
 import { allUserAttachmentKeysAtom } from "@beaver/agent-core/run-state/atoms";
 import { createElement } from 'react';
 import { logger } from "@beaver/agent-core/platform/logger";
@@ -15,7 +15,7 @@ import { TextSelection, zoteroReferenceLookupKeys } from "@beaver/agent-core/typ
 import { ZoteroTag, CollectionReference } from "@beaver/agent-core/types/zotero";
 import type { ExternalFileRecord } from "../../src/services/database";
 import { currentNoteItemAtom } from "./zoteroContext";
-import type { SlashCommandDescriptor } from "../utils/slashCommands";
+import type { SlashCommandDescriptor } from "@beaver/agent-ui/composer/slashCommands";
 import { libraryRefForLibraryID } from "../../src/utils/libraryIdentity";
 
 

@@ -9,8 +9,8 @@ import { actionsForContextAtom, actionContextAtom } from "../atoms/actions";
 import { GroupIconInfo, splitCategoryActions, getActiveTarget } from "../utils/actionVisibility";
 import { useActionRunner } from "../hooks/useActionRunner";
 import { openPreferencesWindow } from "../../src/ui/openPreferencesWindow";
-import { buildActionPopup } from "./agentRuns/requestChips/actionPopup";
-import { ChipPopupCard } from "./agentRuns/requestChips/ChipPopup";
+import { buildActionPopup } from "@beaver/agent-ui/chat/actionPopup";
+import { ChipPopupCard } from "@beaver/agent-ui/chat/ChipPopup";
 
 interface CategoryPanelProps {
     /** A skill category, or `null` for the uncategorized "Actions" bucket. */
