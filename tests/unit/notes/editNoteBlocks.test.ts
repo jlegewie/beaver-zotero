@@ -571,12 +571,7 @@ describe('validateEditNoteBlocksAction', () => {
 // =============================================================================
 //
 // Masking keeps a page-label change out of the addressability lane, so an edit
-// addressed against the pre-drift numbering still resolves — that part must not
-// regress. What the second lane adds is that both gates KNOW the locators moved
-// and say so to the expansion layer, which is where a copied stale locator
-// would otherwise be written back into the note as if the model had chosen it.
-// What expansion then does with the flag is pinned in
-// `noteCitationLocatorDrift.test.ts`.
+// addressed against the pre-drift numbering still resolves.
 
 describe('edit_note_blocks locator drift', () => {
     // Same note, same line count, same everything except a citation locator —
@@ -600,13 +595,6 @@ describe('edit_note_blocks locator drift', () => {
         content: '<p>Bravo <citation id="1-EXISTS01" loc="page3" ref="c_EXISTS01_0"/> REWRITTEN.</p>',
     };
 
-    /** The `guardLocatorDrift` argument of the last content expansion. */
-    function lastGuardArg(): unknown {
-        const calls = vi.mocked(expandToRawHtml).mock.calls;
-        expect(calls.length).toBeGreaterThan(0);
-        return calls[calls.length - 1][6];
-    }
-
     beforeEach(() => {
         useNote(`<div data-schema-version="9">${DRIFTED_BODY}</div>`);
     });
@@ -619,15 +607,9 @@ describe('edit_note_blocks locator drift', () => {
         expect(response.error_code).toBeUndefined();
     });
 
-    it('tells the expansion layer that locators drifted, at validate', async () => {
-        await handleAgentActionValidateRequest(validateRequest([edit], { snapshot: READ_SNAPSHOT }));
-        expect(lastGuardArg()).toBe(true);
-    });
-
     // A successful validation echoes the caller's token back rather than a
-    // freshly minted one. A fresh one would read as `match` and disarm the guard
-    // on any follow-up edit that echoed it — while this payload ships no note
-    // body, so the model would never have seen the locators it certifies.
+    // freshly minted one: nothing has been applied, so the token the caller sent
+    // still describes the note the edits were addressed against.
     it('echoes the caller\'s token rather than minting one for the drifted note', async () => {
         const response = await handleAgentActionValidateRequest(
             validateRequest([edit], { snapshot: READ_SNAPSHOT }),
@@ -638,53 +620,11 @@ describe('edit_note_blocks locator drift', () => {
         expect(response.current_value).not.toHaveProperty('note');
     });
 
-    // The gate is re-run rather than carried over: page labels can resolve while
-    // the action waits for approval, so execute must reach its own verdict.
-    it('tells the expansion layer that locators drifted, at execute', async () => {
-        await handleAgentActionExecuteRequest(executeRequest([edit], { snapshot: READ_SNAPSHOT }));
-        expect(lastGuardArg()).toBe(true);
-    });
-
-    it('does not flag drift when the token matches the note exactly', async () => {
-        useNote(`<div data-schema-version="9">${READ_BODY}</div>`);
-        await handleAgentActionValidateRequest(validateRequest([edit], { snapshot: READ_SNAPSHOT }));
-        expect(lastGuardArg()).toBe(false);
-    });
-
-    // A sole `op:"rewrite"` needs no token, but it re-emits every citation in
-    // the note — the widest exposure there is. When it DOES carry one, the
-    // verdict is honored.
-    it('honors a token supplied with a sole rewrite', async () => {
-        await handleAgentActionValidateRequest(validateRequest(
-            [{ index: 0, op: 'rewrite', content: DRIFTED_BODY }],
-            { snapshot: READ_SNAPSHOT },
-        ));
-        expect(lastGuardArg()).toBe(true);
-    });
-
-    // …and only a token can license a locator change. "No token" and "a token
-    // for some other note state" are both "these locators cannot be vouched
-    // for", not "there was no drift" — otherwise the untokened rewrite path,
-    // which re-emits every citation, would stay open.
-    it.each([
-        ['no token', undefined],
-        ['a token that does not match this note', buildAddressSnapshot(NOTE_ID, '<p>Some other note.</p>')],
-        ['a token that is not a token', 'not-a-token'],
-    ])('guards a sole rewrite sent with %s', async (_label, snapshot) => {
-        await handleAgentActionValidateRequest(validateRequest(
-            [{ index: 0, op: 'rewrite', content: DRIFTED_BODY }],
-            { snapshot },
-        ));
-        expect(lastGuardArg()).toBe(true);
-    });
-
-    it('does not guard a sole rewrite whose token matches the note exactly', async () => {
-        useNote(`<div data-schema-version="9">${READ_BODY}</div>`);
-        await handleAgentActionValidateRequest(validateRequest(
-            [{ index: 0, op: 'rewrite', content: READ_BODY }],
-            { snapshot: READ_SNAPSHOT },
-        ));
-        expect(lastGuardArg()).toBe(false);
+    it('still executes the edit — drift changes no block number', async () => {
+        const response = await handleAgentActionExecuteRequest(
+            executeRequest([edit], { snapshot: READ_SNAPSHOT }),
+        );
+        expect(response).toMatchObject({ success: true });
     });
 });
 

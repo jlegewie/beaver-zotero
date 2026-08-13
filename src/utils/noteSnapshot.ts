@@ -27,24 +27,15 @@
  *    {@link maskVolatileLocators} removes exactly that class of drift from its
  *    digest input, and nothing else.
  *
- *    Addressability is not the only question, though. A model that copies a
- *    block verbatim also copies the locator it was shown, and the expansion
- *    layer reads a locator that differs from the note's current projection as a
- *    deliberate page change and REWRITES the citation. Under drift that rewrite
- *    stores a stale page in the user's note, silently. The UNMASKED lane exists
- *    to tell the two apart: it digests the projection with locators intact, so
- *    "masked matches, unmasked differs" means the locators — and only the
- *    locators — moved since the read. {@link checkAddressSnapshot} returns that
- *    as `locator_drift`, and the blocks path refuses a locator change on an
- *    existing citation while it holds, rather than guessing at intent. See
- *    `expandToRawHtml`'s `guardLocatorDrift` parameter.
+ *    The UNMASKED lane reports that class of movement rather than hiding it: it
+ *    digests the projection with locators intact, so "masked matches, unmasked
+ *    differs" means the locators — and only the locators — moved since the read.
+ *    {@link checkAddressSnapshot} returns that as `locator_drift`.
  *
  *    The lane is note-wide, not per-citation: any locator anywhere in the note
- *    having moved makes every locator difference in that edit ambiguous. It is
- *    deliberately coarse — the guard it feeds only bites on an edit that
- *    actually changes a locator, so the cost of the coarseness is bounded and
- *    the alternative (per-citation read-time state in the token) would put
- *    unbounded data on the wire.
+ *    having moved yields that verdict for the whole token. The alternative
+ *    (per-citation read-time state in the token) would put unbounded data on the
+ *    wire.
  *
  * 2. WHY THE NOTE ID IS INSIDE THE DIGEST. Without it the token identifies a
  *    STRING, not a note, so a token issued for note A verifies against any note
