@@ -74,7 +74,13 @@ export const MentionsPlugin: React.FC<{
             try {
                 const items = await searchTitleCreatorYear(q);
                 if (seq !== searchSeq.current) return;
-                setResults(items.slice(0, MAX_RESULTS));
+                const shown = items.slice(0, MAX_RESULTS);
+                // The search loads primaryData only, so the field values the
+                // menu rows and the mention descriptor read have to be loaded
+                // before either touches getField()/getDisplayTitle().
+                await Zotero.Items.loadDataTypes(shown, ['itemData']);
+                if (seq !== searchSeq.current) return;
+                setResults(shown);
             } catch {
                 if (seq !== searchSeq.current) return;
                 setResults([]);

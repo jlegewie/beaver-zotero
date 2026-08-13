@@ -15,6 +15,7 @@ import {
 import type { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import {
     modelObjectIdFromReference,
+    resolveLibraryRefForLibraryID,
     UNRESOLVED_LIBRARY_ID,
 } from '@beaver/agent-core/identity/libraryRef';
 import { MentionPill } from './MentionPill';
@@ -71,6 +72,21 @@ export type SerializedMentionNode = SerializedMentionNodeV2 | SerializedLegacyMe
 const MENTION_ATTRIBUTE = 'data-lexical-mention';
 
 /**
+ * Rebuilds the reference a legacy payload carries. The device-local library id
+ * is all such a payload has, so the portable `library_ref` is resolved here —
+ * without it `getTextContent()` would hand the model an id that means a
+ * different library on another device.
+ */
+function legacyReference(libraryID: number, zoteroKey: string): ZoteroItemReference {
+    const libraryRef = resolveLibraryRefForLibraryID(libraryID);
+    return {
+        library_id: libraryID,
+        zotero_key: zoteroKey,
+        ...(libraryRef ? { library_ref: libraryRef } : {}),
+    };
+}
+
+/**
  * Reads a serialized payload of either shape as a descriptor. The legacy branch
  * has no display data, so the label falls back to the object id built from the
  * ids it does carry.
@@ -82,7 +98,7 @@ function descriptorFromSerialized(serialized: SerializedMentionNode): MentionDes
     const { libraryID, itemKey } = serialized as SerializedLegacyMentionNode;
     return {
         label: `${libraryID}-${itemKey}`,
-        ref: { library_id: libraryID, zotero_key: itemKey },
+        ref: legacyReference(libraryID, itemKey),
     };
 }
 
@@ -184,14 +200,16 @@ export class MentionNode extends DecoratorNode<React.ReactElement> {
                         const zoteroKey = node.getAttribute('data-item-key') ?? '';
                         const libraryRef = node.getAttribute('data-library-ref');
                         const libraryID = Number(node.getAttribute('data-library-id'));
+                        const localID = Number.isFinite(libraryID)
+                            ? libraryID
+                            : UNRESOLVED_LIBRARY_ID;
+                        // An export that predates the descriptor carries no
+                        // data-library-ref, so resolve one rather than leaving
+                        // the reference on a device-local id.
                         const ref: ZoteroItemReference | undefined = zoteroKey
-                            ? {
-                                library_id: Number.isFinite(libraryID)
-                                    ? libraryID
-                                    : UNRESOLVED_LIBRARY_ID,
-                                zotero_key: zoteroKey,
-                                ...(libraryRef ? { library_ref: libraryRef } : {}),
-                            }
+                            ? libraryRef
+                                ? { library_id: localID, zotero_key: zoteroKey, library_ref: libraryRef }
+                                : legacyReference(localID, zoteroKey)
                             : undefined;
                         // A pill exported before the descriptor existed carries
                         // only the ids; rebuild the same fallback label the

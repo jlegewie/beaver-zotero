@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { createEditor, type LexicalEditor } from 'lexical';
+import { setLibraryRefResolver } from '@beaver/agent-core/identity/libraryRef';
 import {
     $createMentionNode,
     MentionNode,
@@ -155,5 +156,51 @@ describe('MentionNode DOM conversion', () => {
         element.textContent = '@u-ABCD1234';
 
         expect(importElement(element)).toBeNull();
+    });
+});
+
+/**
+ * A legacy payload carries only the device-local library id, which means a
+ * different library on another device. The upgrade resolves the portable ref so
+ * the plain text the model reads stays the same as it was before the node
+ * stored descriptors.
+ */
+describe('MentionNode legacy library identity', () => {
+    afterEach(() => {
+        setLibraryRefResolver(() => null);
+    });
+
+    it('resolves the portable library ref when upgrading a legacy JSON payload', () => {
+        setLibraryRefResolver((libraryID) => (libraryID === 3 ? 'g4567890' : null));
+
+        const legacy: SerializedLegacyMentionNode = {
+            type: 'beaver-mention',
+            version: 1,
+            libraryID: 3,
+            itemKey: 'LEGACY99',
+        } as SerializedLegacyMentionNode;
+        const node = withEditor(() => MentionNode.importJSON(legacy));
+
+        expect(node.getDescriptor().ref).toEqual({
+            library_id: 3,
+            zotero_key: 'LEGACY99',
+            library_ref: 'g4567890',
+        });
+        expect(withEditor(() => node.getTextContent())).toBe('@g4567890-LEGACY99');
+    });
+
+    it('resolves the portable library ref when upgrading a legacy DOM element', () => {
+        setLibraryRefResolver((libraryID) => (libraryID === 3 ? 'g4567890' : null));
+
+        const element = document.createElement('span');
+        element.setAttribute('data-lexical-mention', 'true');
+        element.setAttribute('data-library-id', '3');
+        element.setAttribute('data-item-key', 'LEGACY99');
+        const node = withEditor(() => {
+            const conversion = MentionNode.importDOM()?.span?.(element);
+            return (conversion?.conversion(element)?.node ?? null) as MentionNode | null;
+        });
+
+        expect(node?.getDescriptor().ref?.library_ref).toBe('g4567890');
     });
 });
