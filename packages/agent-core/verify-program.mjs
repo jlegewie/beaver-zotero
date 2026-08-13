@@ -175,6 +175,7 @@ const entryPaths = [
   "src/transport/clients/embeddingsService.ts",
   "src/transport/clients/searchService.ts",
   "src/transport/clients/diagnosticsService.ts",
+  "src/transport/clients/zoteroLibraryService.ts",
   "src/run-state/toolResultViews.ts",
   "src/run-state/toolResultTypes.ts",
   "src/run-state/toolCallRequest.ts",
