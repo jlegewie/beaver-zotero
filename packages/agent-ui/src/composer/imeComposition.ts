@@ -7,7 +7,7 @@ import {
     type LexicalEditor,
 } from 'lexical';
 import { logger } from '@beaver/agent-core/platform/logger';
-import { isImeKeyEvent } from '../../../utils/ime';
+import { isImeKeyEvent } from '../primitives/ime';
 import {
     $getFlatSelectionOffsets,
     $trySelectFlatRange,
@@ -337,7 +337,7 @@ export function createCompositionGatedEmitter(options: {
     /** Publishes the current editor text upward. Must be safe to call spuriously. */
     emit: () => void;
     /** The window to time with; null while no root is mounted. */
-    getWindow: () => (Window & typeof globalThis) | null;
+    getWindow: () => Window | null;
     retryMs?: number;
     maxWaitMs?: number;
 }): CompositionGatedEmitter {
@@ -840,7 +840,7 @@ export function registerImeTrace(editor: LexicalEditor, ime: ImeCompositionTrack
         const win = doc.defaultView;
         let observer: MutationObserver | null = null;
         if (win) {
-            observer = new (win as typeof globalThis & Window).MutationObserver((records) => {
+            observer = new win.MutationObserver((records) => {
                 if (!ime.isImeActive()) return;
                 const external = records.filter(record => !rootElement.contains(record.target));
                 if (external.length === 0) return;

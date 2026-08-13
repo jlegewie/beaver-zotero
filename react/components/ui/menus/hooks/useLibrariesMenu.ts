@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { SearchMenuItem } from '../SearchMenu';
+import { SearchMenuItem } from '@beaver/agent-ui/primitives/SearchMenu';
 import { LibraryMenuItemContext, createLibraryMenuItem } from '../utils/menuItemFactories';
 
 interface UseLibrariesMenuOptions {

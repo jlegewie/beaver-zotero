@@ -1,4 +1,4 @@
-import { truncateText } from './stringUtils';
+import { truncateText } from '@beaver/agent-ui/utils/stringUtils';
 import { stripHtmlTags, computeDiff } from '../components/agentRuns/EditNotePreview';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { isAgentSupportedItem, agentItemFilter, agentItemFilterAsync } from '../../src/utils/agentItemSupport';

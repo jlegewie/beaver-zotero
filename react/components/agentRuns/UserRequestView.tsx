@@ -7,15 +7,16 @@ import { RequestChips } from './requestChips';
 import { EditIcon, Spinner } from '../icons/icons';
 import Button from '@beaver/agent-ui/primitives/Button';
 import ModelSelectionButton from '../ui/buttons/ModelSelectionButton';
-import SearchMenu from '../ui/menus/SearchMenu';
+import SearchMenu from '@beaver/agent-ui/primitives/SearchMenu';
 import { regenerateWithEditedPromptAtom, isWSChatPendingAtom } from '../../atoms/agentRunAtoms';
 import { selectedModelAtom } from '../../atoms/models';
 import { isStreamingAtom } from '@beaver/agent-core/run-state/atoms';
 import { actionsAtom, buildEditedPromptActionsAtom } from '../../atoms/actions';
-import { ensurePromptActionTokens, promptActionsToDescriptors, type SlashCommandDescriptor } from '../../utils/slashCommands';
+import { ensurePromptActionTokens, promptActionsToDescriptors, type SlashCommandDescriptor } from '@beaver/agent-ui/composer/slashCommands';
 import { renderContentWithSlashPills } from './slashCommandRendering';
-import { LexicalEditorInput, LexicalEditorInputHandle } from '../input/lexical/LexicalEditorInput';
+import { LexicalEditorInput, LexicalEditorInputHandle } from '@beaver/agent-ui/composer/LexicalEditorInput';
 import { useSlashMenu } from '../../hooks/useSlashMenu';
+import { useActionPopupResolver } from '../../hooks/useActionPopupResolver';
 
 interface UserRequestViewProps {
     userPrompt: BeaverAgentPrompt;
@@ -68,6 +69,9 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
     const selectedModel = useAtomValue(selectedModelAtom);
     const isStreaming = useAtomValue(isStreamingAtom);
     const allActions = useAtomValue(actionsAtom);
+    // Supplies the edit overlay's /command pill hover cards with the live
+    // action definitions, matching the chat composer.
+    const resolveAction = useActionPopupResolver();
     const displayContent = useMemo(
         () => ensurePromptActionTokens(userPrompt.content, userPrompt.actions),
         [userPrompt.content, userPrompt.actions],
@@ -386,6 +390,7 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
                                 pills={editedPills}
                                 onPillsChange={setEditedPills}
                                 onSubmit={handleEditorSubmit}
+                                resolveAction={resolveAction}
                                 placeholder="Edit your message..."
                                 ariaLabel="Edit message"
                                 onKeyDown={handleEditorKeyDown}

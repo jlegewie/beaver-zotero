@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import { useSetAtom } from 'jotai';
-import type { ComposerPasteHandlers } from '../components/input/lexical/LexicalEditorInput';
+import type { ComposerPasteHandlers } from '@beaver/agent-ui/composer/LexicalEditorInput';
 import { useAttachExternalFiles, useHoldSendForAttachment } from './useAttachExternalFiles';
 import { addPopupMessageAtom } from '../utils/popupMessageUtils';
 import {

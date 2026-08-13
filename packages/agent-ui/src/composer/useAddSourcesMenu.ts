@@ -1,5 +1,5 @@
 import React, { useCallback, useRef, useState } from 'react';
-import type { MenuPosition, SearchMenuCloseReason } from '../components/ui/menus/SearchMenu';
+import type { MenuPosition, SearchMenuCloseReason } from '../primitives/SearchMenu';
 
 /** The character that opens the Add Sources menu from the chat editor. */
 const TRIGGER = '@';

@@ -2,10 +2,10 @@ import React from 'react';
 import { useSetAtom } from 'jotai';
 import { CSSIcon, TagIcon } from '../icons/icons';
 import { removeTagIdAtom } from '../../atoms/messageComposition';
-import { truncateText } from '../../utils/stringUtils';
+import { truncateText } from '@beaver/agent-ui/utils/stringUtils';
 import { ZoteroTag } from '@beaver/agent-core/types/zotero';
 import { useRemoveContextMenu } from '../../hooks/useRemoveContextMenu';
-import { ChipWithPopup, type ChipPopupContent } from '../agentRuns/requestChips/ChipPopup';
+import { ChipWithPopup, type ChipPopupContent } from '@beaver/agent-ui/chat/ChipPopup';
 import { ChipButton } from '../agentRuns/requestChips/ChipButton';
 import { ChipRemovableIcon } from '../agentRuns/requestChips/ChipRemovableIcon';
 

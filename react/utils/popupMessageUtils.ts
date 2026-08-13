@@ -8,7 +8,7 @@ import { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import { RepeatIcon, CSSItemTypeIcon } from '../components/icons/icons';
 import { retryUploads } from '../../src/services/FileUploader';
 import { RegularItemsSummaryContent } from '../components/ui/popup/RegularItemsSummaryContent';
-import { truncateText } from '../utils/stringUtils';
+import { truncateText } from '@beaver/agent-ui/utils/stringUtils';
 import { getDisplayNameFromItem } from '../utils/sourceUtils';
 import type { ItemValidationState } from '../atoms/itemValidation';
 import {

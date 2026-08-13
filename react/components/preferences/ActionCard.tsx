@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from "react"
 import { useAtomValue, useSetAtom } from "jotai";
 import { Action, ActionCategory, ActionTargetType, CATEGORY_LABELS, TARGET_PRESETS, targetsLabel, targetsDescription } from "@beaver/agent-core/types/actions";
 import { actionsAtom } from "../../atoms/actions";
-import { getActionCommand, toSlashToken } from "../../utils/slashCommands";
+import { getActionCommand, toSlashToken } from "@beaver/agent-ui/composer/slashCommands";
 import { hasUserInputVariables } from "../../utils/userInputVariables";
 import { exportActionToFile } from "../../utils/actionShareFile";
 import { addPopupMessageAtom } from "../../utils/popupMessageUtils";

@@ -1,8 +1,8 @@
 import React, { useEffect, useRef, useState, ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { Icon, SearchIcon } from '../../icons/icons';
-import { getWindowFromElement, getDocumentFromElement } from '@beaver/agent-ui/utils/windowContext';
-import { isImeKeyEvent } from '../../../utils/ime';
+import { Icon, SearchIcon } from '../icons';
+import { getWindowFromElement, getDocumentFromElement } from '../utils/windowContext';
+import { isImeKeyEvent } from './ime';
 
 /**
 * Menu item interface for search menu

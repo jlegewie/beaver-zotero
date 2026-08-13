@@ -7,8 +7,8 @@ import { actionsAtom, actionContextAtom, resolveActionForStagingAtom } from '../
 import { computeActionGroups } from '../utils/actionVisibility';
 import { openPreferencesWindow } from '../../src/ui/openPreferencesWindow';
 import { Action, ActionCategory, ActionTargetType } from '@beaver/agent-core/types/actions';
-import { SlashCommandDescriptor, getActionCommand } from '../utils/slashCommands';
-import { MenuPosition, SearchMenuItem } from '../components/ui/menus/SearchMenu';
+import { SlashCommandDescriptor, getActionCommand } from '@beaver/agent-ui/composer/slashCommands';
+import { MenuPosition, SearchMenuItem } from '@beaver/agent-ui/primitives/SearchMenu';
 
 // Category icons mirror the homepage launcher and Actions preferences so the
 // slash menu matches what users see elsewhere. Uncategorized actions fall

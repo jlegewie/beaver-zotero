@@ -1,6 +1,5 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { useAtomValue } from 'jotai';
 import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext';
 import {
     LexicalTypeaheadMenuPlugin,
@@ -13,12 +12,14 @@ import {
     $isRangeSelection,
     TextNode,
 } from 'lexical';
-import { actionsAtom } from '../../../atoms/actions';
 import { Action } from '@beaver/agent-core/types/actions';
 import { $createSlashCommandNode } from './SlashCommandNode';
-import { truncateText } from '../../../utils/stringUtils';
+import { truncateText } from '../utils/stringUtils';
 
 const MAX_RESULTS = 8;
+
+/** Stable empty default, so an unsupplied `actions` prop doesn't churn the memo. */
+const NO_ACTIONS: Action[] = [];
 
 class SlashOption extends MenuOption {
     action: Action;
@@ -38,17 +39,20 @@ const toSlug = (s: string) =>
 /**
  * /-trigger plugin.
  *
- * Reads the available actions from `actionsAtom` (source of truth for the
- * existing slash menu), filters by the typed query, and on select inserts
+ * Filters the `actions` it is given by the typed query, and on select inserts
  * a SlashCommandNode pill rendered with a background color. Pill data is
  * intentionally limited to the command's visual token - it does NOT resolve
  * prompt variables or trigger the action yet.
+ *
+ * Actions live in the client's own store, so the caller subscribes and passes
+ * them in; with none supplied the menu simply has nothing to offer.
  */
 export const SlashCommandsPlugin: React.FC<{
     anchorElement?: HTMLElement | null;
-}> = ({ anchorElement }) => {
+    /** Actions offered by the menu, in display order. */
+    actions?: Action[];
+}> = ({ anchorElement, actions = NO_ACTIONS }) => {
     const [editor] = useLexicalComposerContext();
-    const actions = useAtomValue(actionsAtom);
     const [queryString, setQueryString] = useState<string | null>(null);
 
     const triggerFn = useBasicTypeaheadTriggerMatch('/', {

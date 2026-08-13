@@ -3,9 +3,9 @@
 import React, { act, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { LexicalEditorInputHandle } from '../../../react/components/input/lexical/LexicalEditorInput';
+import type { LexicalEditorInputHandle } from '@beaver/agent-ui/composer/LexicalEditorInput';
 
-vi.mock('../../../react/components/input/lexical/SlashCommandHoverCardPlugin', () => ({
+vi.mock('@beaver/agent-ui/composer/SlashCommandHoverCardPlugin', () => ({
     SlashCommandHoverCardPlugin: () => null,
 }));
 
@@ -69,7 +69,7 @@ describe('Lexical selection stability', () => {
     const mountEmptyEditor = async () => {
         const testDocument = globalThis.document;
         const { LexicalEditorInput } = await import(
-            '../../../react/components/input/lexical/LexicalEditorInput'
+            '@beaver/agent-ui/composer/LexicalEditorInput'
         );
         const editorHandle = React.createRef<LexicalEditorInputHandle>();
 

@@ -5,7 +5,7 @@ import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import SearchMenu, {
     SearchMenuItem,
-} from "../../../react/components/ui/menus/SearchMenu";
+} from "@beaver/agent-ui/primitives/SearchMenu";
 
 const menuItems: SearchMenuItem[] = [
     {

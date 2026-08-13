@@ -39,10 +39,11 @@ import {
     splitContentByCommandTokens,
     slashDescriptorsEqual,
     type SlashCommandDescriptor,
-} from '../../../utils/slashCommands';
-import { isImeKeyEvent } from '../../../utils/ime';
-import { getHost } from '@beaver/agent-ui/host';
-import { getPref } from '../../../../src/utils/prefs';
+} from './slashCommands';
+import { isImeKeyEvent } from '../primitives/ime';
+import { getHost } from '../host';
+import { isMacPlatform, isWindowsPlatform } from '../utils/platform';
+import type { ActionPopupSource } from '../chat/actionPopup';
 import {
     createCompositionGatedEmitter,
     createImeCompositionTracker,
@@ -421,6 +422,15 @@ export interface LexicalEditorInputProps {
      * reads what the user types but renders no input of its own.
      */
     inlineHint?: string | null;
+    /**
+     * Looks up the live action behind a /command pill, for its hover card.
+     * Returns null when the action no longer exists.
+     *
+     * Actions live in the client's own store, so the caller subscribes and
+     * passes the lookup in rather than the editor reaching for it. Omit it and
+     * hover cards fall back to the snapshot the pill itself carries.
+     */
+    resolveAction?: (actionId: string) => ActionPopupSource | null;
 }
 
 // Exposes a textarea-like focus()/clear() API to the parent via ref so the
@@ -720,8 +730,7 @@ const PlainTextSync: React.FC<{
             // deferred recovery replaces it on the next task.
             isComposing: () => ime.isImeActive(),
             emit: () => emitRef.current(),
-            getWindow: () => (editor.getRootElement()?.ownerDocument.defaultView ?? null) as
-                (Window & typeof globalThis) | null,
+            getWindow: () => editor.getRootElement()?.ownerDocument.defaultView ?? null,
         });
         emitterRef.current = emitter;
         // Lets the imperative handle reach the withheld text (see
@@ -1044,7 +1053,11 @@ const ClipboardAttachmentPlugin: React.FC<{
     useEffect(() => {
         const handler = (e: KeyboardEvent) => {
             if (e.key !== 'v' && e.key !== 'V') return;
-            const accel = Zotero.isMac ? e.metaKey : e.ctrlKey;
+            // The handler is only ever attached to the current root element, so
+            // its window is the one the editor renders in.
+            const win = editor.getRootElement()?.ownerDocument.defaultView;
+            if (!win) return;
+            const accel = isMacPlatform(win.navigator) ? e.metaKey : e.ctrlKey;
             if (!accel || e.altKey || e.shiftKey) return;
             // An input method may use the same chord.
             if (isImeKeyEvent(e) || ime.isComposing()) return;
@@ -1079,29 +1092,44 @@ const ImeCompositionTrackerPlugin: React.FC<{ ime: ImeCompositionTracker }> = ({
 
 /**
  * Applies the Windows IME composition-order workaround to this editor (see
- * registerCompositionEndDeferral). Windows-only; the `imeCompositionOrderFix`
- * pref is a kill-switch in case an IME interacts badly with the deferral.
+ * registerCompositionEndDeferral). Windows-only; the host's
+ * `isImeCompositionOrderFixEnabled` is a kill-switch in case an IME interacts
+ * badly with the deferral, and a host that supplies none leaves it enabled.
  */
 const WindowsImeCompositionOrderPlugin: React.FC = () => {
     const [editor] = useLexicalComposerContext();
     useEffect(() => {
-        if (!Zotero.isWin) return;
-        if (getPref('imeCompositionOrderFix') === false) return;
-        return registerCompositionEndDeferral(editor, {
-            trace: getPref('debugImeTrace') === true,
+        const config = getHost().config;
+        if (config?.isImeCompositionOrderFixEnabled?.() === false) return;
+        // The platform is read from the window the editor renders in, so the
+        // Windows gate waits for a root element instead of assuming one is
+        // already attached.
+        let disposeDeferral: (() => void) | undefined;
+        const unregisterRoot = editor.registerRootListener((rootElement) => {
+            disposeDeferral?.();
+            disposeDeferral = undefined;
+            const win = rootElement?.ownerDocument.defaultView;
+            if (!win || !isWindowsPlatform(win.navigator)) return;
+            disposeDeferral = registerCompositionEndDeferral(editor, {
+                trace: config?.isImeTracingEnabled?.() === true,
+            });
         });
+        return () => {
+            unregisterRoot();
+            disposeDeferral?.();
+        };
     }, [editor]);
     return null;
 };
 
 /**
- * Compact IME event tracing (pref `debugImeTrace`), for diagnosing
- * composition issues without a local reproduction.
+ * Compact IME event tracing (host config `isImeTracingEnabled`), for diagnosing
+ * composition issues without a local reproduction. Off unless the host opts in.
  */
 const ImeTracePlugin: React.FC<{ ime: ImeCompositionTracker }> = ({ ime }) => {
     const [editor] = useLexicalComposerContext();
     useEffect(() => {
-        if (!getPref('debugImeTrace')) return;
+        if (getHost().config?.isImeTracingEnabled?.() !== true) return;
         return registerImeTrace(editor, ime);
     }, [editor, ime]);
     return null;
@@ -1195,7 +1223,7 @@ const CaretNavigationPlugin: React.FC<{
             const sel = win.getSelection();
             if (!sel) return;
 
-            const isMac = Zotero.isMac;
+            const isMac = isMacPlatform(win.navigator);
             const shift = e.shiftKey;
             const alter = shift ? 'extend' : 'move';
 
@@ -1475,7 +1503,7 @@ const SelectionGuardPlugin: React.FC<{
                 }, { discrete: true });
             };
 
-            const observer = new (win as typeof globalThis & Window).MutationObserver(onMutations);
+            const observer = new win.MutationObserver(onMutations);
             observer.observe(doc.documentElement, { childList: true, subtree: true, characterData: true });
             doc.addEventListener('pointerdown', onPointerDown, true);
             doc.addEventListener('pointerup', onPointerUp, true);
@@ -2056,7 +2084,7 @@ const editorConfig = {
 
 export const LexicalEditorInput = forwardRef<LexicalEditorInputHandle, LexicalEditorInputProps>(
     function LexicalEditorInput(
-        { value, onChange, pills, onPillsChange, onSubmit, placeholder, ariaLabel, disabled = false, onKeyDown, suspendKeyboardNavigation = false, onContentEditableRef, pasteHandlers, inlineHint = null },
+        { value, onChange, pills, onPillsChange, onSubmit, placeholder, ariaLabel, disabled = false, onKeyDown, suspendKeyboardNavigation = false, onContentEditableRef, pasteHandlers, inlineHint = null, resolveAction },
         ref,
     ) {
         const contentEditableRef = useRef<HTMLDivElement | null>(null);
@@ -2172,7 +2200,7 @@ export const LexicalEditorInput = forwardRef<LexicalEditorInputHandle, LexicalEd
                     <BlurSelectionSnapshotPlugin blurSelectionRef={blurSelectionRef} />
                     <PinnedEndCaretPlugin pinnedRef={pinnedEndCaretRef} ime={ime} />
                     <SlashCommandClickPlugin />
-                    <SlashCommandHoverCardPlugin />
+                    <SlashCommandHoverCardPlugin resolveAction={resolveAction} />
                     <SubmitOnEnterPlugin onSubmit={onSubmit} />
                     <ClipboardAttachmentPlugin handlers={pasteHandlers} ime={ime} />
                     <WindowsImeCompositionOrderPlugin />

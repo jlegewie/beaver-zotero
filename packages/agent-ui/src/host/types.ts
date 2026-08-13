@@ -313,6 +313,22 @@ export interface ConfigHost {
     usePageLabels(): boolean;
     /** Whether to expose development-only UI affordances. */
     isDevelopment(): boolean;
+    /**
+     * Whether the composer applies the Windows composition-order workaround for
+     * input methods (see the composer's composition-end deferral).
+     *
+     * A kill-switch, not a feature flag: the workaround fixes lost text with
+     * Windows IMEs and is only ever turned off when a particular IME interacts
+     * badly with it. Optional — a host that omits it (or omits this whole slice)
+     * leaves the workaround **enabled**.
+     */
+    isImeCompositionOrderFixEnabled?(): boolean;
+    /**
+     * Whether the composer emits compact IME event traces to the log, for
+     * diagnosing composition issues without a local reproduction. Diagnostic
+     * only; a host that omits it (or omits this whole slice) gets **no** tracing.
+     */
+    isImeTracingEnabled?(): boolean;
 }
 
 /**

@@ -12,4 +12,12 @@ export const zoteroConfig: ConfigHost = {
     isDevelopment() {
         return Zotero.Beaver?.data?.env === 'development';
     },
+    isImeCompositionOrderFixEnabled() {
+        // Kill-switch pref: anything but an explicit `false` (including an
+        // unset pref) leaves the workaround on.
+        return getPref('imeCompositionOrderFix') !== false;
+    },
+    isImeTracingEnabled() {
+        return getPref('debugImeTrace') === true;
+    },
 };

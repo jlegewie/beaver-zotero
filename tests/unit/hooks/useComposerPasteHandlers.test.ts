@@ -78,7 +78,7 @@ vi.mock('../../../react/utils/popupMessageUtils', async () => {
 
 import { getDefaultStore } from 'jotai';
 import { useComposerPasteHandlers } from '../../../react/hooks/useComposerPasteHandlers';
-import type { ComposerPasteHandlers } from '../../../react/components/input/lexical/LexicalEditorInput';
+import type { ComposerPasteHandlers } from '@beaver/agent-ui/composer/LexicalEditorInput';
 
 const mounted: { root: ReturnType<typeof createRoot>; container: HTMLDivElement }[] = [];
 

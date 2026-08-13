@@ -3,7 +3,7 @@ import { useState, useEffect, useRef, useCallback, useMemo, useImperativeHandle,
 import { PlusSignIcon, Icon } from '../../icons/icons';
 import { ItemSearchResult } from '@beaver/agent-core/transport/clients/searchService';
 import { itemSearchResultFromZoteroItem } from '../../../../src/utils/zoteroSerializers';
-import SearchMenu, { MenuPosition, SearchMenuCloseReason } from './SearchMenu';
+import SearchMenu, { MenuPosition, SearchMenuCloseReason } from '@beaver/agent-ui/primitives/SearchMenu';
 import { currentMessageFiltersAtom, removeItemFromMessageAtom, addItemToCurrentMessageItemsAtom, currentMessageItemsAtom } from '../../../atoms/messageComposition';
 import { EXTERNAL_FILE_PICKER_EXTENSIONS } from '../../../../src/services/externalFiles';
 import { useAttachExternalFiles } from '../../../hooks/useAttachExternalFiles';
@@ -24,7 +24,7 @@ import { useTagsMenu } from './hooks/useTagsMenu';
 import { useNotesMenu } from './hooks/useNotesMenu';
 import { ZoteroTag } from '@beaver/agent-core/types/zotero';
 import Tooltip from '@beaver/agent-ui/primitives/Tooltip';
-import { AddSourcesMenuHandle, AddSourcesQuerySource } from '../../../hooks/useAddSourcesMenu';
+import { AddSourcesMenuHandle, AddSourcesQuerySource } from '@beaver/agent-ui/composer/useAddSourcesMenu';
 
 /** How many recent items are carried in the `recentItems` preference. */
 const RECENT_ITEMS_LIMIT = 5;
