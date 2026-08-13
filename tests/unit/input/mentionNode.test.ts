@@ -3,6 +3,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { createEditor, type LexicalEditor } from 'lexical';
 import { setLibraryRefResolver } from '@beaver/agent-core/identity/libraryRef';
+import { registerZoteroLibraryIdentity } from '../../../src/utils/libraryIdentity';
 import {
     $createMentionNode,
     MentionNode,
@@ -167,7 +168,9 @@ describe('MentionNode DOM conversion', () => {
  */
 describe('MentionNode legacy library identity', () => {
     afterEach(() => {
-        setLibraryRefResolver(() => null);
+        // Put back the resolver tests/setup.ts registers, rather than leaving
+        // the seam in a state no setup established.
+        registerZoteroLibraryIdentity();
     });
 
     it('resolves the portable library ref when upgrading a legacy JSON payload', () => {
