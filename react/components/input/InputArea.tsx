@@ -6,7 +6,7 @@ import { currentMessageContentAtom, currentMessagePillsAtom, pendingPillInsertsA
 import { sendWSMessageAtom, isWSChatPendingAtom, closeWSConnectionAtom, sendApprovalResponseAtom } from '../../atoms/agentRunAtoms';
 import { pendingApprovalsAtom, removePendingApprovalAtom } from '../../agents/agentActions';
 import Button from '@beaver/agent-ui/primitives/Button';
-import SearchMenu, { MenuPosition } from '../ui/menus/SearchMenu';
+import SearchMenu from '../ui/menus/SearchMenu';
 import ModelSelectionButton from '../ui/buttons/ModelSelectionButton';
 import MessageAttachmentDisplay from '../messages/MessageAttachmentDisplay';
 import { logger } from '@beaver/agent-core/platform/logger';
@@ -29,6 +29,7 @@ import { getPref, setPref } from '../../../src/utils/prefs';
 import { LexicalEditorInput, LexicalEditorInputHandle, SlashCommandDescriptor } from './lexical/LexicalEditorInput';
 import { isImeKeyEvent } from '../../utils/ime';
 import { useSlashMenu } from '../../hooks/useSlashMenu';
+import { useAddSourcesMenu, AddSourcesMenuHandle } from '../../hooks/useAddSourcesMenu';
 import { useComposerPasteHandlers } from '../../hooks/useComposerPasteHandlers';
 import { sendComposedMessageAtom } from '../../atoms/actions';
 
@@ -56,8 +57,6 @@ const InputArea: React.FC<InputAreaProps> = ({
     const selectedModel = useAtomValue(selectedModelAtom);
     const isUsingBeaverCredits = useAtomValue(isUsingBeaverCreditsAtom);
     const newThread = useSetAtom(newThreadAtom);
-    const [isAddAttachmentMenuOpen, setIsAddAttachmentMenuOpen] = useState(false);
-    const [menuPosition, setMenuPosition] = useState<MenuPosition>({ x: 0, y: 0 });
     const [selectionRestoreTick, setSelectionRestoreTick] = useState(0);
     const isLibraryTab = useAtomValue(isLibraryTabAtom);
     const [isWebSearchEnabled, setIsWebSearchEnabled] = useAtom(isWebSearchEnabledAtom);
@@ -84,9 +83,13 @@ const InputArea: React.FC<InputAreaProps> = ({
     // Imperative handle exposed by the Lexical editor (focus / clear).
     const editorHandleRef = useRef<LexicalEditorInputHandle | null>(null);
     const pendingSelectionRestoreRef = useRef<{ offset: number; skipFocus: boolean } | null>(null);
-    const sourceMenuSelectionRestoreRef = useRef<{ offset: number } | null>(null);
     const focusEditor = useCallback(() => {
         editorHandleRef.current?.focus();
+    }, []);
+    // The open Add Sources menu, for stepping back out of one of its submenus.
+    const addSourcesMenuRef = useRef<AddSourcesMenuHandle | null>(null);
+    const deleteTrailingQuery = useCallback((length: number) => {
+        editorHandleRef.current?.deleteTrailingQuery(length);
     }, []);
     // Stable forwarder so the slash menu can insert a command pill into the
     // Lexical editor (the editor handle isn't available until after mount).
@@ -207,6 +210,31 @@ const InputArea: React.FC<InputAreaProps> = ({
         handleSlashMenuKeyDown,
     } = useSlashMenu(inputRef, verticalPosition, focusEditor, insertSlashCommand);
 
+    // A `@` typed in the editor drives the Add Sources menu the same way: the
+    // caret never leaves the editor and the text after the `@` is the menu's
+    // search query. Opened from the "+" button, the menu brings its own
+    // focused search field instead and the composer is left alone.
+    const {
+        isOpen: isAddSourcesMenuOpen,
+        position: addSourcesMenuPosition,
+        query: addSourcesSearchQuery,
+        querySource: addSourcesQuerySource,
+        setQuery: setAddSourcesSearchQuery,
+        openFromButton: openAddSourcesMenu,
+        handleTrigger: handleAddSourcesTrigger,
+        handleChange: handleAddSourcesChange,
+        handleKeyDown: handleAddSourcesKeyDown,
+        dismiss: dismissAddSourcesMenu,
+        commit: commitAddSourcesMenu,
+        resetQuery: resetAddSourcesQuery,
+    } = useAddSourcesMenu({
+        verticalPosition,
+        deleteTrailingQuery,
+        focusEditor,
+        setMessageContent,
+        menuRef: addSourcesMenuRef,
+    });
+
     useEffect(() => {
         if (isPending && getPref('focusResponseForScreenReaders')) {
             return;
@@ -255,28 +283,6 @@ const InputArea: React.FC<InputAreaProps> = ({
         setSelectionRestoreTick((tick) => tick + 1);
     }, []);
 
-    // Runs when the attachment menu closes (its search input owned DOM focus
-    // while open). Refocuses the editor and puts the caret back where the `@`
-    // trigger was typed. Restoring while the menu is still open would fight
-    // its search input: even a skip-focus selection update moves the native
-    // DOM selection into the contenteditable, which Zotero's chrome focus
-    // manager treats as focus movement, yanking focus out of the menu.
-    const restoreSourceMenuSelection = useCallback(() => {
-        const pendingRestore = sourceMenuSelectionRestoreRef.current;
-        if (pendingRestore) {
-            editorHandleRef.current?.selectRange(pendingRestore.offset, pendingRestore.offset);
-            return;
-        }
-        // Menu was opened without an `@` trigger (e.g. the "+" button).
-        focusEditor();
-    }, [focusEditor]);
-
-    useEffect(() => {
-        if (!isAddAttachmentMenuOpen) {
-            sourceMenuSelectionRestoreRef.current = null;
-        }
-    }, [isAddAttachmentMenuOpen]);
-
     useEffect(() => {
         const pendingRestore = pendingSelectionRestoreRef.current;
         if (!pendingRestore) return;
@@ -295,63 +301,58 @@ const InputArea: React.FC<InputAreaProps> = ({
     }, [inputRef, selectionRestoreTick]);
 
     const handleEditorChange = useCallback((value: string) => {
+        // The open Add Sources menu owns every keystroke until it closes, so a
+        // `/` typed into its query is a search term, not an actions trigger.
+        if (handleAddSourcesChange(value)) {
+            queueSelectionRestore(value.length, false);
+            return;
+        }
+
         if (handleSlashMenuChange(value)) {
             queueSelectionRestore(value.length, false);
             return;
         }
 
         const inputEl = inputRef.current;
+        if (inputEl && handleSlashTrigger(value, inputEl.getBoundingClientRect())) {
+            queueSelectionRestore(value.length, false);
+            return;
+        }
+
         if (
             inputEl &&
-            !isAddAttachmentMenuOpen &&
-            handleSlashTrigger(value, inputEl.getBoundingClientRect())
+            !isAwaitingApproval &&
+            !hideAttachmentMenu &&
+            handleAddSourcesTrigger(value, inputEl.getBoundingClientRect())
         ) {
             queueSelectionRestore(value.length, false);
             return;
         }
 
-        if (value.endsWith('@') && !isAwaitingApproval && !hideAttachmentMenu) {
-            const nextValue = value.slice(0, -1);
-            if (inputEl) {
-                const rect = inputEl.getBoundingClientRect();
-                const y = verticalPosition === 'above' ? rect.top - 5 : rect.bottom - 10;
-                setMenuPosition({
-                    x: rect.left,
-                    y,
-                });
-            }
-            setIsAddAttachmentMenuOpen(true);
-            setMessageContent(nextValue);
-            // Delete just the trailing `@` in place rather than rebuilding the
-            // editor from the string, so any colored /command nodes survive.
-            editorHandleRef.current?.deleteTrailingCharacter();
-            sourceMenuSelectionRestoreRef.current = { offset: nextValue.length };
-            return;
-        }
-
         setMessageContent(value);
     }, [
+        handleAddSourcesChange,
+        handleAddSourcesTrigger,
         handleSlashMenuChange,
         handleSlashTrigger,
         hideAttachmentMenu,
         inputRef,
-        isAddAttachmentMenuOpen,
         isAwaitingApproval,
         queueSelectionRestore,
         setMessageContent,
-        verticalPosition,
     ]);
 
     const handleEditorKeyDown = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
         // Keys owned by an active IME composition must not drive menus or
         // shortcuts (and must not be preventDefault'ed away from the IME).
         if (isImeKeyEvent(e.nativeEvent)) return;
+        if (handleAddSourcesKeyDown(e)) return;
         if (handleSlashMenuKeyDown(e)) return;
         if ((e.key === 'n' || e.key === 'N') && ((Zotero.isMac && e.metaKey) || (!Zotero.isMac && e.ctrlKey))) {
             e.preventDefault();
             newThread();
         }
-    }, [handleSlashMenuKeyDown, newThread]);
+    }, [handleAddSourcesKeyDown, handleSlashMenuKeyDown, newThread]);
 
     const handleSubmit = async (
         e: React.FormEvent<HTMLFormElement> | React.MouseEvent<HTMLButtonElement>
@@ -440,9 +441,11 @@ const InputArea: React.FC<InputAreaProps> = ({
             return;
         }
         if (isSlashMenuOpen) return;
+        // Enter belongs to the open Add Sources menu (it picks the focused row).
+        if (isAddSourcesMenuOpen) return;
         if (isAttachingFiles) return;
         sendMessage(messageContent);
-    }, [isPending, isAwaitingApproval, isSlashMenuOpen, isAttachingFiles, messageContent]);
+    }, [isPending, isAwaitingApproval, isSlashMenuOpen, isAddSourcesMenuOpen, isAttachingFiles, messageContent]);
 
     const handleDismissHighTokenWarning = (e: React.MouseEvent) => {
         e.preventDefault();
@@ -541,12 +544,16 @@ const InputArea: React.FC<InputAreaProps> = ({
             {/* Message attachments */}
             {!hideAttachmentMenu && (
                 <MessageAttachmentDisplay
-                    isAddAttachmentMenuOpen={isAddAttachmentMenuOpen}
-                    setIsAddAttachmentMenuOpen={setIsAddAttachmentMenuOpen}
-                    menuPosition={menuPosition}
-                    setMenuPosition={setMenuPosition}
-                    inputRef={inputRef}
-                    focusInput={restoreSourceMenuSelection}
+                    isAddAttachmentMenuOpen={isAddSourcesMenuOpen}
+                    menuPosition={addSourcesMenuPosition}
+                    addSourcesSearchQuery={addSourcesSearchQuery}
+                    addSourcesQuerySource={addSourcesQuerySource}
+                    onAddSourcesQueryChange={setAddSourcesSearchQuery}
+                    onOpenAddSourcesMenu={openAddSourcesMenu}
+                    onDismissAddSourcesMenu={dismissAddSourcesMenu}
+                    onCommitAddSourcesMenu={commitAddSourcesMenu}
+                    onResetAddSourcesQuery={resetAddSourcesQuery}
+                    addSourcesMenuRef={addSourcesMenuRef}
                     menuPortalContainer={menuPortalContainer}
                     disabled={isAwaitingApproval}
                     verticalPosition={verticalPosition}
@@ -585,11 +592,21 @@ const InputArea: React.FC<InputAreaProps> = ({
                         onPillsChange={setMessagePills}
                         onSubmit={handleEditorSubmit}
                         pasteHandlers={pasteHandlers}
+                        // Nothing else tells the user that what they type after
+                        // the `@` searches — that menu has no input of its own.
+                        // Drops away the moment they start typing.
+                        inlineHint={
+                            isAddSourcesMenuOpen &&
+                            addSourcesQuerySource === 'editor' &&
+                            addSourcesSearchQuery.length === 0
+                                ? 'Type to search'
+                                : null
+                        }
                         placeholder={getPlaceholderText()}
                         ariaLabel="Message Beaver"
                         disabled={isAwaitingApproval}
                         onKeyDown={handleEditorKeyDown}
-                        suspendKeyboardNavigation={isSlashMenuOpen || isAddAttachmentMenuOpen}
+                        suspendKeyboardNavigation={isSlashMenuOpen || isAddSourcesMenuOpen}
                         onContentEditableRef={(el) => {
                             // Forward the Lexical content-editable element to the
                             // parent's inputRef so legacy `.focus()` callers work.

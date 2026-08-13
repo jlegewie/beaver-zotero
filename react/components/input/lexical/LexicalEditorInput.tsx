@@ -108,13 +108,13 @@ function $collectSlashCommandDescriptors(): SlashCommandDescriptor[] {
     return result;
 }
 
-/** Remove the trailing `/query` the user typed (the `/` trigger plus the typed
- *  query) by character count from the end of the document. The slash menu
- *  closes on whitespace, so the query never spans nodes and always lives in the
- *  final plain-text node(s) — never inside an existing pill. Must be called
- *  inside an update context, while that text is still the tail of the document. */
-function $deleteTrailingSlashQuery(queryLength: number): void {
-    let remaining = queryLength + 1; // +1 for the leading '/'
+/** Remove `length` characters of plain text from the end of the document,
+ *  stopping at a /command pill so a menu's typed query can never eat into one.
+ *  Used to take back the `/query` or `@query` a menu consumed as its search
+ *  box. Must be called inside an update context, while that text is still the
+ *  tail of the document. */
+function $deleteTrailingQuery(length: number): void {
+    let remaining = length;
     const textNodes = $getRoot().getAllTextNodes();
     for (let i = textNodes.length - 1; i >= 0 && remaining > 0; i--) {
         const node = textNodes[i];
@@ -314,10 +314,11 @@ export type LexicalEditorInputHandle = {
     focus: () => void;
     clear: () => void;
     setText: (text: string, caretOffset?: number) => void;
-    /** Delete the last character of the editor content in place (no full
-     *  rebuild), leaving the caret at the end. Used to strip the `@` that opens
-     *  the attachment menu without flattening colored command nodes. */
-    deleteTrailingCharacter: () => void;
+    /** Delete the last `length` characters of the editor content in place (no
+     *  full rebuild), leaving the caret at the end. Used to take back the
+     *  `@query` the Add Sources menu consumed as its search box, without
+     *  flattening colored command nodes. */
+    deleteTrailingQuery: (length: number) => void;
     selectRange: (start: number, end: number, options?: { skipFocus?: boolean }) => void;
     getSelectionOffset: () => number | null;
     /** Insert a styled command pill followed by a space, caret left at the
@@ -415,6 +416,11 @@ export interface LexicalEditorInputProps {
      * paste as plain text only.
      */
     pasteHandlers?: ComposerPasteHandlers;
+    /**
+     * Ghost text shown after the content on the last line, for a menu that
+     * reads what the user types but renders no input of its own.
+     */
+    inlineHint?: string | null;
 }
 
 // Exposes a textarea-like focus()/clear() API to the parent via ref so the
@@ -487,22 +493,14 @@ const EditorApi = forwardRef<LexicalEditorInputHandle, {
                 setText: (text, caretOffset = text.length) => {
                     setPlainText(text, caretOffset);
                 },
-                deleteTrailingCharacter: () => {
+                deleteTrailingQuery: (length) => {
+                    if (length <= 0) return;
                     selectionRepairGenerationRef.current++;
                     pinnedEndCaretRef.current = false;
                     blurSelectionRef.current = null;
                     editor.update(() => {
-                        const root = $getRoot();
-                        const textNodes = root.getAllTextNodes();
-                        const last = textNodes[textNodes.length - 1];
-                        if (!last) return;
-                        const text = last.getTextContent();
-                        if (text.length <= 1) {
-                            last.remove();
-                        } else {
-                            last.setTextContent(text.slice(0, -1));
-                        }
-                        root.selectEnd();
+                        $deleteTrailingQuery(length);
+                        $getRoot().selectEnd();
                     });
                 },
                 selectRange: (start, end, options) => {
@@ -527,7 +525,7 @@ const EditorApi = forwardRef<LexicalEditorInputHandle, {
                     editor.update(() => {
                         const root = $getRoot();
                         if (queryLength !== null) {
-                            $deleteTrailingSlashQuery(queryLength);
+                            $deleteTrailingQuery(queryLength + 1); // +1 for the leading '/'
                         }
 
                         // Resolve token collisions against pills already in the
@@ -851,18 +849,44 @@ const SlashCommandRevertPlugin: React.FC<{ ime: ImeCompositionTracker }> = ({ im
     return null;
 };
 
-/**
- * Renders an action's argument hint as greyed-out ghost text after a freshly
- * inserted /command pill ("/summarize-paper |hint…", caret before the hint),
- * mimicking placeholder text for the argument slot.
+/** Where the last line's content ends, for anchoring ghost text after it.
  *
- * The hint shows while a pill carrying an argumentHint is the last
- * non-whitespace content of the editor's last line, and disappears as soon as
- * the user types an argument (or breaks to a new line). It is rendered as a
- * positioned pseudo-element on the pill's paragraph, so long hints can be
- * truncated without changing the editor height.
+ *  Measures the paragraph's contents rather than a caret: a *collapsed* range
+ *  reports no client rects at all in Gecko, which would silently take the
+ *  fallback below and stack the hint on top of the text. A spanning range
+ *  yields one rect per line box, so the last one ends where the text does.
+ *  Only a genuinely empty line has none, and its content starts at the
+ *  paragraph's leading edge. */
+function contentEndAnchor(paragraph: HTMLElement): { right: number; top: number } {
+    const range = paragraph.ownerDocument.createRange();
+    range.selectNodeContents(paragraph);
+    const rects = range.getClientRects();
+    const rect = rects?.[rects.length - 1];
+    if (rect) return { right: rect.right, top: rect.top };
+    const fallback = paragraph.getBoundingClientRect();
+    return { right: fallback.left, top: fallback.top };
+}
+
+/**
+ * Renders greyed-out ghost text on the editor's last line, mimicking
+ * placeholder text for whatever the composer is waiting to be typed.
+ *
+ * It serves two callers, because an element has only one `::after` and two
+ * competing hints would fight over it:
+ *
+ * - An action's argument hint, after a freshly inserted /command pill
+ *   ("/summarize-paper |hint…", caret before the hint). Shows while a pill
+ *   carrying an argumentHint is the last non-whitespace content of the last
+ *   line, and disappears as soon as the user types an argument.
+ * - `overrideHint`, anchored at the end of the content instead of to a pill.
+ *   The Add Sources menu uses it to say that typing searches, which nothing
+ *   else conveys now that the menu has no search field of its own. It takes
+ *   precedence: a menu is open, and that is the more urgent thing to explain.
+ *
+ * Either way it is a positioned pseudo-element on the paragraph, so a long
+ * hint is truncated rather than resizing the composer.
  */
-const ArgumentHintPlugin: React.FC = () => {
+const ArgumentHintPlugin: React.FC<{ overrideHint?: string | null }> = ({ overrideHint = null }) => {
     const [editor] = useLexicalComposerContext();
     useEffect(() => {
         let decoratedEl: HTMLElement | null = null;
@@ -879,6 +903,14 @@ const ArgumentHintPlugin: React.FC = () => {
             editor.getEditorState().read(() => {
                 const last = $getRoot().getLastChild();
                 if (!$isElementNode(last)) return;
+                if (overrideHint) {
+                    // An empty composer already shows its placeholder in this
+                    // spot; a second ghost string would sit on top of it.
+                    if ($getRoot().getTextContent().length === 0) return;
+                    hint = overrideHint;
+                    paragraphKey = last.getKey();
+                    return;
+                }
                 const children = last.getChildren();
                 for (let i = children.length - 1; i >= 0; i--) {
                     const node = children[i];
@@ -894,22 +926,28 @@ const ArgumentHintPlugin: React.FC = () => {
                 }
             });
             const el = hint && paragraphKey ? editor.getElementByKey(paragraphKey) : null;
-            const pillEl = hint && pillKey ? editor.getElementByKey(pillKey) : null;
+            const pillEl = pillKey ? editor.getElementByKey(pillKey) : null;
+            // A pill hint hangs off the pill; an override hangs off the end of
+            // the line. A pill hint with no pill element yet renders nothing.
+            const anchor = el && hint
+                ? (pillKey
+                    ? (pillEl ? { right: pillEl.getBoundingClientRect().right, top: pillEl.getBoundingClientRect().top } : null)
+                    : contentEndAnchor(el))
+                : null;
             if (decoratedEl && decoratedEl !== el) {
                 clearDecoration(decoratedEl);
             }
-            if (el && pillEl && hint) {
+            if (el && hint && anchor) {
                 const paragraphRect = el.getBoundingClientRect();
-                const pillRect = pillEl.getBoundingClientRect();
-                const left = Math.max(0, pillRect.right - paragraphRect.left + 4);
-                const top = Math.max(0, pillRect.top - paragraphRect.top);
+                const left = Math.max(0, anchor.right - paragraphRect.left + 4);
+                const top = Math.max(0, anchor.top - paragraphRect.top);
                 el.style.setProperty('--beaver-argument-hint-left', `${left}px`);
                 el.style.setProperty('--beaver-argument-hint-top', `${top}px`);
                 el.setAttribute('data-argument-hint', hint);
             } else if (el) {
                 clearDecoration(el);
             }
-            decoratedEl = el && pillEl && hint ? el : null;
+            decoratedEl = el && hint && anchor ? el : null;
         };
         const unregister = editor.registerUpdateListener(apply);
         apply();
@@ -918,7 +956,7 @@ const ArgumentHintPlugin: React.FC = () => {
             clearDecoration(decoratedEl);
             decoratedEl = null;
         };
-    }, [editor]);
+    }, [editor, overrideHint]);
     return null;
 };
 
@@ -1847,7 +1885,7 @@ const BlurSelectionSnapshotPlugin: React.FC<{
  * end of the content is corrected back to the end. The pin is released on the
  * first real user interaction (keydown in the editor, pointerdown anywhere,
  * IME composition) and whenever the caret is placed explicitly through the
- * imperative handle (setText / selectRange / clear / deleteTrailingCharacter).
+ * imperative handle (setText / selectRange / clear / deleteTrailingQuery).
  */
 const PinnedEndCaretPlugin: React.FC<{
     pinnedRef: React.MutableRefObject<boolean>;
@@ -2018,7 +2056,7 @@ const editorConfig = {
 
 export const LexicalEditorInput = forwardRef<LexicalEditorInputHandle, LexicalEditorInputProps>(
     function LexicalEditorInput(
-        { value, onChange, pills, onPillsChange, onSubmit, placeholder, ariaLabel, disabled = false, onKeyDown, suspendKeyboardNavigation = false, onContentEditableRef, pasteHandlers },
+        { value, onChange, pills, onPillsChange, onSubmit, placeholder, ariaLabel, disabled = false, onKeyDown, suspendKeyboardNavigation = false, onContentEditableRef, pasteHandlers, inlineHint = null },
         ref,
     ) {
         const contentEditableRef = useRef<HTMLDivElement | null>(null);
@@ -2124,7 +2162,7 @@ export const LexicalEditorInput = forwardRef<LexicalEditorInputHandle, LexicalEd
                     <PlainTextSync value={value} onChange={onChange} pills={pills} onPillsChange={onPillsChange} blurSelectionRef={blurSelectionRef} ime={ime} pendingTextRef={pendingTextRef} />
                     <SlashCommandRevertPlugin ime={ime} />
                     <TypeOverSelectionPlugin ime={ime} />
-                    <ArgumentHintPlugin />
+                    <ArgumentHintPlugin overrideHint={inlineHint} />
                     <PlaceholderVisibilityPlugin />
                     <CaretNavigationPlugin suspendedRef={suspendNavRef} pendingDomSelectionRef={pendingDomSelectionRef} ime={ime} />
                     <SelectionGuardPlugin pendingDomSelectionRef={pendingDomSelectionRef} ime={ime} />
