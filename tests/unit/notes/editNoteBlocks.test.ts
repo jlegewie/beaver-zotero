@@ -69,10 +69,6 @@ vi.mock('../../../src/utils/noteCitationExpand', () => ({
         callLog.push('async:preloadPageLabelsForNewCitations');
         return {};
     }),
-    preloadNotePageLabels: vi.fn(async () => {
-        callLog.push('async:preloadNotePageLabels');
-        return {};
-    }),
     preloadStructuralLocatorPages: vi.fn(async () => {
         callLog.push('async:preloadStructuralLocatorPages');
         return { pages: {}, unresolved: [] };
@@ -971,8 +967,6 @@ describe('executeEditNoteBlocksAction', () => {
         expect(authoritativeAt).toBeGreaterThan(-1);
 
         // 1. Every pre-write preload happened BEFORE the authoritative read.
-        //    (One more preload runs AFTER the save, to re-simplify for the post
-        //    snapshot; it is outside the critical section by construction.)
         const preloadsBeforeWrite = callLog
             .slice(0, setNoteAt)
             .map((entry, i) => ({ entry, i }))

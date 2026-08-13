@@ -29,7 +29,6 @@ import {
 import {
     expandToRawHtml,
     preloadPageLabelsForNewCitations,
-    preloadNotePageLabels,
     preloadStructuralLocatorPages,
     buildUnresolvedLocatorWarning,
     type ExternalRefContext,
@@ -480,8 +479,7 @@ async function validateEditNoteBatchAction(
 
     // Simplify ONCE.
     const noteId = `${resolvedLibraryId}-${zotero_key}`;
-    const pageLabelsByItemId = await preloadNotePageLabels(rawHtml, resolvedLibraryId, { extractOnCacheMiss: true });
-    const { simplified, metadata } = getOrSimplify(noteId, rawHtml, resolvedLibraryId, pageLabelsByItemId);
+    const { simplified, metadata } = getOrSimplify(noteId, rawHtml, resolvedLibraryId);
 
     const externalRefContext = getExternalRefContext();
     const labels = await preloadBatchLabels(edits);
@@ -669,14 +667,10 @@ async function executeEditNoteBatchAction(
     // Preload page labels for ALL edits before the final note snapshot.
     const labels = await preloadBatchLabels(edits);
 
-    const preSeedHtml = item.getNote();
-    await preloadNotePageLabels(preSeedHtml, resolvedLibraryId, { extractOnCacheMiss: true });
-
     // Snapshot the note. Avoid async between here and item.setNote() to keep atomicity.
     const oldHtml: string = item.getNote();
     const noteId = `${resolvedLibraryId}-${zotero_key}`;
-    const pageLabelsByItemId = await preloadNotePageLabels(oldHtml, resolvedLibraryId);
-    const { simplified, metadata } = getOrSimplify(noteId, oldHtml, resolvedLibraryId, pageLabelsByItemId);
+    const { simplified, metadata } = getOrSimplify(noteId, oldHtml, resolvedLibraryId);
     const externalRefContext = getExternalRefContext();
 
     const normalizedOldHtml = normalizeNoteHtml(oldHtml);

@@ -39,7 +39,6 @@ import type { EditNoteBatchUndoRecord } from '@beaver/agent-core/types/agentActi
 import { logger } from '@beaver/agent-core/platform/logger';
 import { libraryRefForLibraryID, resolveItemReference } from '../../src/utils/libraryIdentity';
 import { getOrSimplify, invalidateSimplificationCache } from '../../src/utils/noteHtmlSimplifier';
-import { preloadNotePageLabels } from '../../src/utils/noteCitationExpand';
 import {
     getLatestNoteHtml,
     waitForNoteSaveStabilization,
@@ -156,17 +155,16 @@ export async function executeEditNoteBlocksAction(
         }
     }
 
-    // 3. PROVISIONAL read + every async preload. Block addressing verifies a
-    //    digest of the note, so nothing may be awaited between the read the
-    //    digest is taken over and the write — see the critical-section rule.
-    const provisionalHtml: string = item.getNote();
-    const pageLabelsByItemId = await preloadNotePageLabels(provisionalHtml, library_id, { extractOnCacheMiss: true });
+    // 3. Every async preload, all of it derived from the edits. Block addressing
+    //    verifies a digest of the note, so nothing may be awaited between the
+    //    read the digest is taken over and the write — see the critical-section
+    //    rule on the agent-side executor.
     const labels = await preloadBlockLabels(edits);
     const externalRefContext = getExternalRefContext();
     const citationRejections = await resolveCitationRejections(editContents(edits), externalRefContext);
     const threadId = store.get(currentThreadIdAtom);
 
-    // 4. AUTHORITATIVE re-read.
+    // 4. AUTHORITATIVE read.
     const oldHtml: string = item.getNote();
 
     // 5. NO AWAITS until after setNote(): one synchronous call by construction.
@@ -177,7 +175,6 @@ export async function executeEditNoteBlocksAction(
         edits,
         snapshot,
         destructiveRewrite: destructive_rewrite,
-        pageLabelsByItemId,
         labels,
         externalRefContext,
         citationRejections,
@@ -216,8 +213,7 @@ export async function executeEditNoteBlocksAction(
 
     // 8. Re-simplify for the post-edit numbering (the advisory `blocks` ranges
     //    and `address_post_snapshot`).
-    const postPageLabels = await preloadNotePageLabels(finalRawHtml, library_id, { extractOnCacheMiss: true });
-    const { simplified: postSimplified } = getOrSimplify(noteId, finalRawHtml, library_id, postPageLabels);
+    const { simplified: postSimplified } = getOrSimplify(noteId, finalRawHtml, library_id);
     const postState = buildInlineNoteState(noteId, postSimplified);
 
     const appliedBlocks = plan.resolveAppliedBlocks(postState.total_lines);
@@ -328,27 +324,20 @@ function toBatchUndoRecord(record: EditNoteBlocksUndoRecord): EditNoteBatchUndoR
  *
  * Everything else mirrors the apply path's step 8 exactly — same `getLatestNoteHtml`,
  * same `getOrSimplify`, same portable `noteId` — because a recompute that differs
- * from the one that minted the token reports drift on a note nobody touched. The
- * one deliberate divergence is that page labels are read from cache only: an
- * extraction is not worth running to produce a log line.
+ * from the one that minted the token reports drift on a note nobody touched.
  */
-async function logAddressSnapshotDrift(
+function logAddressSnapshotDrift(
     item: Zotero.Item,
     noteId: string,
     libraryId: number,
     expectedPostSnapshot: string | undefined,
-): Promise<void> {
+): void {
     // Absent on actions applied before the field existed, and on any result the
     // backend relayed without it. Nothing to compare against.
     if (!expectedPostSnapshot) return;
     try {
-        const preloadHtml = getLatestNoteHtml(item);
-        const pageLabels = await preloadNotePageLabels(preloadHtml, libraryId);
-        // Page-label preloading yields, so the note may have changed while it
-        // was in flight. Hash a fresh read so this diagnostic describes the
-        // same current note state that undo will subsequently relocate against.
         const currentHtml = getLatestNoteHtml(item);
-        const { simplified } = getOrSimplify(noteId, currentHtml, libraryId, pageLabels);
+        const { simplified } = getOrSimplify(noteId, currentHtml, libraryId);
         const status = checkAddressSnapshot(expectedPostSnapshot, noteId, simplified);
         if (status === 'match') return;
         // Not comparable at all — an older token format, or a corrupted one.
@@ -426,10 +415,10 @@ export async function undoEditNoteBlocksAction(action: AgentAction): Promise<voi
     // the portable `g<groupID>-KEY` entry the rest of the blocks path writes.
     const noteId = snapshotNoteId(library_id, item.key);
 
-    // Audit the recorded post-edit token. Runs BEFORE the read the undo is
-    // computed from, so its await does not open a window between that read and
-    // the write.
-    await logAddressSnapshotDrift(item, noteId, library_id, resultData?.address_post_snapshot);
+    // Audit the recorded post-edit token. Synchronous by construction, so it
+    // cannot open a window between the read the undo is computed from and the
+    // write that follows it.
+    logAddressSnapshotDrift(item, noteId, library_id, resultData?.address_post_snapshot);
 
     const currentHtml = getLatestNoteHtml(item);
     const existingCitationCache = extractDataCitationItems(currentHtml);

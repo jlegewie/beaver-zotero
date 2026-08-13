@@ -21,7 +21,6 @@ import {
 import {
     expandToRawHtml,
     preloadPageLabelsForNewCitations,
-    preloadNotePageLabels,
     preloadStructuralLocatorPages,
     buildUnresolvedLocatorWarning,
     type ExternalRefContext,
@@ -456,8 +455,7 @@ async function validateEditNoteAction(
 
     // 8. Simplify note (needed for both modes)
     const noteId = `${resolvedLibraryId}-${zotero_key}`;
-    const pageLabelsByItemId = await preloadNotePageLabels(rawHtml, resolvedLibraryId, { extractOnCacheMiss: true });
-    const { simplified, metadata } = getOrSimplify(noteId, rawHtml, resolvedLibraryId, pageLabelsByItemId);
+    const { simplified, metadata } = getOrSimplify(noteId, rawHtml, resolvedLibraryId);
 
     // Snapshot external-reference state once so every expandToRawHtml('new', ...)
     // below can resolve `<citation external_id="..."/>` consistently.
@@ -855,19 +853,13 @@ async function executeEditNoteAction(
     const resolvedLocatorPages = structuralLocators.pages;
     const locatorWarning = buildUnresolvedLocatorWarning(structuralLocators.unresolved);
 
-    // 4. Pre-seed page labels before the final note snapshot. The final
-    //    cache-only preload below keeps extraction out of the read/write window.
-    const preSeedHtml = item.getNote();
-    await preloadNotePageLabels(preSeedHtml, resolvedLibraryId, { extractOnCacheMiss: true });
-
-    // 5. Get current note HTML (kept for rollback on save failure)
+    // 4. Get current note HTML (kept for rollback on save failure)
     //    Avoid async operations between here and item.setNote() to preserve atomicity.
     const oldHtml: string = item.getNote();
 
-    // 6. Get metadata from cache or re-simplify
+    // 5. Get metadata from cache or re-simplify
     const noteId = `${resolvedLibraryId}-${zotero_key}`;
-    const pageLabelsByItemId = await preloadNotePageLabels(oldHtml, resolvedLibraryId);
-    const { simplified, metadata } = getOrSimplify(noteId, oldHtml, resolvedLibraryId, pageLabelsByItemId);
+    const { simplified, metadata } = getOrSimplify(noteId, oldHtml, resolvedLibraryId);
 
     // Snapshot external-reference state once so every expandToRawHtml('new', ...)
     // below can resolve `<citation external_id="..."/>` consistently.

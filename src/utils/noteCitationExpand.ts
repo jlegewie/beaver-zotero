@@ -15,7 +15,6 @@
 import { createCitationHTML } from './zoteroUtils';
 import { getBestPDFAttachment, getBestPDFAttachmentAsync } from './zoteroItemHelpers';
 import { getAttachmentFileStatus, checkLibraryExcluded } from '../services/agentDataProvider/utils';
-import { isRemoteFilePath, makeRemoteFilePath } from '../services/documentFileIdentity';
 import { logger } from '@beaver/agent-core/platform/logger';
 import {
     escapeAttr,
@@ -40,12 +39,9 @@ import {
     type CitationRef,
     type Locator,
 } from '@beaver/agent-core/citations/citationGrammar';
-import type { PageLabels } from '../services/documentCache';
 import type { StructuredExtractResult } from '@beaver/agent-core/extract/schema';
 import { translatePageNumberToLabel } from './pageLabelTranslation';
-import { extractItemKeyFromUri } from './zoteroUri';
 import {
-    modelObjectId,
     modelObjectIdFromReference,
     resolveObjectId,
     UNRESOLVED_LIBRARY_ID,
@@ -143,83 +139,6 @@ export async function preloadPageLabelsForNewCitations(str: string): Promise<Pag
     }
 
     return labelsByAttachmentId;
-}
-
-/**
- * Load cached page labels for citations already stored in a raw Zotero note.
- *
- * This path is cache-first. Warm-cache reads only consult `documentCache`
- * metadata; callers can opt into local metadata seeding on a cache miss when
- * agent-facing note simplification needs read/edit views to resolve page
- * locators consistently. Remote-only attachments stay cache-only unless
- * `allowRemoteDownloads` is explicitly enabled.
- * The returned map is keyed by the simplifier's model-facing item id (see
- * `modelObjectId`).
- */
-export async function preloadNotePageLabels(
-    rawHtml: string,
-    libraryID: number,
-    {
-        extractOnCacheMiss = false,
-        allowRemoteDownloads = false,
-    }: { extractOnCacheMiss?: boolean; allowRemoteDownloads?: boolean } = {},
-): Promise<Record<string, PageLabels>> {
-    const labelsByItemId: Record<string, PageLabels> = {};
-    const cache = Zotero.Beaver?.documentCache;
-    if (!cache) return labelsByItemId;
-
-    const seen = new Set<string>();
-    const regex = /data-citation="([^"]*)"/g;
-    let match: RegExpExecArray | null;
-
-    while ((match = regex.exec(rawHtml)) !== null) {
-        try {
-            const citationData = JSON.parse(decodeURIComponent(match[1]));
-            const citationItems = citationData.citationItems || [];
-            for (const ci of citationItems) {
-                const locator = ci?.locator != null ? String(ci.locator) : '';
-                if (!locator || (ci?.label != null && ci.label !== 'page')) continue;
-
-                const uri = ci?.uris?.[0] || '';
-                const itemKey = extractItemKeyFromUri(uri);
-                if (!itemKey) continue;
-                // Keyed with the simplifier's portable item id so lookups in
-                // `simplifyNoteHtml` (which builds the same id via `modelObjectId`)
-                // resolve to the labels seeded here.
-                const itemId = modelObjectId(libraryID, itemKey);
-                if (seen.has(itemId)) continue;
-                seen.add(itemId);
-
-                const item = Zotero.Items.getByLibraryAndKey(libraryID, itemKey);
-                const attachmentItem = item && typeof item !== 'boolean'
-                    ? (item.isAttachment() ? item : await getBestPDFAttachmentAsync(item))
-                    : null;
-                if (!attachmentItem) continue;
-
-                const localFilePath = await attachmentItem.getFilePathAsync();
-                const filePath = localFilePath || makeRemoteFilePath(attachmentItem);
-                const isRemoteOnly = !localFilePath || isRemoteFilePath(filePath);
-                let record = await cache.getMetadata({
-                    libraryId: attachmentItem.libraryID,
-                    zoteroKey: attachmentItem.key,
-                }, filePath);
-                if (!record && extractOnCacheMiss && (!isRemoteOnly || allowRemoteDownloads)) {
-                    await getAttachmentFileStatus(attachmentItem, false);
-                    record = await cache.getMetadata({
-                        libraryId: attachmentItem.libraryID,
-                        zoteroKey: attachmentItem.key,
-                    }, filePath);
-                }
-                if (record?.pageLabels && Object.keys(record.pageLabels).length > 0) {
-                    labelsByItemId[itemId] = { ...record.pageLabels };
-                }
-            }
-        } catch {
-            // Skip malformed citation metadata or attachments that can't load.
-        }
-    }
-
-    return labelsByItemId;
 }
 
 /**

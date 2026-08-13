@@ -35,7 +35,6 @@ import {
 import { findRangeByContexts } from '../../src/utils/editNoteRawPosition';
 import {
     preloadPageLabelsForNewCitations,
-    preloadNotePageLabels,
     preloadStructuralLocatorPages,
     buildUnresolvedLocatorWarning,
     expandToRawHtml,
@@ -632,8 +631,7 @@ export async function executeEditNoteAction(
 
     // 4. Get metadata from cache or re-simplify
     const noteId = `${library_id}-${zotero_key}`;
-    const pageLabelsByItemId = await preloadNotePageLabels(oldHtml, library_id);
-    const { simplified, metadata } = getOrSimplify(noteId, oldHtml, library_id, pageLabelsByItemId);
+    const { simplified, metadata } = getOrSimplify(noteId, oldHtml, library_id);
 
     // 5. Pre-load page labels so new citations resolve page indices to labels.
     //    The resolved map is threaded explicitly into every expandToRawHtml
@@ -1097,8 +1095,7 @@ export async function undoEditNoteAction(
     let expandedNew = storedUndoNewHtml;
 
     if (expandedOld === undefined || (!isDeletion && expandedNew === undefined)) {
-        const pageLabelsByItemId = await preloadNotePageLabels(currentHtml, library_id);
-        const { metadata } = getOrSimplify(noteId, currentHtml, library_id, pageLabelsByItemId);
+        const { metadata } = getOrSimplify(noteId, currentHtml, library_id);
         const externalRefContext = getExternalRefContext();
         // Resolve page labels for new_string citations so the fallback
         // expansion translates 1-based page numbers the same way the
@@ -1451,8 +1448,7 @@ export async function executeEditNoteBatchAction(
     // 3. Snapshot the note once. Every edit resolves against this snapshot.
     const oldHtml: string = item.getNote();
     const noteId = `${library_id}-${zotero_key}`;
-    const pageLabelsByItemId = await preloadNotePageLabels(oldHtml, library_id);
-    const { simplified, metadata } = getOrSimplify(noteId, oldHtml, library_id, pageLabelsByItemId);
+    const { simplified, metadata } = getOrSimplify(noteId, oldHtml, library_id);
     const externalRefContext = getExternalRefContext();
 
     const existingCitationCache = extractDataCitationItems(oldHtml);

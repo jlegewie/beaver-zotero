@@ -62,7 +62,6 @@ vi.mock('../../../src/utils/noteCitationExpand', () => ({
     normalizePageLocator: vi.fn((s: string) => s),
     translatePageNumberToLabel: vi.fn((s: string) => s),
     preloadPageLabelsForNewCitations: vi.fn(async () => ({})),
-    preloadNotePageLabels: vi.fn(async () => ({})),
     preloadStructuralLocatorPages: vi.fn(async () => ({ pages: {}, unresolved: [] })),
     buildUnresolvedLocatorWarning: vi.fn(() => null),
 }));
@@ -173,7 +172,7 @@ import {
 import { deriveEditNoteRows, getEditNoteCallVariant } from '../../../react/components/agentRuns/editNoteShared';
 import { buildAddressSnapshot, snapshotNoteId } from '../../../src/utils/noteSnapshot';
 import { logger } from '@beaver/agent-core/platform/logger';
-import { preloadNotePageLabels } from '../../../src/utils/noteCitationExpand';
+import { getLatestNoteHtml } from '../../../src/utils/noteEditorIO';
 import { invalidateSimplificationCache } from '../../../src/utils/noteHtmlSimplifier';
 import { stripBeaverEditFooter } from '../../../src/utils/noteEditFooter';
 import { checkLibraryExcluded } from '../../../src/services/agentDataProvider/utils';
@@ -672,23 +671,6 @@ describe('undoEditNoteBlocksAction', () => {
         expect(noteHtml).toContain('<p>User added this.</p>');
     });
 
-    it('reports drift that occurs while page labels are preloading', async () => {
-        const result = await executeEditNoteBlocksAction(blocksAction([replaceBlock2]));
-
-        vi.mocked(preloadNotePageLabels).mockImplementationOnce(async () => {
-            noteHtml = noteHtml.replace(/<\/div>\s*$/, '<p>User added this during preload.</p></div>');
-            return {};
-        });
-        vi.mocked(logger).mockClear();
-
-        await undoEditNoteBlocksAction(appliedBlocksAction(result, [replaceBlock2]));
-
-        expect(driftLogged()).toBe(true);
-        expect(noteHtml).toContain(LINE_2);
-        expect(noteHtml).not.toContain('Bravo REWRITTEN two.');
-        expect(noteHtml).toContain('<p>User added this during preload.</p>');
-    });
-
     // The complement of the case above, and the reason the recompute mirrors the
     // apply path step for step: a diagnostic that fires on an untouched note is
     // worse than none.
@@ -769,7 +751,11 @@ describe('undoEditNoteBlocksAction', () => {
     // next test (`clearAllMocks` does not drain a `…Once` queue).
     it('undoes even when the drift check itself throws', async () => {
         const result = await executeEditNoteBlocksAction(blocksAction([replaceBlock2]));
-        vi.mocked(preloadNotePageLabels).mockRejectedValueOnce(new Error('page label lookup failed'));
+        // The drift check reads the note first, so a throwing read is the
+        // narrowest way to fail it without touching the undo's own read.
+        vi.mocked(getLatestNoteHtml).mockImplementationOnce(() => {
+            throw new Error('note read failed');
+        });
         vi.mocked(logger).mockClear();
 
         await undoEditNoteBlocksAction(appliedBlocksAction(result, [replaceBlock2]));
@@ -777,7 +763,7 @@ describe('undoEditNoteBlocksAction', () => {
         expect(vi.mocked(logger).mock.calls.some(
             ([message]) => typeof message === 'string'
                 && message.includes('could not check address_post_snapshot')
-                && message.includes('page label lookup failed'),
+                && message.includes('note read failed'),
         )).toBe(true);
         expect(stripBeaverEditFooter(noteHtml)).toBe(NOTE_HTML);
     });

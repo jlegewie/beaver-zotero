@@ -62,7 +62,6 @@ import {
     translatePageNumberToLabel,
     buildUnresolvedLocatorWarning,
 } from '../../../src/utils/noteCitationExpand';
-import { translatePageLabelToNumber } from '../../../src/utils/pageLabelTranslation';
 import {
     isNoteInEditor,
     getLatestNoteHtml,
@@ -434,11 +433,9 @@ describe('simplifyNoteHtml', () => {
         expect(simplified).toContain('loc="page42"');
     });
 
-    it('projects the stored page locator verbatim, ignoring cached page labels', () => {
+    it('projects the stored page locator verbatim', () => {
         const html = wrap(`<p>${rawCitation('ROMANPG1', 1, 'xiv')}</p>`);
-        const { simplified, metadata } = simplifyNoteHtml(html, 1, {
-            'u-ROMANPG1': { 13: 'xiv' },
-        });
+        const { simplified, metadata } = simplifyNoteHtml(html, 1);
 
         expect(simplified).toContain('loc="pagexiv"');
         // No Beaver token, so the projected locator is the printed label the
@@ -448,20 +445,6 @@ describe('simplifyNoteHtml', () => {
             loc: 'pagexiv',
             locSpace: 'note',
         });
-    });
-
-    it('projects the same locator whether or not page labels are seeded', () => {
-        const noteId = 'test-note-page-label-seed';
-        const html = wrap(`<p>${rawCitation('LABELPG1', 1, '341')}</p>`);
-        invalidateSimplificationCache(noteId);
-
-        const cold = getOrSimplify(noteId, html, 1);
-        const seeded = getOrSimplify(noteId, html, 1, {
-            'u-LABELPG1': { 0: '341' },
-        });
-
-        expect(cold.simplified).toContain('loc="page341"');
-        expect(seeded.simplified).toContain('loc="page341"');
     });
 
     it('projects the citation\'s own Beaver locator token verbatim', () => {
@@ -1640,25 +1623,6 @@ describe('getOrSimplify', () => {
         getOrSimplify('test-note', html, 1);
         const result2 = getOrSimplify('test-note', html, 1);
         expect(result2.isStale).toBe(false);
-    });
-
-    it('returns the same locator with or without page labels, in either order', () => {
-        // Page labels take no part in the projection, so neither supplying a
-        // label map nor the order of the reads changes what a note reads as.
-        const html = wrap(rawCitation('ABC12345', 1, 'xiv'));
-        const labels = { 'u-ABC12345': { 13: 'xiv' } };
-
-        expect(getOrSimplify('label-cache-note', html, 1, labels).simplified)
-            .toContain('loc="pagexiv"');
-        expect(getOrSimplify('label-cache-note', html, 1).simplified)
-            .toContain('loc="pagexiv"');
-        expect(getOrSimplify('label-cache-note', html, 1, labels).simplified)
-            .toContain('loc="pagexiv"');
-
-        expect(getOrSimplify('label-cache-note-reverse', html, 1).simplified)
-            .toContain('loc="pagexiv"');
-        expect(getOrSimplify('label-cache-note-reverse', html, 1, labels).simplified)
-            .toContain('loc="pagexiv"');
     });
 
     it('cache stale: re-simplifies when content changes, isStale: true', () => {
@@ -3547,39 +3511,6 @@ describe('translatePageNumberToLabel', () => {
         const labels = pageLabelsFromList(Array.from({ length: 28 }, (_, i) => String(338 + i)));
         // "3, 5" → "340, 342"
         expect(translatePageNumberToLabel(labels, '3, 5')).toBe('340, 342');
-    });
-});
-
-describe('translatePageLabelToNumber', () => {
-    function pageLabelsFromList(labels: readonly string[]): Record<string, string> {
-        return Object.fromEntries(labels.map((label, index) => [String(index), label]));
-    }
-
-    it('returns as-is when labels are null or empty', () => {
-        expect(translatePageLabelToNumber(null, 'xiv')).toBe('xiv');
-        expect(translatePageLabelToNumber({}, 'xiv')).toBe('xiv');
-    });
-
-    it('translates a whole page label to a 1-based page number', () => {
-        const labels = pageLabelsFromList(['i', 'ii', 'iii', 'xiv']);
-        expect(translatePageLabelToNumber(labels, 'xiv')).toBe('4');
-    });
-
-    it('translates ranges and comma-separated lists token by token', () => {
-        const labels = pageLabelsFromList(['xiii', 'xiv', 'xv', 'xvi', 'S5']);
-        expect(translatePageLabelToNumber(labels, 'xiv-xvi, S5')).toBe('2-4, 5');
-    });
-
-    it('leaves unknown labels and free-text locators unchanged', () => {
-        const labels = pageLabelsFromList(['i', 'ii', 'iii']);
-        expect(translatePageLabelToNumber(labels, '§3.2')).toBe('§3.2');
-        expect(translatePageLabelToNumber(labels, 'xiv')).toBe('xiv');
-        expect(translatePageLabelToNumber(labels, 'ii-xiv')).toBe('ii-xiv');
-    });
-
-    it('uses the first physical page for duplicate labels', () => {
-        const labels = pageLabelsFromList(['1', '2', '2', '3']);
-        expect(translatePageLabelToNumber(labels, '2')).toBe('2');
     });
 });
 

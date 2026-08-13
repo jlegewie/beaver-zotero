@@ -1,31 +1,22 @@
 /**
- * Live tests for note citation page-label ↔ physical-page translation
- * (v0.20 → fix-note-page-labels diff).
+ * Live tests for the note-citation locator a `read_note` shows the agent.
  *
- * The branch makes Beaver show the agent *physical* page numbers for citation
- * locators (read path) and store the document's Zotero page *label* back when a
- * locator changes (write path). Agent-facing reads seed page labels on a
- * cache miss via `preloadNotePageLabels`, then simplify against the cache.
+ * A citation's agent-visible locator is a STORED value: the simplifier projects
+ * the token the citation itself carries and never consults the page-label cache.
+ * That makes the projection a pure function of the note, so two reads of an
+ * unchanged note agree, and a tag copied out of `read_note` matches verbatim in
+ * an `edit_note`.
  *
  * Covers:
- *   1. read_note simplifier translates a stored page-label locator to its
- *      1-based physical page number when the cited attachment has cached page
- *      labels (cited by attachment key and via the regular parent item).
- *   2. Numeric-looking labels are reverse-mapped to their physical page (the
- *      core bug: label "5" must resolve to its physical page, not be treated
- *      as a 1-based index).
- *   3. Locators with no matching label pass through unchanged.
- *   4. The simplification cache is keyed by a page-labels fingerprint, so the
- *      same note re-simplifies (does not serve a stale result) after the cached
- *      labels change.
- *   5. edit_note write path: changing an existing citation's physical page
- *      stores the corresponding Zotero page label in the saved note.
- *   6. Cold-cache read_note → edit_note matching succeeds after read_note
- *      seeds page labels on first touch.
- *   7. Regression guard: agent-facing read_note extracts and seeds
- *      `documentCache` on a cold miss when a citation has a page locator (so
- *      read/edit converge), and the guard skips extraction for citations with
- *      no page locator or a non-"page" locator label.
+ *   1. `read_note` projects the stored locator verbatim — cached page labels for
+ *      the cited PDF change nothing, whether the citation names the attachment
+ *      or its regular parent item.
+ *   2. `read_note` never extracts. A cited PDF with no cached extraction stays
+ *      uncached after the read.
+ *   3. A tag copied from a cold-cache `read_note` matches in `edit_note`.
+ *   4. Write path: a citation carrying no Beaver locator key stores an edited
+ *      locator exactly as the agent sent it (its locator is already a printed
+ *      label, so nothing is translated into it).
  *
  * Seeding: page labels are placed in `documentCache` via the dev-only
  * `/beaver/test/cache-seed-page-labels` endpoint, which wraps the real
@@ -103,8 +94,8 @@ async function seedNote(html: string): Promise<{ library_id: number; zotero_key:
  * Build a native Zotero `<span class="citation" data-citation="...">` span.
  *
  * `cslLabel` sets the citation item's CSL locator `label` field (e.g. "page",
- * "chapter"). Page-label translation/seeding only applies to page locators, so
- * a non-"page" label must be ignored by `preloadNotePageLabels`.
+ * "chapter"). The span carries no Beaver locator key, which is what a citation
+ * written by hand or by another client looks like.
  */
 function rawCitation(opts: { key: string; locator?: string; label?: string; cslLabel?: string }): string {
     const citationItem: Record<string, unknown> = {
@@ -119,15 +110,16 @@ function rawCitation(opts: { key: string; locator?: string; label?: string; cslL
 }
 
 // ===========================================================================
-// read_note — page-label → physical-page translation
+// read_note — the stored locator is projected verbatim
 // ===========================================================================
 
-describe('/beaver/note/read — page-label translation', () => {
+describe('/beaver/note/read — stored locators project verbatim', () => {
     beforeEach((ctx) => skipIfNoZotero(ctx, zoteroAvailable));
 
-    it('translates a stored page-label locator to its physical page number', async () => {
-        // The 2-page PDF labels its pages "iii" / "iv" (front matter). The
-        // citation stores the label "iv"; the agent should see physical page 2.
+    it('shows the stored label even when the cited PDF has cached page labels', async () => {
+        // The 2-page PDF labels its pages "iii" / "iv". The citation stores the
+        // label "iv"; the agent must see that label, not the physical page it
+        // sits on.
         const seed = await seedPageLabels(SMALL_PDF.library_id, SMALL_PDF.zotero_key, { 0: 'iii', 1: 'iv' });
         expect(seed.seeded, JSON.stringify(seed)).toBe(true);
 
@@ -136,15 +128,14 @@ describe('/beaver/note/read — page-label translation', () => {
 
         const content = await readSimplified(`${ref.library_id}-${ref.zotero_key}`);
         expect(content).toContain(`id="${LIBRARY_PREFIX}-${SMALL_PDF.zotero_key}"`);
-        // Stored label "iv" → physical page 2.
-        expect(content).toContain('loc="page2"');
-        // The raw label must not leak through untranslated.
-        expect(content).not.toContain('loc="pageiv"');
+        expect(content).toContain('loc="pageiv"');
+        expect(content).not.toContain('loc="page2"');
     });
 
-    it('translates when the citation targets the regular parent item (resolved via its child PDF)', async () => {
-        // PARENT_ITEM (1-IYI5SMYM) has the 2-page PDF (1-G7TTJKFH) as its child;
-        // the label lookup resolves the parent to that attachment.
+    it('shows the stored locator when the citation targets the regular parent item', async () => {
+        // PARENT_ITEM (1-IYI5SMYM) has the 2-page PDF (1-G7TTJKFH) as its child.
+        // Resolving the parent to that attachment would be the only way to reach
+        // the seeded labels, and the projection does not do it.
         const seed = await seedPageLabels(SMALL_PDF.library_id, SMALL_PDF.zotero_key, { 0: 'iii', 1: 'iv' });
         expect(seed.seeded, JSON.stringify(seed)).toBe(true);
 
@@ -153,15 +144,13 @@ describe('/beaver/note/read — page-label translation', () => {
 
         const content = await readSimplified(`${ref.library_id}-${ref.zotero_key}`);
         expect(content).toContain(`id="${LIBRARY_PREFIX}-${PARENT_ITEM.zotero_key}"`);
-        // Stored label "iii" → physical page 1.
-        expect(content).toContain('loc="page1"');
-        expect(content).not.toContain('loc="pageiii"');
+        expect(content).toContain('loc="pageiii"');
+        expect(content).not.toContain('loc="page1"');
     });
 
-    it('reverse-maps a numeric-looking label to its physical page (not a 1-based index)', async () => {
-        // Labels that look like numbers are the bug this branch fixes: label
-        // "5" must map to its physical page (here page 1), never be re-treated
-        // as a 1-based page index.
+    it('leaves a numeric-looking locator alone when a label of the same name exists', async () => {
+        // Label "5" sits on physical page 1. A projection that reverse-mapped
+        // labels would turn the stored "5" into "1"; the stored token wins.
         const seed = await seedPageLabels(SMALL_PDF.library_id, SMALL_PDF.zotero_key, { 0: '5', 1: '6' });
         expect(seed.seeded, JSON.stringify(seed)).toBe(true);
 
@@ -169,16 +158,14 @@ describe('/beaver/note/read — page-label translation', () => {
         const ref = await seedNote(`<p>Cited ${citation}.</p>`);
 
         const content = await readSimplified(`${ref.library_id}-${ref.zotero_key}`);
-        // Label "5" lives on physical page 1.
-        expect(content).toContain('loc="page1"');
-        expect(content).not.toContain('loc="page5"');
+        expect(content).toContain('loc="page5"');
+        expect(content).not.toContain('loc="page1"');
     });
 
-    it('leaves a locator with no matching label unchanged', async () => {
+    it('leaves a locator that matches no label unchanged', async () => {
         const seed = await seedPageLabels(SMALL_PDF.library_id, SMALL_PDF.zotero_key, { 0: 'iii', 1: 'iv' });
         expect(seed.seeded, JSON.stringify(seed)).toBe(true);
 
-        // "99" is not one of the document's labels — it must pass through.
         const citation = rawCitation({ key: SMALL_PDF.zotero_key, locator: '99', label: '(Author, 2024, p. 99)' });
         const ref = await seedNote(`<p>Cited ${citation}.</p>`);
 
@@ -210,24 +197,19 @@ describe('/beaver/note/read — page-label translation', () => {
 });
 
 // ===========================================================================
-// read_note seeds documentCache on a cold cache (extractOnCacheMiss)
+// read_note never extracts
 //
-// Regression guard for the read/edit page-label asymmetry: read_note used to
-// be cache-only, so a cold read showed the raw page *label* while a later
-// edit_note (which extracts) showed the physical page *number*. The verbatim
-// old_string copied from read_note then failed to match (old_string_not_found).
-// The fix makes agent-facing read_note extract on a cache miss, so the cache
-// converges on first touch and every later read/edit simplifies identically.
-//
-// These tests assert the *mechanism* directly (does read_note populate the
-// cache?), which distinguishes fixed from broken regardless of whether the
-// fixture PDF carries embedded page labels.
+// Reading a note must not be able to start a full PDF extraction. The locator a
+// citation projects comes off the citation itself, so there is nothing in the
+// read path that a cached extraction could inform — and a note citing several
+// uncached PDFs would otherwise pay one extraction each, sequentially, on every
+// read, validate and execute.
 // ===========================================================================
 
-describe('/beaver/note/read — seeds documentCache on a cold cache', () => {
+describe('/beaver/note/read — does not extract cited attachments', () => {
     beforeEach((ctx) => skipIfNoZotero(ctx, zoteroAvailable));
 
-    it('extracts and seeds the cited PDF when the citation has a page locator', async () => {
+    it('leaves the cited PDF uncached when the citation has a page locator', async () => {
         await invalidateCache(SMALL_PDF.library_id, SMALL_PDF.zotero_key);
         expect(await getCacheMetadata(SMALL_PDF.library_id, SMALL_PDF.zotero_key)).toBeNull();
 
@@ -236,108 +218,43 @@ describe('/beaver/note/read — seeds documentCache on a cold cache', () => {
 
         await readSimplified(`${ref.library_id}-${ref.zotero_key}`);
 
-        // read_note must have run extraction on the cold miss, leaving a
-        // document-cache record behind. Before the fix this stayed null.
         const record = await getCacheMetadata(SMALL_PDF.library_id, SMALL_PDF.zotero_key);
-        expect(record, 'read_note did not seed documentCache on a cold cache').not.toBeNull();
+        expect(record, 'read_note extracted the cited PDF').toBeNull();
     });
 
-    it('seeds the child PDF when the citation targets the regular parent item', async () => {
+    it('leaves the child PDF uncached when the citation targets the regular parent item', async () => {
         await invalidateCache(SMALL_PDF.library_id, SMALL_PDF.zotero_key);
         expect(await getCacheMetadata(SMALL_PDF.library_id, SMALL_PDF.zotero_key)).toBeNull();
 
-        // PARENT_ITEM resolves to its child PDF (SMALL_PDF) before the lookup;
-        // the extraction-on-miss must seed that child attachment.
         const citation = rawCitation({ key: PARENT_ITEM.zotero_key, locator: '1', label: '(Author, 2024, p. 1)' });
         const ref = await seedNote(`<p>Cited ${citation}.</p>`);
 
         await readSimplified(`${ref.library_id}-${ref.zotero_key}`);
 
         const record = await getCacheMetadata(SMALL_PDF.library_id, SMALL_PDF.zotero_key);
-        expect(record, 'parent-item read_note did not seed the child PDF cache').not.toBeNull();
-    });
-
-    it('does NOT extract for a citation with no page locator', async () => {
-        await invalidateCache(SMALL_PDF.library_id, SMALL_PDF.zotero_key);
-        expect(await getCacheMetadata(SMALL_PDF.library_id, SMALL_PDF.zotero_key)).toBeNull();
-
-        // No locator → nothing to translate → the guard must skip extraction so
-        // citations without page references don't pay an extraction cost.
-        const citation = rawCitation({ key: SMALL_PDF.zotero_key });
-        const ref = await seedNote(`<p>Cited ${citation}.</p>`);
-
-        await readSimplified(`${ref.library_id}-${ref.zotero_key}`);
-
-        const record = await getCacheMetadata(SMALL_PDF.library_id, SMALL_PDF.zotero_key);
-        expect(record, 'read_note extracted for a citation without a page locator').toBeNull();
-    });
-
-    it('does NOT extract for a non-page locator label', async () => {
-        await invalidateCache(SMALL_PDF.library_id, SMALL_PDF.zotero_key);
-        expect(await getCacheMetadata(SMALL_PDF.library_id, SMALL_PDF.zotero_key)).toBeNull();
-
-        // A "chapter" locator is not a page reference; page-label translation
-        // does not apply, so the guard must skip extraction.
-        const citation = rawCitation({ key: SMALL_PDF.zotero_key, locator: '2', cslLabel: 'chapter', label: '(Author, 2024, ch. 2)' });
-        const ref = await seedNote(`<p>Cited ${citation}.</p>`);
-
-        await readSimplified(`${ref.library_id}-${ref.zotero_key}`);
-
-        const record = await getCacheMetadata(SMALL_PDF.library_id, SMALL_PDF.zotero_key);
-        expect(record, 'read_note extracted for a non-page locator label').toBeNull();
+        expect(record, 'read_note extracted the parent item\'s child PDF').toBeNull();
     });
 });
 
 // ===========================================================================
-// Simplification cache is keyed by the page-labels fingerprint
+// edit_note — a note-space locator is stored as sent
 // ===========================================================================
 
-describe('/beaver/note/read — page-labels fingerprint busts the simplification cache', () => {
+describe('edit_note — a citation without a Beaver locator key stores what it is sent', () => {
     beforeEach((ctx) => skipIfNoZotero(ctx, zoteroAvailable));
 
-    it('re-simplifies the same note when the cached page labels change', async () => {
+    it('stores an edited locator verbatim instead of translating it to a page label', async () => {
+        // Seed labels iii/iv, then cite the PDF with the plain locator "2". The
+        // citation carries no Beaver locator key, so its locator is read as a
+        // printed label already: an edit to "1" is stored as "1", NOT resolved
+        // through the seeded labels to the page-1 label "iii".
         const seed = await seedPageLabels(SMALL_PDF.library_id, SMALL_PDF.zotero_key, { 0: 'iii', 1: 'iv' });
         expect(seed.seeded, JSON.stringify(seed)).toBe(true);
 
-        const citation = rawCitation({ key: SMALL_PDF.zotero_key, locator: 'iv', label: '(Author, 2024, p. iv)' });
+        const citation = rawCitation({ key: SMALL_PDF.zotero_key, locator: '2', label: '(Author, 2024, p. 2)' });
         const ref = await seedNote(`<p>Cited ${citation}.</p>`);
         const noteId = `${ref.library_id}-${ref.zotero_key}`;
 
-        // First read (labels present) → translated physical page.
-        const withLabels = await readSimplified(noteId);
-        expect(withLabels).toContain('loc="page2"');
-
-        // Replace the cached labels and read again. If the simplification cache
-        // ignored the page-labels fingerprint, this would wrongly return the
-        // cached "page2"; with the fingerprint it re-simplifies against the
-        // current labels.
-        const changedSeed = await seedPageLabels(SMALL_PDF.library_id, SMALL_PDF.zotero_key, { 0: 'x', 1: 'y' });
-        expect(changedSeed.seeded, JSON.stringify(changedSeed)).toBe(true);
-        const changedLabels = await readSimplified(noteId);
-        expect(changedLabels).toContain('loc="pageiv"');
-        expect(changedLabels).not.toContain('loc="page2"');
-    });
-});
-
-// ===========================================================================
-// edit_note — write path stores the Zotero page label
-// ===========================================================================
-
-describe('edit_note — physical page edit stores the Zotero page label', () => {
-    beforeEach((ctx) => skipIfNoZotero(ctx, zoteroAvailable));
-
-    it('changing an existing citation page stores the matching label in the saved note', async () => {
-        // Seed labels iii/iv. Cite the PDF with the stored label "iv"
-        // (physical page 2). The agent edits the physical page 2 → 1, which
-        // must be stored back as the page-1 label "iii".
-        const seed = await seedPageLabels(SMALL_PDF.library_id, SMALL_PDF.zotero_key, { 0: 'iii', 1: 'iv' });
-        expect(seed.seeded, JSON.stringify(seed)).toBe(true);
-
-        const citation = rawCitation({ key: SMALL_PDF.zotero_key, locator: 'iv', label: '(Author, 2024, p. iv)' });
-        const ref = await seedNote(`<p>Cited ${citation}.</p>`);
-        const noteId = `${ref.library_id}-${ref.zotero_key}`;
-
-        // The agent sees the citation as physical page 2; copy its exact tag.
         const content = await readSimplified(noteId);
         const tagMatch = content.match(new RegExp(`<citation id="${LIBRARY_PREFIX}-${SMALL_PDF.zotero_key}"[^>]*/>`));
         expect(tagMatch, `no citation tag in:\n${content}`).not.toBeNull();
@@ -354,15 +271,14 @@ describe('edit_note — physical page edit stores the Zotero page label', () => 
         }, { timeout: 20000 });
         expect(exec.success, exec.error ?? '').toBe(true);
 
-        // The saved note's native citation must carry the page-1 label "iii".
         const readBack = await post<{ saved_html: string; error?: string }>(
             '/beaver/test/note-read',
             { library_id: ref.library_id, zotero_key: ref.zotero_key },
         );
         expect(readBack.error).toBeFalsy();
         const decoded = decodeURIComponent(readBack.saved_html);
-        expect(decoded).toContain('"locator":"iii"');
-        expect(decoded).not.toContain('"locator":"iv"');
-        expect(decoded).not.toContain('"locator":"1"');
+        expect(decoded).toContain('"locator":"1"');
+        expect(decoded).not.toContain('"locator":"iii"');
+        expect(decoded).not.toContain('"locator":"2"');
     });
 });

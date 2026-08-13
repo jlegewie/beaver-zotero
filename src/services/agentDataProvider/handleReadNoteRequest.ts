@@ -7,7 +7,6 @@
 
 import { logger } from '@beaver/agent-core/platform/logger';
 import { getOrSimplify } from '../../utils/noteHtmlSimplifier';
-import { preloadNotePageLabels } from '../../utils/noteCitationExpand';
 import { getNoteHtmlForRead } from '../../utils/noteEditorIO';
 import { containsPreviewMarkers, stripPreviewMarkers } from '../../utils/notePreviewGuard';
 import { buildAddressSnapshot, snapshotNoteId } from '../../utils/noteSnapshot';
@@ -334,8 +333,7 @@ export async function handleReadNoteRequest(
         // internally, so the cached output is identical either way and every
         // caller can hand over what it already has.
         const cacheNoteId = snapshotNoteId(item.libraryID, item.key);
-        const pageLabelsByItemId = await preloadNotePageLabels(rawHtml, item.libraryID, { extractOnCacheMiss: true });
-        const { simplified } = getOrSimplify(cacheNoteId, rawHtml, item.libraryID, pageLabelsByItemId);
+        const { simplified } = getOrSimplify(cacheNoteId, rawHtml, item.libraryID);
 
         // 7. Apply offset/limit pagination.
         //

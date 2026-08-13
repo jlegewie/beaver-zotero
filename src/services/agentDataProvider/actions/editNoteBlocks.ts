@@ -50,7 +50,6 @@ import {
 import {
     expandToRawHtml,
     extractAttr,
-    preloadNotePageLabels,
     type ExternalRefContext,
 } from '../../../utils/noteCitationExpand';
 import {
@@ -1067,8 +1066,7 @@ async function validateEditNoteBlocksAction(
     // simplification cache key and the identity folded into the address
     // snapshot, so it must be byte-identical to what read_note used.
     const noteId = snapshotNoteId(resolvedLibraryId, item.key);
-    const pageLabelsByItemId = await preloadNotePageLabels(rawHtml, resolvedLibraryId, { extractOnCacheMiss: true });
-    const { simplified, metadata } = getOrSimplify(noteId, rawHtml, resolvedLibraryId, pageLabelsByItemId);
+    const { simplified, metadata } = getOrSimplify(noteId, rawHtml, resolvedLibraryId);
     const strippedHtml = stripDataCitationItems(normalizeNoteHtml(rawHtml));
 
     // ONE snapshot verdict for the whole request, computed before either branch
@@ -1310,7 +1308,6 @@ export interface BlockExecutionInputs {
     snapshot?: string;
     /** `proposed_data.destructive_rewrite` — true when the destructive shape was approved. */
     destructiveRewrite?: boolean;
-    pageLabelsByItemId: Awaited<ReturnType<typeof preloadNotePageLabels>>;
     labels: PreloadedLabels;
     externalRefContext: ExternalRefContext;
     citationRejections: Map<string, CitationRejection>;
@@ -1368,13 +1365,13 @@ export type BlockExecutionPlan =
 export function planBlockEditsExecution(inputs: BlockExecutionInputs): BlockExecutionPlan {
     const {
         oldHtml, noteId, libraryId, edits, snapshot, destructiveRewrite,
-        pageLabelsByItemId, labels, externalRefContext, citationRejections, threadId,
+        labels, externalRefContext, citationRejections, threadId,
     } = inputs;
 
     const normalizedOldHtml = normalizeNoteHtml(oldHtml);
     const existingCitationCache = extractDataCitationItems(normalizedOldHtml);
     const strippedHtml = stripDataCitationItems(normalizedOldHtml);
-    const { simplified, metadata } = getOrSimplify(noteId, oldHtml, libraryId, pageLabelsByItemId);
+    const { simplified, metadata } = getOrSimplify(noteId, oldHtml, libraryId);
 
     // THE APPROVAL BOUNDARY. An edit validation skipped was shown to the user as
     // "Skipped" with NO diff, so execute must not apply it — not even if the
@@ -1671,30 +1668,27 @@ export function refreshBlockUndoRecords(
  *
  * ── THE CRITICAL-SECTION RULE ───────────────────────────────────────────────
  * The batch executor is NOT a precedent here despite its comment: it says "avoid
- * async between here and setNote()" and then awaits `preloadNotePageLabels` and
- * `prepareSpecs` immediately afterwards. For batch that is inherent — you need
- * the note HTML to know which labels to preload, labels feed simplification, and
- * simplification feeds the match — and it is tolerable because batch relocates
- * its edits by STRING MATCH, which re-checks itself against whatever the note
- * turns out to be.
+ * async between here and setNote()" and then awaits `prepareSpecs` immediately
+ * afterwards. For batch that is inherent — preparing a spec needs the note's
+ * simplification, and the spec feeds the match — and it is tolerable because
+ * batch relocates its edits by STRING MATCH, which re-checks itself against
+ * whatever the note turns out to be.
  *
  * Block addressing cannot tolerate it. Here the digest IS the drift check, so an
  * await between reading the note and verifying it races exactly the drift the
- * verification exists to detect. The cycle is therefore broken explicitly:
+ * verification exists to detect. The order is therefore fixed:
  *
- *   1. read the note PROVISIONALLY and await ALL async work off it — page
- *      labels, citation-expansion preloads, and citation-identity resolution for
- *      degrade (exclusion pre-checks plus `Zotero.Items` lookups, resolved into
- *      a Map);
- *   2. re-read the note as the AUTHORITATIVE snapshot;
+ *   1. await ALL async work FIRST — citation-expansion preloads and
+ *      citation-identity resolution for degrade (exclusion pre-checks plus
+ *      `Zotero.Items` lookups, resolved into a Map). Every one of these derives
+ *      from the EDITS, never from the note, so none of them needs the note read
+ *      first;
+ *   2. read the note as the AUTHORITATIVE snapshot;
  *   3. with NO awaits at all: simplify → verify snapshot → build index → select
  *      → apply → `setNote`.
  *
- * If the re-read differs from the provisional read, the preloads may be stale
- * for ids that appeared in between. That surfaces as an ordinary
- * `snapshot_mismatch` (the digest changed) or through the degrade/expansion
- * paths — never as a silent misaddressed splice. The address digest and the
- * whole selection pipeline are synchronous, which is what makes step 3 possible.
+ * The address digest and the whole selection pipeline are synchronous, which is
+ * what makes step 3 possible.
  *
  * A future maintainer WILL want to add an await in step 3. Do not.
  */
@@ -1761,21 +1755,19 @@ async function executeEditNoteBlocksAction(
 
     const noteId = snapshotNoteId(resolvedLibraryId, item.key);
 
-    // ── STEP 1: PROVISIONAL read + every async preload ──────────────────────
+    // ── STEP 1: every async preload, all of it derived from the edits ───────
+    const labels = await preloadBlockLabels(edits);
+    const externalRefContext = getExternalRefContext();
+    const citationRejections = await resolveCitationRejections(editContents(edits), externalRefContext);
+    const threadId = store.get(currentThreadIdAtom);
+
+    // ── STEP 2: AUTHORITATIVE read ──────────────────────────────────────────
     // Execute stays on the batch accessor (`item.getNote()` after
     // `flushLiveEditorToDB`) rather than validate's `getNoteHtmlForRead`: the
     // flush makes the DB authoritative, and it is the string that will actually
     // be written back. It differs from what the model saw only by ProseMirror
     // re-serialization, which `getOrSimplify` absorbs because it runs
     // `normalizeNoteHtml` internally. The asymmetry with validate is deliberate.
-    const provisionalHtml: string = item.getNote();
-    const pageLabelsByItemId = await preloadNotePageLabels(provisionalHtml, resolvedLibraryId, { extractOnCacheMiss: true });
-    const labels = await preloadBlockLabels(edits);
-    const externalRefContext = getExternalRefContext();
-    const citationRejections = await resolveCitationRejections(editContents(edits), externalRefContext);
-    const threadId = store.get(currentThreadIdAtom);
-
-    // ── STEP 2: AUTHORITATIVE re-read ───────────────────────────────────────
     const oldHtml: string = item.getNote();
 
     // ── STEP 3: NO AWAITS BELOW THIS LINE UNTIL AFTER setNote() ─────────────
@@ -1787,7 +1779,6 @@ async function executeEditNoteBlocksAction(
         edits,
         snapshot,
         destructiveRewrite: destructive_rewrite,
-        pageLabelsByItemId,
         labels,
         externalRefContext,
         citationRejections,
@@ -1838,8 +1829,7 @@ async function executeEditNoteBlocksAction(
     );
 
     // Re-simplify for the post-edit numbering.
-    const postPageLabels = await preloadNotePageLabels(finalRawHtml, resolvedLibraryId, { extractOnCacheMiss: true });
-    const { simplified: postSimplified } = getOrSimplify(noteId, finalRawHtml, resolvedLibraryId, postPageLabels);
+    const { simplified: postSimplified } = getOrSimplify(noteId, finalRawHtml, resolvedLibraryId);
     const refreshedNote = buildInlineNoteState(noteId, postSimplified);
 
     // The single construction site for `applied[]` (see `appliedIdentities`).

@@ -18,7 +18,6 @@ import { parseZoteroCitationLinkHref } from './zoteroLinkCitation';
 import { readBeaverLoc } from './noteCitationLoc';
 import { extractItemKeyFromUri } from './zoteroUri';
 import { modelObjectId } from './libraryIdentity';
-import type { PageLabels } from '../services/documentCache';
 
 export { normalizeNoteHtml };
 
@@ -74,7 +73,6 @@ export interface StoredElement {
 
 interface CachedSimplification {
     contentHash: string;
-    pageLabelsFingerprint: string;
     simplified: string;
     metadata: SimplificationMetadata;
 }
@@ -85,10 +83,6 @@ interface CachedSimplification {
 
 const MAX_CACHE_SIZE = 50;
 const simplificationCache = new Map<string, CachedSimplification>();
-
-function simplificationCacheKey(noteId: string, pageLabelsFingerprint: string): string {
-    return `${noteId}\u0000${pageLabelsFingerprint}`;
-}
 
 function quickHash(str: string): string {
     // Simple hash for content comparison (not cryptographic)
@@ -101,19 +95,6 @@ function quickHash(str: string): string {
     return String(hash) + ':' + str.length;
 }
 
-function fingerprintPageLabels(pageLabelsByItemId?: Record<string, PageLabels>): string {
-    if (!pageLabelsByItemId || Object.keys(pageLabelsByItemId).length === 0) return '';
-    return JSON.stringify(
-        Object.keys(pageLabelsByItemId)
-            .sort()
-            .map((itemId) => [
-                itemId,
-                Object.entries(pageLabelsByItemId[itemId] ?? {})
-                    .sort(([a], [b]) => Number(a) - Number(b)),
-            ])
-    );
-}
-
 /**
  * Get a cached simplification or re-simplify if cache is stale/missing.
  */
@@ -121,23 +102,16 @@ export function getOrSimplify(
     noteId: string,
     rawHtml: string,
     libraryID: number,
-    pageLabelsByItemId?: Record<string, PageLabels>,
 ): { simplified: string; metadata: SimplificationMetadata; isStale: boolean } {
     const contentHash = quickHash(rawHtml);
-    const pageLabelsFingerprint = fingerprintPageLabels(pageLabelsByItemId);
-    const cacheKey = simplificationCacheKey(noteId, pageLabelsFingerprint);
-    const cached = simplificationCache.get(cacheKey);
+    const cached = simplificationCache.get(noteId);
 
-    if (
-        cached
-        && cached.contentHash === contentHash
-        && cached.pageLabelsFingerprint === pageLabelsFingerprint
-    ) {
+    if (cached && cached.contentHash === contentHash) {
         return { simplified: cached.simplified, metadata: cached.metadata, isStale: false };
     }
 
     // Cache miss or stale — re-simplify
-    const result = simplifyNoteHtml(rawHtml, libraryID, pageLabelsByItemId);
+    const result = simplifyNoteHtml(rawHtml, libraryID);
 
     // Evict oldest entries if cache is full
     if (simplificationCache.size >= MAX_CACHE_SIZE) {
@@ -147,9 +121,8 @@ export function getOrSimplify(
         }
     }
 
-    simplificationCache.set(cacheKey, {
+    simplificationCache.set(noteId, {
         contentHash,
-        pageLabelsFingerprint,
         simplified: result.simplified,
         metadata: result.metadata,
     });
@@ -165,10 +138,7 @@ export function getOrSimplify(
  * Invalidate cache entry for a note.
  */
 export function invalidateSimplificationCache(noteId: string): void {
-    const prefix = `${noteId}\u0000`;
-    for (const key of [...simplificationCache.keys()]) {
-        if (key.startsWith(prefix)) simplificationCache.delete(key);
-    }
+    simplificationCache.delete(noteId);
 }
 
 // =============================================================================
@@ -186,9 +156,6 @@ export function invalidateSimplificationCache(noteId: string): void {
 export function simplifyNoteHtml(
     rawHtml: string,
     libraryID: number,
-    // Citation locators are projected exactly as stored, so page labels are not
-    // consulted here. The parameter stays for callers that still pass one.
-    _pageLabelsByItemId?: Record<string, PageLabels>,
 ): SimplificationResult {
     const metadata: SimplificationMetadata = { elements: new Map() };
 

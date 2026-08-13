@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { diffWords, diffLines, diffChars } from 'diff';
 import { getOrSimplify } from '../../../src/utils/noteHtmlSimplifier';
-import { preloadNotePageLabels } from '../../../src/utils/noteCitationExpand';
 import { getLatestNoteHtml } from '../../../src/utils/noteEditorIO';
 import type { EditNoteOperation } from '@beaver/agent-core/types/agentActions/editNote';
 import { getPageLocator, normalizeCitationTag, parseRawCitationAttributes } from '@beaver/agent-core/citations/citationGrammar';
@@ -222,8 +221,7 @@ export const EditNotePreview: React.FC<EditNotePreviewProps> = ({
                 await item.loadDataType('note');
                 const rawHtml = getLatestNoteHtml(item);
                 const noteId = `${libraryId}-${zoteroKey}`;
-                const pageLabelsByItemId = await preloadNotePageLabels(rawHtml, libraryId!);
-                const { simplified } = getOrSimplify(noteId, rawHtml, libraryId!, pageLabelsByItemId);
+                const { simplified } = getOrSimplify(noteId, rawHtml, libraryId!);
                 if (!cancelled) setFetchedOldContent(simplified);
             } catch {
                 // Fall back to no old content
@@ -270,8 +268,7 @@ export const EditNotePreview: React.FC<EditNotePreviewProps> = ({
                 await item.loadDataType('note');
                 const rawHtml = getLatestNoteHtml(item);
                 const noteId = `${libraryId}-${zoteroKey}`;
-                const pageLabelsByItemId = await preloadNotePageLabels(rawHtml, libraryId);
-                const { simplified } = getOrSimplify(noteId, rawHtml, libraryId, pageLabelsByItemId);
+                const { simplified } = getOrSimplify(noteId, rawHtml, libraryId);
 
                 // After the edit is applied, the note contains newString instead
                 // of oldString. Search for the appropriate string so we get

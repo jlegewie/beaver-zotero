@@ -48,7 +48,6 @@ vi.mock('../../../src/utils/noteCitationExpand', async () => {
     );
     return {
         ...actual,
-        preloadNotePageLabels: vi.fn(async () => ({})),
         preloadPageLabelsForNewCitations: vi.fn(async () => ({})),
     };
 });
@@ -63,7 +62,7 @@ import {
     isDiffPreviewPendingFor,
     isDiffPreviewPending,
 } from '../../../react/utils/noteEditorDiffPreview';
-import { preloadNotePageLabels } from '../../../src/utils/noteCitationExpand';
+import { preloadPageLabelsForNewCitations } from '../../../src/utils/noteCitationExpand';
 
 describe('constructMultiDiffHtml', () => {
     it('renders multiple append edits at the append point in edit order', () => {
@@ -412,7 +411,7 @@ describe('showDiffPreview approveAll revision-guard flow', () => {
         // reflect the snapshot-time content so the first Apply reads as
         // drift; hashing at activePreview creation would silently adopt the
         // newer content under a stale preview.
-        vi.mocked(preloadNotePageLabels).mockImplementationOnce(async () => {
+        vi.mocked(preloadPageLabelsForNewCitations).mockImplementationOnce(async () => {
             h.setNoteHtml('<div data-schema-version="9"><p>Intro. Alpha paragraph body text.</p></div>');
             return {};
         });
