@@ -3,7 +3,7 @@ import { useState, useEffect, useRef, useCallback, useMemo, useImperativeHandle,
 import { PlusSignIcon, Icon } from '../../icons/icons';
 import { ItemSearchResult } from '@beaver/agent-core/transport/clients/searchService';
 import { itemSearchResultFromZoteroItem } from '../../../../src/utils/zoteroSerializers';
-import SearchMenu, { MenuPosition } from './SearchMenu';
+import SearchMenu, { MenuPosition, SearchMenuCloseReason } from './SearchMenu';
 import { currentMessageFiltersAtom, removeItemFromMessageAtom, addItemToCurrentMessageItemsAtom, currentMessageItemsAtom } from '../../../atoms/messageComposition';
 import { EXTERNAL_FILE_PICKER_EXTENSIONS } from '../../../../src/services/externalFiles';
 import { useAttachExternalFiles } from '../../../hooks/useAttachExternalFiles';
@@ -24,7 +24,7 @@ import { useTagsMenu } from './hooks/useTagsMenu';
 import { useNotesMenu } from './hooks/useNotesMenu';
 import { ZoteroTag } from '@beaver/agent-core/types/zotero';
 import Tooltip from '@beaver/agent-ui/primitives/Tooltip';
-import { AddSourcesMenuHandle } from '../../../hooks/useAddSourcesMenu';
+import { AddSourcesMenuHandle, AddSourcesQuerySource } from '../../../hooks/useAddSourcesMenu';
 
 /** How many recent items are carried in the `recentItems` preference. */
 const RECENT_ITEMS_LIMIT = 5;
@@ -109,12 +109,19 @@ export interface AddSourcesMenuProps {
     showText: boolean;
     isMenuOpen: boolean;
     menuPosition: MenuPosition;
-    /** The query typed after the `@` in the chat editor. */
+    /** The current search query, wherever it is being typed. */
     searchQuery: string;
+    /**
+     * Where that query comes from: the chat editor for a typed `@`, or the
+     * menu's own search field when opened from the "+" button.
+     */
+    querySource: AddSourcesQuerySource;
+    /** The menu's own search field reporting what was typed into it. */
+    onQueryChange: (query: string) => void;
     /** Open from the "+" button, anchored at the given position. */
     onOpen: (position: MenuPosition) => void;
     /** Close without touching the typed text (Escape, click outside). */
-    onDismiss: () => void;
+    onDismiss: (reason: SearchMenuCloseReason) => void;
     /** Close because something was picked — the typed `@query` is consumed. */
     onCommit: () => void;
     /** Clear the typed query but leave the menu open (entering a submenu). */
@@ -130,6 +137,8 @@ const AddSourcesMenu = forwardRef<AddSourcesMenuHandle, AddSourcesMenuProps>(fun
     isMenuOpen,
     menuPosition,
     searchQuery,
+    querySource,
+    onQueryChange,
     onOpen,
     onDismiss,
     onCommit,
@@ -173,9 +182,9 @@ const AddSourcesMenu = forwardRef<AddSourcesMenuHandle, AddSourcesMenuProps>(fun
         setMenuMode('sources');
     }, []);
 
-    const handleDismiss = useCallback(() => {
+    const handleDismiss = useCallback((reason: SearchMenuCloseReason) => {
         resetMenuState();
-        onDismiss();
+        onDismiss(reason);
     }, [onDismiss, resetMenuState]);
 
     const handleCommit = useCallback(() => {
@@ -492,6 +501,33 @@ const AddSourcesMenu = forwardRef<AddSourcesMenuHandle, AddSourcesMenuProps>(fun
                     ? "No tags found"
                     : "No notes found";
 
+    // The chat editor is the search box for a typed `@` — the caret stays there
+    // and whatever follows the `@` is the query. A menu opened from the "+"
+    // button has no such query to read, so it renders (and focuses) a search
+    // field of its own and leaves the composer alone.
+    const ownsSearchField = querySource === 'menu';
+
+    const placeholderText = menuMode === 'sources'
+        ? "Search by author, year and title"
+        : menuMode === 'libraries'
+            ? "Search libraries"
+            : menuMode === 'collections'
+                ? "Search collections"
+                : menuMode === 'tags'
+                    ? "Search tags"
+                    : "Search notes";
+
+    // Backspace on an empty search field steps back out of a submenu, and
+    // closes the menu at the top level. (The editor-driven menu gets the same
+    // behavior from `useAddSourcesMenu`, via the menu handle.)
+    const handleEmptyBackspace = useCallback(() => {
+        if (menuMode !== 'sources') {
+            setMenuMode('sources');
+            return;
+        }
+        handleDismiss('keyboard');
+    }, [handleDismiss, menuMode]);
+
     return (
         <>
             <Tooltip content="Add Sources" showArrow singleLine>
@@ -518,16 +554,19 @@ const AddSourcesMenu = forwardRef<AddSourcesMenuHandle, AddSourcesMenuProps>(fun
                 verticalPosition={verticalPosition}
                 width="250px"
                 maxHeight="300px"
+                // The query drives an effect above, so the menu's own field
+                // needs no separate search callback.
                 onSearch={() => {}}
                 noResultsText={noResultsText}
-                placeholder=""
+                placeholder={ownsSearchField ? placeholderText : ''}
                 closeOnSelect={false}
                 searchQuery={searchQuery}
-                setSearchQuery={() => {}}
-                // The chat editor is the search box: the caret stays there and
-                // whatever follows the `@` is the query.
-                showSearchInput={false}
-                selectOnTab={true}
+                setSearchQuery={onQueryChange}
+                showSearchInput={ownsSearchField}
+                onEmptyBackspace={ownsSearchField ? handleEmptyBackspace : undefined}
+                // Tab keeps its normal focus-navigation meaning where there is
+                // a real input to move out of.
+                selectOnTab={!ownsSearchField}
                 portalContainer={menuPortalContainer}
                 onAfterInitialFocus={onAfterMenuInitialFocus}
             />

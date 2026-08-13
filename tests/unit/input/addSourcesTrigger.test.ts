@@ -28,31 +28,25 @@ describe('matchSourcesTrigger', () => {
 });
 
 describe('queryForOpenTrigger', () => {
-    const typed = { prefix: 'summarize ', hasMarker: true };
-    const button = { prefix: 'summarize ', hasMarker: false };
+    const trigger = { prefix: 'summarize ' };
 
     it('reads the query as everything after the @', () => {
-        expect(queryForOpenTrigger('summarize @smith', typed)).toBe('smith');
+        expect(queryForOpenTrigger('summarize @smith', trigger)).toBe('smith');
     });
 
     it('keeps spaces inside the query', () => {
-        expect(queryForOpenTrigger('summarize @smith 2020', typed)).toBe('smith 2020');
+        expect(queryForOpenTrigger('summarize @smith 2020', trigger)).toBe('smith 2020');
     });
 
     it('is empty right after the @ is typed', () => {
-        expect(queryForOpenTrigger('summarize @', typed)).toBe('');
+        expect(queryForOpenTrigger('summarize @', trigger)).toBe('');
     });
 
     it('closes the menu when the @ is deleted', () => {
-        expect(queryForOpenTrigger('summarize ', typed)).toBeNull();
+        expect(queryForOpenTrigger('summarize ', trigger)).toBeNull();
     });
 
     it('closes the menu when the edit lands ahead of the trigger', () => {
-        expect(queryForOpenTrigger('please summarize @smith', typed)).toBeNull();
-    });
-
-    it('reads the query straight off the content for a button-opened menu', () => {
-        expect(queryForOpenTrigger('summarize smith', button)).toBe('smith');
-        expect(queryForOpenTrigger('summariz', button)).toBeNull();
+        expect(queryForOpenTrigger('please summarize @smith', trigger)).toBeNull();
     });
 });

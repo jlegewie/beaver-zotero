@@ -86,24 +86,10 @@ const InputArea: React.FC<InputAreaProps> = ({
     const focusEditor = useCallback(() => {
         editorHandleRef.current?.focus();
     }, []);
-    // Latest composer text, for the Add Sources menu opened from the "+" button
-    // (which anchors its query to the content as it stood at that moment).
-    const messageContentRef = useRef(messageContent);
-    messageContentRef.current = messageContent;
     // The open Add Sources menu, for stepping back out of one of its submenus.
     const addSourcesMenuRef = useRef<AddSourcesMenuHandle | null>(null);
     const deleteTrailingQuery = useCallback((length: number) => {
         editorHandleRef.current?.deleteTrailingQuery(length);
-    }, []);
-    // Park the caret at the end, then focus. The explicit selection is what
-    // makes this different from focusEditor(): that restores the caret the
-    // editor held when it lost focus, which would leave a menu query stranded
-    // in the middle of the text. selectRange also clears the blur snapshot, so
-    // the focus() that follows cannot put it back.
-    const focusEditorAtEnd = useCallback(() => {
-        const end = messageContentRef.current.length;
-        editorHandleRef.current?.selectRange(end, end);
-        editorHandleRef.current?.focus();
     }, []);
     // Stable forwarder so the slash menu can insert a command pill into the
     // Lexical editor (the editor handle isn't available until after mount).
@@ -224,12 +210,16 @@ const InputArea: React.FC<InputAreaProps> = ({
         handleSlashMenuKeyDown,
     } = useSlashMenu(inputRef, verticalPosition, focusEditor, insertSlashCommand);
 
-    // The `@` menu is driven from the editor the same way: the caret never
-    // leaves it and the text typed after the `@` is the menu's search query.
+    // A `@` typed in the editor drives the Add Sources menu the same way: the
+    // caret never leaves the editor and the text after the `@` is the menu's
+    // search query. Opened from the "+" button, the menu brings its own
+    // focused search field instead and the composer is left alone.
     const {
         isOpen: isAddSourcesMenuOpen,
         position: addSourcesMenuPosition,
         query: addSourcesSearchQuery,
+        querySource: addSourcesQuerySource,
+        setQuery: setAddSourcesSearchQuery,
         openFromButton: openAddSourcesMenu,
         handleTrigger: handleAddSourcesTrigger,
         handleChange: handleAddSourcesChange,
@@ -239,10 +229,8 @@ const InputArea: React.FC<InputAreaProps> = ({
         resetQuery: resetAddSourcesQuery,
     } = useAddSourcesMenu({
         verticalPosition,
-        contentRef: messageContentRef,
         deleteTrailingQuery,
         focusEditor,
-        focusEditorAtEnd,
         setMessageContent,
         menuRef: addSourcesMenuRef,
     });
@@ -559,6 +547,8 @@ const InputArea: React.FC<InputAreaProps> = ({
                     isAddAttachmentMenuOpen={isAddSourcesMenuOpen}
                     menuPosition={addSourcesMenuPosition}
                     addSourcesSearchQuery={addSourcesSearchQuery}
+                    addSourcesQuerySource={addSourcesQuerySource}
+                    onAddSourcesQueryChange={setAddSourcesSearchQuery}
                     onOpenAddSourcesMenu={openAddSourcesMenu}
                     onDismissAddSourcesMenu={dismissAddSourcesMenu}
                     onCommitAddSourcesMenu={commitAddSourcesMenu}
@@ -603,10 +593,12 @@ const InputArea: React.FC<InputAreaProps> = ({
                         onSubmit={handleEditorSubmit}
                         pasteHandlers={pasteHandlers}
                         // Nothing else tells the user that what they type after
-                        // the `@` searches — the menu has no input of its own.
+                        // the `@` searches — that menu has no input of its own.
                         // Drops away the moment they start typing.
                         inlineHint={
-                            isAddSourcesMenuOpen && addSourcesSearchQuery.length === 0
+                            isAddSourcesMenuOpen &&
+                            addSourcesQuerySource === 'editor' &&
+                            addSourcesSearchQuery.length === 0
                                 ? 'Type to search'
                                 : null
                         }

@@ -28,6 +28,13 @@ const isFocusableItem = (item: SearchMenuItem) =>
     !item.disabled && !item.isGroupHeader && !item.isDivider;
 
 /**
+* Why the menu closed. A caller that moved DOM focus into the menu needs this
+* to decide where focus belongs afterwards: back where it came from for a
+* keyboard dismissal, but not when the user clicked some other target.
+*/
+export type SearchMenuCloseReason = 'keyboard' | 'outside-click' | 'select';
+
+/**
 * Position interface for menu placement
 */
 export interface MenuPosition {
@@ -54,7 +61,7 @@ export interface SearchMenuProps {
     /** Optional max height for the menu */
     maxHeight?: string;
     /** Callback when menu should close */
-    onClose: () => void;
+    onClose: (reason: SearchMenuCloseReason) => void;
     /** Position coordinates for menu placement */
     position: MenuPosition;
     /** Optional CSS class name */
@@ -243,16 +250,16 @@ const SearchMenu: React.FC<SearchMenuProps> = ({
 
         const handleClickOutside = (e: MouseEvent) => {
             if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-                onClose();
+                onClose('outside-click');
             }
         };
-        
+
         const handleEscape = (e: KeyboardEvent) => {
             // An Escape owned by an IME composition cancels the composition,
             // not the menu.
             if (isImeKeyEvent(e)) return;
             if (e.key === 'Escape') {
-                onClose();
+                onClose('keyboard');
             }
         };
         
@@ -327,7 +334,7 @@ const SearchMenu: React.FC<SearchMenuProps> = ({
                         isFocusableItem(displayOrderMenuItems[focusedIndex])
                     ) {
                         displayOrderMenuItems[focusedIndex].onClick();
-                        if(closeOnSelect) onClose();
+                        if(closeOnSelect) onClose('select');
                     }
                     break;
                 default:
@@ -466,7 +473,7 @@ const SearchMenu: React.FC<SearchMenuProps> = ({
                     e.stopPropagation();
                     if (item.disabled) return;
                     item.onClick();
-                    if(closeOnSelect) onClose();
+                    if(closeOnSelect) onClose('select');
                 }}
                 // Hover moves the focused item rather than highlighting on top
                 // of it: a separate hover highlight would keep showing the row
@@ -514,7 +521,8 @@ const SearchMenu: React.FC<SearchMenuProps> = ({
                 onKeyDown={(e) => {
                     if ((e.key === 'Backspace' || e.key === 'Delete') && searchQuery.length === 0) {
                         e.preventDefault();
-                        (onEmptyBackspace ?? onClose)();
+                        if (onEmptyBackspace) onEmptyBackspace();
+                        else onClose('keyboard');
                     }
                 }}
                 placeholder={placeholder}

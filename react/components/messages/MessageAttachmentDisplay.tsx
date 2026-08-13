@@ -6,7 +6,8 @@ import { removePopupMessagesByTypeAtom } from '../../atoms/ui';
 import { TextSelectionButton } from '../input/TextSelectionButton';
 // import { ZoteroIcon, ZOTERO_ICONS } from './icons/ZoteroIcon';
 import AddSourcesMenu from '../ui/menus/AddSourcesMenu';
-import { AddSourcesMenuHandle } from '../../hooks/useAddSourcesMenu';
+import { AddSourcesMenuHandle, AddSourcesQuerySource } from '../../hooks/useAddSourcesMenu';
+import { SearchMenuCloseReason } from '../ui/menus/SearchMenu';
 import { LibraryButton } from '../library/LibraryButton';
 import { CollectionButton } from '../library/CollectionButton';
 import { TagButton } from '../library/TagButton';
@@ -23,6 +24,8 @@ const MessageAttachmentDisplay = ({
     isAddAttachmentMenuOpen,
     menuPosition,
     addSourcesSearchQuery,
+    addSourcesQuerySource,
+    onAddSourcesQueryChange,
     onOpenAddSourcesMenu,
     onDismissAddSourcesMenu,
     onCommitAddSourcesMenu,
@@ -35,10 +38,13 @@ const MessageAttachmentDisplay = ({
 }: {
     isAddAttachmentMenuOpen: boolean;
     menuPosition: { x: number; y: number };
-    /** Text typed after the `@` in the chat editor; the menu's search query. */
+    /** The Add Sources menu's search query. */
     addSourcesSearchQuery: string;
+    /** Whether that query is typed in the chat editor or in the menu itself. */
+    addSourcesQuerySource: AddSourcesQuerySource;
+    onAddSourcesQueryChange: (query: string) => void;
     onOpenAddSourcesMenu: (menuPosition: { x: number; y: number }) => void;
-    onDismissAddSourcesMenu: () => void;
+    onDismissAddSourcesMenu: (reason: SearchMenuCloseReason) => void;
     onCommitAddSourcesMenu: () => void;
     onResetAddSourcesQuery: () => void;
     addSourcesMenuRef?: React.Ref<AddSourcesMenuHandle>;
@@ -133,6 +139,8 @@ const MessageAttachmentDisplay = ({
                 isMenuOpen={isAddAttachmentMenuOpen}
                 menuPosition={menuPosition}
                 searchQuery={addSourcesSearchQuery}
+                querySource={addSourcesQuerySource}
+                onQueryChange={onAddSourcesQueryChange}
                 onOpen={onOpenAddSourcesMenu}
                 onDismiss={onDismissAddSourcesMenu}
                 onCommit={onCommitAddSourcesMenu}

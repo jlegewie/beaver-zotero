@@ -1,20 +1,27 @@
 import React, { useCallback, useRef, useState } from 'react';
-import type { MenuPosition } from '../components/ui/menus/SearchMenu';
+import type { MenuPosition, SearchMenuCloseReason } from '../components/ui/menus/SearchMenu';
 
 /** The character that opens the Add Sources menu from the chat editor. */
 const TRIGGER = '@';
 
 /**
- * Where the open menu's query starts inside the editor content.
+ * Where the open menu takes its search query from.
  *
- * `prefix` is the text that preceded the trigger; everything after it (plus the
- * `@` itself, when there is one) is the typed query. A menu opened from the "+"
- * button has no `@` in the text, so it anchors on the content as it stood when
- * the button was clicked.
+ * - `editor` — the user typed `@`: the caret never leaves the composer and the
+ *   text after the `@` is the query.
+ * - `menu` — the menu was opened from the "+" button and renders its own
+ *   focused search field, leaving the composer text untouched.
+ */
+export type AddSourcesQuerySource = 'editor' | 'menu';
+
+/**
+ * Where an editor-driven menu's query starts inside the editor content.
+ *
+ * `prefix` is the text that preceded the `@`; everything after `prefix@` is the
+ * typed query.
  */
 export interface OpenTrigger {
     prefix: string;
-    hasMarker: boolean;
 }
 
 /**
@@ -35,7 +42,7 @@ export function matchSourcesTrigger(value: string): { prefix: string } | null {
  * the edit moved outside the query and the menu should close.
  */
 export function queryForOpenTrigger(value: string, trigger: OpenTrigger): string | null {
-    const prefix = trigger.prefix + (trigger.hasMarker ? TRIGGER : '');
+    const prefix = trigger.prefix + TRIGGER;
     return value.startsWith(prefix) ? value.slice(prefix.length) : null;
 }
 
@@ -47,79 +54,93 @@ export interface AddSourcesMenuHandle {
 
 interface UseAddSourcesMenuOptions {
     verticalPosition: 'above' | 'below';
-    /** Live editor text, read when the menu opens without a typed `@`. */
-    contentRef: React.MutableRefObject<string>;
     /** Removes `length` characters from the end of the editor content. */
     deleteTrailingQuery: (length: number) => void;
     focusEditor: () => void;
-    /**
-     * Focuses the editor with the caret at the end of the content. The query is
-     * always the tail of the document, so a menu opened without a typed `@`
-     * has to put the caret there before the user types.
-     */
-    focusEditorAtEnd: () => void;
     setMessageContent: (value: string) => void;
     /** The rendered menu, for back-navigation out of a submenu. */
     menuRef: React.MutableRefObject<AddSourcesMenuHandle | null>;
 }
 
 /**
- * Drives the Add Sources menu from the chat editor, the way `useSlashMenu`
- * drives the actions menu: the caret never leaves the editor, and whatever the
- * user types after the `@` is the menu's search query.
+ * Drives the Add Sources menu, which searches from one of two places depending
+ * on how it was opened (see `AddSourcesQuerySource`).
  *
- * The menu closes on Escape, on a space typed as the first query character
- * (a later space is part of the query), when the `@` is deleted, when an item
- * is picked, and on any click outside it (handled by `SearchMenu` itself).
+ * A typed `@` works the way `useSlashMenu` drives the actions menu: the caret
+ * never leaves the editor, and whatever follows the `@` is the query. Such a
+ * menu closes on Escape, on a space typed as the first query character (a later
+ * space is part of the query), when the `@` is deleted, when an item is picked,
+ * and on any click outside it (handled by `SearchMenu` itself).
+ *
+ * The "+" button instead opens a menu with its own focused search field, so
+ * none of the editor-driven handling applies: the composer keeps its text and
+ * its caret, and every keystroke goes to the menu's field.
  */
 export function useAddSourcesMenu({
     verticalPosition,
-    contentRef,
     deleteTrailingQuery,
     focusEditor,
-    focusEditorAtEnd,
     setMessageContent,
     menuRef,
 }: UseAddSourcesMenuOptions) {
     const [isOpen, setIsOpen] = useState(false);
     const [position, setPosition] = useState<MenuPosition>({ x: 0, y: 0 });
-    const [query, setQuery] = useState('');
+    const [query, setQueryValue] = useState('');
+    const [querySource, setQuerySourceValue] = useState<AddSourcesQuerySource>('editor');
 
     // Mirrors of the state above, so handlers that run within a single event
     // (keydown closing the menu, the input event that follows it) see the
     // current values rather than the ones from their render.
     const isOpenRef = useRef(false);
     const queryRef = useRef('');
+    const querySourceRef = useRef<AddSourcesQuerySource>('editor');
     const triggerRef = useRef<OpenTrigger | null>(null);
 
-    const open = useCallback((trigger: OpenTrigger, at: MenuPosition) => {
+    const updateQuery = useCallback((value: string) => {
+        queryRef.current = value;
+        setQueryValue(value);
+    }, []);
+
+    const open = useCallback((source: AddSourcesQuerySource, trigger: OpenTrigger | null, at: MenuPosition) => {
         triggerRef.current = trigger;
-        queryRef.current = '';
+        querySourceRef.current = source;
         isOpenRef.current = true;
-        setQuery('');
+        updateQuery('');
+        setQuerySourceValue(source);
         setPosition(at);
         setIsOpen(true);
-    }, []);
+    }, [updateQuery]);
 
     const close = useCallback(() => {
         triggerRef.current = null;
-        queryRef.current = '';
+        querySourceRef.current = 'editor';
         isOpenRef.current = false;
-        setQuery('');
+        updateQuery('');
+        setQuerySourceValue('editor');
         setIsOpen(false);
-    }, []);
+    }, [updateQuery]);
 
     /** Close and leave the typed text in the editor (Escape, outside click, …). */
-    const dismiss = useCallback(() => {
+    const dismiss = useCallback((reason?: SearchMenuCloseReason) => {
+        const hadOwnSearchField = querySourceRef.current === 'menu';
         close();
-    }, [close]);
+        // That search field held DOM focus, so dismissing it would otherwise
+        // leave the window with nothing focused. Hand focus back to the
+        // composer — unless the user dismissed the menu by clicking elsewhere,
+        // which is its own focus target.
+        if (hadOwnSearchField && reason !== 'outside-click') {
+            setTimeout(() => focusEditor(), 0);
+        }
+    }, [close, focusEditor]);
 
     /**
-     * Close because something was picked: the typed `@query` did its job as a
-     * search box, so it is removed rather than left in the message.
+     * Close because something was picked: a typed `@query` did its job as a
+     * search box, so it is removed rather than left in the message. A menu with
+     * its own search field never put anything in the editor to take back.
      */
     const commit = useCallback(() => {
-        const removeLength = queryRef.current.length + (triggerRef.current?.hasMarker ? 1 : 0);
+        // +1 for the `@` itself.
+        const removeLength = querySourceRef.current === 'editor' ? queryRef.current.length + 1 : 0;
         close();
         if (removeLength > 0) deleteTrailingQuery(removeLength);
         // The click that picked the item may have taken DOM focus out of the
@@ -130,58 +151,62 @@ export function useAddSourcesMenu({
     /** Drop the typed query but keep the menu open (entering a submenu). */
     const resetQuery = useCallback(() => {
         const length = queryRef.current.length;
-        queryRef.current = '';
-        setQuery('');
-        if (length > 0) deleteTrailingQuery(length);
-    }, [deleteTrailingQuery]);
+        const isEditorQuery = querySourceRef.current === 'editor';
+        updateQuery('');
+        if (isEditorQuery && length > 0) deleteTrailingQuery(length);
+    }, [deleteTrailingQuery, updateQuery]);
 
-    /** Open from the "+" button, anchoring the query to the current content. */
+    /** Open from the "+" button, with the menu's own search field. */
     const openFromButton = useCallback((at: MenuPosition) => {
-        open({ prefix: contentRef.current, hasMarker: false }, at);
-        // The menu renders no search input of its own, and the click that
-        // opened it left focus on the button — so hand focus to the editor,
-        // caret at the end, or the menu could not be searched at all. Deferred
-        // until the menu has mounted: rendering it mutates the same chrome
-        // document, which resets contenteditable selection offsets.
-        setTimeout(() => focusEditorAtEnd(), 0);
-    }, [contentRef, focusEditorAtEnd, open]);
+        open('menu', null, at);
+        // No focus handling here: `SearchMenu` focuses its search field as it
+        // opens, and the composer is left exactly as the user left it.
+    }, [open]);
+
+    /** The menu's own search field, publishing what was typed into it. */
+    const setQuery = useCallback((value: string) => {
+        if (querySourceRef.current !== 'menu') return;
+        updateQuery(value);
+    }, [updateQuery]);
 
     /** Detect a typed `@` trigger. Returns true when the menu opened. */
     const handleTrigger = useCallback((value: string, rect: DOMRect): boolean => {
         const match = matchSourcesTrigger(value);
         if (!match) return false;
         const y = verticalPosition === 'above' ? rect.top - 5 : rect.bottom - 10;
-        open({ prefix: match.prefix, hasMarker: true }, { x: rect.left, y });
+        open('editor', { prefix: match.prefix }, { x: rect.left, y });
         setMessageContent(value);
         return true;
     }, [open, setMessageContent, verticalPosition]);
 
     /** Handle an editor change while the menu is open. Returns true if handled. */
     const handleChange = useCallback((value: string): boolean => {
-        if (!isOpenRef.current) return false;
+        // A menu with its own search field does not read the composer, so an
+        // edit there is an ordinary edit.
+        if (!isOpenRef.current || querySourceRef.current !== 'editor') return false;
         const trigger = triggerRef.current;
         const nextQuery = trigger ? queryForOpenTrigger(value, trigger) : null;
         if (nextQuery !== null) {
-            queryRef.current = nextQuery;
-            setQuery(nextQuery);
+            updateQuery(nextQuery);
         } else {
             // The `@` was deleted, or the edit landed somewhere else entirely.
             close();
         }
         setMessageContent(value);
         return true;
-    }, [close, setMessageContent]);
+    }, [close, setMessageContent, updateQuery]);
 
     /**
-     * Handle a keydown while the menu is open. Returns true when the event was
-     * consumed.
+     * Handle a keydown in the editor while an editor-driven menu is open.
+     * Returns true when the event was consumed. A menu with its own search
+     * field takes its keystrokes there instead.
      *
      * Navigation keys are only preventDefault'ed (never stopPropagation'ed):
      * the event must keep bubbling to `SearchMenu`'s document-level listener,
      * which performs the actual navigation and selection.
      */
     const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLElement>): boolean => {
-        if (!isOpenRef.current) return false;
+        if (!isOpenRef.current || querySourceRef.current !== 'editor') return false;
         if (e.key === 'Enter' || e.key === 'ArrowDown' || e.key === 'ArrowUp' || e.key === 'Tab') {
             e.preventDefault();
             return true;
@@ -212,6 +237,8 @@ export function useAddSourcesMenu({
         isOpen,
         position,
         query,
+        querySource,
+        setQuery,
         openFromButton,
         handleTrigger,
         handleChange,

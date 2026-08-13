@@ -20,16 +20,13 @@ function mount(options?: { goBack?: () => boolean }) {
     };
     const deleted: number[] = [];
     const focused = { count: 0 };
-    const focusedAtEnd = { count: 0 };
     let latest: Hook;
 
     const Harness: React.FC = () => {
         latest = useAddSourcesMenu({
             verticalPosition: 'above',
-            contentRef,
             deleteTrailingQuery: (length) => deleted.push(length),
             focusEditor: () => { focused.count++; },
-            focusEditorAtEnd: () => { focusedAtEnd.count++; },
             setMessageContent: (value) => { contentRef.current = value; },
             menuRef,
         });
@@ -46,7 +43,6 @@ function mount(options?: { goBack?: () => boolean }) {
         contentRef,
         deleted,
         focused,
-        focusedAtEnd,
         /** Run an interaction and let React flush the state it produced. */
         run<T>(fn: (hook: Hook) => T): T {
             let result!: T;
@@ -78,11 +74,12 @@ describe('useAddSourcesMenu', () => {
     });
 
     describe('opening from a typed @', () => {
-        it('opens when the @ starts a word', () => {
+        it('opens when the @ starts a word, with the editor as its search box', () => {
             harness = mount();
             expect(harness.run(h => h.handleTrigger('find @', RECT))).toBe(true);
             expect(harness.hook.isOpen).toBe(true);
             expect(harness.hook.query).toBe('');
+            expect(harness.hook.querySource).toBe('editor');
         });
 
         it('opens when the @ is the first character', () => {
@@ -129,6 +126,12 @@ describe('useAddSourcesMenu', () => {
             harness.run(h => h.handleChange('find '));
             expect(harness.hook.isOpen).toBe(false);
             expect(harness.contentRef.current).toBe('find ');
+        });
+
+        it('ignores a menu search field it is not rendering', () => {
+            harness.run(h => h.handleChange('find @smith'));
+            harness.run(h => h.setQuery('somethingelse'));
+            expect(harness.hook.query).toBe('smith');
         });
 
         it('reports the change as handled while open, and not once closed', () => {
@@ -235,33 +238,59 @@ describe('useAddSourcesMenu', () => {
     });
 
     describe('opening from the "+" button', () => {
-        it('hands focus to the editor, caret at the end, so the menu can be typed into', async () => {
-            harness = mount();
-            harness.contentRef.current = 'draft text ';
-            harness.run(h => h.openFromButton({ x: 0, y: 0 }));
-            await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); });
-            expect(harness.focusedAtEnd.count).toBe(1);
-        });
-
-        it('anchors the query to the content as it stood, with no @ to take back', () => {
+        beforeEach(() => {
             harness = mount();
             harness.contentRef.current = 'draft text ';
             harness.run(h => h.openFromButton({ x: 10, y: 20 }));
-            expect(harness.hook.isOpen).toBe(true);
-            expect(harness.hook.position).toEqual({ x: 10, y: 20 });
-
-            harness.run(h => h.handleChange('draft text smith'));
-            expect(harness.hook.query).toBe('smith');
-
-            harness.run(h => h.commit());
-            expect(harness.deleted).toEqual(['smith'.length]);
         });
 
-        it('deletes nothing when picked before anything was typed', () => {
-            harness = mount();
-            harness.run(h => h.openFromButton({ x: 0, y: 0 }));
+        it('opens a menu that searches from its own field', () => {
+            expect(harness.hook.isOpen).toBe(true);
+            expect(harness.hook.querySource).toBe('menu');
+            expect(harness.hook.position).toEqual({ x: 10, y: 20 });
+        });
+
+        it('takes its query from that field, leaving the composer text alone', () => {
+            harness.run(h => h.setQuery('smith'));
+            expect(harness.hook.query).toBe('smith');
+            expect(harness.contentRef.current).toBe('draft text ');
+        });
+
+        it('leaves editor keystrokes to the editor', () => {
+            const { event, prevented } = keyEvent('Enter');
+            expect(harness.run(h => h.handleKeyDown(event))).toBe(false);
+            expect(prevented.value).toBe(false);
+            expect(harness.run(h => h.handleChange('draft text more'))).toBe(false);
+        });
+
+        it('deletes nothing from the composer when something is picked', async () => {
+            harness.run(h => h.setQuery('smith'));
             harness.run(h => h.commit());
+            expect(harness.hook.isOpen).toBe(false);
             expect(harness.deleted).toEqual([]);
+            await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); });
+            expect(harness.focused.count).toBe(1);
+        });
+
+        it('clears only its own field when entering a submenu', () => {
+            harness.run(h => h.setQuery('lib'));
+            harness.run(h => h.resetQuery());
+            expect(harness.hook.query).toBe('');
+            expect(harness.hook.isOpen).toBe(true);
+            expect(harness.deleted).toEqual([]);
+        });
+
+        it('hands focus back to the editor when dismissed from the keyboard', async () => {
+            harness.run(h => h.dismiss('keyboard'));
+            await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); });
+            expect(harness.hook.isOpen).toBe(false);
+            expect(harness.focused.count).toBe(1);
+        });
+
+        it('leaves focus alone when dismissed by a click elsewhere', async () => {
+            harness.run(h => h.dismiss('outside-click'));
+            await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); });
+            expect(harness.focused.count).toBe(0);
         });
     });
 });
