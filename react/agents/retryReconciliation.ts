@@ -33,8 +33,15 @@ import type { AgentRun } from '@beaver/agent-core/agents/types';
  * `keepRunIds` is the second anchor — the runs the client still holds after the
  * truncation. The server deletes the trailing block of runs outside that set,
  * which reconciles a thread whose client-side and server-side views have
- * drifted apart. A set matching no run in the thread says nothing about where
- * the discarded tail begins and is ignored, so both are always sent together.
+ * drifted apart. A non-empty set matching no run in the thread says nothing
+ * about where the discarded tail begins and is ignored, so both are always sent
+ * together.
+ *
+ * An empty set is not silence: it says the client keeps nothing in this thread,
+ * so the whole thread goes. Retrying the first run of a thread has no other
+ * anchor, and that is exactly where `retryRunId` fails — a first run stopped
+ * before it was persisted leaves the server nothing to delete from, and the
+ * thread the replacement run answers from is empty.
  */
 export interface RetryAnchor {
     /** Run to restart from. The server deletes it and everything after it. */
@@ -59,8 +66,8 @@ export interface RetryAnchor {
  * - commit — the server sent the `thread` event, which it does only after
  *   loading the thread and applying the truncation. That is positive proof of
  *   what is gone server-side, and the only point at which the client destroys
- *   its own copy. A truncation that never anchored deleted nothing, and then a
- *   commit destroys nothing either.
+ *   its own copy. Each run in the plan is destroyed only on that proof, so a
+ *   truncation that anchored on nothing takes only the run it looked for.
  * - abort — the run reached a terminal failure, or the user cancelled, before
  *   that proof arrived. Nothing was destroyed, so nothing has to be put back:
  *   the record is dropped and the failed run shell with it.
@@ -78,7 +85,20 @@ export interface PendingRetry {
     runId: string;
     /** The run the user retried — where the UI shows the retry in progress. */
     sourceRunId: string;
-    /** Thread the plan was made against, so it is never applied to another. */
+    /**
+     * The run the request is anchored on: `RetryAnchor.retryRunId`, and the
+     * first of `runIdsToRemove`. Named separately because the server's report
+     * can speak for this run alone — a truncation that anchored on it and
+     * deleted nothing proves it was never persisted.
+     */
+    anchorRunId: string;
+    /**
+     * Thread the plan was made against, and the thread the runs it names belong
+     * to. Null when the client has no id for it — a run cancelled before the
+     * first `thread` event never gave it one. The server reports the thread it
+     * ran the retry in, and a different one means the plan's runs are in none of
+     * the history the replacement run was given.
+     */
     threadId: string | null;
     /**
      * Runs the retry expects to remove from the thread: the run the request is

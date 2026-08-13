@@ -179,7 +179,10 @@ describe('retry lifecycle', () => {
         expect(store.get(threadRunsAtom).map((r: AgentRun) => r.id)).toEqual(['a', 'b']);
         expect(store.get(citationsAtom)).toHaveLength(2);
         expect(wsRequest().retry_run_id).toBe('a');
-        expect(wsRequest().retry_keep_run_ids).toBeUndefined();
+        // Empty, and sent anyway: 'a' is the first run of the thread, so "the
+        // client keeps nothing" is the only anchor the server can use if 'a'
+        // was never persisted.
+        expect(wsRequest().retry_keep_run_ids).toEqual([]);
 
         const pending = store.get(pendingRetryAtom);
         expect(pending?.sourceRunId).toBe('a');
@@ -241,22 +244,42 @@ describe('retry lifecycle', () => {
         expect(store.get(pendingRetryAtom)).toBeNull();
     });
 
-    it('keeps every run when the server truncation never anchored', async () => {
+    it('removes the run a truncation anchored on but found nothing to delete', async () => {
         await store.set(regenerateFromRunAtom, 'a');
         const newRunId = store.get(pendingRetryAtom)?.runId;
 
-        // The run-id anchor found no run to delete from — it was never
-        // persisted — and there was no keep set to fall back on. The turns the
-        // retry meant to replace are still in the history the replacement run
-        // was given.
+        // The run-id anchor found no run to delete from — 'a' was never
+        // persisted — and there was no keep set to fall back on. Its prompt is
+        // not in the history the replacement run was given, so showing it would
+        // repeat the prompt on screen.
         wsCallbacks().onThread(THREAD_ID, threadEvent(THREAD_ID, [], 'retry_run_id'));
 
-        expect(store.get(threadRunsAtom).map((r: AgentRun) => r.id)).toEqual(['a', 'b']);
-        expect(store.get(citationsAtom)).toHaveLength(2);
+        // 'b' is a different matter: the server said nothing about it, and it
+        // may well still be in the thread it is answering from.
+        expect(store.get(threadRunsAtom).map((r: AgentRun) => r.id)).toEqual(['b']);
+        expect(store.get(citationsAtom).map((c: any) => c.citation_id)).toEqual(['cite-b']);
         expect(store.get(pendingRetryAtom)).toBeNull();
-        // The retry is no longer waiting on anything, so its run stops hiding —
-        // the repeated prompt is what the server is answering.
-        expect(store.get(allRunsAtom).map((r: AgentRun) => r.id)).toEqual(['a', 'b', newRunId]);
+        expect(store.get(allRunsAtom).map((r: AgentRun) => r.id)).toEqual(['b', newRunId]);
+    });
+
+    it('drops the whole plan when the server ran the retry in a thread of its own', async () => {
+        // Stopping the first run of a thread before its `thread` event arrives
+        // leaves the client with no thread id to send, so the server has no
+        // thread to truncate and creates one. Nothing the client holds is in
+        // it — keeping the plan is what showed the same prompt twice.
+        store.set(threadRunsAtom, [{ ...makeRun('a'), thread_id: null as any, status: 'error' }]);
+        store.set(currentThreadIdAtom, null);
+        store.set(citationsAtom, []);
+
+        await store.set(regenerateFromRunAtom, 'a');
+        const newRunId = store.get(pendingRetryAtom)?.runId;
+        expect(store.get(pendingRetryAtom)?.threadId).toBeNull();
+        expect(wsRequest().thread_id).toBeNull();
+
+        wsCallbacks().onThread('server-made-thread', threadEvent('server-made-thread', [], null));
+
+        expect(store.get(threadRunsAtom)).toEqual([]);
+        expect(store.get(allRunsAtom).map((r: AgentRun) => r.id)).toEqual([newRunId]);
     });
 
     it('falls back to its own plan when the server reports no truncation', async () => {

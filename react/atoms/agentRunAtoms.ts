@@ -353,6 +353,11 @@ type CommitPendingRetryArgs =
     | {
           runId: string;
           /**
+           * Thread the server is running this run in, from the `thread` event.
+           * Not always the one the retry was planned against — see below.
+           */
+          threadId?: string | null;
+          /**
            * What the server reports its truncation did. Absent from backends
            * too old to report it, and from the backstop call sites, which have
            * no such report to pass on.
@@ -369,21 +374,33 @@ type CommitPendingRetryArgs =
  * first streamed part and the run's completion, so a run that somehow streams
  * without the event cannot leave the thread showing turns the server dropped.
  *
- * That event also reports what the truncation did, and the two questions it
- * answers are different ones:
+ * A run is destroyed here only where something proves it is not in the history
+ * the replacement run was given, and the event proves that three ways:
  *
+ * - *Is this even the same thread?* The event names the thread the run is
+ *   actually in, which is not always the one the retry was planned against: a
+ *   request that names no thread, or one whose thread the server cannot load,
+ *   gets a fresh one. Nothing the client holds can be in a thread created for
+ *   this very request, so the whole plan goes. This is the case where the
+ *   client had no thread id to send — a run cancelled before the first `thread`
+ *   event never gave it one — and keeping the plan there is what showed the
+ *   user their prompt twice.
  * - *Did the truncation take effect?* A truncation the server anchored ends the
- *   thread at the retry point, so the client's planned tail goes. One that found
- *   no anchor deleted nothing, and the runs the retry meant to replace are still
- *   server-side and still in the history the replacement run was given — so the
- *   client keeps showing them and reveals the new run underneath. That reads as
- *   a repeated prompt, and it is what actually happened.
+ *   thread at the retry point, so the client's planned tail goes.
  * - *What else went with it?* `deleted_run_ids` names rows the server actually
  *   deleted, which is not the same set as the plan in either direction. It can
  *   hold more — runs another client wrote to the thread, which this one never
  *   loaded — and it can hold less, because a planned run that was never
  *   persisted has no row to delete. So an applied truncation removes the plan
  *   *and* what the server reports, never one in place of the other.
+ *
+ * What is left is a truncation that ran on the right thread and anchored on
+ * nothing: the run it looked for is not there, which is proof about that run
+ * and no other. It goes — its prompt is not in the replacement run's history,
+ * and showing it is the repeated prompt again — while the rest of the plan
+ * stays, since runs behind a phantom anchor may well still be server-side, and
+ * dropping those would strand them: gone from the UI, alive in the history of
+ * every later run.
  *
  * Without a report — an older backend, or one of the backstop call sites — the
  * plan alone is used, as before.
@@ -402,41 +419,46 @@ const commitPendingRetryAtom = atom(
         set(pendingRetryAtom, null);
         set(uncommittedRunIdAtom, null);
 
-        // The plan describes one thread. Applying it to another is already a
-        // no-op — every id in it belongs to the thread it was planned against —
-        // but say so rather than leave it looking like a truncation that ran.
-        const threadId = get(currentThreadIdAtom);
-        if (pending.threadId && threadId && pending.threadId !== threadId) {
+        // Thread the replacement run is running in. The backstop call sites
+        // carry no event to read it from and take what the `thread` event
+        // already stored for this run.
+        const runThreadId = (typeof args === 'string' ? null : args.threadId) ?? get(currentThreadIdAtom);
+
+        const serverDeleted = serverTruncation?.deleted_run_ids ?? [];
+        const removeIds = new Set<string>(serverDeleted);
+
+        const planned = new Set(pending.runIdsToRemove);
+        const extra = serverDeleted.filter((id) => !planned.has(id));
+        if (extra.length > 0) {
             logger(
-                `commitPendingRetry: thread changed (${pending.threadId} -> ${threadId}), leaving it untouched`,
+                `commitPendingRetry: the server also deleted ${extra.length} run(s) this client never held (${extra.join(', ')})`,
                 1,
             );
-            return;
         }
 
-        const removeIds = new Set<string>();
-        if (serverTruncation) {
-            const serverDeleted = serverTruncation.deleted_run_ids ?? [];
-            // A keep set that anchored ends the thread at the kept prefix, even
-            // when it deleted no row — everything the client planned to replace
-            // was already absent server-side. The run-id anchor only ran if it
-            // found its run, which an empty set is the only evidence against.
-            const applied = serverTruncation.anchored_by === 'keep_set' || serverDeleted.length > 0;
-            if (applied) {
-                pending.runIdsToRemove.forEach((id) => removeIds.add(id));
-                serverDeleted.forEach((id) => removeIds.add(id));
+        // A keep set that anchored ends the thread at the kept prefix, even when
+        // it deleted no row — everything the client planned to replace was
+        // already absent server-side. The run-id anchor only ran if it found its
+        // run, which an empty set is the only evidence against.
+        const truncationApplied =
+            serverTruncation?.anchored_by === 'keep_set' || serverDeleted.length > 0;
 
-                const planned = new Set(pending.runIdsToRemove);
-                const extra = serverDeleted.filter((id) => !planned.has(id));
-                if (extra.length > 0) {
-                    logger(
-                        `commitPendingRetry: the server also deleted ${extra.length} run(s) this client never held (${extra.join(', ')})`,
-                        1,
-                    );
-                }
-            }
-        } else {
+        if (runThreadId !== pending.threadId) {
+            // A thread the plan was not made against. Either the server started
+            // a fresh one for this request, in which case none of the planned
+            // runs can be in it, or the user has moved on to another thread, in
+            // which case the ids name runs that are no longer on screen and
+            // removing them changes nothing.
             pending.runIdsToRemove.forEach((id) => removeIds.add(id));
+        } else if (!serverTruncation || truncationApplied) {
+            // The truncation took effect, or the backend is too old to report
+            // one and the client's own plan is all there is to go on.
+            pending.runIdsToRemove.forEach((id) => removeIds.add(id));
+        } else if (serverTruncation.anchored_by === 'retry_run_id') {
+            // Nothing to delete from: the run the retry is anchored on is not in
+            // the thread, so it was never persisted. That says nothing about the
+            // runs behind it, which stay.
+            removeIds.add(pending.anchorRunId);
         }
 
         if (removeIds.size > 0) {
@@ -449,10 +471,12 @@ const commitPendingRetryAtom = atom(
             set(maybeShowCitationTipAtom);
         }
 
+        const keptFromPlan = pending.runIdsToRemove.filter((id) => !removeIds.has(id));
         logger(
-            removeIds.size > 0
-                ? `commitPendingRetry: removed ${removeIds.size} run(s) for retry ${runId} after the server truncated the thread`
-                : `commitPendingRetry: retry ${runId} kept every run — the server truncation never anchored`,
+            `commitPendingRetry: retry ${runId} removed ${removeIds.size} run(s)` +
+                (keptFromPlan.length > 0
+                    ? `, keeping ${keptFromPlan.length} the server did not confirm gone (${keptFromPlan.join(', ')})`
+                    : ''),
             1,
         );
     },
@@ -651,12 +675,14 @@ function createAgentRunShell(
         // Both anchors travel together: the keep set is ignored server-side
         // unless retry_run_id marks the request as a retry, and it degrades to
         // retry_run_id alone when it matches no run in the thread.
+        //
+        // Sent even when empty — that is the anchor for a retry on the first run
+        // of a thread ("I keep nothing here"), and the only one it has, since
+        // retry_run_id matches nothing when that run was never persisted.
         ...(retryAnchor
             ? {
                   retry_run_id: retryAnchor.retryRunId,
-                  ...(retryAnchor.keepRunIds.length > 0
-                      ? { retry_keep_run_ids: retryAnchor.keepRunIds }
-                      : {}),
+                  retry_keep_run_ids: retryAnchor.keepRunIds,
               }
             : {}),
     };
@@ -985,6 +1011,7 @@ async function startRetry(
                 // retry running — not the resume-chain root the request is
                 // anchored on, whose turn the user never clicked.
                 sourceRunId: runId,
+                anchorRunId: retryAnchor.retryRunId,
                 threadId,
                 runIdsToRemove,
             });
@@ -1992,6 +2019,7 @@ function createWSCallbacks(set: Setter): WSCallbacks {
             if (activeRunId) {
                 set(commitPendingRetryAtom, {
                     runId: activeRunId,
+                    threadId: newThreadId,
                     serverTruncation: event.retry_truncation ?? null,
                 });
             }

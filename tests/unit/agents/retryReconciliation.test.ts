@@ -41,8 +41,9 @@ describe('buildRetryAnchor', () => {
     it('keeps nothing when the first run is regenerated', () => {
         const runs = [makeRun('a'), makeRun('b')];
 
-        // An empty keep set is unanchored server-side, which falls back to
-        // retryRunId rather than deleting the thread.
+        // Sent as an empty set rather than dropped: it tells the server the
+        // client holds nothing here, which discards the whole thread — the only
+        // anchor a retry on the first run has.
         expect(buildRetryAnchor(runs, 'a', 0)).toEqual({
             retryRunId: 'a',
             keepRunIds: [],

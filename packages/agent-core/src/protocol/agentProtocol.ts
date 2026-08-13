@@ -2085,8 +2085,16 @@ export interface AgentRunRequest {
      * and every later retry anchored on it matches nothing. This set gives the
      * server a second anchor: it deletes the trailing block of runs that are not
      * in the set, reconciling a thread whose client-side and server-side views
-     * have drifted apart. A set matching no run in the thread is ignored, so
-     * `retry_run_id` must always be sent alongside it as the fallback.
+     * have drifted apart. A non-empty set matching no run in the thread is
+     * ignored, so `retry_run_id` must always be sent alongside it as the
+     * fallback.
+     *
+     * An empty array is meaningful and is not the same as omitting the field:
+     * it says the client holds no run in this thread, which discards the whole
+     * thread. Retrying the first run of a thread has no other anchor — there is
+     * no kept run in front of it, and `retry_run_id` matches nothing when that
+     * run was never persisted. Omitting the field says nothing at all, which is
+     * what an older client does.
      */
     retry_keep_run_ids?: string[];
     /** Pre-generated assistant message ID (optional) */
