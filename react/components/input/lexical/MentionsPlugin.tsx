@@ -19,6 +19,7 @@ import {
     TextNode,
 } from 'lexical';
 import { $createMentionNode } from './MentionNode';
+import { itemToMentionDescriptor } from '../../../utils/mentionDescriptor';
 import { searchTitleCreatorYear } from '../../../utils/search';
 import { getDisplayNameFromItem } from '../../../utils/sourceUtils';
 import { truncateText } from '../../../utils/stringUtils';
@@ -93,11 +94,11 @@ export const MentionsPlugin: React.FC<{
             nodeToReplace: TextNode | null,
             closeMenu: () => void,
         ) => {
+            // The descriptor is resolved here, once: the pill renders from it
+            // and never reads Zotero itself.
+            const descriptor = itemToMentionDescriptor(selectedOption.item);
             editor.update(() => {
-                const mentionNode = $createMentionNode(
-                    selectedOption.item.libraryID,
-                    selectedOption.item.key,
-                );
+                const mentionNode = $createMentionNode(descriptor);
                 if (nodeToReplace) {
                     nodeToReplace.replace(mentionNode);
                 } else {

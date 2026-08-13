@@ -1,54 +1,26 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext';
 import { $getNodeByKey, NodeKey } from 'lexical';
-import { CSSItemTypeIcon, CSSIcon } from '../../icons/icons';
-import { truncateText } from '../../../utils/stringUtils';
-import { getDisplayNameFromItem } from '../../../utils/sourceUtils';
-import { $isMentionNode } from './MentionNode';
-
-const MAX_ITEM_TEXT_LENGTH = 30;
+import { CancelIcon, FileIcon, Icon } from '@beaver/agent-ui/icons';
+import { getHost } from '@beaver/agent-ui/host';
+import { $isMentionNode, type MentionDescriptor } from './MentionNode';
 
 /**
  * Visual for a MentionNode.
  *
- * Styled to match MessageItemButton (same `source-button` class), so pills
- * feel at home with the attachment row above the editor. Kept intentionally
- * thin: no hover preview, no validation, no atom wiring. Those can be layered
- * on later when mentions are integrated with the attachment system.
+ * Renders purely from the node's descriptor - no data lookup, so the pill works
+ * in any client. Styled to match MessageItemButton (same `source-button`
+ * class), so pills feel at home with the attachment row above the editor. Kept
+ * intentionally thin: no hover preview, no validation, no atom wiring. Those
+ * can be layered on later when mentions are integrated with the attachment
+ * system.
  */
 export const MentionPill: React.FC<{
     nodeKey: NodeKey;
-    libraryID: number;
-    itemKey: string;
-}> = ({ nodeKey, libraryID, itemKey }) => {
+    descriptor: MentionDescriptor;
+}> = ({ nodeKey, descriptor }) => {
     const [editor] = useLexicalComposerContext();
     const [isHovered, setIsHovered] = useState(false);
-    const [item, setItem] = useState<Zotero.Item | null>(null);
-
-    useEffect(() => {
-        let cancelled = false;
-        // Cached lookup first (synchronous in most cases)
-        try {
-            const cached = Zotero.Items.getByLibraryAndKey(libraryID, itemKey);
-            if (cached) {
-                setItem(cached as Zotero.Item);
-                return;
-            }
-        } catch {
-            /* fall through */
-        }
-        // Fallback to async load
-        Zotero.Items.getByLibraryAndKeyAsync(libraryID, itemKey)
-            .then((loaded) => {
-                if (!cancelled && loaded) setItem(loaded as Zotero.Item);
-            })
-            .catch(() => {
-                /* ignore - render fallback */
-            });
-        return () => {
-            cancelled = true;
-        };
-    }, [libraryID, itemKey]);
 
     const handleRemove = (e: React.MouseEvent) => {
         e.preventDefault();
@@ -59,19 +31,7 @@ export const MentionPill: React.FC<{
         });
     };
 
-    const displayName = item
-        ? item.isRegularItem()
-            ? truncateText(getDisplayNameFromItem(item), MAX_ITEM_TEXT_LENGTH)
-            : truncateText(item.getDisplayTitle(), MAX_ITEM_TEXT_LENGTH)
-        : `${libraryID}-${itemKey}`;
-
-    const iconName = (() => {
-        try {
-            return item?.getItemTypeIconName() ?? null;
-        } catch {
-            return null;
-        }
-    })();
+    const { label, sublabel, iconName, ref } = descriptor;
 
     return (
         // Render as a button to match the existing MessageItemButton look.
@@ -83,7 +43,7 @@ export const MentionPill: React.FC<{
             data-lexical-decorator="true"
             className="variant-outline source-button beaver-mention-pill"
             style={{ height: '22px', verticalAlign: 'middle' }}
-            aria-label={`Zotero item: ${displayName}`}
+            aria-label={sublabel ? `Mention: ${label}, ${sublabel}` : `Mention: ${label}`}
             onMouseEnter={() => setIsHovered(true)}
             onMouseLeave={() => setIsHovered(false)}
             onMouseDown={(e) => {
@@ -92,13 +52,10 @@ export const MentionPill: React.FC<{
             }}
             onClick={(e) => {
                 e.preventDefault();
-                if (!item) return;
-                try {
-                    const win = Zotero.getMainWindow();
-                    if (win && win.ZoteroPane) win.ZoteroPane.selectItem(item.id);
-                } catch {
-                    /* ignore */
-                }
+                // A descriptor without a ref (e.g. a document selection) points
+                // at nothing to reveal, so the pill is simply not activatable.
+                if (!ref) return;
+                getHost().navigation?.revealInLibrary(ref);
             }}
         >
             {isHovered ? (
@@ -109,14 +66,20 @@ export const MentionPill: React.FC<{
                     onMouseDown={(e) => e.preventDefault()}
                     onClick={handleRemove}
                 >
-                    <CSSIcon name="x-8" className="icon-16" />
+                    <Icon icon={CancelIcon} className="scale-80" />
                 </span>
             ) : iconName ? (
                 <span className="scale-80">
-                    <CSSItemTypeIcon itemType={iconName} />
+                    {/* The client owns its item-type artwork; the generic
+                        document glyph is the honest fallback when it has none. */}
+                    {getHost().components?.itemTypeIcon({ itemType: iconName })
+                        ?? <Icon icon={FileIcon} />}
                 </span>
             ) : null}
-            <span className="truncate">{displayName}</span>
+            <span className="truncate">{label}</span>
+            {sublabel ? (
+                <span className="truncate font-color-tertiary ml-1">{sublabel}</span>
+            ) : null}
         </button>
     );
 };
