@@ -435,7 +435,7 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
                                     loading={isSubmittingEdit}
                                     disabled={editedContent.length === 0 || isPending || !selectedModel || isSlashMenuOpen}
                                 >
-                                    <span>Send <span className="opacity-50">⏎</span></span>
+                                    <span>Send {isSubmittingEdit ? '' : <span className="opacity-50">⏎</span>}</span>
                                 </Button>
                             </div>
                         </div>
