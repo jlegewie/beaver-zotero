@@ -441,9 +441,12 @@ describe('simplifyNoteHtml', () => {
         });
 
         expect(simplified).toContain('loc="pagexiv"');
+        // No Beaver token, so the projected locator is the printed label the
+        // citation itself stores.
         expect(metadata.elements.get('c_ROMANPG1_0')!.originalAttrs).toEqual({
             item_id: 'u-ROMANPG1',
             loc: 'pagexiv',
+            locSpace: 'note',
         });
     });
 
@@ -479,6 +482,7 @@ describe('simplifyNoteHtml', () => {
         expect(metadata.elements.get('c_BEAVLOC1_0')!.originalAttrs).toEqual({
             item_id: 'u-BEAVLOC1',
             loc: 's56-s59',
+            locSpace: 'document',
             cslLabel: 'page',
         });
     });
@@ -566,7 +570,7 @@ describe('expandToRawHtml', () => {
         const metadata: SimplificationMetadata = {
             elements: new Map([
                 ['c_EX1_0', { rawHtml: rawCit, type: 'citation' as const, originalAttrs: { item_id: 'u-EX1' } }],
-                ['c_EX1_1', { rawHtml: rawCitation('EX1', 1, '10'), type: 'citation' as const, originalAttrs: { item_id: 'u-EX1', loc: 'page10' } }],
+                ['c_EX1_1', { rawHtml: rawCitation('EX1', 1, '10'), type: 'citation' as const, originalAttrs: { item_id: 'u-EX1', loc: 'page10', locSpace: 'note' as const } }],
                 ['c_K1+K2_0', { rawHtml: rawCompoundCitation(['K1', 'K2']), type: 'compound-citation' as const, isCompound: true }],
                 ['a_EA1', { rawHtml: rawAnnot, type: 'annotation' as const, originalText: 'text here' }],
                 ['ai_EAI1', { rawHtml: rawAI, type: 'annotation-image' as const }],
@@ -603,9 +607,13 @@ describe('expandToRawHtml', () => {
         const { metadata } = makeMetadata();
         const input = '<citation item_id="1-EX1" page="99" label="Author, 2024" ref="c_EX1_0"/>';
         const result = expandToRawHtml(input, metadata, 'old');
+        // The citation projected no locator, so there was nothing to copy and
+        // the added one counts document pages: it is recorded as the token
+        // (and would be translated, were any page labels cached).
         expect(createCitationHTML).toHaveBeenCalledWith(
             expect.objectContaining({ key: 'EX1' }),
-            '99'
+            '99',
+            { beaverLoc: 'page99' }
         );
         expect(result).toContain('data-citation=');
     });
@@ -617,7 +625,8 @@ describe('expandToRawHtml', () => {
         expandToRawHtml(input, metadata, 'old');
         expect(createCitationHTML).toHaveBeenCalledWith(
             expect.objectContaining({ key: 'EX1' }),
-            '25'
+            '25',
+            {}
         );
     });
 
@@ -626,10 +635,11 @@ describe('expandToRawHtml', () => {
         // c_EX1_1 originally has page="10" — remove page attr
         const input = '<citation item_id="1-EX1" label="Author, 2024, p. 10" ref="c_EX1_1"/>';
         expandToRawHtml(input, metadata, 'old');
-        // page is now undefined vs original "10" → attrs changed → rebuild
+        // no token vs the stored "page10" → attrs changed → rebuild
         expect(createCitationHTML).toHaveBeenCalledWith(
             expect.objectContaining({ key: 'EX1' }),
-            undefined
+            undefined,
+            {}
         );
     });
 
@@ -650,7 +660,8 @@ describe('expandToRawHtml', () => {
         expandToRawHtml(input, metadata, 'new', undefined, undefined, resolvedLocatorPages);
         expect(createCitationHTML).toHaveBeenCalledWith(
             expect.objectContaining({ key: 'EX1' }),
-            '9'
+            '9',
+            { beaverLoc: 's4' }
         );
     });
 
@@ -659,9 +670,11 @@ describe('expandToRawHtml', () => {
         // No resolvedLocatorPages entry → structural locator can't be stored.
         const input = '<citation id="1-EX1" loc="s4" label="(Author, 2024)" ref="c_EX1_new"/>';
         expandToRawHtml(input, metadata, 'new', undefined, undefined, {});
+        // The token is recorded even though it resolved to no page.
         expect(createCitationHTML).toHaveBeenCalledWith(
             expect.objectContaining({ key: 'EX1' }),
-            undefined
+            undefined,
+            { beaverLoc: 's4' }
         );
     });
 
@@ -675,7 +688,8 @@ describe('expandToRawHtml', () => {
         expandToRawHtml(input, metadata, 'new', undefined, pageLabels as any, resolvedLocatorPages);
         expect(createCitationHTML).toHaveBeenCalledWith(
             expect.objectContaining({ key: 'EX1' }),
-            '9'
+            '9',
+            { beaverLoc: 's4' }
         );
     });
 
@@ -687,7 +701,8 @@ describe('expandToRawHtml', () => {
         expandToRawHtml(input, metadata, 'new', undefined, undefined, resolvedLocatorPages);
         expect(createCitationHTML).toHaveBeenCalledWith(
             expect.objectContaining({ key: 'EX1' }),
-            '3'
+            '3',
+            { beaverLoc: 's4' }
         );
     });
 
@@ -698,7 +713,8 @@ describe('expandToRawHtml', () => {
         expandToRawHtml(input, metadata, 'new', undefined, undefined, resolvedLocatorPages);
         expect(createCitationHTML).toHaveBeenCalledWith(
             expect.objectContaining({ key: 'ATT1' }),
-            '9'
+            '9',
+            { beaverLoc: 's4' }
         );
     });
 
@@ -710,7 +726,8 @@ describe('expandToRawHtml', () => {
         expandToRawHtml(input, metadata, 'new', undefined, undefined, resolvedLocatorPages);
         expect(createCitationHTML).toHaveBeenCalledWith(
             expect.objectContaining({ key: 'ATT1' }),
-            '9'
+            '9',
+            { beaverLoc: 's4' }
         );
     });
 
@@ -720,7 +737,8 @@ describe('expandToRawHtml', () => {
         expandToRawHtml(input, metadata, 'new', undefined, undefined, {});
         expect(createCitationHTML).toHaveBeenCalledWith(
             expect.objectContaining({ key: 'ATT1' }),
-            undefined
+            undefined,
+            { beaverLoc: 's4' }
         );
     });
 
@@ -751,7 +769,8 @@ describe('expandToRawHtml', () => {
         const result = expandToRawHtml(input, metadata, 'new');
         expect(createCitationHTML).toHaveBeenCalledWith(
             expect.objectContaining({ key: 'NEW1' }),
-            undefined
+            undefined,
+            {}
         );
         expect(result).toContain('data-citation=');
     });
@@ -762,7 +781,8 @@ describe('expandToRawHtml', () => {
         expandToRawHtml(input, metadata, 'new');
         expect(createCitationHTML).toHaveBeenCalledWith(
             expect.objectContaining({ key: 'NEW1' }),
-            '42'
+            '42',
+            { beaverLoc: 'page42' }
         );
     });
 
@@ -838,7 +858,8 @@ describe('expandToRawHtml', () => {
         expandToRawHtml(input, metadata, 'new');
         expect(createCitationHTML).toHaveBeenCalledWith(
             expect.objectContaining({ key: 'ATT1' }),
-            undefined
+            undefined,
+            {}
         );
     });
 
@@ -848,7 +869,8 @@ describe('expandToRawHtml', () => {
         expandToRawHtml(input, metadata, 'new');
         expect(createCitationHTML).toHaveBeenCalledWith(
             expect.objectContaining({ key: 'ATT1' }),
-            '7'
+            '7',
+            { beaverLoc: 'page7' }
         );
     });
 
@@ -1556,7 +1578,8 @@ describe('citation round-trips', () => {
         // Should have called createCitationHTML with the new page
         expect(createCitationHTML).toHaveBeenCalledWith(
             expect.objectContaining({ key: 'PU1' }),
-            '99'
+            '99',
+            {}
         );
         expect(expanded).toContain('data-citation=');
     });
@@ -1593,7 +1616,8 @@ describe('citation round-trips', () => {
         // New citation built via createCitationHTML
         expect(createCitationHTML).toHaveBeenCalledWith(
             expect.objectContaining({ key: 'BRAND' }),
-            undefined
+            undefined,
+            {}
         );
     });
 });

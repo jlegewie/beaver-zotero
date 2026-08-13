@@ -1407,7 +1407,8 @@ describe('page locator normalization in apply-undo cycle', () => {
         const { createCitationHTML } = await import('../../../src/utils/zoteroUtils');
         expect(createCitationHTML).toHaveBeenCalledWith(
             expect.objectContaining({ key: 'RANGECIT' }),
-            '50'
+            '50',
+            { beaverLoc: 'page50-55' }
         );
         expect(item._getHtml()).toContain('RANGECIT');
 
@@ -1427,7 +1428,8 @@ describe('page locator normalization in apply-undo cycle', () => {
         const { createCitationHTML } = await import('../../../src/utils/zoteroUtils');
         expect(createCitationHTML).toHaveBeenCalledWith(
             expect.objectContaining({ key: 'COMMACIT' }),
-            '222'
+            '222',
+            { beaverLoc: 'page222, 237-238' }
         );
 
         const restored = await undoEdit(item, action);
@@ -1489,7 +1491,8 @@ describe('page locator normalization in apply-undo cycle', () => {
         const { createCitationHTML } = await import('../../../src/utils/zoteroUtils');
         expect(createCitationHTML).toHaveBeenCalledWith(
             expect.objectContaining({ key: 'CITE1' }),
-            '42'
+            '42',
+            {}
         );
 
         // Undo should restore the PM-canonical version of the original note

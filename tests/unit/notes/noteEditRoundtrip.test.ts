@@ -7,7 +7,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 // Mock createCitationHTML — same pattern as noteHtmlSimplifier.test.ts
 vi.mock('../../../src/utils/zoteroUtils', () => ({
     createCitationHTML: vi.fn(
-        (item: any, page?: string) =>
+        (item: any, page?: string, options?: { cslLabel?: string; beaverLoc?: string }) =>
             `<span class="citation" data-citation="${encodeURIComponent(JSON.stringify({
                 citationItems: [{
                     uris: [`http://zotero.org/users/1/items/${item.key}`],
@@ -18,6 +18,9 @@ vi.mock('../../../src/utils/zoteroUtils', () => ({
                         issued: { 'date-parts': [['2024']] },
                     },
                     locator: page || '',
+                    // Mirrors the real writer, so a rebuilt citation can be fed
+                    // back through simplification in the same test.
+                    ...(options?.beaverLoc ? { beaver: { v: 1, loc: options.beaverLoc } } : {}),
                 }],
                 properties: {},
             }))}"><span class="citation-item">${item.getField?.('title') || 'Mock Title'}${page ? ', p. ' + page : ''}</span></span>`
@@ -647,7 +650,8 @@ describe('edit + undo roundtrip', () => {
         // The new citation should have been built
         expect(createCitationHTML).toHaveBeenCalledWith(
             expect.objectContaining({ key: 'NEWKEY' }),
-            undefined
+            undefined,
+            {}
         );
 
         // expandedOld should be raw HTML of existing citation
@@ -1973,7 +1977,8 @@ describe('page locator normalization in citation expansion', () => {
         // createCitationHTML should have been called with the normalized single page
         expect(createCitationHTML).toHaveBeenCalledWith(
             expect.objectContaining({ key: 'NEWITEM' }),
-            '222'
+            '222',
+            { beaverLoc: 'page222, 237-238' }
         );
         expect(expanded).toContain('data-citation=');
     });
@@ -1987,7 +1992,8 @@ describe('page locator normalization in citation expansion', () => {
 
         expect(createCitationHTML).toHaveBeenCalledWith(
             expect.objectContaining({ key: 'LEGACYITEM' }),
-            '222'
+            '222',
+            { beaverLoc: 'page222, 237-238' }
         );
     });
 
@@ -2000,7 +2006,8 @@ describe('page locator normalization in citation expansion', () => {
 
         expect(createCitationHTML).toHaveBeenCalledWith(
             expect.objectContaining({ key: 'RANGEITEM' }),
-            '100'
+            '100',
+            { beaverLoc: 'page100–105' }
         );
     });
 
@@ -2013,7 +2020,8 @@ describe('page locator normalization in citation expansion', () => {
 
         expect(createCitationHTML).toHaveBeenCalledWith(
             expect.objectContaining({ key: 'SINGLEITEM' }),
-            '42'
+            '42',
+            { beaverLoc: 'page42' }
         );
     });
 
@@ -2026,7 +2034,8 @@ describe('page locator normalization in citation expansion', () => {
 
         expect(createCitationHTML).toHaveBeenCalledWith(
             expect.objectContaining({ key: 'SECITEM' }),
-            '§3.2'
+            '§3.2',
+            { beaverLoc: 'page§3.2' }
         );
     });
 
@@ -2045,7 +2054,8 @@ describe('page locator normalization in citation expansion', () => {
         // Should have been called with normalized page
         expect(createCitationHTML).toHaveBeenCalledWith(
             expect.objectContaining({ key: 'PGCHG' }),
-            '10'
+            '10',
+            {}
         );
         expect(expanded).toContain('data-citation=');
     });
@@ -2088,7 +2098,8 @@ describe('page locator normalization in citation expansion', () => {
         // Verify normalization happened
         expect(createCitationHTML).toHaveBeenCalledWith(
             expect.objectContaining({ key: 'NEWCIT' }),
-            '50' // normalized from "50-55"
+            '50', // normalized from "50-55"
+            { beaverLoc: 'page50-55' }
         );
 
         // Apply the edit
@@ -2146,7 +2157,8 @@ describe('page locator normalization in citation expansion', () => {
         // createCitationHTML should have been called with normalized page
         expect(createCitationHTML).toHaveBeenCalledWith(
             mockAttItem,
-            '30' // normalized from "30-35"
+            '30', // normalized from "30-35"
+            { beaverLoc: 'page30-35' }
         );
     });
 });
@@ -2188,7 +2200,7 @@ describe('Page label translation during citation expansion', () => {
         expandToRawHtml(input, metadata, 'new', undefined, pageLabels);
 
         // Page 15 → pageLabels[14] = "352"
-        expect(createCitationHTML).toHaveBeenCalledWith(mockItem, '352');
+        expect(createCitationHTML).toHaveBeenCalledWith(mockItem, '352', { beaverLoc: 'page15' });
     });
 
     it('translates to same value for sequential labels (identity case)', () => {
@@ -2215,7 +2227,7 @@ describe('Page label translation during citation expansion', () => {
         expandToRawHtml(input, metadata, 'new', undefined, pageLabels);
 
         // Page 15 → pageLabels[14] = "15" (identity)
-        expect(createCitationHTML).toHaveBeenCalledWith(mockItem, '15');
+        expect(createCitationHTML).toHaveBeenCalledWith(mockItem, '15', { beaverLoc: 'page15' });
     });
 
     it('passes through page when no labels are cached', () => {
@@ -2239,7 +2251,7 @@ describe('Page label translation during citation expansion', () => {
         const input = '<citation att_id="1-GHI789" page="15"/>';
         expandToRawHtml(input, metadata, 'new', undefined, pageLabels);
 
-        expect(createCitationHTML).toHaveBeenCalledWith(mockItem, '15');
+        expect(createCitationHTML).toHaveBeenCalledWith(mockItem, '15', { beaverLoc: 'page15' });
     });
 
     it('preserves existing citation rawHtml when not edited', () => {
@@ -2283,7 +2295,7 @@ describe('Page label translation during citation expansion', () => {
         const editedSimplified = simplified.replace(/id="1-ITEMKEY"/, 'id="1-NEWKEY"');
         expandToRawHtml(editedSimplified, metadata, 'new', undefined, pageLabels);
 
-        expect(createCitationHTML).toHaveBeenCalledWith(mockItem, 'ii');
+        expect(createCitationHTML).toHaveBeenCalledWith(mockItem, 'ii', {});
     });
 
     it('does not translate unchanged cold-cache label when only the citation target changes', () => {
@@ -2309,10 +2321,10 @@ describe('Page label translation during citation expansion', () => {
         const editedSimplified = simplified.replace(/id="1-ITEMKEY"/, 'id="1-NEWKEY"');
         expandToRawHtml(editedSimplified, metadata, 'new', undefined, pageLabels);
 
-        expect(createCitationHTML).toHaveBeenCalledWith(mockItem, '100');
+        expect(createCitationHTML).toHaveBeenCalledWith(mockItem, '100', {});
     });
 
-    it('stores a page locator added to a chapter-labelled citation as sent', () => {
+    it('translates a page locator added to a chapter-labelled citation', () => {
         const labels = ['i', 'ii', 'iii', '1', '2', '3'];
         setupPageLabels(labels);
 
@@ -2348,7 +2360,12 @@ describe('Page label translation during citation expansion', () => {
         );
         expandToRawHtml(editedSimplified, metadata, 'new', undefined, pageLabels);
 
-        expect(createCitationHTML).toHaveBeenCalledWith(mockItem, '4');
+        // The added page locator replaces the chapter locator, so the rebuild
+        // takes the default page label rather than keeping "chapter". The
+        // citation projected no locator, so the added one counts document
+        // pages: physical page 4 is stored as the label "1", and the token is
+        // recorded so later reads project what the agent wrote.
+        expect(createCitationHTML).toHaveBeenCalledWith(mockItem, '1', { beaverLoc: 'page4' });
     });
 
     it('restores unchanged label-backed citations verbatim when labels are supplied', () => {
@@ -2390,11 +2407,185 @@ describe('Page label translation during citation expansion', () => {
 
         const { simplified, metadata } = simplifyNoteHtml(noteHtml, 1);
 
-        // The agent is shown the stored label and sends the next one back; it
-        // is stored verbatim rather than read as a physical page number.
+        // The citation carries no Beaver locator token, so the agent is shown
+        // the label it stores and sends the next one back; that is stored
+        // verbatim rather than read as a physical page number.
         const editedSimplified = simplified.replace(/loc="pagexiv"/, 'loc="pagexv"');
         expandToRawHtml(editedSimplified, metadata, 'new', undefined, pageLabels);
 
-        expect(createCitationHTML).toHaveBeenCalledWith(mockItem, 'xv');
+        expect(createCitationHTML).toHaveBeenCalledWith(mockItem, 'xv', {});
+    });
+});
+
+
+// =============================================================================
+// Stored locator tokens
+// =============================================================================
+
+describe('Stored locator tokens in citation expansion', () => {
+    /**
+     * A raw citation carrying Beaver's recorded locator token next to Zotero's
+     * page locator, as `createCitationHTML` writes it.
+     */
+    function rawCitationWithToken(
+        key: string,
+        loc: string,
+        { page = '12', cslLabel }: { page?: string; cslLabel?: string } = {},
+    ): string {
+        const citationData = {
+            citationItems: [{
+                uris: [`http://zotero.org/users/1/items/${key}`],
+                locator: page,
+                ...(cslLabel ? { label: cslLabel } : {}),
+                beaver: { v: 1, loc },
+            }],
+        };
+        return `<span class="citation" data-citation="${encodeURIComponent(JSON.stringify(citationData))}">`
+            + '<span class="citation-item">(Author, 2024)</span></span>';
+    }
+
+    it('returns the stored raw HTML when a structural locator is copied back verbatim', () => {
+        const noteHtml = wrap(`<p>Text ${rawCitationWithToken('SENT1', 's56-s59')} more text</p>`);
+        const { simplified, metadata } = simplifyNoteHtml(noteHtml, 1);
+
+        // The note projects the token it stores, not the page it resolved to.
+        expect(simplified).toContain('loc="s56-s59"');
+
+        const expanded = expandToRawHtml(simplified, metadata, 'old');
+
+        expect(expanded).toBe(roundtripExpected(noteHtml));
+        expect(createCitationHTML).not.toHaveBeenCalled();
+    });
+
+    it('rebuilds and records the new token when a structural locator is changed', () => {
+        const noteHtml = wrap(`<p>Text ${rawCitationWithToken('SENT1', 's56-s59')} more text</p>`);
+        const { simplified, metadata } = simplifyNoteHtml(noteHtml, 1);
+
+        const editedSimplified = simplified.replace('loc="s56-s59"', 'loc="s60-s62"');
+        const resolvedLocatorPages = { 'zotero:1-SENT1:s60-s62': '13' };
+        expandToRawHtml(editedSimplified, metadata, 'new', undefined, undefined, resolvedLocatorPages);
+
+        expect(createCitationHTML).toHaveBeenCalledWith(
+            expect.objectContaining({ key: 'SENT1' }),
+            '13',
+            { beaverLoc: 's60-s62' },
+        );
+    });
+
+    it('translates an edited locator to a page label when the token counts document pages', () => {
+        // Physical page 15 is printed "352" and 16 is printed "353".
+        const labels = Array.from({ length: 20 }, (_, i) => String(i + 1));
+        labels[14] = '352';
+        labels[15] = '353';
+        const pageLabels = { 99: { ...labels } };
+
+        const mockItem = {
+            id: 99,
+            key: 'PGDOC',
+            libraryID: 1,
+            getField: vi.fn(() => 'Paper'),
+            isAttachment: vi.fn(() => true),
+            isRegularItem: vi.fn(() => false),
+            parentItem: null,
+            getAttachments: vi.fn(() => []),
+        };
+        (globalThis as any).Zotero.Items.getByLibraryAndKey = vi.fn(() => mockItem);
+
+        const noteHtml = wrap(`<p>Text ${rawCitationWithToken('PGDOC', 'page15', { page: '352' })} more text</p>`);
+        const { simplified, metadata } = simplifyNoteHtml(noteHtml, 1);
+
+        // The agent reads the physical page it wrote, not the printed label.
+        expect(simplified).toContain('loc="page15"');
+        const editedSimplified = simplified.replace('loc="page15"', 'loc="page16"');
+        expandToRawHtml(editedSimplified, metadata, 'new', undefined, pageLabels);
+
+        expect(createCitationHTML).toHaveBeenCalledWith(mockItem, '353', { beaverLoc: 'page16' });
+    });
+
+    it('stores an edited printed label as sent and keeps the citation in note space', () => {
+        const labels = Array.from({ length: 20 }, (_, i) => String(i + 1));
+        labels[14] = '352';
+        labels[15] = '353';
+        labels[16] = '354';
+        const pageLabels = { 99: { ...labels } };
+
+        const mockItem = {
+            id: 99,
+            key: 'PGNOTE',
+            libraryID: 1,
+            getField: vi.fn(() => 'Paper'),
+            isAttachment: vi.fn(() => true),
+            isRegularItem: vi.fn(() => false),
+            parentItem: null,
+            getAttachments: vi.fn(() => []),
+        };
+        (globalThis as any).Zotero.Items.getByLibraryAndKey = vi.fn(() => mockItem);
+
+        // No Beaver locator key, so the projected token can only be the printed
+        // label the citation stores.
+        const noteHtml = wrap(`<p>Text ${rawCitation('PGNOTE', 1, '352', '(Author, 2024, p. 352)')} more text</p>`);
+        const { simplified, metadata } = simplifyNoteHtml(noteHtml, 1);
+
+        expect(simplified).toContain('loc="page352"');
+        const editedSimplified = simplified.replace('loc="page352"', 'loc="page16"');
+        const edited = expandToRawHtml(editedSimplified, metadata, 'new', undefined, pageLabels);
+
+        // Stored as sent — translating it would have stored "353" — and without
+        // Beaver's key, which would have claimed the label counts pages.
+        expect(createCitationHTML).toHaveBeenCalledWith(mockItem, '16', {});
+
+        // Editing the same citation again reads it the same way: one edit alone
+        // cannot show that the citation kept its numbering.
+        const editedNote = wrap(`<p>Text ${edited} more text</p>`);
+        const second = simplifyNoteHtml(editedNote, 1);
+        expect(second.simplified).toContain('loc="page16"');
+        const secondEdit = second.simplified.replace('loc="page16"', 'loc="page17"');
+        expandToRawHtml(secondEdit, second.metadata, 'new', undefined, pageLabels);
+
+        expect(createCitationHTML).toHaveBeenLastCalledWith(mockItem, '17', {});
+    });
+
+    it('records the token when a printed-label citation is retargeted to a structural locator', () => {
+        const labels = Array.from({ length: 20 }, (_, i) => String(i + 1));
+        labels[14] = '352';
+        labels[15] = '353';
+        const pageLabels = { 99: { ...labels } };
+
+        const mockItem = {
+            id: 99,
+            key: 'PGSTRUCT',
+            libraryID: 1,
+            getField: vi.fn(() => 'Paper'),
+            isAttachment: vi.fn(() => true),
+            isRegularItem: vi.fn(() => false),
+            parentItem: null,
+            getAttachments: vi.fn(() => []),
+        };
+        (globalThis as any).Zotero.Items.getByLibraryAndKey = vi.fn(() => mockItem);
+
+        const noteHtml = wrap(`<p>Text ${rawCitation('PGSTRUCT', 1, '352', '(Author, 2024, p. 352)')} more text</p>`);
+        const { simplified, metadata } = simplifyNoteHtml(noteHtml, 1);
+
+        // A structural locator only ever counts document positions, so the
+        // citation is recorded with the token even though it had none before.
+        const editedSimplified = simplified.replace('loc="page352"', 'loc="s10-s12"');
+        const resolvedLocatorPages = { 'zotero:1-PGSTRUCT:s10-s12': '353' };
+        expandToRawHtml(editedSimplified, metadata, 'new', undefined, pageLabels, resolvedLocatorPages);
+
+        expect(createCitationHTML).toHaveBeenCalledWith(mockItem, '353', { beaverLoc: 's10-s12' });
+    });
+
+    it('keeps the CSL label when a citation is retargeted without touching its locator', () => {
+        const noteHtml = wrap(`<p>Text ${rawCitationWithToken('CHAP1', 'page12', { cslLabel: 'chapter' })} more text</p>`);
+        const { simplified, metadata } = simplifyNoteHtml(noteHtml, 1);
+
+        const editedSimplified = simplified.replace('id="1-CHAP1"', 'id="1-NEWKEY"');
+        expandToRawHtml(editedSimplified, metadata, 'new');
+
+        expect(createCitationHTML).toHaveBeenCalledWith(
+            expect.objectContaining({ key: 'NEWKEY' }),
+            '12',
+            { cslLabel: 'chapter', beaverLoc: 'page12' },
+        );
     });
 });

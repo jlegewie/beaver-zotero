@@ -35,6 +35,18 @@ export interface SimplificationMetadata {
     elements: Map<string, StoredElement>;
 }
 
+/**
+ * Which numbering a citation's locator token counts in.
+ *
+ *  - `document` — positions in the file itself: physical pages and structural
+ *    ids, the numbering the agent reads documents in. A page locator in this
+ *    space is translated to the document's printed label before being stored.
+ *  - `note` — the printed labels the citation itself stores, which is all a
+ *    citation without Beaver's locator key can be read as. A locator in this
+ *    space is already a label and is stored as sent.
+ */
+export type LocatorSpace = 'document' | 'note';
+
 export interface StoredElement {
     rawHtml: string;
     type: 'citation' | 'compound-citation' | 'annotation' | 'annotation-image' | 'image' | 'link';
@@ -46,6 +58,13 @@ export interface StoredElement {
          * when the citation projects no locator.
          */
         loc?: string;
+        /**
+         * Which numbering `loc` counts in, so a rebuild stores an edited locator
+         * the way the agent meant it. Read off stored data alone (the presence
+         * of Beaver's locator key), never off a cache lookup, so it cannot
+         * change between two reads of the same note.
+         */
+        locSpace?: LocatorSpace;
         /** The citation's stored CSL `label` (e.g. `chapter`), when it has one. */
         cslLabel?: string;
     };
@@ -314,8 +333,12 @@ export function simplifyNoteHtml(
                     // `cslLabel` so a rebuild can preserve it.
                     const storedLocator = ci.locator != null ? String(ci.locator) : '';
                     const isPageLocator = ci.label == null || ci.label === 'page';
-                    const loc = readBeaverLoc(ci)
+                    const beaverLoc = readBeaverLoc(ci);
+                    const loc = beaverLoc
                         ?? (storedLocator && isPageLocator ? `page${storedLocator}` : undefined);
+                    // Beaver's token counts document positions; the CSL fallback
+                    // is the printed label the citation already stores.
+                    const locSpace: LocatorSpace = beaverLoc ? 'document' : 'note';
 
                     // Content-based ref with occurrence counter
                     const keyForCount = itemKey;
@@ -328,7 +351,7 @@ export function simplifyNoteHtml(
                         type: 'citation',
                         originalAttrs: {
                             item_id: itemId,
-                            ...(loc ? { loc } : {}),
+                            ...(loc ? { loc, locSpace } : {}),
                             ...(ci.label !== undefined ? { cslLabel: ci.label } : {}),
                         },
                     });

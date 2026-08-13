@@ -26,7 +26,7 @@ import {
     buildZoteroCitationLinkHTML,
     isLinkCitationItem,
 } from './zoteroLinkCitation';
-import type { SimplificationMetadata } from './noteHtmlSimplifier';
+import type { LocatorSpace, SimplificationMetadata } from './noteHtmlSimplifier';
 import type { ExternalReference } from '@beaver/agent-core/types/externalReferences';
 import type { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import type { PageLabelsByAttachmentId } from '../../react/atoms/citations';
@@ -412,35 +412,51 @@ export function extractAttr(attrStr: string, name: string): string | undefined {
 /** Parse simplified citation attributes into a structured object */
 interface SimplifiedCitationAttrs {
     item_id: string;
-    page?: string;
-    cslLabel?: string;
     /**
-     * True when `page` was resolved from a structural locator and is already a
-     * final page label — `buildCitationFromSimplifiedAttrs` must store it
-     * verbatim and skip the 1-based-page-number → label translation.
+     * The locator token exactly as the tag carries it. Recorded verbatim on the
+     * stored citation, which is also what the simplifier projects back, so a tag
+     * copied out of the note and sent back unchanged compares equal as a string.
      */
-    pageIsResolvedLabel?: boolean;
+    loc?: string;
+    /**
+     * Zotero's own page locator for `loc`, resolved at write time: a page token
+     * as written, or the page a structural token sits on.
+     */
+    page?: string;
+    /** CSL label to store `page` under. Defaults to `page`. */
+    cslLabel?: string;
+}
+
+/**
+ * The locator token a citation tag carries, read with the citation grammar's own
+ * attribute precedence so every spelling it accepts is seen here too. A legacy
+ * bare `page="5"` is read as the `page5` token the simplifier projects, so both
+ * spellings of the same locator compare equal against a stored token.
+ */
+function locatorToken(rawAttrs: Record<string, string>): string | undefined {
+    const token = rawAttrs.loc
+        ?? rawAttrs.sid
+        ?? (rawAttrs.page != null ? `page${rawAttrs.page}` : undefined);
+    return token || undefined;
 }
 
 /**
  * Resolve the page locator to store for a citation ref. Page locators are used
  * as-is; non-page structural locators (sentence/paragraph/…) are substituted
- * with the page pre-resolved from the extraction cache. `pageIsResolvedLabel`
- * marks a substituted page so callers skip the 1-based-number → label
- * translation (the resolved value is already a final page label).
+ * with the page pre-resolved from the extraction cache, and stored without a
+ * page when they resolve to none.
  */
-function resolveLocatorPageAttr(
+function resolveLocatorPage(
     ref: CitationRef,
     resolvedLocatorPages?: ResolvedLocatorPages,
-): { page?: string; pageIsResolvedLabel?: boolean } {
+): string | undefined {
     const page = getPageLocator(ref);
-    if (page) return { page };
+    if (page) return page;
 
     if (ref.loc && ref.loc.kind !== 'page' && resolvedLocatorPages) {
-        const resolved = resolvedLocatorPages[requestedCitationKey(ref)];
-        if (resolved) return { page: resolved, pageIsResolvedLabel: true };
+        return resolvedLocatorPages[requestedCitationKey(ref)];
     }
-    return {};
+    return undefined;
 }
 
 function parseSimplifiedCitationAttrs(
@@ -452,28 +468,34 @@ function parseSimplifiedCitationAttrs(
         throw new Error('Citation must have an "id" attribute. Legacy "item_id" / "att_id" are also accepted.');
     }
     const item_id = modelObjectIdFromReference(normalized.ref);
-    const { page, pageIsResolvedLabel } = resolveLocatorPageAttr(normalized.ref, resolvedLocatorPages);
-    return { item_id, ...(page ? { page, pageIsResolvedLabel } : {}) };
+    const loc = locatorToken(normalized.rawAttrs);
+    const page = resolveLocatorPage(normalized.ref, resolvedLocatorPages);
+    return { item_id, ...(loc ? { loc } : {}), ...(page ? { page } : {}) };
 }
 
 /**
- * The page a stored `loc` token addresses, or undefined when the token is not a
- * page locator. The simplifier stores the token the note projects; the rebuild
- * path below compares and stores pages.
+ * True when a locator token addresses a page — an absent token included, since a
+ * page carried without one is a page as written. False only for a structural
+ * token, whose page was substituted from the extraction cache.
  */
-function pageFromStoredLoc(loc: string | undefined): string | undefined {
-    const parsed = parseLoc(loc);
-    return parsed?.kind === 'page' ? parsed.value : undefined;
+function isPageToken(loc: string | undefined): boolean {
+    return (parseLoc(loc)?.kind ?? 'page') === 'page';
 }
 
-/** Check if citation attributes have changed */
+/**
+ * Check if citation attributes have changed.
+ *
+ * Locators are compared as TOKENS, the form both the citation stores and the
+ * simplifier projects: a tag copied back verbatim compares equal and keeps the
+ * note's raw HTML, and any other token is a locator the model chose.
+ */
 function attrsChanged(
     original: { item_id: string; loc?: string } | undefined,
-    current: { item_id: string; page?: string }
+    current: SimplifiedCitationAttrs,
 ): boolean {
     if (!original) return true;
     return original.item_id !== current.item_id
-        || pageFromStoredLoc(original.loc) !== current.page;
+        || (original.loc || undefined) !== (current.loc || undefined);
 }
 
 /**
@@ -504,10 +526,46 @@ function resolvePageForCitation(
     return resolved;
 }
 
+/**
+ * Build the stored citation HTML for a resolved item.
+ *
+ * Beaver's locator key asserts one thing about the token it carries: that the
+ * token counts DOCUMENT positions. So the space of the token being stored is
+ * settled here, once, and answers both questions this function asks:
+ *
+ *  - a structural token (`s56-s59`, `p3`, …) exists only in document space,
+ *    whatever the citation stored before, and its page came pre-resolved from
+ *    the extraction cache, so it is stored as-is;
+ *  - a page token is in the space of the projection the agent wrote it against
+ *    (`projectedSpace`): a physical page number when that projection was
+ *    document space, translated to the document's printed label before being
+ *    stored; otherwise the citation's own printed label, stored as sent.
+ *
+ * The key is written only for a document-space token. Recording a note-space
+ * label under it would relabel that label as a physical page, and the next edit
+ * of the citation would translate it — silently changing its numbering mid-life.
+ */
+function buildCitationHTML(
+    item: any,
+    attrs: { loc?: string; page?: string; cslLabel?: string },
+    projectedSpace: LocatorSpace,
+    pageLabels?: PageLabelsByAttachmentId,
+): string {
+    const pageToken = isPageToken(attrs.loc);
+    const isDocumentSpace = !pageToken || projectedSpace === 'document';
+    const page = pageToken
+        ? resolvePageForCitation(item, attrs.page, isDocumentSpace, pageLabels)
+        : attrs.page;
+    return stripInlineItemDataFromDataCitations(createCitationHTML(item, page, {
+        ...(attrs.cslLabel ? { cslLabel: attrs.cslLabel } : {}),
+        ...(attrs.loc && isDocumentSpace ? { beaverLoc: attrs.loc } : {}),
+    }));
+}
+
 /** Build a new citation from simplified attributes (item_id: portable "u-KEY" / "gGROUP-KEY", or legacy "LIB-KEY") */
 function buildCitationFromSimplifiedAttrs(
     attrs: SimplifiedCitationAttrs,
-    shouldTranslatePage: boolean,
+    projectedSpace: LocatorSpace,
     pageLabels?: PageLabelsByAttachmentId,
 ): string {
     const ref = resolveObjectId(attrs.item_id);
@@ -530,21 +588,15 @@ function buildCitationFromSimplifiedAttrs(
     if (isLinkCitationItem(item)) {
         return buildZoteroCitationLinkHTML(item);
     }
-    // A page resolved from a structural locator is already a final label;
-    // translating it again would mangle a numeric label into the wrong page.
-    const resolvedPage = attrs.pageIsResolvedLabel
-        ? attrs.page
-        : resolvePageForCitation(item, attrs.page, shouldTranslatePage, pageLabels);
-    return stripInlineItemDataFromDataCitations(createCitationHTML(item, resolvedPage));
+    return buildCitationHTML(item, attrs, projectedSpace, pageLabels);
 }
 
 /** Build a new citation from an attachment ID (att_id: portable "u-KEY" / "gGROUP-KEY", or legacy "LIB-KEY") */
 function buildCitationFromAttId(
     attId: string,
-    page?: string,
-    shouldTranslatePage = true,
+    attrs: { loc?: string; page?: string },
+    projectedSpace: LocatorSpace,
     pageLabels?: PageLabelsByAttachmentId,
-    pageIsResolvedLabel = false,
 ): string {
     const ref = resolveObjectId(attId);
     if (!ref) {
@@ -563,13 +615,8 @@ function buildCitationFromAttId(
     if (!item) {
         throw new Error(`Attachment not found: ${attId}`);
     }
-    // A page resolved from a structural locator is already a final label and
-    // must be stored verbatim rather than re-translated.
-    const resolvedPage = pageIsResolvedLabel
-        ? page
-        : resolvePageForCitation(item, page, shouldTranslatePage, pageLabels);
     // createCitationHTML handles attachment-to-parent resolution internally
-    return stripInlineItemDataFromDataCitations(createCitationHTML(item, resolvedPage));
+    return buildCitationHTML(item, attrs, projectedSpace, pageLabels);
 }
 
 // =============================================================================
@@ -759,7 +806,9 @@ function citationLocatorDriftError(ref: string, current: string, sentAttrs: stri
  *   citations throw the standard missing identity error.
  * @param pageLabels - Optional pre-resolved page-label map (attachment item ID
  *   → 0-based page index → label). Used to translate model-provided 1-based
- *   page numbers on NEW citations into display labels. Resolve it up-front via
+ *   page numbers into display labels: on NEW citations, and on an existing
+ *   citation whose locator the model changed and whose stored token counts
+ *   document pages (see `locSpace`). Resolve it up-front via
  *   `preloadPageLabelsForNewCitations`.
  * @param resolvedLocatorPages - Optional pre-resolved pages for non-page
  *   structural locators; see {@link ResolvedLocatorPages}.
@@ -832,9 +881,14 @@ export function expandToRawHtml(
                             // to nothing still means the caller asked for a
                             // locator, and rebuilding would drop the note's page
                             // without saying so.
-                            const storedPage = stored.originalAttrs?.item_id === newAttrs.item_id
-                                ? pageFromStoredLoc(stored.originalAttrs?.loc)
+                            //
+                            // The stored side is narrowed to a page because the
+                            // message quotes the note's page (see
+                            // {@link citationLocatorDriftError}).
+                            const storedLoc = stored.originalAttrs?.item_id === newAttrs.item_id
+                                ? parseLoc(stored.originalAttrs?.loc)
                                 : undefined;
+                            const storedPage = storedLoc?.kind === 'page' ? storedLoc.value : undefined;
                             if (storedPage && writtenLocator(attrStr)) {
                                 if (guardLocatorDrift) {
                                     throw citationLocatorDriftError(ref, storedPage, attrStr);
@@ -849,12 +903,33 @@ export function expandToRawHtml(
                                     1,
                                 );
                             }
-                            // An existing citation is shown to the agent with the
-                            // locator it stores, so a changed locator is stored
-                            // as sent — no page-number → label translation.
+                            // A changed locator is stored in the numbering the
+                            // agent was shown it in: a document-space token was
+                            // read as a physical page, so a new one is
+                            // translated to the document's printed label, while
+                            // a note-space one is already a label and is stored
+                            // as sent (see `locSpace`).
+                            //
+                            // A rebuild that leaves the locator token untouched
+                            // keeps the citation's CSL label, so retargeting a
+                            // `chapter`/`section` citation does not silently
+                            // convert it to a page citation. A rebuild that sets
+                            // a different token, or that stores the page a
+                            // structural token resolves to, is writing a page
+                            // locator and takes the default `page` label.
+                            const keepsStoredLocator =
+                                newAttrs.loc === (stored.originalAttrs?.loc || undefined)
+                                && isPageToken(newAttrs.loc);
+                            const rebuilt = keepsStoredLocator
+                                ? { ...newAttrs, cslLabel: stored.originalAttrs?.cslLabel }
+                                : newAttrs;
+                            // A citation that projected no locator has no space
+                            // of its own: there was nothing for the agent to
+                            // copy, so a locator it adds was read off the
+                            // document, exactly like one on a new citation.
                             return buildCitationFromSimplifiedAttrs(
-                                newAttrs,
-                                false,
+                                rebuilt,
+                                stored.originalAttrs?.locSpace ?? 'document',
                                 pageLabels,
                             );
                         }
@@ -910,19 +985,22 @@ export function expandToRawHtml(
             const normalizedCitation = normalizeCitationTag(parseRawCitationAttributes(attrStr));
             if (itemId) {
                 const attrs = parseSimplifiedCitationAttrs(attrStr, resolvedLocatorPages);
-                return buildCitationFromSimplifiedAttrs(attrs, true, pageLabels);
+                return buildCitationFromSimplifiedAttrs(attrs, 'document', pageLabels);
             }
             if (attId) {
                 // Resolve structural locators on legacy att_id/attachment_id
                 // citations the same way as the unified id path.
-                const { page, pageIsResolvedLabel } = normalizedCitation.ok
-                    ? resolveLocatorPageAttr(normalizedCitation.ref, resolvedLocatorPages)
-                    : { page: extractAttr(attrStr, 'page'), pageIsResolvedLabel: false };
-                return buildCitationFromAttId(attId, page, true, pageLabels, pageIsResolvedLabel);
+                const attrs = {
+                    loc: locatorToken(normalizedCitation.rawAttrs),
+                    page: normalizedCitation.ok
+                        ? resolveLocatorPage(normalizedCitation.ref, resolvedLocatorPages)
+                        : extractAttr(attrStr, 'page'),
+                };
+                return buildCitationFromAttId(attId, attrs, 'document', pageLabels);
             }
             if (normalizedCitation.ok && normalizedCitation.ref.kind === 'zotero') {
                 const attrs = parseSimplifiedCitationAttrs(attrStr, resolvedLocatorPages);
-                return buildCitationFromSimplifiedAttrs(attrs, true, pageLabels);
+                return buildCitationFromSimplifiedAttrs(attrs, 'document', pageLabels);
             }
             // external_id: chat-side external work ID (e.g. OpenAlex W-id). Two-tier
             // fallback so the model's research effort isn't lost when it tries to
@@ -935,7 +1013,12 @@ export function expandToRawHtml(
                 const mappedItemRef = externalRefContext?.externalItemMapping?.[externalId];
                 if (mappedItemRef) {
                     const itemIdStr = modelObjectIdFromReference(mappedItemRef);
-                    return buildCitationFromSimplifiedAttrs({ item_id: itemIdStr, page }, true, pageLabels);
+                    const loc = locatorToken(normalizedCitation.rawAttrs);
+                    return buildCitationFromSimplifiedAttrs(
+                        { item_id: itemIdStr, ...(loc ? { loc } : {}), ...(page ? { page } : {}) },
+                        'document',
+                        pageLabels,
+                    );
                 }
 
                 // Tier 2: emit an inline hyperlink from the ExternalReference
