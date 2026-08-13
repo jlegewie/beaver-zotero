@@ -94,6 +94,7 @@
     "./src/transport/clients/embeddingsService.ts",
     "./src/transport/clients/searchService.ts",
     "./src/transport/clients/diagnosticsService.ts",
+    "./src/transport/clients/zoteroLibraryService.ts",
     "./src/platform/runtime.ts",
     "./src/platform/logger.ts",
     "./src/types/models.ts",
