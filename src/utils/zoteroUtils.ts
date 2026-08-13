@@ -6,6 +6,7 @@ import { libraryRefForLibraryID, UNRESOLVED_LIBRARY_ID } from "./libraryIdentity
 import { safeAttachmentFilename } from "./attachmentFiles";
 import type { ZoteroInstanceRef } from "@beaver/agent-core/transport/threadService";
 import { getSelectedLibraryId, getSelectedCollection } from "./zoteroSelection";
+import { BEAVER_CITATION_META_KEY, buildBeaverCitationMeta } from "./noteCitationLoc";
 
 function makeZoteroItemReference(libraryID: number, zoteroKey: string): ZoteroItemReference {
     return {
@@ -839,10 +840,18 @@ export function getCurrentLibrary(): _ZoteroTypes.Library.LibraryLike | null {
 /**
  * Creates a citation HTML string for a Zotero item
  * @param {Zotero.Item|Number|String} itemOrID - Zotero item object or item ID
- * @param {String} [page] - Optional page number or locator (e.g., "123", "123-145")
+ * @param {String} [page] - Optional locator value as printed (e.g., "123", "123-145", "xiv")
+ * @param {Object} [options] - Optional citation details
+ * @param {String} [options.cslLabel] - CSL locator label for `page` (defaults to "page")
+ * @param {String} [options.beaverLoc] - Beaver locator token to record privately on the
+ *   citation item; attachable even when no `page` could be resolved
  * @returns {String} HTML string with citation markup
  */
-export function createCitationHTML(itemOrID: Zotero.Item | number | string, page?: string): string {
+export function createCitationHTML(
+    itemOrID: Zotero.Item | number | string,
+    page?: string,
+    options?: { cslLabel?: string; beaverLoc?: string }
+): string {
     // Get the item if an ID was passed
     const item = typeof itemOrID === 'object' ? itemOrID : Zotero.Items.get(itemOrID);
     
@@ -879,12 +888,18 @@ export function createCitationHTML(itemOrID: Zotero.Item | number | string, page
         itemData: itemData
     };
     
-    // Add page locator if provided
+    // Add locator if provided, preserving the caller's CSL label (e.g. "chapter")
     if (page) {
         citationItem.locator = page;
-        citationItem.label = "page";
+        citationItem.label = options?.cslLabel || "page";
     }
-    
+
+    // Record Beaver's own locator token, which a printed page label cannot express.
+    // Independent of `page`: a token that resolved to no page label is still worth keeping.
+    if (options?.beaverLoc) {
+        citationItem[BEAVER_CITATION_META_KEY] = buildBeaverCitationMeta(options.beaverLoc);
+    }
+
     // Create citation object
     const citation = {
         citationItems: [citationItem],
