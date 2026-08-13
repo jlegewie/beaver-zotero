@@ -25,7 +25,8 @@ import {
 import { getReadableContentKind } from '../../src/services/documentExtraction/attachmentResolution';
 import { getAttachmentFileStatus } from '../../src/services/agentDataProvider/utils';
 import { logger } from '@beaver/agent-core/platform/logger';
-import { libraryRefForLibraryID, resolveItemReference } from '../../src/utils/libraryIdentity';
+import { isLibraryReferencePortable, libraryRefForLibraryID, resolveItemReference } from '../../src/utils/libraryIdentity';
+import type { UndoActionOutcome } from './undoActionOutcome';
 import type { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 
 type AnnotationContentKind = 'pdf' | 'epub';
@@ -260,21 +261,39 @@ export async function executeCreateNoteAnnotationsAction(
 /**
  * Undo a bulk annotation action by deleting every created annotation.
  */
-export async function undoCreateAnnotationsAction(action: AgentAction): Promise<void> {
+export async function undoCreateAnnotationsAction(action: AgentAction): Promise<UndoActionOutcome> {
     const created = action.result_data?.created;
-    if (!Array.isArray(created) || created.length === 0) {
+    if (!Array.isArray(created)) {
+        // No record of what the action created, so nothing can be deleted and
+        // nothing says the annotations are not still in the document.
         logger(`undoCreateAnnotationsAction: No created annotations for action ${action.id}`, 1);
-        return;
+        return 'unverifiable';
+    }
+    if (created.length === 0) {
+        // The executor always reports what it created, so an empty list is its
+        // answer rather than a gap: every annotation failed, and there is
+        // nothing in the document to take back out.
+        logger(`undoCreateAnnotationsAction: Action ${action.id} created nothing`, 1);
+        return 'reverted';
     }
 
+    let unverifiable = false;
     for (const ref of created) {
         const resolved = await resolveItemReference(ref);
         if (resolved.status === 'library_unavailable') {
             logger(`undoCreateAnnotationsAction: Library unavailable for ${ref.library_ref || ref.library_id}-${ref.zotero_key}`, 1);
+            unverifiable = true;
             continue;
         }
         if (resolved.status === 'found') {
             await resolved.item.eraseTx();
+        } else if (!isLibraryReferencePortable(ref)) {
+            // A miss through a device-local group library_id proves nothing —
+            // that id may name a different group here while the annotation
+            // still exists in the one it was created in.
+            logger(`undoCreateAnnotationsAction: Annotation not found through a device-local library id; cannot confirm deletion`, 1);
+            unverifiable = true;
         }
     }
+    return unverifiable ? 'unverifiable' : 'reverted';
 }

@@ -6,7 +6,8 @@
 import { AgentAction } from '../agents/agentActions';
 import type { OrganizeItemsResultData, TagChanges, CollectionChanges } from '@beaver/agent-core/types/agentActions/base';
 import { logger } from '@beaver/agent-core/platform/logger';
-import { parseItemReference, resolveItemReference } from '../../src/utils/libraryIdentity';
+import { isLibraryReferencePortable, parseItemReference, resolveItemReference } from '../../src/utils/libraryIdentity';
+import type { UndoActionOutcome } from './undoActionOutcome';
 
 /**
  * Execute an organize_items agent action.
@@ -147,7 +148,7 @@ export async function executeOrganizeItemsAction(
  */
 export async function undoOrganizeItemsAction(
     action: AgentAction
-): Promise<void> {
+): Promise<UndoActionOutcome> {
     const { item_ids, tags, collections, current_state } = action.proposed_data as {
         item_ids: string[];
         tags?: TagChanges | null;
@@ -158,6 +159,8 @@ export async function undoOrganizeItemsAction(
     // If we have current_state, use it for precise undo
     // Otherwise, reverse the changes that were applied
     const resultData = action.result_data as OrganizeItemsResultData | undefined;
+    let unverifiable = false;
+    const failedItemIds: string[] = [];
 
     for (const itemId of item_ids) {
         try {
@@ -168,8 +171,22 @@ export async function undoOrganizeItemsAction(
                 continue;
             }
             const resolved = await resolveItemReference(parsed);
+            if (resolved.status === 'library_unavailable') {
+                logger(`undoOrganizeItemsAction: Library unavailable for ${itemId}`, 1);
+                unverifiable = true;
+                continue;
+            }
             if (resolved.status !== 'found') {
                 logger(`undoOrganizeItemsAction: Item not found: ${itemId}`, 1);
+                // A miss through a device-local group library_id may just mean
+                // that id names a different group here, so it is no proof the
+                // item's tags and collections are beyond restoring.
+                if (!isLibraryReferencePortable({
+                    library_ref: parsed.library_ref,
+                    library_id: parsed.library_id ?? -1,
+                })) {
+                    unverifiable = true;
+                }
                 continue;
             }
             const item = resolved.item;
@@ -259,7 +276,10 @@ export async function undoOrganizeItemsAction(
                     }
                 }
             } else {
+                // Nothing records what this item looked like before the apply,
+                // so its tags and collections stay as the action left them.
                 logger(`undoOrganizeItemsAction: No current_state or result_data for ${itemId}, skipping`, 1);
+                unverifiable = true;
                 continue;
             }
 
@@ -268,8 +288,21 @@ export async function undoOrganizeItemsAction(
             }
         } catch (error) {
             logger(`undoOrganizeItemsAction: Failed to undo ${itemId}: ${error}`, 1);
+            failedItemIds.push(itemId);
         }
     }
 
+    // A per-item failure is swallowed above so the remaining items still get
+    // restored, but the action as a whole is not reverted — reporting it as
+    // such would mark it undone and discard the record needed to finish the
+    // job. Undoing again is safe: every step is derived from the original
+    // state, not from the current one.
+    if (failedItemIds.length > 0) {
+        throw new Error(
+            `Could not restore ${failedItemIds.length} of ${item_ids.length} item(s): ${failedItemIds.join(', ')}`
+        );
+    }
+
     logger(`undoOrganizeItemsAction: Restored ${item_ids.length} items`, 1);
+    return unverifiable ? 'unverifiable' : 'reverted';
 }

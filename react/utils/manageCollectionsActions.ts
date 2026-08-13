@@ -28,7 +28,8 @@
 import { AgentAction, ManageCollectionsAgentAction } from '../agents/agentActions';
 import type { ManageCollectionsProposedData, ManageCollectionsResultData } from '@beaver/agent-core/types/agentActions/base';
 import { logger } from '@beaver/agent-core/platform/logger';
-import { libraryRefForLibraryID, resolveWriteTargetLibrary } from '../../src/utils/libraryIdentity';
+import { isLibraryReferencePortable, libraryRefForLibraryID, resolveWriteTargetLibrary } from '../../src/utils/libraryIdentity';
+import type { UndoActionOutcome } from './undoActionOutcome';
 
 
 export async function executeManageCollectionsAction(
@@ -124,52 +125,67 @@ export async function executeManageCollectionsAction(
  */
 export async function undoManageCollectionsAction(
     action: AgentAction,
-): Promise<void> {
+): Promise<UndoActionOutcome> {
     const data = action.proposed_data as ManageCollectionsProposedData;
     const { library_id, action: op, collection_key } = data;
     if ((!library_id || typeof library_id !== 'number') && !data.library_ref) {
         logger(`undoManageCollectionsAction: missing target library (${collection_key}); skipping`, 1);
-        return;
+        return 'unverifiable';
     }
     const resolution = resolveWriteTargetLibrary(data);
     if (!resolution.ok) {
         logger(`undoManageCollectionsAction: ${resolution.message} (${data.library_ref || library_id}-${collection_key}); skipping`, 1);
-        return;
+        return 'unverifiable';
     }
     const resolvedLibraryID = resolution.libraryID;
     const result = (action.result_data ?? {}) as Partial<ManageCollectionsResultData>;
     const old_name = result.old_name ?? null;
     const old_parent_key = result.old_parent_key ?? null;
 
+    // A collection that isn't there means the user deleted it, so the rename or
+    // move has nothing left to restore — but only when the reference names its
+    // library portably. Through a device-local group library_id the miss may
+    // just mean that id maps to a different group here.
+    const missIsProof = isLibraryReferencePortable({
+        library_ref: data.library_ref,
+        library_id: library_id ?? resolvedLibraryID,
+    });
+
     if (op === 'rename') {
         const collection = await Zotero.Collections.getByLibraryAndKeyAsync(resolvedLibraryID, collection_key);
         if (!collection) {
             logger(`undoManageCollectionsAction: Collection ${resolvedLibraryID}-${collection_key} not found; skipping`, 1);
-            return;
+            return missIsProof ? 'reverted' : 'unverifiable';
         }
         const originalName = (old_name ?? '').trim();
         if (!originalName) throw new Error('old_name missing in result_data — cannot undo rename');
         collection.name = originalName;
         await collection.saveTx();
         logger(`undoManageCollectionsAction: Restored name '${originalName}'`, 1);
-        return;
+        return 'reverted';
     }
 
     if (op === 'move') {
         const collection = await Zotero.Collections.getByLibraryAndKeyAsync(resolvedLibraryID, collection_key);
         if (!collection) {
             logger(`undoManageCollectionsAction: Collection ${resolvedLibraryID}-${collection_key} not found; skipping`, 1);
-            return;
+            return missIsProof ? 'reverted' : 'unverifiable';
         }
         (collection as any).parentKey = old_parent_key ? old_parent_key : false;
         await collection.saveTx();
         logger(`undoManageCollectionsAction: Restored parent '${old_parent_key ?? 'top-level'}'`, 1);
-        return;
+        return 'reverted';
     }
 
     if (op === 'delete') {
         const collection = await Zotero.Collections.getByLibraryAndKeyAsync(resolvedLibraryID, collection_key);
         if (!collection) {
+            if (!missIsProof) {
+                // Not necessarily gone — the miss may be an artifact of a
+                // device-local library id, so don't claim a permanent delete.
+                logger(`undoManageCollectionsAction: Collection not found through a device-local library id; cannot confirm its fate`, 1);
+                return 'unverifiable';
+            }
             // Trash was emptied (manually or by auto-empty). The collection
             // is gone from the DB and its key is unrecoverable.
             const label = old_name ? `'${old_name}'` : collection_key;
@@ -181,12 +197,12 @@ export async function undoManageCollectionsAction(
             // Already restored (e.g. user clicked "Restore to Library" in
             // Zotero). Treat as success.
             logger(`undoManageCollectionsAction: Collection ${resolvedLibraryID}-${collection_key} already restored; skipping`, 1);
-            return;
+            return 'reverted';
         }
         (collection as any).deleted = false;
         await collection.saveTx();
         logger(`undoManageCollectionsAction: Restored collection '${collection.name}' from trash`, 1);
-        return;
+        return 'reverted';
     }
 
     throw new Error(`Unsupported manage_collections action: ${op}`);

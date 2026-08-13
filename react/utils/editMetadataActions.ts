@@ -21,6 +21,15 @@ export interface UndoResult {
     manuallyModified: string[];
     /** Whether user confirmation is needed (some fields were manually modified) */
     needsConfirmation: boolean;
+    /** Target library is not on this device; no fields were touched. */
+    unverifiable?: boolean;
+    /**
+     * Fields whose current value could not be read, or whose write threw. The
+     * loop carries on so the rest of the item is still restored, but these
+     * fields may still hold what the action wrote, so a caller must not treat
+     * the undo as complete.
+     */
+    failed?: string[];
 }
 
 /**
@@ -29,7 +38,15 @@ export interface UndoResult {
  */
 function normalizeValue(value: any): string {
     if (value === null || value === undefined) return '';
-    return String(value);
+    // Match what Zotero stores: `setField` trims and NFC-normalizes strings, so
+    // a proposed value carrying an NFD accent or stray whitespace comes back
+    // differently than it went in. Comparing raw would read that as the user
+    // having edited the field, leaving it as the action set it.
+    //
+    // Only those two transforms are modeled. A field Zotero rewrites further —
+    // an ISBN it hyphenates, a date it reformats — still reads as user-edited,
+    // which the undo declines to overwrite and reports as unconfirmed.
+    return String(value).trim().normalize('NFC');
 }
 
 /**
@@ -190,12 +207,18 @@ export async function undoEditMetadataAction(
             alreadyReverted: [],
             manuallyModified: [],
             needsConfirmation: false,
+            unverifiable: true,
         };
     }
     if (resolved.status === 'not_found') {
         throw new Error(`Item not found: ${library_id}-${zotero_key}`);
     }
     const item = resolved.item;
+    // `getAsync` loads primary data only, so an item fetched fresh — undone
+    // from persisted history after a restart, or once it has been evicted —
+    // would throw on every `getField`/`getCreatorsJSON` below.
+    await item.loadDataType('itemData');
+    await item.loadDataType('creators');
 
     // Prefer result_data.applied_edits (has old_value captured at apply-time)
     // Fall back to proposed_data.edits if result_data is not available
@@ -217,6 +240,7 @@ export async function undoEditMetadataAction(
         alreadyReverted: [],
         manuallyModified: [],
         needsConfirmation: false,
+        failed: [],
     };
 
     let needsSave = false;
@@ -226,12 +250,17 @@ export async function undoEditMetadataAction(
         const oldValue = 'old_value' in edit ? edit.old_value : null;
         const appliedValue = 'applied_value' in edit ? edit.applied_value : (edit as MetadataEdit).new_value;
 
-        // Get current value in Zotero
+        // Get current value in Zotero. A read that throws leaves the field
+        // unclassifiable, and treating it as "null" would read as already
+        // reverted — letting the caller call the undo complete while the
+        // applied value is still on the item.
         let currentValue: any = null;
         try {
             currentValue = item.getField(field);
-        } catch {
-            currentValue = null;
+        } catch (error) {
+            logger(`undoEditMetadataAction: Could not read '${field}': ${error}`, 1);
+            result.failed!.push(field);
+            continue;
         }
 
         // Determine scenario
@@ -248,6 +277,7 @@ export async function undoEditMetadataAction(
                 logger(`undoEditMetadataAction: Reverted '${field}' to old value`, 1);
             } catch (error) {
                 logger(`undoEditMetadataAction: Failed to revert ${field}: ${error}`, 1);
+                result.failed!.push(field);
             }
         } else {
             // Scenario 3: User manually edited the field
@@ -260,6 +290,7 @@ export async function undoEditMetadataAction(
                     logger(`undoEditMetadataAction: Force-reverted manually modified '${field}'`, 1);
                 } catch (error) {
                     logger(`undoEditMetadataAction: Failed to revert ${field}: ${error}`, 1);
+                    result.failed!.push(field);
                 }
             } else {
                 // Don't overwrite user's manual changes
@@ -286,6 +317,7 @@ export async function undoEditMetadataAction(
                 logger(`undoEditMetadataAction: Reverted creators to original values`, 1);
             } catch (error) {
                 logger(`undoEditMetadataAction: Failed to revert creators: ${error}`, 1);
+                result.failed!.push('creators');
             }
         } else {
             // User manually modified creators since the apply
@@ -297,6 +329,7 @@ export async function undoEditMetadataAction(
                     logger(`undoEditMetadataAction: Force-reverted manually modified creators`, 1);
                 } catch (error) {
                     logger(`undoEditMetadataAction: Failed to revert creators: ${error}`, 1);
+                    result.failed!.push('creators');
                 }
             } else {
                 result.manuallyModified.push('creators');

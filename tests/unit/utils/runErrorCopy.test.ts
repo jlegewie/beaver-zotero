@@ -41,4 +41,32 @@ describe('formatRetryFailurePopupText', () => {
             message: 'internal_error: Something went wrong',
         })).toBe('System Error. Something went wrong.');
     });
+
+    it('appends that library changes were already undone', () => {
+        expect(formatRetryFailurePopupText({
+            type: 'internal_error',
+            message: 'Something went wrong',
+            libraryChangesUndone: 'all',
+        })).toBe(
+            'System Error. Something went wrong. Changes those messages made to your library were already undone.',
+        );
+    });
+
+    it('does not claim every change was undone when only some were', () => {
+        expect(formatRetryFailurePopupText({
+            type: 'internal_error',
+            message: 'Something went wrong',
+            libraryChangesUndone: 'some',
+        })).toBe(
+            'System Error. Something went wrong. Some of the changes those messages made to your library were already undone.',
+        );
+    });
+
+    it('says nothing about the library when no change was undone', () => {
+        expect(formatRetryFailurePopupText({
+            type: 'internal_error',
+            message: 'Something went wrong',
+            libraryChangesUndone: 'none',
+        })).toBe('System Error. Something went wrong.');
+    });
 });

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { AgentRun } from '@beaver/agent-core/agents/types';
 
@@ -9,11 +9,17 @@ import type { AgentRun } from '@beaver/agent-core/agents/types';
 // agentRunAtoms transitively imports the WS transport layer. Mocking connect()
 // gives the tests the callbacks the server would drive, so a retry can be run
 // through its whole lifecycle without a socket.
-const { connectMock, cancelMock, undoEditMetadataMock, addPopupMessageMock } = vi.hoisted(() => ({
+const { connectMock, cancelMock, undoEditMetadataMock, addPopupMessageMock, updateActionMock } = vi.hoisted(() => ({
     connectMock: vi.fn().mockResolvedValue(undefined),
     cancelMock: vi.fn().mockResolvedValue(undefined),
-    undoEditMetadataMock: vi.fn().mockResolvedValue(undefined),
+    undoEditMetadataMock: vi.fn().mockResolvedValue({
+        fieldsReverted: 1,
+        alreadyReverted: [],
+        manuallyModified: [],
+        needsConfirmation: false,
+    }),
     addPopupMessageMock: vi.fn(),
+    updateActionMock: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock('@beaver/agent-core/transport/agentService', () => ({
@@ -55,6 +61,9 @@ vi.mock('../../../react/utils/noteEditorDiffPreview', async (importOriginal) => 
 // whether the Zotero side ran.
 vi.mock('../../../react/utils/editMetadataActions', () => ({
     undoEditMetadataAction: undoEditMetadataMock,
+}));
+vi.mock('@beaver/agent-core/transport/clients/agentActionsService', () => ({
+    agentActionsService: { updateAction: updateActionMock },
 }));
 vi.mock('../../../react/utils/popupMessageUtils', async () => {
     const { atom } = await import('jotai');
@@ -110,6 +119,21 @@ function makeAppliedMetadataAction(runId: string, id: string): AgentAction {
         action_type: 'edit_metadata',
         status: 'applied',
         created_at: new Date().toISOString(),
+    } as unknown as AgentAction;
+}
+
+/**
+ * An applied note whose Zotero item the undo will look for and not find.
+ * `libraryRef` absent leaves a bare, device-local `library_id`.
+ */
+function makeAppliedNoteAction(runId: string, id: string, libraryRef?: string): AgentAction {
+    return {
+        id,
+        run_id: runId,
+        action_type: 'zotero_note',
+        status: 'applied',
+        created_at: new Date().toISOString(),
+        result_data: { library_id: 7, zotero_key: 'NOTEKEY1', ...(libraryRef ? { library_ref: libraryRef } : {}) },
     } as unknown as AgentAction;
 }
 
@@ -311,7 +335,11 @@ describe('retry lifecycle', () => {
         expect(store.get(activeRunAtom)).toBeNull();
         expect(store.get(allRunsAtom).map((r: AgentRun) => r.id)).toEqual(['a', 'b']);
         expect(addPopupMessageMock).toHaveBeenCalledWith(
-            expect.objectContaining({ type: 'error', title: expect.stringContaining('Retry failed') }),
+            expect.objectContaining({
+                type: 'error',
+                title: expect.stringContaining('Retry failed'),
+                text: expect.not.stringContaining('already undone'),
+            }),
         );
     });
 
@@ -599,14 +627,208 @@ describe('retry lifecycle', () => {
             // server-side records to resume from.
             expect(undoEditMetadataMock.mock.invocationCallOrder[0])
                 .toBeLessThan(connectMock.mock.invocationCallOrder[0]);
-            // Deliberately left applied: a helper that resolves is not proof
-            // it reverted anything, and recording `undone` would discard the
-            // result data a second attempt needs. Reopening the thread
-            // reconciles it against Zotero.
-            expect(store.get(threadAgentActionsAtom)[0].status).toBe('applied');
+            // Card and backend follow the library: the undo completed, so the
+            // action is undone while the old turn is still on screen.
+            expect(store.get(threadAgentActionsAtom)[0].status).toBe('undone');
+            expect(updateActionMock).toHaveBeenCalledWith(
+                'action-1',
+                expect.objectContaining({ status: 'undone', clear_result_data: true }),
+            );
 
             wsCallbacks().onThread(THREAD_ID, threadEvent(THREAD_ID, ['a', 'b']));
             expect(store.get(threadAgentActionsAtom)).toEqual([]);
+        });
+
+        it('does not mark a skipped library undo as undone', async () => {
+            undoEditMetadataMock.mockResolvedValueOnce({
+                fieldsReverted: 0,
+                alreadyReverted: [],
+                manuallyModified: [],
+                needsConfirmation: false,
+                unverifiable: true,
+            });
+            // 'Undo & Retry', then Cancel at the "retry anyway?" prompt.
+            (globalThis as any).Zotero.Prompt.confirm = vi.fn()
+                .mockReturnValueOnce(0)
+                .mockReturnValueOnce(1);
+
+            await store.set(regenerateFromRunAtom, 'a');
+
+            expect(connectMock).not.toHaveBeenCalled();
+            expect(store.get(threadAgentActionsAtom)[0].status).toBe('applied');
+            expect(updateActionMock).not.toHaveBeenCalled();
+        });
+
+        it('does not mark a partial field revert as undone', async () => {
+            // Fields the user edited after the apply are deliberately kept, so
+            // the value the agent wrote may still be on the item. Calling that
+            // undone would discard the snapshot needed to finish the job.
+            undoEditMetadataMock.mockResolvedValueOnce({
+                fieldsReverted: 1,
+                alreadyReverted: [],
+                manuallyModified: ['publisher'],
+                needsConfirmation: true,
+            });
+            // 'Undo & Retry', then Cancel at the "retry anyway?" prompt.
+            (globalThis as any).Zotero.Prompt.confirm = vi.fn()
+                .mockReturnValueOnce(0)
+                .mockReturnValueOnce(1);
+
+            await store.set(regenerateFromRunAtom, 'a');
+
+            expect(connectMock).not.toHaveBeenCalled();
+            expect(store.get(threadAgentActionsAtom)[0].status).toBe('applied');
+            expect(updateActionMock).not.toHaveBeenCalled();
+        });
+
+        it('does not mark a field revert that could not read or write as undone', async () => {
+            undoEditMetadataMock.mockResolvedValueOnce({
+                fieldsReverted: 0,
+                alreadyReverted: [],
+                manuallyModified: [],
+                needsConfirmation: false,
+                failed: ['publisher'],
+            });
+            // 'Undo & Retry', then Cancel at the "retry anyway?" prompt.
+            (globalThis as any).Zotero.Prompt.confirm = vi.fn()
+                .mockReturnValueOnce(0)
+                .mockReturnValueOnce(1);
+
+            await store.set(regenerateFromRunAtom, 'a');
+
+            expect(connectMock).not.toHaveBeenCalled();
+            expect(store.get(threadAgentActionsAtom)[0].status).toBe('applied');
+            expect(updateActionMock).not.toHaveBeenCalled();
+        });
+
+        it('leaves an approval gate out of the changes it warns about', async () => {
+            // confirm_extraction records a decision, not a library change, so
+            // it must not be counted among the undos that could not be
+            // confirmed. The metadata action alongside it is what carries the
+            // run past the "anything to undo at all?" check.
+            store.set(threadAgentActionsAtom, [
+                makeAppliedMetadataAction('b', 'action-1'),
+                {
+                    id: 'action-2',
+                    run_id: 'b',
+                    action_type: 'confirm_extraction',
+                    status: 'applied',
+                    created_at: new Date().toISOString(),
+                } as unknown as AgentAction,
+            ]);
+
+            await store.set(regenerateFromRunAtom, 'a');
+
+            // One confirm prompt for the metadata change, and no second one
+            // asking about undos that could not be confirmed.
+            expect((globalThis as any).Zotero.Prompt.confirm).toHaveBeenCalledTimes(1);
+            expect(connectMock).toHaveBeenCalled();
+            expect(store.get(threadAgentActionsAtom)[0].status).toBe('undone');
+            expect(store.get(threadAgentActionsAtom)[1].status).toBe('applied');
+        });
+
+        describe('an item the undo cannot find', () => {
+            let originalItems: any;
+            let originalLibraries: any;
+
+            beforeEach(() => {
+                originalItems = (globalThis as any).Zotero.Items;
+                originalLibraries = (globalThis as any).Zotero.Libraries;
+                (globalThis as any).Zotero.Libraries = {
+                    ...originalLibraries,
+                    userLibraryID: 1,
+                };
+                (globalThis as any).Zotero.Items = {
+                    ...originalItems,
+                    getByLibraryAndKeyAsync: vi.fn(async () => null),
+                };
+            });
+
+            afterEach(() => {
+                (globalThis as any).Zotero.Items = originalItems;
+                (globalThis as any).Zotero.Libraries = originalLibraries;
+            });
+
+            it('counts a miss through a device-local library id as unconfirmed', async () => {
+                // A bare group library_id is numbered per device, so the miss may
+                // just mean that id names a different group here — no proof the
+                // note was deleted, and no grounds to call the action undone.
+                store.set(threadAgentActionsAtom, [makeAppliedNoteAction('b', 'action-1')]);
+                (globalThis as any).Zotero.Prompt.confirm = vi.fn()
+                    .mockReturnValueOnce(0)
+                    .mockReturnValueOnce(1);
+
+                await store.set(regenerateFromRunAtom, 'a');
+
+                expect(connectMock).not.toHaveBeenCalled();
+                expect(store.get(threadAgentActionsAtom)[0].status).toBe('applied');
+                expect(updateActionMock).not.toHaveBeenCalled();
+            });
+
+            it('treats a miss on a portable reference as already reverted', async () => {
+                // `u` names the personal library, whose id is the same on every
+                // device, so the item really is gone.
+                store.set(threadAgentActionsAtom, [makeAppliedNoteAction('b', 'action-1', 'u')]);
+
+                await store.set(regenerateFromRunAtom, 'a');
+
+                expect(connectMock).toHaveBeenCalled();
+                expect(store.get(threadAgentActionsAtom)[0].status).toBe('undone');
+            });
+        });
+
+        it('puts an undo it could not record to the user before replacing the turn', async () => {
+            // The Zotero undo landed but its status did not reach the backend —
+            // the case where both requests fail for the same reason. Retrying
+            // would delete the turn and leave the server's `applied` row to come
+            // back on the next thread load, so the user gets the choice.
+            updateActionMock.mockRejectedValueOnce(new Error('offline'));
+            // 'Undo & Retry', then Cancel at the "retry anyway?" prompt.
+            (globalThis as any).Zotero.Prompt.confirm = vi.fn()
+                .mockReturnValueOnce(0)
+                .mockReturnValueOnce(1);
+
+            await store.set(regenerateFromRunAtom, 'a');
+
+            expect((globalThis as any).Zotero.Prompt.confirm).toHaveBeenCalledTimes(2);
+            expect(connectMock).not.toHaveBeenCalled();
+            expect(store.get(threadRunsAtom).map((r: AgentRun) => r.id)).toEqual(['a', 'b']);
+            // The library really was reverted, so the card says so either way.
+            expect(store.get(threadAgentActionsAtom)[0].status).toBe('undone');
+            // The change was undone; only the record of it was not. The prompt
+            // must not say it may still be in their library, or offer to
+            // discard a record of something there is nothing left to undo.
+            expect((globalThis as any).Zotero.Prompt.confirm).toHaveBeenLastCalledWith(
+                expect.objectContaining({
+                    title: 'Some undone changes were not saved',
+                    text: expect.stringContaining('could not save that to your account'),
+                }),
+            );
+            const { text } = (globalThis as any).Zotero.Prompt.confirm.mock.lastCall[0];
+            expect(text).not.toContain('may still be in your library');
+            expect(text).not.toContain('only you can undo them');
+        });
+
+        it('warns about the library when the undo itself is unconfirmed', async () => {
+            undoEditMetadataMock.mockResolvedValueOnce({
+                fieldsReverted: 0,
+                alreadyReverted: [],
+                manuallyModified: [],
+                needsConfirmation: false,
+                unverifiable: true,
+            });
+            (globalThis as any).Zotero.Prompt.confirm = vi.fn()
+                .mockReturnValueOnce(0)
+                .mockReturnValueOnce(1);
+
+            await store.set(regenerateFromRunAtom, 'a');
+
+            expect((globalThis as any).Zotero.Prompt.confirm).toHaveBeenLastCalledWith(
+                expect.objectContaining({
+                    title: 'Some changes could not be undone',
+                    text: expect.stringContaining('may still be in your library'),
+                }),
+            );
         });
 
         it('does not retry behind the user when a revert fails outright', async () => {
@@ -639,6 +861,39 @@ describe('retry lifecycle', () => {
             expect(store.get(pendingRetryAtom)?.runIdsToRemove).toEqual(['a', 'b']);
         });
 
+        it('tells the user about a revert that only got part way', async () => {
+            // One field went back and one was left as the user had it, so the
+            // action stays applied — but their library did change, and the
+            // failure popup is where they hear about it.
+            undoEditMetadataMock.mockResolvedValueOnce({
+                fieldsReverted: 1,
+                alreadyReverted: [],
+                manuallyModified: ['publisher'],
+                needsConfirmation: true,
+            });
+            // 'Undo & Retry', then 'Retry Anyway'.
+            (globalThis as any).Zotero.Prompt.confirm = vi.fn()
+                .mockReturnValueOnce(0)
+                .mockReturnValueOnce(0);
+
+            await store.set(regenerateFromRunAtom, 'a');
+            const newRunId = store.get(pendingRetryAtom)?.runId;
+
+            wsCallbacks().onError({
+                event: 'error',
+                type: 'internal_error',
+                message: 'boom',
+                run_id: newRunId,
+            });
+
+            expect(store.get(threadAgentActionsAtom)[0].status).toBe('applied');
+            expect(addPopupMessageMock).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    text: expect.stringContaining('Some of the changes'),
+                }),
+            );
+        });
+
         it('keeps the reverted actions recoverable when the retry then fails', async () => {
             await store.set(regenerateFromRunAtom, 'a');
             const newRunId = store.get(pendingRetryAtom)?.runId;
@@ -650,11 +905,15 @@ describe('retry lifecycle', () => {
                 run_id: newRunId,
             });
 
-            // The user asked for the undo and got it, and the turns it belonged
-            // to come back. The record stays applied and keeps its result data,
-            // so a second attempt at the reversal is still possible.
+            // The user asked for the undo and got it. The turns come back with
+            // their cards showing `undone`, matching the library.
             expect(store.get(threadRunsAtom).map((r: AgentRun) => r.id)).toEqual(['a', 'b']);
-            expect(store.get(threadAgentActionsAtom)[0].status).toBe('applied');
+            expect(store.get(threadAgentActionsAtom)[0].status).toBe('undone');
+            expect(addPopupMessageMock).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    text: expect.stringContaining('already undone'),
+                }),
+            );
         });
 
         it('does not start the retry when the user cancels the dialog', async () => {

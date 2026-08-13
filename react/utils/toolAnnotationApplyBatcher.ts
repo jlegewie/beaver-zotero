@@ -3,7 +3,12 @@ import { currentReaderAttachmentKeyAtom } from '../atoms/messageComposition';
 import { agentActionsService, AckActionLink } from '@beaver/agent-core/transport/clients/agentActionsService';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { AnnotationResultData } from '@beaver/agent-core/types/agentActions/base';
-import { updateAgentActionsAtom, AgentAction, AgentActionUpdate, isAnnotationAgentAction } from '../agents/agentActions';
+import {
+    updateAgentActionsAtom,
+    AgentAction,
+    AgentActionUpdate,
+    isAnnotationAgentAction,
+} from '../agents/agentActions';
 import { applyAnnotation } from './annotationActions';
 
 const DEFAULT_FLUSH_TIMEOUT_MS = 250;

@@ -5,6 +5,8 @@ import {
   normalizePageLocations,
 } from "@beaver/agent-core/types/agentActions/annotations";
 import { CoordOrigin } from "@beaver/agent-core/types/citations";
+import type { AgentAction } from "@beaver/agent-core/agents/agentActionTypes";
+import { undoCreateAnnotationsAction } from "../../../react/utils/createAnnotationsActions";
 
 describe("annotation action normalization", () => {
   describe("normalizeBoundingBox", () => {
@@ -113,5 +115,16 @@ describe("annotation action normalization", () => {
       });
       expect(out?.[0].page_label).toBeNull();
     });
+  });
+});
+
+describe("bulk annotation undo", () => {
+  it("treats an authoritative empty created list as reverted", async () => {
+    const action = {
+      id: "annotation-action-1",
+      result_data: { created: [], total_created: 0 },
+    } as unknown as AgentAction;
+
+    await expect(undoCreateAnnotationsAction(action)).resolves.toBe("reverted");
   });
 });

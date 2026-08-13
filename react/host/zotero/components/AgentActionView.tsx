@@ -60,6 +60,7 @@ import {
     PreviewData,
     getCreateAnnotationsDisplayStatus,
     getAgentActionToolIcon,
+    hasFailedUndo,
 } from './agentActionViewHelpers';
 import { ActionPreview } from './ActionPreview';
 import { useApprovalRecovery } from './useApprovalRecovery';
@@ -348,14 +349,20 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
         }
     }, [action, actions, isProcessing, undoAgentActions]);
 
+    // An action that errored with its result data intact failed its *undo*, so
+    // Retry has to point back at undo. The local flag only catches a failure
+    // thrown out of the whole batch; a per-action one is recorded on the action
+    // itself, and re-applying there would write the change a second time.
+    const isUndoRetry = isUndoError || hasFailedUndo(actions);
+
     const handleRetry = useCallback(async () => {
-        if (isUndoError) {
+        if (isUndoRetry) {
             setIsUndoError(false);
             await handleUndo();
         } else {
             await handleApplyPending();
         }
-    }, [isUndoError, handleUndo, handleApplyPending]);
+    }, [isUndoRetry, handleUndo, handleApplyPending]);
 
     const handleRevealNote = useCallback(async () => {
         const libraryId = action?.result_data?.library_id;
@@ -665,7 +672,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                                 onClick={handleRetry}
                                 loading={isProcessing}
                             >
-                                {isUndoError ? 'Retry Undo' : 'Try Again'}
+                                {isUndoRetry ? 'Retry Undo' : 'Try Again'}
                             </Button>
                         )}
 

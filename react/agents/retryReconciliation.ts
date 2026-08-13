@@ -110,7 +110,21 @@ export interface PendingRetry {
      * rows, and a planned run that was never persisted has no row to name.
      */
     runIdsToRemove: string[];
+    /**
+     * How much of the replaced runs' Zotero changes this retry reverted before
+     * sending the request. The failure popup uses it so it can say so without
+     * guessing from card status (the user may have undone other actions
+     * earlier), and without claiming more than actually happened when the user
+     * chose to go ahead past changes that could not be confirmed.
+     */
+    undidLibraryChanges: RetryUndoExtent;
 }
+
+/**
+ * How much of a retry's revert went through: nothing, some of the changes, or
+ * all of them.
+ */
+export type RetryUndoExtent = 'none' | 'some' | 'all';
 
 /** Runs the retry keeps, given the index it truncates the thread from. */
 export function buildRetryAnchor(

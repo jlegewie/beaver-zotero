@@ -11,7 +11,8 @@ import { applyCreateItemData } from './addItemActions';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { ensureItemSynced } from '../../src/utils/sync';
 import { scheduleBackgroundTask, generateTaskId, cancelTasksForItem, deduplicatedSync } from '../../src/utils/backgroundTasks';
-import { resolveItemReference, resolveWriteTargetLibrary } from '../../src/utils/libraryIdentity';
+import { isLibraryReferencePortable, resolveItemReference, resolveWriteTargetLibrary } from '../../src/utils/libraryIdentity';
+import { UNVERIFIABLE_UNDO_MESSAGE, type UndoActionOutcome } from './undoActionOutcome';
 
 /** Maximum concurrent item creations in batch operations */
 const BATCH_CONCURRENCY_LIMIT = 3;
@@ -89,7 +90,7 @@ function scheduleSyncTask(libraryId: number, itemKey: string): void {
  * Undo a create_item agent action.
  * Deletes the item that was created from Zotero.
  */
-export async function undoCreateItemAction(action: AgentAction): Promise<void> {
+export async function undoCreateItemAction(action: AgentAction): Promise<UndoActionOutcome> {
     const resultData = action.result_data as CreateItemResultData | undefined;
 
     if (!resultData?.library_id || !resultData?.zotero_key) {
@@ -105,19 +106,28 @@ export async function undoCreateItemAction(action: AgentAction): Promise<void> {
 
     if (resolved.status === 'library_unavailable') {
         logger(`undoCreateItemAction: Library unavailable for ${resultData.library_ref || resultData.library_id}-${resultData.zotero_key}`, 1);
-        return;
+        return 'unverifiable';
     }
 
     if (resolved.status === 'not_found') {
+        // A miss only proves the item is gone when the reference names its
+        // library portably. A legacy group reference resolves through a
+        // device-local library_id, so the miss may just mean that id maps to a
+        // different group here — and the created item still exists elsewhere.
+        if (!isLibraryReferencePortable(resultData)) {
+            logger(`undoCreateItemAction: Item not found through a device-local library id; cannot confirm deletion`, 1);
+            return 'unverifiable';
+        }
         // Item doesn't exist (may have been manually deleted)
         logger(`undoCreateItemAction: Item not found, may have been already deleted`, 1);
-        return;
+        return 'reverted';
     }
 
     // Erase the item
     await resolved.item.eraseTx();
 
     logger(`undoCreateItemAction: Successfully deleted item ${resultData.library_id}-${resultData.zotero_key}`, 1);
+    return 'reverted';
 }
 
 /**
@@ -245,7 +255,14 @@ export async function undoCreateItemActions(actions: AgentAction[]): Promise<Bat
         actions,
         async (action) => {
             try {
-                await undoCreateItemAction(action);
+                const outcome = await undoCreateItemAction(action);
+                if (outcome === 'unverifiable') {
+                    return {
+                        success: false as const,
+                        actionId: action.id,
+                        error: UNVERIFIABLE_UNDO_MESSAGE,
+                    };
+                }
                 return { success: true as const, actionId: action.id };
             } catch (error: any) {
                 const errorMessage = error?.message || 'Failed to undo item creation';

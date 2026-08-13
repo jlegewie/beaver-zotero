@@ -345,7 +345,7 @@ export const ackAgentActionsAtom = atom(
         // Frontend: Update UI state
         set(threadAgentActionsAtom, (prev: AgentAction[]) => {
             const actionIds = actionResultData.map((result) => result.action_id);
-            return prev.map((action) => 
+            return prev.map((action) =>
                 actionIds.includes(action.id)
                     ? {
                         ...action,
@@ -422,37 +422,67 @@ export const rejectAgentActionAtom = atom(
     }
 );
 
+/** An action in its undone state, keeping what the preview needs to draw it. */
+function toUndoneAction(action: AgentAction): AgentAction {
+    // Preserve undo-critical fields from result_data into proposed_data before
+    // clearing, so the preview can show the before/after diff in the "undone" state.
+    let proposed_data = action.proposed_data;
+    if (action.result_data?.old_creators && !proposed_data?.old_creators) {
+        proposed_data = { ...proposed_data, old_creators: action.result_data.old_creators };
+    }
+    if (action.result_data?.undo_full_html && !proposed_data?.undo_full_html) {
+        proposed_data = { ...proposed_data, undo_full_html: action.result_data.undo_full_html };
+    }
+    return { ...action, proposed_data, status: 'undone' as ActionStatus, result_data: undefined, error_message: undefined };
+}
+
+function persistUndoneStatus(actionId: string): Promise<unknown> {
+    return agentActionsService.updateAction(actionId, {
+        status: 'undone',
+        clear_result_data: true,
+        clear_error_message: true,
+    });
+}
+
 /**
  * Undo an applied agent action.
  * Updates both UI state and backend.
+ *
+ * The backend write is not awaited, which is fine wherever the record surviving
+ * as `applied` is merely stale. Where it is not — a caller about to act on the
+ * assumption that the status is recorded — use `undoAgentActionDurablyAtom`.
  */
 export const undoAgentActionAtom = atom(
     null,
     (_, set, actionId: string) => {
-        // Frontend: Update UI state
-        set(threadAgentActionsAtom, (prev: AgentAction[]) => {
-            return prev.map((action) => {
-                if (action.id !== actionId) return action;
-                // Preserve undo-critical fields from result_data into proposed_data before
-                // clearing, so the preview can show the before/after diff in the "undone" state.
-                let proposed_data = action.proposed_data;
-                if (action.result_data?.old_creators && !proposed_data?.old_creators) {
-                    proposed_data = { ...proposed_data, old_creators: action.result_data.old_creators };
-                }
-                if (action.result_data?.undo_full_html && !proposed_data?.undo_full_html) {
-                    proposed_data = { ...proposed_data, undo_full_html: action.result_data.undo_full_html };
-                }
-                return { ...action, proposed_data, status: 'undone' as ActionStatus, result_data: undefined, error_message: undefined };
-            });
-        });
-        // Backend: Update action state
-        agentActionsService.updateAction(actionId, {
-            status: 'undone',
-            clear_result_data: true,
-            clear_error_message: true,
-        }).catch((error) => {
+        set(threadAgentActionsAtom, (prev: AgentAction[]) =>
+            prev.map((action) => (action.id === actionId ? toUndoneAction(action) : action)));
+        persistUndoneStatus(actionId).catch((error) => {
             logger(`undoAgentActionAtom: failed to persist state for action ${actionId}: ${error}`, 1);
         });
+    }
+);
+
+/**
+ * Undo an applied agent action and wait for the backend to take it.
+ *
+ * Resolves false when the status could not be recorded. The local state still
+ * flips — the library really was reverted, and the card has to say so — but the
+ * server keeps its `applied` row, so reopening the thread would bring the stale
+ * status back. A caller that is about to discard the record needs to know.
+ */
+export const undoAgentActionDurablyAtom = atom(
+    null,
+    async (_, set, actionId: string): Promise<boolean> => {
+        set(threadAgentActionsAtom, (prev: AgentAction[]) =>
+            prev.map((action) => (action.id === actionId ? toUndoneAction(action) : action)));
+        try {
+            await persistUndoneStatus(actionId);
+            return true;
+        } catch (error) {
+            logger(`undoAgentActionDurablyAtom: failed to persist state for action ${actionId}: ${error}`, 1);
+            return false;
+        }
     }
 );
 

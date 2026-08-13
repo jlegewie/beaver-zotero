@@ -1,3 +1,5 @@
+import type { RetryUndoExtent } from '../agents/retryReconciliation';
+
 /**
  * User-facing titles for agent-run error types (shared by the in-chat error
  * card and the retry-failure popup).
@@ -73,6 +75,8 @@ export function formatRetryFailurePopupText(params: {
     type?: string;
     message?: string;
     details?: string;
+    /** How much of the kept messages' Zotero changes the retry already reverted. */
+    libraryChangesUndone?: RetryUndoExtent;
 }): string {
     const title = getRunErrorTitle(params.type);
     const message = params.message?.trim() ?? '';
@@ -93,6 +97,11 @@ export function formatRetryFailurePopupText(params: {
     }
     if (!/[.!?]$/.test(text)) {
         text += '.';
+    }
+    if (params.libraryChangesUndone === 'all') {
+        text += ' Changes those messages made to your library were already undone.';
+    } else if (params.libraryChangesUndone === 'some') {
+        text += ' Some of the changes those messages made to your library were already undone.';
     }
     return text;
 }

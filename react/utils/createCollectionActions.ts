@@ -7,12 +7,14 @@ import { AgentAction } from '../agents/agentActions';
 import { CreateCollectionResultData } from '@beaver/agent-core/types/agentActions/base';
 import { logger } from '@beaver/agent-core/platform/logger';
 import {
+    isLibraryReferencePortable,
     libraryRefForLibraryID,
     resolveItemReference,
     resolveLibraryRef,
     resolveObjectId,
     resolveWriteTargetLibrary,
 } from '../../src/utils/libraryIdentity';
+import type { UndoActionOutcome } from './undoActionOutcome';
 
 /**
  * Execute a create_collection agent action by creating the collection in Zotero.
@@ -109,7 +111,7 @@ export async function executeCreateCollectionAction(
  */
 export async function undoCreateCollectionAction(
     action: AgentAction
-): Promise<void> {
+): Promise<UndoActionOutcome> {
     const resultData = action.result_data as CreateCollectionResultData | undefined;
 
     if (!resultData?.collection_key || !resultData?.library_id) {
@@ -120,7 +122,7 @@ export async function undoCreateCollectionAction(
     const libraryID = resolveLibraryRef({ library_ref: resultData.library_ref, library_id: resultData.library_id });
     if (!libraryID) {
         logger(`undoCreateCollectionAction: Library unavailable for ${resultData.library_ref || resultData.library_id}-${resultData.collection_key}`, 1);
-        return;
+        return 'unverifiable';
     }
 
     const collection = await Zotero.Collections.getByLibraryAndKeyAsync(
@@ -129,9 +131,16 @@ export async function undoCreateCollectionAction(
     );
 
     if (!collection) {
+        // Only decisive for a portable reference — a legacy group reference
+        // resolves through a device-local library_id, so the miss may mean the
+        // id maps elsewhere here while the collection still exists.
+        if (!isLibraryReferencePortable(resultData)) {
+            logger(`undoCreateCollectionAction: Collection not found through a device-local library id; cannot confirm deletion`, 1);
+            return 'unverifiable';
+        }
         // Collection may have already been deleted manually
         logger(`undoCreateCollectionAction: Collection ${resultData.library_id}-${resultData.collection_key} not found, may have been deleted`, 1);
-        return;
+        return 'reverted';
     }
 
     // Refuse if subcollections were moved in after creation — eraseTx would
@@ -143,4 +152,5 @@ export async function undoCreateCollectionAction(
     // Erase the collection (this will NOT delete items in the collection, just remove them from it)
     await collection.eraseTx();
     logger(`undoCreateCollectionAction: Deleted collection "${collection.name}" (${resultData.library_id}-${resultData.collection_key})`, 1);
+    return 'reverted';
 }

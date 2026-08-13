@@ -114,6 +114,8 @@ import {
     isEditNoteBatchAgentAction,
     isAnyEditNoteAgentAction,
     isCreateNoteAgentAction,
+    isConfirmExtractionAgentAction,
+    isConfirmExternalSearchAgentAction,
     hasAppliedZoteroItem,
     hasAppliedBulkAnnotations,
     isCreateAnnotationsAgentAction,
@@ -123,6 +125,7 @@ import {
     removePendingApprovalsAtom,
     pendingApprovalsAtom,
     clearAllPendingApprovalsAtom,
+    undoAgentActionDurablyAtom,
 } from '../agents/agentActions';
 import {
     addPendingQuestionAtom,
@@ -130,7 +133,7 @@ import {
     clearAllPendingQuestionsAtom,
 } from '@beaver/agent-core/run-state/pendingQuestions';
 import { getAppliedPdfAnnotationCount } from '../agents/agentActionCounts';
-import { undoEditMetadataAction } from '../utils/editMetadataActions';
+import { undoEditMetadataAction, type UndoResult } from '../utils/editMetadataActions';
 import { undoCreateItemAction } from '../utils/createItemActions';
 import { undoCreateCollectionAction } from '../utils/createCollectionActions';
 import { undoOrganizeItemsAction } from '../utils/organizeItemsActions';
@@ -164,7 +167,7 @@ import { triggerProfileRefresh } from '../hooks/useProfileSync';
 import { agentItemFilterAsync, isAgentSupportedItem } from '../../src/utils/agentItemSupport';
 import { safeIsInTrash } from '../../src/utils/zoteroUtils';
 import { wasItemAddedBeforeLastSync } from '../utils/sourceUtils';
-import { libraryRefForLibraryID, resolveItemReference, resolveLibraryRef } from '../../src/utils/libraryIdentity';
+import { isLibraryReferencePortable, libraryRefForLibraryID, resolveItemReference, resolveLibraryRef } from '../../src/utils/libraryIdentity';
 import { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import { createZoteroItemReference } from '../utils/zoteroReferences';
 import { markExternalReferenceImportedAtom } from './externalReferences';
@@ -174,11 +177,13 @@ import {
     buildRetryAnchor,
     type PendingRetry,
     type RetryAnchor,
+    type RetryUndoExtent,
 } from '../agents/retryReconciliation';
 import { prewarmMuPDFWorker } from '../../src/beaver-extract';
 import { BeaverTemporaryAnnotations } from '../utils/annotationUtils';
 import { isRejectedItemValidation, itemValidationResultsAtom } from './itemValidation';
 import { formatRetryFailurePopupText } from '../utils/runErrorCopy';
+import type { UndoActionOutcome } from '../utils/undoActionOutcome';
 
 // =============================================================================
 // Helper Functions
@@ -502,6 +507,7 @@ type AbortPendingRetryArgs =
 type AbortPendingRetryResult = {
     aborted: boolean;
     popupId: string | null;
+    undidLibraryChanges: RetryUndoExtent;
 };
 
 /**
@@ -519,8 +525,10 @@ const RETRY_FAILURE_POPUP_DURATION_MS = 10000;
  * the user prompt under the turns it failed to replace.
  *
  * Any Zotero changes the user asked to revert are already reverted by this
- * point, and stay that way: they were reverted on the user's instruction, and
- * the turns they belong to come back showing them as undone.
+ * point, and stay that way: they were reverted on the user's instruction. Each
+ * card shows what its own change did — `undone` for the reverts that went
+ * through, still `applied` for the ones the retry could not confirm and the
+ * user chose to go ahead past.
  *
  * Pass `notify: true` on failure paths to tell the user via popup; cancel omits
  * it. Callers use the returned `aborted` to decide whether an error still needs
@@ -542,7 +550,7 @@ export const abortPendingRetryAtom = atom(
         // Also covers the second terminal event for the same run: the first one
         // cleared the record, so this returns false and the caller surfaces the
         // error the ordinary way.
-        if (!pending || pending.runId !== runId) return { aborted: false, popupId: null };
+        if (!pending || pending.runId !== runId) return { aborted: false, popupId: null, undidLibraryChanges: 'none' };
 
         set(pendingRetryAtom, null);
         set(uncommittedRunIdAtom, null);
@@ -570,7 +578,12 @@ export const abortPendingRetryAtom = atom(
                 id: messageId,
                 type: 'error',
                 title: 'Retry failed — Your messages were kept',
-                text: formatRetryFailurePopupText({ type: errorType, message, details }),
+                text: formatRetryFailurePopupText({
+                    type: errorType,
+                    message,
+                    details,
+                    libraryChangesUndone: pending.undidLibraryChanges,
+                }),
                 expire: true,
                 duration: RETRY_FAILURE_POPUP_DURATION_MS,
                 ...(showGetBeaverCredits ? { button: getBeaverCreditsButton } : {}),
@@ -621,7 +634,7 @@ export const abortPendingRetryAtom = atom(
             `abortPendingRetry: dropped retry ${runId}; the ${pending.runIdsToRemove.length} run(s) it would have replaced are untouched`,
             1,
         );
-        return { aborted: true, popupId: shownPopupId };
+        return { aborted: true, popupId: shownPopupId, undidLibraryChanges: pending.undidLibraryChanges };
     },
 );
 
@@ -835,12 +848,12 @@ interface RetryOptions {
  * Retry a run: ask the server to replace it and everything after it, and
  * regenerate from its prompt.
  *
- * The client does not remove anything here. It records what the retry will
- * replace in `pendingRetryAtom` and keeps those runs — and any Zotero changes
- * they applied — until the server confirms the truncation, which
- * `commitPendingRetryAtom` acts on. A retry that fails first leaves the thread
- * exactly as it was; see `retryReconciliation` for why that ordering is the
- * only sound one.
+ * The client does not remove runs here. It records what the retry will
+ * replace in `pendingRetryAtom` and keeps those turns until the server
+ * confirms the truncation, which `commitPendingRetryAtom` acts on. Zotero
+ * changes the user asked to undo are reverted before the request, because that
+ * undo cannot wait; each revert that went through marks its card `undone`. A
+ * retry that fails first leaves the turns in place; see `retryReconciliation`.
  *
  * The retry's own run is hidden until then, so the thread never shows the same
  * prompt twice.
@@ -960,12 +973,17 @@ async function startRetry(
         //
         // Running it before the request also keeps the replacement run from
         // touching notes and items while they are being reverted.
+        let undidLibraryChanges: RetryUndoExtent = 'none';
         if (options.confirmAppliedActions && runIdsToRemove.length > 0) {
             const decision = confirmUndoForRemovedRuns(get, runIdsToRemove);
             if (decision === 'cancel') return;
-            if (decision.length > 0 && !(await revertAppliedActions(decision))) {
-                logger(`${logPrefix}: not retrying, some changes could not be undone`, 1);
-                return;
+            if (decision.length > 0) {
+                const result = await revertAppliedActions(set, decision);
+                if (!result.proceed) {
+                    logger(`${logPrefix}: not retrying, some changes could not be undone`, 1);
+                    return;
+                }
+                undidLibraryChanges = result.undid;
             }
         }
 
@@ -1014,6 +1032,7 @@ async function startRetry(
                 anchorRunId: retryAnchor.retryRunId,
                 threadId,
                 runIdsToRemove,
+                undidLibraryChanges,
             });
             // Keep the new run out of the thread while the runs it replaces are
             // still in it. Retrying the active run removes nothing locally (the
@@ -1051,21 +1070,57 @@ async function startRetry(
 }
 
 /**
+ * Classify a field-level undo (`edit_metadata`, `edit_annotations`), which
+ * reverts field by field and reports what it could not do rather than throwing.
+ *
+ * This path passes `forceRevert: false`, so any field the user edited after the
+ * apply is deliberately left as they left it. That is the right call for the
+ * library, but it means the action is only partly reversed — the value the
+ * agent wrote may still be there — so it cannot be reported as reverted, which
+ * would mark it undone and discard the snapshot needed to finish the job.
+ */
+function fieldUndoOutcome(result: UndoResult): UndoActionOutcome {
+    if (result.unverifiable) return 'unverifiable';
+    if (result.manuallyModified.length > 0) return 'unverifiable';
+    // A field the helper could not read or could not write is left as the
+    // action set it, and it says so rather than throwing so the rest of the
+    // item is still restored.
+    return (result.failed?.length ?? 0) > 0 ? 'unverifiable' : 'reverted';
+}
+
+/**
  * Undo all applied agent actions from removed runs in reverse chronological order.
  *
  * A single ordered loop is required because actions have cross-type dependencies.
  * Undoing in reverse chronological order restores the original state.
  *
  * Actions that are no longer applied are skipped, so a list assembled earlier
- * stays safe to hand over. One failure does not stop the loop; the number that
- * could not be reverted comes back, which is the user's to hear about.
+ * stays safe to hand over. One failure does not stop the loop: `succeededIds`
+ * names the undos that demonstrably completed, and everything else — a throw,
+ * an `unverifiable` outcome, an action type with no undo path — is counted in
+ * `failed` for the caller to put to the user.
+ *
+ * `partiallyReverted` says whether an undo that is *not* in `succeededIds`
+ * nevertheless changed the library: an action can revert some of its fields and
+ * report the rest, or reverse what it can and leave a known residue. It is what
+ * lets the caller tell the user that some of their changes are already gone. It
+ * only ever under-reports — a mutation this loop cannot see from the outcome
+ * keeps the claim off rather than making one that might be wrong.
  */
-async function undoAppliedActionsInReverse(actions: AgentAction[]): Promise<number> {
+async function undoAppliedActionsInReverse(
+    actions: AgentAction[],
+): Promise<{ failed: number; succeededIds: string[]; partiallyReverted: boolean }> {
     // Filter applied actions, keeping their original array position as the
     // tiebreaker for chronological ordering.
     const indexed = actions
         .map((action, index) => ({ action, index }))
         .filter(({ action }) => {
+            // Approval gates record a decision the user made, not a change to
+            // the library, so there is nothing to revert and nothing to warn
+            // about. Left in, they would be counted as undos that failed.
+            if (isConfirmExtractionAgentAction(action) || isConfirmExternalSearchAgentAction(action)) {
+                return false;
+            }
             if (isCreateAnnotationsAgentAction(action)) {
                 return hasAppliedBulkAnnotations(action);
             }
@@ -1085,39 +1140,65 @@ async function undoAppliedActionsInReverse(actions: AgentAction[]): Promise<numb
     });
 
     let failed = 0;
+    const succeededIds: string[] = [];
+    let partiallyReverted = false;
 
     for (const { action } of indexed) {
         try {
+            let outcome: UndoActionOutcome | null = 'reverted';
             if (isCreateAnnotationsAgentAction(action)) {
-                await undoCreateAnnotationsAction(action);
+                outcome = await undoCreateAnnotationsAction(action);
             } else if (isEditAnnotationsAgentAction(action)) {
-                // Preserve fields the user manually modified after apply, as
-                // the other edit-action retry paths do.
-                await undoEditAnnotationsAction(action, false);
+                // Throws when the library is not on this device.
+                const result = await undoEditAnnotationsAction(action, false);
+                outcome = fieldUndoOutcome(result);
+                if (outcome !== 'reverted' && result.fieldsReverted > 0) partiallyReverted = true;
             } else if (isAnnotationAgentAction(action) || isZoteroNoteAgentAction(action)) {
                 const ref = action.result_data as ZoteroItemReference | undefined;
-                if (!ref) continue;
+                if (!ref) throw new Error('No result data naming the item to remove');
                 const resolved = await resolveItemReference(ref);
-                if (resolved.status === 'found') await resolved.item.eraseTx();
+                if (resolved.status === 'found') {
+                    await resolved.item.eraseTx();
+                } else if (resolved.status === 'library_unavailable' || !isLibraryReferencePortable(ref)) {
+                    // Either the library isn't here, or the miss came through a
+                    // device-local group id that may name a different group on
+                    // this device — neither proves the item is gone.
+                    outcome = 'unverifiable';
+                }
             } else if (isEditMetadataAgentAction(action)) {
                 // false = preserve fields the user manually modified after apply
-                await undoEditMetadataAction(action, false);
+                const result = await undoEditMetadataAction(action, false);
+                outcome = fieldUndoOutcome(result);
+                if (outcome !== 'reverted' && result.fieldsReverted > 0) partiallyReverted = true;
             } else if (isEditNoteAgentAction(action)) {
                 await undoEditNoteAction(action);
             } else if (isEditNoteBatchAgentAction(action)) {
                 await undoEditNoteBatchAction(action);
             } else if (isCreateItemAgentAction(action)) {
-                await undoCreateItemAction(action);
+                outcome = await undoCreateItemAction(action);
             } else if (isCreateCollectionAgentAction(action)) {
-                await undoCreateCollectionAction(action);
+                outcome = await undoCreateCollectionAction(action);
             } else if (isOrganizeItemsAgentAction(action)) {
-                await undoOrganizeItemsAction(action);
+                outcome = await undoOrganizeItemsAction(action);
             } else if (isManageTagsAgentAction(action)) {
-                await undoManageTagsAction(action);
+                outcome = await undoManageTagsAction(action);
             } else if (isManageCollectionsAgentAction(action)) {
-                await undoManageCollectionsAction(action);
+                outcome = await undoManageCollectionsAction(action);
             } else if (isCreateNoteAgentAction(action)) {
-                await undoCreateNoteAction(action);
+                outcome = await undoCreateNoteAction(action);
+            } else {
+                // No undo path for this action type. Nothing was reverted, and
+                // the user has to hear about it like any other failure.
+                logger(`undoAppliedActionsInReverse: No undo handler for action ${action.id} (${action.action_type})`, 1);
+                outcome = null;
+            }
+            if (outcome === 'reverted') {
+                succeededIds.push(action.id);
+            } else {
+                failed++;
+                // `partial` means the undo ran and left a known residue, so the
+                // library did change even though the action stays applied.
+                if (outcome === 'partial') partiallyReverted = true;
             }
         } catch (error) {
             failed++;
@@ -1125,7 +1206,7 @@ async function undoAppliedActionsInReverse(actions: AgentAction[]): Promise<numb
         }
     }
 
-    return failed;
+    return { failed, succeededIds, partiallyReverted };
 }
 
 /**
@@ -1283,13 +1364,41 @@ function confirmUndoForRemovedRuns(
  * them, so this is the last moment at which Beaver still knows how to reverse
  * what is left. Only the user can weigh that against wanting the answer.
  */
-function confirmRetryAfterFailedUndo(failed: number): boolean {
-    const subject = failed === 1 ? 'change' : 'changes';
-    const pronoun = failed === 1 ? 'it' : 'them';
+function confirmRetryAfterFailedUndo(unconfirmed: number, unrecorded: number): boolean {
+    const lines: string[] = [];
+    if (unconfirmed > 0) {
+        // Counts every undo that did not demonstrably complete: one that threw,
+        // one this device could not confirm, and one that went as far as it can
+        // and knowingly left something behind. The copy speaks to all of them,
+        // so it claims uncertainty rather than a known outcome.
+        const subject = unconfirmed === 1 ? 'change' : 'changes';
+        const pronoun = unconfirmed === 1 ? 'it' : 'them';
+        lines.push(
+            `Beaver could not confirm that ${unconfirmed} ${subject} from the messages being replaced ${unconfirmed === 1 ? 'was' : 'were'} undone, so ${pronoun} may still be in your library.`,
+        );
+    }
+    if (unrecorded > 0) {
+        // These were reverted in Zotero, but the status could not be saved, so
+        // the server still has them as applied and a reload would show that.
+        const subject = unrecorded === 1 ? 'change' : 'changes';
+        lines.push(
+            `${unrecorded} ${subject} ${unrecorded === 1 ? 'was' : 'were'} undone in Zotero, but Beaver could not save that to your account, so ${unrecorded === 1 ? 'it' : 'they'} may show as applied again later.`,
+        );
+    }
+    // A change that was undone but not recorded is a different problem from one
+    // that may not be undone at all, and only the second is worth warning about
+    // losing the record of — the first has nothing left to undo.
+    const title = unconfirmed > 0
+        ? 'Some changes could not be undone'
+        : 'Some undone changes were not saved';
+    lines.push(unconfirmed > 0
+        ? `Retrying discards Beaver's record of these changes, so afterwards only you can undo them in Zotero. Retry anyway?`
+        : 'Retry anyway?');
+
     const buttonIndex = Zotero.Prompt.confirm({
         window: Zotero.getMainWindow(),
-        title: 'Some changes could not be undone',
-        text: `${failed} ${subject} from the messages being replaced ${failed === 1 ? 'is' : 'are'} still in your library.\n\nRetrying discards Beaver's record of ${pronoun}, so afterwards only you can undo ${pronoun} in Zotero. Retry anyway?`,
+        title,
+        text: lines.join('\n\n'),
         button0: 'Retry Anyway',
         // Cancel at button1 so Escape/dialog-close routes here
         // (Services.prompt.confirmEx returns index 1 on Esc).
@@ -1302,21 +1411,48 @@ function confirmRetryAfterFailedUndo(failed: number): boolean {
 /**
  * Revert the Zotero changes the user agreed to drop.
  *
- * Returns whether the retry should go ahead. A reversal that failed outright is
- * put to the user rather than swallowed: proceeding costs them the only record
- * of how to finish it, and cancelling here leaves a thread they can act on.
+ * Returns whether the retry should go ahead, and whether any change was
+ * actually undone. A reversal that failed outright is put to the user rather
+ * than swallowed: proceeding costs them the only record of how to finish it,
+ * and cancelling here leaves a thread they can act on.
  *
- * The actions are deliberately *not* marked undone here. An undo helper that
- * resolves is not proof it did anything — some resolve having skipped a library
- * this device cannot reach — and recording `undone` persists to the server and
- * discards the result data a second attempt would need. Left applied, the state
- * is merely stale, and reopening the thread reconciles it against Zotero itself
- * (see `validateAppliedAgentAction`), which is evidence rather than a guess.
- * A retry that goes through deletes these records anyway.
+ * Actions whose Zotero undo completed — or whose applied object is verifiably
+ * gone — are marked `undone` (local + backend) so the cards match the library
+ * while the old turns are still on screen. Anything else leaves that action
+ * applied with its result data, so a second attempt is still possible. A retry
+ * that goes through deletes these records anyway, which is also why a status
+ * the backend would not take is worth stopping for: it is the one case where
+ * the record outlives the undo and contradicts it.
+ *
+ * `undid` reports how much went through, which is what the failure popup may
+ * tell the user about: "all" only when nothing was left behind, and "some" also
+ * for an action that reverted part of itself without being marked undone.
  */
-async function revertAppliedActions(actions: AgentAction[]): Promise<boolean> {
-    const failed = await undoAppliedActionsInReverse(actions);
-    return failed === 0 || confirmRetryAfterFailedUndo(failed);
+async function revertAppliedActions(
+    set: Setter,
+    actions: AgentAction[],
+): Promise<{ proceed: boolean; undid: RetryUndoExtent }> {
+    const { failed, succeededIds, partiallyReverted } = await undoAppliedActionsInReverse(actions);
+    // Awaited, unlike the card's own Undo: this caller goes on to ask the server
+    // to delete these rows, and the two requests fail together when the network
+    // is the reason. An undo recorded only in memory would come back `applied`
+    // on the next thread load — the exact state this is here to prevent — so a
+    // status that did not persist is put to the user rather than logged.
+    const unrecorded = (await Promise.all(
+        succeededIds.map((id) => set(undoAgentActionDurablyAtom, id)),
+    )).filter((persisted) => !persisted).length;
+    // "all" only when every undo went through. An action that reverted part of
+    // itself counts toward "some" even though it is not marked undone — the
+    // library changed, which is the thing the message speaks to.
+    const undid: RetryUndoExtent = failed === 0 && succeededIds.length > 0
+        ? 'all'
+        : (succeededIds.length > 0 || partiallyReverted) ? 'some' : 'none';
+    return {
+        proceed: failed === 0 && unrecorded === 0
+            ? true
+            : confirmRetryAfterFailedUndo(failed, unrecorded),
+        undid,
+    };
 }
 
 
@@ -1715,7 +1851,7 @@ function surfaceAndDiagnoseConnectionFailure(
     // under those turns).
     const initialPresentation = presentConnectionFailure(evidence);
     const popupId = uuidv4();
-    const { aborted } = set(abortPendingRetryAtom, {
+    const { aborted, undidLibraryChanges } = set(abortPendingRetryAtom, {
         runId,
         notify: true,
         type: 'connection_error',
@@ -1745,6 +1881,7 @@ function surfaceAndDiagnoseConnectionFailure(
                     type: 'connection_error',
                     message: refined.message,
                     details: refined.details,
+                    libraryChangesUndone: undidLibraryChanges,
                 }),
             },
         });

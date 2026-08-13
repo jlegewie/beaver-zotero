@@ -58,6 +58,7 @@ import { type CollectionReference } from '@beaver/agent-core/types/zotero';
 import { collectionToReference } from '../../utils/zoteroReferences';
 import { resolveItemReference } from '../../../src/utils/libraryIdentity';
 import { undoEditMetadataAction } from '../../utils/editMetadataActions';
+import { UNVERIFIABLE_UNDO_MESSAGE, type UndoActionOutcome } from '../../utils/undoActionOutcome';
 import { undoCreateCollectionAction } from '../../utils/createCollectionActions';
 import { undoOrganizeItemsAction } from '../../utils/organizeItemsActions';
 import { undoManageTagsAction } from '../../utils/manageTagsActions';
@@ -482,28 +483,33 @@ export async function handleTestUndoActionHttpRequest(request: any) {
         return { ok: false, error: `action ${actionId} not found in current thread (load the thread first)` };
     }
     let reverted: string | Record<string, unknown> = action.action_type;
+    // Helpers that can come back without having reverted anything say so
+    // instead of throwing. Reporting `ok` for one of those would have this
+    // endpoint disagree with the UI about what happened to the library.
+    let outcome: UndoActionOutcome | void = undefined;
     try {
         switch (action.action_type) {
             case 'edit_metadata': {
                 const result = await undoEditMetadataAction(action, true); // force-revert manual edits
                 reverted = { fieldsReverted: result.fieldsReverted };
+                if (result.unverifiable || (result.failed?.length ?? 0) > 0) outcome = 'unverifiable';
                 break;
             }
             case 'create_collection':
-                await undoCreateCollectionAction(action);
+                outcome = await undoCreateCollectionAction(action);
                 break;
             case 'organize_items':
-                await undoOrganizeItemsAction(action);
+                outcome = await undoOrganizeItemsAction(action);
                 break;
             case 'manage_tags':
-                await undoManageTagsAction(action);
+                outcome = await undoManageTagsAction(action);
                 break;
             case 'manage_collections':
-                await undoManageCollectionsAction(action);
+                outcome = await undoManageCollectionsAction(action);
                 break;
             case 'zotero_note':
             case 'create_note':
-                await undoCreateNoteAction(action);
+                outcome = await undoCreateNoteAction(action);
                 break;
             case 'edit_note':
                 await undoEditNoteAction(action);
@@ -512,14 +518,16 @@ export async function handleTestUndoActionHttpRequest(request: any) {
                 await undoEditNoteBatchAction(action);
                 break;
             // Both edit_annotations and delete_annotations share this action type.
-            case 'edit_annotations':
-                await undoEditAnnotationsAction(action);
+            case 'edit_annotations': {
+                const result = await undoEditAnnotationsAction(action, true); // force-revert manual edits
+                if (result.unverifiable || (result.failed?.length ?? 0) > 0) outcome = 'unverifiable';
                 break;
+            }
             case 'create_highlight_annotations':
             case 'create_note_annotations':
             case 'highlight_annotation':
             case 'note_annotation':
-                await undoCreateAnnotationsAction(action);
+                outcome = await undoCreateAnnotationsAction(action);
                 break;
             case 'create_item': {
                 const batch = await undoCreateItemActions([action]);
@@ -533,6 +541,9 @@ export async function handleTestUndoActionHttpRequest(request: any) {
         }
     } catch (error: any) {
         return { ok: false, actionId, error: error?.message || 'undo failed' };
+    }
+    if (outcome === 'unverifiable') {
+        return { ok: false, actionId, error: UNVERIFIABLE_UNDO_MESSAGE };
     }
     // Zotero revert succeeded — now flip UI + backend status.
     store.set(undoAgentActionAtom, actionId);

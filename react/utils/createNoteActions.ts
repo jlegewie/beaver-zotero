@@ -14,7 +14,8 @@ import { wrapWithSchemaVersion, getBeaverNoteFooterHTML } from './noteActions';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { resolveCreateNoteParent } from '../../src/services/agentDataProvider/actions/resolveCreateNoteParent';
 import { getCollectionByIdOrName } from '../../src/services/agentDataProvider/utils';
-import { libraryRefForLibraryID, resolveItemReference, resolveWriteTargetLibrary } from '../../src/utils/libraryIdentity';
+import { isLibraryReferencePortable, libraryRefForLibraryID, resolveItemReference, resolveWriteTargetLibrary } from '../../src/utils/libraryIdentity';
+import type { UndoActionOutcome } from './undoActionOutcome';
 
 
 export interface CreateNoteResultData {
@@ -252,7 +253,7 @@ export async function executeCreateNoteAction(action: AgentAction, runId?: strin
 /**
  * Undo a create_note action by deleting the created note.
  */
-export async function undoCreateNoteAction(action: AgentAction): Promise<void> {
+export async function undoCreateNoteAction(action: AgentAction): Promise<UndoActionOutcome> {
     const resultData = action.result_data as CreateNoteResultData | undefined;
     if (!resultData?.library_id || !resultData?.zotero_key) {
         throw new Error('Cannot undo: no result data with note reference');
@@ -261,13 +262,21 @@ export async function undoCreateNoteAction(action: AgentAction): Promise<void> {
     const resolved = await resolveItemReference(resultData);
     if (resolved.status === 'library_unavailable') {
         logger(`undoCreateNoteAction: Library unavailable for note ${resultData.library_ref || resultData.library_id}-${resultData.zotero_key}`, 1);
-        return;
+        return 'unverifiable';
     }
     if (resolved.status === 'not_found') {
+        // Only decisive for a portable reference — a legacy group reference
+        // resolves through a device-local library_id, so the miss may mean the
+        // id maps elsewhere here while the note still exists.
+        if (!isLibraryReferencePortable(resultData)) {
+            logger(`undoCreateNoteAction: Note not found through a device-local library id; cannot confirm deletion`, 1);
+            return 'unverifiable';
+        }
         logger(`undoCreateNoteAction: Note ${resultData.library_id}-${resultData.zotero_key} not found, may have been manually deleted`, 1);
-        return;
+        return 'reverted';
     }
 
     await resolved.item.eraseTx();
     logger(`undoCreateNoteAction: Deleted note ${resultData.library_id}-${resultData.zotero_key}`, 1);
+    return 'reverted';
 }

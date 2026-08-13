@@ -25,7 +25,7 @@ import {
     threadAgentActionsAtom, 
     isCreateItemAgentAction, 
     AgentAction, 
-    validateAppliedAgentAction, 
+    validateAppliedAgentAction,
     undoAgentActionAtom,
     clearAllPendingApprovalsAtom,
 } from "../agents/agentActions";

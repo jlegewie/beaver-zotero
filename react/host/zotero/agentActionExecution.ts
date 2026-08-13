@@ -28,8 +28,9 @@ import {
     getUserFacingErrorMessage,
     undoEditNoteOrBatchAction,
 } from '../../utils/editNoteActions';
-import { confirmOverwriteManualChanges } from './components/agentActionViewHelpers';
+import { confirmOverwriteManualChanges, hasFailedUndo } from './components/agentActionViewHelpers';
 import { dismissActiveEditNotePreview } from './editNotePreviewLifecycle';
+import { UNVERIFIABLE_UNDO_MESSAGE, type UndoActionOutcome } from '../../utils/undoActionOutcome';
 
 /**
  * Apply / undo / reject for stored agent actions, as write atoms so any
@@ -84,8 +85,15 @@ const APPLY_EXECUTORS = new Map<string, (action: AgentAction, runId: string) => 
     ['edit_annotations', (action) => executeEditAnnotationsAction(action)],
 ]);
 
-/** Action types undone by one call with no confirmation step. */
-const UNDO_EXECUTORS = new Map<string, (action: AgentAction) => Promise<void>>([
+/**
+ * Action types undone by one call with no confirmation step.
+ *
+ * Handlers that can return without having reverted anything report an
+ * `UndoActionOutcome`; the rest say the same thing by throwing. Both are
+ * handled in `undoClaimedActions` — an undo that is not proven to have run must
+ * not mark the card undone.
+ */
+const UNDO_EXECUTORS = new Map<string, (action: AgentAction) => Promise<void | UndoActionOutcome>>([
     ['edit_note', undoEditNoteOrBatchAction],
     ['edit_note_batch', undoEditNoteOrBatchAction],
     ['create_collection', undoCreateCollectionAction],
@@ -314,7 +322,13 @@ async function undoClaimedActions(set: Setter, actions: AgentAction[]): Promise<
             await dismissActiveEditNotePreview();
         }
         if (actionType === 'create_item') {
-            const actionsToUndo = actions.filter((candidate) => candidate.status === 'applied');
+            // An action that errored with its result data intact failed its own
+            // undo, so the item is still there and Retry Undo has to reach it.
+            // Without that this branch would find nothing to do and the button
+            // would spin on a card it can never resolve.
+            const actionsToUndo = actions.filter(
+                (candidate) => candidate.status === 'applied' || hasFailedUndo([candidate]),
+            );
             if (actionsToUndo.length === 0) return { undone, failed };
 
             const batchResult = await undoCreateItemActions(actionsToUndo);
@@ -342,6 +356,14 @@ async function undoClaimedActions(set: Setter, actions: AgentAction[]): Promise<
                 isMetadata ? undoEditMetadataAction : undoEditAnnotationsAction,
                 isMetadata ? 'fields' : 'annotation fields',
             );
+            // Marking the card undone would claim a revert that did not
+            // happen: either nothing was touched because the library is not
+            // reachable here, or a field could not be read or written and
+            // still holds what the action wrote. Fields the user chose to keep
+            // are a different matter and fall through — see below.
+            if (result.unverifiable || (result.failed?.length ?? 0) > 0) {
+                throw new Error(UNVERIFIABLE_UNDO_MESSAGE);
+            }
             // Also reached when the user declined the overwrite: the fields
             // they kept are theirs, but the action is no longer applied.
             set(undoAgentActionAtom, action.id);
@@ -353,7 +375,10 @@ async function undoClaimedActions(set: Setter, actions: AgentAction[]): Promise<
                 return { undone, failed: unsupportedActionTypeFailures(actions, actionType, 'undo') };
             }
 
-            await undoAction(action);
+            const outcome = await undoAction(action);
+            if (outcome === 'unverifiable') {
+                throw new Error(UNVERIFIABLE_UNDO_MESSAGE);
+            }
             set(undoAgentActionAtom, action.id);
             undone.push(action.id);
             logger(`agentActionExecution: Undone ${actionType} action ${action.id}`, 1);
