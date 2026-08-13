@@ -100,7 +100,7 @@ export const useCollectionsMenu = ({
             collection.name.toLowerCase().includes(lowerCaseQuery)
         );
         const items = filteredCollections.map((collection) =>
-            createCollectionMenuItem(collection, collectionMenuItemContext)
+            createCollectionMenuItem(collection, collectionMenuItemContext, searchQuery)
         );
         let headerLabel = 'Select Collections';
         if (activeLibraryId) {

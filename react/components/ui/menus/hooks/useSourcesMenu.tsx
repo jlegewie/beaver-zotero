@@ -107,7 +107,7 @@ export const useSourcesMenu = ({
                 if (!item) {
                     continue;
                 }
-                items.push(await createSourceMenuItem(item, sourceMenuItemContext));
+                items.push(await createSourceMenuItem(item, sourceMenuItemContext, searchQuery));
             }
             return itemSection('Search Results', items);
         };

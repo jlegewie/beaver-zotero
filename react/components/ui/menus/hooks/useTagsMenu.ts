@@ -131,7 +131,7 @@ export const useTagsMenu = ({
             tag.tag.toLowerCase().includes(lowerCaseQuery)
         );
         const items = filteredTags.map((tag) =>
-            createTagMenuItem(tag, tagMenuItemContext)
+            createTagMenuItem(tag, tagMenuItemContext, searchQuery)
         );
 
         let headerLabel = 'Select Tags';

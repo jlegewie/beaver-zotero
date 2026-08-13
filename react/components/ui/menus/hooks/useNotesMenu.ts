@@ -202,7 +202,7 @@ export const useNotesMenu = ({
             }
 
             const items = await Promise.all(
-                displayNotes.map(note => createNoteMenuItem(note, sourceMenuItemContext))
+                displayNotes.map(note => createNoteMenuItem(note, sourceMenuItemContext, searchQuery))
             );
 
             if (!isCancelled) {

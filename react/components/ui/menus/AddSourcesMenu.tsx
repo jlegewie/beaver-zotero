@@ -357,6 +357,10 @@ const AddSourcesMenu = forwardRef<AddSourcesMenuHandle, AddSourcesMenuProps>(fun
         handleCommit();
     }, [setCurrentMessageFilters, handleCommit]);
 
+    // These contexts stay identity-stable across keystrokes: menu hooks feed
+    // them to their fetch effects, so churning them would re-read tags,
+    // collections and libraries on every character typed. The search query
+    // reaches the rows as a separate argument to the item factories.
     const sourceMenuItemContext = useMemo<SourceMenuItemContext>(() => ({
         currentMessageItems,
         onAdd: handleAddSourceItem,
