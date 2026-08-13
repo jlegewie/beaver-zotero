@@ -8,7 +8,7 @@ import {
     type MentionDescriptor,
     type SerializedLegacyMentionNode,
     type SerializedMentionNodeV2,
-} from '../../../react/components/input/lexical/MentionNode';
+} from '@beaver/agent-ui/composer/MentionNode';
 
 /**
  * Node work has to run inside an editor: `$createMentionNode` applies node

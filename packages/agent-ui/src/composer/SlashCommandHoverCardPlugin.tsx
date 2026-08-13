@@ -1,7 +1,7 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext';
-import { ChipPopupCard, type ChipPopupContent } from '@beaver/agent-ui/chat/ChipPopup';
-import { buildActionPopup, type ActionPopupSource } from '@beaver/agent-ui/chat/actionPopup';
+import { ChipPopupCard, type ChipPopupContent } from '../chat/ChipPopup';
+import { buildActionPopup, type ActionPopupSource } from '../chat/actionPopup';
 
 /** Delay before the card opens, so mousing across the input doesn't flash it. */
 const HOVER_OPEN_DELAY_MS = 300;

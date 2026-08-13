@@ -4,7 +4,7 @@ import React, { act, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('../../../react/components/input/lexical/SlashCommandHoverCardPlugin', () => ({
+vi.mock('@beaver/agent-ui/composer/SlashCommandHoverCardPlugin', () => ({
     SlashCommandHoverCardPlugin: () => null,
 }));
 
@@ -17,9 +17,9 @@ const deferral = vi.hoisted(() => ({
     dispose: vi.fn(),
 }));
 
-vi.mock('../../../react/components/input/lexical/imeComposition', async (importOriginal) => {
+vi.mock('@beaver/agent-ui/composer/imeComposition', async (importOriginal) => {
     const actual = await importOriginal<
-        typeof import('../../../react/components/input/lexical/imeComposition')
+        typeof import('@beaver/agent-ui/composer/imeComposition')
     >();
     return { ...actual, registerCompositionEndDeferral: deferral.register };
 });
@@ -81,7 +81,7 @@ describe('windows IME composition-order gate', () => {
 
     const mountEditor = async () => {
         const { LexicalEditorInput } = await import(
-            '../../../react/components/input/lexical/LexicalEditorInput'
+            '@beaver/agent-ui/composer/LexicalEditorInput'
         );
         container = globalThis.document.createElement('div');
         globalThis.document.body.append(container);

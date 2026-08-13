@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { matchSourcesTrigger, queryForOpenTrigger } from '../../../react/hooks/useAddSourcesMenu';
+import { matchSourcesTrigger, queryForOpenTrigger } from '@beaver/agent-ui/composer/useAddSourcesMenu';
 
 describe('matchSourcesTrigger', () => {
     it('opens on an @ at the very start of the composer', () => {

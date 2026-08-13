@@ -39,11 +39,11 @@ import {
     splitContentByCommandTokens,
     slashDescriptorsEqual,
     type SlashCommandDescriptor,
-} from '@beaver/agent-ui/composer/slashCommands';
-import { isImeKeyEvent } from '../../../utils/ime';
-import { getHost } from '@beaver/agent-ui/host';
-import { isMacPlatform, isWindowsPlatform } from '@beaver/agent-ui/utils/platform';
-import type { ActionPopupSource } from '@beaver/agent-ui/chat/actionPopup';
+} from './slashCommands';
+import { isImeKeyEvent } from '../primitives/ime';
+import { getHost } from '../host';
+import { isMacPlatform, isWindowsPlatform } from '../utils/platform';
+import type { ActionPopupSource } from '../chat/actionPopup';
 import {
     createCompositionGatedEmitter,
     createImeCompositionTracker,
@@ -730,8 +730,7 @@ const PlainTextSync: React.FC<{
             // deferred recovery replaces it on the next task.
             isComposing: () => ime.isImeActive(),
             emit: () => emitRef.current(),
-            getWindow: () => (editor.getRootElement()?.ownerDocument.defaultView ?? null) as
-                (Window & typeof globalThis) | null,
+            getWindow: () => editor.getRootElement()?.ownerDocument.defaultView ?? null,
         });
         emitterRef.current = emitter;
         // Lets the imperative handle reach the withheld text (see
@@ -1504,7 +1503,7 @@ const SelectionGuardPlugin: React.FC<{
                 }, { discrete: true });
             };
 
-            const observer = new (win as typeof globalThis & Window).MutationObserver(onMutations);
+            const observer = new win.MutationObserver(onMutations);
             observer.observe(doc.documentElement, { childList: true, subtree: true, characterData: true });
             doc.addEventListener('pointerdown', onPointerDown, true);
             doc.addEventListener('pointerup', onPointerUp, true);

@@ -140,10 +140,11 @@ export class MentionNode extends DecoratorNode<React.ReactElement> {
     // --- DOM ---------------------------------------------------------------
 
     createDOM(config: EditorConfig): HTMLElement {
-        // Lexical inserts the element into the editor's own document; creating
-        // it from the bundle's global document is fine (Gecko adopts nodes on
-        // insertion).
-        // eslint-disable-next-line no-restricted-globals
+        // Lexical hands no element to derive a document from here, so the
+        // bundle's global `document` is what creates the node. That is safe even
+        // when the editor lives in another document: Lexical inserts the element
+        // into the editor's own document, and Gecko adopts a foreign node on
+        // insertion rather than rejecting it.
         const span = document.createElement('span');
         span.className = 'beaver-mention';
         // Keep the pill from being split by the browser during selection
@@ -157,7 +158,9 @@ export class MentionNode extends DecoratorNode<React.ReactElement> {
 
     exportDOM(): DOMExportOutput {
         const { label, sublabel, iconName, ref } = this.__descriptor;
-        // eslint-disable-next-line no-restricted-globals
+        // Same as createDOM: the export target is a detached span the caller
+        // serializes or adopts, so the bundle's global document is the right
+        // owner.
         const span = document.createElement('span');
         span.setAttribute(MENTION_ATTRIBUTE, 'true');
         span.setAttribute('data-mention-label', label);

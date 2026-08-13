@@ -12,7 +12,7 @@ import {
     $selectFlatSelection,
     $trySelectFlatRange,
     type LexicalSelectionOffsets,
-} from '../../../react/components/input/lexical/selectionOffsets';
+} from '@beaver/agent-ui/composer/selectionOffsets';
 
 function createTestEditor() {
     return createEditor({

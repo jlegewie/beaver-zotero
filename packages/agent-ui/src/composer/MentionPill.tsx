@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
 import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext';
 import { $getNodeByKey, NodeKey } from 'lexical';
-import { CancelIcon, FileIcon, Icon } from '@beaver/agent-ui/icons';
-import { getHost } from '@beaver/agent-ui/host';
+import { CancelIcon, FileIcon, Icon } from '../icons';
+import { getHost } from '../host';
 import { $isMentionNode, type MentionDescriptor } from './MentionNode';
 
 /**

@@ -10,7 +10,7 @@
 import { truncateText } from '@beaver/agent-ui/utils/stringUtils';
 import { getDisplayNameFromItem } from './sourceUtils';
 import { libraryRefForLibraryID } from '../../src/utils/libraryIdentity';
-import type { MentionDescriptor } from '../components/input/lexical/MentionNode';
+import type { MentionDescriptor } from '@beaver/agent-ui/composer/MentionNode';
 
 /**
  * Labels are truncated here rather than in the pill: the client owns what a

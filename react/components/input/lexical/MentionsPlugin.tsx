@@ -18,7 +18,7 @@ import {
     $isRangeSelection,
     TextNode,
 } from 'lexical';
-import { $createMentionNode } from './MentionNode';
+import { $createMentionNode } from '@beaver/agent-ui/composer/MentionNode';
 import { itemToMentionDescriptor } from '../../../utils/mentionDescriptor';
 import { searchTitleCreatorYear } from '../../../utils/search';
 import { getDisplayNameFromItem } from '../../../utils/sourceUtils';

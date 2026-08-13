@@ -14,7 +14,7 @@ import {
 } from 'lexical';
 import { Action } from '@beaver/agent-core/types/actions';
 import { $createSlashCommandNode } from './SlashCommandNode';
-import { truncateText } from '@beaver/agent-ui/utils/stringUtils';
+import { truncateText } from '../utils/stringUtils';
 
 const MAX_RESULTS = 8;
 

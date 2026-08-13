@@ -3,9 +3,9 @@
 import React, { act, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ComposerPasteHandlers } from '../../../react/components/input/lexical/LexicalEditorInput';
+import type { ComposerPasteHandlers } from '@beaver/agent-ui/composer/LexicalEditorInput';
 
-vi.mock('../../../react/components/input/lexical/SlashCommandHoverCardPlugin', () => ({
+vi.mock('@beaver/agent-ui/composer/SlashCommandHoverCardPlugin', () => ({
     SlashCommandHoverCardPlugin: () => null,
 }));
 
@@ -83,7 +83,7 @@ describe('composer paste handling', () => {
 
     const mountEditor = async (pasteHandlers: ComposerPasteHandlers) => {
         const { LexicalEditorInput } = await import(
-            '../../../react/components/input/lexical/LexicalEditorInput'
+            '@beaver/agent-ui/composer/LexicalEditorInput'
         );
         container = globalThis.document.createElement('div');
         globalThis.document.body.append(container);

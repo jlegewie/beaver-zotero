@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { SearchMenuItem } from '../SearchMenu';
+import { SearchMenuItem } from '@beaver/agent-ui/primitives/SearchMenu';
 import { CollectionMenuItemContext, createCollectionMenuItem } from '../utils/menuItemFactories';
 import { getActiveZoteroLibraryId } from '../../../../../src/utils/zoteroUtils';
 

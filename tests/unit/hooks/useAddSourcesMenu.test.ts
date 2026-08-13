@@ -3,7 +3,7 @@
 import React, { act } from 'react';
 import { createRoot, Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { useAddSourcesMenu, AddSourcesMenuHandle } from '../../../react/hooks/useAddSourcesMenu';
+import { useAddSourcesMenu, AddSourcesMenuHandle } from '@beaver/agent-ui/composer/useAddSourcesMenu';
 
 type Hook = ReturnType<typeof useAddSourcesMenu>;
 
