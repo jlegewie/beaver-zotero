@@ -2647,4 +2647,41 @@ describe('Stored locator tokens in citation expansion', () => {
             { cslLabel: 'chapter', beaverLoc: 'page12' },
         );
     });
+
+    it('keeps an unprojected chapter locator when the citation is retargeted', () => {
+        // A chapter locator is not a page, so the projection carries no `loc`
+        // at all. The agent cannot have changed what it was never shown, so
+        // retargeting the citation must leave "chapter xiv" intact.
+        const citationItem: any = {
+            uris: ['http://zotero.org/users/1/items/CHAPKEY'],
+            locator: 'xiv',
+            label: 'chapter',
+        };
+        const citHtml = `<span class="citation" data-citation="${encodeURIComponent(JSON.stringify({
+            citationItems: [citationItem],
+        }))}"><span class="citation-item">(Author, ch. xiv)</span></span>`;
+        const noteHtml = wrap(`<p>Text ${citHtml} more text</p>`);
+
+        const mockItem = {
+            id: 99,
+            key: 'NEWKEY',
+            libraryID: 1,
+            getField: vi.fn(() => 'Other Paper'),
+            isAttachment: vi.fn(() => false),
+            isRegularItem: vi.fn(() => true),
+            parentItem: null,
+            getAttachments: vi.fn(() => []),
+        };
+        (globalThis as any).Zotero.Items.getByLibraryAndKey = vi.fn(() => mockItem);
+
+        const { simplified, metadata } = simplifyNoteHtml(noteHtml, 1);
+        expect(simplified).not.toContain('loc=');
+
+        const editedSimplified = simplified.replace('id="1-CHAPKEY"', 'id="1-NEWKEY"');
+        expandToRawHtml(editedSimplified, metadata, 'new');
+
+        // Locator and label both survive, and no token is recorded: the value
+        // is the citation's own, not a position read off a document.
+        expect(createCitationHTML).toHaveBeenCalledWith(mockItem, 'xiv', { cslLabel: 'chapter' });
+    });
 });

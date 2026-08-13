@@ -475,10 +475,12 @@ describe('simplifyNoteHtml', () => {
         const { simplified, metadata } = simplifyNoteHtml(html, 1);
 
         // "xiv" is a chapter, not a page — projecting it as `loc="pagexiv"`
-        // would claim a page the citation never recorded.
+        // would claim a page the citation never recorded. Its value and label
+        // are kept so a rebuild can restore it.
         expect(simplified).not.toContain('loc=');
         expect(metadata.elements.get('c_CHAPTER1_0')!.originalAttrs).toEqual({
             item_id: 'u-CHAPTER1',
+            cslLocator: 'xiv',
             cslLabel: 'chapter',
         });
     });

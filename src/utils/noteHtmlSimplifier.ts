@@ -64,6 +64,13 @@ export interface StoredElement {
          * change between two reads of the same note.
          */
         locSpace?: LocatorSpace;
+        /**
+         * The citation's stored CSL locator value, set only when the projection
+         * carries no `loc` for it. A rebuild restores it, so a locator the agent
+         * was never shown — and therefore cannot have changed — survives an edit
+         * that touches something else.
+         */
+        cslLocator?: string;
         /** The citation's stored CSL `label` (e.g. `chapter`), when it has one. */
         cslLabel?: string;
     };
@@ -296,8 +303,9 @@ export function simplifyNoteHtml(
                     // locator as a page locator.
                     // A CSL locator under a non-page label (`chapter`, `section`,
                     // …) gets no `loc`: writing it as `page…` would claim a page
-                    // the citation never recorded. The label is kept in
-                    // `cslLabel` so a rebuild can preserve it.
+                    // the citation never recorded. Its value and label are kept
+                    // in `cslLocator`/`cslLabel` so a rebuild can restore the
+                    // locator the projection could not show.
                     const storedLocator = ci.locator != null ? String(ci.locator) : '';
                     const isPageLocator = ci.label == null || ci.label === 'page';
                     const beaverLoc = readBeaverLoc(ci);
@@ -319,6 +327,7 @@ export function simplifyNoteHtml(
                         originalAttrs: {
                             item_id: itemId,
                             ...(loc ? { loc, locSpace } : {}),
+                            ...(!loc && storedLocator ? { cslLocator: storedLocator } : {}),
                             ...(ci.label !== undefined ? { cslLabel: ci.label } : {}),
                         },
                     });

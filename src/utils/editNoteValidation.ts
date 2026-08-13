@@ -20,6 +20,7 @@ import type { SimplificationMetadata } from './noteHtmlSimplifier';
 import {
     extractAttr,
     isCitationRefNotFoundError,
+    locatorToken,
     normalizePageLocator,
     translatePageNumberToLabel,
 } from './noteCitationExpand';
@@ -329,8 +330,8 @@ export function enrichOldStringCitationRefs(
         // Skip if it already has a ref — enrichment not needed
         if (extractAttr(attrStr, 'ref') !== undefined) continue;
 
-        const normalized = normalizeCitationTag(parseRawCitationAttributes(attrStr));
-        if (normalized.ok && normalized.ref.loc && !getPageLocator(normalized.ref)) continue;
+        const rawAttrs = parseRawCitationAttributes(attrStr);
+        const normalized = normalizeCitationTag(rawAttrs);
         const page = normalized.ok
             ? getPageLocator(normalized.ref)
             : extractAttr(attrStr, 'page') || undefined;
@@ -348,7 +349,10 @@ export function enrichOldStringCitationRefs(
             : rawItemId;
         const unifiedAttId = resolvedUnifiedId.attId;
         if (itemId) {
-            const candidateRef = findUniqueCitationRef(metadata, itemId, pageLocToken(page));
+            // Matched on the locator TOKEN, the form the projection carries, so
+            // a structural locator the note shows (`loc="s56-s59"`) is looked up
+            // as written rather than reduced to a page it has none of.
+            const candidateRef = findUniqueCitationRef(metadata, itemId, locatorToken(rawAttrs));
             if (candidateRef === null) continue;
 
             // Inject ` ref="..."` before the self-closing `/>`, preserving all
@@ -366,6 +370,9 @@ export function enrichOldStringCitationRefs(
 
         const attId = extractAttr(attrStr, 'att_id') || extractAttr(attrStr, 'attachment_id') || unifiedAttId;
         if (attId) {
+            // The attachment form is looked up by page, so a locator that is not
+            // one cannot be resolved through it.
+            if (normalized.ok && normalized.ref.loc && !getPageLocator(normalized.ref)) continue;
             addParentCitationRefReplacement(replacements, metadata, m, attrStr, attId, page, pageLabels);
             continue;
         }

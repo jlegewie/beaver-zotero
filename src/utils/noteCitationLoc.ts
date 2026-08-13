@@ -49,6 +49,11 @@ export function readBeaverLoc(citationItem: unknown): string | undefined {
     const meta = (citationItem as Record<string, unknown>)[BEAVER_CITATION_META_KEY];
     if (!meta || typeof meta !== 'object') return undefined;
 
+    // A payload written under a version this build does not know may mean
+    // something else by `loc`, so it is not read at all. The citation still has
+    // its CSL locator, which is what the caller falls back to.
+    if ((meta as Record<string, unknown>).v !== BEAVER_CITATION_META_VERSION) return undefined;
+
     const loc = (meta as Record<string, unknown>).loc;
     if (typeof loc !== 'string' || loc.length === 0) return undefined;
 

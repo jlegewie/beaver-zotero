@@ -352,7 +352,7 @@ interface SimplifiedCitationAttrs {
  * bare `page="5"` is read as the `page5` token the simplifier projects, so both
  * spellings of the same locator compare equal against a stored token.
  */
-function locatorToken(rawAttrs: Record<string, string>): string | undefined {
+export function locatorToken(rawAttrs: Record<string, string>): string | undefined {
     const token = rawAttrs.loc
         ?? rawAttrs.sid
         ?? (rawAttrs.page != null ? `page${rawAttrs.page}` : undefined);
@@ -726,6 +726,21 @@ export function expandToRawHtml(
                             const keepsStoredLocator =
                                 newAttrs.loc === (stored.originalAttrs?.loc || undefined)
                                 && isPageToken(newAttrs.loc);
+
+                            // A locator the projection could not carry survives
+                            // a rebuild untouched: the agent was never shown it,
+                            // so this edit cannot be changing it. Stored as it
+                            // stands — it is the citation's own printed locator,
+                            // not a position read off the document.
+                            const unprojected = stored.originalAttrs?.cslLocator;
+                            if (keepsStoredLocator && newAttrs.loc === undefined && unprojected) {
+                                return buildCitationFromSimplifiedAttrs(
+                                    { ...newAttrs, page: unprojected, cslLabel: stored.originalAttrs?.cslLabel },
+                                    'note',
+                                    pageLabels,
+                                );
+                            }
+
                             const rebuilt = keepsStoredLocator
                                 ? { ...newAttrs, cslLabel: stored.originalAttrs?.cslLabel }
                                 : newAttrs;
