@@ -126,7 +126,6 @@ const SearchMenu: React.FC<SearchMenuProps> = ({
     const inputRef = useRef<HTMLInputElement | null>(null);
     const wasOpen = useRef(false);
     const [focusedIndex, setFocusedIndex] = useState<number>(-1);
-    const [hoveredIndex, setHoveredIndex] = useState<number>(-1);
     const [adjustedPosition, setAdjustedPosition] = useState<MenuPosition>(position);
     // const [menuItems, setMenuItems] = useState<SearchMenuItem[]>(initialMenuItems);
     
@@ -385,7 +384,6 @@ const SearchMenu: React.FC<SearchMenuProps> = ({
             }
         } else {
             setFocusedIndex(-1);
-            setHoveredIndex(-1);
         }
     }, [isOpen, menuItems, onAfterInitialFocus, verticalPosition]);
     
@@ -460,7 +458,7 @@ const SearchMenu: React.FC<SearchMenuProps> = ({
                 tabIndex={focusedIndex === index ? 0 : -1}
                 className={`
                     display-flex items-center gap-2 px-2 py-15 transition user-select-none
-                    ${(hoveredIndex >= 0 ? hoveredIndex === index : focusedIndex === index) && !item.disabled ? 'bg-quinary' : ''}
+                    ${focusedIndex === index && !item.disabled ? 'bg-quinary' : ''}
                     ${item.disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
                 `}
                 style={{ maxWidth: '100%', minWidth: 0 }}
@@ -470,14 +468,14 @@ const SearchMenu: React.FC<SearchMenuProps> = ({
                     item.onClick();
                     if(closeOnSelect) onClose();
                 }}
+                // Hover moves the focused item rather than highlighting on top
+                // of it: a separate hover highlight would keep showing the row
+                // under the pointer while the arrow keys moved the real focus
+                // elsewhere, so Enter picked a row the user could not see.
                 onMouseEnter={() => {
                     if (isFocusableItem(item)) {
-                        setHoveredIndex(index);
                         setFocusedIndex(index);
                     }
-                }}
-                onMouseLeave={() => {
-                    setHoveredIndex(-1);
                 }}
                 onFocus={() => {
                     if (isFocusableItem(item)) {
