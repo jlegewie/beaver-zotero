@@ -10,7 +10,7 @@ import {
     filterPromptActionsForContent,
     promptActionsToDescriptors,
     type SlashCommandDescriptor,
-} from '../../../react/utils/slashCommands';
+} from '@beaver/agent-ui/composer/slashCommands';
 import type { PromptAction } from '@beaver/agent-core/agents/types';
 import type { Action } from '@beaver/agent-core/types/actions';
 

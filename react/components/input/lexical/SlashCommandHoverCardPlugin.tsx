@@ -2,8 +2,8 @@ import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext';
 import { useAtomValue } from 'jotai';
 import { actionsAtom } from '../../../atoms/actions';
-import { ChipPopupCard, type ChipPopupContent } from '../../agentRuns/requestChips/ChipPopup';
-import { buildActionPopup } from '../../agentRuns/requestChips/actionPopup';
+import { ChipPopupCard, type ChipPopupContent } from '@beaver/agent-ui/chat/ChipPopup';
+import { buildActionPopup } from '@beaver/agent-ui/chat/actionPopup';
 
 /** Delay before the card opens, so mousing across the input doesn't flash it. */
 const HOVER_OPEN_DELAY_MS = 300;

@@ -39,7 +39,7 @@ import {
     splitContentByCommandTokens,
     slashDescriptorsEqual,
     type SlashCommandDescriptor,
-} from '../../../utils/slashCommands';
+} from '@beaver/agent-ui/composer/slashCommands';
 import { isImeKeyEvent } from '../../../utils/ime';
 import { getHost } from '@beaver/agent-ui/host';
 import { isMacPlatform, isWindowsPlatform } from '@beaver/agent-ui/utils/platform';

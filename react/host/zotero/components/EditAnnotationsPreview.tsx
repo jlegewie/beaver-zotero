@@ -14,7 +14,7 @@ import {
     ZOTERO_ANNOTATION_PALETTE_COLORS,
 } from '../../../../src/constants/annotations';
 import { resolveItemReference } from '../../../../src/utils/libraryIdentity';
-import { truncateText } from '../../../utils/stringUtils';
+import { truncateText } from '@beaver/agent-ui/utils/stringUtils';
 import { TagPill } from '../../../components/agentRuns/TagPill';
 import {
     AnnotationTooltip,

@@ -16,7 +16,7 @@ import {
 import { actionsAtom } from '../../../atoms/actions';
 import { Action } from '@beaver/agent-core/types/actions';
 import { $createSlashCommandNode } from './SlashCommandNode';
-import { truncateText } from '../../../utils/stringUtils';
+import { truncateText } from '@beaver/agent-ui/utils/stringUtils';
 
 const MAX_RESULTS = 8;
 

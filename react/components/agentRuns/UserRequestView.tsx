@@ -12,7 +12,7 @@ import { regenerateWithEditedPromptAtom, isWSChatPendingAtom } from '../../atoms
 import { selectedModelAtom } from '../../atoms/models';
 import { isStreamingAtom } from '@beaver/agent-core/run-state/atoms';
 import { actionsAtom, buildEditedPromptActionsAtom } from '../../atoms/actions';
-import { ensurePromptActionTokens, promptActionsToDescriptors, type SlashCommandDescriptor } from '../../utils/slashCommands';
+import { ensurePromptActionTokens, promptActionsToDescriptors, type SlashCommandDescriptor } from '@beaver/agent-ui/composer/slashCommands';
 import { renderContentWithSlashPills } from './slashCommandRendering';
 import { LexicalEditorInput, LexicalEditorInputHandle } from '../input/lexical/LexicalEditorInput';
 import { useSlashMenu } from '../../hooks/useSlashMenu';

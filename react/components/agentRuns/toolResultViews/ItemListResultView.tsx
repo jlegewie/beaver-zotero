@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { CSSItemTypeIcon } from '../../icons/icons';
-import { truncateText } from '../../../utils/stringUtils';
+import { truncateText } from '@beaver/agent-ui/utils/stringUtils';
 import { itemTypeToIconName, ContentKind } from '@beaver/agent-core/types/citations';
 import {
     ItemListView,

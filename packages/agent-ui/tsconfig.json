@@ -181,11 +181,19 @@
     "./src/chat/index.ts",
     "./src/chat/Citation.tsx",
     "./src/chat/CitedSourcesList.tsx",
+    "./src/chat/ChipPopup.tsx",
+    "./src/chat/actionPopup.ts",
     "./src/chat/useCitationMarker.ts",
     "./src/chat/useCitationViewModel.ts",
+
+    // The message composer. `slashCommands.ts` is the React-free token layer;
+    // the Lexical editor that consumes it moves in beside it.
+    "./src/composer/slashCommands.ts",
+
     "./src/utils/windowContext.ts",
     "./src/utils/locationDisplay.ts",
     "./src/utils/platform.ts",
+    "./src/utils/stringUtils.ts",
     "./src/utils/pageLabels.ts",
     "./src/utils/pageRanges.ts",
     "./src/utils/useIsomorphicLayoutEffect.ts",

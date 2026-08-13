@@ -13,3 +13,16 @@ export { readCitationProps, useCitationViewModel } from './useCitationViewModel'
 export type { CitationDisplayState, CitationViewModel } from './useCitationViewModel';
 
 export { useCitationMarker } from './useCitationMarker';
+
+export { default as ChipWithPopup, ChipPopupCard, ChipWithListPopup } from './ChipPopup';
+export type {
+    ChipPopupAction,
+    ChipPopupContent,
+    ChipPopupStatus,
+    ChipPopupSubtitle,
+    ChipListPopupContent,
+    ChipListPopupRow,
+} from './ChipPopup';
+
+export { buildActionPopup } from './actionPopup';
+export type { ActionPopupSource } from './actionPopup';

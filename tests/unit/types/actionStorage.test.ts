@@ -9,7 +9,7 @@ vi.mock('../../../react/types/settings', () => ({
 import { getActionCustomizations, getHiddenBuiltinActions, getMergedActions, saveActionCustomizations } from '../../../react/types/actionStorage';
 import { BUILTIN_ACTIONS, ALL_BUILTIN_ACTIONS } from '../../../react/types/builtinActions';
 import { ARCHIVED_ACTIONS } from '../../../react/types/archivedActions';
-import { getActionCommand, toSlashToken } from '../../../react/utils/slashCommands';
+import { getActionCommand, toSlashToken } from '@beaver/agent-ui/composer/slashCommands';
 import type { ActionCustomizations } from '@beaver/agent-core/types/actions';
 
 // In-memory pref store backing the Zotero.Prefs stub from tests/setup.ts, so

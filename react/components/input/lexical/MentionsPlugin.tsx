@@ -22,7 +22,7 @@ import { $createMentionNode } from './MentionNode';
 import { itemToMentionDescriptor } from '../../../utils/mentionDescriptor';
 import { searchTitleCreatorYear } from '../../../utils/search';
 import { getDisplayNameFromItem } from '../../../utils/sourceUtils';
-import { truncateText } from '../../../utils/stringUtils';
+import { truncateText } from '@beaver/agent-ui/utils/stringUtils';
 import { CSSItemTypeIcon } from '../../icons/icons';
 
 const MAX_RESULTS = 8;

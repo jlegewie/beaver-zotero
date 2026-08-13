@@ -1,6 +1,6 @@
 import React from 'react';
-import { Icon, InformationCircleIcon } from '../../icons/icons';
-import Tooltip from '@beaver/agent-ui/primitives/Tooltip';
+import { Icon, InformationCircleIcon } from '../icons';
+import Tooltip from '../primitives/Tooltip';
 
 /**
  * Hover-card for a request chip.

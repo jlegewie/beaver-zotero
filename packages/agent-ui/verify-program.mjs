@@ -258,10 +258,15 @@ if (
 // root because nothing else in the package imports the registry — a client and
 // a shared component both reach it from outside.
 //
-// src/utils/platform.ts is a root for the same reason: it is a standalone helper
-// that clients import by its own subpath, and no module inside the package
-// imports it. Drop it from this list once one does — the orphan scan then keeps
-// it honest through its importer, which is the stronger signal.
+// The last two roots are different in kind, and temporary. They are standalone
+// helpers that clients import by their own subpath, and nothing inside the
+// package imports them yet — they moved in ahead of the Lexical composer, which
+// is the module that will import both. Rooting them here is what keeps them in
+// the closure meanwhile; without it the orphan scan would reject them. Drop BOTH
+// from this list when the composer lands under src/composer/ — the orphan scan
+// then keeps them honest through their real importer, which is the stronger
+// signal, and a root that no longer needs to be one only hides a file falling
+// out of the closure.
 const entryPaths = [
   "src/icons/index.tsx",
   "src/primitives/index.ts",
@@ -269,6 +274,7 @@ const entryPaths = [
   "src/chat/index.ts",
   "src/auth/index.ts",
   "src/utils/platform.ts",
+  "src/composer/slashCommands.ts",
 ].map((p) => path.join(pkgDir, p));
 
 const listed = parsed.fileNames.map((f) => path.resolve(f));

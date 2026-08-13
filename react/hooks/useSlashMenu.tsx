@@ -7,7 +7,7 @@ import { actionsAtom, actionContextAtom, resolveActionForStagingAtom } from '../
 import { computeActionGroups } from '../utils/actionVisibility';
 import { openPreferencesWindow } from '../../src/ui/openPreferencesWindow';
 import { Action, ActionCategory, ActionTargetType } from '@beaver/agent-core/types/actions';
-import { SlashCommandDescriptor, getActionCommand } from '../utils/slashCommands';
+import { SlashCommandDescriptor, getActionCommand } from '@beaver/agent-ui/composer/slashCommands';
 import { MenuPosition, SearchMenuItem } from '../components/ui/menus/SearchMenu';
 
 // Category icons mirror the homepage launcher and Actions preferences so the

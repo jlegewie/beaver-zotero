@@ -7,7 +7,7 @@
  * wire reference DTOs) because it pulls in the display helpers, which drag a
  * much larger import graph than that widely imported module should carry.
  */
-import { truncateText } from './stringUtils';
+import { truncateText } from '@beaver/agent-ui/utils/stringUtils';
 import { getDisplayNameFromItem } from './sourceUtils';
 import { libraryRefForLibraryID } from '../../src/utils/libraryIdentity';
 import type { MentionDescriptor } from '../components/input/lexical/MentionNode';
