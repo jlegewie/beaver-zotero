@@ -3,10 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { AgentRun } from '@beaver/agent-core/agents/types';
 import {
     buildRetryAnchor,
-    planRetryRollback,
     resolveRetryTarget,
-    restoreRemoved,
-    type RemovedThreadTail,
     type UnconfirmedRetry,
 } from '../../../react/agents/retryReconciliation';
 
@@ -30,7 +27,7 @@ function makeUnconfirmed(
     retryRunId: string,
     keepRunIds: string[] = [],
 ): UnconfirmedRetry {
-    return { runId, anchor: { retryRunId, keepRunIds }, removed: null, acknowledged: false };
+    return { runId, anchor: { retryRunId, keepRunIds } };
 }
 
 describe('buildRetryAnchor', () => {
@@ -84,10 +81,10 @@ describe('resolveRetryTarget', () => {
         expect(resolved.anchor).toEqual({ retryRunId: 'b', keepRunIds: ['a'] });
     });
 
-    it('re-targets the run an unacknowledged retry was replacing', () => {
-        // The rollback put 'b' and 'c' back, and the failed retry 'phantom'
-        // sits in the active slot. Regenerating it must replace 'b' again, not
-        // anchor on an ID the server has never seen.
+    it('re-targets the run an unconfirmed retry was replacing', () => {
+        // The thread was reloaded, so 'b' and 'c' are back and the failed retry
+        // 'phantom' sits in the active slot. Regenerating it must replace 'b'
+        // again, not anchor on an ID the server has never seen.
         const runs = [makeRun('a'), makeRun('b'), makeRun('c')];
         const phantom = makeRun('phantom');
         const unconfirmed = makeUnconfirmed('phantom', 'b', ['a']);
@@ -99,9 +96,9 @@ describe('resolveRetryTarget', () => {
         expect(resolved.anchor).toEqual({ retryRunId: 'b', keepRunIds: ['a'] });
     });
 
-    it('inherits the anchor when the replaced run is not back in the thread', () => {
-        // Nothing was restored (the failed retry targeted the active run), so
-        // the recorded anchor is the only description of what to replace.
+    it('inherits the anchor when the replaced run is not in the thread', () => {
+        // The replaced run is gone from the local view, so the recorded anchor
+        // is the only description of what to replace.
         const runs = [makeRun('a')];
         const phantom = makeRun('phantom');
         const unconfirmed = makeUnconfirmed('phantom', 'was-active', ['a']);
@@ -115,13 +112,13 @@ describe('resolveRetryTarget', () => {
 
     it('re-targets the only run in a thread that regenerated down to empty', () => {
         // The reported drift: one run, regenerated, the request never landed.
-        // With the run restored the retry anchors on it again and the empty
-        // keep set falls back to retryRunId server-side.
-        const restored = [makeRun('a')];
+        // Once the run is back in the list the retry anchors on it again, and
+        // the empty keep set falls back to retryRunId server-side.
+        const reloaded = [makeRun('a')];
         const phantom = makeRun('phantom');
         const unconfirmed = makeUnconfirmed('phantom', 'a', []);
 
-        const resolved = resolveRetryTarget(unconfirmed, restored, phantom, restored.length);
+        const resolved = resolveRetryTarget(unconfirmed, reloaded, phantom, reloaded.length);
 
         expect(resolved.targetRun.id).toBe('a');
         expect(resolved.truncateFromIndex).toBe(0);
@@ -154,108 +151,12 @@ describe('resolveRetryTarget', () => {
         );
         const secondPhantom = makeRun('phantom-2');
         const second = resolveRetryTarget(
-            { runId: 'phantom-2', anchor: first.anchor, removed: null, acknowledged: false },
+            { runId: 'phantom-2', anchor: first.anchor },
             runs,
             secondPhantom,
             runs.length,
         );
 
         expect(second.anchor).toEqual({ retryRunId: 'unpersisted', keepRunIds: ['a', 'b'] });
-    });
-});
-
-describe('planRetryRollback', () => {
-    function makeRemoved(threadId: string | null): RemovedThreadTail {
-        return { threadId, runs: [makeRun('b')], actions: [], citations: [], undoneActionIds: [] };
-    }
-
-    function makePending(
-        runId: string,
-        removed: RemovedThreadTail | null,
-        acknowledged = false,
-    ): UnconfirmedRetry {
-        return { runId, anchor: { retryRunId: 'b', keepRunIds: ['a'] }, removed, acknowledged };
-    }
-
-    it('restores the tail when the run failed before the acknowledgment', () => {
-        const pending = makePending('phantom', makeRemoved('thread-1'));
-
-        expect(planRetryRollback(pending, 'phantom', 'thread-1')).toEqual({
-            action: 'restore',
-            removed: pending.removed,
-        });
-    });
-
-    it('discards the snapshot once the request was acknowledged', () => {
-        // The server truncates after acknowledging, and the event reporting it
-        // can be lost with the connection. Restoring here could re-create runs
-        // the server has already deleted, which nothing would correct; leaving
-        // them removed is reconciled by the keep set on the next retry.
-        const pending = makePending('phantom', makeRemoved('thread-1'), true);
-
-        expect(planRetryRollback(pending, 'phantom', 'thread-1')).toEqual({ action: 'discard' });
-    });
-
-    it('does nothing when there is no unconfirmed retry', () => {
-        expect(planRetryRollback(null, 'phantom', 'thread-1')).toEqual({ action: 'none' });
-    });
-
-    it('does nothing when the failure belongs to a different run', () => {
-        const pending = makePending('phantom', makeRemoved('thread-1'));
-
-        expect(planRetryRollback(pending, 'other-run', 'thread-1')).toEqual({ action: 'none' });
-    });
-
-    it('does nothing once the tail has already been restored', () => {
-        // An acknowledged run also lands here: the ack clears the whole entry.
-        const pending = makePending('phantom', null);
-
-        expect(planRetryRollback(pending, 'phantom', 'thread-1')).toEqual({ action: 'none' });
-    });
-
-    it('discards the snapshot when the user switched threads', () => {
-        const pending = makePending('phantom', makeRemoved('thread-1'));
-
-        expect(planRetryRollback(pending, 'phantom', 'thread-2')).toEqual({ action: 'discard' });
-    });
-
-    it('restores a snapshot taken before the thread had an ID', () => {
-        const pending = makePending('phantom', makeRemoved(null));
-
-        expect(planRetryRollback(pending, 'phantom', null)).toEqual({
-            action: 'restore',
-            removed: pending.removed,
-        });
-    });
-});
-
-describe('restoreRemoved', () => {
-    it('re-appends removed entries in their original order', () => {
-        const current = [{ id: 'a' }];
-        const removed = [{ id: 'b' }, { id: 'c' }];
-
-        expect(restoreRemoved(current, removed, (entry) => entry.id)).toEqual([
-            { id: 'a' },
-            { id: 'b' },
-            { id: 'c' },
-        ]);
-    });
-
-    it('skips entries that are already back in the list', () => {
-        const current = [{ id: 'a' }, { id: 'b' }];
-        const removed = [{ id: 'b' }, { id: 'c' }];
-
-        expect(restoreRemoved(current, removed, (entry) => entry.id)).toEqual([
-            { id: 'a' },
-            { id: 'b' },
-            { id: 'c' },
-        ]);
-    });
-
-    it('returns the same array when there is nothing to restore', () => {
-        const current = [{ id: 'a' }];
-
-        expect(restoreRemoved(current, [], (entry) => entry.id)).toBe(current);
-        expect(restoreRemoved(current, [{ id: 'a' }], (entry) => entry.id)).toBe(current);
     });
 });
