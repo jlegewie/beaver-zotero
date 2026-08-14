@@ -72,7 +72,7 @@ import type { ExternalFileAttachment } from '@beaver/agent-core/types/attachment
 import { getApplicationStateProvider } from './applicationState';
 import { uint8ArrayToBase64 } from '../utils/fileUtils';
 import { isAttachmentOnServer } from '../../src/utils/webAPI';
-import { AgentRun, BeaverAgentPrompt, MessageSearchFilters, PromptAction, PromptOrigin, ToolRequest } from '@beaver/agent-core/agents/types';
+import { AgentRun, BeaverAgentPrompt, MessageSearchFilters, PromptAction, PromptOrigin, ToolRequest, isRunActive } from '@beaver/agent-core/agents/types';
 import {
     threadRunsAtom,
     activeRunAtom,
@@ -385,6 +385,26 @@ function activeRunForAssertion(get: Getter): AgentRun[] {
 }
 
 /**
+ * Move a terminal run out of the active slot into thread history.
+ *
+ * Failed and canceled runs stay in `activeRunAtom` (there is no terminal
+ * `done` to archive them). A send or resume that is not replacing that run
+ * has to keep it — the request already asserts it, and dropping it locally
+ * would make the history on screen diverge from the history the model reads,
+ * leaving a ghost in the middle of the server thread that later messages
+ * cannot delete.
+ *
+ * Live runs (`in_progress`, `awaiting_deferred`) are left in place. Callers
+ * overwrite `activeRunAtom` with the new shell immediately after, so this
+ * does not null the slot.
+ */
+function archiveTerminalActiveRun(get: Getter, set: Setter): void {
+    const activeRun = get(activeRunAtom);
+    if (!activeRun || isRunActive(activeRun)) return;
+    set(threadRunsAtom, (runs) => appendRunIfMissing(runs, activeRun));
+}
+
+/**
  * Apply the truncation the server reported, in place of the client's guess.
  *
  * The two can disagree: the server may have deleted runs this client never
@@ -555,9 +575,9 @@ async function startResumeRun(
             return;
         }
 
-        if (activeRun?.id === failedRunId) {
-            set(threadRunsAtom, runs => appendRunIfMissing(runs, failedRun));
-        }
+        // Keep the failed run in local history: the resume continues from it
+        // rather than replacing it, so the next request has to still hold it.
+        archiveTerminalActiveRun(get, set);
 
         set(prepareForNewRunAtom);
         prewarmMuPDFWorker();
@@ -581,7 +601,7 @@ async function startResumeRun(
             model.provider,
             customInstructions,
             model.is_custom ? model.custom_model : undefined,
-            assertThreadState(get(threadRunsAtom)),
+            assertThreadState(activeRunForAssertion(get)),
         );
 
         newRunId = newRun.id;
@@ -2304,6 +2324,13 @@ export const sendWSMessageAtom = atom(
                 set(isWSChatPendingAtom, false);
                 return;
             }
+
+            // A failed run still in the active slot has to stay in local
+            // history: the request asserts it (so the server will not delete
+            // it), and overwriting the slot without archiving would drop it
+            // from the client's view — a ghost in the middle of the server
+            // thread that later messages cannot delete.
+            archiveTerminalActiveRun(get, set);
 
             // Create AgentRun shell and request
             const { run, request } = createAgentRunShell(

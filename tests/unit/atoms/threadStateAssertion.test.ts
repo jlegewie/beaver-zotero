@@ -9,6 +9,9 @@
  * - an ordinary send must assert every run on screen, including a failed one
  *   still in the active slot, or the server deletes it and cascades the
  *   `agent_actions` of anything it applied in Zotero.
+ *
+ * Send, retry, edit-retry, resume, and auto-retry are separate atoms; each has
+ * to build that set itself. A path that forgets is not saved by the others.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -48,11 +51,15 @@ import { store } from '../../../react/store';
 import {
     activeRunAtom,
     currentThreadIdAtom,
+    isStreamingAtom,
     threadRunsAtom,
 } from '@beaver/agent-core/run-state/atoms';
 import {
+    autoRetryErroredRunAtom,
     isWSChatPendingAtom,
     regenerateFromRunAtom,
+    regenerateWithEditedPromptAtom,
+    resumeFromRunAtom,
     sendWSMessageAtom,
 } from '../../../react/atoms/agentRunAtoms';
 import { selectedModelAtom } from '../../../react/atoms/models';
@@ -114,6 +121,11 @@ describe('thread state asserted on a request', () => {
         await store.set(sendWSMessageAtom, 'follow-up');
 
         expect(sentRequest().thread_run_ids).toEqual(['a', 'failed']);
+        // The failed run is archived into thread history so the next request
+        // still holds it. Overwriting the active slot without that would drop
+        // it from the client's view while the server kept it.
+        expect(store.get(threadRunsAtom).map((run: AgentRun) => run.id)).toEqual(['a', 'failed']);
+        expect(store.get(activeRunAtom)?.user_prompt.content).toBe('follow-up');
     });
 
     it('still names a real anchor when the active run was never persisted', async () => {
@@ -175,5 +187,89 @@ describe('thread state asserted on a request', () => {
         expect(request.thread_run_ids).toEqual([]);
         expect(request.retry_run_id).toBe('a');
         expect(request.retry_keep_run_ids).toBeUndefined();
+    });
+
+    it('retries a failed run still in the active slot without keeping it', async () => {
+        // Retry from the error card: the failed run is what is being replaced,
+        // so it must not appear in the asserted set.
+        store.set(threadRunsAtom, [makeRun('a')]);
+        store.set(activeRunAtom, makeRun('failed', { status: 'error' }));
+
+        await store.set(regenerateFromRunAtom, 'failed');
+
+        const request = sentRequest();
+        expect(request.thread_run_ids).toEqual(['a']);
+        expect(request.retry_run_id).toBe('failed');
+        expect(store.get(threadRunsAtom).map((run: AgentRun) => run.id)).toEqual(['a']);
+    });
+
+    it('asserts the truncated thread when retrying from an edited prompt', async () => {
+        store.set(threadRunsAtom, [makeRun('a'), makeRun('b'), makeRun('c')]);
+
+        await store.set(regenerateWithEditedPromptAtom, {
+            runId: 'b',
+            editedPrompt: { content: 'rewritten' },
+        });
+
+        const request = sentRequest();
+        expect(request.thread_run_ids).toEqual(['a']);
+        expect(request.retry_run_id).toBe('b');
+        expect(request.retry_keep_run_ids).toEqual(['a']);
+        expect(request.user_prompt.content).toBe('rewritten');
+    });
+
+    it('retries an edited failed run in the active slot without keeping it', async () => {
+        store.set(threadRunsAtom, [makeRun('a')]);
+        store.set(activeRunAtom, makeRun('failed', { status: 'error' }));
+
+        await store.set(regenerateWithEditedPromptAtom, {
+            runId: 'failed',
+            editedPrompt: { content: 'rewritten' },
+        });
+
+        const request = sentRequest();
+        expect(request.thread_run_ids).toEqual(['a']);
+        expect(request.retry_run_id).toBe('failed');
+        expect(request.user_prompt.content).toBe('rewritten');
+    });
+
+    it('keeps the failed run when resuming from it', async () => {
+        store.set(threadRunsAtom, [makeRun('a')]);
+        store.set(activeRunAtom, makeRun('failed', {
+            status: 'error',
+            error: { type: 'llm_error', message: 'boom', is_resumable: true },
+        }));
+
+        await store.set(resumeFromRunAtom, 'failed');
+
+        const request = sentRequest();
+        expect(request.thread_run_ids).toEqual(['a', 'failed']);
+        expect(request.retry_run_id).toBeUndefined();
+        expect(request.user_prompt.is_resume).toBe(true);
+        expect(request.user_prompt.resumes_run_id).toBe('failed');
+        expect(store.get(threadRunsAtom).map((run: AgentRun) => run.id)).toEqual(['a', 'failed']);
+        expect(store.get(activeRunAtom)?.user_prompt.is_resume).toBe(true);
+    });
+
+    it('auto-retries a failed active run as a retry of that run', async () => {
+        store.set(threadRunsAtom, [makeRun('a')]);
+        store.set(activeRunAtom, makeRun('failed', { status: 'error' }));
+
+        await store.set(autoRetryErroredRunAtom, 'failed');
+
+        const request = sentRequest();
+        expect(request.thread_run_ids).toEqual(['a']);
+        expect(request.retry_run_id).toBe('failed');
+        expect(request.user_prompt.content).toBe('prompt for failed');
+    });
+
+    it('does not treat a failed active run as streaming', () => {
+        // UserRequestView gates edit-retry on isStreamingAtom. A failed run
+        // sitting in the active slot must not block editing that message.
+        store.set(activeRunAtom, makeRun('failed', { status: 'error' }));
+        expect(store.get(isStreamingAtom)).toBe(false);
+
+        store.set(activeRunAtom, makeRun('live', { status: 'in_progress' }));
+        expect(store.get(isStreamingAtom)).toBe(true);
     });
 });
