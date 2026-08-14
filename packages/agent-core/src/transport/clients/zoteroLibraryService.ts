@@ -162,6 +162,14 @@ export interface ListTagsParams {
     /** Library ref, name or numeric id; the user's personal library when absent */
     library_id?: number | string;
     /** Restrict to tags used inside this collection */
+    /**
+     * Restrict to tags on items in this collection.
+     *
+     * A scoped response is **not** covered by `LibraryScopeVersions.tags`:
+     * moving an already-tagged item in or out of a collection changes this
+     * listing while that marker stays put. Either re-fetch it every time, or
+     * cache the library-wide list and narrow it client-side.
+     */
     collection_key?: string;
     /** Drop tags used by fewer items than this; default 1 */
     min_item_count?: number;

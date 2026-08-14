@@ -154,6 +154,26 @@ describe('getLibraryVersions tags', () => {
         expect((await getLibraryVersions(1))?.tags).not.toBe(before);
     });
 
+    it('is library-wide: unmoved by a collection membership change', async () => {
+        // Moving an already-tagged item into or out of a collection leaves
+        // every grouped row identical — the item still exists, still carries
+        // the tag — so the marker cannot see it, and a `collection_key`-scoped
+        // list_tags response would go stale under it.
+        //
+        // Deliberate: folding membership in would invalidate every
+        // library-wide tag cache on any item move, losing the per-scope
+        // precision these markers exist for. The wire contract narrows instead
+        // (LibraryScopeVersions.tags), so this pins the boundary rather than a
+        // bug. Widening the marker means changing that contract too.
+        const before = (await getLibraryVersions(1))?.tags;
+
+        // The query has no collection join, so a membership change produces
+        // exactly the same rows.
+        serve(COLLECTIONS, TAGS);
+
+        expect((await getLibraryVersions(1))?.tags).toBe(before);
+    });
+
     it('changes when a tag colour changes', async () => {
         const before = (await getLibraryVersions(1))?.tags;
 

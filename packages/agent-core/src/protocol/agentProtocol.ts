@@ -1654,7 +1654,17 @@ export interface LibraryScopeVersions {
      * `include_item_counts: false` — the counts would go stale under it.
      */
     collections?: string;
-    /** Changes when the library's tag list, per-tag usage or tag colors change. */
+    /**
+     * Changes when the library's tag list, per-tag usage or tag colors change.
+     *
+     * Scoped to the **library-wide** `list_tags` response. A response taken
+     * with `collection_key` must not be cached against it: moving an
+     * already-tagged item into or out of a collection changes which tags that
+     * collection shows without changing any tag row or count in the library,
+     * so this marker stays put while the scoped listing has moved. Cache the
+     * library-wide list and narrow it client-side, or re-fetch a scoped list
+     * every time.
+     */
     tags?: string;
     /** Reserved for a surface that needs to cache items. Not emitted today. */
     items?: string;

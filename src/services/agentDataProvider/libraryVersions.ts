@@ -124,6 +124,16 @@ function tagColorsMarker(libraryId: number): string {
  * row per visible tag crosses into JavaScript rather than every assignment.
  *
  * Assignments to trashed objects are excluded, as they are from the listing.
+ *
+ * **Library-wide only.** The grouping deliberately has no collection join, so
+ * the marker does not move when an already-tagged item is added to or removed
+ * from a collection — no tag row and no count in the library changes, only
+ * which items a `collection_key`-scoped `list_tags` has in scope. Folding
+ * membership in here would fix that at the price of invalidating every
+ * library-wide tag cache on any item move, which is the per-scope precision
+ * these markers exist to provide. The wire contract narrows instead:
+ * `LibraryScopeVersions.tags` tells clients not to cache a scoped response
+ * against it.
  */
 async function tagsVersion(libraryId: number): Promise<string | undefined> {
     try {
