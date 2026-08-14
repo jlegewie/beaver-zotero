@@ -14,11 +14,11 @@ function rowWithCount(count: number) {
 }
 
 /**
- * True for the aggregate queries behind `versions`, which run alongside the
- * counts and read several columns from one row.
+ * True for the fingerprint queries behind `versions`, which run alongside the
+ * counts: the ordered collection rows and the grouped tag rows.
  */
 function isVersionQuery(sql: string): boolean {
-    return sql.includes('MAX(collectionID)') || sql.includes('COUNT(DISTINCT IT.tagID)');
+    return sql.includes('ORDER BY collectionID') || sql.includes('ORDER BY T.tagID');
 }
 
 describe('getLibrarySummaries', () => {
