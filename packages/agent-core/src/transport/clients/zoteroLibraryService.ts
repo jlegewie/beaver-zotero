@@ -5,6 +5,12 @@
  * plugin reads its own library directly and should not use this. When Zotero
  * is not running, the request fails with `zotero_offline` — branch on
  * `isZoteroOffline` rather than treating that as a generic error.
+ *
+ * Alongside the library ops, two calls describe and hold the connection itself
+ * rather than reading anything: `getStatus` asks whether Zotero is reachable
+ * without touching it, and `keepAlive` asks the backend to hold a reachable
+ * connection open a while longer. Both report an unreachable Zotero as a value,
+ * not as a thrown error.
  */
 
 import { ApiService, type RequestOptions } from '../apiService';
@@ -20,6 +26,8 @@ import type {
 } from '../../protocol/agentProtocol';
 
 const ZOTERO_REQUEST_ENDPOINT = '/api/v1/zotero/request';
+const ZOTERO_STATUS_ENDPOINT = '/api/v1/zotero/status';
+const ZOTERO_SESSION_ENDPOINT = '/api/v1/zotero/session';
 
 /**
  * Default deadline for one library request.
@@ -29,6 +37,31 @@ const ZOTERO_REQUEST_ENDPOINT = '/api/v1/zotero/request';
  * that block interactive UI can pass a shorter `timeoutMs`.
  */
 export const ZOTERO_REQUEST_TIMEOUT_MS = 45_000;
+
+/**
+ * Default deadline for `getStatus`.
+ *
+ * The route reads what the backend already knows about the connection: no
+ * wake, no library op, so none of the budgets `ZOTERO_REQUEST_TIMEOUT_MS`
+ * covers apply and a short deadline is honest rather than merely impatient.
+ * It still has to clear the parts of a call that are never free — a cold TLS
+ * handshake, an auth lookup that may refresh the token over the network, and a
+ * 401 refresh-and-retry that replays the whole request — so it is sized for
+ * those and not for the round trip alone.
+ */
+export const ZOTERO_STATUS_TIMEOUT_MS = 10_000;
+
+/**
+ * Default deadline for `keepAlive`.
+ *
+ * The lease itself is cheap, but the call may first wake a Zotero that is not
+ * connected, which the backend allows ~8s for. Cutting below that would abort
+ * exactly the wakes that were about to succeed — the same reasoning as
+ * `ZOTERO_REQUEST_TIMEOUT_MS`, minus the library op that is the bulk of its
+ * budget. Sized for a wake, a 401 refresh-and-retry that may pay for a second
+ * one, and round trips.
+ */
+export const ZOTERO_SESSION_TIMEOUT_MS = 20_000;
 
 // =============================================================================
 // Op payloads
@@ -307,6 +340,39 @@ export function isZoteroOffline(error: unknown): boolean {
 }
 
 // =============================================================================
+// Connection state
+// =============================================================================
+
+/**
+ * What the backend knows about this user's provider connection.
+ *
+ * Returned by both `getStatus` and `keepAlive`. `provider` is the only field
+ * that is always meaningful: everything else describes a connection, so it is
+ * null when there is none.
+ */
+export interface ZoteroProviderStatus {
+    /** Whether a Zotero is currently connected to the backend for this user. */
+    provider: 'connected' | 'absent';
+    /**
+     * Discriminates the Zotero install serving this user, so a client can tell
+     * "still the same one" from "a different machine answered". Null when
+     * absent.
+     */
+    local_user_key: string | null;
+    /**
+     * Seconds since the connection last served a data request. Deliberately
+     * unaffected by `keepAlive`, so it stays a measure of real use rather than
+     * of heartbeats. Null when absent.
+     */
+    idle_seconds: number | null;
+    /**
+     * Seconds left on the keep-alive lease, or 0 when no lease is live and the
+     * connection is running on its ordinary idle timeout. Null when absent.
+     */
+    lease_seconds: number | null;
+}
+
+// =============================================================================
 // Service
 // =============================================================================
 
@@ -332,6 +398,44 @@ export class ZoteroLibraryService extends ApiService {
             { timeoutMs: ZOTERO_REQUEST_TIMEOUT_MS, ...options },
         );
         return response.data;
+    }
+
+    /**
+     * Asks whether the user's Zotero is currently connected.
+     *
+     * This is a pure read of what the backend already believes: it never wakes
+     * Zotero, so asking the question cannot change the answer and the call is
+     * safe to poll. An unreachable Zotero comes back as
+     * `provider: 'absent'` — there is no `zotero_offline` failure to catch
+     * here, unlike a library op.
+     */
+    async getStatus(options?: RequestOptions): Promise<ZoteroProviderStatus> {
+        return this.get<ZoteroProviderStatus>(
+            ZOTERO_STATUS_ENDPOINT,
+            { timeoutMs: ZOTERO_STATUS_TIMEOUT_MS, ...options },
+        );
+    }
+
+    /**
+     * Tells the backend the caller is still using the library, so a connection
+     * is worth holding open, and reports the resulting state.
+     *
+     * Does no library work. It does wake a Zotero that is not connected, so it
+     * can take seconds when Zotero is closed — a caller on a timer should not
+     * assume it returns promptly. Callers say only "I am still here": how long
+     * the lease runs is the backend's decision, so warmth expires on its own if
+     * this client stops calling, crashes or loses its network.
+     *
+     * A Zotero that could not be reached comes back as `provider: 'absent'`
+     * rather than throwing, so a failed wake is a state to render, not an
+     * error.
+     */
+    async keepAlive(options?: RequestOptions): Promise<ZoteroProviderStatus> {
+        return this.post<ZoteroProviderStatus>(
+            ZOTERO_SESSION_ENDPOINT,
+            {},
+            { timeoutMs: ZOTERO_SESSION_TIMEOUT_MS, ...options },
+        );
     }
 }
 
