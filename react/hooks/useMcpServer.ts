@@ -494,6 +494,13 @@ const LIST_COLLECTIONS_TOOL = {
                 type: 'string',
                 description: 'Collection key to list subcollections within. Omit for top-level collections.',
             },
+            recursive: {
+                type: 'boolean',
+                description:
+                    'Whether to list every descendant collection instead of direct children only. '
+                    + 'Each result carries parent_key, so the tree can be reconstructed. Default: false.',
+                default: false,
+            },
             include_item_counts: {
                 type: 'boolean',
                 description: 'Whether to include the number of items in each collection. Default: true.',
@@ -528,7 +535,8 @@ const LIST_TAGS_TOOL = {
         'Tags are user-defined labels attached to references (e.g., "to-read", "methods", "key-paper"). ' +
         'Returns tag names with per-type counts: item_count (regular items), attachment_count, note_count, and annotation_count. ' +
         'Use this to discover available tags before using them as filters in `search_by_topic` or `search_by_metadata` (`tags_filter`). ' +
-        'Set `min_item_count` to filter out rarely-used tags (counts all tagged objects, not just regular items).',
+        'Set `min_item_count` to filter out rarely-used tags (counts all tagged objects, not just regular items). ' +
+        'Set `name_query` to search tag names in a library with too many tags to list.',
     inputSchema: {
         type: 'object' as const,
         properties: {
@@ -539,6 +547,10 @@ const LIST_TAGS_TOOL = {
             collection: {
                 type: 'string',
                 description: 'Collection key to list tags within that collection only.',
+            },
+            name_query: {
+                type: 'string',
+                description: 'Only return tags whose name contains this text (case-insensitive).',
             },
             min_item_count: {
                 type: 'integer',
@@ -1267,6 +1279,7 @@ async function handleListCollections(args: any): Promise<any> {
         library_id: libraryId,
         parent_collection_key: args.parent_collection ?? null,
         include_item_counts: args.include_item_counts ?? true,
+        recursive: args.recursive ?? false,
         limit,
         offset,
     };
@@ -1290,6 +1303,8 @@ async function handleListCollections(args: any): Promise<any> {
         collections: response.collections.map((c) => ({
             collection_key: c.collection_key,
             name: c.name,
+            // Carries the tree shape a recursive listing flattens.
+            parent_key: c.parent_key ?? null,
             item_count: c.item_count,
             standalone_attachment_count: c.standalone_attachment_count,
             standalone_note_count: c.standalone_note_count,
@@ -1314,6 +1329,7 @@ async function handleListTags(args: any): Promise<any> {
         library_id: libraryId,
         collection_key: args.collection ?? null,
         min_item_count: args.min_item_count ?? 1,
+        name_query: args.name_query ?? null,
         limit,
         offset,
     };

@@ -36,6 +36,11 @@ export function getItemDisplayName(
 
     if (item.isNote()) {
         displayName = truncate(item.getNoteTitle(), noteTitleLength) || 'Untitled Note';
+    } else if (item.isAnnotation()) {
+        // An annotation has neither creators nor a title, so without this it
+        // falls through to the creator branch and is labelled "Unknown Author".
+        // `getDisplayTitle` is Zotero's own summary of the highlighted text.
+        displayName = truncate(item.getDisplayTitle() || '', noteTitleLength) || 'Annotation';
     } else if (item.isAttachment() && !item.parentItem) {
         displayName = item.getField('title') || '';
     } else {

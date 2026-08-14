@@ -22,12 +22,9 @@ import {
 } from '@beaver/agent-core/protocol/agentProtocol';
 import { deduplicateItems } from '../../utils/zoteroUtils';
 import { agentItemFilter } from '../../utils/agentItemSupport';
-import { getItemDisplayName } from '../../utils/itemDisplayName';
-import { getYearFromItem } from '../../utils/zoteroSerializers';
-import { libraryRefForLibraryID } from '../../utils/libraryIdentity';
 import { quickSearchItems, QuickSearchItemsOptions } from '../librarySearch/quickSearch';
 import { scoreSearchResult } from '../librarySearch/ranking';
-import { serializeItemSearchRows } from './itemSearchSerialization';
+import { serializeItemSearchRows, toQuickSearchHit } from './itemSearchSerialization';
 import {
     collectionsFilterError,
     getSearchableLibraryIds,
@@ -81,36 +78,6 @@ function emptyTiming(startTime: number): FrontendTimingMetadata {
         total_ms: Date.now() - startTime,
         item_count: 0,
         attachment_count: 0,
-    };
-}
-
-/**
- * Build the compact projection: what a chip, a menu row and a hover card need.
- *
- * `display_name` and `formatted_citation` are computed here, in Zotero, so a
- * client without a local library renders the same label the Zotero UI does.
- */
-function toQuickSearchHit(item: Zotero.Item, score: number): QuickSearchHit {
-    let hasAttachment: boolean | undefined;
-    try {
-        hasAttachment = item.getAttachments().length > 0;
-    } catch {
-        // childItems is loaded before this runs; if it somehow is not, omit the
-        // flag rather than claiming the item has no attachment.
-        hasAttachment = undefined;
-    }
-
-    return {
-        library_id: item.libraryID,
-        library_ref: libraryRefForLibraryID(item.libraryID) ?? undefined,
-        zotero_key: item.key,
-        item_type: item.itemType,
-        display_name: getItemDisplayName(item),
-        title: item.getDisplayTitle?.() || item.getField('title') || undefined,
-        year: getYearFromItem(item),
-        formatted_citation: Zotero.Beaver?.citationService?.formatBibliography(item) || undefined,
-        has_attachment: hasAttachment,
-        score,
     };
 }
 

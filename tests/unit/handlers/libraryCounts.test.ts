@@ -13,18 +13,28 @@ function rowWithCount(count: number) {
     };
 }
 
+/**
+ * True for the aggregate queries behind `versions`, which run alongside the
+ * counts and read several columns from one row.
+ */
+function isVersionQuery(sql: string): boolean {
+    return sql.includes('MAX(collectionID)') || sql.includes('COUNT(DISTINCT IT.tagID)');
+}
+
 describe('getLibrarySummaries', () => {
     const queryAsync = vi.fn();
     const getAllLibraries = vi.fn();
     const getAllTags = vi.fn();
+    const getColors = vi.fn();
 
     beforeEach(() => {
         vi.clearAllMocks();
 
         const zotero = (globalThis as any).Zotero;
         zotero.DB = { queryAsync };
-        zotero.Tags = { getAll: getAllTags };
+        zotero.Tags = { getAll: getAllTags, getColors };
         zotero.Libraries.getAll = getAllLibraries;
+        getColors.mockReturnValue(new Map());
     });
 
     it('returns sorted count summaries for requested libraries', async () => {
@@ -61,6 +71,10 @@ describe('getLibrarySummaries', () => {
             ) => {
                 const libraryId = params[0];
                 let count = 0;
+                if (isVersionQuery(sql)) {
+                    options?.onRow?.(rowWithCount(libraryId));
+                    return;
+                }
                 if (sql.includes('LEFT JOIN itemNotes')) {
                     count = libraryId === 1 ? 12 : 4;
                 } else if (sql.includes('JOIN itemAttachments IA')) {
@@ -117,6 +131,34 @@ describe('getLibrarySummaries', () => {
             expect(sql).toContain('IA.parentItemID IS NULL');
             expect(sql).toContain('NOT IN (SELECT itemID FROM deletedItems)');
         }
+    });
+
+    it('computes the cache-freshness markers only when they are asked for', async () => {
+        // The application-state snapshot shares this helper and runs on every
+        // message, where the markers would be pure cost.
+        getAllLibraries.mockReturnValue([
+            {
+                libraryID: 1,
+                name: 'My Library',
+                isGroup: false,
+                editable: true,
+                filesEditable: true,
+            },
+        ]);
+        queryAsync.mockImplementation(
+            async (_sql: string, params: number[], options?: { onRow?: (row: any) => void }) => {
+                options?.onRow?.(rowWithCount(params[0]));
+            }
+        );
+        getAllTags.mockResolvedValue([]);
+
+        const [withoutVersions] = await getLibrarySummaries([1]);
+        expect(withoutVersions.versions).toBeUndefined();
+        expect(queryAsync.mock.calls.some(([sql]) => isVersionQuery(sql))).toBe(false);
+
+        const [withVersions] = await getLibrarySummaries([1], true);
+        expect(withVersions.versions?.collections).toBeTruthy();
+        expect(withVersions.versions?.tags).toBeTruthy();
     });
 
     it('reports a library holding only loose files as non-empty', async () => {

@@ -653,12 +653,14 @@ async function handleLibraryMetadataHttpRequest(request: any) {
         item_ids: request.item_ids || [],
         include_attachments: request.include_attachments ?? false,
         include_notes: request.include_notes ?? false,
+        detail: request.detail,
     };
 
     const response = await handleGetMetadataRequest(wsRequest);
 
     return {
         items: response.items,
+        detail: response.detail,
         not_found: response.not_found,
         error: response.error,
         error_code: response.error_code,
@@ -721,6 +723,7 @@ async function handleListCollectionsHttpRequest(request: any) {
         library_id: request.library_id,
         parent_collection_key: request.parent_collection_key,
         include_item_counts: request.include_item_counts ?? false,
+        recursive: request.recursive ?? false,
         limit: request.limit ?? 50,
         offset: request.offset ?? 0,
     };
@@ -744,6 +747,7 @@ async function handleListTagsHttpRequest(request: any) {
         library_id: request.library_id,
         collection_key: request.collection_key,
         min_item_count: request.min_item_count ?? 0,
+        name_query: request.name_query,
         limit: request.limit ?? 50,
         offset: request.offset ?? 0,
     };

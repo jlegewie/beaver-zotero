@@ -1,16 +1,67 @@
 /**
- * Shared serialization of item-search hits into the full
- * `ItemSearchFrontendResultItem` rows (item metadata plus attachments).
+ * Shared serialization of item rows into the two projections the library ops
+ * offer: the full `ItemSearchFrontendResultItem` (item metadata plus
+ * attachments) and the compact `QuickSearchHit`.
  *
- * Used by every search handler that serves the `full` projection, so the rows
- * a client or the model sees do not depend on which search produced them.
+ * Used by every handler that serves either projection, so the rows a client or
+ * the model sees do not depend on which op produced them.
  */
 
 import { logger } from '@beaver/agent-core/platform/logger';
-import { ItemSearchFrontendResultItem } from '@beaver/agent-core/protocol/agentProtocol';
-import { serializeItem } from '../../utils/zoteroSerializers';
+import { ItemSearchFrontendResultItem, QuickSearchHit } from '@beaver/agent-core/protocol/agentProtocol';
+import { serializeItem, getYearFromItem } from '../../utils/zoteroSerializers';
+import { getItemDisplayName } from '../../utils/itemDisplayName';
+import { libraryRefForLibraryID } from '../../utils/libraryIdentity';
 import { TimingAccumulator } from '../../utils/timing';
 import { prepareAttachmentInfoBatchData, processAttachmentInfoBatch } from './utils';
+
+/**
+ * Build the compact projection: what a chip, a menu row and a hover card need.
+ *
+ * `display_name` and `formatted_citation` are computed here, in Zotero, so a
+ * client without a local library renders the same label the Zotero UI does
+ * rather than rebuilding one from `creators[]` and drifting from what citations
+ * and tool-call headers call the same item.
+ *
+ * Requires `childItems` to be loaded for `has_attachment`; the flag is omitted
+ * rather than reported as false when it is not.
+ *
+ * @param score - Ranking score, for the ops that rank. Omitted when there is
+ * no ranking to explain.
+ */
+export function toQuickSearchHit(item: Zotero.Item, score?: number): QuickSearchHit {
+    let hasAttachment: boolean | undefined;
+    try {
+        hasAttachment = item.getAttachments().length > 0;
+    } catch {
+        hasAttachment = undefined;
+    }
+
+    // Only a regular item has a bibliography entry. A note or an attachment
+    // formats as something like "“PDF.” n.d.", which is worse for a hover card
+    // than having no body at all.
+    let formattedCitation: string | undefined;
+    if (item.isRegularItem()) {
+        try {
+            formattedCitation = Zotero.Beaver?.citationService?.formatBibliography(item) || undefined;
+        } catch {
+            formattedCitation = undefined;
+        }
+    }
+
+    return {
+        library_id: item.libraryID,
+        library_ref: libraryRefForLibraryID(item.libraryID) ?? undefined,
+        zotero_key: item.key,
+        item_type: item.itemType,
+        display_name: getItemDisplayName(item),
+        title: item.getDisplayTitle?.() || item.getField('title') || undefined,
+        year: getYearFromItem(item),
+        formatted_citation: formattedCitation,
+        has_attachment: hasAttachment,
+        score,
+    };
+}
 
 /** Items serialized concurrently per batch. */
 const BATCH_SIZE_CAP = 20;

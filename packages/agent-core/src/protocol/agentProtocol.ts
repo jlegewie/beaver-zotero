@@ -619,14 +619,20 @@ export interface WSItemSearchByTopicResponse {
 // =============================================================================
 
 /**
- * How much each quick-search hit carries.
+ * How much an item row carries, for the ops that let the caller choose.
  *
- * - `compact`: a `QuickSearchHit` — what a chip, a menu row and a hover card
- *   need, and nothing else.
- * - `full`: today's `ItemSearchFrontendResultItem` (full item metadata plus the
- *   attachment list), the same shape the fielded searches return.
+ * - `compact`: a {@link QuickSearchHit} — what a chip, a menu row and a hover
+ *   card need, and nothing else.
+ * - `full`: the op's rich row (item metadata plus attachments for the searches,
+ *   the whole `toJSON` payload for `get_metadata`).
+ *
+ * The projection is a parameter rather than a second op so a picker and the
+ * agent cannot disagree about what an item is or what matched.
  */
-export type QuickSearchDetail = 'compact' | 'full';
+export type ItemProjectionDetail = 'compact' | 'full';
+
+/** How much each quick-search hit carries. See {@link ItemProjectionDetail}. */
+export type QuickSearchDetail = ItemProjectionDetail;
 
 /**
  * A single quick-search hit in the `compact` projection.
@@ -1357,13 +1363,30 @@ export interface WSGetMetadataRequest extends WSBaseEvent {
     item_ids: string[];
     include_attachments: boolean;
     include_notes: boolean;
+    /**
+     * What each row carries. Default 'full' — the historical behavior.
+     *
+     * 'compact' returns a {@link QuickSearchHit} per item (plus its `item_id`),
+     * which is what a chip needs to render a bare reference from thread
+     * history. It ignores `include_attachments` / `include_notes`, whose
+     * payloads have no place in that projection.
+     */
+    detail?: ItemProjectionDetail;
 }
 
 /** Response to get_metadata request */
 export interface WSGetMetadataResponse {
     type: 'get_metadata';
     request_id: string;
+    /**
+     * One row per resolved item. `QuickSearchHit & {item_id}` when `detail` is
+     * 'compact', the full `toJSON` payload otherwise — branch on the echoed
+     * `detail` rather than sniffing the rows.
+     */
     items: Record<string, any>[];
+    /** Projection the items are in; echoes the request's resolved `detail`.
+     * Omitted by older providers, which always serve 'full'. */
+    detail?: ItemProjectionDetail;
     not_found: string[];
     error?: string | null;
     error_code?: string | null;
@@ -1432,6 +1455,15 @@ export interface WSListCollectionsRequest extends WSBaseEvent {
     library_id?: number | string | null;
     parent_collection_key?: string | null;
     include_item_counts: boolean;
+    /**
+     * List every descendant of the scope rather than its direct children only,
+     * so a whole library is one call. Each row still carries `parent_key`, so
+     * the caller can rebuild the tree.
+     *
+     * Gated by the `list_collections_recursive` client feature: a client
+     * without it silently returns direct children only.
+     */
+    recursive?: boolean | null;
     limit: number;
     offset: number;
 }
@@ -1490,6 +1522,16 @@ export interface WSListTagsRequest extends WSBaseEvent {
     library_id?: number | string | null;
     collection_key?: string | null;
     min_item_count: number;
+    /**
+     * Keep only tags whose name contains this substring, case-insensitively.
+     * Pushed into SQL, so it reduces the provider's work as well as the wire —
+     * the escape hatch for a library with too many tags to fetch and filter
+     * locally.
+     *
+     * Gated by the `list_tags_name_query` client feature: a client without it
+     * silently returns the unfiltered list.
+     */
+    name_query?: string | null;
     limit: number;
     offset: number;
 }
@@ -1557,6 +1599,33 @@ export interface LibrarySummary {
     note_count: number;
     collection_count: number;
     tag_count: number;
+    /**
+     * Opaque per-scope change markers, for a client caching this library's
+     * collections or tags. Compare for equality and re-fetch on a mismatch;
+     * never parse one, and never order two of them — the provider is free to
+     * change how it computes them without a wire change.
+     *
+     * Per scope rather than per library so an item edit does not invalidate a
+     * collection cache. Absent when the provider cannot compute them, which a
+     * client must read as "no freshness oracle" (do not cache) rather than
+     * "unchanged".
+     */
+    versions?: LibraryScopeVersions;
+}
+
+/** Per-scope change markers for one library. See `LibrarySummary.versions`. */
+export interface LibraryScopeVersions {
+    /**
+     * Changes when the library's collections change (added, renamed, moved,
+     * deleted). Deliberately **not** when the items inside them change, so a
+     * response cached against this marker must be one taken with
+     * `include_item_counts: false` — the counts would go stale under it.
+     */
+    collections?: string;
+    /** Changes when the library's tag list, per-tag usage or tag colors change. */
+    tags?: string;
+    /** Reserved for a surface that needs to cache items. Not emitted today. */
+    items?: string;
 }
 
 /** Response to list_libraries request */
@@ -1979,6 +2048,19 @@ export const CLIENT_FEATURES = {
      * backend refuses the op up front instead.
      */
     ITEM_QUICK_SEARCH: 'item_quick_search',
+    /**
+     * `list_collections` honors `recursive`, listing every descendant of the
+     * scope instead of its direct children. A client without it ignores the
+     * flag and answers with direct children only, which reads as a complete
+     * library that happens to be flat.
+     */
+    LIST_COLLECTIONS_RECURSIVE: 'list_collections_recursive',
+    /**
+     * `list_tags` honors `name_query`, filtering tag names in SQL. A client
+     * without it ignores the parameter and returns the unfiltered list, which
+     * reads as "these are the matches".
+     */
+    LIST_TAGS_NAME_QUERY: 'list_tags_name_query',
 } as const;
 
 /** Client type identifier for the Zotero plugin. */

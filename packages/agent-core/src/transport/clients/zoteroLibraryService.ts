@@ -11,6 +11,7 @@ import { ApiService, type RequestOptions } from '../apiService';
 import { ApiError } from '../../types/apiErrors';
 import type {
     CollectionInfo,
+    ItemProjectionDetail,
     ItemSearchFrontendResultItem,
     LibrarySummary,
     QuickSearchDetail,
@@ -123,8 +124,18 @@ export interface ListCollectionsParams {
     library_id?: number | string;
     /** Children of this collection; omit for the library root */
     parent_collection_key?: string;
+    /**
+     * Every descendant of the scope rather than its direct children, so a whole
+     * library is one call. Rows still carry `parent_key`, so the tree can be
+     * rebuilt client-side.
+     */
+    recursive?: boolean;
+    /**
+     * Counting the items in every collection is the expensive part of this op
+     * and counts are decoration in a picker — pass `false` there. Default true.
+     */
     include_item_counts?: boolean;
-    /** 1–200, default 100 */
+    /** Up to 1000, so one library is one call; 50 when omitted. */
     limit?: number;
     offset?: number;
 }
@@ -147,7 +158,15 @@ export interface ListTagsParams {
     collection_key?: string;
     /** Drop tags used by fewer items than this; default 1 */
     min_item_count?: number;
-    /** 1–200, default 100 */
+    /**
+     * Keep only tags whose name contains this substring (case-insensitive for
+     * ASCII). Filtered in the provider's SQL, so it is the escape hatch for a
+     * library with too many tags to fetch once and filter locally — fetch with
+     * a generous `limit` first, and fall back to this only when `total_count`
+     * says the list was cut short.
+     */
+    name_query?: string;
+    /** Up to 1000, so the fetch-once-and-filter-locally path works; 50 when omitted. */
     limit?: number;
     offset?: number;
 }
@@ -161,6 +180,41 @@ export interface ListTagsData {
     library_ref?: string | null;
     library_name?: string | null;
 }
+
+/** Params for `get_metadata` */
+export interface GetMetadataParams {
+    /** Model-facing item ids ("<library_ref>-<zotero_key>") */
+    item_ids: string[];
+    /** What each row carries. Default 'full'. */
+    detail?: ItemProjectionDetail;
+    /** Child attachments per item. Default false; ignored when compact. */
+    include_attachments?: boolean;
+    /** Child notes per item. Default false; ignored when compact. */
+    include_notes?: boolean;
+}
+
+/** One `get_metadata` row in the `compact` projection. */
+export interface CompactMetadataItem extends QuickSearchHit {
+    /** Echo of the requested id, so a caller can key the row back to its ref */
+    item_id: string;
+}
+
+/**
+ * Result of `get_metadata`. Ids that resolved to nothing come back in
+ * `not_found` rather than as an error, so a partial batch still answers.
+ */
+export type GetMetadataData =
+    | {
+        detail: 'compact';
+        items: CompactMetadataItem[];
+        not_found: string[];
+    }
+    | {
+        /** Absent on responses from providers that predate the parameter. */
+        detail?: 'full';
+        items: Record<string, any>[];
+        not_found: string[];
+    };
 
 /**
  * Library ops a client may request, with params and result typed together.
@@ -191,6 +245,15 @@ export interface ZoteroLibraryOpMap {
     list_tags: {
         params: ListTagsParams;
         data: ListTagsData;
+    };
+    /**
+     * Look up known items by id — for rendering a thread's stored references
+     * and for building a citation, not for a picker, which already has
+     * everything it needs from `item_quick_search`.
+     */
+    get_metadata: {
+        params: GetMetadataParams;
+        data: GetMetadataData;
     };
 }
 
