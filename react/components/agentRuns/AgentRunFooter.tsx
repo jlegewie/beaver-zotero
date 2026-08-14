@@ -17,7 +17,7 @@ import { messageSourcesVisibilityAtom, toggleMessageSourcesVisibilityAtom, setMe
 import { toolResultsMapAtom, allRunsAtom } from '@beaver/agent-core/run-state/atoms';
 import { extractRunResponseContent } from '../../utils/threadContent';
 import TokenUsageDisplay from './TokenUsageDisplay';
-import { regenerateFromRunAtom, streamingDoneRunIdsAtom } from '../../atoms/agentRunAtoms';
+import { regenerateFromRunAtom, retryPendingRunIdAtom, streamingDoneRunIdsAtom } from '../../atoms/agentRunAtoms';
 import { currentThreadIdAtom } from '../../atoms/threads';
 import { store } from '../../store';
 import Tooltip from '@beaver/agent-ui/primitives/Tooltip';
@@ -226,6 +226,9 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
     };
 
     const regenerateFromRun = useSetAtom(regenerateFromRunAtom);
+    // Loading state while this run's retry commits its removal on the
+    // backend (truncate POST + undo), before the replacement run appears.
+    const isRetryPending = useAtomValue(retryPendingRunIdAtom) === run.id;
 
     const handleRegenerate = async () => {
         // regenerateFromRunAtom walks the resume chain back to the root
@@ -297,6 +300,7 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
                             onClick={handleRegenerate}
                             className="scale-11"
                             ariaLabel="Retry"
+                            loading={isRetryPending}
                         />
                     </Tooltip>
 

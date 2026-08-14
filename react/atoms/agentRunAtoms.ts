@@ -39,9 +39,9 @@ import {
     AskUserQuestionAnswer,
     WSStreamingDoneEvent,
     WSThreadNameEvent,
-    WSRetryTruncation,
     ChargingPermissions,
 } from '@beaver/agent-core/protocol/agentProtocol';
+import { threadService } from '@beaver/agent-core/transport/threadService';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { selectedModelAtom, ModelConfig } from './models';
 import { getPref } from '../../src/utils/prefs';
@@ -142,7 +142,7 @@ import { upgradeToolReturn } from '../compat/legacyToolResults';
 import { isToolResultView } from '@beaver/agent-core/run-state/toolResultViews';
 import { addWarningAtom, clearWarningsAtom } from './warnings';
 import { backendHighTokenUsageRunsAtom, softCapTriggeredRunsAtom } from './messageUIState';
-import { currentThreadNameAtom } from './threads';
+import { currentThreadNameAtom, loadThreadAtom } from './threads';
 import { loadItemDataForAgentActions, autoApplyAnnotationAgentActions, autoCreateNoteAgentActions } from '../utils/agentActionUtils';
 import { extractZoteroReferencesFromToolCall } from '@beaver/agent-core/run-state/toolLabels';
 import {
@@ -323,76 +323,16 @@ async function cleanupTemporaryAnnotationsForRunReplacement(logPrefix: string): 
 }
 
 // =============================================================================
-// Thread state reconciliation
+// Retry truncation
 // =============================================================================
-
-/**
- * What the client tells the server about the thread it is holding.
- *
- * Sent with every request. The server anchors on the last of `threadRunIds`
- * that exists in the thread and deletes the trailing block after it, so the
- * history the model reads is the history on screen. A retry is the same
- * statement with a shorter set, plus the run it replaces.
- *
- * Run IDs are client-generated and the run row is written late, so a request
- * that dies during setup leaves the client holding an ID that was never
- * persisted and the runs it dropped stranded server-side. Restating the whole
- * view every time is what makes that self-correcting, and why no retry state
- * has to survive between requests.
- *
- * The set must describe the thread *after* any local truncation — assert it
- * once the runs have been dropped, or the server is told to keep what the user
- * just replaced and the retry deletes nothing. It must also cover every run the
- * user can see, including one still in the active slot (see
- * `activeRunForAssertion`).
- *
- * One case it cannot repair: a client holding no run of the thread at all,
- * which happens after replacing the thread's first run. An empty set is
- * indistinguishable from a client that has not finished loading, so the server
- * reads it as silence unless the request is also a retry.
- */
-interface ThreadStateAssertion {
-    /** Runs the client holds for this thread, oldest first. */
-    threadRunIds: string[];
-    /** The run a retry replaces. Omitted on an ordinary send. */
-    retryRunId?: string;
-}
-
-/** The thread state a request asserts, given the runs the client holds. */
-function assertThreadState(threadRuns: AgentRun[], retryRunId?: string): ThreadStateAssertion {
-    return {
-        threadRunIds: threadRuns.map((run) => run.id),
-        ...(retryRunId ? { retryRunId } : {}),
-    };
-}
-
-/**
- * Thread history plus the run still sitting in the active slot, if any.
- *
- * A run only leaves that slot on `done` or a cancel, so one that failed on an
- * `error` event stays there — visible to the user as an error card, and
- * persisted server-side. Requests that are not replacing it have to assert it
- * alongside the rest, or the anchor lands on the run before it and the server
- * deletes it.
- *
- * Retries deliberately do not use this: the run they replace is exactly what
- * they are asking the server to drop.
- */
-function activeRunForAssertion(get: Getter): AgentRun[] {
-    const activeRun = get(activeRunAtom);
-    const threadRuns = get(threadRunsAtom);
-    return activeRun ? appendRunIfMissing(threadRuns, activeRun) : threadRuns;
-}
 
 /**
  * Move a terminal run out of the active slot into thread history.
  *
  * Failed and canceled runs stay in `activeRunAtom` (there is no terminal
  * `done` to archive them). A send or resume that is not replacing that run
- * has to keep it — the request already asserts it, and dropping it locally
- * would make the history on screen diverge from the history the model reads,
- * leaving a ghost in the middle of the server thread that later messages
- * cannot delete.
+ * has to keep it — the run is persisted server-side, and dropping it locally
+ * would make the history on screen diverge from the history the model reads.
  *
  * Live runs (`in_progress`, `awaiting_deferred`) are left in place. Callers
  * overwrite `activeRunAtom` with the new shell immediately after, so this
@@ -405,39 +345,100 @@ function archiveTerminalActiveRun(get: Getter, set: Setter): void {
 }
 
 /**
- * Apply the truncation the server reported, in place of the client's guess.
+ * Archive a terminal active run into thread history and clear the slot.
  *
- * The two can disagree: the server may have deleted runs this client never
- * loaded, or nothing at all. Dropping whatever it deleted that is still here
- * keeps the views converging instead of drifting further apart.
+ * The retry paths use this instead of `archiveTerminalActiveRun`: they await
+ * a truncate POST before installing the replacement shell, and `allRunsAtom`
+ * concatenates thread history and the active slot without deduplication, so a
+ * run left in both places would render twice for the whole round trip.
  *
- * Normally a no-op — the server only deletes past the anchor, which is the last
- * run this client asserted, so a run it still holds is not in that block. When
- * it is not a no-op the thread was written by something else, and any Zotero
- * change an applied action in those runs made is left in place with its record
- * gone. Nothing here can undo it: the user was never asked, and unlike the
- * regenerate paths there is no confirmation step to hang it on. Logged loudly
- * instead, since it should not happen while a thread has one writer.
+ * Folding the run into `threadRunsAtom` first is also what puts a failed run
+ * that sits in the active slot into the retry's removed set — its applied
+ * actions belong in the confirm dialog, and its ID in the POSTed removal.
  */
-const applyServerTruncationAtom = atom(null, (get, set, deletedRunIds: string[]) => {
-    if (deletedRunIds.length === 0) return;
-    const deleted = new Set(deletedRunIds);
-    if (!get(threadRunsAtom).some((run) => deleted.has(run.id))) return;
+function archiveAndClearTerminalActiveRun(get: Getter, set: Setter): void {
+    const activeRun = get(activeRunAtom);
+    if (!activeRun || isRunActive(activeRun)) return;
+    set(threadRunsAtom, (runs) => appendRunIfMissing(runs, activeRun));
+    set(activeRunAtom, null);
+}
 
-    const orphanedActions = get(threadAgentActionsAtom)
-        .filter((a) => deleted.has(a.run_id) && a.status === 'applied').length;
-    logger(
-        `WS onThread: server deleted ${deleted.size} run(s) this client still held` +
-            (orphanedActions > 0
-                ? `; ${orphanedActions} applied action(s) dropped without an undo`
-                : ''),
-        1,
-    );
-    set(threadRunsAtom, (runs) => runs.filter((run) => !deleted.has(run.id)));
-    set(threadAgentActionsAtom, (actions) => actions.filter((a) => !deleted.has(a.run_id)));
-    set(citationsAtom, (citations) => citations.filter((c) => !deleted.has(c.run_id ?? '')));
-    set(processCitationsAtom);
-});
+/**
+ * The run whose retry is in its pre-send phase — set while the truncate POST
+ * and any undo work run, cleared once the replacement shell is installed (or
+ * the retry aborts). Drives the loading state of the retry controls; the
+ * replacement run's own status takes over from there.
+ *
+ * Doubles as the retry lock. While set, no other retry, resume, or send may
+ * start (`retryCommitInFlight`), and the failed run's dying socket must not
+ * release `isWSChatPendingAtom` — the close event of the run being replaced
+ * arrives mid-commit, and clearing the flag there would re-enable the
+ * composer while the truncation is still in flight. Only the retry flow
+ * itself clears this atom, on every one of its exits.
+ */
+export const retryPendingRunIdAtom = atom<string | null>(null);
+
+/**
+ * Whether a retry is between its truncate POST and its replacement shell.
+ * Guards every path that would mutate run state concurrently: a second
+ * truncation issued in this window would commit against a thread the first
+ * is about to rewrite.
+ */
+function retryCommitInFlight(get: Getter, logPrefix: string): boolean {
+    const pendingRetryRunId = get(retryPendingRunIdAtom);
+    if (!pendingRetryRunId) return false;
+    logger(`${logPrefix}: Blocked — retry of run ${pendingRetryRunId} is still committing`, 1);
+    return true;
+}
+
+/**
+ * Commit a retry's removal on the backend before anything local changes.
+ *
+ * This ordering is what the retry design hangs on: no run leaves the screen
+ * and no Zotero change is undone until the backend confirms the deletion.
+ * On 'failed' and 'refused' the caller must leave local state untouched —
+ * client and server still agree, because neither moved.
+ *
+ * `expectedTailRunId` names the run the client expects to survive as the
+ * thread's last (null when the whole thread is removed); the backend refuses
+ * when the actual survivor differs, which catches a thread rewritten by
+ * another client even when every named run is already gone.
+ *
+ * The transport already re-POSTs once on network-shaped failures (the
+ * endpoint is idempotent), so 'failed' here means the retry genuinely could
+ * not reach the backend.
+ */
+async function truncateThreadOnServer(
+    threadId: string,
+    removedRunIds: string[],
+    expectedTailRunId: string | null,
+    logPrefix: string,
+): Promise<'ok' | 'refused' | 'failed'> {
+    try {
+        const report = await threadService.truncateThread(
+            threadId,
+            removedRunIds,
+            expectedTailRunId,
+        );
+        if (report.reason) {
+            logger(
+                `${logPrefix}: truncation refused (${report.reason}) — thread rewritten elsewhere ` +
+                    `(named ${removedRunIds.length}, refused ${report.refused_run_ids.length})`,
+                1,
+            );
+            return 'refused';
+        }
+        logger(
+            `${logPrefix}: truncation confirmed ` +
+                `(deleted ${report.deleted_run_ids.length} of ${removedRunIds.length} named run(s))`,
+            1,
+        );
+        return 'ok';
+    } catch (error) {
+        logger(`${logPrefix}: truncation failed: ${error}`, 1);
+        return 'failed';
+    }
+}
 
 /**
  * Create the initial AgentRun shell when user presses send.
@@ -452,7 +453,6 @@ function createAgentRunShell(
     providerName?: string,
     customInstructions?: string,
     customModel?: ModelConfig['custom_model'],
-    threadState?: ThreadStateAssertion,
     runIdOverride?: string,
     permissionsOverride?: Partial<ChargingPermissions>,
 ): { run: AgentRun; request: AgentRunRequest } {
@@ -486,21 +486,6 @@ function createAgentRunShell(
         ...(modelSelectionOptions.model_id ? { model_id: modelSelectionOptions.model_id } : {}),
         ...(modelSelectionOptions.api_key ? { api_key: modelSelectionOptions.api_key } : {}),
         ...(customModel ? { custom_model: customModel } : {}),
-        // Sent on every request: the server truncates whatever it holds past
-        // the last of these, which is what makes a thread the client and server
-        // disagree about repair itself on the next message of any kind.
-        ...(threadState ? { thread_run_ids: threadState.threadRunIds } : {}),
-        // Retries additionally name the run they replace. It is the only anchor
-        // a backend predating `thread_run_ids` understands, and on a current one
-        // it covers an assertion that matches no run in the thread.
-        ...(threadState?.retryRunId
-            ? {
-                  retry_run_id: threadState.retryRunId,
-                  ...(threadState.threadRunIds.length > 0
-                      ? { retry_keep_run_ids: threadState.threadRunIds }
-                      : {}),
-              }
-            : {}),
     };
 
     // Create the shell AgentRun for immediate UI rendering
@@ -536,6 +521,10 @@ async function startResumeRun(
     options: StartResumeRunOptions,
 ): Promise<void> {
     logger(`${options.logPrefix}: Resuming from run ${failedRunId}`, 1);
+
+    // A resume overwriting the active slot mid-commit would be clobbered
+    // when the retry installs its own replacement shell.
+    if (retryCommitInFlight(get, options.logPrefix)) return;
 
     let newRunId: string | null = null;
 
@@ -601,7 +590,6 @@ async function startResumeRun(
             model.provider,
             customInstructions,
             model.is_custom ? model.custom_model : undefined,
-            assertThreadState(activeRunForAssertion(get)),
         );
 
         newRunId = newRun.id;
@@ -625,6 +613,11 @@ async function startResumeRun(
  * Retry a failed run by deleting it (and any preceding resume-chain runs) and
  * starting fresh from the original user prompt. Used by auto-retry when the
  * frontend has only received thinking content — nothing user-visible to keep.
+ *
+ * Like the user-driven retries, the removal is committed on the backend
+ * first. There is no confirm dialog and no undo — applied actions in the
+ * removed runs stay in place, as before. A failed or refused truncation
+ * takes the ordinary auto-retry error path with nothing local to unwind.
  */
 async function startAutoRetryRun(
     get: Getter,
@@ -633,6 +626,8 @@ async function startAutoRetryRun(
 ): Promise<void> {
     const logPrefix = 'autoRetryErroredRunAtom';
     logger(`${logPrefix}: Retrying from run ${failedRunId}`, 1);
+
+    if (retryCommitInFlight(get, logPrefix)) return;
 
     let newRunId: string | null = null;
 
@@ -649,9 +644,13 @@ async function startAutoRetryRun(
             return;
         }
 
+        // Fold the failed run out of the active slot into thread history so
+        // the removal below names it — the backend persisted it, and leaving
+        // it out would strand an error run in the middle of the thread.
+        archiveAndClearTerminalActiveRun(get, set);
+
         const threadRuns = get(threadRunsAtom);
-        const activeRun = get(activeRunAtom);
-        const failedRun = findRunForResume(threadRuns, activeRun, failedRunId);
+        const failedRun = findRunForResume(threadRuns, get(activeRunAtom), failedRunId);
 
         if (!failedRun) {
             logger(`${logPrefix}: Failed run ${failedRunId} not found`, 1);
@@ -671,24 +670,56 @@ async function startAutoRetryRun(
 
         // Walk back to the original user message — resume runs carry an empty
         // user_prompt.content, so we need the root to preserve the question.
-        const allRunsForChain: AgentRun[] = activeRun && !threadRuns.some(r => r.id === activeRun.id)
-            ? [...threadRuns, activeRun]
-            : threadRuns;
-        const chainRoot = findResumeChainRoot(failedRun, allRunsForChain);
-
-        // A chain root outside threadRuns is the active run, so nothing before
-        // it is removed and the truncation index is the end of the list.
-        const rootRun = chainRoot;
-        const chainRootIndex = threadRuns.findIndex(r => r.id === chainRoot.id);
+        const rootRun = findResumeChainRoot(failedRun, threadRuns);
+        const chainRootIndex = threadRuns.findIndex(r => r.id === rootRun.id);
         const truncateFromIndex = chainRootIndex >= 0 ? chainRootIndex : threadRuns.length;
+        const runIdsToRemove = threadRuns.slice(truncateFromIndex).map(r => r.id);
 
-        // Truncate from the retry point so the UI reflects what the backend
-        // deletes for this retry.
-        if (truncateFromIndex < threadRuns.length) {
+        // The failed run's error card shows a loading state while the
+        // truncate round trip runs; every exit below clears it (the catch
+        // handles the throw on a failed POST).
+        set(retryPendingRunIdAtom, failedRunId);
+        set(isWSChatPendingAtom, true);
+
+        // Commit the removal on the backend before anything local changes.
+        // Skipped when nothing was removed (nothing persisted to delete).
+        if (runIdsToRemove.length > 0) {
+            const expectedTailRunId =
+                truncateFromIndex > 0 ? threadRuns[truncateFromIndex - 1].id : null;
+            const outcome = await truncateThreadOnServer(
+                threadId,
+                runIdsToRemove,
+                expectedTailRunId,
+                logPrefix,
+            );
+            if (outcome === 'refused') {
+                // The thread was rewritten by another client. There is no
+                // user decision to retry against a history this client has
+                // never seen — reload instead, so the UI shows the thread
+                // whole (including the failed run's error card, from which
+                // the user can retry deliberately).
+                set(retryPendingRunIdAtom, null);
+                set(isWSChatPendingAtom, false);
+                set(addPopupMessageAtom, {
+                    type: 'warning',
+                    title: 'Chat changed elsewhere',
+                    text: 'This chat was changed somewhere else, so the failed run was not retried automatically. Reloading the chat.',
+                    expire: true,
+                });
+                await set(loadThreadAtom, {
+                    user_id: userId,
+                    threadId,
+                    skipInstanceMismatchConfirm: true,
+                });
+                return;
+            }
+            if (outcome === 'failed') {
+                throw new Error('Failed to automatically retry run');
+            }
+
             await cleanupTemporaryAnnotationsForRunReplacement(logPrefix);
 
-            const runIdsToRemove = threadRuns.slice(truncateFromIndex).map(r => r.id);
-            set(threadRunsAtom, threadRuns.slice(0, truncateFromIndex));
+            set(threadRunsAtom, prev => prev.filter(r => !runIdsToRemove.includes(r.id)));
             set(threadAgentActionsAtom, prev => prev.filter(a => !runIdsToRemove.includes(a.run_id)));
             set(citationsAtom, prev => prev.filter(c => !runIdsToRemove.includes(c.run_id ?? '')));
             set(processCitationsAtom);
@@ -711,13 +742,11 @@ async function startAutoRetryRun(
             model.provider,
             customInstructions,
             model.is_custom ? model.custom_model : undefined,
-            // Asserted after the local truncation, so it describes the thread
-            // the user is now looking at.
-            assertThreadState(get(threadRunsAtom), rootRun.id),
         );
 
         newRunId = newRun.id;
         set(activeRunAtom, newRun);
+        set(retryPendingRunIdAtom, null);
 
         await executeWSRequest(newRun, request, get, set);
     } catch (error) {
@@ -730,6 +759,7 @@ async function startAutoRetryRun(
             is_retryable: true,
         });
         set(activeRunAtom, prev => (newRunId && prev?.id === newRunId ? null : prev));
+        set(retryPendingRunIdAtom, prev => (prev === failedRunId ? null : prev));
         set(isWSChatPendingAtom, false);
     }
 }
@@ -1537,14 +1567,14 @@ function createWSCallbacks(set: Setter): WSCallbacks {
             });
         },
 
-        onThread: (newThreadId: string, truncation?: WSRetryTruncation | null) => {
-            logger('WS onThread:', { threadId: newThreadId, truncation }, 1);
+        // The event's `retry_truncation` report is deliberately not consumed:
+        // this client never asks the server to reconcile a thread mid-request
+        // — retries commit their removal through `POST /truncate` before the
+        // run request is sent.
+        onThread: (newThreadId: string) => {
+            logger('WS onThread:', { threadId: newThreadId }, 1);
             set(currentThreadIdAtom, newThreadId);
             set(activeRunAtom, (prev) => prev ? { ...prev, thread_id: newThreadId } : prev);
-            // Sent after the server reconciled the thread against the state this
-            // request asserted. What it actually deleted can differ from what the
-            // client predicted — runs this client never loaded, or nothing at all.
-            if (truncation) set(applyServerTruncationAtom, truncation.deleted_run_ids);
         },
 
         onThreadName: (event: WSThreadNameEvent) => {
@@ -1847,7 +1877,14 @@ function createWSCallbacks(set: Setter): WSCallbacks {
             // set(activeRunAtom, null);
             set(isWSConnectedAtom, false);
             set(isWSReadyAtom, false);
-            set(isWSChatPendingAtom, false);
+            // A retry commit in flight owns the pending flag: this close
+            // belongs to the failed run the retry is replacing (onError
+            // dispatched it before the server closed the socket), and
+            // clearing here would re-enable the composer mid-commit. The
+            // retry flow clears or re-asserts the flag on every exit.
+            if (!store.get(retryPendingRunIdAtom)) {
+                set(isWSChatPendingAtom, false);
+            }
             // Clear streaming-done state (connection lost during post-processing)
             set(streamingDoneRunIdsAtom, new Set<string>());
             // Clear pending approvals and dismiss diff preview (connection lost)
@@ -1965,7 +2002,12 @@ async function executeWSRequest(
             if (currentError && currentError.type !== 'connection_error') {
                 logger('WS connection error: Error already set by onError callback, not overwriting', 1);
                 set(wsReconnectingAtom, null);
-                set(isWSChatPendingAtom, false);
+                // The onError that set this error may have dispatched an
+                // auto-retry whose commit is now in flight and owns the
+                // pending flag (see retryPendingRunIdAtom).
+                if (!get(retryPendingRunIdAtom)) {
+                    set(isWSChatPendingAtom, false);
+                }
                 return;
             }
 
@@ -2051,11 +2093,15 @@ export const sendWSMessageAtom = atom(
         const isPending = get(isWSChatPendingAtom);
         logger('sendWSMessageAtom: Called at ' + Date.now() + ' with message: ' + message.substring(0, 50) + ' (isPending: ' + isPending + ')', 1);
         
-        // Guard: Don't allow concurrent requests
+        // Guard: Don't allow concurrent requests. The retry lock is checked
+        // separately because the failed run's dying socket can clear the
+        // pending flag mid-commit — the lock is released only by the retry
+        // flow itself.
         if (isPending) {
             logger('sendWSMessageAtom: Blocked - already have request in progress', 1);
             return;
         }
+        if (retryCommitInFlight(get, 'sendWSMessageAtom')) return;
         
         // Dismiss any open diff preview before sending
         dismissDiffPreview();
@@ -2326,10 +2372,9 @@ export const sendWSMessageAtom = atom(
             }
 
             // A failed run still in the active slot has to stay in local
-            // history: the request asserts it (so the server will not delete
-            // it), and overwriting the slot without archiving would drop it
-            // from the client's view — a ghost in the middle of the server
-            // thread that later messages cannot delete.
+            // history: the server persisted it, and overwriting the slot
+            // without archiving would drop it from the client's view — a
+            // ghost in the middle of the server thread.
             archiveTerminalActiveRun(get, set);
 
             // Create AgentRun shell and request
@@ -2342,20 +2387,6 @@ export const sendWSMessageAtom = atom(
                 model?.provider,
                 customInstructions,
                 model?.is_custom ? model.custom_model : undefined,
-                // An ordinary send asserts the thread unchanged. Normally that
-                // deletes nothing; when an earlier request died before the
-                // server truncated, this is what repairs it — unless the client
-                // holds no run of the thread at all, which the server has to
-                // read as silence (see `ThreadStateAssertion`).
-                //
-                // A run that failed without a terminal `done` is still in the
-                // active slot rather than thread history, and the user is
-                // looking at its error card. It has to be asserted like any
-                // other run it can see: the server persisted it, and leaving it
-                // out would name the run before it as the anchor and delete it,
-                // taking the `agent_actions` rows of anything it applied in
-                // Zotero with it.
-                assertThreadState(activeRunForAssertion(get)),
                 runIdOverride,
                 permissionsOverride,
             );
@@ -2387,77 +2418,110 @@ export const sendWSMessageAtom = atom(
     }
 );
 
+/** How a regenerate path replaces the target run. */
+interface RegenerateRunOptions {
+    logPrefix: string;
+    /**
+     * Walk a resume chain back to its root so the regeneration starts from
+     * the original user message (retry buttons). Edited-prompt retries target
+     * the named run itself.
+     */
+    walkResumeChain: boolean;
+    /** Replacement prompt; defaults to the target run's own prompt. */
+    editedPrompt?: BeaverAgentPrompt;
+    /** Failure message for the generic error card. */
+    failureMessage: string;
+}
+
 /**
- * Regenerate a response from a specific run.
- * 
+ * Regenerate a response from a specific run. The single implementation behind
+ * every user-driven retry (retry button, error-card retry, edit-and-retry).
+ *
  * Flow:
- * 1. Find the run to regenerate from (in threadRuns or activeRun)
- * 2. If active run, cancel it first
- * 3. Optionally delete applied agent actions (annotations, notes) if user confirms
- * 4. Remove runs from that point forward
- * 5. Clear related agent actions and citations
- * 6. Create new run with the same user_prompt
- * 7. Execute via WebSocket
+ * 1. Find the run to regenerate from (canceling it first if still live)
+ * 2. Confirm undoing applied agent actions (cancel aborts, nothing sent)
+ * 3. Commit the removal on the backend (`POST /truncate`) — on failure or
+ *    refusal nothing has changed on either side, so the exits are a popup
+ *    (plus a thread reload on refusal) and an intact thread
+ * 4. Undo applied actions if the user chose to, remove the runs and their
+ *    actions/citations locally
+ * 5. Create the replacement run and execute it via WebSocket
  */
-export const regenerateFromRunAtom = atom(
-    null,
-    async (get, set, runId: string) => {
-        logger(`regenerateFromRunAtom: Regenerating from run ${runId}`, 1);
+async function startRegenerateRun(
+    get: Getter,
+    set: Setter,
+    runId: string,
+    options: RegenerateRunOptions,
+): Promise<void> {
+    const { logPrefix, walkResumeChain, editedPrompt, failureMessage } = options;
+    logger(`${logPrefix}: Regenerating from run ${runId}`, 1);
 
-        // Dismiss any open diff preview before regenerating
-        dismissDiffPreview();
+    // One retry at a time: retry controls of other runs stay clickable while
+    // a commit is in flight, and a second truncation would race the first.
+    if (retryCommitInFlight(get, logPrefix)) return;
 
-        let newRunId: string | null = null;
+    // Dismiss any open diff preview before regenerating
+    dismissDiffPreview();
 
-        try {
-            // Get current model
-            const model = get(selectedModelAtom);
-            if (!model) {
-                logger('regenerateFromRunAtom: No model selected', 1);
-                return;
-            }
+    let newRunId: string | null = null;
 
-            // Get user ID
-            const userId = get(userIdAtom);
-            if (!userId) {
-                logger('regenerateFromRunAtom: No user ID found', 1);
-                return;
-            }
+    try {
+        // Get current model
+        const model = get(selectedModelAtom);
+        if (!model) {
+            logger(`${logPrefix}: No model selected`, 1);
+            return;
+        }
 
-            // Find the run - check both threadRuns and activeRun
-            const threadRuns = get(threadRunsAtom);
-            const activeRun = get(activeRunAtom);
-            
-            let targetRun: AgentRun | null = null;
-            let runIndex = threadRuns.findIndex(r => r.id === runId);
-            
-            if (runIndex >= 0) {
-                targetRun = threadRuns[runIndex];
-            } else if (activeRun?.id === runId) {
-                // The run is currently active - cancel it and resubmit
-                targetRun = activeRun;
-                runIndex = threadRuns.length;
-                // Clear the active run before awaiting cancel: agentService.cancel()
-                // waits for the cancel message to flush, and if the socket closes
-                // uncleanly during that window, the onclose handler must not see this
-                // run still marked active and misattribute the close as a connection
-                // failure. The pending flag stays set until cancel resolves so the
-                // composer guard keeps blocking new sends during the flush.
-                set(activeRunAtom, null);
-                await agentService.cancel();
-                set(isWSChatPendingAtom, false);
-            }
+        // Get user ID
+        const userId = get(userIdAtom);
+        if (!userId) {
+            logger(`${logPrefix}: No user ID found`, 1);
+            return;
+        }
 
-            if (!targetRun) {
-                logger(`regenerateFromRunAtom: Run ${runId} not found`, 1);
-                return;
-            }
+        // Fold a terminal run out of the active slot into thread history
+        // before the removed set is computed: a failed run being replaced
+        // contributes its applied actions to the confirm dialog and its ID
+        // to the POSTed removal (it is persisted server-side).
+        archiveAndClearTerminalActiveRun(get, set);
 
-            // If the target is a resume run, walk the resume chain back to the
-            // root so we regenerate from the original user message, not from an
-            // intermediate resume prompt (whose content is empty). The root
-            // always lives in threadRuns — startResumeRun guarantees the failed
-            // run is appended to threadRuns before the resume is started.
+        // Find the run — a terminal run was archived into threadRuns above,
+        // so only a still-live run is found through the active slot.
+        const threadRuns = get(threadRunsAtom);
+        const activeRun = get(activeRunAtom);
+
+        let targetRun: AgentRun | null = null;
+        let runIndex = threadRuns.findIndex(r => r.id === runId);
+
+        if (runIndex >= 0) {
+            targetRun = threadRuns[runIndex];
+        } else if (activeRun?.id === runId) {
+            // The run is currently active - cancel it and resubmit
+            targetRun = activeRun;
+            runIndex = threadRuns.length;
+            // Clear the active run before awaiting cancel: agentService.cancel()
+            // waits for the cancel message to flush, and if the socket closes
+            // uncleanly during that window, the onclose handler must not see this
+            // run still marked active and misattribute the close as a connection
+            // failure. The pending flag stays set until cancel resolves so the
+            // composer guard keeps blocking new sends during the flush.
+            set(activeRunAtom, null);
+            await agentService.cancel();
+            set(isWSChatPendingAtom, false);
+        }
+
+        if (!targetRun) {
+            logger(`${logPrefix}: Run ${runId} not found`, 1);
+            return;
+        }
+
+        // If the target is a resume run, walk the resume chain back to the
+        // root so we regenerate from the original user message, not from an
+        // intermediate resume prompt (whose content is empty). The root
+        // always lives in threadRuns — startResumeRun guarantees the failed
+        // run is appended to threadRuns before the resume is started.
+        if (walkResumeChain) {
             const allRunsForChain: AgentRun[] = activeRun && !threadRuns.some(r => r.id === activeRun.id)
                 ? [...threadRuns, activeRun]
                 : threadRuns;
@@ -2465,364 +2529,245 @@ export const regenerateFromRunAtom = atom(
             if (rootRun.id !== targetRun.id) {
                 const rootIndex = threadRuns.findIndex(r => r.id === rootRun.id);
                 if (rootIndex >= 0) {
-                    logger(`regenerateFromRunAtom: walking resume chain, using root run ${rootRun.id}`, 1);
+                    logger(`${logPrefix}: walking resume chain, using root run ${rootRun.id}`, 1);
                     targetRun = rootRun;
                     runIndex = rootIndex;
                 }
             }
-
-            // Get thread ID from the target run (may not be set in currentThreadIdAtom yet)
-            const threadId = get(currentThreadIdAtom) || targetRun.thread_id;
-
-            // Collect runs that will be removed (target run and all subsequent)
-            const removedRuns = threadRuns.slice(runIndex);
-            const runIdsToRemove = removedRuns.map(r => r.id);
-
-            // Find applied actions for runs being removed
-            const allAgentActions = get(threadAgentActionsAtom);
-            const actionsInRemovedRuns = allAgentActions.filter(a => runIdsToRemove.includes(a.run_id));
-            
-            // Categorize by type - only include applied actions
-            const annotationsToDelete = actionsInRemovedRuns
-                .filter((action) =>
-                    (isAnnotationAgentAction(action) && hasAppliedZoteroItem(action)) ||
-                    (isCreateAnnotationsAgentAction(action) && hasAppliedBulkAnnotations(action))
-                );
-            const annotationEditsToUndo = actionsInRemovedRuns
-                .filter(isEditAnnotationsAgentAction)
-                .filter(a => a.status === 'applied');
-            const zoteroNotesToDelete = actionsInRemovedRuns
-                .filter(isZoteroNoteAgentAction)
-                .filter(hasAppliedZoteroItem);
-            const metadataEditsToUndo = actionsInRemovedRuns
-                .filter(isEditMetadataAgentAction)
-                .filter(a => a.status === 'applied');
-            const createItemsToUndo = actionsInRemovedRuns
-                .filter(isCreateItemAgentAction)
-                .filter(a => a.status === 'applied');
-            const createCollectionsToUndo = actionsInRemovedRuns
-                .filter(isCreateCollectionAgentAction)
-                .filter(a => a.status === 'applied');
-            const organizeItemsToUndo = actionsInRemovedRuns
-                .filter(isOrganizeItemsAgentAction)
-                .filter(a => a.status === 'applied');
-            const manageTagsToUndo = actionsInRemovedRuns
-                .filter(isManageTagsAgentAction)
-                .filter(a => a.status === 'applied');
-            const manageCollectionsToUndo = actionsInRemovedRuns
-                .filter(isManageCollectionsAgentAction)
-                .filter(a => a.status === 'applied');
-            const noteEditsToUndo = actionsInRemovedRuns
-                .filter(isAnyEditNoteAgentAction)
-                .filter(a => a.status === 'applied');
-            const createNotesToUndo = actionsInRemovedRuns
-                .filter(isCreateNoteAgentAction)
-                .filter(a => a.status === 'applied');
-
-            // Prompt user to confirm undoing applied actions
-            const hasActionsToUndo = annotationsToDelete.length > 0 || annotationEditsToUndo.length > 0 ||
-                                     zoteroNotesToDelete.length > 0 ||
-                                     metadataEditsToUndo.length > 0 || noteEditsToUndo.length > 0 ||
-                                     createItemsToUndo.length > 0 ||
-                                     createCollectionsToUndo.length > 0 || organizeItemsToUndo.length > 0 ||
-                                     manageTagsToUndo.length > 0 || manageCollectionsToUndo.length > 0 ||
-                                     createNotesToUndo.length > 0;
-            if (hasActionsToUndo) {
-                const confirmResult = confirmUndoAppliedActions({
-                    annotations: annotationsToDelete,
-                    annotationEdits: annotationEditsToUndo,
-                    zoteroNotes: zoteroNotesToDelete,
-                    metadataEdits: metadataEditsToUndo,
-                    noteEdits: noteEditsToUndo,
-                    createItems: createItemsToUndo,
-                    createCollections: createCollectionsToUndo,
-                    organizeItems: organizeItemsToUndo,
-                    manageTags: manageTagsToUndo,
-                    manageCollections: manageCollectionsToUndo,
-                    createNotes: createNotesToUndo,
-                });
-                if (confirmResult === 'cancel') {
-                    return;
-                }
-                if (confirmResult === 'undo') {
-                    // Single reverse-chronological pass across all applied
-                    // actions. Cross-type ordering matters — e.g. a
-                    // create_collection undo cascades to descendants, so any
-                    // later manage_collections moves into it must be undone
-                    // first. See undoAppliedActionsInReverse for details.
-                    await undoAppliedActionsInReverse(actionsInRemovedRuns);
-                }
-            }
-
-            await cleanupTemporaryAnnotationsForRunReplacement('regenerateFromRunAtom');
-
-            // Truncate runs - keep only runs before the target
-            const truncatedRuns = threadRuns.slice(0, runIndex);
-            set(threadRunsAtom, truncatedRuns);
-
-            // Clear agent actions for removed runs
-            set(threadAgentActionsAtom, (prev) =>
-                prev.filter(a => !runIdsToRemove.includes(a.run_id))
-            );
-
-            // Clear citations for removed runs
-            set(citationsAtom, (prev) =>
-                prev.filter(c => !runIdsToRemove.includes(c.run_id ?? ''))
-            );
-            set(processCitationsAtom);
-            set(maybeShowCitationTipAtom);
-
-            // Reset WS state and set pending
-            set(prepareForNewRunAtom);
-            prewarmMuPDFWorker();
-            set(isWSChatPendingAtom, true);
-
-            // Build model selection options
-            const modelOptions = buildModelSelectionOptions(model);
-            const customInstructions = getPref('customInstructions') || undefined;
-
-            // Create new AgentRun shell with the same user_prompt
-            const { run: newRun, request } = createAgentRunShell(
-                targetRun.user_prompt,
-                threadId,
-                userId,
-                model.name,
-                modelOptions,
-                model.provider,
-                customInstructions,
-                model.is_custom ? model.custom_model : undefined,
-                // Asserted after the local truncation above, so it states the
-                // thread the user is now looking at; the server truncates its
-                // own copy to match. targetRun names the run being replaced, as
-                // the fallback anchor for a backend that predates this field.
-                assertThreadState(get(threadRunsAtom), targetRun.id),
-            );
-
-            // Set active run - UI now shows user message + spinner
-            newRunId = newRun.id;
-            set(activeRunAtom, newRun);
-
-            // Execute the WebSocket request
-            await executeWSRequest(newRun, request, get, set);
-        } catch (error) {
-            // Catch any unexpected errors during regeneration
-            logger('regenerateFromRunAtom: Unexpected error:', error, 1);
-            const failureMessage = error instanceof Error ? error.message : 'Failed to regenerate response';
-            set(wsErrorAtom, {
-                event: 'error',
-                type: 'regeneration_error',
-                message: failureMessage,
-                is_retryable: true,
-            });
-            set(activeRunAtom, null);
-            set(isWSChatPendingAtom, false);
         }
+
+        // Get thread ID from the target run (may not be set in currentThreadIdAtom yet)
+        const threadId = get(currentThreadIdAtom) || targetRun.thread_id;
+
+        // Runs the retry replaces: the target and everything after it. A live
+        // target canceled out of the active slot is not in threadRuns, so it
+        // is named explicitly — the backend ignores IDs it never persisted.
+        const removedRuns = threadRuns.slice(runIndex);
+        const runIdsToRemove = removedRuns.map(r => r.id);
+        if (!runIdsToRemove.includes(targetRun.id)) {
+            runIdsToRemove.push(targetRun.id);
+        }
+
+        // Find applied actions for runs being removed
+        const allAgentActions = get(threadAgentActionsAtom);
+        const actionsInRemovedRuns = allAgentActions.filter(a => runIdsToRemove.includes(a.run_id));
+
+        // Categorize by type - only include applied actions
+        const annotationsToDelete = actionsInRemovedRuns
+            .filter((action) =>
+                (isAnnotationAgentAction(action) && hasAppliedZoteroItem(action)) ||
+                (isCreateAnnotationsAgentAction(action) && hasAppliedBulkAnnotations(action))
+            );
+        const annotationEditsToUndo = actionsInRemovedRuns
+            .filter(isEditAnnotationsAgentAction)
+            .filter(a => a.status === 'applied');
+        const zoteroNotesToDelete = actionsInRemovedRuns
+            .filter(isZoteroNoteAgentAction)
+            .filter(hasAppliedZoteroItem);
+        const metadataEditsToUndo = actionsInRemovedRuns
+            .filter(isEditMetadataAgentAction)
+            .filter(a => a.status === 'applied');
+        const createItemsToUndo = actionsInRemovedRuns
+            .filter(isCreateItemAgentAction)
+            .filter(a => a.status === 'applied');
+        const createCollectionsToUndo = actionsInRemovedRuns
+            .filter(isCreateCollectionAgentAction)
+            .filter(a => a.status === 'applied');
+        const organizeItemsToUndo = actionsInRemovedRuns
+            .filter(isOrganizeItemsAgentAction)
+            .filter(a => a.status === 'applied');
+        const manageTagsToUndo = actionsInRemovedRuns
+            .filter(isManageTagsAgentAction)
+            .filter(a => a.status === 'applied');
+        const manageCollectionsToUndo = actionsInRemovedRuns
+            .filter(isManageCollectionsAgentAction)
+            .filter(a => a.status === 'applied');
+        const noteEditsToUndo = actionsInRemovedRuns
+            .filter(isAnyEditNoteAgentAction)
+            .filter(a => a.status === 'applied');
+        const createNotesToUndo = actionsInRemovedRuns
+            .filter(isCreateNoteAgentAction)
+            .filter(a => a.status === 'applied');
+
+        // Prompt the user to confirm undoing applied actions. The dialog is
+        // the consent and must precede the truncate POST: a user who cancels
+        // leaves no trace anywhere. The undo itself executes only after the
+        // backend confirms, so a failed POST changes nothing.
+        let confirmResult: UndoConfirmResult = 'skip';
+        const hasActionsToUndo = annotationsToDelete.length > 0 || annotationEditsToUndo.length > 0 ||
+                                 zoteroNotesToDelete.length > 0 ||
+                                 metadataEditsToUndo.length > 0 || noteEditsToUndo.length > 0 ||
+                                 createItemsToUndo.length > 0 ||
+                                 createCollectionsToUndo.length > 0 || organizeItemsToUndo.length > 0 ||
+                                 manageTagsToUndo.length > 0 || manageCollectionsToUndo.length > 0 ||
+                                 createNotesToUndo.length > 0;
+        if (hasActionsToUndo) {
+            confirmResult = confirmUndoAppliedActions({
+                annotations: annotationsToDelete,
+                annotationEdits: annotationEditsToUndo,
+                zoteroNotes: zoteroNotesToDelete,
+                metadataEdits: metadataEditsToUndo,
+                noteEdits: noteEditsToUndo,
+                createItems: createItemsToUndo,
+                createCollections: createCollectionsToUndo,
+                organizeItems: organizeItemsToUndo,
+                manageTags: manageTagsToUndo,
+                manageCollections: manageCollectionsToUndo,
+                createNotes: createNotesToUndo,
+            });
+            if (confirmResult === 'cancel') {
+                return;
+            }
+        }
+
+        // Commit the removal on the backend before anything local changes.
+        // The retry control's spinner and the composer's pending flag cover
+        // the round trip; every failure exit clears both. A thread the
+        // backend never assigned has nothing persisted to truncate (a first
+        // run that died before the thread event).
+        set(retryPendingRunIdAtom, runId);
+        set(isWSChatPendingAtom, true);
+        if (threadId) {
+            // The run the client expects to survive as the thread's last —
+            // the backend refuses when its survivor differs (rewritten by
+            // another client), instead of misreading a stale retry as an
+            // idempotent replay.
+            const expectedTailRunId = runIndex > 0 ? threadRuns[runIndex - 1].id : null;
+            const outcome = await truncateThreadOnServer(
+                threadId,
+                runIdsToRemove,
+                expectedTailRunId,
+                logPrefix,
+            );
+            if (outcome === 'failed') {
+                set(retryPendingRunIdAtom, null);
+                set(isWSChatPendingAtom, false);
+                set(addPopupMessageAtom, {
+                    type: 'error',
+                    title: 'Retry failed',
+                    text: 'Beaver could not be reached to start the retry. Nothing was changed — please try again.',
+                    expire: true,
+                });
+                return;
+            }
+            if (outcome === 'refused') {
+                set(retryPendingRunIdAtom, null);
+                set(isWSChatPendingAtom, false);
+                set(addPopupMessageAtom, {
+                    type: 'warning',
+                    title: 'Chat changed elsewhere',
+                    text: 'This chat was changed somewhere else (for example on another device), so the retry was not applied. Reloading the chat.',
+                    expire: true,
+                });
+                // Show the thread whole, including whatever was added elsewhere.
+                await set(loadThreadAtom, {
+                    user_id: userId,
+                    threadId,
+                    skipInstanceMismatchConfirm: true,
+                });
+                return;
+            }
+        }
+
+        if (confirmResult === 'undo') {
+            // Single reverse-chronological pass across all applied
+            // actions. Cross-type ordering matters — e.g. a
+            // create_collection undo cascades to descendants, so any
+            // later manage_collections moves into it must be undone
+            // first. See undoAppliedActionsInReverse for details.
+            await undoAppliedActionsInReverse(actionsInRemovedRuns);
+        }
+
+        await cleanupTemporaryAnnotationsForRunReplacement(logPrefix);
+
+        // Truncate runs - keep only runs before the target
+        set(threadRunsAtom, (prev) =>
+            prev.filter(r => !runIdsToRemove.includes(r.id))
+        );
+
+        // Clear agent actions for removed runs
+        set(threadAgentActionsAtom, (prev) =>
+            prev.filter(a => !runIdsToRemove.includes(a.run_id))
+        );
+
+        // Clear citations for removed runs
+        set(citationsAtom, (prev) =>
+            prev.filter(c => !runIdsToRemove.includes(c.run_id ?? ''))
+        );
+        set(processCitationsAtom);
+        set(maybeShowCitationTipAtom);
+
+        // Reset WS state and set pending
+        set(prepareForNewRunAtom);
+        prewarmMuPDFWorker();
+        set(isWSChatPendingAtom, true);
+
+        // Build model selection options
+        const modelOptions = buildModelSelectionOptions(model);
+        const customInstructions = getPref('customInstructions') || undefined;
+
+        // Create new AgentRun shell with the replacement prompt
+        const { run: newRun, request } = createAgentRunShell(
+            editedPrompt ?? targetRun.user_prompt,
+            threadId,
+            userId,
+            model.name,
+            modelOptions,
+            model.provider,
+            customInstructions,
+            model.is_custom ? model.custom_model : undefined,
+        );
+
+        // Set active run - UI now shows user message + spinner, which takes
+        // over from the retry control's own loading state.
+        newRunId = newRun.id;
+        set(activeRunAtom, newRun);
+        set(retryPendingRunIdAtom, null);
+
+        // Execute the WebSocket request
+        await executeWSRequest(newRun, request, get, set);
+    } catch (error) {
+        // Catch any unexpected errors during regeneration
+        logger(`${logPrefix}: Unexpected error:`, error, 1);
+        set(wsErrorAtom, {
+            event: 'error',
+            type: 'regeneration_error',
+            message: error instanceof Error ? error.message : failureMessage,
+            is_retryable: true,
+        });
+        set(activeRunAtom, prev => (newRunId && prev?.id === newRunId ? null : prev));
+        set(retryPendingRunIdAtom, prev => (prev === runId ? null : prev));
+        set(isWSChatPendingAtom, false);
+    }
+}
+
+/**
+ * Regenerate a response from a specific run (retry button and error card).
+ */
+export const regenerateFromRunAtom = atom(
+    null,
+    async (get, set, runId: string) => {
+        await startRegenerateRun(get, set, runId, {
+            logPrefix: 'regenerateFromRunAtom',
+            walkResumeChain: true,
+            failureMessage: 'Failed to regenerate response',
+        });
     }
 );
 
 /**
  * Regenerate from a run with an edited user prompt.
- * Similar to regenerateFromRunAtom but accepts a modified user prompt.
+ * Same flow as regenerateFromRunAtom, with a replacement prompt.
  */
 export const regenerateWithEditedPromptAtom = atom(
     null,
     async (get, set, params: { runId: string; editedPrompt: BeaverAgentPrompt }) => {
-        const { runId, editedPrompt } = params;
-        logger(`regenerateWithEditedPromptAtom: Regenerating run ${runId} with edited prompt`, 1);
-
-        // Dismiss any open diff preview before regenerating
-        dismissDiffPreview();
-
-        let newRunId: string | null = null;
-
-        try {
-            // Get current model
-            const model = get(selectedModelAtom);
-            if (!model) {
-                logger('regenerateWithEditedPromptAtom: No model selected', 1);
-                return;
-            }
-
-            // Get user ID
-            const userId = get(userIdAtom);
-            if (!userId) {
-                logger('regenerateWithEditedPromptAtom: No user ID found', 1);
-                return;
-            }
-
-            // Find the run - check both threadRuns and activeRun
-            const threadRuns = get(threadRunsAtom);
-            const activeRun = get(activeRunAtom);
-            
-            let targetRun: AgentRun | null = null;
-            let runIndex = threadRuns.findIndex(r => r.id === runId);
-            
-            if (runIndex >= 0) {
-                targetRun = threadRuns[runIndex];
-            } else if (activeRun?.id === runId) {
-                // The run is currently active - cancel it and resubmit
-                targetRun = activeRun;
-                runIndex = threadRuns.length;
-                // Clear the active run before awaiting cancel: agentService.cancel()
-                // waits for the cancel message to flush, and if the socket closes
-                // uncleanly during that window, the onclose handler must not see this
-                // run still marked active and misattribute the close as a connection
-                // failure. The pending flag stays set until cancel resolves so the
-                // composer guard keeps blocking new sends during the flush.
-                set(activeRunAtom, null);
-                await agentService.cancel();
-                set(isWSChatPendingAtom, false);
-            }
-
-            if (!targetRun) {
-                logger(`regenerateWithEditedPromptAtom: Run ${runId} not found`, 1);
-                return;
-            }
-
-            // Get thread ID from the target run
-            const threadId = get(currentThreadIdAtom) || targetRun.thread_id;
-
-            // Collect runs that will be removed (target run and all subsequent)
-            const removedRuns = threadRuns.slice(runIndex);
-            const runIdsToRemove = removedRuns.map(r => r.id);
-
-            // Find applied actions for runs being removed
-            const allAgentActions = get(threadAgentActionsAtom);
-            const actionsInRemovedRuns = allAgentActions.filter(a => runIdsToRemove.includes(a.run_id));
-            
-            // Categorize by type - only include applied actions
-            const annotationsToDelete = actionsInRemovedRuns
-                .filter((action) =>
-                    (isAnnotationAgentAction(action) && hasAppliedZoteroItem(action)) ||
-                    (isCreateAnnotationsAgentAction(action) && hasAppliedBulkAnnotations(action))
-                );
-            const annotationEditsToUndo = actionsInRemovedRuns
-                .filter(isEditAnnotationsAgentAction)
-                .filter(a => a.status === 'applied');
-            const zoteroNotesToDelete = actionsInRemovedRuns
-                .filter(isZoteroNoteAgentAction)
-                .filter(hasAppliedZoteroItem);
-            const metadataEditsToUndo = actionsInRemovedRuns
-                .filter(isEditMetadataAgentAction)
-                .filter(a => a.status === 'applied');
-            const createItemsToUndo = actionsInRemovedRuns
-                .filter(isCreateItemAgentAction)
-                .filter(a => a.status === 'applied');
-            const createCollectionsToUndo = actionsInRemovedRuns
-                .filter(isCreateCollectionAgentAction)
-                .filter(a => a.status === 'applied');
-            const organizeItemsToUndo = actionsInRemovedRuns
-                .filter(isOrganizeItemsAgentAction)
-                .filter(a => a.status === 'applied');
-            const manageTagsToUndo = actionsInRemovedRuns
-                .filter(isManageTagsAgentAction)
-                .filter(a => a.status === 'applied');
-            const manageCollectionsToUndo = actionsInRemovedRuns
-                .filter(isManageCollectionsAgentAction)
-                .filter(a => a.status === 'applied');
-            const noteEditsToUndo = actionsInRemovedRuns
-                .filter(isAnyEditNoteAgentAction)
-                .filter(a => a.status === 'applied');
-            const createNotesToUndo = actionsInRemovedRuns
-                .filter(isCreateNoteAgentAction)
-                .filter(a => a.status === 'applied');
-
-            // Prompt user to confirm undoing applied actions
-            const hasActionsToUndo = annotationsToDelete.length > 0 || annotationEditsToUndo.length > 0 ||
-                                     zoteroNotesToDelete.length > 0 ||
-                                     metadataEditsToUndo.length > 0 || noteEditsToUndo.length > 0 ||
-                                     createItemsToUndo.length > 0 ||
-                                     createCollectionsToUndo.length > 0 || organizeItemsToUndo.length > 0 ||
-                                     manageTagsToUndo.length > 0 || manageCollectionsToUndo.length > 0 ||
-                                     createNotesToUndo.length > 0;
-            if (hasActionsToUndo) {
-                const confirmResult = confirmUndoAppliedActions({
-                    annotations: annotationsToDelete,
-                    annotationEdits: annotationEditsToUndo,
-                    zoteroNotes: zoteroNotesToDelete,
-                    metadataEdits: metadataEditsToUndo,
-                    noteEdits: noteEditsToUndo,
-                    createItems: createItemsToUndo,
-                    createCollections: createCollectionsToUndo,
-                    organizeItems: organizeItemsToUndo,
-                    manageTags: manageTagsToUndo,
-                    manageCollections: manageCollectionsToUndo,
-                    createNotes: createNotesToUndo,
-                });
-                if (confirmResult === 'cancel') {
-                    return;
-                }
-                if (confirmResult === 'undo') {
-                    // Single reverse-chronological pass — see
-                    // undoAppliedActionsInReverse for why cross-type ordering
-                    // matters (e.g. create_collection cascades on erase).
-                    await undoAppliedActionsInReverse(actionsInRemovedRuns);
-                }
-            }
-
-            await cleanupTemporaryAnnotationsForRunReplacement('regenerateWithEditedPromptAtom');
-
-            // Truncate runs - keep only runs before the target
-            const truncatedRuns = threadRuns.slice(0, runIndex);
-            set(threadRunsAtom, truncatedRuns);
-
-            // Clear agent actions for removed runs
-            set(threadAgentActionsAtom, (prev) =>
-                prev.filter(a => !runIdsToRemove.includes(a.run_id))
-            );
-
-            // Clear citations for removed runs
-            set(citationsAtom, (prev) => 
-                prev.filter(c => !runIdsToRemove.includes(c.run_id ?? ''))
-            );
-            set(processCitationsAtom);
-            set(maybeShowCitationTipAtom);
-
-            // Reset WS state and set pending
-            set(prepareForNewRunAtom);
-            prewarmMuPDFWorker();
-            set(isWSChatPendingAtom, true);
-
-            // Build model selection options
-            const modelOptions = buildModelSelectionOptions(model);
-            const customInstructions = getPref('customInstructions') || undefined;
-
-            // Create new AgentRun shell with the EDITED user_prompt
-            const { run: newRun, request } = createAgentRunShell(
-                editedPrompt,
-                threadId,
-                userId,
-                model.name,
-                modelOptions,
-                model.provider,
-                customInstructions,
-                model.is_custom ? model.custom_model : undefined,
-                // Asserted after the local truncation above, so it states the
-                // thread the user is now looking at; the server truncates its
-                // own copy to match. targetRun names the run being replaced, as
-                // the fallback anchor for a backend that predates this field.
-                assertThreadState(get(threadRunsAtom), targetRun.id),
-            );
-
-            // Set active run - UI now shows user message + spinner
-            newRunId = newRun.id;
-            set(activeRunAtom, newRun);
-
-            // Execute the WebSocket request
-            await executeWSRequest(newRun, request, get, set);
-        } catch (error) {
-            logger('regenerateWithEditedPromptAtom: Unexpected error:', error, 1);
-            const failureMessage =
-                error instanceof Error ? error.message : 'Failed to regenerate with edited prompt';
-            set(wsErrorAtom, {
-                event: 'error',
-                type: 'regeneration_error',
-                message: failureMessage,
-                is_retryable: true,
-            });
-            set(activeRunAtom, null);
-            set(isWSChatPendingAtom, false);
-        }
+        await startRegenerateRun(get, set, params.runId, {
+            logPrefix: 'regenerateWithEditedPromptAtom',
+            walkResumeChain: false,
+            editedPrompt: params.editedPrompt,
+            failureMessage: 'Failed to regenerate with edited prompt',
+        });
     }
 );
 

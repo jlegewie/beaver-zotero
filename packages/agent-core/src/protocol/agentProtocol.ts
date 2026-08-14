@@ -134,13 +134,10 @@ export interface WSStreamingDoneEvent extends WSBaseEvent {
 }
 
 /**
- * What the server removed from the thread while reconciling it against the
- * client's asserted state.
+ * What the server removed from the thread while reconciling it against a
+ * legacy retry request (`retry_run_id` / `retry_keep_run_ids`).
  *
- * The client predicts its own truncation, and the two can disagree: the server
- * may delete more (runs this client never loaded) or nothing at all (an
- * assertion that matched no run here). Applying the reported set keeps the two
- * views converging rather than drifting.
+ * Kept for wire compatibility.
  */
 export interface WSRetryTruncation {
     /** Runs deleted from the thread by this request, oldest first. */
@@ -154,8 +151,8 @@ export interface WSThreadEvent extends WSBaseEvent {
     event: 'thread';
     thread_id: string;
     /**
-     * Present when the server reconciled this thread — on every retry, and on
-     * any request whose asserted state removed runs. Absent from older backends.
+     * Present when the server reconciled this thread against a legacy retry
+     * request. Never triggered by current clients, which ignore it.
      */
     retry_truncation?: WSRetryTruncation | null;
 }
@@ -2076,38 +2073,16 @@ export interface AgentRunRequest {
     /** Custom model configuration (mutually exclusive with model_id) */
     custom_model?: CustomChatModel;
     /**
-     * If set, instructs the server to retry from this run ID, deleting it and
-     * all subsequent runs (backwards compatibility and fallback for assertion).
+     * Legacy, no longer sent by this client. Instructed the server to retry
+     * from this run ID, deleting it and all subsequent runs. Retries now
+     * commit their removal through `POST /threads/{id}/truncate` before the
+     * run request is sent; the field stays documented because the backend
+     * keeps accepting it from released clients.
      */
     retry_run_id?: string;
     /**
-     * The run IDs this client currently holds for the thread, oldest first —
-     * sent on every request, not only retries.
-     *
-     * Run IDs are client-generated and the server writes the run row late, so a
-     * request that dies during setup leaves the client holding an ID that was
-     * never persisted and the runs it dropped stranded server-side: invisible to
-     * the user, replayed into the history of every later run. Stating what the
-     * client holds makes that self-correcting — the server anchors on the last
-     * of these that exists, deletes the trailing block after it, and the next
-     * message of any kind repairs the drift.
-     *
-     * One case is not self-correcting: a client holding *no* run of the thread,
-     * which happens when the run it replaced was the first one. An empty list
-     * cannot be told apart from a client that has not finished loading, so the
-     * server treats it as silence unless the request is also a retry. Until a
-     * further retry, that drift stands.
-     *
-     * A retry is just a request whose asserted set is shorter, which is why no
-     * retry state has to be tracked between requests.
-     */
-    thread_run_ids?: string[];
-    /**
-     * Superseded by `thread_run_ids`; kept for backends that predate it.
-     *
-     * Retry only. The run IDs the client still holds after dropping the ones it
-     * is regenerating. A set matching no run in the thread is ignored, so
-     * `retry_run_id` must always be sent alongside it as the fallback.
+     * Legacy, no longer sent by this client (see `retry_run_id`). The run IDs
+     * the client still held after dropping the ones it was regenerating.
      */
     retry_keep_run_ids?: string[];
     /** Pre-generated assistant message ID (optional) */

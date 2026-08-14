@@ -8,7 +8,7 @@ import { EditIcon, Spinner } from '../icons/icons';
 import Button from '@beaver/agent-ui/primitives/Button';
 import ModelSelectionButton from '../ui/buttons/ModelSelectionButton';
 import SearchMenu from '@beaver/agent-ui/primitives/SearchMenu';
-import { regenerateWithEditedPromptAtom, isWSChatPendingAtom } from '../../atoms/agentRunAtoms';
+import { regenerateWithEditedPromptAtom, isWSChatPendingAtom, retryPendingRunIdAtom } from '../../atoms/agentRunAtoms';
 import { selectedModelAtom } from '../../atoms/models';
 import { isStreamingAtom } from '@beaver/agent-core/run-state/atoms';
 import { actionsAtom, buildEditedPromptActionsAtom } from '../../atoms/actions';
@@ -68,6 +68,10 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
     const isPending = useAtomValue(isWSChatPendingAtom);
     const selectedModel = useAtomValue(selectedModelAtom);
     const isStreaming = useAtomValue(isStreamingAtom);
+    // Loading state after an edited prompt was submitted: the edit overlay is
+    // already closed while the retry commits its removal on the backend
+    // (truncate POST + undo), before the replacement run replaces this view.
+    const isRetryPending = useAtomValue(retryPendingRunIdAtom) === runId;
     const allActions = useAtomValue(actionsAtom);
     // Supplies the edit overlay's /command pill hover cards with the live
     // action definitions, matching the chat composer.
@@ -325,13 +329,21 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
                         : displayContent}
                 </div>
 
+                {/* Retry in flight: the edited prompt was submitted and its
+                    removal is being committed on the backend. */}
+                {isRetryPending && !isEditing && (
+                    <div className="user-request-edit-icon mb-075">
+                        <Spinner size={12} />
+                    </div>
+                )}
+
                 {/* Edit icon (visible on hover) */}
-                {isHovered && !isEditing && canEditNow && (
+                {isHovered && !isEditing && !isRetryPending && canEditNow && (
                     <div className="user-request-edit-icon mb-075">
                         <EditIcon width={12} height={12} />
                     </div>
                 )}
-                {isHovered && !isEditing && !canEditNow && (
+                {isHovered && !isEditing && !isRetryPending && !canEditNow && (
                     <div className="user-request-edit-icon mb-075">
                         <Spinner size={12} />
                     </div>
