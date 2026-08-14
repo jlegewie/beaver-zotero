@@ -24,8 +24,8 @@ const PARENT_CHAIN_DEPTH = 2;
  *
  * {@link toQuickSearchHit} is synchronous, so every value it touches has to be
  * in memory before it runs — and Zotero loads item data lazily, per data type.
- * Two of those types are easy to miss because failing to load them does not
- * raise anything a caller sees, it just quietly degrades the row:
+ * Two of those are easy to miss because failing to load them raises nothing a
+ * caller sees, it just quietly degrades the row:
  *
  * - **`note`.** `getNoteTitle()` only needs `itemData`, so a note's display
  *   name looks right, but `getNote()` requires the separate `note` type and
@@ -36,6 +36,13 @@ const PARENT_CHAIN_DEPTH = 2;
  *   indistinguishable from no parent: a real child attachment describes itself
  *   as "Standalone attachment" and an annotation loses the work it sits in.
  *
+ * Annotations need nothing extra despite reading lazily-loaded properties:
+ * loading `itemData` runs Zotero's own `updateDisplayTitle()`, which catches
+ * the unloaded-data error and pulls in the `annotation` type before recomputing
+ * the highlighted-text label. That back-fill is why a note is the odd one out —
+ * a note's *display title* only needs `itemData`, so nothing ever forces its
+ * content to load.
+ *
  * Loads are batched per type and skipped when nothing needs them, so a page of
  * ordinary top-level items still costs the single call it always did.
  */
@@ -45,13 +52,17 @@ export async function loadQuickSearchHitData(items: Zotero.Item[]): Promise<void
     // Fields and creators for both lines; child items for `has_attachment`.
     await Zotero.Items.loadDataTypes(items, ['itemData', 'creators', 'childItems']);
 
-    const notes = items.filter((item) => {
-        try {
-            return item.isNote();
-        } catch {
-            return false;
-        }
-    });
+    /** Items matching a type predicate, ignoring any that cannot answer it. */
+    const select = (predicate: (item: Zotero.Item) => boolean): Zotero.Item[] =>
+        items.filter((item) => {
+            try {
+                return predicate(item);
+            } catch {
+                return false;
+            }
+        });
+
+    const notes = select((item) => item.isNote());
     if (notes.length > 0) {
         await Zotero.Items.loadDataTypes(notes, ['note']);
     }

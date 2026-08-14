@@ -203,6 +203,19 @@ describe('handleGetMetadataRequest compact projection', () => {
             expect(res.items[0].description).toBe('Discussed the sampling frame.');
         });
 
+        it('leaves annotation data to Zotero, which back-fills it with itemData', async () => {
+            // An annotation's label does read lazily-loaded properties, but
+            // loading itemData runs Zotero's updateDisplayTitle(), which
+            // catches the unloaded-data error and loads the `annotation` type
+            // itself. Requesting it here would be a redundant round trip.
+            const annotation = annotationItem('ANNOT111');
+            mocks.resolveItemReference.mockResolvedValue({ status: 'found', item: annotation });
+
+            await handleGetMetadataRequest(request({ detail: 'compact' }));
+
+            expect(loadDataTypes).not.toHaveBeenCalledWith(expect.anything(), ['annotation']);
+        });
+
         it('resolves an uncached parent so a child attachment is not called standalone', async () => {
             // `parentItem` is a synchronous cache read, so an unresolved parent
             // is indistinguishable from no parent at all.
