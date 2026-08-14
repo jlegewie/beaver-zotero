@@ -51,6 +51,14 @@ const VERSION_GATES: { feature: string; minVersion: string; op: Op }[] = [
 // recursive_collections_filter is declaration-only because it describes what
 // the client's two item-search handlers do with collections_filter; without it
 // the backend warns the model that only direct membership was matched.
+// item_quick_search is declaration-only because it gates an inbound request
+// event a client only answers if it has the handler: a build that predates it
+// drops the unknown event silently, so the backend refuses the op up front
+// rather than letting the caller wait out the request timeout.
+// list_collections_recursive and list_tags_name_query are declaration-only for
+// the same reason as list_items_include_children: they gate request fields a
+// client only honors if its handler implements them, and a build that predates
+// them drops the field and answers a narrower question without saying so.
 const DECLARATION_ONLY_FEATURES = [
     'external_files',
     'ask_user_question',
@@ -61,6 +69,9 @@ const DECLARATION_ONLY_FEATURES = [
     'edit_annotations',
     'citations_event',
     'recursive_collections_filter',
+    'item_quick_search',
+    'list_collections_recursive',
+    'list_tags_name_query',
 ];
 
 // The full backend feature vocabulary (ALL_FEATURES in version_gates.py): every

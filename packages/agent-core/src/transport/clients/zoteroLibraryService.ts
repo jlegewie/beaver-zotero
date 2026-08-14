@@ -11,8 +11,11 @@ import { ApiService, type RequestOptions } from '../apiService';
 import { ApiError } from '../../types/apiErrors';
 import type {
     CollectionInfo,
+    ItemProjectionDetail,
     ItemSearchFrontendResultItem,
     LibrarySummary,
+    QuickSearchDetail,
+    QuickSearchHit,
     TagInfo,
 } from '../../protocol/agentProtocol';
 
@@ -60,6 +63,59 @@ export interface ItemSearchByMetadataData {
     items: ItemSearchFrontendResultItem[];
 }
 
+/** Params for `item_quick_search` */
+export interface ItemQuickSearchParams {
+    /**
+     * The user's raw string, ORed across title-like fields, creators and the
+     * year — what a picker has. Use `item_search_by_metadata` when the query is
+     * already parsed into fields, which are ANDed.
+     */
+    query: string;
+    /** Library names or refs; OR'd */
+    libraries_filter?: string[];
+    /** Collection names or keys; OR'd */
+    collections_filter?: string[];
+    /** Tag names; OR'd */
+    tags_filter?: string[];
+    item_type_filter?: string;
+    /** What each hit carries. Default 'compact'. */
+    detail?: QuickSearchDetail;
+    /**
+     * Also render `formatted_citation` per hit. Default false, and best left
+     * that way: it runs the CSL engine once per row at hundreds of
+     * milliseconds each. Every hit already carries `description`, which says
+     * the same thing at field-read cost.
+     */
+    include_citation?: boolean;
+    /** 1–50, default 20 */
+    limit?: number;
+    offset?: number;
+}
+
+/**
+ * Result of `item_quick_search`, ranked highest-score first.
+ *
+ * Discriminated on `detail` so the hit type follows the projection that was
+ * actually served rather than the one that was asked for.
+ */
+export type ItemQuickSearchData =
+    | {
+        detail: 'compact';
+        items: QuickSearchHit[];
+        /** Ranked matches, which may exceed the page returned. See `truncated`. */
+        total_count: number;
+        /** True when the library held more matches than could be ranked, so
+         * `total_count` undercounts — prompt for a narrower query rather than
+         * paging deeper. */
+        truncated?: boolean;
+    }
+    | {
+        detail: 'full';
+        items: ItemSearchFrontendResultItem[];
+        total_count: number;
+        truncated?: boolean;
+    };
+
 /** `list_libraries` takes no parameters. */
 export type ListLibrariesParams = Record<string, never>;
 
@@ -75,8 +131,18 @@ export interface ListCollectionsParams {
     library_id?: number | string;
     /** Children of this collection; omit for the library root */
     parent_collection_key?: string;
+    /**
+     * Every descendant of the scope rather than its direct children, so a whole
+     * library is one call. Rows still carry `parent_key`, so the tree can be
+     * rebuilt client-side.
+     */
+    recursive?: boolean;
+    /**
+     * Counting the items in every collection is the expensive part of this op
+     * and counts are decoration in a picker — pass `false` there. Default true.
+     */
     include_item_counts?: boolean;
-    /** 1–200, default 100 */
+    /** Up to 1000, so one library is one call; 50 when omitted. */
     limit?: number;
     offset?: number;
 }
@@ -96,10 +162,26 @@ export interface ListTagsParams {
     /** Library ref, name or numeric id; the user's personal library when absent */
     library_id?: number | string;
     /** Restrict to tags used inside this collection */
+    /**
+     * Restrict to tags on items in this collection.
+     *
+     * A scoped response is **not** covered by `LibraryScopeVersions.tags`:
+     * moving an already-tagged item in or out of a collection changes this
+     * listing while that marker stays put. Either re-fetch it every time, or
+     * cache the library-wide list and narrow it client-side.
+     */
     collection_key?: string;
     /** Drop tags used by fewer items than this; default 1 */
     min_item_count?: number;
-    /** 1–200, default 100 */
+    /**
+     * Keep only tags whose name contains this substring (case-insensitive for
+     * ASCII). Filtered in the provider's SQL, so it is the escape hatch for a
+     * library with too many tags to fetch once and filter locally — fetch with
+     * a generous `limit` first, and fall back to this only when `total_count`
+     * says the list was cut short.
+     */
+    name_query?: string;
+    /** Up to 1000, so the fetch-once-and-filter-locally path works; 50 when omitted. */
     limit?: number;
     offset?: number;
 }
@@ -114,6 +196,47 @@ export interface ListTagsData {
     library_name?: string | null;
 }
 
+/** Params for `get_metadata` */
+export interface GetMetadataParams {
+    /** Model-facing item ids ("<library_ref>-<zotero_key>") */
+    item_ids: string[];
+    /** What each row carries. Default 'full'. */
+    detail?: ItemProjectionDetail;
+    /**
+     * Render `formatted_citation` on compact rows. Default false; ignored when
+     * `detail` is 'full'. This is where to ask for a real bibliography entry —
+     * for the one item a user paused on, never for a list.
+     */
+    include_citation?: boolean;
+    /** Child attachments per item. Default false; ignored when compact. */
+    include_attachments?: boolean;
+    /** Child notes per item. Default false; ignored when compact. */
+    include_notes?: boolean;
+}
+
+/** One `get_metadata` row in the `compact` projection. */
+export interface CompactMetadataItem extends QuickSearchHit {
+    /** Echo of the requested id, so a caller can key the row back to its ref */
+    item_id: string;
+}
+
+/**
+ * Result of `get_metadata`. Ids that resolved to nothing come back in
+ * `not_found` rather than as an error, so a partial batch still answers.
+ */
+export type GetMetadataData =
+    | {
+        detail: 'compact';
+        items: CompactMetadataItem[];
+        not_found: string[];
+    }
+    | {
+        /** Absent on responses from providers that predate the parameter. */
+        detail?: 'full';
+        items: Record<string, any>[];
+        not_found: string[];
+    };
+
 /**
  * Library ops a client may request, with params and result typed together.
  * The backend keeps a matching allowlist.
@@ -123,6 +246,11 @@ export interface ZoteroLibraryOpMap {
     item_search_by_metadata: {
         params: ItemSearchByMetadataParams;
         data: ItemSearchByMetadataData;
+    };
+    /** Search the user's library with one string, ranked like Zotero's picker */
+    item_quick_search: {
+        params: ItemQuickSearchParams;
+        data: ItemQuickSearchData;
     };
     /** List the libraries this user's Zotero can see */
     list_libraries: {
@@ -138,6 +266,15 @@ export interface ZoteroLibraryOpMap {
     list_tags: {
         params: ListTagsParams;
         data: ListTagsData;
+    };
+    /**
+     * Look up known items by id — for rendering a thread's stored references
+     * and for building a citation, not for a picker, which already has
+     * everything it needs from `item_quick_search`.
+     */
+    get_metadata: {
+        params: GetMetadataParams;
+        data: GetMetadataData;
     };
 }
 

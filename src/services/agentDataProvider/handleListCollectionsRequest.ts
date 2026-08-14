@@ -19,13 +19,25 @@ import { libraryRefForLibraryID } from '../../utils/libraryIdentity';
 
 
 /**
+ * Upper bound on `limit`.
+ *
+ * A recursive listing is meant to be one call per library, and ~1000 rows
+ * covers the collection count of any real library while still bounding what a
+ * bad `limit` can serialize.
+ */
+const MAX_LIMIT = 1000;
+
+/** Applied when the request omits `limit`. */
+const DEFAULT_LIMIT = 50;
+
+/**
  * Handle list_collections request from backend.
  * Lists collections in a library.
  */
 export async function handleListCollectionsRequest(
     request: WSListCollectionsRequest
 ): Promise<WSListCollectionsResponse> {
-    logger(`handleListCollectionsRequest: library=${request.library_id}, parent=${request.parent_collection_key}`, 1);
+    logger(`handleListCollectionsRequest: library=${request.library_id}, parent=${request.parent_collection_key}, recursive=${request.recursive === true}`, 1);
     
     try {
         // Validate library (checks both existence and searchability)
@@ -86,28 +98,43 @@ export async function handleListCollectionsRequest(
         
         // Get all collections from the library (excluding deleted)
         const allCollections = Zotero.Collections.getByLibrary(library.libraryID, true);
-        
-        // Filter by parent collection if specified
-        let filteredCollections: any[];
-        
-        if (parentCollectionId !== null) {
-            filteredCollections = allCollections.filter((c: any) => c.parentID === parentCollectionId);
-        } else {
-            filteredCollections = allCollections.filter((c: any) => !c.parentID);
-        }
-        
+
         // Build lookup maps
         const collectionIdToName: Map<number, string> = new Map(
             allCollections.map((c: any) => [c.id, c.name])
         );
-        
-        const subcollectionCountById: Map<number, number> = new Map();
+
+        const childrenByParent: Map<number, any[]> = new Map();
         for (const coll of allCollections) {
             if (coll.parentID) {
-                subcollectionCountById.set(coll.parentID, (subcollectionCountById.get(coll.parentID) || 0) + 1);
+                const siblings = childrenByParent.get(coll.parentID);
+                if (siblings) {
+                    siblings.push(coll);
+                } else {
+                    childrenByParent.set(coll.parentID, [coll]);
+                }
             }
         }
-        
+
+        // Filter to the requested scope: the direct children of the parent (or
+        // of the library root), or every descendant when `recursive` is set so
+        // a whole library is one call. Each row carries `parent_key` either
+        // way, so a recursive listing is a flat tree the caller can rebuild.
+        const recursive = request.recursive === true;
+        let filteredCollections: any[];
+
+        if (recursive) {
+            // `allCollections` is already the whole library, so the root case
+            // needs no walk at all.
+            filteredCollections = parentCollectionId === null
+                ? allCollections.slice()
+                : Zotero.Collections.getByParent(parentCollectionId, true);
+        } else if (parentCollectionId !== null) {
+            filteredCollections = childrenByParent.get(parentCollectionId) ?? [];
+        } else {
+            filteredCollections = allCollections.filter((c: any) => !c.parentID);
+        }
+
         // Pre-fetch item counts for all collections if needed
         const itemCountById: Map<number, number> = new Map();
         const attachmentCountById: Map<number, number> = new Map();
@@ -142,16 +169,16 @@ export async function handleListCollectionsRequest(
             // "not reported", which a zero would misrepresent as "none here".
             standalone_attachment_count: request.include_item_counts ? (attachmentCountById.get(collection.id) || 0) : undefined,
             standalone_note_count: request.include_item_counts ? (noteCountById.get(collection.id) || 0) : undefined,
-            subcollection_count: subcollectionCountById.get(collection.id) || 0,
+            subcollection_count: childrenByParent.get(collection.id)?.length ?? 0,
         }));
-        
+
         // Sort by name
         allResults.sort((a, b) => a.name.localeCompare(b.name));
-        
+
         // Apply pagination
         const totalCount = allResults.length;
-        const offset = request.offset ?? 0;
-        const limit = request.limit ?? 50;
+        const offset = Math.max(0, request.offset ?? 0);
+        const limit = Math.max(0, Math.min(request.limit ?? DEFAULT_LIMIT, MAX_LIMIT));
         const collections = allResults.slice(offset, offset + limit);
         
         logger(`handleListCollectionsRequest: Returning ${collections.length}/${totalCount} collections`, 1);
