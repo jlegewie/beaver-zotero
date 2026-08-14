@@ -54,4 +54,59 @@ describe('getItemDisplayName', () => {
 
         expect(name).toBe('Legewie (3)');
     });
+
+    describe('item types that store their title in another field', () => {
+        // Zotero maps nameOfAct (statute), caseName (case) and subject (email)
+        // onto the `title` base field. Reading a plain `title` finds none of
+        // them, which labelled every such item "Unknown Author".
+        it('names a statute by its act rather than "Unknown Author"', () => {
+            const name = getItemDisplayName(item({
+                firstCreator: '',
+                getDisplayTitle: () => 'Clean Air Act',
+            }));
+
+            expect(name).toBe('Clean Air Act');
+        });
+
+        it('names an email by its subject', () => {
+            const name = getItemDisplayName(item({
+                firstCreator: '',
+                getDisplayTitle: () => 'Re: sampling frame',
+            }));
+
+            expect(name).toBe('Re: sampling frame');
+        });
+
+        it('still says "Unknown Author" when there is no title of any kind', () => {
+            const name = getItemDisplayName(item({ firstCreator: '' }));
+
+            expect(name).toBe('Unknown Author');
+        });
+
+        it('reads the base-mapped title when getDisplayTitle is unavailable', () => {
+            // Some callers hand in item-like objects without the method.
+            const name = getItemDisplayName(item({
+                firstCreator: '',
+                getDisplayTitle: undefined,
+                getField: (f: string, _u?: boolean, base?: boolean) =>
+                    f === 'title' && base ? 'Clean Air Act' : '',
+            }));
+
+            expect(name).toBe('Clean Air Act');
+        });
+    });
+
+    describe('item types that date from another field', () => {
+        it('dates a case from dateDecided', () => {
+            // `date` maps from dateDecided (case), issueDate (patent) and
+            // dateEnacted (statute); a plain read leaves them all undated.
+            const name = getItemDisplayName(item({
+                firstCreator: 'Smith',
+                getField: (f: string, _u?: boolean, base?: boolean) =>
+                    f === 'date' && base ? '2024-04-01' : '',
+            }));
+
+            expect(name).toBe('Smith 2024');
+        });
+    });
 });

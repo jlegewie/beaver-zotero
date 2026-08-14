@@ -25,6 +25,12 @@ vi.mock('../../../src/utils/itemDisplayName', () => ({
     getItemDisplayName: vi.fn((item: any) => `${item.firstCreator} ${item.year}`),
 }));
 
+// The row's second line has its own suite (utils/itemDescription.test.ts);
+// stubbed here so these tests stay about ranking, paging and scope.
+vi.mock('../../../src/utils/itemDescription', () => ({
+    getItemDescription: vi.fn((item: any) => `Description ${item.key}`),
+}));
+
 vi.mock('../../../src/utils/zoteroSerializers', () => ({
     getYearFromItem: (item: any) => item.year,
     serializeItem: mocks.serializeItem,
@@ -132,7 +138,7 @@ beforeEach(() => {
 });
 
 describe('handleItemQuickSearchRequest projection', () => {
-    it('returns compact hits carrying the Zotero-computed display name by default', async () => {
+    it('returns compact hits carrying the Zotero-computed display name and description', async () => {
         quickSearchItems.mockImplementation(async (libraryId: number) =>
             searchResult(libraryId === 1 ? [searchHit(1, 'AAAAAAAA', { getAttachments: () => [99] })] : [])
         );
@@ -147,14 +153,40 @@ describe('handleItemQuickSearchRequest projection', () => {
                 zotero_key: 'AAAAAAAA',
                 item_type: 'journalArticle',
                 display_name: 'Legewie and DiPrete 2014',
+                description: 'Description AAAAAAAA',
                 title: 'Title AAAAAAAA',
                 year: 2014,
-                formatted_citation: 'Legewie, J. (2014).',
+                formatted_citation: undefined,
                 has_attachment: true,
                 score: 1,
             },
         ]);
         expect(res.total_count).toBe(1);
+    });
+
+    it('does not run the citation engine for a page of results', async () => {
+        // Rendering a CSL entry costs hundreds of milliseconds per row, so a
+        // page must never trigger one unless it was asked for by name.
+        quickSearchItems.mockImplementation(async (libraryId: number) =>
+            searchResult(libraryId === 1 ? [searchHit(1, 'AAAAAAAA'), searchHit(1, 'BBBBBBBB')] : [])
+        );
+
+        const res = await handleItemQuickSearchRequest(request());
+
+        expect((Zotero as any).Beaver.citationService.formatBibliography).not.toHaveBeenCalled();
+        expect(res.items.every((hit: any) => hit.formatted_citation === undefined)).toBe(true);
+    });
+
+    it('renders a citation per hit when include_citation is set', async () => {
+        quickSearchItems.mockImplementation(async (libraryId: number) =>
+            searchResult(libraryId === 1 ? [searchHit(1, 'AAAAAAAA')] : [])
+        );
+
+        const res = await handleItemQuickSearchRequest(request({ include_citation: true }));
+
+        expect((res.items[0] as any).formatted_citation).toBe('Legewie, J. (2014).');
+        // The cheap line is still served, so a caller never has to choose.
+        expect((res.items[0] as any).description).toBe('Description AAAAAAAA');
     });
 
     it('returns full search rows when detail is full', async () => {

@@ -17,7 +17,7 @@ import { AttachmentInfo, ItemStub } from '@beaver/agent-core/types/zotero';
 import { serializeNote, serializeAnnotation, serializeItemStub } from '../../utils/zoteroSerializers';
 import { libraryRefForLibraryID, modelObjectId, resolveItemReference, resolveObjectId, UNRESOLVED_LIBRARY_ID } from '../../utils/libraryIdentity';
 import { checkLibraryExcluded, getAttachmentInfoForItem, degradedAttachmentInfo, formatCreatorsString, extractYear } from './utils';
-import { toQuickSearchHit } from './itemSearchSerialization';
+import { loadQuickSearchHitData, toQuickSearchHit } from './itemSearchSerialization';
 import { getCreatorTypeInfo } from '../../utils/zoteroUtils';
 
 
@@ -89,21 +89,26 @@ export async function handleGetMetadataRequest(
             const item = resolved.item;
             const libraryId = item.libraryID;
 
-            // Load necessary data types before accessing item data
-            // Always load itemData and creators for basic fields
-            const dataTypesToLoad: string[] = detail === 'compact'
-                // The compact row reads fields, creators and (for
-                // has_attachment) child items, and nothing else — loading the
-                // rest is the cost this projection exists to avoid.
-                ? ['itemData', 'creators', 'childItems']
-                : ['itemData', 'creators', 'relations', 'tags', 'collections', 'childItems'];
-            await Zotero.Items.loadDataTypes([item], dataTypesToLoad);
-
             // --- Compact: one chip-sized row per item, whatever its type ---
             if (detail === 'compact') {
-                items.push({ item_id: itemId, ...toQuickSearchHit(item) });
+                // Loads exactly what the compact row reads — including the
+                // note text and parent chain a bare itemData/creators load
+                // leaves behind, which this projection needs precisely because
+                // it serves notes and child items as well as regular ones.
+                await loadQuickSearchHitData([item]);
+                items.push({
+                    item_id: itemId,
+                    ...toQuickSearchHit(item, { includeCitation: request.include_citation === true }),
+                });
                 continue;
             }
+
+            // Load necessary data types before accessing item data
+            // Always load itemData and creators for basic fields
+            await Zotero.Items.loadDataTypes(
+                [item],
+                ['itemData', 'creators', 'relations', 'tags', 'collections', 'childItems']
+            );
 
             // --- Attachment: normalize to the unified AttachmentInfo shape ---
             if (item.isAttachment()) {

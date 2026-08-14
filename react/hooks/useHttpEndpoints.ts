@@ -490,6 +490,7 @@ async function handleQuickSearchHttpRequest(request: any) {
         tags_filter: request.tags_filter,
         collections_filter: request.collections_filter,
         detail: request.detail,
+        include_citation: request.include_citation,
         limit: request.limit,
         offset: request.offset,
     };
@@ -654,6 +655,7 @@ async function handleLibraryMetadataHttpRequest(request: any) {
         include_attachments: request.include_attachments ?? false,
         include_notes: request.include_notes ?? false,
         detail: request.detail,
+        include_citation: request.include_citation,
     };
 
     const response = await handleGetMetadataRequest(wsRequest);

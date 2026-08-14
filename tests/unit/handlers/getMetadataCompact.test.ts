@@ -95,6 +95,7 @@ function annotationItem(key: string) {
 }
 
 const loadDataTypes = vi.fn(async () => {});
+const getAsync = vi.fn(async () => []);
 
 function request(overrides: Record<string, any> = {}) {
     return {
@@ -114,7 +115,8 @@ beforeEach(() => {
     mocks.checkLibraryExcluded.mockReturnValue(null);
 
     const zotero = (globalThis as any).Zotero;
-    zotero.Items = { ...(zotero.Items ?? {}), loadDataTypes, getAsync: vi.fn() };
+    getAsync.mockResolvedValue([]);
+    zotero.Items = { ...(zotero.Items ?? {}), loadDataTypes, getAsync };
     zotero.Beaver = { citationService: { formatBibliography: vi.fn(() => 'Legewie, J. (2014).') } };
 });
 
@@ -133,13 +135,31 @@ describe('handleGetMetadataRequest compact projection', () => {
                 // Zotero's own et-al-aware creator string plus the year, which
                 // is why a client must render this rather than rebuild it.
                 display_name: 'Legewie and DiPrete 2014',
+                // The second line under it, composed from fields rather than
+                // rendered by the citation engine.
+                description: 'Title AAAAAAAA',
                 title: 'Title AAAAAAAA',
                 year: 2014,
-                formatted_citation: 'Legewie, J. (2014).',
+                formatted_citation: undefined,
                 has_attachment: true,
                 score: undefined,
             },
         ]);
+    });
+
+    it('does not render a citation unless the caller asked for one', async () => {
+        const res = await handleGetMetadataRequest(request({ detail: 'compact' }));
+
+        expect((Zotero as any).Beaver.citationService.formatBibliography).not.toHaveBeenCalled();
+        expect(res.items[0].formatted_citation).toBeUndefined();
+    });
+
+    it('renders a citation when include_citation is set', async () => {
+        const res = await handleGetMetadataRequest(
+            request({ detail: 'compact', include_citation: true })
+        );
+
+        expect(res.items[0].formatted_citation).toBe('Legewie, J. (2014).');
     });
 
     it('skips the child payloads the projection has no place for', async () => {
@@ -158,6 +178,66 @@ describe('handleGetMetadataRequest compact projection', () => {
         expect(loadDataTypes).toHaveBeenCalledWith(expect.anything(), [
             'itemData', 'creators', 'childItems',
         ]);
+    });
+
+    describe('data the compact row needs but a bare field load leaves behind', () => {
+        it('loads note text so a note is described by its content', async () => {
+            // getNoteTitle() only needs itemData, so the display name looks
+            // right either way; getNote() requires the separate `note` type and
+            // throws without it, silently degrading the content preview to a
+            // bare relationship label.
+            const note = regularItem('NOTE1111', {
+                itemType: 'note',
+                firstCreator: '',
+                isNote: () => true,
+                isRegularItem: () => false,
+                parentItem: null,
+                getNoteTitle: () => 'Meeting notes',
+                getNote: () => '<p>Meeting notes</p><p>Discussed the sampling frame.</p>',
+            });
+            mocks.resolveItemReference.mockResolvedValue({ status: 'found', item: note });
+
+            const res = await handleGetMetadataRequest(request({ detail: 'compact' }));
+
+            expect(loadDataTypes).toHaveBeenCalledWith([note], ['note']);
+            expect(res.items[0].description).toBe('Discussed the sampling frame.');
+        });
+
+        it('resolves an uncached parent so a child attachment is not called standalone', async () => {
+            // `parentItem` is a synchronous cache read, so an unresolved parent
+            // is indistinguishable from no parent at all.
+            const parent = regularItem('PARENT11', { firstCreator: 'Legewie and DiPrete' });
+            const attachment = regularItem('ATTACH11', {
+                itemType: 'attachment',
+                firstCreator: '',
+                isAttachment: () => true,
+                isRegularItem: () => false,
+                parentItemID: 2519,
+                getField: (field: string) => (field === 'title' ? 'Accepted Version' : ''),
+            });
+            // Defined after construction: a getter in a spread literal would be
+            // evaluated once, not carried across. Undefined until the parent
+            // has actually been pulled into the cache, which is what makes an
+            // unresolved parent look exactly like no parent.
+            Object.defineProperty(attachment, 'parentItem', {
+                get: () => (getAsync.mock.calls.length > 0 ? parent : undefined),
+            });
+            mocks.resolveItemReference.mockResolvedValue({ status: 'found', item: attachment });
+            getAsync.mockResolvedValue([parent]);
+
+            const res = await handleGetMetadataRequest(request({ detail: 'compact' }));
+
+            expect(getAsync).toHaveBeenCalledWith([2519]);
+            expect(res.items[0].description).toBe('Attached to Legewie and DiPrete 2014');
+        });
+
+        it('does not resolve parents for a plain top-level item', async () => {
+            // The common case must still cost the one load it always did.
+            await handleGetMetadataRequest(request({ detail: 'compact' }));
+
+            expect(getAsync).not.toHaveBeenCalled();
+            expect(loadDataTypes).toHaveBeenCalledTimes(1);
+        });
     });
 
     it('serves the full row when detail is omitted', async () => {

@@ -24,7 +24,7 @@ import { deduplicateItems } from '../../utils/zoteroUtils';
 import { agentItemFilter } from '../../utils/agentItemSupport';
 import { quickSearchItems, QuickSearchItemsOptions } from '../librarySearch/quickSearch';
 import { scoreSearchResult } from '../librarySearch/ranking';
-import { serializeItemSearchRows, toQuickSearchHit } from './itemSearchSerialization';
+import { loadQuickSearchHitData, serializeItemSearchRows, toQuickSearchHit } from './itemSearchSerialization';
 import {
     collectionsFilterError,
     getSearchableLibraryIds,
@@ -315,14 +315,16 @@ export async function handleItemQuickSearchRequest(
             'handleItemQuickSearchRequest',
         );
     } else {
-        // childItems is what `has_attachment` reads; the search loaded only
-        // itemData and creators.
-        if (page.length > 0) {
-            await ta.track('data_loading_ms', () =>
-                Zotero.Items.loadDataTypes(page.map(entry => entry.item), ['childItems'])
-            );
-        }
-        items = page.map(entry => toQuickSearchHit(entry.item, entry.score));
+        // The search loaded only what ranking compares; the compact row also
+        // reads child items, and note or parent data for anything that is not
+        // a plain top-level item.
+        await ta.track('data_loading_ms', () =>
+            loadQuickSearchHitData(page.map(entry => entry.item))
+        );
+        items = page.map(entry => toQuickSearchHit(entry.item, {
+            score: entry.score,
+            includeCitation: request.include_citation === true,
+        }));
     }
 
     const serializationEndTime = Date.now();
