@@ -39,6 +39,7 @@ import {
     AskUserQuestionAnswer,
     WSStreamingDoneEvent,
     WSThreadNameEvent,
+    WSRetryTruncation,
     ChargingPermissions,
 } from '@beaver/agent-core/protocol/agentProtocol';
 import { logger } from '@beaver/agent-core/platform/logger';
@@ -166,11 +167,6 @@ import { createZoteroItemReference } from '../utils/zoteroReferences';
 import { markExternalReferenceImportedAtom } from './externalReferences';
 import type { CreateItemProposedData, CreateItemResultData } from '@beaver/agent-core/types/agentActions/items';
 import { appendRunIfMissing, findResumeChainRoot, findRunForResume, hasOnlyThinkingParts, lingeringCompletedRun, resolveErrorRunId, toRunError } from '@beaver/agent-core/run-state/runResumeHelpers';
-import {
-    resolveRetryTarget,
-    type RetryAnchor,
-    type UnconfirmedRetry,
-} from '../agents/retryReconciliation';
 import { prewarmMuPDFWorker } from '../../src/beaver-extract';
 import { BeaverTemporaryAnnotations } from '../utils/annotationUtils';
 import { isRejectedItemValidation, itemValidationResultsAtom } from './itemValidation';
@@ -327,33 +323,100 @@ async function cleanupTemporaryAnnotationsForRunReplacement(logPrefix: string): 
 }
 
 // =============================================================================
-// Retry reconciliation
+// Thread state reconciliation
 // =============================================================================
 
 /**
- * The retry the client has applied locally but the server has not confirmed.
- * See `retryReconciliation` for what the entry is for.
+ * What the client tells the server about the thread it is holding.
  *
- * Single slot, tracking the most recent retry: starting another one before the
- * first resolves overwrites the entry. That matches `activeRunAtom`, which a
- * second concurrent run overwrites the same way — and the anchor the new entry
- * carries still lets the server reconcile the thread.
+ * Sent with every request. The server anchors on the last of `threadRunIds`
+ * that exists in the thread and deletes the trailing block after it, so the
+ * history the model reads is the history on screen. A retry is the same
+ * statement with a shorter set, plus the run it replaces.
+ *
+ * Run IDs are client-generated and the run row is written late, so a request
+ * that dies during setup leaves the client holding an ID that was never
+ * persisted and the runs it dropped stranded server-side. Restating the whole
+ * view every time is what makes that self-correcting, and why no retry state
+ * has to survive between requests.
+ *
+ * The set must describe the thread *after* any local truncation — assert it
+ * once the runs have been dropped, or the server is told to keep what the user
+ * just replaced and the retry deletes nothing. It must also cover every run the
+ * user can see, including one still in the active slot (see
+ * `activeRunForAssertion`).
+ *
+ * One case it cannot repair: a client holding no run of the thread at all,
+ * which happens after replacing the thread's first run. An empty set is
+ * indistinguishable from a client that has not finished loading, so the server
+ * reads it as silence unless the request is also a retry.
  */
-const unconfirmedRetryAtom = atom<UnconfirmedRetry | null>(null);
+interface ThreadStateAssertion {
+    /** Runs the client holds for this thread, oldest first. */
+    threadRunIds: string[];
+    /** The run a retry replaces. Omitted on an ordinary send. */
+    retryRunId?: string;
+}
+
+/** The thread state a request asserts, given the runs the client holds. */
+function assertThreadState(threadRuns: AgentRun[], retryRunId?: string): ThreadStateAssertion {
+    return {
+        threadRunIds: threadRuns.map((run) => run.id),
+        ...(retryRunId ? { retryRunId } : {}),
+    };
+}
 
 /**
- * Retire the entry once the server has truncated the thread itself.
+ * Thread history plus the run still sitting in the active slot, if any.
  *
- * The `thread` event is sent only after the thread has been loaded and any
- * retry truncation applied, so from here the run exists server-side and is a
- * valid retry target in its own right — it must stop inheriting the anchor of
- * the retry it replaced.
+ * A run only leaves that slot on `done` or a cancel, so one that failed on an
+ * `error` event stays there — visible to the user as an error card, and
+ * persisted server-side. Requests that are not replacing it have to assert it
+ * alongside the rest, or the anchor lands on the run before it and the server
+ * deletes it.
+ *
+ * Retries deliberately do not use this: the run they replace is exactly what
+ * they are asking the server to drop.
  */
-const confirmRetryTruncatedAtom = atom(null, (get, set) => {
-    const activeRunId = get(activeRunAtom)?.id;
-    if (activeRunId && get(unconfirmedRetryAtom)?.runId === activeRunId) {
-        set(unconfirmedRetryAtom, null);
-    }
+function activeRunForAssertion(get: Getter): AgentRun[] {
+    const activeRun = get(activeRunAtom);
+    const threadRuns = get(threadRunsAtom);
+    return activeRun ? appendRunIfMissing(threadRuns, activeRun) : threadRuns;
+}
+
+/**
+ * Apply the truncation the server reported, in place of the client's guess.
+ *
+ * The two can disagree: the server may have deleted runs this client never
+ * loaded, or nothing at all. Dropping whatever it deleted that is still here
+ * keeps the views converging instead of drifting further apart.
+ *
+ * Normally a no-op — the server only deletes past the anchor, which is the last
+ * run this client asserted, so a run it still holds is not in that block. When
+ * it is not a no-op the thread was written by something else, and any Zotero
+ * change an applied action in those runs made is left in place with its record
+ * gone. Nothing here can undo it: the user was never asked, and unlike the
+ * regenerate paths there is no confirmation step to hang it on. Logged loudly
+ * instead, since it should not happen while a thread has one writer.
+ */
+const applyServerTruncationAtom = atom(null, (get, set, deletedRunIds: string[]) => {
+    if (deletedRunIds.length === 0) return;
+    const deleted = new Set(deletedRunIds);
+    if (!get(threadRunsAtom).some((run) => deleted.has(run.id))) return;
+
+    const orphanedActions = get(threadAgentActionsAtom)
+        .filter((a) => deleted.has(a.run_id) && a.status === 'applied').length;
+    logger(
+        `WS onThread: server deleted ${deleted.size} run(s) this client still held` +
+            (orphanedActions > 0
+                ? `; ${orphanedActions} applied action(s) dropped without an undo`
+                : ''),
+        1,
+    );
+    set(threadRunsAtom, (runs) => runs.filter((run) => !deleted.has(run.id)));
+    set(threadAgentActionsAtom, (actions) => actions.filter((a) => !deleted.has(a.run_id)));
+    set(citationsAtom, (citations) => citations.filter((c) => !deleted.has(c.run_id ?? '')));
+    set(processCitationsAtom);
 });
 
 /**
@@ -369,7 +432,7 @@ function createAgentRunShell(
     providerName?: string,
     customInstructions?: string,
     customModel?: ModelConfig['custom_model'],
-    retryAnchor?: RetryAnchor,
+    threadState?: ThreadStateAssertion,
     runIdOverride?: string,
     permissionsOverride?: Partial<ChargingPermissions>,
 ): { run: AgentRun; request: AgentRunRequest } {
@@ -403,14 +466,18 @@ function createAgentRunShell(
         ...(modelSelectionOptions.model_id ? { model_id: modelSelectionOptions.model_id } : {}),
         ...(modelSelectionOptions.api_key ? { api_key: modelSelectionOptions.api_key } : {}),
         ...(customModel ? { custom_model: customModel } : {}),
-        // Both anchors travel together: the keep set is ignored server-side
-        // unless retry_run_id marks the request as a retry, and it degrades to
-        // retry_run_id alone when it matches no run in the thread.
-        ...(retryAnchor
+        // Sent on every request: the server truncates whatever it holds past
+        // the last of these, which is what makes a thread the client and server
+        // disagree about repair itself on the next message of any kind.
+        ...(threadState ? { thread_run_ids: threadState.threadRunIds } : {}),
+        // Retries additionally name the run they replace. It is the only anchor
+        // a backend predating `thread_run_ids` understands, and on a current one
+        // it covers an assertion that matches no run in the thread.
+        ...(threadState?.retryRunId
             ? {
-                  retry_run_id: retryAnchor.retryRunId,
-                  ...(retryAnchor.keepRunIds.length > 0
-                      ? { retry_keep_run_ids: retryAnchor.keepRunIds }
+                  retry_run_id: threadState.retryRunId,
+                  ...(threadState.threadRunIds.length > 0
+                      ? { retry_keep_run_ids: threadState.threadRunIds }
                       : {}),
               }
             : {}),
@@ -514,6 +581,7 @@ async function startResumeRun(
             model.provider,
             customInstructions,
             model.is_custom ? model.custom_model : undefined,
+            assertThreadState(get(threadRunsAtom)),
         );
 
         newRunId = newRun.id;
@@ -590,13 +658,9 @@ async function startAutoRetryRun(
 
         // A chain root outside threadRuns is the active run, so nothing before
         // it is removed and the truncation index is the end of the list.
+        const rootRun = chainRoot;
         const chainRootIndex = threadRuns.findIndex(r => r.id === chainRoot.id);
-        const { targetRun: rootRun, truncateFromIndex, anchor } = resolveRetryTarget(
-            get(unconfirmedRetryAtom),
-            threadRuns,
-            chainRoot,
-            chainRootIndex >= 0 ? chainRootIndex : threadRuns.length,
-        );
+        const truncateFromIndex = chainRootIndex >= 0 ? chainRootIndex : threadRuns.length;
 
         // Truncate from the retry point so the UI reflects what the backend
         // deletes for this retry.
@@ -627,11 +691,12 @@ async function startAutoRetryRun(
             model.provider,
             customInstructions,
             model.is_custom ? model.custom_model : undefined,
-            anchor,
+            // Asserted after the local truncation, so it describes the thread
+            // the user is now looking at.
+            assertThreadState(get(threadRunsAtom), rootRun.id),
         );
 
         newRunId = newRun.id;
-        set(unconfirmedRetryAtom, { runId: newRunId, anchor });
         set(activeRunAtom, newRun);
 
         await executeWSRequest(newRun, request, get, set);
@@ -1452,13 +1517,14 @@ function createWSCallbacks(set: Setter): WSCallbacks {
             });
         },
 
-        onThread: (newThreadId: string) => {
-            logger('WS onThread:', { threadId: newThreadId }, 1);
+        onThread: (newThreadId: string, truncation?: WSRetryTruncation | null) => {
+            logger('WS onThread:', { threadId: newThreadId, truncation }, 1);
             set(currentThreadIdAtom, newThreadId);
             set(activeRunAtom, (prev) => prev ? { ...prev, thread_id: newThreadId } : prev);
-            // Sent only after the server has loaded the thread and applied any
-            // retry truncation, so the local truncation is no longer ours to undo.
-            set(confirmRetryTruncatedAtom);
+            // Sent after the server reconciled the thread against the state this
+            // request asserted. What it actually deleted can differ from what the
+            // client predicted — runs this client never loaded, or nothing at all.
+            if (truncation) set(applyServerTruncationAtom, truncation.deleted_run_ids);
         },
 
         onThreadName: (event: WSThreadNameEvent) => {
@@ -2249,7 +2315,20 @@ export const sendWSMessageAtom = atom(
                 model?.provider,
                 customInstructions,
                 model?.is_custom ? model.custom_model : undefined,
-                undefined, // rewriteFromRunId
+                // An ordinary send asserts the thread unchanged. Normally that
+                // deletes nothing; when an earlier request died before the
+                // server truncated, this is what repairs it — unless the client
+                // holds no run of the thread at all, which the server has to
+                // read as silence (see `ThreadStateAssertion`).
+                //
+                // A run that failed without a terminal `done` is still in the
+                // active slot rather than thread history, and the user is
+                // looking at its error card. It has to be asserted like any
+                // other run it can see: the server persisted it, and leaving it
+                // out would name the run before it as the anchor and delete it,
+                // taking the `agent_actions` rows of anything it applied in
+                // Zotero with it.
+                assertThreadState(activeRunForAssertion(get)),
                 runIdOverride,
                 permissionsOverride,
             );
@@ -2364,13 +2443,6 @@ export const regenerateFromRunAtom = atom(
                     runIndex = rootIndex;
                 }
             }
-
-            // A target the server never acknowledged stands in for the retry it
-            // was; anchoring on it would name a run the server has never seen.
-            const resolved = resolveRetryTarget(get(unconfirmedRetryAtom), threadRuns, targetRun, runIndex);
-            targetRun = resolved.targetRun;
-            runIndex = resolved.truncateFromIndex;
-            const retryAnchor = resolved.anchor;
 
             // Get thread ID from the target run (may not be set in currentThreadIdAtom yet)
             const threadId = get(currentThreadIdAtom) || targetRun.thread_id;
@@ -2492,12 +2564,15 @@ export const regenerateFromRunAtom = atom(
                 model.provider,
                 customInstructions,
                 model.is_custom ? model.custom_model : undefined,
-                retryAnchor, // ask backend to rewrite thread from this run forward
+                // Asserted after the local truncation above, so it states the
+                // thread the user is now looking at; the server truncates its
+                // own copy to match. targetRun names the run being replaced, as
+                // the fallback anchor for a backend that predates this field.
+                assertThreadState(get(threadRunsAtom), targetRun.id),
             );
 
             // Set active run - UI now shows user message + spinner
             newRunId = newRun.id;
-            set(unconfirmedRetryAtom, { runId: newRunId, anchor: retryAnchor });
             set(activeRunAtom, newRun);
 
             // Execute the WebSocket request
@@ -2576,13 +2651,6 @@ export const regenerateWithEditedPromptAtom = atom(
                 logger(`regenerateWithEditedPromptAtom: Run ${runId} not found`, 1);
                 return;
             }
-
-            // A target the server never acknowledged stands in for the retry it
-            // was; anchoring on it would name a run the server has never seen.
-            const resolved = resolveRetryTarget(get(unconfirmedRetryAtom), threadRuns, targetRun, runIndex);
-            targetRun = resolved.targetRun;
-            runIndex = resolved.truncateFromIndex;
-            const retryAnchor = resolved.anchor;
 
             // Get thread ID from the target run
             const threadId = get(currentThreadIdAtom) || targetRun.thread_id;
@@ -2702,12 +2770,15 @@ export const regenerateWithEditedPromptAtom = atom(
                 model.provider,
                 customInstructions,
                 model.is_custom ? model.custom_model : undefined,
-                retryAnchor, // ask backend to rewrite thread from this run forward
+                // Asserted after the local truncation above, so it states the
+                // thread the user is now looking at; the server truncates its
+                // own copy to match. targetRun names the run being replaced, as
+                // the fallback anchor for a backend that predates this field.
+                assertThreadState(get(threadRunsAtom), targetRun.id),
             );
 
             // Set active run - UI now shows user message + spinner
             newRunId = newRun.id;
-            set(unconfirmedRetryAtom, { runId: newRunId, anchor: retryAnchor });
             set(activeRunAtom, newRun);
 
             // Execute the WebSocket request
