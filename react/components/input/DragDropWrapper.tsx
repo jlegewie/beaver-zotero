@@ -10,8 +10,8 @@ import { useAttachExternalFiles } from '../../hooks/useAttachExternalFiles';
 import { importActionAtom, stageActionPillAtom } from '../../atoms/actions';
 import { readActionFile, isActionFilePath } from '../../utils/actionShareFile';
 import { addPopupMessageAtom } from '../../utils/popupMessageUtils';
-import { getActionCommand } from '../../utils/slashCommands';
-import { getHost } from '../../host';
+import { getActionCommand } from '@beaver/agent-ui/composer/slashCommands';
+import { getHost } from '@beaver/agent-ui/host';
 import { SettingsIcon } from '../icons/icons';
 
 interface DragDropWrapperProps {

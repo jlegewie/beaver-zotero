@@ -1,6 +1,6 @@
 import React from 'react';
-import MenuButton from '../MenuButton';
-import { MenuItem } from '../menu/ContextMenu';
+import MenuButton from '@beaver/agent-ui/primitives/MenuButton';
+import { MenuItem } from '@beaver/agent-ui/primitives/ContextMenu';
 import { SettingsIcon, UserIcon, LogoutIcon, BugIcon, InformationCircleIcon, IdeaIcon } from '../../icons/icons';
 import { isErrorReportDialogVisibleAtom } from '../../../atoms/ui';
 import { useAtomValue, useSetAtom } from 'jotai';

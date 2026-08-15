@@ -4,7 +4,7 @@ import remarkMath from 'remark-math';
 import remarkGfm from 'remark-gfm'
 import rehypeRaw from 'rehype-raw';
 import rehypeSanitize, { defaultSchema } from 'rehype-sanitize';
-import Citation from '../citations/Citation';
+import Citation from '@beaver/agent-ui/chat/Citation';
 import rehypeKatex from 'rehype-katex';
 import deepmerge from 'deepmerge';
 import NoteDisplay, { StreamingNoteBlock } from './NoteDisplay';
@@ -13,7 +13,7 @@ import {
     createPreprocessState 
 } from '../../utils/citationPreprocessing';
 import { processPartialContent } from '../../utils/markdownPartialContent';
-import { getHost } from '../../host';
+import { getHost } from '@beaver/agent-ui/host';
 
 const citationDataAttributes = [
     'data-library-id', 'dataLibraryId',

@@ -9,7 +9,7 @@ vi.mock('../../../src/services/agentDataProvider/utils', () => ({
     isRemoteAccessAvailable: vi.fn(() => false),
 }));
 
-import { resolvePageLabelFromLabels } from '../../../react/utils/pageLabels';
+import { resolvePageLabelFromLabels } from '@beaver/agent-ui/utils/pageLabels';
 
 describe('pageLabels', () => {
     it('resolves 1-based citation pages against 0-based backend label maps', () => {

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { CopyIcon, TickIcon } from '../../icons/icons';
-import IconButton from '../IconButton';
+import IconButton from '@beaver/agent-ui/primitives/IconButton';
 import { copyToClipboard } from '../../../utils/clipboard';
 
 interface CopyButtonProps {

@@ -1,7 +1,7 @@
 {
     "name": "beaver-zotero",
     "type": "module",
-    "version": "0.23.0",
+    "version": "0.23.1",
     "description": "Academic research agent that lives in Zotero, instantly searching through all your documents and explaining complex concepts as you read.",
     "config": {
         "addonName": "Beaver",
@@ -21,10 +21,10 @@
     "homepage": "https://www.beaverapp.ai",
     "license": "AGPL-3.0-or-later",
     "scripts": {
-        "start": "concurrently \"zotero-plugin serve\" \"npm run watch-react\"",
-        "build": "NODE_ENV=production npm run build-react:prod && NODE_ENV=production zotero-plugin build && tsc --noEmit && npm run typecheck:core",
-        "build:dev": "NODE_ENV=development npm run build-react:dev && NODE_ENV=development zotero-plugin build --dev && npm run pack:xpi && tsc --noEmit && npm run typecheck:core",
-        "build:staging": "BUILD_ENV=staging npm run build-react:staging && BUILD_ENV=staging zotero-plugin build && tsc --noEmit && npm run typecheck:core",
+        "start": "npm run copy:agent-ui-css && concurrently \"zotero-plugin serve\" \"npm run watch-react\"",
+        "build": "npm run copy:agent-ui-css && NODE_ENV=production npm run build-react:prod && NODE_ENV=production zotero-plugin build && tsc --noEmit && npm run typecheck:core && npm run typecheck:ui",
+        "build:dev": "npm run copy:agent-ui-css && NODE_ENV=development npm run build-react:dev && NODE_ENV=development zotero-plugin build --dev && npm run pack:xpi && tsc --noEmit && npm run typecheck:core && npm run typecheck:ui",
+        "build:staging": "npm run copy:agent-ui-css && BUILD_ENV=staging npm run build-react:staging && BUILD_ENV=staging zotero-plugin build && tsc --noEmit && npm run typecheck:core && npm run typecheck:ui",
         "lint:check": "prettier --check . && eslint .",
         "lint:fix": "prettier --write . && eslint . --fix",
         "release": "zotero-plugin release",
@@ -41,9 +41,11 @@
         "build-react:staging": "BUILD_ENV=staging webpack --config webpack.config.js --mode=production",
         "watch-react": "webpack --config webpack.config.js --watch",
         "pack:xpi": "node scripts/pack-xpi.mjs",
+        "copy:agent-ui-css": "node scripts/copy-agent-ui-css.mjs",
         "beaver-extract": "tsx src/beaver-extract/cli/main.ts",
         "typecheck:cli": "tsc -p tsconfig.cli.json --noEmit",
         "typecheck:core": "tsc -p packages/agent-core --noEmit && node packages/agent-core/verify-program.mjs",
+        "typecheck:ui": "tsc -p packages/agent-ui --noEmit && node packages/agent-ui/verify-program.mjs",
         "test:cli-smoke": "vitest run --config vitest.smoke.config.ts"
     },
     "dependencies": {

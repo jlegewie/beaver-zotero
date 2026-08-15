@@ -6,8 +6,8 @@ import {
 } from '../../atoms/ui';
 import ExternalReferenceDetails from '../externalReferences/ExternalReferenceDetails';
 import { CancelIcon } from '../icons/icons';
-import IconButton from '../ui/IconButton';
-import { getDocumentFromElement } from '../../utils/windowContext';
+import IconButton from '@beaver/agent-ui/primitives/IconButton';
+import { getDocumentFromElement } from '@beaver/agent-ui/utils/windowContext';
 
 const ExternalReferenceDetailsDialog: React.FC = () => {
     const [isVisible, setIsVisible] = useAtom(isExternalReferenceDetailsDialogVisibleAtom);
@@ -25,6 +25,7 @@ const ExternalReferenceDetailsDialog: React.FC = () => {
         if (isVisible) {
             // Get the correct document context for this component
             const doc = getDocumentFromElement(containerRef.current);
+            if (!doc) return;
             doc.addEventListener('keydown', handleKeyDown);
             return () => doc.removeEventListener('keydown', handleKeyDown);
         }

@@ -74,7 +74,7 @@ import { assertNoPreviewMarkers, containsPreviewMarkers, stripPreviewMarkers } f
 import {
     externalReferenceMappingAtom,
     externalReferenceItemMappingAtom,
-} from '../atoms/externalReferences';
+} from '@beaver/agent-core/citations/externalReferences';
 import {
     resolveBatchEdits,
     detectOverlaps,

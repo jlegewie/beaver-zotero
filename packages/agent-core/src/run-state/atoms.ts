@@ -10,6 +10,7 @@ import {
     ThinkingPart,
     RetryPromptPart,
     AgentRunStatus,
+    isRunActive,
     isUnsuccessfulToolReturn,
 } from "../agents/types";
 import {
@@ -37,6 +38,12 @@ export const activeRunAtom = atom<AgentRun | null>(null);
  * thread module; a client may re-export it from its own thread module.
  */
 export const currentThreadIdAtom = atom<string | null>(null);
+
+/** Display name of the open thread (null when it has none yet). */
+export const currentThreadNameAtom = atom<string | null>(null);
+
+/** True while a thread's history is being loaded. */
+export const isLoadingThreadAtom = atom<boolean>(false);
 
 // =============================================================================
 // Derived Atoms
@@ -66,8 +73,14 @@ export const resumedRunIdsAtom = atom((get) => {
 /** Total number of runs in the thread */
 export const runsCountAtom = atom((get) => get(allRunsAtom).length);
 
-/** Is there an active streaming run? */
-export const isStreamingAtom = atom((get) => get(activeRunAtom) !== null);
+/**
+ * Whether Beaver is still generating in the open thread.
+ *
+ * A failed or canceled run can sit in `activeRunAtom` (no terminal `done`
+ * archives it), so presence of an active run is not the same as streaming.
+ * See `isRunActive`.
+ */
+export const isStreamingAtom = atom((get) => isRunActive(get(activeRunAtom)));
 
 /** Quick lookup of tool results by tool_call_id */
 export const toolResultsMapAtom = atom((get) => {

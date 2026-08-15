@@ -4,11 +4,11 @@ import { useAtomValue, useSetAtom } from 'jotai';
 import { AgentRunStatus } from '@beaver/agent-core/agents/types';
 import {
     AgentAction,
-    PendingApproval,
     getAgentActionsByToolcallAtom,
     removePendingApprovalAtom,
     isCreateAnnotationsAgentAction,
 } from '../../../agents/agentActions';
+import type { PendingApproval } from '@beaver/agent-ui/host';
 import {
     approveToolGroupForRunAtom,
     approvalResponseIntentsAtom,
@@ -42,9 +42,9 @@ import {
     ArrowUpRightIcon,
 } from '../../../components/icons/icons';
 import { revealSource, openNoteByKey, getCurrentCollectionKeyForItem } from '../../../utils/sourceUtils';
-import Button from '../../../components/ui/Button';
-import IconButton from '../../../components/ui/IconButton';
-import Tooltip from '../../../components/ui/Tooltip';
+import Button from '@beaver/agent-ui/primitives/Button';
+import IconButton from '@beaver/agent-ui/primitives/IconButton';
+import Tooltip from '@beaver/agent-ui/primitives/Tooltip';
 import SplitApplyButton from '../../../components/ui/buttons/SplitApplyButton';
 import DeferredToolPreferenceButton from '../../../components/ui/buttons/DeferredToolPreferenceButton';
 import ExtractionApprovalButton from '../../../components/ui/buttons/ExtractionApprovalButton';

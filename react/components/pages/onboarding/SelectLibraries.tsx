@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useMemo, useRef, Dispatch, SetStateAction } from 'react';
 import { getLibraryItemCounts, LibraryStatistics } from '../../../../src/utils/libraries';
 import { Icon, DeleteIcon, CSSIcon, PlusSignIcon, AlertIcon } from '../../icons/icons';
-import IconButton from '../../ui/IconButton';
-import SearchMenu, { MenuPosition, SearchMenuItem } from '../../ui/menus/SearchMenu';
+import IconButton from '@beaver/agent-ui/primitives/IconButton';
+import SearchMenu, { MenuPosition, SearchMenuItem } from '@beaver/agent-ui/primitives/SearchMenu';
 import { isLibrarySynced } from '../../../../src/utils/zoteroUtils';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { isLibraryValidForSync, isLibraryValidForSyncWithServerCheck } from '../../../../src/utils/sync';

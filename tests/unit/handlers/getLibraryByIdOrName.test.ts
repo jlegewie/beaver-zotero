@@ -1,5 +1,6 @@
 /**
- * Focused unit tests for getLibraryByIdOrName, validateLibraryAccess, and
+ * Focused unit tests for getLibraryByIdOrName, validateLibraryAccess,
+ * resolveLibrariesFilter, librariesFilterError, and
  * resolveLibrariesFilterToSearchableIds (src/services/agentDataProvider/utils.ts).
  *
  * The module has a wide transitive dependency surface (document extraction,
@@ -45,6 +46,7 @@ vi.mock('@beaver/agent-core/run-state/atoms', () => ({
 }));
 vi.mock('../../../react/atoms/profile', () => ({
     searchableLibraryIdsAtom: Symbol('searchableLibraryIdsAtom'),
+    isLibraryAccessReadyAtom: Symbol('isLibraryAccessReadyAtom'),
 }));
 vi.mock('../../../src/services/documentExtraction/attachmentInfo', () => ({
     getAttachmentInfo: vi.fn(),
@@ -65,9 +67,12 @@ vi.mock('../../../src/services/documentExtraction', () => ({
 }));
 
 import { store } from '../../../react/store';
+import { isLibraryAccessReadyAtom, searchableLibraryIdsAtom } from '../../../react/atoms/profile';
 import {
     getLibraryByIdOrName,
     validateLibraryAccess,
+    librariesFilterError,
+    resolveLibrariesFilter,
     resolveLibrariesFilterToSearchableIds,
 } from '../../../src/services/agentDataProvider/utils';
 
@@ -79,8 +84,20 @@ const groupAlpha = { libraryID: 100, name: 'Group Alpha' };
 const groupExcluded = { libraryID: 300, name: 'Excluded Group' };
 const allLibraries = [userLibrary, groupAlpha, groupExcluded];
 
+/**
+ * Answer per atom: the searchable set and the access-ready flag are read from the
+ * same store, and conflating them hides the loading state these helpers gate on.
+ */
+function setLibraryAccess(ids: number[], accessReady = true) {
+    vi.mocked(store.get).mockImplementation((atom: any) => {
+        if (atom === isLibraryAccessReadyAtom) return accessReady;
+        if (atom === searchableLibraryIdsAtom) return ids;
+        return undefined;
+    });
+}
+
 function setSearchableLibraryIds(ids: number[]) {
-    vi.mocked(store.get).mockReturnValue(ids);
+    setLibraryAccess(ids);
 }
 
 function installZoteroMock() {
@@ -214,5 +231,140 @@ describe('resolveLibrariesFilterToSearchableIds', () => {
         // "Excluded Group" also matches the substring but its library isn't searchable.
         const result = resolveLibrariesFilterToSearchableIds(['group']);
         expect(result).toEqual([100]);
+    });
+});
+
+describe('resolveLibrariesFilter / librariesFilterError', () => {
+    let previousZotero: any;
+
+    beforeEach(() => {
+        vi.clearAllMocks();
+        setSearchableLibraryIds([1, 100]);
+        previousZotero = (globalThis as any).Zotero;
+        installZoteroMock();
+    });
+
+    afterEach(() => {
+        (globalThis as any).Zotero = previousZotero;
+    });
+
+    it('reports a group ref this device does not have as unresolved, not excluded', () => {
+        const resolution = resolveLibrariesFilter(['g999999']);
+        expect(resolution).toEqual({ libraryIds: [], unresolved: ['g999999'], excluded: [] });
+        expect(librariesFilterError(resolution)?.error_code).toBe('library_not_found');
+    });
+
+    it('names the available libraries by portable ref when nothing resolved', () => {
+        const error = librariesFilterError(resolveLibrariesFilter(['Nope']));
+        expect(error?.message).toContain('Library not found: "Nope"');
+        expect(error?.message).toContain('"My Library" (u)');
+        expect(error?.message).toContain('"Group Alpha" (g555)');
+    });
+
+    it('distinguishes an excluded library from an unknown one', () => {
+        const resolution = resolveLibrariesFilter(['g777']);
+        expect(resolution.libraryIds).toEqual([]);
+        expect(resolution.unresolved).toEqual([]);
+        expect(resolution.excluded).toEqual([{ input: 'g777', libraryId: 300 }]);
+        expect(librariesFilterError(resolution)?.error_code).toBe('library_not_searchable');
+    });
+
+    it('reports an unresolvable numeric id as not found rather than excluded', () => {
+        const resolution = resolveLibrariesFilter([9999]);
+        expect(resolution).toEqual({ libraryIds: [], unresolved: ['9999'], excluded: [] });
+    });
+
+    it('treats a partially resolvable filter as usable and raises no error', () => {
+        const resolution = resolveLibrariesFilter(['u', 'g999999']);
+        expect(resolution.libraryIds).toEqual([1]);
+        expect(resolution.unresolved).toEqual(['g999999']);
+        expect(librariesFilterError(resolution)).toBeNull();
+    });
+
+    it('counts a name matching both a searchable and an excluded library as resolved', () => {
+        // "group" matches Group Alpha (searchable) and Excluded Group (not).
+        const resolution = resolveLibrariesFilter(['group']);
+        expect(resolution.libraryIds).toEqual([100]);
+        expect(resolution.excluded).toEqual([]);
+        expect(librariesFilterError(resolution)).toBeNull();
+    });
+
+    it('falls back to name matching for a non-strict numeric string instead of reading it as an id', () => {
+        const resolution = resolveLibrariesFilter(['100abc']);
+        expect(resolution).toEqual({ libraryIds: [], unresolved: ['100abc'], excluded: [] });
+    });
+
+    it('raises no error for an empty filter, so callers keep their own no-filter path', () => {
+        expect(librariesFilterError(resolveLibrariesFilter([]))).toBeNull();
+    });
+});
+
+describe('librariesFilterError while the library-access snapshot is loading', () => {
+    let previousZotero: any;
+
+    beforeEach(() => {
+        vi.clearAllMocks();
+        previousZotero = (globalThis as any).Zotero;
+        installZoteroMock();
+        // Fail-closed loading state: no searchable libraries known yet.
+        setLibraryAccess([], false);
+    });
+
+    afterEach(() => {
+        (globalThis as any).Zotero = previousZotero;
+    });
+
+    it('does not claim a valid library reference is excluded', () => {
+        const resolution = resolveLibrariesFilter(['u']);
+        // Fail-closed: the search still covers nothing.
+        expect(resolution.libraryIds).toEqual([]);
+        // ...but the reason must not be reported, since it is not yet known.
+        expect(librariesFilterError(resolution)).toBeNull();
+    });
+
+    it('does not claim a valid library name is unknown', () => {
+        expect(librariesFilterError(resolveLibrariesFilter(['My Library']))).toBeNull();
+    });
+
+    it('reports normally once the snapshot has loaded', () => {
+        setLibraryAccess([1, 100], true);
+        expect(librariesFilterError(resolveLibrariesFilter(['g777']))?.error_code)
+            .toBe('library_not_searchable');
+    });
+});
+
+describe('resolveLibrariesFilter name matching and the exclusion boundary', () => {
+    let previousZotero: any;
+
+    beforeEach(() => {
+        vi.clearAllMocks();
+        setSearchableLibraryIds([1, 100]);
+        previousZotero = (globalThis as any).Zotero;
+        installZoteroMock();
+    });
+
+    afterEach(() => {
+        (globalThis as any).Zotero = previousZotero;
+    });
+
+    it('never resolves a name to an excluded library, so its name cannot leak', () => {
+        // "Excluded Group" is a local library, but only reachable by name here.
+        const resolution = resolveLibrariesFilter(['Excluded']);
+        expect(resolution.libraryIds).toEqual([]);
+        expect(resolution.excluded).toEqual([]);
+        expect(resolution.unresolved).toEqual(['Excluded']);
+
+        const error = librariesFilterError(resolution);
+        expect(error?.error_code).toBe('library_not_found');
+        expect(error?.message).not.toContain('Excluded Group');
+    });
+
+    it('still reports an excluded library named by an explicit ref or id', () => {
+        // An explicit reference is precise enough to answer honestly, matching
+        // validateLibraryAccess.
+        for (const entry of ['g777', 300, '300'] as Array<string | number>) {
+            const error = librariesFilterError(resolveLibrariesFilter([entry]));
+            expect(error?.error_code).toBe('library_not_searchable');
+        }
     });
 });

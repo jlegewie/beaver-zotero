@@ -45,8 +45,10 @@ import { logger } from '@beaver/agent-core/platform/logger';
  * Maximum number of selected library items included in `library_selection`.
  * The selection is low-signal context (users often have items selected without
  * asking about them), so large selections (e.g. select-all) are truncated.
+ * `library_selection_total_count` reports the untruncated size so the model can
+ * tell the user what it is missing.
  */
-const MAX_LIBRARY_SELECTION = 5;
+const MAX_LIBRARY_SELECTION = 30;
 
 /**
  * Build reader state for the current reader attachment.
@@ -125,6 +127,7 @@ export async function buildZoteroApplicationState(get: Getter): Promise<Applicat
     let currentCollections: CurrentCollection[] = [];
     let currentSearches: CurrentSavedSearch[] = [];
     let librarySelection: ZoteroItemReference[] | undefined = undefined;
+    let librarySelectionTotalCount: number | undefined = undefined;
 
     // Detect the note-editor view from the raw tab context, NOT from the
     // exclusion-filtered noteState
@@ -234,6 +237,9 @@ export async function buildZoteroApplicationState(get: Getter): Promise<Applicat
                         zotero_key: item.key,
                         library_ref: libraryRefForLibraryID(item.libraryID) ?? undefined,
                     }));
+                // Count after the exclusion filter: an excluded library must not
+                // be inferable from a selection count the model cannot reconcile.
+                librarySelectionTotalCount = selectedItems.length;
             }
         }
     }
@@ -306,7 +312,12 @@ export async function buildZoteroApplicationState(get: Getter): Promise<Applicat
             ? { current_collection: currentCollections[0], current_collections: currentCollections }
             : {}),
         ...(currentSearches.length > 0 ? { current_searches: currentSearches } : {}),
-        ...(librarySelection ? { library_selection: librarySelection } : {}),
+        ...(librarySelection
+            ? {
+                library_selection: librarySelection,
+                library_selection_total_count: librarySelectionTotalCount,
+            }
+            : {}),
         ...(indexingStatus ? { indexing_status: indexingStatus } : {}),
         ...(libraries ? { libraries } : {}),
     };

@@ -15,7 +15,7 @@ import {
     createImeCompositionTracker,
     decideCompositionPayloadRecovery,
     registerCompositionEndDeferral,
-} from '../../../react/components/input/lexical/imeComposition';
+} from '@beaver/agent-ui/composer/imeComposition';
 
 type RootListener = (root: HTMLElement | null, prev: HTMLElement | null) => void;
 

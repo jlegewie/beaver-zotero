@@ -37,9 +37,9 @@ import {
     pendingApprovalsAtom,
     threadAgentActionsAtom,
     undoAgentActionAtom,
-    type PendingApproval,
     type AgentAction,
 } from '../../agents/agentActions';
+import type { PendingApproval } from '@beaver/agent-ui/host';
 import { pendingQuestionsAtom } from '@beaver/agent-core/run-state/pendingQuestions';
 import {
     currentMessageItemsAtom,

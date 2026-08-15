@@ -9,7 +9,7 @@ import { FailedProcessingTooltipContent } from "./FailedProcessingTooltipContent
 import PaginatedFailedProcessingList from "./PaginatedFailedProcessingList";
 import { SkippedFilesSummary } from "./SkippedFilesSummary";
 import { ConnectionStatus } from "../../types/fileStatus";
-import Button from "../ui/Button";
+import Button from "@beaver/agent-ui/primitives/Button";
 import { zoteroServerCredentialsErrorAtom, zoteroServerDownloadErrorAtom } from "../../atoms/ui";
 
 interface FileStatusDisplayProps {

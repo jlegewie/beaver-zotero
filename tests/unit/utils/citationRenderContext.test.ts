@@ -6,11 +6,11 @@ vi.mock('../../../react/store', () => ({
     },
 }));
 
-vi.mock('../../../react/atoms/citations', () => ({
+vi.mock('@beaver/agent-core/citations/atoms', () => ({
     citationDataMapAtom: Symbol('citationDataMapAtom'),
 }));
 
-vi.mock('../../../react/atoms/externalReferences', () => ({
+vi.mock('@beaver/agent-core/citations/externalReferences', () => ({
     externalReferenceItemMappingAtom: Symbol('externalReferenceItemMappingAtom'),
     externalReferenceMappingAtom: Symbol('externalReferenceMappingAtom'),
 }));

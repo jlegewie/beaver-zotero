@@ -29,7 +29,7 @@ import {
     normalizeCitationTag,
     parseRawCitationAttributes,
 } from '@beaver/agent-core/citations/citationGrammar';
-import type { PageLabelsByAttachmentId } from '../../react/atoms/citations';
+import type { PageLabelsByAttachmentId } from '@beaver/agent-core/citations/atoms';
 import { modelObjectId, modelObjectIdFromReference, resolveObjectId, UNRESOLVED_LIBRARY_ID } from './libraryIdentity';
 import { checkLibraryExcluded } from '../services/agentDataProvider/utils';
 import { logger } from '@beaver/agent-core/platform/logger';

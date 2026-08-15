@@ -1,6 +1,7 @@
 import type { LibrarySummary } from '@beaver/agent-core/protocol/agentProtocol';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { libraryRefForLibraryID } from '../../utils/libraryIdentity';
+import { getLibraryVersions } from './libraryVersions';
 
 async function countRegularItems(libraryId: number): Promise<number> {
     try {
@@ -139,14 +140,15 @@ async function countTags(libraryId: number): Promise<number> {
     }
 }
 
-async function getLibrarySummary(library: any): Promise<LibrarySummary | null> {
+async function getLibrarySummary(library: any, includeVersions: boolean): Promise<LibrarySummary | null> {
     try {
-        const [itemCount, attachmentCount, noteCount, collectionCount, tagCount] = await Promise.all([
+        const [itemCount, attachmentCount, noteCount, collectionCount, tagCount, versions] = await Promise.all([
             countRegularItems(library.libraryID),
             countStandaloneAttachments(library.libraryID),
             countNotes(library.libraryID),
             countCollections(library.libraryID),
             countTags(library.libraryID),
+            includeVersions ? getLibraryVersions(library.libraryID) : undefined,
         ]);
 
         return {
@@ -160,6 +162,7 @@ async function getLibrarySummary(library: any): Promise<LibrarySummary | null> {
             note_count: noteCount,
             collection_count: collectionCount,
             tag_count: tagCount,
+            versions,
         };
     } catch (error) {
         logger(
@@ -172,9 +175,16 @@ async function getLibrarySummary(library: any): Promise<LibrarySummary | null> {
 
 /**
  * Return per-library count snapshots for the requested Zotero libraries.
+ *
+ * @param includeVersions - Also compute the per-scope cache-freshness markers.
+ * Off by default: they exist for a client caching a library between calls
+ * (`list_libraries`), and the application-state snapshot this also feeds runs
+ * on every message, where they would be two extra aggregate queries per library
+ * and an opaque string in the model's context for no one's benefit.
  */
 export async function getLibrarySummaries(
-    libraryIds: number[]
+    libraryIds: number[],
+    includeVersions = false
 ): Promise<LibrarySummary[]> {
     if (libraryIds.length === 0) {
         return [];
@@ -185,7 +195,9 @@ export async function getLibrarySummaries(
         const libraries = Zotero.Libraries.getAll()
             .filter((lib: any) => searchableIds.has(lib.libraryID));
 
-        const summaries = (await Promise.all(libraries.map(getLibrarySummary)))
+        const summaries = (await Promise.all(
+            libraries.map((library: any) => getLibrarySummary(library, includeVersions))
+        ))
             .filter((summary): summary is LibrarySummary => summary !== null);
         return summaries.sort((a, b) => a.library_id - b.library_id);
     } catch (error) {

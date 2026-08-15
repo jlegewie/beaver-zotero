@@ -15,7 +15,7 @@ import { sendWSMessageAtom } from './agentRunAtoms';
 import { isWebSearchAllowedAtom, isWebSearchEnabledAtom } from './ui';
 import { beaverDefaultModelAtom, updateSelectedModelAtom } from './models';
 import { resolvePromptVariables } from '../utils/promptVariables';
-import { ensurePromptActionTokens, getActionCommand } from '../utils/slashCommands';
+import { ensurePromptActionTokens, getActionCommand } from '@beaver/agent-ui/composer/slashCommands';
 import { PromptAction } from '@beaver/agent-core/agents/types';
 import { ChargingPermissions } from '@beaver/agent-core/protocol/agentProtocol';
 import { logger } from '@beaver/agent-core/platform/logger';

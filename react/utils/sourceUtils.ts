@@ -1,4 +1,4 @@
-import { truncateText } from './stringUtils';
+import { getItemDisplayName, MAX_NOTE_TITLE_LENGTH } from '../../src/utils/itemDisplayName';
 import { stripHtmlTags, computeDiff } from '../components/agentRuns/EditNotePreview';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { isAgentSupportedItem, agentItemFilter, agentItemFilterAsync } from '../../src/utils/agentItemSupport';
@@ -29,24 +29,19 @@ import {
 } from '@beaver/agent-core/citations/citationGrammar';
 
 // Constants
-export const MAX_NOTE_TITLE_LENGTH = 20;
 export const MAX_NOTE_CONTENT_LENGTH = 150;
 
-export function getDisplayNameFromItem(item: Zotero.Item, count: number | null = null, noteTitleLength: number = MAX_NOTE_TITLE_LENGTH): string {
-    let displayName: string;
+export { MAX_NOTE_TITLE_LENGTH };
 
-    if (item.isNote()) {
-        displayName = truncateText(item.getNoteTitle(), noteTitleLength) || 'Untitled Note';
-    } else if(item.isAttachment() && !item.parentItem) {
-        displayName = item.getField('title') || '';
-    } else {
-        const firstCreator = item.firstCreator || item.getField('title') || 'Unknown Author';
-        const year = item.getField('date')?.match(/\d{4}/)?.[0] || '';
-        displayName = `${firstCreator}${year ? ` ${year}` : ''}`;
-    }
-    
-    if (count && count > 1) displayName = `${displayName} (${count})`;
-    return displayName;
+/**
+ * Short display label for an item.
+ *
+ * Thin alias for the shared formatter in `src/utils/itemDisplayName.ts`; that
+ * module is React-free so the data provider can serve the same label to clients
+ * without a local Zotero.
+ */
+export function getDisplayNameFromItem(item: Zotero.Item, count: number | null = null, noteTitleLength: number = MAX_NOTE_TITLE_LENGTH): string {
+    return getItemDisplayName(item, count, noteTitleLength);
 }
 
 export function getReferenceFromItem(item: Zotero.Item): string {

@@ -34,6 +34,7 @@ import {
     handleZoteroAttachmentSearchRequest,
     handleItemSearchByMetadataRequest,
     handleItemSearchByTopicRequest,
+    handleItemQuickSearchRequest,
     // Library management tools
     handleZoteroSearchRequest,
     handleListItemsRequest,
@@ -86,6 +87,10 @@ import {
     handleTestNoteSetUnsavedHttpRequest,
     handleTestNoteUndoHttpRequest,
 } from './httpHandlers/testNoteHandlers';
+import {
+    handleTestCollectionCreateHttpRequest,
+    handleTestCollectionDeleteHttpRequest,
+} from './httpHandlers/testCollectionHandlers';
 import {
     handleTestAnnotationCreateHttpRequest,
 } from './httpHandlers/testAnnotationHandlers';
@@ -172,6 +177,7 @@ import type {
     WSZoteroAttachmentSearchRequest,
     WSItemSearchByMetadataRequest,
     WSItemSearchByTopicRequest,
+    WSItemQuickSearchRequest,
     // Library management tools
     WSZoteroSearchRequest,
     WSListItemsRequest,
@@ -212,6 +218,7 @@ const ENDPOINT_PATHS = [
     '/beaver/external-reference-check',
     '/beaver/search/metadata',
     '/beaver/search/topic',
+    '/beaver/search/quick',
     '/beaver/attachment/document',
     '/beaver/attachment/page-images',
     '/beaver/attachment/search',
@@ -259,6 +266,9 @@ const ENDPOINT_PATHS = [
     '/beaver/test/note-close-editor',
     '/beaver/test/note-editor-set-unsaved',
     '/beaver/test/note-undo',
+    // Test-only endpoints (collection seeding/teardown)
+    '/beaver/test/collection-create',
+    '/beaver/test/collection-delete',
     // Test-only endpoints (headless PDF annotations)
     '/beaver/test/annotation-create',
     // Test-only endpoints (MuPDF worker singleton stats / lifecycle)
@@ -440,9 +450,11 @@ async function handleMetadataSearchHttpRequest(request: any) {
     };
     
     const response = await handleItemSearchByMetadataRequest(wsRequest);
-    
+
     return {
         items: response.items,
+        error: response.error ?? null,
+        error_code: response.error_code ?? null,
     };
 }
 
@@ -462,9 +474,40 @@ async function handleTopicSearchHttpRequest(request: any) {
     };
     
     const response = await handleItemSearchByTopicRequest(wsRequest);
-    
+
     return {
         items: response.items,
+        error: response.error ?? null,
+        error_code: response.error_code ?? null,
+    };
+}
+
+async function handleQuickSearchHttpRequest(request: any) {
+    const wsRequest: WSItemQuickSearchRequest = {
+        event: 'item_quick_search_request',
+        request_id: generateRequestId(),
+        query: request.query,
+        item_type_filter: request.item_type_filter,
+        libraries_filter: request.libraries_filter,
+        tags_filter: request.tags_filter,
+        collections_filter: request.collections_filter,
+        detail: request.detail,
+        include_citation: request.include_citation,
+        limit: request.limit,
+        offset: request.offset,
+    };
+
+    const response = await handleItemQuickSearchRequest(wsRequest);
+
+    return {
+        items: response.items,
+        detail: response.detail,
+        total_count: response.total_count,
+        // Without this a caller reads a truncated total as the complete match
+        // count and pages into a hole. LocalhostFrontendCapability reads it.
+        truncated: response.truncated ?? false,
+        error: response.error ?? null,
+        error_code: response.error_code ?? null,
     };
 }
 
@@ -613,12 +656,15 @@ async function handleLibraryMetadataHttpRequest(request: any) {
         item_ids: request.item_ids || [],
         include_attachments: request.include_attachments ?? false,
         include_notes: request.include_notes ?? false,
+        detail: request.detail,
+        include_citation: request.include_citation,
     };
 
     const response = await handleGetMetadataRequest(wsRequest);
 
     return {
         items: response.items,
+        detail: response.detail,
         not_found: response.not_found,
         error: response.error,
         error_code: response.error_code,
@@ -681,6 +727,7 @@ async function handleListCollectionsHttpRequest(request: any) {
         library_id: request.library_id,
         parent_collection_key: request.parent_collection_key,
         include_item_counts: request.include_item_counts ?? false,
+        recursive: request.recursive ?? false,
         limit: request.limit ?? 50,
         offset: request.offset ?? 0,
     };
@@ -704,6 +751,7 @@ async function handleListTagsHttpRequest(request: any) {
         library_id: request.library_id,
         collection_key: request.collection_key,
         min_item_count: request.min_item_count ?? 0,
+        name_query: request.name_query,
         limit: request.limit ?? 50,
         offset: request.offset ?? 0,
     };
@@ -854,9 +902,12 @@ function registerEndpoints(): boolean {
     Zotero.Server.Endpoints['/beaver/search/metadata'] = 
         createEndpoint(handleMetadataSearchHttpRequest);
     
-    Zotero.Server.Endpoints['/beaver/search/topic'] = 
+    Zotero.Server.Endpoints['/beaver/search/topic'] =
         createEndpoint(handleTopicSearchHttpRequest);
-    
+
+    Zotero.Server.Endpoints['/beaver/search/quick'] =
+        createEndpoint(handleQuickSearchHttpRequest);
+
     Zotero.Server.Endpoints['/beaver/attachment/document'] =
         createEndpoint(handleAttachmentDocumentHttpRequest);
     
@@ -1004,6 +1055,13 @@ function registerEndpoints(): boolean {
 
         Zotero.Server.Endpoints['/beaver/test/note-undo'] =
             createEndpoint(handleTestNoteUndoHttpRequest);
+
+        // Collection seeding/teardown (dev-only)
+        Zotero.Server.Endpoints['/beaver/test/collection-create'] =
+            createEndpoint(handleTestCollectionCreateHttpRequest);
+
+        Zotero.Server.Endpoints['/beaver/test/collection-delete'] =
+            createEndpoint(handleTestCollectionDeleteHttpRequest);
 
         // Headless PDF annotation primitives (dev-only)
         Zotero.Server.Endpoints['/beaver/test/annotation-create'] =

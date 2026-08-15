@@ -17,7 +17,7 @@ import { Action, ActionCategory, ActionTargetType } from '@beaver/agent-core/typ
 import type { ZoteroContext, LibraryViewInfo, SelectedCollectionInfo } from '../atoms/zoteroContext';
 import { agentItemFilter } from '../../src/utils/agentItemSupport';
 import { getDisplayNameFromItem } from './sourceUtils';
-import { truncateText } from './stringUtils';
+import { truncateText } from '@beaver/agent-ui/utils/stringUtils';
 import { safeIsInTrash } from '../../src/utils/zoteroUtils';
 
 // ---------------------------------------------------------------------------

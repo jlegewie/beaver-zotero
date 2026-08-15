@@ -1,6 +1,6 @@
 import React from 'react';
 import { InformationCircleIcon, CancelIcon, Icon } from '../icons/icons';
-import IconButton from '../ui/IconButton';
+import IconButton from '@beaver/agent-ui/primitives/IconButton';
 
 interface SoftCapWarningBarProps {
     onEnableLongRunning: (e: React.MouseEvent) => void;

@@ -11,8 +11,8 @@ import {
     TickIcon,
     UndoIcon,
 } from '../../../components/icons/icons';
-import IconButton from '../../../components/ui/IconButton';
-import Tooltip from '../../../components/ui/Tooltip';
+import IconButton from '@beaver/agent-ui/primitives/IconButton';
+import Tooltip from '@beaver/agent-ui/primitives/Tooltip';
 import { ActionPreview } from './ActionPreview';
 import { useEditNoteActions, type EditNotePrecomputed } from './useEditNoteActions';
 import type { EditNoteRowDescriptor } from '../../../components/agentRuns/editNoteShared';

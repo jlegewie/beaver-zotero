@@ -4,7 +4,7 @@ import { ZoteroIcon, ZOTERO_ICONS } from '../../icons/ZoteroIcon';
 import { ANNOTATION_ICON_BY_TYPE, ANNOTATION_TEXT_BY_TYPE } from '../../../utils/annotationDisplay';
 import { toAnnotation } from '../../../types/attachments/converters';
 import { getDisplayNameFromItem } from '../../../utils/sourceUtils';
-import { truncateText } from '../../../utils/stringUtils';
+import { truncateText } from '@beaver/agent-ui/utils/stringUtils';
 
 /**
  * Icon for a row in the items summary preview.

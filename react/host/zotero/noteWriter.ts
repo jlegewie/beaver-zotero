@@ -1,4 +1,4 @@
-import type { NoteWriterHost, SaveNoteRequest, SavedNoteReference } from '../types';
+import type { NoteWriterHost, SaveNoteRequest, SavedNoteReference } from '@beaver/agent-ui/host/types';
 import {
     getZoteroTargetContext,
     getZoteroTargetContextSync,

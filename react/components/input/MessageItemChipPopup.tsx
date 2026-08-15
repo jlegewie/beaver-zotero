@@ -1,6 +1,6 @@
 import React from 'react';
 import { CSSItemTypeIcon, NoteIcon, LibraryIcon } from '../icons/icons';
-import type { ChipListPopupContent, ChipPopupAction, ChipPopupContent, ChipPopupStatus, ChipPopupSubtitle } from '../agentRuns/requestChips/ChipPopup';
+import type { ChipListPopupContent, ChipPopupAction, ChipPopupContent, ChipPopupStatus, ChipPopupSubtitle } from '@beaver/agent-ui/chat/ChipPopup';
 import type { ItemValidationState } from '../../atoms/itemValidation';
 import { getDisplayNameFromItem } from '../../utils/sourceUtils';
 import type { AttachmentInfo, ContentKind } from '@beaver/agent-core/extract/document/shared/contentKinds';

@@ -1,6 +1,6 @@
 import React from 'react';
 import { ModelMessage } from '@beaver/agent-core/agents/types';
-import Button from '../ui/Button';
+import Button from '@beaver/agent-ui/primitives/Button';
 import {
     Icon,
     PuzzleIcon,

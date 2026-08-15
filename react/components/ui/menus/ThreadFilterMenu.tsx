@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAtomValue } from 'jotai';
 import { FilterIcon, ArrowDownIcon, Icon } from '../../icons/icons';
-import SearchMenu, { MenuPosition, SearchMenuItem } from './SearchMenu';
+import SearchMenu, { MenuPosition, SearchMenuItem } from '@beaver/agent-ui/primitives/SearchMenu';
 import { ChipButton } from '../../agentRuns/requestChips/ChipButton';
 import { createThreadFilterMenuItem, ThreadFilterMenuItemContext } from './utils/menuItemFactories';
 import { ThreadItemFilter } from '../../../atoms/ui';
@@ -14,7 +14,7 @@ import { UNRESOLVED_LIBRARY_ID } from '../../../../src/utils/libraryIdentity';
 import { searchTitleCreatorYear, scoreSearchResult } from '../../../utils/search';
 import { getPref } from '../../../../src/utils/prefs';
 import { logger } from '@beaver/agent-core/platform/logger';
-import Tooltip from '../Tooltip';
+import Tooltip from '@beaver/agent-ui/primitives/Tooltip';
 
 const RECENT_ITEMS_LIMIT = 5;
 const RECENTLY_MODIFIED_LIMIT = 15;

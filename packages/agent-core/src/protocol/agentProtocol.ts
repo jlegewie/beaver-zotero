@@ -133,10 +133,28 @@ export interface WSStreamingDoneEvent extends WSBaseEvent {
     run_id: string;
 }
 
+/**
+ * What the server removed from the thread while reconciling it against a
+ * legacy retry request (`retry_run_id` / `retry_keep_run_ids`).
+ *
+ * Kept for wire compatibility.
+ */
+export interface WSRetryTruncation {
+    /** Runs deleted from the thread by this request, oldest first. */
+    deleted_run_ids: string[];
+    /** Which anchor the truncation used, or null when none ran. */
+    anchored_by: 'thread_run_ids' | 'keep_set' | 'retry_run_id' | null;
+}
+
 /** Thread event sent when a thread is initialized or created */
 export interface WSThreadEvent extends WSBaseEvent {
     event: 'thread';
     thread_id: string;
+    /**
+     * Present when the server reconciled this thread against a legacy retry
+     * request. Never triggered by current clients, which ignore it.
+     */
+    retry_truncation?: WSRetryTruncation | null;
 }
 
 /** Thread name event sent after background thread name generation completes */
@@ -550,10 +568,14 @@ export interface WSItemSearchByMetadataRequest extends WSBaseEvent {
 
 /** Error codes for item search failures */
 export type ItemSearchErrorCode =
-    | 'internal_error'      // General internal error
-    | 'database_error'      // Database/indexing error
-    | 'invalid_request'     // Invalid request parameters
-    | 'timeout';            // Operation timed out
+    | 'internal_error'         // General internal error
+    | 'database_error'         // Database/indexing error
+    | 'invalid_request'        // Invalid request parameters
+    | 'collection_not_found'   // collections_filter matched no collection the search covers
+    | 'library_not_found'      // libraries_filter matched no library on this device
+    | 'library_not_searchable' // a filter matched only in a library excluded from Beaver
+    | 'tag_not_found'          // tags_filter matched no tag in the searched libraries
+    | 'timeout';               // Operation timed out
 
 /** Response to item metadata search request */
 export interface WSItemSearchByMetadataResponse {
@@ -602,6 +624,150 @@ export interface WSItemSearchByTopicResponse {
     type: 'item_search_by_topic';
     request_id: string;
     items: ItemSearchFrontendResultItem[];
+    /** Error message if search failed */
+    error?: string | null;
+    /** Error code for programmatic handling */
+    error_code?: ItemSearchErrorCode | null;
+    /** Optional timing breakdown for diagnostics */
+    timing?: FrontendTimingMetadata;
+}
+
+// =============================================================================
+// Zotero Item Quick Search (one string, ORed across title / creators / year)
+// =============================================================================
+
+/**
+ * How much an item row carries, for the ops that let the caller choose.
+ *
+ * - `compact`: a {@link QuickSearchHit} — what a chip, a menu row and a hover
+ *   card need, and nothing else.
+ * - `full`: the op's rich row (item metadata plus attachments for the searches,
+ *   the whole `toJSON` payload for `get_metadata`).
+ *
+ * The projection is a parameter rather than a second op so a picker and the
+ * agent cannot disagree about what an item is or what matched.
+ */
+export type ItemProjectionDetail = 'compact' | 'full';
+
+/** How much each quick-search hit carries. See {@link ItemProjectionDetail}. */
+export type QuickSearchDetail = ItemProjectionDetail;
+
+/**
+ * A single quick-search hit in the `compact` projection.
+ *
+ * `display_name` and `description` are computed by the Zotero client, so every
+ * surface calls the same item the same thing. A client must render these
+ * rather than rebuild a label from creators, or its chips drift from what
+ * citations and tool-call headers show for the same item.
+ *
+ * The pair is designed as two lines: `display_name` is the headline
+ * ("Smith 2014") and `description` the context under it.
+ */
+export interface QuickSearchHit {
+    /** Device-local library id. Portable identity is `library_ref`. */
+    library_id: number;
+    /** Device-portable library identity ("u" | "g<groupID>"). */
+    library_ref?: string;
+    zotero_key: string;
+    /** Zotero item type, for the row's icon */
+    item_type: string;
+    /** Chip label, e.g. "Legewie and DiPrete 2014" */
+    display_name: string;
+    /**
+     * Second line for the row: title and publication context, or the parent
+     * relationship for a note or attachment. Composed from Zotero's fields —
+     * cheap enough to serve for a whole page, unlike `formatted_citation`.
+     */
+    description?: string;
+    title?: string;
+    year?: number;
+    /**
+     * Formatted bibliography entry, for a hover card.
+     *
+     * Only present when the request set `include_citation`. Rendering one runs
+     * the CSL engine per item, which costs hundreds of milliseconds and is far
+     * too slow for a page of results — ask for it for a single item the user
+     * actually paused on, and use `description` everywhere else.
+     */
+    formatted_citation?: string;
+    /** Whether the item has at least one child attachment */
+    has_attachment?: boolean;
+    /** Ranking score; higher ranks first. Explains the result order. */
+    score?: number;
+}
+
+/**
+ * Request from backend to run a quick search over the user's Zotero library.
+ *
+ * Unlike `item_search_by_metadata`, which ANDs separate title/creator/
+ * publication conditions, this takes one raw string and ORs it across
+ * title-like fields, creator fields and the year — Zotero's own
+ * `quicksearch-titleCreatorYear`. That is the shape a picker needs, which has
+ * one string and no idea which field it belongs to.
+ */
+export interface WSItemQuickSearchRequest extends WSBaseEvent {
+    event: 'item_quick_search_request';
+    request_id: string;
+
+    /** The user's raw string. ORed across title-like fields, creators and year. */
+    query: string;
+
+    // Filters (optional, narrow results further)
+    /** Filter by item type (e.g., "journalArticle") */
+    item_type_filter?: string;
+    /** Filter by library names, refs or IDs (OR logic) */
+    libraries_filter?: (string | number)[];
+    /** Filter by tag names (OR logic) */
+    tags_filter?: string[];
+    /** Filter by collection names or keys (OR logic) */
+    collections_filter?: (string | number)[];
+
+    // Options
+    /** What each hit carries. Default 'compact'. */
+    detail?: QuickSearchDetail;
+    /**
+     * Also render `formatted_citation` on each hit. Default false.
+     *
+     * Off by default because it runs the CSL engine once per row, which costs
+     * hundreds of milliseconds per item — enough to make a picker unusable.
+     * `description` carries the same information cheaply; reach for this only
+     * when a real bibliography entry is required.
+     */
+    include_citation?: boolean;
+    /** Maximum number of results to return. Default 20. */
+    limit?: number;
+    /** Number of results to skip for pagination. Default 0. */
+    offset?: number;
+}
+
+/** Response to a quick search request */
+export interface WSItemQuickSearchResponse {
+    type: 'item_quick_search';
+    request_id: string;
+    /**
+     * Ranked hits, highest score first. `QuickSearchHit[]` when `detail` is
+     * 'compact', `ItemSearchFrontendResultItem[]` when 'full' — branch on the
+     * echoed `detail` rather than sniffing the rows.
+     */
+    items: QuickSearchHit[] | ItemSearchFrontendResultItem[];
+    /** Projection the items are in; echoes the request's resolved `detail`. */
+    detail: QuickSearchDetail;
+    /**
+     * Ranked matches before pagination — every one of them reachable with
+     * `offset`, so a client can page the whole set.
+     *
+     * When `truncated` is true this is a floor, not the library's true match
+     * count: ranking every match of a very common query is unbounded work, so
+     * the provider ranks a bounded candidate set per library.
+     */
+    total_count: number;
+    /**
+     * True when a library held more matches than the provider's ranking budget,
+     * so `total_count` undercounts and the ranking covers only part of the
+     * matches. A client should treat it as "too many — keep typing" rather than
+     * paging deeper. Omitted by older providers.
+     */
+    truncated?: boolean;
     /** Error message if search failed */
     error?: string | null;
     /** Error code for programmatic handling */
@@ -1280,13 +1446,38 @@ export interface WSGetMetadataRequest extends WSBaseEvent {
     item_ids: string[];
     include_attachments: boolean;
     include_notes: boolean;
+    /**
+     * What each row carries. Default 'full' — the historical behavior.
+     *
+     * 'compact' returns a {@link QuickSearchHit} per item (plus its `item_id`),
+     * which is what a chip needs to render a bare reference from thread
+     * history. It ignores `include_attachments` / `include_notes`, whose
+     * payloads have no place in that projection.
+     */
+    detail?: ItemProjectionDetail;
+    /**
+     * Also render `formatted_citation` on each compact row. Default false;
+     * ignored when `detail` is 'full', which always carries one.
+     *
+     * This is the op to ask for a real bibliography entry — for one item the
+     * user paused on, not for a list. See `QuickSearchHit.formatted_citation`.
+     */
+    include_citation?: boolean;
 }
 
 /** Response to get_metadata request */
 export interface WSGetMetadataResponse {
     type: 'get_metadata';
     request_id: string;
+    /**
+     * One row per resolved item. `QuickSearchHit & {item_id}` when `detail` is
+     * 'compact', the full `toJSON` payload otherwise — branch on the echoed
+     * `detail` rather than sniffing the rows.
+     */
     items: Record<string, any>[];
+    /** Projection the items are in; echoes the request's resolved `detail`.
+     * Omitted by older providers, which always serve 'full'. */
+    detail?: ItemProjectionDetail;
     not_found: string[];
     error?: string | null;
     error_code?: string | null;
@@ -1355,6 +1546,15 @@ export interface WSListCollectionsRequest extends WSBaseEvent {
     library_id?: number | string | null;
     parent_collection_key?: string | null;
     include_item_counts: boolean;
+    /**
+     * List every descendant of the scope rather than its direct children only,
+     * so a whole library is one call. Each row still carries `parent_key`, so
+     * the caller can rebuild the tree.
+     *
+     * Gated by the `list_collections_recursive` client feature: a client
+     * without it silently returns direct children only.
+     */
+    recursive?: boolean | null;
     limit: number;
     offset: number;
 }
@@ -1413,6 +1613,16 @@ export interface WSListTagsRequest extends WSBaseEvent {
     library_id?: number | string | null;
     collection_key?: string | null;
     min_item_count: number;
+    /**
+     * Keep only tags whose name contains this substring, case-insensitively.
+     * Pushed into SQL, so it reduces the provider's work as well as the wire —
+     * the escape hatch for a library with too many tags to fetch and filter
+     * locally.
+     *
+     * Gated by the `list_tags_name_query` client feature: a client without it
+     * silently returns the unfiltered list.
+     */
+    name_query?: string | null;
     limit: number;
     offset: number;
 }
@@ -1480,6 +1690,43 @@ export interface LibrarySummary {
     note_count: number;
     collection_count: number;
     tag_count: number;
+    /**
+     * Opaque per-scope change markers, for a client caching this library's
+     * collections or tags. Compare for equality and re-fetch on a mismatch;
+     * never parse one, and never order two of them — the provider is free to
+     * change how it computes them without a wire change.
+     *
+     * Per scope rather than per library so an item edit does not invalidate a
+     * collection cache. Absent when the provider cannot compute them, which a
+     * client must read as "no freshness oracle" (do not cache) rather than
+     * "unchanged".
+     */
+    versions?: LibraryScopeVersions;
+}
+
+/** Per-scope change markers for one library. See `LibrarySummary.versions`. */
+export interface LibraryScopeVersions {
+    /**
+     * Changes when the library's collections change (added, renamed, moved,
+     * deleted). Deliberately **not** when the items inside them change, so a
+     * response cached against this marker must be one taken with
+     * `include_item_counts: false` — the counts would go stale under it.
+     */
+    collections?: string;
+    /**
+     * Changes when the library's tag list, per-tag usage or tag colors change.
+     *
+     * Scoped to the **library-wide** `list_tags` response. A response taken
+     * with `collection_key` must not be cached against it: moving an
+     * already-tagged item into or out of a collection changes which tags that
+     * collection shows without changing any tag row or count in the library,
+     * so this marker stays put while the scoped listing has moved. Cache the
+     * library-wide list and narrow it client-side, or re-fetch a scoped list
+     * every time.
+     */
+    tags?: string;
+    /** Reserved for a surface that needs to cache items. Not emitted today. */
+    items?: string;
 }
 
 /** Response to list_libraries request */
@@ -1826,6 +2073,7 @@ export type WSEvent =
     | WSZoteroDataRequest
     | WSItemSearchByMetadataRequest
     | WSItemSearchByTopicRequest
+    | WSItemQuickSearchRequest
     // Library management tools
     | WSZoteroSearchRequest
     | WSListItemsRequest
@@ -1961,10 +2209,53 @@ export const CLIENT_FEATURES = {
      * rather than after the backend has finished asking us about its citations.
      */
     CITATIONS_EVENT: 'citations_event',
+    /**
+     * `collections_filter` on the search tools matches items in the named
+     * collections *and their subcollections*. Older clients matched direct
+     * membership only, so the backend warns the model about that when this
+     * feature is absent.
+     */
+    RECURSIVE_COLLECTIONS_FILTER: 'recursive_collections_filter',
+    /**
+     * `item_quick_search_request`: one-string search ORed across title-like
+     * fields, creators and the year. A client asking for it without this
+     * feature would get no handler and wait out the request timeout, so the
+     * backend refuses the op up front instead.
+     */
+    ITEM_QUICK_SEARCH: 'item_quick_search',
+    /**
+     * `list_collections` honors `recursive`, listing every descendant of the
+     * scope instead of its direct children. A client without it ignores the
+     * flag and answers with direct children only, which reads as a complete
+     * library that happens to be flat.
+     */
+    LIST_COLLECTIONS_RECURSIVE: 'list_collections_recursive',
+    /**
+     * `list_tags` honors `name_query`, filtering tag names in SQL. A client
+     * without it ignores the parameter and returns the unfiltered list, which
+     * reads as "these are the matches".
+     */
+    LIST_TAGS_NAME_QUERY: 'list_tags_name_query',
 } as const;
 
 /** Client type identifier for the Zotero plugin. */
 export const ZOTERO_PLUGIN_CLIENT_TYPE = 'zotero-plugin';
+
+/** Client type identifier for the Word add-in. */
+export const WORD_ADDIN_CLIENT_TYPE = 'word-addin';
+
+/**
+ * The Beaver clients this build knows about, for code that has to branch on
+ * which client it is running as. These are wire values: the handshake sends one
+ * as `WSAuthMessage.client_type` and the backend keys its per-client agent
+ * mapping on them, so a client cannot rename one on its own.
+ *
+ * `WSAuthMessage.client_type` itself stays a plain `string` — a backend may
+ * know clients a given build does not.
+ */
+export type BeaverClientType =
+    | typeof ZOTERO_PLUGIN_CLIENT_TYPE
+    | typeof WORD_ADDIN_CLIENT_TYPE;
 
 /**
  * Agent the backend runs for, and stamps on threads created by, the Zotero
@@ -2081,8 +2372,12 @@ export interface ApplicationStateInput {
      * `current_collections`.
      */
     current_searches?: CurrentSavedSearch[];
-    /** Currently selected library items (optional) */
+    /**
+     * Currently selected library items, truncated to a client-defined maximum.
+     */
     library_selection?: ZoteroItemReference[];
+    /** Number of items the user actually has selected, before truncation. */
+    library_selection_total_count?: number;
     /** Frontend embedding index status */
     indexing_status?: IndexingStatus;
     /** Per-library summary stats (counts) for searchable libraries. */
@@ -2138,20 +2433,17 @@ export interface AgentRunRequest {
     api_key?: string;
     /** Custom model configuration (mutually exclusive with model_id) */
     custom_model?: CustomChatModel;
-    /** If set, instructs the server to retry from this run ID, deleting it and all subsequent runs */
+    /**
+     * Legacy, no longer sent by this client. Instructed the server to retry
+     * from this run ID, deleting it and all subsequent runs. Retries now
+     * commit their removal through `POST /threads/{id}/truncate` before the
+     * run request is sent; the field stays documented because the backend
+     * keeps accepting it from released clients.
+     */
     retry_run_id?: string;
     /**
-     * Retry only. The run IDs the client still holds for this thread after
-     * dropping the ones it is regenerating.
-     *
-     * Run IDs are client-generated, so `retry_run_id` can name a run the server
-     * never persisted — a retry whose request died before the setup phase
-     * finished leaves the client holding an ID that does not exist server-side,
-     * and every later retry anchored on it matches nothing. This set gives the
-     * server a second anchor: it deletes the trailing block of runs that are not
-     * in the set, reconciling a thread whose client-side and server-side views
-     * have drifted apart. A set matching no run in the thread is ignored, so
-     * `retry_run_id` must always be sent alongside it as the fallback.
+     * Legacy, no longer sent by this client (see `retry_run_id`). The run IDs
+     * the client still held after dropping the ones it was regenerating.
      */
     retry_keep_run_ids?: string[];
     /** Pre-generated assistant message ID (optional) */
@@ -2248,8 +2540,11 @@ export interface WSCallbacks {
     /**
      * Called when a thread is initialized or created
      * @param threadId The thread ID
+     * @param truncation What the server removed reconciling the thread against
+     *        the client's asserted state, when it removed anything. Absent from
+     *        backends that predate the report.
      */
-    onThread: (threadId: string) => void;
+    onThread: (threadId: string, truncation?: WSRetryTruncation | null) => void;
 
     /**
      * Called when the backend generates a name for a new thread

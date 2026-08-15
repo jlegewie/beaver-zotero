@@ -13,8 +13,8 @@ import { getLibraryByIdOrName, getCollectionByIdOrName, isLibrarySearchable } fr
 import { getPref } from '../../src/utils/prefs';
 import { store } from '../store';
 import { currentReaderAttachmentKeyAtom } from '../atoms/messageComposition';
-import { citationMapAtom } from '../atoms/citations';
-import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '../atoms/externalReferences';
+import { citationMapAtom } from '@beaver/agent-core/citations/atoms';
+import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '@beaver/agent-core/citations/externalReferences';
 import { toolAnnotationApplyBatcher, filterAnnotationAgentActions } from './toolAnnotationApplyBatcher';
 import { saveStreamingNote } from './noteActions';
 import { currentThreadIdAtom } from '../atoms/threads';

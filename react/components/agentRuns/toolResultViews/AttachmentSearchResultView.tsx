@@ -6,7 +6,7 @@ import {
     AttachmentSearchRowView,
     AttachmentMatchView,
 } from '@beaver/agent-core/run-state/toolResultViews';
-import { getHost } from '../../../host';
+import { getHost } from '@beaver/agent-ui/host';
 
 /**
  * Shared renderer for the {@link AttachmentSearchView} view model

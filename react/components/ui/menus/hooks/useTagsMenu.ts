@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { SearchMenuItem } from '../SearchMenu';
+import { SearchMenuItem } from '@beaver/agent-ui/primitives/SearchMenu';
 import { TagMenuItemContext, createTagMenuItem } from '../utils/menuItemFactories';
 import { getActiveZoteroLibraryId } from '../../../../../src/utils/zoteroUtils';
 import { ZoteroTag } from '@beaver/agent-core/types/zotero';
@@ -131,7 +131,7 @@ export const useTagsMenu = ({
             tag.tag.toLowerCase().includes(lowerCaseQuery)
         );
         const items = filteredTags.map((tag) =>
-            createTagMenuItem(tag, tagMenuItemContext)
+            createTagMenuItem(tag, tagMenuItemContext, searchQuery)
         );
 
         let headerLabel = 'Select Tags';

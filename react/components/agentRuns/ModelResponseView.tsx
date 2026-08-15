@@ -4,10 +4,10 @@ import { TextPartView } from './TextPartView';
 import { ThinkingPartView } from './ThinkingPartView';
 import { ToolCallPartView } from './ToolCallPartView';
 import { isAnnotationToolResult } from '@beaver/agent-core/run-state/toolResultTypes';
-import ContextMenu from '../ui/menu/ContextMenu';
+import ContextMenu from '@beaver/agent-ui/primitives/ContextMenu';
 import useSelectionContextMenu from '../../hooks/useSelectionContextMenu';
 import { buildEditNoteRenderItems, getEditNoteGroupInstanceId } from './editNoteShared';
-import { getHost } from '../../host';
+import { getHost } from '@beaver/agent-ui/host';
 import { GenericAgentActionView } from './GenericAgentActionView';
 
 /**

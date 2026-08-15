@@ -20,11 +20,16 @@ import {
 import { semanticSearchService, SearchResult } from '../semanticSearchService';
 import { BeaverDB } from '../database';
 import {
-    getCollectionByIdOrName,
+    collectionsFilterError,
+    getCollectionScopeItemIds,
     getSearchableLibraryIds,
+    librariesFilterError,
     prepareAttachmentInfoBatchData,
     processAttachmentInfoBatch,
-    resolveLibrariesFilterToSearchableIds,
+    resolveCollectionsFilter,
+    resolveLibrariesFilter,
+    resolveTagsFilter,
+    tagsFilterError,
 } from '../agentDataProvider/utils';
 import { TimingAccumulator } from '../../utils/timing';
 
@@ -63,9 +68,11 @@ export async function handleItemSearchByTopicRequest(
         };
     }
 
-    // Get searchable library IDs
+    // Get searchable library IDs. An explicit libraries_filter is resolved even
+    // when none are searchable, so the model is told the library is excluded
+    // instead of reading an empty result as "that library holds nothing".
     const searchableLibraryIds = getSearchableLibraryIds();
-    if (searchableLibraryIds.length === 0) {
+    if (searchableLibraryIds.length === 0 && !request.libraries_filter?.length) {
         logger('handleItemSearchByTopicRequest: no searchable libraries available', 1);
         return {
             type: 'item_search_by_topic',
@@ -78,64 +85,134 @@ export async function handleItemSearchByTopicRequest(
             },
         };
     }
-    
+
     // Resolve library IDs from filter, but always intersect with searchable libraries.
     // Accepts portable library refs ("u"/"g<groupID>"), numeric IDs, numeric-ID
     // strings, and library name substrings.
-    const libraryIds: number[] = request.libraries_filter && request.libraries_filter.length > 0
-        ? resolveLibrariesFilterToSearchableIds(request.libraries_filter)
-        : [...searchableLibraryIds];
+    let libraryIds: number[] = [...searchableLibraryIds];
+    if (request.libraries_filter && request.libraries_filter.length > 0) {
+        const resolution = resolveLibrariesFilter(request.libraries_filter);
 
-    // Guard: if libraries_filter was provided but resolved to no searchable libraries,
-    // return empty results instead of widening scope to all libraries
-    if (request.libraries_filter && request.libraries_filter.length > 0 && libraryIds.length === 0) {
-        logger('handleItemSearchByTopicRequest: libraries_filter resolved to no searchable libraries', 1);
-        return {
-            type: 'item_search_by_topic',
-            request_id: request.request_id,
-            items: [],
-            timing: {
-                total_ms: Date.now() - startTime,
-                item_count: 0,
-                attachment_count: 0,
-            },
-        };
+        // A libraries_filter that resolves to nothing must narrow the search to no
+        // results, never widen it to every library — and it is reported as an error
+        // rather than an empty result so a bad library reference is not mistaken for
+        // a library that holds no matching items.
+        const filterError = librariesFilterError(resolution);
+        if (filterError) {
+            logger(`handleItemSearchByTopicRequest: ${filterError.message}`, 1);
+            return {
+                type: 'item_search_by_topic',
+                request_id: request.request_id,
+                items: [],
+                error: filterError.message,
+                error_code: filterError.error_code,
+                timing: {
+                    total_ms: Date.now() - startTime,
+                    item_count: 0,
+                    attachment_count: 0,
+                },
+            };
+        }
+
+        libraryIds = resolution.libraryIds;
     }
 
-    // Convert collections_filter names to keys if needed (scoped to libraryIds)
-    const collectionKeysSet = new Set<string>();
+    // Resolve collections_filter, then turn the scope into an item allowlist
+    // before ranking, so the candidate pool isn't spent on items outside the
+    // requested collections. Both are read from Zotero before the embedding
+    // query narrows by library.
+    let collectionItemIds: number[] | undefined;
     if (request.collections_filter && request.collections_filter.length > 0) {
-        for (const collectionFilter of request.collections_filter) {
-            if (typeof collectionFilter === 'number') {
-                const collection = Zotero.Collections.get(collectionFilter);
-                if (collection && (libraryIds.length === 0 || libraryIds.includes(collection.libraryID))) {
-                    collectionKeysSet.add(collection.key);
-                }
-                continue;
-            }
+        const resolution = resolveCollectionsFilter(request.collections_filter, libraryIds);
 
-            // String filter: search within each library
-            if (libraryIds.length > 0) {
-                for (const libId of libraryIds) {
-                    const result = getCollectionByIdOrName(collectionFilter, libId);
-                    if (result) {
-                        collectionKeysSet.add(result.collection.key);
-                    }
-                }
-            } else {
-                const result = getCollectionByIdOrName(collectionFilter);
-                if (result) {
-                    collectionKeysSet.add(result.collection.key);
-                }
-            }
+        // A collections_filter that resolves to nothing must narrow the search to
+        // no results, never widen it to the whole library — and it is reported as
+        // an error rather than an empty result so a bad collection reference is
+        // not mistaken for a collection that holds no matching items.
+        const filterError = collectionsFilterError(resolution);
+        if (filterError) {
+            logger(`handleItemSearchByTopicRequest: ${filterError.message}`, 1);
+            return {
+                type: 'item_search_by_topic',
+                request_id: request.request_id,
+                items: [],
+                error: filterError.message,
+                error_code: filterError.error_code,
+                timing: {
+                    total_ms: Date.now() - startTime,
+                    item_count: 0,
+                    attachment_count: 0,
+                },
+            };
+        }
+
+        // An empty allowlist here means the collections resolved but hold no
+        // items: an honest empty result, not a bad reference.
+        collectionItemIds = await getCollectionScopeItemIds(resolution.collections);
+        if (collectionItemIds.length === 0) {
+            logger(`handleItemSearchByTopicRequest: collections_filter resolved to ${resolution.collections.length} collections holding no items`, 1);
+            return {
+                type: 'item_search_by_topic',
+                request_id: request.request_id,
+                items: [],
+                timing: {
+                    total_ms: Date.now() - startTime,
+                    item_count: 0,
+                    attachment_count: 0,
+                },
+            };
         }
     }
-    const collectionKeys = Array.from(collectionKeysSet);
+
+    // Resolve tags_filter to the tag names Zotero stores, before the embedding
+    // query: a tag the library doesn't have is a bad filter, not an empty result,
+    // and the model can only tell the two apart if it is told.
+    const tagsFilter = request.tags_filter ?? [];
+    let tagNames: string[] | undefined;
+    if (tagsFilter.length > 0) {
+        const resolution = await resolveTagsFilter(tagsFilter, libraryIds);
+
+        const filterError = tagsFilterError(resolution);
+        if (filterError) {
+            logger(`handleItemSearchByTopicRequest: ${filterError.message}`, 1);
+            return {
+                type: 'item_search_by_topic',
+                request_id: request.request_id,
+                items: [],
+                error: filterError.message,
+                error_code: filterError.error_code,
+                timing: {
+                    total_ms: Date.now() - startTime,
+                    item_count: 0,
+                    attachment_count: 0,
+                },
+            };
+        }
+
+        // A tags_filter must narrow the search, never drop off it: when nothing
+        // resolved and no error explained why (no library in scope), return no
+        // results instead of ranking as if no tag had been requested.
+        if (resolution.tags.length === 0) {
+            logger('handleItemSearchByTopicRequest: tags_filter resolved to no tags', 1);
+            return {
+                type: 'item_search_by_topic',
+                request_id: request.request_id,
+                items: [],
+                timing: {
+                    total_ms: Date.now() - startTime,
+                    item_count: 0,
+                    attachment_count: 0,
+                },
+            };
+        }
+
+        tagNames = resolution.tags;
+    }
 
     logger('handleItemSearchByTopicRequest: Searching by topic', {
         topic_query: request.topic_query,
         libraryIds: libraryIds.length > 0 ? libraryIds : 'all',
-        collectionKeys: collectionKeys.length > 0 ? collectionKeys : 'all',
+        collectionItemIds: collectionItemIds ? collectionItemIds.length : 'all',
         limit: request.limit,
     }, 1);
 
@@ -151,6 +228,7 @@ export async function handleItemSearchByTopicRequest(
             topK: (offset + request.limit) * 4, // Fetch extra to account for filtering and pagination offset
             minSimilarity: 0.3,
             libraryIds,
+            itemIds: collectionItemIds,
         });
     } catch (error) {
         logger(`handleItemSearchByTopicRequest: Semantic search failed: ${error}`, 1);
@@ -257,27 +335,14 @@ export async function handleItemSearchByTopicRequest(
             if (!matchesAuthor) continue;
         }
 
-        // Tags filter
-        if (request.tags_filter && request.tags_filter.length > 0) {
+        // Tags filter, applied to the resolved tag names rather than the request's
+        // own spelling so it matches what the library actually stores.
+        if (tagNames) {
             const itemTags = item.getTags().map(t => t.tag.toLowerCase());
-            const matchesTag = request.tags_filter.some(tag =>
+            const matchesTag = tagNames.some(tag =>
                 itemTags.includes(tag.toLowerCase())
             );
             if (!matchesTag) continue;
-        }
-
-        // Collections filter
-        if (collectionKeys.length > 0) {
-            const itemCollections = item.getCollections();
-            const itemCollectionKeys = itemCollections.map(collectionId => {
-                const collection = Zotero.Collections.get(collectionId);
-                return collection ? collection.key : null;
-            }).filter((key): key is string => key !== null);
-
-            const matchesCollection = collectionKeys.some(key =>
-                itemCollectionKeys.includes(key)
-            );
-            if (!matchesCollection) continue;
         }
 
         // Validate item is regular item and not in trash

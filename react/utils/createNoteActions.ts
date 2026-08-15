@@ -5,8 +5,8 @@
 
 import { AgentAction } from '../agents/agentActions';
 import { store } from '../store';
-import { citationMapAtom } from '../atoms/citations';
-import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '../atoms/externalReferences';
+import { citationMapAtom } from '@beaver/agent-core/citations/atoms';
+import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '@beaver/agent-core/citations/externalReferences';
 import { currentThreadIdAtom } from '../atoms/threads';
 import { renderToHTML } from './citationRenderers';
 import { prepareCitationRenderContext } from './citationRenderContext';

@@ -1,5 +1,5 @@
 import React from "react";
-import Button from "./ui/Button";
+import Button from "@beaver/agent-ui/primitives/Button";
 import { useAtomValue } from "jotai";
 import { Action } from "@beaver/agent-core/types/actions";
 import { actionsForContextAtom, actionContextAtom } from "../atoms/actions";
@@ -7,10 +7,10 @@ import { useActionRunner } from "../hooks/useActionRunner";
 import { getActiveTarget } from "../utils/actionVisibility";
 import { searchableLibraryIdsAtom } from "../atoms/profile";
 import { CSSIcon, CSSItemTypeIcon } from "./icons/zotero";
-import Icon from "./icons/Icon";
+import Icon from "@beaver/agent-ui/icons/Icon";
 import { AlertIcon, SettingsIcon, ZapIcon } from './icons/icons';
 import { openPreferencesWindow } from "../../src/ui/openPreferencesWindow";
-import IconButton from "./ui/IconButton";
+import IconButton from "@beaver/agent-ui/primitives/IconButton";
 
 interface ActionSuggestionsProps {
     /** When true, global actions are always shown. When false, global actions only appear if no context-specific actions match. */

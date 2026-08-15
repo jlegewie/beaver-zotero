@@ -8,11 +8,11 @@ from this repo to run inside Zotero.
 
 | Task | Command |
 |------|---------|
-| Dev build (also packs `beaver.xpi`, runs `tsc --noEmit` + `typecheck:core`) | `npm run build:dev 2>&1` |
+| Dev build (also packs `beaver.xpi`, runs `tsc --noEmit` + both package gates) | `npm run build:dev 2>&1` |
 | Production build | `npm run build` |
 | Hot-reload dev loop | `npm start` (`zotero-plugin serve` + webpack watch) |
 | Typecheck | `npx tsc --noEmit` |
-| Core-package gate | `npm run typecheck:core` |
+| Package gates | `npm run typecheck:core` · `npm run typecheck:ui` |
 | Lint / format | `npm run lint:check` · `npm run lint:fix` |
 | Unit tests (no Zotero) | `npm test` · `npm run test:watch` |
 | Live / integration tests (running Zotero) | `npm run test:live` · `npm run test:integration` |
@@ -21,7 +21,10 @@ from this repo to run inside Zotero.
 Notes:
 
 - `tsconfig.json` covers `src/`, `react/`, `typings/` only — **`tsc --noEmit` never
-  typechecks `tests/`**. A broken test contract passes typecheck; run the suites.
+  typechecks `tests/`**. A broken test contract passes typecheck; run the suites. A
+  `vi.mock()` path that no longer resolves is a silent no-op, not an error.
+- Every `build*` script starts with `copy:agent-ui-css` and ends with both package gates.
+  `npm start` runs the copy step too, once, before the watcher.
 - **Never create commits** unless explicitly asked.
 
 ### Build vs. watch — do not mix them
@@ -48,14 +51,19 @@ Consequences:
 - **Don't edit source while a live/integration run is extracting.**
 - Hot reload only refreshes the bundles and UI, not global state that survives a window
   reload (DB, Supabase, services). Startup-only wiring needs a full plugin reload.
+- **`@beaver/agent-ui`'s stylesheets are not watched.** `copy:agent-ui-css` runs once per
+  `npm start`. Saving one *does* trigger a scaffold rebuild + reload, but that copies the
+  stale generated file, so it looks like the edit did nothing. Re-run
+  `npm run copy:agent-ui-css` after editing a shared sheet.
 
-## Source layout: three roots, two bundles
+## Source layout: four roots, two bundles
 
 | Root | Bundled by | Entry → output |
 |------|-----------|----------------|
 | `src/` | esbuild | `src/index.ts` → `content/scripts/beaver.js` — lifecycle, hooks, database, services |
 | `react/` | webpack | `react/index.tsx` → `content/reactBundle.js` — React UI, Jotai atoms, Supabase client, auth |
 | `packages/agent-core/` | both (compiled from source) | consumed as `@beaver/agent-core/<subpath>` |
+| `packages/agent-ui/` | webpack only (compiled from source) | consumed as `@beaver/agent-ui/<subpath>`; its `src/theme/*.css` is copied into `addon/content/styles/` by `scripts/copy-agent-ui-css.mjs` |
 
 **The two bundles cannot import from each other.** The webpack bundle is loaded via a
 `<script>` tag into the window; cross-bundle communication goes through `__beaver*`
@@ -111,21 +119,50 @@ The wire protocol and its type closure (`protocol/`, `transport/`, `run-state/`,
   `@beaver/agent-core/extract/*`, and may not otherwise leave `src/beaver-extract`
   (lint-enforced).
 
+## `packages/agent-ui` — the shared React layer
+
+The client-agnostic React surface: `theme/` (CSS), `icons/`, `primitives/`, `host/` (the
+`ClientHost` registry), `chat/` (the citation stack) and `utils/`. Imported as
+`@beaver/agent-ui/<subpath>` from `react/` and `tests/`. **Not from `src/`** — that would pull
+React into the esbuild bundle. It may import `@beaver/agent-core`; the reverse is forbidden.
+
+Same shape of gate as `agent-core`, so the same rules apply — plus these differences:
+
+- **`npm run typecheck:ui` is the gate** (CI and every `build*` script). **Adding a file means
+  adding its line to `files` in `packages/agent-ui/tsconfig.json`**, reachable from a barrel
+  listed in `verify-program.mjs`'s `entryPaths` — including every new icon. The gate rejects an
+  orphan, a stale entry, and a closure that escapes the package.
+- The verifier pins what the tsconfig may license, because unlike the core this package cannot
+  prove isolation by starving itself of libs: `types` is exactly `react` + `react-dom`, `lib`
+  exactly `ES2020` + `DOM`, `paths` nothing but `@beaver/agent-core/*`. Widening any of them is
+  a deliberate, visible edit.
+- `jsx` is the **classic** runtime, so every `.tsx` here needs an explicit
+  `import React from 'react'` — the Zotero bundle's Babel transform requires it.
+- No `Zotero` / `Office` / `Word` globals and no `_ZoteroTypes` (lint + typecheck). Bare
+  `window` / `document` **are** allowed, unlike everywhere else in this repo: a shared component
+  has no `Zotero.getMainWindow()` to ask and derives them from an element's `ownerDocument`.
+- Stylesheets must be named `agent-ui-*.css` — `scripts/copy-agent-ui-css.mjs` fails otherwise,
+  and one `.gitignore` glob keys on that prefix to ignore the generated copies.
+
 ## Client host seam and the shared render layer
 
-Client-specific behavior is injected, not imported. The registry lives in `react/host/`
-(`ClientHost` with optional slices: `navigation`, `itemData`, `documentExport`, `noteWriter`,
-`config`, `components`, `dialogs`). The Zotero implementations live in `react/host/zotero/*`
-and are registered once at bundle init by `registerZoteroHost()` (called from
-`react/index.tsx`). Absent slices must degrade gracefully.
+Client-specific behavior is injected, not imported. The registry lives in the shared package,
+`@beaver/agent-ui/host` (`ClientHost` with optional slices: `navigation`, `itemData`,
+`documentExport`, `noteWriter`, `config`, `components`, `documentActions`, `dialogs`) — a shared
+component must be able to import its seam without reaching into a client's source tree. The
+Zotero implementations stay in `react/host/zotero/*` and are registered once at bundle init by
+`registerZoteroHost()` (called from `react/index.tsx`). Absent slices must degrade gracefully;
+Zotero has no `documentActions` (that slice is for document-hosted clients).
 
 Shared render components reach client-specific behavior only through
 `getHost().<slice>?.<method>(...)`. Rules that are load-bearing:
 
-- **Lint guard** — `eslint.config.mjs` scopes a rule to the shared render files (citations,
-  `toolResultViews/**`, the agent-run dispatchers, …) banning the `Zotero` global,
-  `react/host/zotero/*` imports, and `src/utils/prefs` imports. When a file becomes clean,
-  add it to that `files` list; don't add one before it is clean or CI breaks.
+- **Lint guard, in two places.** Code that has graduated into `packages/agent-ui/src/**` is
+  covered automatically by that package's own, stricter eslint block — nothing to add. For a
+  render file still living under `react/`, `eslint.config.mjs` scopes a weaker rule to an
+  explicit `files` list (`toolResultViews/**`, the agent-run dispatchers, …) banning the
+  `Zotero` global, `react/host/zotero/*` imports and `src/utils/prefs` imports. When such a
+  file becomes clean, add it to that list; don't add one before it is clean or CI breaks.
 - **Store / reactivity** — render-time host methods must receive store-derived state as a
   parameter (the hook subscribes via `useAtomValue` and passes it in). They must **not** read
   the module-global `store`; that breaks the isolated store used by note export /
@@ -217,8 +254,17 @@ This applies to every query, including simple `COUNT`s. See `src/utils/sync.ts`.
 ## Library exclusions (enforce in every data / write / index path)
 
 Users can exclude Zotero libraries in Beaver Preferences. Exclusion is an access-control
-boundary: Beaver must not index, search, read new data from, attach as model context, or
-modify an excluded library. Exclusions live on `profile.excluded_libraries`.
+boundary for data leaving the user's computer and for Beaver-initiated operations: Beaver
+must not send excluded-library data to the backend or an LLM, index it remotely, expose it in
+an agent response or model context, or modify the excluded library. Exclusions live on
+`profile.excluded_libraries`.
+
+Local enumeration and metadata lookup are allowed when needed to implement the UI or enforce
+this boundary. In particular, `Zotero.Libraries.getAll()` is safe to use locally. Filter to
+the searchable-library set before results, library metadata, item data, or derived data can
+enter an agent response, model context, remote request, index, or mutation path. Do not expose
+an excluded library's existence or name to the model merely because a loose name lookup
+matched it.
 
 Exclusion is **not** a UI restriction. Threads that already reference an excluded library keep
 working — history renders, and the user may click a reference to reveal or open the item.
@@ -238,8 +284,10 @@ Gate **before** the item lookup / read / mutation:
   validation — `const ex = checkLibraryExcluded(ref.library_id); if (ex) return errorResponse(ex.message, 'library_excluded');`
 - **Agent actions** (`agentDataProvider/actions/*.ts`): check in **both** `validate*` and
   `execute*` (TOCTOU) before any `saveTx` / mutation.
-- **Search / list / browse**: scope to `getSearchableLibraryIds()` / `validateLibraryAccess(...)`,
-  never `Zotero.Libraries.getAll()`.
+- **Search / list / browse**: scope agent-visible results to `getSearchableLibraryIds()` /
+  `validateLibraryAccess(...)`. Local `Zotero.Libraries.getAll()` enumeration and local reads
+  are allowed, but excluded libraries must be filtered out before anything is returned to the
+  agent, included in model context, indexed remotely, or otherwise sent off-device.
 - **Context funnels** that stage items for a run (selection, prompt variables, reader
   auto-attach): filter by `searchableLibraryIds` directly — do not rely on cached item
   validation, since an un-validated item reads as allowed.
@@ -327,7 +375,9 @@ scripts/worktree/setup-worktree.sh --lite /path/to/worktree
   `git branch <name> main` first.
 - Full setup clones the dev profile/data dir, allocates unique HTTP + RDP ports, forces sync
   **off** in the clone, and builds the React bundle if the worktree lacks one. Re-running is
-  safe and **keeps the ports the worktree already has**.
+  safe and **keeps the ports the worktree already has**: a profile/data dir kept from an
+  earlier run is never touched (no lock or recovery-marker cleanup, no checkpointing), and
+  `--start` won't launch a second Zotero against a profile that already has one.
 - A fresh worktree must have `addon/content/reactBundle.js` before `npm start`; the serve
   installs the plugin long before webpack's first build finishes and does not re-copy the
   bundle afterwards. Setup builds it; a hand-bootstrapped worktree needs

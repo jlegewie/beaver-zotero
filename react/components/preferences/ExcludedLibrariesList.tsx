@@ -15,8 +15,8 @@ import {
     toggleExcludedLibraryAtom,
 } from '../../atoms/excludedLibraries';
 import { AlertIcon, CSSIcon, Icon, PlusSignIcon, UndoIcon } from '../icons/icons';
-import IconButton from '../ui/IconButton';
-import SearchMenu, { MenuPosition, SearchMenuItem } from '../ui/menus/SearchMenu';
+import IconButton from '@beaver/agent-ui/primitives/IconButton';
+import SearchMenu, { MenuPosition, SearchMenuItem } from '@beaver/agent-ui/primitives/SearchMenu';
 
 type LocalZoteroLibraryLike = {
     libraryID: number;

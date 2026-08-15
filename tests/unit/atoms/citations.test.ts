@@ -24,7 +24,7 @@ import {
     citationMapAtom,
     getOrAssignCitationMarkerAtom,
     processCitationsAtom,
-} from '../../../react/atoms/citations';
+} from '@beaver/agent-core/citations/atoms';
 import {
     getCitationBoundingBoxes,
     getCitationPages,
@@ -257,6 +257,85 @@ describe('processCitationsAtom', () => {
             'zotero:1-PARENT': '1',
             'zotero:1-ATTACH': '1',
         });
+    });
+
+    it('aliases the local-library form of an identity to its portable form', () => {
+        const store = createStore();
+        // What a client with no local Zotero keys the tag under: it cannot map a
+        // device-local library id onto the portable ref the backend stamps.
+        store.set(citationKeyToMarkerAtom, { 'zotero:1-ITEM': '1' });
+        store.set(citationsAtom, [citation({
+            citation_id: 'c1',
+            requested_ref: { kind: 'zotero', library_id: 1, library_ref: 'u', zotero_key: 'ITEM' },
+            resolved_ref: { kind: 'zotero', library_id: 1, library_ref: 'u', zotero_key: 'ITEM' },
+            raw_tag: '<citation id="1-ITEM"/>',
+        })]);
+
+        store.set(processCitationsAtom);
+
+        expect(store.get(citationKeyToMarkerAtom)).toMatchObject({
+            'zotero:1-ITEM': '1',
+            'zotero:u-ITEM': '1',
+        });
+    });
+
+    it('closes the numbering gap aliasing leaves behind', () => {
+        const store = createStore();
+        // Mid-stream, one source cited under both of its names is numbered twice
+        // before its metadata arrives, and the next source takes the number after
+        // both. Folding the pair together must not strand that number.
+        store.set(citationKeyToMarkerAtom, {
+            'zotero:1-ITEM': '1',
+            'zotero:u-ITEM': '2',
+            'zotero:u-OTHER': '3',
+        });
+        store.set(citationsAtom, [citation({
+            citation_id: 'c1',
+            requested_ref: { kind: 'zotero', library_id: 1, library_ref: 'u', zotero_key: 'ITEM' },
+            resolved_ref: { kind: 'zotero', library_id: 1, library_ref: 'u', zotero_key: 'ITEM' },
+            raw_tag: '<citation id="1-ITEM"/>',
+        })]);
+
+        store.set(processCitationsAtom);
+
+        expect(store.get(citationKeyToMarkerAtom)).toEqual({
+            'zotero:1-ITEM': '1',
+            'zotero:u-ITEM': '1',
+            'zotero:u-OTHER': '2',
+        });
+    });
+
+    it('takes the local-library form from the reference, not from the written tag', () => {
+        const store = createStore();
+        // A library id in a tag is a rowid from whichever device wrote it, so it
+        // names a different library elsewhere. Only the id the reference itself
+        // carries may stand in for the portable ref.
+        store.set(citationsAtom, [citation({
+            citation_id: 'c1',
+            requested_ref: { kind: 'zotero', library_id: 4, library_ref: 'g7', zotero_key: 'ITEM' },
+            resolved_ref: { kind: 'zotero', library_id: 4, library_ref: 'g7', zotero_key: 'ITEM' },
+            raw_tag: '<citation id="9-ITEM"/>',
+        })]);
+
+        store.set(processCitationsAtom);
+
+        const markers = store.get(citationKeyToMarkerAtom);
+        expect(markers).toEqual({ 'zotero:g7-ITEM': '1', 'zotero:4-ITEM': '1' });
+        expect(markers['zotero:9-ITEM']).toBeUndefined();
+    });
+
+    it('leaves an unresolvable library out of the alias set', () => {
+        const store = createStore();
+        // library_id 0 is the sentinel for a library this device cannot map; it
+        // is not a rowid and must never become a key.
+        store.set(citationsAtom, [citation({
+            citation_id: 'c1',
+            resolved_ref: { kind: 'zotero', library_id: 0, library_ref: 'g7', zotero_key: 'ITEM' },
+        })]);
+
+        store.set(processCitationsAtom);
+
+        expect(store.get(citationKeyToMarkerAtom)).toEqual({ 'zotero:g7-ITEM': '1' });
     });
 
     it('does not assign markers for invalid citations', () => {

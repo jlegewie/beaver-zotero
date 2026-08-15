@@ -1,9 +1,9 @@
 import React, { useState, useCallback, useMemo, useRef, useEffect } from "react";
-import Button from "../ui/Button";
+import Button from "@beaver/agent-ui/primitives/Button";
 import CopyButton from "../ui/buttons/CopyButton";
-import MenuButton from "../ui/MenuButton";
-import Spinner from "../icons/Spinner";
-import { MenuItem } from "../ui/menu/ContextMenu";
+import MenuButton from "@beaver/agent-ui/primitives/MenuButton";
+import Spinner from "@beaver/agent-ui/icons/Spinner";
+import { MenuItem } from "@beaver/agent-ui/primitives/ContextMenu";
 import {
     Icon,
     ArrowDownIcon,

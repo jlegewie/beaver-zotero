@@ -3,6 +3,9 @@
 <?xml-stylesheet href="chrome://zotero/skin/zotero.css" type="text/css"?>
 <?xml-stylesheet href="chrome://zotero/skin/overlay.css" type="text/css"?>
 <?xml-stylesheet href="chrome://zotero-platform/content/zotero.css" type="text/css"?>
+<?xml-stylesheet href="chrome://beaver/content/styles/agent-ui-tokens.css" type="text/css"?>
+<?xml-stylesheet href="chrome://beaver/content/styles/agent-ui-utilities.css" type="text/css"?>
+<?xml-stylesheet href="chrome://beaver/content/styles/agent-ui-components.css" type="text/css"?>
 <?xml-stylesheet href="chrome://beaver/content/styles/beaver.css" type="text/css"?>
 <!DOCTYPE window>
 <window
@@ -19,6 +22,10 @@
 >
     <script type="application/javascript" src="chrome://beaver/content/beaverPreferences.js"/>
 
-    <!-- React mount point -->
-    <html:div id="beaver-pane-preferences" class="display-flex flex-1 flex-col h-full w-full min-w-0" style="height: 100%; width: 100%; display: flex;"></html:div>
+    <!-- React mount point. `beaver-root` is the scoping root for the shared
+         @beaver/agent-ui sheets, which select `.beaver-root .foo`; it belongs on
+         every element carrying a `beaver-pane-*` id. The preferences pane is a
+         full React surface built from the same utility vocabulary, so it needs
+         the class as much as the sidebar does. -->
+    <html:div id="beaver-pane-preferences" class="beaver-root display-flex flex-1 flex-col h-full w-full min-w-0" style="height: 100%; width: 100%; display: flex;"></html:div>
 </window>

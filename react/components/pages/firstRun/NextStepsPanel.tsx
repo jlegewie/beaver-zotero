@@ -13,11 +13,11 @@ import {
     getWhereToStartCardKind,
     renderFollowup,
 } from '../../../types/firstRunFollowups';
-import Button from '../../ui/Button';
+import Button from '@beaver/agent-ui/primitives/Button';
 import { ArrowRightIcon, Icon, CancelIcon } from '../../icons/icons';
 import BackToSuggestions from './BackToSuggestions';
-import IconButton from '../../ui/IconButton';
-import Tooltip from '../../ui/Tooltip';
+import IconButton from '@beaver/agent-ui/primitives/IconButton';
+import Tooltip from '@beaver/agent-ui/primitives/Tooltip';
 import { textWithTrailingNoWrap } from '../../../utils/textWithTrailingNoWrap';
 
 

@@ -19,7 +19,7 @@ import {
     NoteChip,
     TagChip,
 } from './RequestChipPrimitives';
-import type { ChipPopupSubtitle } from './ChipPopup';
+import type { ChipPopupSubtitle } from '@beaver/agent-ui/chat/ChipPopup';
 
 const EMPTY_ATTACHMENTS: NonNullable<BeaverAgentPrompt['attachments']> = [];
 

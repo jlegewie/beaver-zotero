@@ -5,13 +5,13 @@ import { planFeaturesAtom } from '../../atoms/profile';
 import { attachmentsService, AttachmentStatusPagedResponse, ProcessingStatus } from '../../../src/services/attachmentsService';
 import { logger } from '@beaver/agent-core/platform/logger';
 import ZoteroAttachmentList from '../ui/ZoteroAttachmentList';
-import Button from '../ui/Button';
-import Tooltip from '../ui/Tooltip';
+import Button from '@beaver/agent-ui/primitives/Button';
+import Tooltip from '@beaver/agent-ui/primitives/Tooltip';
 import { FailedFileReference } from '../../types/fileStatus';
 import { Icon, ArrowDownIcon, ArrowRightIcon, RepeatIcon } from '../icons/icons';
 import { getMimeType, loadFullItemData } from '../../../src/utils/zoteroUtils';
 import { UNRESOLVED_LIBRARY_ID } from '../../../src/utils/libraryIdentity';
-import IconButton from '../ui/IconButton';
+import IconButton from '@beaver/agent-ui/primitives/IconButton';
 import { retryUploads } from '../../../src/services/FileUploader';
 
 const ITEMS_PER_PAGE = 10;

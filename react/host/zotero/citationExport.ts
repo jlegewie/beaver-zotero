@@ -1,6 +1,7 @@
 import { getPageLabelsForItem } from './itemData';
 import { getPageLocator } from '@beaver/agent-core/citations/citationGrammar';
-import { resolvePageLabelFromLabels, translatePageNumberToLabelFromLabels } from '../../utils/pageLabels';
+import { translatePageNumberToLabelFromLabels } from '../../utils/pageLabels';
+import { resolvePageLabelFromLabels } from '@beaver/agent-ui/utils/pageLabels';
 import { buildZoteroCitationLinkHTML, isLinkCitationItem } from '../../../src/utils/zoteroLinkCitation';
 import { resolveLibraryRef } from '../../../src/utils/libraryIdentity';
 import { BEAVER_CITATION_META_KEY, buildBeaverCitationMeta } from '../../../src/utils/noteCitationLoc';
@@ -11,7 +12,7 @@ import type {
     CitationExportRender,
     DocumentExportHost,
     ExternalFileCitationExportRequest,
-} from '../types';
+} from '@beaver/agent-ui/host/types';
 
 /** Escape text for safe interpolation into an HTML attribute or text node. */
 function escapeHtml(value: string): string {

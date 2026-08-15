@@ -11,18 +11,20 @@ import {
     isExternalReferenceDetailsDialogVisibleAtom,
     selectedExternalReferenceAtom
 } from '../../../atoms/ui';
-import Button from '../../../components/ui/Button';
-import IconButton from '../../../components/ui/IconButton';
-import Tooltip from '../../../components/ui/Tooltip';
+import Button from '@beaver/agent-ui/primitives/Button';
+import IconButton from '@beaver/agent-ui/primitives/IconButton';
+import Tooltip from '@beaver/agent-ui/primitives/Tooltip';
 import { ZOTERO_ICONS } from '../../../components/icons/ZoteroIcon';
 import { ZoteroIcon } from '../../../components/icons/ZoteroIcon';
 import { revealSource } from '../../../utils/sourceUtils';
 import {
     checkExternalReferenceAtom,
-    externalReferenceItemMappingAtom,
-    isCheckingReferenceObjectAtom,
     markExternalReferenceImportedAtom,
 } from '../../../atoms/externalReferences';
+import {
+    externalReferenceItemMappingAtom,
+    isCheckingReferenceObjectAtom,
+} from '@beaver/agent-core/citations/externalReferences';
 import { createZoteroItem, stampBeaverProvenanceExtra } from '../../../utils/addItemActions';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { ensureItemSynced } from '../../../../src/utils/sync';
@@ -37,7 +39,7 @@ import { CreateItemResultData } from '@beaver/agent-core/types/agentActions/item
 import { currentThreadIdAtom } from '../../../atoms/threads';
 import { searchableLibraryIdsAtom } from '../../../atoms/profile';
 import type { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
-import type { ExternalReferenceActionMode, ExternalReferenceActionsProps } from '../../types';
+import type { ExternalReferenceActionMode, ExternalReferenceActionsProps } from '@beaver/agent-ui/host/types';
 import { resolveSearchableLibraryId } from '../libraryAccess';
 
 const CITED_BY_URL = 'https://openalex.org/works?page=1&filter=cites:';

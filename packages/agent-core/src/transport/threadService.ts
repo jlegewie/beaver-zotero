@@ -1,4 +1,5 @@
 import { ApiService } from './apiService';
+import { ServerError, SessionRefreshError } from '../types/apiErrors';
 
 
 /**
@@ -117,6 +118,35 @@ export function isThreadAgentMismatch(thread: Pick<ThreadModel, 'agent_name'>): 
     if (!thread.agent_name) return false;
     return thread.agent_name !== clientAgentName;
 }
+
+/**
+ * What the backend did with a thread truncation request.
+ *
+ * A refusal means the thread was rewritten elsewhere and nothing was deleted:
+ * `'not_a_suffix'` when a run the request did not name sits after the first
+ * named one (the thread was continued), `'tail_mismatch'` when the run that
+ * would survive as the thread's last is not the one the client expected (the
+ * tail was replaced or further truncated). Naming runs that no longer exist
+ * while the expected tail still matches is a success with an empty
+ * `deleted_run_ids` (idempotent no-op).
+ */
+export interface ThreadTruncationReport {
+    deleted_run_ids: string[];
+    refused_run_ids: string[];
+    reason: 'not_a_suffix' | 'tail_mismatch' | null;
+}
+
+/**
+ * Whether a truncate POST failed in a way a re-POST can answer: the request
+ * may never have arrived (network, timeout) or died in transit (5xx). A 4xx
+ * is a definitive answer already and must not be retried.
+ */
+function isRetryableTruncateFailure(error: unknown): boolean {
+    return error instanceof ServerError || error instanceof SessionRefreshError;
+}
+
+/** Per-attempt deadline: the retry UI blocks on this call. */
+const TRUNCATE_TIMEOUT_MS = 15000;
 
 /**
  * Thread-specific API service that extends the base API service
@@ -262,6 +292,47 @@ export class ThreadService extends ApiService {
             zotero_user_id: scope.zoteroUserId,
             expected_user_id: expectedUserId,
         });
+    }
+
+    /**
+     * Deletes explicitly named trailing runs from a thread — the commit point
+     * of a retry. Nothing local may change until this resolves successfully.
+     *
+     * The endpoint is idempotent, so one network-shaped failure (timeout,
+     * connection loss, 5xx) is answered with a single re-POST: a response
+     * lost after the backend applied the deletion then resolves to a
+     * definitive empty success instead of silent drift. 4xx responses are
+     * definitive and rethrown as-is.
+     *
+     * @param threadId The ID of the thread to truncate
+     * @param removedRunIds The run IDs the retry replaces (never inferred)
+     * @param expectedTailRunId The run expected to remain the thread's last
+     *   after the removal (null when the whole thread is named). The backend
+     *   refuses with `tail_mismatch` when the surviving tail differs, which
+     *   is what tells an idempotent replay apart from a retry against a
+     *   thread rewritten elsewhere.
+     * @returns Report of what the backend deleted or refused
+     */
+    async truncateThread(
+        threadId: string,
+        removedRunIds: string[],
+        expectedTailRunId: string | null
+    ): Promise<ThreadTruncationReport> {
+        const endpoint = `/api/v1/agents/beaver/threads/${threadId}/truncate`;
+        const body = {
+            removed_run_ids: removedRunIds,
+            expected_tail_run_id: expectedTailRunId,
+        };
+        try {
+            return await this.post<ThreadTruncationReport>(endpoint, body, {
+                timeoutMs: TRUNCATE_TIMEOUT_MS,
+            });
+        } catch (error) {
+            if (!isRetryableTruncateFailure(error)) throw error;
+            return await this.post<ThreadTruncationReport>(endpoint, body, {
+                timeoutMs: TRUNCATE_TIMEOUT_MS,
+            });
+        }
     }
 
     /**

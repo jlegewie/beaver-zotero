@@ -155,12 +155,18 @@ if (!parsed.options.lib || nonEsLibs.length > 0) {
 // them. `run-state/atoms.ts` is deliberately absent — `toolLabels` imports it,
 // so listing it as a root would only cost the orphan signal that catches it
 // dropping out of the closure.
+//
+// `citations/atoms.ts` is a root on the same rule: it is the citation render
+// state a client reads and writes directly, and nothing else in the package
+// imports it. So is `transport/otp.ts`: a client's sign-in form calls it, and
+// nothing inside the package has a reason to send anyone a code.
 const entryPaths = [
   "src/globals.d.ts",
   "src/protocol/agentProtocol.ts",
   "src/protocol/wordProtocol.ts",
   "src/transport/providerConnection.ts",
   "src/transport/threadService.ts",
+  "src/transport/otp.ts",
   "src/transport/agentActionQueue.ts",
   "src/transport/attachmentLimits.ts",
   "src/transport/clients/accountService.ts",
@@ -169,12 +175,17 @@ const entryPaths = [
   "src/transport/clients/embeddingsService.ts",
   "src/transport/clients/searchService.ts",
   "src/transport/clients/diagnosticsService.ts",
+  "src/transport/clients/zoteroLibraryService.ts",
   "src/run-state/toolResultViews.ts",
   "src/run-state/toolResultTypes.ts",
   "src/run-state/toolCallRequest.ts",
   "src/run-state/runResumeHelpers.ts",
+  "src/run-state/loadThreadRuns.ts",
   "src/run-state/toolLabels.ts",
   "src/run-state/pendingQuestions.ts",
+  "src/run-state/runErrorCopy.ts",
+  "src/citations/atoms.ts",
+  "src/citations/externalReferences.ts",
 ].map((p) => path.join(pkgDir, p));
 
 const listed = parsed.fileNames.map((f) => path.resolve(f));

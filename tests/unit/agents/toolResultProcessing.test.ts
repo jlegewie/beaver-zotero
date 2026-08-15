@@ -8,8 +8,11 @@ const mockLoadFullItemDataWithAllTypes = vi.fn();
 const mockExtractZoteroReferences = vi.fn();
 
 vi.mock('../../../react/atoms/externalReferences', () => ({
-    addExternalReferencesToMappingAtom: {},
     checkExternalReferencesAtom: {},
+}));
+
+vi.mock('@beaver/agent-core/citations/externalReferences', () => ({
+    addExternalReferencesToMappingAtom: {},
 }));
 
 vi.mock('../../../src/utils/zoteroUtils', () => ({

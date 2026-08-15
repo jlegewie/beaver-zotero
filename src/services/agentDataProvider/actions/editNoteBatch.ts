@@ -35,7 +35,7 @@ import {
     type ExternalRefContext,
     type ResolvedLocatorPages,
 } from '../../../utils/noteCitationExpand';
-import type { PageLabelsByAttachmentId } from '../../../../react/atoms/citations';
+import type { PageLabelsByAttachmentId } from '@beaver/agent-core/citations/atoms';
 import {
     getLatestNoteHtml,
     waitForNoteSaveStabilization,

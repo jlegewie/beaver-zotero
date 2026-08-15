@@ -35,17 +35,43 @@ zc_sqlite3() {
   fi
 }
 
+# True if a Zotero is currently using this profile or data dir.
+#
+# On macOS the profile lock is an flock on an open `.parentlock` fd -- there is
+# no `lock` symlink -- so an open fd is the only reliable signal.
+#
+# Usage: zc_dir_in_use <profile-dir|data-dir>
+zc_dir_in_use() {
+  local d="$1" f
+  command -v lsof >/dev/null 2>&1 || return 1
+  for f in "$d/.parentlock" "$d/zotero.sqlite"; do
+    [[ -e "$f" ]] || continue
+    lsof -- "$f" >/dev/null 2>&1 && return 0
+  done
+  return 1
+}
+
 # Delete files that are meaningless or actively harmful once copied:
 #   - profile/data locks: always stale in a copy.
 #   - *.is.corrupt markers and *.repair.tmp / *.check.tmp files: Zotero's
 #     database-recovery state. A stale pending repair would let Zotero swap an
 #     older database copy over the clone's on first launch.
 #
+# ONLY meaningful on a directory no Zotero is using. Removing a LIVE profile's
+# `.parentlock` does not stop the running instance (it keeps its fd), it just
+# drops the guard that stops a second instance from opening the same profile and
+# data dir -- two Zoteros on one database is how you corrupt it. A directory in
+# use is therefore skipped with a warning rather than cleaned.
+#
 # Usage: zc_strip_clone_artifacts <profile-dir> <data-dir>
 zc_strip_clone_artifacts() {
   local d
   for d in "$@"; do
     [[ -d "$d" ]] || continue
+    if zc_dir_in_use "$d"; then
+      echo "!!  Skipping lock/recovery cleanup: a Zotero is using $d" >&2
+      continue
+    fi
     find "$d" -maxdepth 1 \
       \( -name '.parentlock' -o -name 'parent.lock' -o -name 'lock' \) \
       -delete 2>/dev/null || true

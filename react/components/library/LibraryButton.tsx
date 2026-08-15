@@ -2,11 +2,11 @@ import React from 'react';
 import { useSetAtom, useAtomValue } from 'jotai';
 import { CSSIcon, LibraryIcon } from '../icons/icons';
 import { removeLibraryIdAtom } from '../../atoms/messageComposition';
-import { truncateText } from '../../utils/stringUtils';
+import { truncateText } from '@beaver/agent-ui/utils/stringUtils';
 import { selectLibrary } from '../../../src/utils/selectItem';
 import { searchableLibraryIdsAtom } from '../../atoms/profile';
 import { useRemoveContextMenu } from '../../hooks/useRemoveContextMenu';
-import { ChipWithPopup, type ChipPopupContent } from '../agentRuns/requestChips/ChipPopup';
+import { ChipWithPopup, type ChipPopupContent } from '@beaver/agent-ui/chat/ChipPopup';
 import { ChipButton } from '../agentRuns/requestChips/ChipButton';
 import { ChipRemovableIcon } from '../agentRuns/requestChips/ChipRemovableIcon';
 

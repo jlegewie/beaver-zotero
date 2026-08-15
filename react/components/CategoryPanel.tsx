@@ -1,7 +1,7 @@
 import React from "react";
 import { useAtomValue } from "jotai";
-import Button from "./ui/Button";
-import Tooltip from "./ui/Tooltip";
+import Button from "@beaver/agent-ui/primitives/Button";
+import Tooltip from "@beaver/agent-ui/primitives/Tooltip";
 import { CSSIcon, CSSItemTypeIcon } from "./icons/zotero";
 import { ArrowUpRightIcon, ArrowRightIcon } from "./icons/icons";
 import { Action, ActionCategory, TARGET_TYPE_LABELS } from "@beaver/agent-core/types/actions";
@@ -9,8 +9,8 @@ import { actionsForContextAtom, actionContextAtom } from "../atoms/actions";
 import { GroupIconInfo, splitCategoryActions, getActiveTarget } from "../utils/actionVisibility";
 import { useActionRunner } from "../hooks/useActionRunner";
 import { openPreferencesWindow } from "../../src/ui/openPreferencesWindow";
-import { buildActionPopup } from "./agentRuns/requestChips/actionPopup";
-import { ChipPopupCard } from "./agentRuns/requestChips/ChipPopup";
+import { buildActionPopup } from "@beaver/agent-ui/chat/actionPopup";
+import { ChipPopupCard } from "@beaver/agent-ui/chat/ChipPopup";
 
 interface CategoryPanelProps {
     /** A skill category, or `null` for the uncategorized "Actions" bucket. */

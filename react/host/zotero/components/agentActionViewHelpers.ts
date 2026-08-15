@@ -1,6 +1,7 @@
 import React from 'react';
 import { isAnyEditNoteActionType } from '@beaver/agent-core/agents/agentActionTypes';
-import { AgentAction, PendingApproval, isCreateAnnotationsAgentAction } from '../../../agents/agentActions';
+import { AgentAction, isCreateAnnotationsAgentAction } from '../../../agents/agentActions';
+import type { PendingApproval } from '@beaver/agent-ui/host';
 import {
     CheckmarkCircleIcon,
     CancelCircleIcon,
@@ -19,7 +20,7 @@ import {
     NoteIcon,
     EditIcon,
 } from '../../../components/icons/icons';
-import { truncateText } from '../../../utils/stringUtils';
+import { truncateText } from '@beaver/agent-ui/utils/stringUtils';
 
 export type ActionStatus = 'pending' | 'applied' | 'rejected' | 'undone' | 'error';
 

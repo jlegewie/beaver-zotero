@@ -1,7 +1,7 @@
 import React, { useMemo } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
-import MenuButton from '../ui/MenuButton';
-import { MenuItem } from '../ui/menu/ContextMenu';
+import MenuButton from '@beaver/agent-ui/primitives/MenuButton';
+import { MenuItem } from '@beaver/agent-ui/primitives/ContextMenu';
 import { ArrowDownIcon, Icon, TickIcon } from '../icons/icons';
 import {
     DeferredToolPreference,

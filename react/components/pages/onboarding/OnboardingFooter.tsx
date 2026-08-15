@@ -1,6 +1,6 @@
 import React from "react";
 import { Spinner, ArrowRightIcon, ArrowLeftIcon } from "../../icons/icons";
-import Button, { ButtonVariant } from "../../ui/Button";
+import Button, { ButtonVariant } from "@beaver/agent-ui/primitives/Button";
 
 interface OnboardingFooterProps {
     /** Message displayed on the left side of the footer */
