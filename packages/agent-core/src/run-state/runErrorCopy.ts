@@ -1,7 +1,11 @@
 /**
- * User-facing titles for agent-run error types, as shown by the in-chat error
- * card.
+ * User-facing copy for a failed agent run.
+ *
+ * Shared across clients so the same failure reads the same everywhere.
+ * Presentation-neutral: no markup, styling, or host APIs.
  */
+
+/** Header titles by error type. Unknown types fall back rather than showing a raw identifier. */
 const RUN_ERROR_TITLE_BY_TYPE: Record<string, string> = {
     // Account & Auth
     profile_not_found: 'Account Error',
@@ -57,10 +61,15 @@ const RUN_ERROR_TITLE_BY_TYPE: Record<string, string> = {
     llm_client_error: 'Client Error',
 };
 
-/**
- * Typed title for an agent-run error, matching the in-chat error card header.
- */
+/** Header title for an agent-run error type, with a fallback for unknown types. */
 export function getRunErrorTitle(type: string | undefined): string {
     if (!type) return 'An error occurred';
     return RUN_ERROR_TITLE_BY_TYPE[type] || 'An error occurred';
+}
+
+/** Strip a leading `"<type>: "` prefix from a backend error message. */
+export function stripRunErrorTypePrefix(message: string, type: string | undefined): string {
+    if (!type) return message;
+    const prefix = `${type}: `;
+    return message.startsWith(prefix) ? message.slice(prefix.length) : message;
 }
