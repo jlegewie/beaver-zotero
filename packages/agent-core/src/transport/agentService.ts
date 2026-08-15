@@ -772,7 +772,7 @@ export class AgentService {
                     break;
 
                 case 'thread':
-                    this.callbacks.onThread(event.thread_id);
+                    this.callbacks.onThread(event.thread_id, event.retry_truncation);
                     break;
 
                 case 'thread_name':

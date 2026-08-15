@@ -1,6 +1,6 @@
 /**
- * User-facing titles for agent-run error types (shared by the in-chat error
- * card and the retry-restore popup).
+ * User-facing titles for agent-run error types, as shown by the in-chat error
+ * card.
  */
 const RUN_ERROR_TITLE_BY_TYPE: Record<string, string> = {
     // Account & Auth
@@ -63,36 +63,4 @@ const RUN_ERROR_TITLE_BY_TYPE: Record<string, string> = {
 export function getRunErrorTitle(type: string | undefined): string {
     if (!type) return 'An error occurred';
     return RUN_ERROR_TITLE_BY_TYPE[type] || 'An error occurred';
-}
-
-/**
- * Popup body for a failed retry that restored the previous thread: typed title
- * plus the user-facing message and optional longer details.
- */
-export function formatRetryRestorePopupText(params: {
-    type?: string;
-    message?: string;
-    details?: string;
-}): string {
-    const title = getRunErrorTitle(params.type);
-    const message = params.message?.trim() ?? '';
-    const details = params.details?.trim() ?? '';
-
-    const strippedMessage = params.type && message.startsWith(`${params.type}: `)
-        ? message.substring(params.type.length + 2).trim()
-        : message;
-
-    let text = title;
-    if (strippedMessage) {
-        text += `. ${strippedMessage}`;
-    }
-    // Connection failures carry a longer troubleshooting paragraph in details;
-    // skip when it repeats the short message.
-    if (details && details !== strippedMessage) {
-        text = /[.!?]$/.test(text) ? `${text} ${details}` : `${text}. ${details}`;
-    }
-    if (!/[.!?]$/.test(text)) {
-        text += '.';
-    }
-    return text;
 }

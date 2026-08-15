@@ -133,10 +133,28 @@ export interface WSStreamingDoneEvent extends WSBaseEvent {
     run_id: string;
 }
 
+/**
+ * What the server removed from the thread while reconciling it against a
+ * legacy retry request (`retry_run_id` / `retry_keep_run_ids`).
+ *
+ * Kept for wire compatibility.
+ */
+export interface WSRetryTruncation {
+    /** Runs deleted from the thread by this request, oldest first. */
+    deleted_run_ids: string[];
+    /** Which anchor the truncation used, or null when none ran. */
+    anchored_by: 'thread_run_ids' | 'keep_set' | 'retry_run_id' | null;
+}
+
 /** Thread event sent when a thread is initialized or created */
 export interface WSThreadEvent extends WSBaseEvent {
     event: 'thread';
     thread_id: string;
+    /**
+     * Present when the server reconciled this thread against a legacy retry
+     * request. Never triggered by current clients, which ignore it.
+     */
+    retry_truncation?: WSRetryTruncation | null;
 }
 
 /** Thread name event sent after background thread name generation completes */
@@ -2300,20 +2318,17 @@ export interface AgentRunRequest {
     api_key?: string;
     /** Custom model configuration (mutually exclusive with model_id) */
     custom_model?: CustomChatModel;
-    /** If set, instructs the server to retry from this run ID, deleting it and all subsequent runs */
+    /**
+     * Legacy, no longer sent by this client. Instructed the server to retry
+     * from this run ID, deleting it and all subsequent runs. Retries now
+     * commit their removal through `POST /threads/{id}/truncate` before the
+     * run request is sent; the field stays documented because the backend
+     * keeps accepting it from released clients.
+     */
     retry_run_id?: string;
     /**
-     * Retry only. The run IDs the client still holds for this thread after
-     * dropping the ones it is regenerating.
-     *
-     * Run IDs are client-generated, so `retry_run_id` can name a run the server
-     * never persisted — a retry whose request died before the setup phase
-     * finished leaves the client holding an ID that does not exist server-side,
-     * and every later retry anchored on it matches nothing. This set gives the
-     * server a second anchor: it deletes the trailing block of runs that are not
-     * in the set, reconciling a thread whose client-side and server-side views
-     * have drifted apart. A set matching no run in the thread is ignored, so
-     * `retry_run_id` must always be sent alongside it as the fallback.
+     * Legacy, no longer sent by this client (see `retry_run_id`). The run IDs
+     * the client still held after dropping the ones it was regenerating.
      */
     retry_keep_run_ids?: string[];
     /** Pre-generated assistant message ID (optional) */
@@ -2410,8 +2425,11 @@ export interface WSCallbacks {
     /**
      * Called when a thread is initialized or created
      * @param threadId The thread ID
+     * @param truncation What the server removed reconciling the thread against
+     *        the client's asserted state, when it removed anything. Absent from
+     *        backends that predate the report.
      */
-    onThread: (threadId: string) => void;
+    onThread: (threadId: string, truncation?: WSRetryTruncation | null) => void;
 
     /**
      * Called when the backend generates a name for a new thread

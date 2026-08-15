@@ -5,7 +5,7 @@ import Button from '@beaver/agent-ui/primitives/Button';
 import ContextMenu from '@beaver/agent-ui/primitives/ContextMenu';
 import useSelectionContextMenu from '../../hooks/useSelectionContextMenu';
 import { parseTextWithLinksAndNewlines } from '../../utils/parseTextWithLinksAndNewlines';
-import { regenerateFromRunAtom, resumeFromRunAtom } from '../../atoms/agentRunAtoms';
+import { regenerateFromRunAtom, resumeFromRunAtom, retryPendingRunIdAtom } from '../../atoms/agentRunAtoms';
 import { runErrorVisibilityAtom, setRunErrorVisibilityAtom } from '../../atoms/messageUIState';
 import { remainingBeaverCreditsAtom, errorCreditCheckAtom } from '../../atoms/profile';
 import { beaverDefaultModelAtom, updateSelectedModelAtom, type ModelConfig } from '../../atoms/models';
@@ -66,7 +66,14 @@ export const RunErrorDisplay: React.FC<RunErrorDisplayProps> = ({ runId, error, 
 
     const [isHovered, setIsHovered] = useState(false);
 
+    // Loading state while this run's retry commits its removal on the
+    // backend (truncate POST + undo). `clickedAction` remembers which button
+    // started it so only that one shows the spinner; the others just disable.
+    const isRetryPending = useAtomValue(retryPendingRunIdAtom) === runId;
+    const [clickedAction, setClickedAction] = useState<'retry' | 'try-with-beaver' | null>(null);
+
     const handleRetry = async () => {
+        setClickedAction('retry');
         await regenerateFromRun(runId);
     };
 
@@ -76,6 +83,7 @@ export const RunErrorDisplay: React.FC<RunErrorDisplayProps> = ({ runId, error, 
 
     const handleRetryWithBeaver = async () => {
         if (!defaultBeaverModel) return;
+        setClickedAction('try-with-beaver');
         updateSelectedModel({ ...defaultBeaverModel, access_mode: 'app_key' });
         await regenerateFromRun(runId);
     };
@@ -172,7 +180,8 @@ export const RunErrorDisplay: React.FC<RunErrorDisplayProps> = ({ runId, error, 
                                         iconClassName="font-color-red"
                                         rightIcon={DollarCircleIcon}
                                         onClick={handleRetryWithBeaver}
-                                        disabled={!defaultBeaverModel}
+                                        disabled={!defaultBeaverModel || isRetryPending}
+                                        loading={isRetryPending && clickedAction === 'try-with-beaver'}
                                         data-run-error-action="try-with-beaver"
                                         data-run-error-primary-action={primaryActionAttr('try-with-beaver')}
                                     >
@@ -197,6 +206,7 @@ export const RunErrorDisplay: React.FC<RunErrorDisplayProps> = ({ runId, error, 
                                         iconClassName="font-color-red"
                                         rightIcon={LinkForwardIcon}
                                         onClick={handleResume}
+                                        disabled={isRetryPending}
                                         data-run-error-action="resume"
                                         data-run-error-primary-action={primaryActionAttr('resume')}
                                     >
@@ -209,6 +219,8 @@ export const RunErrorDisplay: React.FC<RunErrorDisplayProps> = ({ runId, error, 
                                         iconClassName="font-color-red"
                                         rightIcon={RepeatIcon}
                                         onClick={handleRetry}
+                                        disabled={isRetryPending}
+                                        loading={isRetryPending && clickedAction === 'retry'}
                                         data-run-error-action="retry"
                                         data-run-error-primary-action={primaryActionAttr('retry')}
                                     >
