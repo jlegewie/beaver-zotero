@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useSetAtom } from 'jotai';
 import type { PendingCreditConfirmation } from '@beaver/agent-core/run-state/pendingCreditConfirmations';
+import { removePendingCreditConfirmationAtom } from '@beaver/agent-core/run-state/pendingCreditConfirmations';
 import {
     closeWSConnectionAtom,
     sendCreditConfirmationResponseAtom,
@@ -49,8 +50,6 @@ interface CreditConfirmationCardProps {
     confirmation: PendingCreditConfirmation;
     /** Disables every control once a decision has been made */
     disabled: boolean;
-    containerRef: React.RefObject<HTMLDivElement>;
-    onKeyDown: (event: React.KeyboardEvent<HTMLDivElement>) => void;
     onApprove: () => void;
     onDecline: () => void;
     onStop: () => void;
@@ -66,24 +65,23 @@ interface CreditConfirmationCardProps {
  * belongs to whichever backend asked for it.
  *
  * Deliberately hook-free so it can be exercised as a plain function.
+ *
+ * Spending credits is a decision the user has to make deliberately, so the
+ * card has no keyboard shortcut and never takes focus: a keypress meant for
+ * the composer must not be able to answer it.
  */
 export const CreditConfirmationCard: React.FC<CreditConfirmationCardProps> = ({
     confirmation,
     disabled,
-    containerRef,
-    onKeyDown,
     onApprove,
     onDecline,
     onStop,
 }) => (
     <div
-        ref={containerRef}
         className="user-message-display"
         style={{ minHeight: 'fit-content' }}
         role="group"
         aria-label="Credit confirmation"
-        tabIndex={-1}
-        onKeyDown={onKeyDown}
     >
         <div className="display-flex flex-col gap-15">
             {/* Header: static icon + the backend's title */}
@@ -142,9 +140,7 @@ export const CreditConfirmationCard: React.FC<CreditConfirmationCardProps> = ({
                     onClick={onApprove}
                     disabled={disabled}
                 >
-                    <span>
-                        {confirmation.approveLabel} <span className="opacity-50">⏎</span>
-                    </span>
+                    {confirmation.approveLabel}
                 </Button>
             </div>
         </div>
@@ -168,17 +164,18 @@ interface CreditConfirmationPanelProps {
  * already has (both are backend-defined — see the labels it sends). Stop
  * cancels the run outright, which is a different outcome from either.
  *
- * The panel takes focus on mount so Enter (approve, the default action) and
- * Escape (decline) work without the user first clicking into the card.
+ * The card is retired when the backend's own deadline passes: past it the run
+ * has already moved on, and a card that still looks answerable would take a
+ * decision nothing is listening for.
  */
 export const CreditConfirmationPanel: React.FC<CreditConfirmationPanelProps> = ({ confirmation }) => {
     const sendResponse = useSetAtom(sendCreditConfirmationResponseAtom);
     const closeWSConnection = useSetAtom(closeWSConnectionAtom);
+    const removeConfirmation = useSetAtom(removePendingCreditConfirmationAtom);
 
     // Drives the disabled styling in the instant before the panel unmounts.
     // The one-shot guard lives in the handlers, not here.
     const [isSubmitted, setIsSubmitted] = useState(false);
-    const containerRef = useRef<HTMLDivElement>(null);
 
     // Built once per panel instance. Sidebar keys the panel by confirmationId,
     // so a new confirmation mounts a new panel with fresh handlers, and
@@ -193,34 +190,25 @@ export const CreditConfirmationPanel: React.FC<CreditConfirmationPanelProps> = (
     }
     const handlers = handlersRef.current;
 
+    const { confirmationId, timeoutSeconds } = confirmation;
     useEffect(() => {
-        containerRef.current?.focus();
-    }, []);
+        if (!timeoutSeconds || timeoutSeconds <= 0) return;
+        const timer = setTimeout(() => {
+            logger(`CreditConfirmationPanel: Confirmation ${confirmationId} expired`, 1);
+            removeConfirmation(confirmationId);
+        }, timeoutSeconds * 1000);
+        return () => clearTimeout(timer);
+    }, [confirmationId, timeoutSeconds, removeConfirmation]);
 
     const handleStop = useCallback(() => {
         logger('CreditConfirmationPanel: Stopping run while credit confirmation pending');
         closeWSConnection(); // Also clears pending confirmations -> panel unmounts
     }, [closeWSConnection]);
 
-    const handleKeyDown = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
-        if (event.altKey || event.ctrlKey || event.metaKey) return;
-        if (event.key === 'Enter' && !event.shiftKey) {
-            // preventDefault so a focused button is not activated a second
-            // time by the same keypress.
-            event.preventDefault();
-            handlers.approve();
-        } else if (event.key === 'Escape') {
-            event.preventDefault();
-            handlers.decline();
-        }
-    }, [handlers]);
-
     return (
         <CreditConfirmationCard
             confirmation={confirmation}
             disabled={isSubmitted}
-            containerRef={containerRef}
-            onKeyDown={handleKeyDown}
             onApprove={handlers.approve}
             onDecline={handlers.decline}
             onStop={handleStop}

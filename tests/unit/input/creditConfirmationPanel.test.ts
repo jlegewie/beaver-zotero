@@ -143,8 +143,6 @@ function renderCard(overrides: Partial<PendingCreditConfirmation> = {}, disabled
     const tree = CreditConfirmationCard({
         confirmation: confirmation(overrides),
         disabled,
-        containerRef: React.createRef<HTMLDivElement>(),
-        onKeyDown: vi.fn(),
         onApprove,
         onDecline,
         onStop,
@@ -263,5 +261,21 @@ describe('createCreditDecisionHandlers', () => {
 
         expect(sendSpy).toHaveBeenCalledTimes(1);
         expect(sendSpy).toHaveBeenCalledWith({ confirmationId: 'conf-1', approved: true });
+    });
+});
+
+describe('CreditConfirmationCard keyboard safety', () => {
+    it('answers only on click, never on a keypress', () => {
+        // Spending credits has to be deliberate. A shortcut on the card would
+        // let a keypress meant for the composer answer it, and would answer it
+        // the same way no matter which button the user had focused.
+        const { tree } = renderCard();
+        const root = tree as React.ReactElement<{
+            onKeyDown?: unknown;
+            tabIndex?: number;
+        }>;
+
+        expect(root.props.onKeyDown).toBeUndefined();
+        expect(root.props.tabIndex).toBeUndefined();
     });
 });

@@ -15,7 +15,7 @@
  *   - Completed responses: the reply only renders inside the sidebar, so a
  *     user working elsewhere has no signal it is ready (see notifyRunComplete).
  *
- * Both are gated on whether the user can currently see the Beaver UI. Three
+ * All are gated on whether the user can currently see the Beaver UI. Three
  * visibility scenarios are handled (see getBeaverVisibility):
  *   A) Beaver UI is on screen and focused  -> no notification (user sees it).
  *   B) A Zotero window is focused but Beaver is not visible -> system
@@ -327,6 +327,11 @@ function truncateBody(text: string): string {
  * wording of its own, exactly as the card does.
  */
 export function notifyCreditConfirmation(event: WSCreditConfirmationRequest): void {
+    // The card's message is written for a panel, so a notification-sized slice
+    // of it ends mid-sentence and points at detail lines no notification shows.
+    // The details themselves are short, backend-composed and self-contained.
+    const body = event.details.length > 0 ? event.details.join(" · ") : event.message;
+
     if (getPref("enableSystemNotifications") !== true) {
         return;
     }
@@ -349,7 +354,7 @@ export function notifyCreditConfirmation(event: WSCreditConfirmationRequest): vo
 
     showNotification(
         event.title,
-        truncateBody(event.message),
+        truncateBody(body),
         CREDIT_CONFIRMATION_NOTIFICATION_NAME,
     );
 }

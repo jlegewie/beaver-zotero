@@ -3,6 +3,10 @@ import {SettingsGroup, SettingsRow, SectionLabel, DocLink, SectionHeader, Sectio
 import DeferredToolPreferenceSetting from "./DeferredToolPreferenceSetting";
 import { getPref, setPref } from "../../../src/utils/prefs";
 
+// Upper bound for the credit limit. The preference is stored as a 32-bit
+// integer, so a larger entry would wrap to a negative limit.
+const MAX_CREDIT_THRESHOLD = 1_000_000;
+
 
 const PermissionsSection: React.FC = () => {
 
@@ -31,25 +35,34 @@ const PermissionsSection: React.FC = () => {
     }, [autoCreateNotes]);
 
     // --- Handle Confirm Credit Use Toggle ---
+    // This is the only remaining UI for the per-tool cost confirmations, which
+    // older backends read instead of the run-level preference and which the
+    // approval dropdown on a cost card can still switch off. Writing all three
+    // together keeps them consistent and makes this toggle the way back.
     const handleConfirmCreditsToggle = useCallback(() => {
         const newValue = !confirmCredits;
         setPref('confirmCredits', newValue);
+        setPref('confirmExtractionCosts', newValue);
+        setPref('confirmExternalSearchCosts', newValue);
         setConfirmCredits(newValue);
     }, [confirmCredits]);
 
     // --- Handle Credit Confirmation Limit ---
     // The field is edited as free text and only written on commit (blur or
     // Enter): writing per keystroke would store "1" on the way to "10", and an
-    // empty field mid-edit is not a limit. A value that is not a non-negative
-    // number is rejected and the field snaps back to the stored preference.
+    // empty field mid-edit is not a limit. The preference holds an integer, so
+    // the entry is rounded and capped before it is stored — an out-of-range
+    // value would otherwise wrap and be rejected by the server on every run.
+    // Anything that is not a non-negative number snaps back to what is stored.
     const commitCreditThreshold = useCallback(() => {
         const parsed = Number(creditThresholdText.trim());
         if (creditThresholdText.trim() === '' || !Number.isFinite(parsed) || parsed < 0) {
             setCreditThresholdText(String(getPref('creditConfirmThreshold')));
             return;
         }
-        setPref('creditConfirmThreshold', parsed);
-        setCreditThresholdText(String(parsed));
+        const stored = Math.min(Math.round(parsed), MAX_CREDIT_THRESHOLD);
+        setPref('creditConfirmThreshold', stored);
+        setCreditThresholdText(String(stored));
     }, [creditThresholdText]);
 
     // --- Handle System Notifications Toggle ---
@@ -207,7 +220,7 @@ const PermissionsSection: React.FC = () => {
                 )}
                 <SettingsRow
                     title="Approval Notifications"
-                    description="Show a system notification when an agent action needs your approval and Beaver is not visible."
+                    description="Show a system notification when Beaver is waiting for your decision and is not visible."
                     onClick={handleEnableSystemNotificationsToggle}
                     hasBorder
                     control={
