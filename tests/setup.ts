@@ -63,12 +63,13 @@ const pathUtils = {
 // ---------------------------------------------------------------------------
 // Unit tests run in the Node environment by default. Only suites that opt into
 // a DOM environment should expose `window`, so avoid eagerly importing jsdom
-// here. That import currently fails in this toolchain before any tests load.
-// Build a lazy, jsdom-backed window for tests that need real DOM APIs
-// (e.g. ProseMirror normalization in the notes suites). We try to load
-// jsdom at first access; if it isn't available or fails to initialize,
-// the fallback is an empty object and DOM-dependent tests will surface
+// here — most files never touch the DOM and would pay the construction cost for
+// nothing. Build a lazy, jsdom-backed window for tests that need real DOM APIs
+// (e.g. ProseMirror normalization in the notes suites). If jsdom fails to
+// initialize the fallback is an empty object, so DOM-dependent tests surface
 // their own descriptive errors rather than a stack-overflow recursion.
+// Note: the most common cause of a jsdom load failure — a Node too old for
+// require(esm) — is caught up front by tests/helpers/assertNodeVersion.ts.
 let fallbackWindow: any = null;
 function getTestWindow() {
     if (fallbackWindow) return fallbackWindow;

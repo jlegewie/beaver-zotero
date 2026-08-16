@@ -23,7 +23,7 @@
  */
 
 import type { SimplificationMetadata, StoredElement } from './noteHtmlSimplifier';
-import type { PageLabelsByAttachmentId } from '../../react/atoms/citations';
+import type { PageLabelsByAttachmentId } from '@beaver/agent-core/citations/atoms';
 import type {
     EditNoteBlocksOp,
     EditNoteBlocksSkipReasonCode,

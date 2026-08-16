@@ -20,6 +20,9 @@
     },
     "homepage": "https://www.beaverapp.ai",
     "license": "AGPL-3.0-or-later",
+    "engines": {
+        "node": ">=20.19.0"
+    },
     "scripts": {
         "start": "npm run copy:agent-ui-css && concurrently \"zotero-plugin serve\" \"npm run watch-react\"",
         "build": "npm run copy:agent-ui-css && NODE_ENV=production npm run build-react:prod && NODE_ENV=production zotero-plugin build && tsc --noEmit && npm run typecheck:core && npm run typecheck:ui",

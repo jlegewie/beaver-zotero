@@ -1,6 +1,10 @@
 import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vitest/config';
 
+// Fails the run early, with one legible message, on a Node too old for the
+// require(esm) that jsdom's CSS stack performs. See the helper for why.
+import './tests/helpers/assertNodeVersion';
+
 const agentCoreSrc = fileURLToPath(new URL('./packages/agent-core/src', import.meta.url));
 const agentUiSrc = fileURLToPath(new URL('./packages/agent-ui/src', import.meta.url));
 

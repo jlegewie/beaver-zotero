@@ -135,7 +135,7 @@ vi.mock('../../../react/store', () => ({
     store: { get: vi.fn() },
 }));
 
-vi.mock('../../../react/atoms/citations', () => ({
+vi.mock('@beaver/agent-core/citations/atoms', () => ({
     citationMapAtom: Symbol('citationMapAtom'),
 }));
 
