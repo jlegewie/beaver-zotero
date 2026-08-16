@@ -160,6 +160,7 @@ import {
     handleTestLoadThreadHttpRequest,
     handleTestListActionsHttpRequest,
     handleTestApproveActionHttpRequest,
+    handleTestConfirmCreditsHttpRequest,
     handleTestUndoActionHttpRequest,
 } from './httpHandlers/testChatHandlers';
 import {
@@ -1223,6 +1224,8 @@ function registerEndpoints(): boolean {
             createEndpoint(handleTestListActionsHttpRequest);
         Zotero.Server.Endpoints['/beaver/test/approve-action'] =
             createEndpoint(handleTestApproveActionHttpRequest);
+        Zotero.Server.Endpoints['/beaver/test/confirm-credits'] =
+            createEndpoint(handleTestConfirmCreditsHttpRequest);
         Zotero.Server.Endpoints['/beaver/test/undo-action'] =
             createEndpoint(handleTestUndoActionHttpRequest);
 

@@ -193,15 +193,25 @@ export const CreditConfirmationPanel: React.FC<CreditConfirmationPanelProps> = (
     }
     const handlers = handlersRef.current;
 
-    const { confirmationId, timeoutSeconds } = confirmation;
+    // Retire the card when the backend's deadline passes. The deadline is
+    // absolute and was stamped when the request arrived, so a card that only
+    // renders now — the panel lives in the thread view, which the user can
+    // navigate away from — is retired immediately if the run already gave up.
+    const { confirmationId, expiresAt } = confirmation;
     useEffect(() => {
-        if (!timeoutSeconds || timeoutSeconds <= 0) return;
-        const timer = setTimeout(() => {
+        if (!expiresAt) return;
+        const expire = () => {
             logger(`CreditConfirmationPanel: Confirmation ${confirmationId} expired`, 1);
             removeConfirmation(confirmationId);
-        }, timeoutSeconds * 1000);
+        };
+        const remaining = expiresAt - Date.now();
+        if (remaining <= 0) {
+            expire();
+            return;
+        }
+        const timer = setTimeout(expire, remaining);
         return () => clearTimeout(timer);
-    }, [confirmationId, timeoutSeconds, removeConfirmation]);
+    }, [confirmationId, expiresAt, removeConfirmation]);
 
     const handleStop = useCallback(() => {
         logger('CreditConfirmationPanel: Stopping run while credit confirmation pending');

@@ -303,7 +303,7 @@ describe('pendingCreditConfirmations atoms', () => {
 
         const map = store.get(pendingCreditConfirmationsAtom);
         expect(map.size).toBe(1);
-        expect(map.get('conf-1')).toEqual({
+        expect(map.get('conf-1')).toMatchObject({
             confirmationId: 'conf-1',
             runId: 'run-1',
             threadId: 'thread-1',
@@ -317,6 +317,20 @@ describe('pendingCreditConfirmations atoms', () => {
             threshold: 5,
             timeoutSeconds: 300,
         });
+    });
+
+    it('stamps the deadline on arrival, not when a panel renders', () => {
+        // The card only renders in thread view, so a user who navigates away
+        // and returns must not be given a fresh countdown for a decision the
+        // run has already given up on.
+        const store = createStore();
+        const before = Date.now();
+        store.set(addPendingCreditConfirmationAtom, confirmationEvent());
+        const after = Date.now();
+
+        const expiresAt = store.get(pendingCreditConfirmationsAtom).get('conf-1')!.expiresAt;
+        expect(expiresAt).toBeGreaterThanOrEqual(before + 300_000);
+        expect(expiresAt).toBeLessThanOrEqual(after + 300_000);
     });
 
     it('removes a pending confirmation by id (the stale-notice path)', () => {

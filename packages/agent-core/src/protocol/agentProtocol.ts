@@ -1914,7 +1914,12 @@ export interface WSCreditConfirmationResponse {
     confirmation_id: string;
     /** Whether the user let the run continue */
     approved: boolean;
-    /** Optional additional instructions from the user */
+    /**
+     * Optional note from the user, passed to the model when the run continues
+     * without the priced steps. Only meaningful alongside a declined decision:
+     * an approval covers the rest of the run unconditionally, so it cannot
+     * carry a condition.
+     */
     user_instructions?: string | null;
 }
 

@@ -44,6 +44,15 @@ export interface PendingCreditConfirmation {
     threshold: number;
     /** How long the backend will wait for a response, in seconds */
     timeoutSeconds: number;
+    /**
+     * When the backend stops waiting, as a local timestamp.
+     *
+     * Stamped on arrival rather than measured from when a panel renders: the
+     * card only renders in thread view, so a user who navigates away and comes
+     * back would otherwise be shown a fresh countdown for a decision the run
+     * has already given up on.
+     */
+    expiresAt: number;
 }
 
 /**
@@ -57,6 +66,9 @@ export const pendingCreditConfirmationsAtom = atom<Map<string, PendingCreditConf
 export const addPendingCreditConfirmationAtom = atom(
     null,
     (_get, set, event: WSCreditConfirmationRequest) => {
+        // The backend started its clock before it sent this, so the deadline is
+        // stamped now — the earliest the client can know about the request.
+        const expiresAt = Date.now() + (event.timeout_seconds ?? 0) * 1000;
         set(pendingCreditConfirmationsAtom, (prev) => {
             const next = new Map(prev);
             next.set(event.confirmation_id, {
@@ -72,6 +84,7 @@ export const addPendingCreditConfirmationAtom = atom(
                 projectedTotalCredits: event.projected_total_credits,
                 threshold: event.threshold,
                 timeoutSeconds: event.timeout_seconds,
+                expiresAt,
             });
             return next;
         });
