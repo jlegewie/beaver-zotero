@@ -2,7 +2,7 @@
  * OS-native system notifications for events the user may miss while working
  * outside the Beaver UI.
  *
- * Three events are surfaced:
+ * Four events are surfaced:
  *   - Deferred approval requests (note edit, metadata change, cost
  *     confirmation, ...): the approval UI only renders inside the Beaver
  *     sidebar, so if the user is elsewhere the task stalls waiting for a
@@ -10,6 +10,8 @@
  *   - User questions (ask_user_question tool): the question panel only renders
  *     inside the sidebar, so the run stalls until the user answers and a user
  *     working elsewhere has no signal it is waiting (see notifyUserQuestion).
+ *   - Credit confirmations: the run pauses on a spending decision that can only
+ *     be answered in the sidebar (see notifyCreditConfirmation).
  *   - Completed responses: the reply only renders inside the sidebar, so a
  *     user working elsewhere has no signal it is ready (see notifyRunComplete).
  *
@@ -32,7 +34,11 @@ import { getPref } from "../utils/prefs";
 import { store } from "../../react/store";
 import { isSidebarVisibleAtom } from "../../react/atoms/ui";
 import { BeaverUIFactory } from "../ui/ui";
-import { WSAskUserQuestionRequest, WSDeferredApprovalRequest } from "@beaver/agent-core/protocol/agentProtocol";
+import {
+    WSAskUserQuestionRequest,
+    WSCreditConfirmationRequest,
+    WSDeferredApprovalRequest,
+} from "@beaver/agent-core/protocol/agentProtocol";
 
 type BeaverVisibility = "beaver-visible" | "zotero-focused" | "zotero-unfocused";
 
@@ -44,7 +50,12 @@ const NOTIFICATION_ICON = `chrome://${config.addonRef}/content/icons/beaver.png`
 // notifications from replacing each other.
 const APPROVAL_NOTIFICATION_NAME = "beaver-approval";
 const QUESTION_NOTIFICATION_NAME = "beaver-question";
+const CREDIT_CONFIRMATION_NOTIFICATION_NAME = "beaver-credit-confirmation";
 const RUN_COMPLETE_NOTIFICATION_NAME = "beaver-run-complete";
+
+// Notification bodies are one-liners in the OS shell; longer copy is elided
+// rather than wrapped. The card in the sidebar carries the full text.
+const MAX_BODY_CHARS = 160;
 
 // Parallel tool calls can queue several approvals in the same tick. Collect
 // them for a short window and surface a single notification with a count.
@@ -298,6 +309,49 @@ export function notifyUserQuestion(event: WSAskUserQuestionRequest): void {
 
     const { title, body } = describeQuestions(event);
     showNotification(title, body, QUESTION_NOTIFICATION_NAME);
+}
+
+/** Shorten a body to one notification-sized line. */
+function truncateBody(text: string): string {
+    const cleaned = text.replace(/\s+/g, " ").trim();
+    return cleaned.length > MAX_BODY_CHARS
+        ? `${cleaned.slice(0, MAX_BODY_CHARS - 1).trimEnd()}…`
+        : cleaned;
+}
+
+/**
+ * Surface a system notification when a run pauses for a credit confirmation
+ * and the user can't currently see the Beaver UI.
+ *
+ * The title and body are the backend's own copy — this path composes no
+ * wording of its own, exactly as the card does.
+ */
+export function notifyCreditConfirmation(event: WSCreditConfirmationRequest): void {
+    if (getPref("enableSystemNotifications") !== true) {
+        return;
+    }
+
+    const visibility = getBeaverVisibility();
+
+    switch (visibility) {
+        case "beaver-visible":
+            // Scenario A: the card is already on screen — nothing to do.
+            return;
+        case "zotero-focused":
+            // SCENARIO B: Zotero is focused but Beaver is not visible.
+            // TODO: when an in-app Zotero notification exists, route this case
+            // there instead of falling through to a system notification.
+            break;
+        case "zotero-unfocused":
+            // Scenario C: Zotero is in the background.
+            break;
+    }
+
+    showNotification(
+        event.title,
+        truncateBody(event.message),
+        CREDIT_CONFIRMATION_NOTIFICATION_NAME,
+    );
 }
 
 /**

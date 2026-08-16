@@ -8,7 +8,7 @@
 import { atom, Getter, Setter } from 'jotai';
 import { v4 as uuidv4 } from 'uuid';
 import { agentService, AgentConnectionError } from '@beaver/agent-core/transport/agentService';
-import { notifyRunComplete, notifyUserQuestion } from '../../src/services/systemNotifications';
+import { notifyCreditConfirmation, notifyRunComplete, notifyUserQuestion } from '../../src/services/systemNotifications';
 import { reportConnectionFailure } from '@beaver/agent-core/transport/clients/diagnosticsService';
 import {
     baselineConnectionEvidence,
@@ -1878,6 +1878,10 @@ function createWSCallbacks(set: Setter): WSCallbacks {
             // projected total, is decided by the backend from the preferences
             // sent with the run request.
             set(addPendingCreditConfirmationAtom, event);
+
+            // Surface an OS-native notification if the user can't currently see
+            // the card — the run stays parked until they decide.
+            notifyCreditConfirmation(event);
         },
 
         onCreditConfirmationStale: (event: WSCreditConfirmationStale) => {

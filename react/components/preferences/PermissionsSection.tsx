@@ -9,8 +9,8 @@ const PermissionsSection: React.FC = () => {
     // --- Atoms: Permissions ---
     const [autoApplyAnnotations, setAutoApplyAnnotations] = useState(() => getPref('autoApplyAnnotations'));
     const [autoCreateNotes, setAutoCreateNotes] = useState(() => getPref('autoCreateNotes'));
-    const [confirmExtractionCosts, setConfirmExtractionCosts] = useState(() => getPref('confirmExtractionCosts'));
-    const [confirmExternalSearchCosts, setConfirmExternalSearchCosts] = useState(() => getPref('confirmExternalSearchCosts'));
+    const [confirmCredits, setConfirmCredits] = useState(() => getPref('confirmCredits'));
+    const [creditThresholdText, setCreditThresholdText] = useState(() => String(getPref('creditConfirmThreshold')));
     const [enableSystemNotifications, setEnableSystemNotifications] = useState(() => getPref('enableSystemNotifications'));
     const [enableResponseCompleteNotifications, setEnableResponseCompleteNotifications] = useState(() => getPref('enableResponseCompleteNotifications'));
     const [pauseLongRunningAgent, setPauseLongRunningAgent] = useState(() => getPref('pauseLongRunningAgent'));
@@ -30,19 +30,27 @@ const PermissionsSection: React.FC = () => {
         setAutoCreateNotes(newValue);
     }, [autoCreateNotes]);
 
-    // --- Handle Confirm Extraction Costs Toggle ---
-    const handleConfirmExtractionCostsToggle = useCallback(() => {
-        const newValue = !confirmExtractionCosts;
-        setPref('confirmExtractionCosts', newValue);
-        setConfirmExtractionCosts(newValue);
-    }, [confirmExtractionCosts]);
+    // --- Handle Confirm Credit Use Toggle ---
+    const handleConfirmCreditsToggle = useCallback(() => {
+        const newValue = !confirmCredits;
+        setPref('confirmCredits', newValue);
+        setConfirmCredits(newValue);
+    }, [confirmCredits]);
 
-    // --- Handle Confirm External Search Costs Toggle ---
-    const handleConfirmExternalSearchCostsToggle = useCallback(() => {
-        const newValue = !confirmExternalSearchCosts;
-        setPref('confirmExternalSearchCosts', newValue);
-        setConfirmExternalSearchCosts(newValue);
-    }, [confirmExternalSearchCosts]);
+    // --- Handle Credit Confirmation Limit ---
+    // The field is edited as free text and only written on commit (blur or
+    // Enter): writing per keystroke would store "1" on the way to "10", and an
+    // empty field mid-edit is not a limit. A value that is not a non-negative
+    // number is rejected and the field snaps back to the stored preference.
+    const commitCreditThreshold = useCallback(() => {
+        const parsed = Number(creditThresholdText.trim());
+        if (creditThresholdText.trim() === '' || !Number.isFinite(parsed) || parsed < 0) {
+            setCreditThresholdText(String(getPref('creditConfirmThreshold')));
+            return;
+        }
+        setPref('creditConfirmThreshold', parsed);
+        setCreditThresholdText(String(parsed));
+    }, [creditThresholdText]);
 
     // --- Handle System Notifications Toggle ---
     const handleEnableSystemNotificationsToggle = useCallback(() => {
@@ -155,35 +163,48 @@ const PermissionsSection: React.FC = () => {
                     }
                 />
                 <SettingsRow
-                    title="Confirm Extraction Costs"
-                    description="Ask before using extra credits for batch extraction. Only relevant when using Beaver credits."
-                    onClick={handleConfirmExtractionCostsToggle}
+                    title="Confirm Credit Use"
+                    description={
+                        <>
+                            Ask once per request before it goes over the credit limit below. Only relevant when using Beaver credits. <DocLink path="credits">Learn more</DocLink>
+                        </>
+                    }
+                    onClick={handleConfirmCreditsToggle}
                     hasBorder
                     control={
                         <input
                             type="checkbox"
-                            checked={confirmExtractionCosts}
-                            onChange={handleConfirmExtractionCostsToggle}
+                            checked={confirmCredits}
+                            onChange={handleConfirmCreditsToggle}
                             onClick={(e) => e.stopPropagation()}
                             style={{ cursor: 'pointer', margin: 0 }}
                         />
                     }
                 />
-                <SettingsRow
-                    title="Confirm External Search Costs"
-                    description="Ask before using extra credits for external literature search. Only relevant when using Beaver credits."
-                    onClick={handleConfirmExternalSearchCostsToggle}
-                    hasBorder
-                    control={
-                        <input
-                            type="checkbox"
-                            checked={confirmExternalSearchCosts}
-                            onChange={handleConfirmExternalSearchCostsToggle}
-                            onClick={(e) => e.stopPropagation()}
-                            style={{ cursor: 'pointer', margin: 0 }}
-                        />
-                    }
-                />
+                {confirmCredits && (
+                    <SettingsRow
+                        title="Credit Limit"
+                        description="Beaver asks before a single request is projected to use more credits than this."
+                        hasBorder
+                        control={
+                            <input
+                                type="number"
+                                min={0}
+                                step={1}
+                                inputMode="decimal"
+                                aria-label="Credit limit"
+                                value={creditThresholdText}
+                                onChange={(e) => setCreditThresholdText(e.target.value)}
+                                onBlur={commitCreditThreshold}
+                                onKeyDown={(e) => {
+                                    if (e.key === 'Enter') e.currentTarget.blur();
+                                }}
+                                onClick={(e) => e.stopPropagation()}
+                                style={{ width: '72px', margin: 0 }}
+                            />
+                        }
+                    />
+                )}
                 <SettingsRow
                     title="Approval Notifications"
                     description="Show a system notification when an agent action needs your approval and Beaver is not visible."
