@@ -51,11 +51,11 @@ import { sendCreditConfirmationResponseAtom } from '../../../react/atoms/agentRu
 
 // Deliberately digit-free copy, so any digit in the rendered output can only
 // have come from the numeric fields below.
-const TITLE = 'Continue for more credits?';
-const MESSAGE = 'This request is projected to go over your confirmation limit.';
-const DETAILS = ['Extract from attachments — some credits', 'Deep search of external sources — one credit'];
+const TITLE = 'Continue past your credit limit?';
+const MESSAGE = 'This request is about to go over your limit. Wrapping up stops any further charges.';
+const DETAILS = ['Very large context — one credit', 'Extract from attachments — some credits', 'Deep search of external sources — one credit'];
 const APPROVE_LABEL = 'Continue';
-const DECLINE_LABEL = 'Skip these steps';
+const DECLINE_LABEL = 'Wrap up now';
 
 function confirmation(overrides: Partial<PendingCreditConfirmation> = {}): PendingCreditConfirmation {
     return {

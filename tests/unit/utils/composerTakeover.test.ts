@@ -20,7 +20,7 @@ function confirmation(id = 'conf-1'): PendingCreditConfirmation {
         message: 'Over your limit.',
         details: [],
         approveLabel: 'Continue',
-        declineLabel: 'Skip these steps',
+        declineLabel: 'Wrap up now',
         pendingCredits: 4,
         projectedTotalCredits: 9,
         threshold: 5,
