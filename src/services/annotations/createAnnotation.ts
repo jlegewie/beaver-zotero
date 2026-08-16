@@ -9,9 +9,10 @@ import { getAttachmentFileStatus } from "../agentDataProvider/utils";
 import { isRemoteFilePath } from "../documentFileIdentity";
 import { libraryRefForLibraryID } from "../../utils/libraryIdentity";
 import {
-    BEAVER_ANNOTATION_AUTHOR,
+    getBeaverAnnotationAuthorName,
     resolveBeaverAnnotationColor,
 } from "../../constants/annotations";
+import { markBeaverAnnotationWrite } from "./beaverAnnotationRegistry";
 import {
     displayBoxToZoteroRect,
     sourceBboxesToZoteroRects,
@@ -33,6 +34,20 @@ import {
 
 const NOTE_RECT_SIZE = 18;
 const NOTE_SIDE_MARGIN = 12;
+
+/**
+ * Persist an annotation Beaver is creating: stamp the configured author, apply
+ * tags, and record the write before `saveTx()` (observers run inside it).
+ */
+async function saveBeaverAnnotation(item: Zotero.Item, tags?: string[]): Promise<void> {
+    item.annotationAuthorName = getBeaverAnnotationAuthorName();
+    // addTag calls setTags internally, so tags persist in the same write.
+    if (tags?.length) {
+        for (const tag of tags) item.addTag(tag);
+    }
+    markBeaverAnnotationWrite(item);
+    await item.saveTx();
+}
 
 function createdAnnotationReference(attachment: Zotero.Item, item: Zotero.Item): ZoteroItemReference {
     return {
@@ -487,12 +502,7 @@ export async function createHighlightAnnotation(
     item.annotationComment = input.comment ?? "";
     item.annotationColor = resolveBeaverAnnotationColor(input.color);
     applyAnnotationPlacement(item, buildHighlightPlacement(input, geometry));
-    item.annotationAuthorName = BEAVER_ANNOTATION_AUTHOR;
-    // addTag calls setTags internally, so tags persist in the same write.
-    if (input.tags?.length) {
-        for (const tag of input.tags) item.addTag(tag);
-    }
-    await item.saveTx();
+    await saveBeaverAnnotation(item, input.tags);
 
     return createdAnnotationReference(attachment, item);
 }
@@ -520,12 +530,7 @@ export async function createNoteAnnotation(
     item.annotationComment = input.comment;
     item.annotationColor = resolveBeaverAnnotationColor(input.color);
     applyAnnotationPlacement(item, buildNotePlacement(input, geometry));
-    item.annotationAuthorName = BEAVER_ANNOTATION_AUTHOR;
-    // addTag calls setTags internally, so tags persist in the same write.
-    if (input.tags?.length) {
-        for (const tag of input.tags) item.addTag(tag);
-    }
-    await item.saveTx();
+    await saveBeaverAnnotation(item, input.tags);
 
     return createdAnnotationReference(attachment, item);
 }
@@ -644,11 +649,7 @@ export async function createEpubHighlightAnnotation(
             pageLabel: input.pageLabel,
         }),
     );
-    item.annotationAuthorName = BEAVER_ANNOTATION_AUTHOR;
-    if (input.tags?.length) {
-        for (const tag of input.tags) item.addTag(tag);
-    }
-    await item.saveTx();
+    await saveBeaverAnnotation(item, input.tags);
 
     return createdAnnotationReference(attachment, item);
 }
@@ -684,11 +685,7 @@ export async function createEpubNoteAnnotation(
             pageLabel: input.pageLabel,
         }),
     );
-    item.annotationAuthorName = BEAVER_ANNOTATION_AUTHOR;
-    if (input.tags?.length) {
-        for (const tag of input.tags) item.addTag(tag);
-    }
-    await item.saveTx();
+    await saveBeaverAnnotation(item, input.tags);
 
     return createdAnnotationReference(attachment, item);
 }
@@ -827,11 +824,7 @@ export async function createSnapshotHighlightAnnotation(
         item,
         buildDomPlacement(resolved, { isHighlight: true }),
     );
-    item.annotationAuthorName = BEAVER_ANNOTATION_AUTHOR;
-    if (input.tags?.length) {
-        for (const tag of input.tags) item.addTag(tag);
-    }
-    await item.saveTx();
+    await saveBeaverAnnotation(item, input.tags);
 
     return createdAnnotationReference(attachment, item);
 }
@@ -862,11 +855,7 @@ export async function createSnapshotNoteAnnotation(
         item,
         buildDomPlacement(resolved, { isHighlight: false }),
     );
-    item.annotationAuthorName = BEAVER_ANNOTATION_AUTHOR;
-    if (input.tags?.length) {
-        for (const tag of input.tags) item.addTag(tag);
-    }
-    await item.saveTx();
+    await saveBeaverAnnotation(item, input.tags);
 
     return createdAnnotationReference(attachment, item);
 }

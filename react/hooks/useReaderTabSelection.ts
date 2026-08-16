@@ -17,6 +17,7 @@ import { BeaverTemporaryAnnotations, ZoteroReader } from '../utils/annotationUti
 import { store } from '../store';
 import { threadAgentActionsAtom, getZoteroItemReferenceFromAgentAction, hasAppliedBulkAnnotations, AgentAction } from '../agents/agentActions';
 import { BEAVER_CITATION_ANNOTATION_AUTHOR, isBeaverAuthoredAnnotation } from '../../src/constants/annotations';
+import { wasWrittenByBeaver } from '../../src/services/annotations/beaverAnnotationRegistry';
 import { getItemValidationAtom, isRejectedItemValidation } from '../atoms/itemValidation';
 import type { CreatedAnnotationResult } from '@beaver/agent-core/types/agentActions/createAnnotations';
 import { isActiveReaderTabType } from '../utils/zoteroTabTypes';
@@ -469,6 +470,8 @@ export function useReaderTabSelection() {
                             const item = Zotero.Items.get(ids[0]);
                             if(!item.isAnnotation() || !isValidAnnotationType(item.annotationType)) return;
                             if (item.parentID !== activeReaderItemID) return;
+                            // Skip Beaver's own writes. Author name is user-configurable and may be empty.
+                            if (wasWrittenByBeaver(item)) return;
                             if (isBeaverAuthoredAnnotation(item.annotationAuthorName)) return;
                             if (item.annotationText === BEAVER_CITATION_ANNOTATION_AUTHOR) return;
                             // Check if this annotation was created by an agent action

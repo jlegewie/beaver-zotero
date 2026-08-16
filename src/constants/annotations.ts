@@ -1,3 +1,5 @@
+import { getPref } from '../utils/prefs';
+
 export const BEAVER_ANNOTATION_AUTHOR = 'Beaver';
 export const BEAVER_CITATION_ANNOTATION_AUTHOR = 'Beaver Citation';
 export const BEAVER_VISUALIZER_ANNOTATION_AUTHOR = 'Beaver Visualizer';
@@ -65,8 +67,26 @@ const BEAVER_ANNOTATION_AUTHORS = new Set([
 ]);
 
 /**
- * Whether an annotation was created by Beaver (agent, citation preview, visualizer, etc.).
+ * Author name stored on annotations Beaver creates. Empty string means no
+ * attribution. Not a reliable authorship signal — see beaverAnnotationRegistry.
+ */
+export function getBeaverAnnotationAuthorName(): string {
+    const configured = getPref('annotationAuthorName');
+    return typeof configured === 'string' ? configured.trim() : BEAVER_ANNOTATION_AUTHOR;
+}
+
+/**
+ * Whether an annotation's author marks it as Beaver's (agent, citation
+ * preview, visualizer, etc.).
+ *
+ * Matches the built-in names (kept on older annotations) plus the configured
+ * name, unless that name is empty or the user's own Zotero display name — then
+ * matching it would misclassify the user's annotations.
  */
 export function isBeaverAuthoredAnnotation(authorName: string | undefined | null): boolean {
-    return !!authorName && BEAVER_ANNOTATION_AUTHORS.has(authorName);
+    if (!authorName) return false;
+    if (BEAVER_ANNOTATION_AUTHORS.has(authorName)) return true;
+    const configured = getBeaverAnnotationAuthorName();
+    if (!configured || configured !== authorName) return false;
+    return configured !== (Zotero.Users.getCurrentName() || '');
 }

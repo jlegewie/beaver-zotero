@@ -21,6 +21,7 @@ declare namespace _ZoteroTypes {
       "addBeaverProvenanceNote": boolean;
       "focusResponseForScreenReaders": boolean;
       "annotationToolEnabled": boolean;
+      "annotationAuthorName": string;
       "maxAddAttachmentToMessage": number;
       "readerExplainPrompt": string;
       "imeCompositionOrderFix": boolean;

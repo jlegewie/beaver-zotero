@@ -63,6 +63,10 @@ declare namespace Zotero {
     let __beaverJotaiStore: any;
     /** Set to true at the start of shutdown to signal all in-flight operations to bail out */
     let __beaverShuttingDown: boolean | undefined;
+    /** Items Beaver has just written; see beaverAnnotationRegistry.ts. Shared across bundles. */
+    let __beaverWrittenAnnotationItems: WeakSet<Zotero.Item> | undefined;
+    /** As above, keyed `libraryID:key` with the write timestamp, for reader writes. */
+    let __beaverWrittenAnnotationKeys: Map<string, number> | undefined;
 
     namespace Beaver {
         const pluginVersion: string;
