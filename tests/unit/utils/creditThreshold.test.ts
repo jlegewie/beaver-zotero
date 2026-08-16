@@ -4,12 +4,13 @@ import {
     MAX_CREDIT_THRESHOLD,
     clampCreditThreshold,
     parseCreditLimitEntry,
+    MIN_CREDIT_THRESHOLD,
 } from '../../../react/utils/creditThreshold';
 
 describe('clampCreditThreshold', () => {
     it('keeps a usable limit as it is', () => {
         expect(clampCreditThreshold(5)).toBe(5);
-        expect(clampCreditThreshold(0)).toBe(0);
+        expect(clampCreditThreshold(MIN_CREDIT_THRESHOLD)).toBe(MIN_CREDIT_THRESHOLD);
     });
 
     it('rounds to the integer the preference can hold', () => {
@@ -25,6 +26,7 @@ describe('clampCreditThreshold', () => {
         // A build that stored a wrapped value would otherwise send a negative
         // limit on every run, which the server rejects.
         expect(clampCreditThreshold(-1_294_967_296)).toBe(DEFAULT_CREDIT_THRESHOLD);
+        expect(clampCreditThreshold(0)).toBe(DEFAULT_CREDIT_THRESHOLD);
         expect(clampCreditThreshold(Number.NaN)).toBe(DEFAULT_CREDIT_THRESHOLD);
         expect(clampCreditThreshold(Number.POSITIVE_INFINITY)).toBe(DEFAULT_CREDIT_THRESHOLD);
     });
@@ -55,7 +57,14 @@ describe('parseCreditLimitEntry', () => {
         expect(parseCreditLimitEntry('abc')).toEqual({ kind: 'invalid' });
     });
 
-    it('accepts zero, which asks about any credit use', () => {
-        expect(parseCreditLimitEntry('0')).toEqual({ kind: 'limit', value: 0 });
+    it('refuses a limit below the minimum rather than rounding it up', () => {
+        // Clearing the field is how the user says "never ask"; a limit under
+        // the minimum is a typo, and silently storing 1 would hide that.
+        expect(parseCreditLimitEntry('0')).toEqual({ kind: 'invalid' });
+        expect(parseCreditLimitEntry('0.4')).toEqual({ kind: 'invalid' });
+        expect(parseCreditLimitEntry(String(MIN_CREDIT_THRESHOLD))).toEqual({
+            kind: 'limit',
+            value: MIN_CREDIT_THRESHOLD,
+        });
     });
 });

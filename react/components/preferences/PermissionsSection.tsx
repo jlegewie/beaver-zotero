@@ -2,7 +2,11 @@ import React, { useCallback, useState } from "react";
 import {SettingsGroup, SettingsRow, SectionLabel, DocLink, SectionHeader, SectionDescription} from "./components/SettingsElements";
 import DeferredToolPreferenceSetting from "./DeferredToolPreferenceSetting";
 import { getPref, setPref } from "../../../src/utils/prefs";
-import { parseCreditLimitEntry, readCreditThreshold } from "../../utils/creditThreshold";
+import {
+    MIN_CREDIT_THRESHOLD,
+    parseCreditLimitEntry,
+    readCreditThreshold,
+} from "../../utils/creditThreshold";
 
 
 const PermissionsSection: React.FC = () => {
@@ -179,7 +183,7 @@ const PermissionsSection: React.FC = () => {
                     control={
                         <input
                             type="number"
-                            min={0}
+                            min={MIN_CREDIT_THRESHOLD}
                             step={1}
                             inputMode="numeric"
                             placeholder="Never"
