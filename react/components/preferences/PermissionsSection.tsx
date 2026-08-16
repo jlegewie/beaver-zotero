@@ -2,7 +2,7 @@ import React, { useCallback, useState } from "react";
 import {SettingsGroup, SettingsRow, SectionLabel, DocLink, SectionHeader, SectionDescription} from "./components/SettingsElements";
 import DeferredToolPreferenceSetting from "./DeferredToolPreferenceSetting";
 import { getPref, setPref } from "../../../src/utils/prefs";
-import { clampCreditThreshold, readCreditThreshold } from "../../utils/creditThreshold";
+import { parseCreditLimitEntry, readCreditThreshold } from "../../utils/creditThreshold";
 
 
 const PermissionsSection: React.FC = () => {
@@ -10,8 +10,12 @@ const PermissionsSection: React.FC = () => {
     // --- Atoms: Permissions ---
     const [autoApplyAnnotations, setAutoApplyAnnotations] = useState(() => getPref('autoApplyAnnotations'));
     const [autoCreateNotes, setAutoCreateNotes] = useState(() => getPref('autoCreateNotes'));
-    const [confirmCredits, setConfirmCredits] = useState(() => getPref('confirmCredits'));
-    const [creditThresholdText, setCreditThresholdText] = useState(() => String(readCreditThreshold()));
+    // One control drives both stored values: a number is the limit, an empty
+    // field means never ask. `confirmCredits` is what carries "never" — the
+    // limit itself keeps its last value so clearing and refilling the field
+    // does not lose it.
+    const [creditThresholdText, setCreditThresholdText] = useState(() =>
+        getPref('confirmCredits') ? String(readCreditThreshold()) : '');
     const [enableSystemNotifications, setEnableSystemNotifications] = useState(() => getPref('enableSystemNotifications'));
     const [enableResponseCompleteNotifications, setEnableResponseCompleteNotifications] = useState(() => getPref('enableResponseCompleteNotifications'));
     const [pauseLongRunningAgent, setPauseLongRunningAgent] = useState(() => getPref('pauseLongRunningAgent'));
@@ -31,35 +35,27 @@ const PermissionsSection: React.FC = () => {
         setAutoCreateNotes(newValue);
     }, [autoCreateNotes]);
 
-    // --- Handle Confirm Credit Use Toggle ---
-    // This is the only remaining UI for the per-tool cost confirmations, which
-    // older backends read instead of the run-level preference and which the
-    // approval dropdown on a cost card can still switch off. Writing all three
-    // together keeps them consistent and makes this toggle the way back.
-    const handleConfirmCreditsToggle = useCallback(() => {
-        const newValue = !confirmCredits;
-        setPref('confirmCredits', newValue);
-        setPref('confirmExtractionCosts', newValue);
-        setPref('confirmExternalSearchCosts', newValue);
-        setConfirmCredits(newValue);
-    }, [confirmCredits]);
-
-    // --- Handle Credit Confirmation Limit ---
+    // --- Handle Credit Limit ---
     // The field is edited as free text and only written on commit (blur or
-    // Enter): writing per keystroke would store "1" on the way to "10", and an
-    // empty field mid-edit is not a limit. The preference holds an integer, so
-    // the entry is rounded and capped before it is stored — an out-of-range
-    // value would otherwise wrap and be rejected by the server on every run.
-    // Anything that is not a non-negative number snaps back to what is stored.
+    // Enter): writing per keystroke would store "1" on the way to "10". An
+    // empty field is a deliberate "never ask", not an invalid entry. The
+    // preference holds an integer, so a number is rounded and capped before it
+    // is stored — an out-of-range value would otherwise wrap and be rejected by
+    // the server on every run. Anything else snaps back to what is stored.
     const commitCreditThreshold = useCallback(() => {
-        const parsed = Number(creditThresholdText.trim());
-        if (creditThresholdText.trim() === '' || !Number.isFinite(parsed) || parsed < 0) {
-            setCreditThresholdText(String(readCreditThreshold()));
+        const entry = parseCreditLimitEntry(creditThresholdText);
+        if (entry.kind === 'never') {
+            setPref('confirmCredits', false);
+            setCreditThresholdText('');
             return;
         }
-        const stored = clampCreditThreshold(parsed);
-        setPref('creditConfirmThreshold', stored);
-        setCreditThresholdText(String(stored));
+        if (entry.kind === 'invalid') {
+            setCreditThresholdText(getPref('confirmCredits') ? String(readCreditThreshold()) : '');
+            return;
+        }
+        setPref('creditConfirmThreshold', entry.value);
+        setPref('confirmCredits', true);
+        setCreditThresholdText(String(entry.value));
     }, [creditThresholdText]);
 
     // --- Handle System Notifications Toggle ---
@@ -173,48 +169,32 @@ const PermissionsSection: React.FC = () => {
                     }
                 />
                 <SettingsRow
-                    title="Confirm Credit Use"
+                    title="Credit Limit"
                     description={
                         <>
-                            Ask once per request before it goes over the credit limit below. Only relevant when using Beaver credits. <DocLink path="credits">Learn more</DocLink>
+                            Ask before a single request uses more than this many credits in total. Leave empty to never ask. Only relevant when using Beaver credits. <DocLink path="credits">Learn more</DocLink>
                         </>
                     }
-                    onClick={handleConfirmCreditsToggle}
                     hasBorder
                     control={
                         <input
-                            type="checkbox"
-                            checked={confirmCredits}
-                            onChange={handleConfirmCreditsToggle}
+                            type="number"
+                            min={0}
+                            step={1}
+                            inputMode="numeric"
+                            placeholder="Never"
+                            aria-label="Credit limit"
+                            value={creditThresholdText}
+                            onChange={(e) => setCreditThresholdText(e.target.value)}
+                            onBlur={commitCreditThreshold}
+                            onKeyDown={(e) => {
+                                if (e.key === 'Enter') e.currentTarget.blur();
+                            }}
                             onClick={(e) => e.stopPropagation()}
-                            style={{ cursor: 'pointer', margin: 0 }}
+                            style={{ width: '72px', margin: 0 }}
                         />
                     }
                 />
-                {confirmCredits && (
-                    <SettingsRow
-                        title="Credit Limit"
-                        description="Beaver asks before a single request is projected to use more credits than this."
-                        hasBorder
-                        control={
-                            <input
-                                type="number"
-                                min={0}
-                                step={1}
-                                inputMode="decimal"
-                                aria-label="Credit limit"
-                                value={creditThresholdText}
-                                onChange={(e) => setCreditThresholdText(e.target.value)}
-                                onBlur={commitCreditThreshold}
-                                onKeyDown={(e) => {
-                                    if (e.key === 'Enter') e.currentTarget.blur();
-                                }}
-                                onClick={(e) => e.stopPropagation()}
-                                style={{ width: '72px', margin: 0 }}
-                            />
-                        }
-                    />
-                )}
                 <SettingsRow
                     title="Approval Notifications"
                     description="Show a system notification when Beaver is waiting for your decision and is not visible."

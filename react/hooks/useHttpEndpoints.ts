@@ -343,6 +343,7 @@ const ENDPOINT_PATHS = [
     '/beaver/test/load-thread',
     '/beaver/test/list-actions',
     '/beaver/test/approve-action',
+    '/beaver/test/confirm-credits',
     '/beaver/test/undo-action',
     '/beaver/test/application-state',
     '/beaver/test/beaver-window',

@@ -466,18 +466,15 @@ function createAgentRunShell(
 ): { run: AgentRun; request: AgentRunRequest } {
     const runId = runIdOverride ?? uuidv4();
 
-    // Get user preferences for charging permissions, then apply any partial override
-    // The run-level preference is what this build exposes. The two per-tool
-    // booleans are only read by a backend that predates the run-level
-    // confirmation, so they combine the run-level preference with whatever the
-    // user had set per tool — that way an older backend keeps honoring a tool
-    // the user had already opted out of confirming.
+    // Get user preferences for charging permissions, then apply any partial override.
+    // What a request may spend is one run-level preference: the credit limit,
+    // or no limit at all. The per-tool cost booleans this build no longer sets
+    // are left to their default on a backend old enough to read them, so such a
+    // backend asks per tool rather than charging silently.
     const confirmCredits = getPref('confirmCredits');
     const permissions: ChargingPermissions = {
-        confirm_extraction_costs: confirmCredits && getPref('confirmExtractionCosts'),
-        confirm_external_search_costs: confirmCredits && getPref('confirmExternalSearchCosts'),
         confirm_credits: confirmCredits,
-        credit_confirm_threshold: readCreditThreshold(),
+        credit_confirm_threshold: confirmCredits ? readCreditThreshold() : null,
         pause_long_running_agent: getPref('pauseLongRunningAgent'),
         ...permissionsOverride,
     };
@@ -1213,59 +1210,6 @@ export const prepareForNewRunAtom = atom(null, (_get, set) => {
 });
 
 /**
- * Pre-validate a confirm_extraction approval by checking which attachments
- * actually have files locally. If the number of existing attachments is within
- * the free tier (included_free), auto-approve without showing the dialog.
- * Credit logic stays on the backend -- this only gates whether to bother the user.
- */
-async function prevalidateExtractionApproval(
-    set: Setter,
-    event: WSDeferredApprovalRequest,
-    attachmentIds: string[],
-    includedFree: number,
-): Promise<void> {
-    let existingCount = 0;
-
-    for (const attachmentId of attachmentIds) {
-        try {
-            const ref = createZoteroItemReference(attachmentId);
-            if (!ref) continue;
-
-            const resolved = await resolveItemReference(ref);
-            if (resolved.status !== 'found') continue;
-            const item = resolved.item;
-            if (item && item.isAttachment()) {
-                existingCount++;
-            } else if (item && item.isRegularItem()) {
-                // Count regular items with exactly one supported attachment
-                // (the agent likely confused item ID with attachment ID)
-                await Zotero.Items.loadDataTypes([item], ['childItems']);
-                const attachmentIDs = item.getAttachments();
-                const supportedAttachments = attachmentIDs
-                    .map((id: number) => Zotero.Items.get(id))
-                    .filter((a: any) => a && a.isAttachment() && isAgentSupportedItem(a));
-                if (supportedAttachments.length === 1) {
-                    existingCount++;
-                }
-            }
-        } catch {
-            // Skip attachments that fail to resolve
-        }
-    }
-
-    logger(`prevalidateExtractionApproval: ${existingCount}/${attachmentIds.length} attachments have files locally (included_free=${includedFree})`, 1);
-
-    if (existingCount <= includedFree) {
-        // Not enough real attachments to incur extra charges -- auto-approve
-        logger(`prevalidateExtractionApproval: Auto-approving (${existingCount} <= ${includedFree})`, 1);
-        agentService.sendApprovalResponse(event.action_id, true);
-    } else {
-        // Show the dialog with the backend's original numbers
-        set(addPendingApprovalAtom, event);
-    }
-}
-
-/**
  * Find the args of the tool-call part that produced a given tool return, by
  * scanning the run's response messages. Used to derive the annotation-list
  * variant when synthesizing a legacy view; null when the call can't be found.
@@ -1802,37 +1746,10 @@ function createWSCallbacks(set: Setter): WSCallbacks {
                 actionType: event.action_type,
             }, 1);
 
-            // confirm_extraction: skip confirmation if user disabled it, then pre-validate
-            if (event.action_type === 'confirm_extraction') {
-                const confirmCosts = getPref('confirmExtractionCosts') as boolean;
-                if (!confirmCosts) {
-                    logger('WS onDeferredApprovalRequest: Auto-approving confirm_extraction (confirmation disabled)', 1);
-                    agentService.sendApprovalResponse(event.action_id, true);
-                    return;
-                }
-
-                // Pre-validate: auto-approve if few attachments exist locally
-                const attachmentIds: string[] = event.action_data?.attachment_ids ?? [];
-                const includedFree: number = event.action_data?.included_free ?? 0;
-
-                if (attachmentIds.length > 0) {
-                    prevalidateExtractionApproval(set, event, attachmentIds, includedFree).catch(err => {
-                        logger(`WS onDeferredApprovalRequest: Pre-validation failed, showing dialog: ${err}`, 1);
-                        set(addPendingApprovalAtom, event);
-                    });
-                    return;
-                }
-            }
-
-            // confirm_external_search: skip confirmation if user disabled it
-            if (event.action_type === 'confirm_external_search') {
-                const confirmCosts = getPref('confirmExternalSearchCosts') as boolean;
-                if (!confirmCosts) {
-                    logger('WS onDeferredApprovalRequest: Auto-approving confirm_external_search (confirmation disabled)', 1);
-                    agentService.sendApprovalResponse(event.action_id, true);
-                    return;
-                }
-            }
+            // Cost confirmations arrive this way only from a backend that
+            // predates the run-level credit confirmation. They are shown like
+            // any other approval: what a request may spend is decided once per
+            // run by the credit limit, never per tool call.
 
             // A grant can be selected while other validation requests are
             // already in flight. Catch those requests here even though future

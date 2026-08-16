@@ -26,8 +26,6 @@ import { logger } from '@beaver/agent-core/platform/logger';
 
 // Suggested first-run actions launch without cost-confirmation prompts.
 const FIRST_RUN_PERMISSIONS_OVERRIDE: Partial<ChargingPermissions> = {
-    confirm_extraction_costs: false,
-    confirm_external_search_costs: false,
     confirm_credits: false,
 };
 

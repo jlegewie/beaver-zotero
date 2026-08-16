@@ -25,3 +25,24 @@ export function clampCreditThreshold(value: number): number {
 export function readCreditThreshold(): number {
     return clampCreditThreshold(Number(getPref('creditConfirmThreshold')));
 }
+
+/**
+ * What a typed credit-limit entry means.
+ *
+ * `never` is an empty field, which is a deliberate choice and not an invalid
+ * entry. `invalid` is anything that is not a usable limit; the caller restores
+ * what is stored rather than writing it.
+ */
+export type CreditLimitEntry =
+    | { kind: 'never' }
+    | { kind: 'limit'; value: number }
+    | { kind: 'invalid' };
+
+/** Interpret the credit-limit field's text. */
+export function parseCreditLimitEntry(text: string): CreditLimitEntry {
+    const entry = text.trim();
+    if (entry === '') return { kind: 'never' };
+    const parsed = Number(entry);
+    if (!Number.isFinite(parsed) || parsed < 0) return { kind: 'invalid' };
+    return { kind: 'limit', value: clampCreditThreshold(parsed) };
+}

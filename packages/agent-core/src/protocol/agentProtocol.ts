@@ -2372,10 +2372,13 @@ export interface IndexingStatus {
 }
 
 export interface ChargingPermissions {
-    /** Whether to request user confirmation for extraction surcharges */
-    confirm_extraction_costs: boolean;
-    /** Whether to request user confirmation for external search surcharges */
-    confirm_external_search_costs: boolean;
+    /**
+     * Per-tool cost confirmations, read only by a backend that predates the
+     * run-level credit confirmation. Omitted by this build: such a backend
+     * defaults them to asking, which is the safe direction.
+     */
+    confirm_extraction_costs?: boolean;
+    confirm_external_search_costs?: boolean;
     /**
      * Whether to ask the user to confirm a run projected to cost credits at all.
      * Read only for clients that declare CLIENT_FEATURES.CREDIT_CONFIRMATION,
@@ -2383,8 +2386,9 @@ export interface ChargingPermissions {
      */
     confirm_credits: boolean;
     /**
-     * Projected run total, in credits, above which the user is asked to confirm.
-     * `null` uses the server default. Read only for clients that declare
+     * Total credits a single request may be projected to use before the user is
+     * asked to confirm it — the whole run cost, not just the surcharges. `null`
+     * uses the server default. Read only for clients that declare
      * CLIENT_FEATURES.CREDIT_CONFIRMATION.
      */
     credit_confirm_threshold: number | null;
