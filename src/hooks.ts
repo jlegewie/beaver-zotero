@@ -598,6 +598,8 @@ async function onMainWindowUnload(win: Window): Promise<void> {
         // 15. Drop React-bundle cross-bundle globals attached to Zotero
         Zotero.__beaverJotaiStore = undefined;
         Zotero.__beaverShuttingDown = undefined;
+        Zotero.__beaverWrittenAnnotationItems = undefined;
+        Zotero.__beaverWrittenAnnotationKeys = undefined;
 
         ztoolkit.log("onMainWindowUnload: Cleanup completed successfully");
     } catch (error: any) {
@@ -813,6 +815,8 @@ async function onShutdown(): Promise<void> {
         // shutdown flag that would short-circuit the next onStartup().
         Zotero.__beaverJotaiStore = undefined;
         Zotero.__beaverShuttingDown = undefined;
+        Zotero.__beaverWrittenAnnotationItems = undefined;
+        Zotero.__beaverWrittenAnnotationKeys = undefined;
         // Note: the singleton is removed from Zotero in addon/bootstrap.js's
     } catch (error) {
         ztoolkit.log("onShutdown: Error during cleanup:", error);
