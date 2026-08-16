@@ -133,6 +133,7 @@ import {
     removePendingCreditConfirmationAtom,
     clearAllPendingCreditConfirmationsAtom,
 } from '@beaver/agent-core/run-state/pendingCreditConfirmations';
+import { readCreditThreshold } from '../utils/creditThreshold';
 import { getAppliedPdfAnnotationCount } from '../agents/agentActionCounts';
 import { undoEditMetadataAction } from '../utils/editMetadataActions';
 import { undoCreateItemAction } from '../utils/createItemActions';
@@ -476,7 +477,7 @@ function createAgentRunShell(
         confirm_extraction_costs: confirmCredits && getPref('confirmExtractionCosts'),
         confirm_external_search_costs: confirmCredits && getPref('confirmExternalSearchCosts'),
         confirm_credits: confirmCredits,
-        credit_confirm_threshold: getPref('creditConfirmThreshold'),
+        credit_confirm_threshold: readCreditThreshold(),
         pause_long_running_agent: getPref('pauseLongRunningAgent'),
         ...permissionsOverride,
     };

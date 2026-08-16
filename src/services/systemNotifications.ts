@@ -327,14 +327,14 @@ function truncateBody(text: string): string {
  * wording of its own, exactly as the card does.
  */
 export function notifyCreditConfirmation(event: WSCreditConfirmationRequest): void {
-    // The card's message is written for a panel, so a notification-sized slice
-    // of it ends mid-sentence and points at detail lines no notification shows.
-    // The details themselves are short, backend-composed and self-contained.
-    const body = event.details.length > 0 ? event.details.join(" · ") : event.message;
-
     if (getPref("enableSystemNotifications") !== true) {
         return;
     }
+
+    // The card's message is written for a panel, so a notification-sized slice
+    // of it ends mid-sentence and points at detail lines no notification shows.
+    // The details themselves are short, backend-composed and self-contained.
+    const body = event.details?.length ? event.details.join(" · ") : event.message;
 
     const visibility = getBeaverVisibility();
 

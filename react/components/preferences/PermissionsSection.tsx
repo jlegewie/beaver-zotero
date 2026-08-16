@@ -2,10 +2,7 @@ import React, { useCallback, useState } from "react";
 import {SettingsGroup, SettingsRow, SectionLabel, DocLink, SectionHeader, SectionDescription} from "./components/SettingsElements";
 import DeferredToolPreferenceSetting from "./DeferredToolPreferenceSetting";
 import { getPref, setPref } from "../../../src/utils/prefs";
-
-// Upper bound for the credit limit. The preference is stored as a 32-bit
-// integer, so a larger entry would wrap to a negative limit.
-const MAX_CREDIT_THRESHOLD = 1_000_000;
+import { clampCreditThreshold, readCreditThreshold } from "../../utils/creditThreshold";
 
 
 const PermissionsSection: React.FC = () => {
@@ -14,7 +11,7 @@ const PermissionsSection: React.FC = () => {
     const [autoApplyAnnotations, setAutoApplyAnnotations] = useState(() => getPref('autoApplyAnnotations'));
     const [autoCreateNotes, setAutoCreateNotes] = useState(() => getPref('autoCreateNotes'));
     const [confirmCredits, setConfirmCredits] = useState(() => getPref('confirmCredits'));
-    const [creditThresholdText, setCreditThresholdText] = useState(() => String(getPref('creditConfirmThreshold')));
+    const [creditThresholdText, setCreditThresholdText] = useState(() => String(readCreditThreshold()));
     const [enableSystemNotifications, setEnableSystemNotifications] = useState(() => getPref('enableSystemNotifications'));
     const [enableResponseCompleteNotifications, setEnableResponseCompleteNotifications] = useState(() => getPref('enableResponseCompleteNotifications'));
     const [pauseLongRunningAgent, setPauseLongRunningAgent] = useState(() => getPref('pauseLongRunningAgent'));
@@ -57,10 +54,10 @@ const PermissionsSection: React.FC = () => {
     const commitCreditThreshold = useCallback(() => {
         const parsed = Number(creditThresholdText.trim());
         if (creditThresholdText.trim() === '' || !Number.isFinite(parsed) || parsed < 0) {
-            setCreditThresholdText(String(getPref('creditConfirmThreshold')));
+            setCreditThresholdText(String(readCreditThreshold()));
             return;
         }
-        const stored = Math.min(Math.round(parsed), MAX_CREDIT_THRESHOLD);
+        const stored = clampCreditThreshold(parsed);
         setPref('creditConfirmThreshold', stored);
         setCreditThresholdText(String(stored));
     }, [creditThresholdText]);

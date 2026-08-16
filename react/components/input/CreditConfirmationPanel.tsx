@@ -82,6 +82,9 @@ export const CreditConfirmationCard: React.FC<CreditConfirmationCardProps> = ({
         style={{ minHeight: 'fit-content' }}
         role="group"
         aria-label="Credit confirmation"
+        // The card takes no focus, so this is the only thing that tells a
+        // screen reader the run has stopped and is waiting on a decision.
+        aria-live="assertive"
     >
         <div className="display-flex flex-col gap-15">
             {/* Header: static icon + the backend's title */}
