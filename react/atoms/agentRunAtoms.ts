@@ -36,6 +36,8 @@ import {
     WSDeferredApprovalRequest,
     WSDeferredApprovalStale,
     WSAskUserQuestionRequest,
+    WSCreditConfirmationRequest,
+    WSCreditConfirmationStale,
     AskUserQuestionAnswer,
     WSStreamingDoneEvent,
     WSThreadNameEvent,
@@ -126,6 +128,11 @@ import {
     removePendingQuestionAtom,
     clearAllPendingQuestionsAtom,
 } from '@beaver/agent-core/run-state/pendingQuestions';
+import {
+    addPendingCreditConfirmationAtom,
+    removePendingCreditConfirmationAtom,
+    clearAllPendingCreditConfirmationsAtom,
+} from '@beaver/agent-core/run-state/pendingCreditConfirmations';
 import { getAppliedPdfAnnotationCount } from '../agents/agentActionCounts';
 import { undoEditMetadataAction } from '../utils/editMetadataActions';
 import { undoCreateItemAction } from '../utils/createItemActions';
@@ -459,9 +466,17 @@ function createAgentRunShell(
     const runId = runIdOverride ?? uuidv4();
 
     // Get user preferences for charging permissions, then apply any partial override
+    // The run-level preference is what this build exposes. The two per-tool
+    // booleans are only read by a backend that predates the run-level
+    // confirmation, so they combine the run-level preference with whatever the
+    // user had set per tool — that way an older backend keeps honoring a tool
+    // the user had already opted out of confirming.
+    const confirmCredits = getPref('confirmCredits');
     const permissions: ChargingPermissions = {
-        confirm_extraction_costs: getPref('confirmExtractionCosts'),
-        confirm_external_search_costs: getPref('confirmExternalSearchCosts'),
+        confirm_extraction_costs: confirmCredits && getPref('confirmExtractionCosts'),
+        confirm_external_search_costs: confirmCredits && getPref('confirmExternalSearchCosts'),
+        confirm_credits: confirmCredits,
+        credit_confirm_threshold: getPref('creditConfirmThreshold'),
         pause_long_running_agent: getPref('pauseLongRunningAgent'),
         ...permissionsOverride,
     };
@@ -1190,6 +1205,7 @@ export const prepareForNewRunAtom = atom(null, (_get, set) => {
     set(resetWSStateAtom);
     set(clearAllPendingApprovalsAtom);
     set(clearAllPendingQuestionsAtom);
+    set(clearAllPendingCreditConfirmationsAtom);
     set(clearApprovalResponseIntentsAtom);
     set(clearStaleApprovalsAtom);
     set(clearRunApprovalPolicyAtom);
@@ -1606,6 +1622,7 @@ function createWSCallbacks(set: Setter): WSCallbacks {
             // Clear pending approvals and dismiss diff preview
             set(clearAllPendingApprovalsAtom);
             set(clearAllPendingQuestionsAtom);
+            set(clearAllPendingCreditConfirmationsAtom);
             set(clearRunApprovalPolicyAtom);
         },
 
@@ -1637,6 +1654,7 @@ function createWSCallbacks(set: Setter): WSCallbacks {
             // Clear pending approvals and dismiss diff preview (run failed)
             set(clearAllPendingApprovalsAtom);
             set(clearAllPendingQuestionsAtom);
+            set(clearAllPendingCreditConfirmationsAtom);
             set(clearRunApprovalPolicyAtom);
 
             // Run quality flags, which a current backend puts here rather than
@@ -1848,6 +1866,30 @@ function createWSCallbacks(set: Setter): WSCallbacks {
             set(removeApprovalResponseIntentAtom, event.action_id);
         },
 
+        onCreditConfirmationRequest: (event: WSCreditConfirmationRequest) => {
+            logger('WS onCreditConfirmationRequest:', {
+                confirmationId: event.confirmation_id,
+                runId: event.run_id,
+                pendingCredits: event.pending_credits,
+                projectedTotalCredits: event.projected_total_credits,
+                threshold: event.threshold,
+            }, 1);
+            // Always surface the card. Whether to ask at all, and above which
+            // projected total, is decided by the backend from the preferences
+            // sent with the run request.
+            set(addPendingCreditConfirmationAtom, event);
+        },
+
+        onCreditConfirmationStale: (event: WSCreditConfirmationStale) => {
+            logger('WS onCreditConfirmationStale:', {
+                confirmationId: event.confirmation_id,
+                reason: event.reason,
+            }, 1);
+            // The run moved on without the answer and there is nothing to apply
+            // locally, so the card is simply retired.
+            set(removePendingCreditConfirmationAtom, event.confirmation_id);
+        },
+
         onAskUserQuestionRequest: (event: WSAskUserQuestionRequest) => {
             logger('WS onAskUserQuestionRequest:', {
                 questionId: event.question_id,
@@ -1890,6 +1932,7 @@ function createWSCallbacks(set: Setter): WSCallbacks {
             // Clear pending approvals and dismiss diff preview (connection lost)
             set(clearAllPendingApprovalsAtom);
             set(clearAllPendingQuestionsAtom);
+            set(clearAllPendingCreditConfirmationsAtom);
             set(clearRunApprovalPolicyAtom);
 
             // A run that reached `completed` (run_complete processed) but whose
@@ -2847,6 +2890,7 @@ export const closeWSConnectionAtom = atom(null, async (get, set) => {
     // Clear any pending approvals (for parallel tool calls that were awaiting user response)
     set(clearAllPendingApprovalsAtom);
     set(clearAllPendingQuestionsAtom);
+    set(clearAllPendingCreditConfirmationsAtom);
     set(clearApprovalResponseIntentsAtom);
     set(clearRunApprovalPolicyAtom);
 
@@ -2888,6 +2932,7 @@ export const clearThreadAtom = atom(null, (_get, set) => {
     // Clear pending questions so a reset never leaves the composer disabled
     // behind an unanswerable card (pending approvals are left as-is here).
     set(clearAllPendingQuestionsAtom);
+    set(clearAllPendingCreditConfirmationsAtom);
     set(clearRunApprovalPolicyAtom);
 });
 
@@ -3027,5 +3072,33 @@ export const sendAskUserQuestionResponseAtom = atom(
         logger(`sendAskUserQuestionResponseAtom: Sending question response for ${questionId}: ${cancelled ? 'cancelled' : `${answers.length} answer(s)`}`, 1);
         agentService.sendAskUserQuestionResponse(questionId, answers, cancelled ?? false);
         set(removePendingQuestionAtom, toolcallId);
+    }
+);
+
+/**
+ * Send the user's decision for a run-level credit confirmation and retire the
+ * pending card.
+ *
+ * The card is removed even when the send fails: the decision can no longer
+ * reach the run, so leaving it up would strand the user on a card that can
+ * never be answered.
+ */
+export const sendCreditConfirmationResponseAtom = atom(
+    null,
+    (_get, set, { confirmationId, approved, userInstructions }: {
+        confirmationId: string;
+        approved: boolean;
+        userInstructions?: string | null;
+    }) => {
+        logger(`sendCreditConfirmationResponseAtom: Sending credit confirmation response for ${confirmationId}: ${approved}`, 1);
+        const delivered = agentService.sendCreditConfirmationResponse(
+            confirmationId,
+            approved,
+            userInstructions,
+        );
+        if (!delivered) {
+            logger(`sendCreditConfirmationResponseAtom: Credit confirmation response for ${confirmationId} was not sent`, 1);
+        }
+        set(removePendingCreditConfirmationAtom, confirmationId);
     }
 );

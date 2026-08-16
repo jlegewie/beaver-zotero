@@ -32,6 +32,8 @@ declare namespace _ZoteroTypes {
       "autoImportItems": boolean;
       "confirmExtractionCosts": boolean;
       "confirmExternalSearchCosts": boolean;
+      "confirmCredits": boolean;
+      "creditConfirmThreshold": number;
       "pauseLongRunningAgent": boolean;
       "requestPlusTools": boolean;
       "showDiffPreviewInNoteEditor": boolean;

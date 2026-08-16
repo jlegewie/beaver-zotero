@@ -1867,6 +1867,76 @@ export interface WSDeferredApprovalStale extends WSBaseEvent {
     reason: 'timed_out' | 'unknown';
 }
 
+/**
+ * Ask the user to confirm continuing a run that is projected to cost credits.
+ *
+ * Unlike a deferred approval this carries no `toolcall_id` and no agent action:
+ * the decision covers the whole run, not one tool call, so it renders as a
+ * run-level card rather than inline with a tool.
+ *
+ * `title`, `message`, `details` and the two button labels are composed by the
+ * backend and must be rendered verbatim. The numeric fields (`pending_credits`,
+ * `projected_total_credits`, `threshold`) are for client-side logging and
+ * telemetry only — the client must never build its own prose from them, since
+ * only the backend knows how the projection was formed.
+ */
+export interface WSCreditConfirmationRequest extends WSBaseEvent {
+    event: 'credit_confirmation_request';
+    /** Correlation id for the response */
+    confirmation_id: string;
+    /** The agent run awaiting confirmation */
+    run_id: string;
+    /** Thread the run belongs to */
+    thread_id?: string | null;
+    /** Card title, composed by the backend */
+    title: string;
+    /** Card body text, composed by the backend */
+    message: string;
+    /** Optional supporting lines (e.g. a per-charge breakdown), rendered as-is */
+    details: string[];
+    /** Label for the approve button */
+    approve_label: string;
+    /** Label for the decline button */
+    decline_label: string;
+    /** Extra credits this decision authorizes (logging/telemetry only) */
+    pending_credits: number;
+    /** Projected total credits for the run if it continues (logging only) */
+    projected_total_credits: number;
+    /** Credit threshold that triggered this confirmation (logging only) */
+    threshold: number;
+    /** How long the backend will wait for a response */
+    timeout_seconds: number;
+}
+
+/** Response to a credit confirmation request (the user's decision) */
+export interface WSCreditConfirmationResponse {
+    type: 'credit_confirmation_response';
+    confirmation_id: string;
+    /** Whether the user let the run continue */
+    approved: boolean;
+    /** Optional additional instructions from the user */
+    user_instructions?: string | null;
+}
+
+/**
+ * The backend is no longer waiting on a credit confirmation.
+ *
+ * Sent when a `credit_confirmation_response` arrives after the backend's wait
+ * expired (the run already proceeded without the answer). Unlike a deferred
+ * approval there is nothing to apply locally — the decision has no local
+ * equivalent — so the client just retires the card.
+ */
+export interface WSCreditConfirmationStale extends WSBaseEvent {
+    event: 'credit_confirmation_stale';
+    /** The confirmation whose response was too late */
+    confirmation_id: string;
+    /**
+     * `timed_out`: the backend was waiting and gave up.
+     * `unknown`: no record of this confirmation on this connection.
+     */
+    reason: 'timed_out' | 'unknown';
+}
+
 /** One selectable option of an ask_user_question item (ids are server-assigned) */
 export interface AskUserQuestionOption {
     /** Server-assigned option id (e.g. 'q0-o1') */
@@ -1977,6 +2047,9 @@ export type WSEvent =
     | WSAgentActionExecuteRequest
     | WSDeferredApprovalRequest
     | WSDeferredApprovalStale
+    // Run-level credit confirmation
+    | WSCreditConfirmationRequest
+    | WSCreditConfirmationStale
     // User interaction events
     | WSAskUserQuestionRequest;
 
@@ -2121,6 +2194,13 @@ export const CLIENT_FEATURES = {
      * reads as "these are the matches".
      */
     LIST_TAGS_NAME_QUERY: 'list_tags_name_query',
+    /**
+     * `credit_confirmation_request`: the run's credit cost is confirmed once per
+     * run instead of per tool call. A client declaring it is asked at the
+     * threshold its `ChargingPermissions` carry; a client without it keeps the
+     * per-tool `confirm_extraction` / `confirm_external_search` approvals.
+     */
+    CREDIT_CONFIRMATION: 'credit_confirmation',
 } as const;
 
 /** Client type identifier for the Zotero plugin. */
@@ -2291,6 +2371,18 @@ export interface ChargingPermissions {
     confirm_extraction_costs: boolean;
     /** Whether to request user confirmation for external search surcharges */
     confirm_external_search_costs: boolean;
+    /**
+     * Whether to ask the user to confirm a run projected to cost credits at all.
+     * Read only for clients that declare CLIENT_FEATURES.CREDIT_CONFIRMATION,
+     * for which it supersedes the two per-tool booleans above.
+     */
+    confirm_credits: boolean;
+    /**
+     * Projected run total, in credits, above which the user is asked to confirm.
+     * `null` uses the server default. Read only for clients that declare
+     * CLIENT_FEATURES.CREDIT_CONFIRMATION.
+     */
+    credit_confirm_threshold: number | null;
     /** Whether to apply the soft cap that stops long-running agent turns */
     pause_long_running_agent: boolean;
 }
@@ -2483,6 +2575,22 @@ export interface WSCallbacks {
      * @param event The stale-approval notice, keyed by action id
      */
     onDeferredApprovalStale?: (event: WSDeferredApprovalStale) => void;
+
+    /**
+     * Called when the backend asks the user to confirm the run's credit cost.
+     * The frontend should render the backend-composed card verbatim and send a
+     * WSCreditConfirmationResponse when the user decides.
+     * @param event The confirmation request with copy and correlation id
+     */
+    onCreditConfirmationRequest?: (event: WSCreditConfirmationRequest) => void;
+
+    /**
+     * Called when a credit confirmation response we sent arrived too late to be
+     * used. The frontend should retire the card; there is nothing to apply
+     * locally.
+     * @param event The stale-confirmation notice, keyed by confirmation id
+     */
+    onCreditConfirmationStale?: (event: WSCreditConfirmationStale) => void;
 
     /**
      * Called when the backend asks the user structured multiple-choice

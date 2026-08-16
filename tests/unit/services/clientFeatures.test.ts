@@ -59,6 +59,10 @@ const VERSION_GATES: { feature: string; minVersion: string; op: Op }[] = [
 // the same reason as list_items_include_children: they gate request fields a
 // client only honors if its handler implements them, and a build that predates
 // them drops the field and answers a narrower question without saying so.
+// credit_confirmation is declaration-only because it gates an inbound event a
+// client only answers if it has the handler: a build that predates it drops the
+// event and stalls the run for the whole confirmation timeout, so the backend
+// falls back to the per-tool confirmations instead.
 const DECLARATION_ONLY_FEATURES = [
     'external_files',
     'ask_user_question',
@@ -72,6 +76,7 @@ const DECLARATION_ONLY_FEATURES = [
     'item_quick_search',
     'list_collections_recursive',
     'list_tags_name_query',
+    'credit_confirmation',
 ];
 
 // The full backend feature vocabulary (ALL_FEATURES in version_gates.py): every

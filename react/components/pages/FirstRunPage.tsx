@@ -28,6 +28,7 @@ import { logger } from '@beaver/agent-core/platform/logger';
 const FIRST_RUN_PERMISSIONS_OVERRIDE: Partial<ChargingPermissions> = {
     confirm_extraction_costs: false,
     confirm_external_search_costs: false,
+    confirm_credits: false,
 };
 
 interface FirstRunPageProps {

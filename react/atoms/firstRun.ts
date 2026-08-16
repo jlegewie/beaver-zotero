@@ -341,6 +341,7 @@ export const submitFirstRunCardAtom = atom(
 const FIRST_RUN_DISCOVER_PERMISSIONS_OVERRIDE: Partial<ChargingPermissions> = {
     confirm_extraction_costs: false,
     confirm_external_search_costs: false,
+    confirm_credits: false,
 };
 
 /**

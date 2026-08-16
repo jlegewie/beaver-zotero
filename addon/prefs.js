@@ -42,6 +42,10 @@ pref("autoCreateNotes", true);
 pref("autoImportItems", false);
 pref("confirmExtractionCosts", true);
 pref("confirmExternalSearchCosts", true);
+// Ask once per run before it spends credits, and the projected run total (in
+// credits) above which the backend asks.
+pref("confirmCredits", true);
+pref("creditConfirmThreshold", 5);
 pref("pauseLongRunningAgent", true);
 pref("requestPlusTools", false);
 pref("showDiffPreviewInNoteEditor", true);

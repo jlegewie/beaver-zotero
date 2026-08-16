@@ -183,6 +183,7 @@ const entryPaths = [
   "src/run-state/loadThreadRuns.ts",
   "src/run-state/toolLabels.ts",
   "src/run-state/pendingQuestions.ts",
+  "src/run-state/pendingCreditConfirmations.ts",
   "src/run-state/runErrorCopy.ts",
   "src/citations/atoms.ts",
   "src/citations/externalReferences.ts",

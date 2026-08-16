@@ -840,6 +840,28 @@ export class AgentService {
                     this.callbacks?.onDeferredApprovalStale?.(event);
                     break;
 
+                case 'credit_confirmation_request':
+                    logger("AgentService: Received credit_confirmation_request", event, 1);
+                    // This event is handled by the UI via callback
+                    if (this.callbacks?.onCreditConfirmationRequest) {
+                        this.callbacks.onCreditConfirmationRequest(event);
+                    } else {
+                        // No handler - decline so the run wraps up now instead of
+                        // spending credits or waiting out the confirmation timeout.
+                        logger("AgentService: No credit confirmation handler, auto-declining", 1);
+                        this.send({
+                            type: 'credit_confirmation_response',
+                            confirmation_id: event.confirmation_id,
+                            approved: false,
+                        });
+                    }
+                    break;
+
+                case 'credit_confirmation_stale':
+                    logger("AgentService: Received credit_confirmation_stale", event, 1);
+                    this.callbacks?.onCreditConfirmationStale?.(event);
+                    break;
+
                 case 'ask_user_question_request':
                     logger("AgentService: Received ask_user_question_request", event, 1);
                     // This event is handled by the UI via callback
@@ -1002,6 +1024,30 @@ export class AgentService {
         return this.send({
             type: 'deferred_approval_response',
             action_id: actionId,
+            approved,
+            user_instructions: userInstructions,
+        });
+    }
+
+    /**
+     * Send a response to a run-level credit confirmation request.
+     * Called by the UI when the user lets the run continue or declines.
+     * @param confirmationId The confirmation ID from the request
+     * @param approved Whether the user let the run continue
+     * @param userInstructions Optional additional instructions from the user
+     * @returns false if the socket was not open, so the decision never left the
+     *   client. The caller must recover the card rather than wait for a reply
+     *   that cannot come.
+     */
+    sendCreditConfirmationResponse(
+        confirmationId: string,
+        approved: boolean,
+        userInstructions?: string | null,
+    ): boolean {
+        logger(`AgentService: Sending credit confirmation response for ${confirmationId}: ${approved}${userInstructions ? ' (with instructions)' : ''}`, 1);
+        return this.send({
+            type: 'credit_confirmation_response',
+            confirmation_id: confirmationId,
             approved,
             user_instructions: userInstructions,
         });
