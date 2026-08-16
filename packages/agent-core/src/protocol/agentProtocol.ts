@@ -103,7 +103,11 @@ export interface WSRunCompleteEvent extends WSBaseEvent {
     agent_actions: import('../agents/agentActionTypes').AgentAction[] | null;
     /** Whether the run had high input token usage (backend-assessed). */
     high_token_usage?: boolean;
-    /** Whether the soft cap history processor was triggered during this run. */
+    /**
+     * @deprecated Always false. Runs are no longer paused at a turn threshold;
+     * a long run is metered and confirmed through the credit limit. Still on
+     * the wire for clients released before that change.
+     */
     soft_cap_triggered?: boolean;
 }
 
@@ -194,8 +198,6 @@ export interface WSErrorEvent extends WSBaseEvent {
      * `lastRun.total_usage`, which a failed run does not have.
      */
     high_token_usage?: boolean;
-    /** Whether the soft cap history processor was triggered during this run. */
-    soft_cap_triggered?: boolean;
 }
 
 /** Warning event for non-fatal issues */
@@ -2392,8 +2394,13 @@ export interface ChargingPermissions {
      * CLIENT_FEATURES.CREDIT_CONFIRMATION.
      */
     credit_confirm_threshold: number | null;
-    /** Whether to apply the soft cap that stops long-running agent turns */
-    pause_long_running_agent: boolean;
+    /**
+     * Whether to pause a long-running run at a turn threshold, read only by a
+     * backend that predates the long-running surcharge. Omitted by this build:
+     * such a backend defaults to pausing, which is the safe direction. A
+     * current backend meters run length instead and ignores this.
+     */
+    pause_long_running_agent?: boolean;
 }
 
 /**

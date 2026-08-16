@@ -22,7 +22,6 @@ const PermissionsSection: React.FC = () => {
         getPref('confirmCredits') ? String(readCreditThreshold()) : '');
     const [enableSystemNotifications, setEnableSystemNotifications] = useState(() => getPref('enableSystemNotifications'));
     const [enableResponseCompleteNotifications, setEnableResponseCompleteNotifications] = useState(() => getPref('enableResponseCompleteNotifications'));
-    const [pauseLongRunningAgent, setPauseLongRunningAgent] = useState(() => getPref('pauseLongRunningAgent'));
     const [accessRemoteFiles, setAccessRemoteFiles] = useState(() => getPref('accessRemoteFiles'));
 
     // --- Handle Auto-Apply Annotations Toggle ---
@@ -75,13 +74,6 @@ const PermissionsSection: React.FC = () => {
         setPref('enableResponseCompleteNotifications', newValue);
         setEnableResponseCompleteNotifications(newValue);
     }, [enableResponseCompleteNotifications]);
-
-    // --- Handle Pause Long-Running Agent Toggle ---
-    const handlePauseLongRunningAgentToggle = useCallback(() => {
-        const newValue = !pauseLongRunningAgent;
-        setPref('pauseLongRunningAgent', newValue);
-        setPauseLongRunningAgent(newValue);
-    }, [pauseLongRunningAgent]);
 
     // --- Handle Access Remote Files Toggle ---
     const handleAccessRemoteFilesToggle = useCallback(() => {
@@ -154,32 +146,12 @@ const PermissionsSection: React.FC = () => {
             <SectionLabel>Checkpoints</SectionLabel>
             <SettingsGroup>
                 <SettingsRow
-                    title="Pause Long-Running Tasks"
-                    description={
-                        <>
-                            Beaver pauses during long-running tasks to summarize progress and check in. Disabling may use additional credits or increase API costs. <DocLink path="credits">Learn more</DocLink>
-                        </>
-                    }
-                    onClick={handlePauseLongRunningAgentToggle}
-                    // tooltip="When enabled, the agent pauses after a set number of steps, reports progress, and asks whether to continue. Disable to let the agent run to completion without interruption."
-                    control={
-                        <input
-                            type="checkbox"
-                            checked={pauseLongRunningAgent}
-                            onChange={handlePauseLongRunningAgentToggle}
-                            onClick={(e) => e.stopPropagation()}
-                            style={{ cursor: 'pointer', margin: 0 }}
-                        />
-                    }
-                />
-                <SettingsRow
                     title="Credit Limit"
                     description={
                         <>
                             Ask before a single request uses more than this many credits in total. Leave empty to never ask. Only relevant when using Beaver credits. <DocLink path="credits">Learn more</DocLink>
                         </>
                     }
-                    hasBorder
                     control={
                         <input
                             type="number"

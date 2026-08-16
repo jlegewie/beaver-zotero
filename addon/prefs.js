@@ -46,7 +46,6 @@ pref("confirmExternalSearchCosts", true);
 // credits) above which the backend asks.
 pref("confirmCredits", true);
 pref("creditConfirmThreshold", 5);
-pref("pauseLongRunningAgent", true);
 pref("requestPlusTools", false);
 pref("showDiffPreviewInNoteEditor", true);
 

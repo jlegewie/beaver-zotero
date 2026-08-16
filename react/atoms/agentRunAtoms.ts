@@ -149,7 +149,7 @@ import { processToolReturnResults } from '../agents/toolResultProcessing';
 import { upgradeToolReturn } from '../compat/legacyToolResults';
 import { isToolResultView } from '@beaver/agent-core/run-state/toolResultViews';
 import { addWarningAtom, clearWarningsAtom } from './warnings';
-import { backendHighTokenUsageRunsAtom, softCapTriggeredRunsAtom } from './messageUIState';
+import { backendHighTokenUsageRunsAtom } from './messageUIState';
 import { currentThreadNameAtom, loadThreadAtom } from './threads';
 import { loadItemDataForAgentActions, autoApplyAnnotationAgentActions, autoCreateNoteAgentActions } from '../utils/agentActionUtils';
 import { extractZoteroReferencesFromToolCall } from '@beaver/agent-core/run-state/toolLabels';
@@ -468,14 +468,14 @@ function createAgentRunShell(
 
     // Get user preferences for charging permissions, then apply any partial override.
     // What a request may spend is one run-level preference: the credit limit,
-    // or no limit at all. The per-tool cost booleans this build no longer sets
-    // are left to their default on a backend old enough to read them, so such a
-    // backend asks per tool rather than charging silently.
+    // or no limit at all. The per-tool cost booleans and the turn pause this
+    // build no longer sets are left to their default on a backend old enough to
+    // read them, so such a backend asks per tool and keeps pausing long runs
+    // rather than charging silently.
     const confirmCredits = getPref('confirmCredits');
     const permissions: ChargingPermissions = {
         confirm_credits: confirmCredits,
         credit_confirm_threshold: confirmCredits ? readCreditThreshold() : null,
-        pause_long_running_agent: getPref('pauseLongRunningAgent'),
         ...permissionsOverride,
     };
 
@@ -1461,7 +1461,6 @@ function createWSCallbacks(set: Setter): WSCallbacks {
                 citationsCount: event.citations?.length ?? 0,
                 actionsCount: event.agent_actions?.length ?? 0,
                 highTokenUsage: event.high_token_usage,
-                softCapTriggered: event.soft_cap_triggered,
             }, 1);
             set(activeRunAtom, (prev) => prev ? updateRunComplete(prev, event) : prev);
             // Streaming-done is deliberately left set: this frame now arrives
@@ -1477,9 +1476,6 @@ function createWSCallbacks(set: Setter): WSCallbacks {
             // Store transient backend flags (not persisted on AgentRun)
             if (event.high_token_usage) {
                 set(backendHighTokenUsageRunsAtom, (prev) => ({ ...prev, [event.run_id]: true }));
-            }
-            if (event.soft_cap_triggered) {
-                set(softCapTriggeredRunsAtom, (prev) => ({ ...prev, [event.run_id]: true }));
             }
 
             // Citations, for a backend that still embeds them here. Current
@@ -1602,17 +1598,14 @@ function createWSCallbacks(set: Setter): WSCallbacks {
             set(clearAllPendingCreditConfirmationsAtom);
             set(clearRunApprovalPolicyAtom);
 
-            // Run quality flags, which a current backend puts here rather than
-            // on a `run_complete` for a run that did not complete. Keyed by run
-            // id in atoms that never consult run status, so a failed run drives
-            // the same composer warnings a finished one does — and for
-            // high_token_usage this is the only source, since the composer's
-            // fallback reads `total_usage`, which a failed run has none of.
+            // Run quality flag for a run that did not complete. Keyed by run id
+            // in an atom that never consults run status, so a failed run drives
+            // the same composer warning a finished one does — the composer's
+            // own fallback reads `total_usage`, which a failed run has none of.
+            // Defensive: the backend carries this on the `run_complete` frame it
+            // sends ahead of the error, so `onRunComplete` normally has it first.
             if (errorRunId && event.high_token_usage) {
                 set(backendHighTokenUsageRunsAtom, (prev) => ({ ...prev, [errorRunId]: true }));
-            }
-            if (errorRunId && event.soft_cap_triggered) {
-                set(softCapTriggeredRunsAtom, (prev) => ({ ...prev, [errorRunId]: true }));
             }
 
             if (

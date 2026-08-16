@@ -34,7 +34,6 @@ declare namespace _ZoteroTypes {
       "confirmExternalSearchCosts": boolean;
       "confirmCredits": boolean;
       "creditConfirmThreshold": number;
-      "pauseLongRunningAgent": boolean;
       "requestPlusTools": boolean;
       "showDiffPreviewInNoteEditor": boolean;
       "enableSystemNotifications": boolean;
