@@ -2,11 +2,6 @@ import React, { useCallback, useState } from "react";
 import {SettingsGroup, SettingsRow, SectionLabel, DocLink, SectionHeader, SectionDescription} from "./components/SettingsElements";
 import DeferredToolPreferenceSetting from "./DeferredToolPreferenceSetting";
 import { getPref, setPref } from "../../../src/utils/prefs";
-import {
-    MIN_CREDIT_THRESHOLD,
-    parseCreditLimitEntry,
-    readCreditThreshold,
-} from "../../utils/creditThreshold";
 
 
 const PermissionsSection: React.FC = () => {
@@ -14,12 +9,6 @@ const PermissionsSection: React.FC = () => {
     // --- Atoms: Permissions ---
     const [autoApplyAnnotations, setAutoApplyAnnotations] = useState(() => getPref('autoApplyAnnotations'));
     const [autoCreateNotes, setAutoCreateNotes] = useState(() => getPref('autoCreateNotes'));
-    // One control drives both stored values: a number is the limit, an empty
-    // field means never ask. `confirmCredits` is what carries "never" — the
-    // limit itself keeps its last value so clearing and refilling the field
-    // does not lose it.
-    const [creditThresholdText, setCreditThresholdText] = useState(() =>
-        getPref('confirmCredits') ? String(readCreditThreshold()) : '');
     const [enableSystemNotifications, setEnableSystemNotifications] = useState(() => getPref('enableSystemNotifications'));
     const [enableResponseCompleteNotifications, setEnableResponseCompleteNotifications] = useState(() => getPref('enableResponseCompleteNotifications'));
     const [accessRemoteFiles, setAccessRemoteFiles] = useState(() => getPref('accessRemoteFiles'));
@@ -37,29 +26,6 @@ const PermissionsSection: React.FC = () => {
         setPref('autoCreateNotes', newValue);
         setAutoCreateNotes(newValue);
     }, [autoCreateNotes]);
-
-    // --- Handle Credit Limit ---
-    // The field is edited as free text and only written on commit (blur or
-    // Enter): writing per keystroke would store "1" on the way to "10". An
-    // empty field is a deliberate "never ask", not an invalid entry. The
-    // preference holds an integer, so a number is rounded and capped before it
-    // is stored — an out-of-range value would otherwise wrap and be rejected by
-    // the server on every run. Anything else snaps back to what is stored.
-    const commitCreditThreshold = useCallback(() => {
-        const entry = parseCreditLimitEntry(creditThresholdText);
-        if (entry.kind === 'never') {
-            setPref('confirmCredits', false);
-            setCreditThresholdText('');
-            return;
-        }
-        if (entry.kind === 'invalid') {
-            setCreditThresholdText(getPref('confirmCredits') ? String(readCreditThreshold()) : '');
-            return;
-        }
-        setPref('creditConfirmThreshold', entry.value);
-        setPref('confirmCredits', true);
-        setCreditThresholdText(String(entry.value));
-    }, [creditThresholdText]);
 
     // --- Handle System Notifications Toggle ---
     const handleEnableSystemNotificationsToggle = useCallback(() => {
@@ -143,34 +109,8 @@ const PermissionsSection: React.FC = () => {
                 </div>
             </SettingsGroup>
 
-            <SectionLabel>Checkpoints</SectionLabel>
+            <SectionLabel>System Notifications</SectionLabel>
             <SettingsGroup>
-                <SettingsRow
-                    title="Credit Limit"
-                    description={
-                        <>
-                            Ask before a single request uses more than this many credits in total. Leave empty to never ask. Only relevant when using Beaver credits. <DocLink path="credits">Learn more</DocLink>
-                        </>
-                    }
-                    control={
-                        <input
-                            type="number"
-                            min={MIN_CREDIT_THRESHOLD}
-                            step={1}
-                            inputMode="numeric"
-                            placeholder="Never"
-                            aria-label="Credit limit"
-                            value={creditThresholdText}
-                            onChange={(e) => setCreditThresholdText(e.target.value)}
-                            onBlur={commitCreditThreshold}
-                            onKeyDown={(e) => {
-                                if (e.key === 'Enter') e.currentTarget.blur();
-                            }}
-                            onClick={(e) => e.stopPropagation()}
-                            style={{ width: '72px', margin: 0 }}
-                        />
-                    }
-                />
                 <SettingsRow
                     title="Approval Notifications"
                     description="Show a system notification when Beaver is waiting for your decision and is not visible."

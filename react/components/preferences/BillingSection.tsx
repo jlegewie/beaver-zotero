@@ -1,4 +1,4 @@
-import React, { useEffect } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import Button from "@beaver/agent-ui/primitives/Button";
 import {SettingsGroup, SettingsRow, SectionLabel, DocLink} from "./components/SettingsElements";
 import { Spinner } from '../icons/icons';
@@ -9,6 +9,12 @@ import { useAtomValue, useSetAtom } from "jotai";
 import { useBilling } from "../../hooks/useBilling";
 import { PlanInfo } from "@beaver/agent-core/transport/clients/accountService";
 import { CreditBreakdown, ProfileBalance, CreditPlan } from "@beaver/agent-core/types/profile";
+import { getPref, setPref } from "../../../src/utils/prefs";
+import {
+    MIN_CREDIT_THRESHOLD,
+    parseCreditLimitEntry,
+    readCreditThreshold,
+} from "../../utils/creditThreshold";
 
 
 const getPackPrice = (pack: PlanInfo) => {
@@ -193,6 +199,35 @@ const BillingSection: React.FC = () => {
     const hasPlan = useAtomValue(hasCreditPlanAtom);
     const { subscribe, buyCredits, manageSubscription, upgradeSubscription, isLoading: isBillingLoading, plans, plansLoading, plansError, fetchPlans } = useBilling();
     const creditPacks = plans.filter(p => !p.interval);
+    // One control drives both stored values: a number is the limit, an empty
+    // field means never ask. `confirmCredits` is what carries "never" — the
+    // limit itself keeps its last value so clearing and refilling the field
+    // does not lose it.
+    const [creditThresholdText, setCreditThresholdText] = useState(() =>
+        getPref('confirmCredits') ? String(readCreditThreshold()) : '');
+
+    // The field is edited as free text and only written on commit (blur or
+    // Enter): writing per keystroke would store "1" on the way to "10". An
+    // empty field is a deliberate "never ask", not an invalid entry. The
+    // preference holds an integer, so a number is rounded and capped before it
+    // is stored — an out-of-range value would otherwise wrap and be rejected by
+    // the server on every run. Anything else snaps back to what is stored.
+    const commitCreditThreshold = useCallback(() => {
+        const entry = parseCreditLimitEntry(creditThresholdText);
+        if (entry.kind === 'never') {
+            setPref('confirmCredits', false);
+            setCreditThresholdText('');
+            return;
+        }
+        if (entry.kind === 'invalid') {
+            setCreditThresholdText(getPref('confirmCredits') ? String(readCreditThreshold()) : '');
+            return;
+        }
+        setPref('creditConfirmThreshold', entry.value);
+        setPref('confirmCredits', true);
+        setCreditThresholdText(String(entry.value));
+    }, [creditThresholdText]);
+
     const upgradePlan = hasPlan && !creditPlan.cancelAtPeriodEnd
         ? plans.filter(p => p.interval && p.monthly_credits > (creditPlan.monthlyCredits || 0))
             .sort((a, b) => a.monthly_credits - b.monthly_credits)[0] ?? null
@@ -420,6 +455,36 @@ const BillingSection: React.FC = () => {
                         }
                     />
                 )}
+            </SettingsGroup>
+
+            <SectionLabel>Credit Limit</SectionLabel>
+            <SettingsGroup>
+                <SettingsRow
+                    title="Credit Limit"
+                    description={
+                        <>
+                            Ask before a single request uses more than this many credits in total. Leave empty to never ask. Only relevant when using Beaver credits. <DocLink path="credits">Learn more</DocLink>
+                        </>
+                    }
+                    control={
+                        <input
+                            type="number"
+                            min={MIN_CREDIT_THRESHOLD}
+                            step={1}
+                            inputMode="numeric"
+                            placeholder="Never"
+                            aria-label="Credit limit"
+                            value={creditThresholdText}
+                            onChange={(e) => setCreditThresholdText(e.target.value)}
+                            onBlur={commitCreditThreshold}
+                            onKeyDown={(e) => {
+                                if (e.key === 'Enter') e.currentTarget.blur();
+                            }}
+                            onClick={(e) => e.stopPropagation()}
+                            style={{ width: '72px', margin: 0 }}
+                        />
+                    }
+                />
             </SettingsGroup>
 
             {/* --- Section 4: Cross-links --- */}
