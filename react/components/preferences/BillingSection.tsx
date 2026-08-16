@@ -481,7 +481,8 @@ const BillingSection: React.FC = () => {
                                 if (e.key === 'Enter') e.currentTarget.blur();
                             }}
                             onClick={(e) => e.stopPropagation()}
-                            style={{ width: '72px', margin: 0 }}
+                            className="py-1 px-2 preference-input text-sm font-color-primary"
+                            style={{ width: '32px', margin: 0 }}
                         />
                     }
                 />
