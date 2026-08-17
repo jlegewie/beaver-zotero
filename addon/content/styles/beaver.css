@@ -576,6 +576,21 @@
     color: var(--fill-tertiary);
 }
 
+/* Compact numeric fields in SettingsRows. Hide the platform spinner so the
+ * control matches other preference inputs. */
+[id^="beaver-pane-"] .preference-input[type="number"] {
+    appearance: textfield;
+    -moz-appearance: textfield;
+    text-align: center;
+}
+
+[id^="beaver-pane-"] .preference-input[type="number"]::-webkit-inner-spin-button,
+[id^="beaver-pane-"] .preference-input[type="number"]::-webkit-outer-spin-button {
+    -webkit-appearance: none;
+    appearance: none;
+    margin: 0;
+}
+
 
 /* Custom Prompt Card (custom instructions textarea wrapper) */
 [id^="beaver-pane-"] .custom-prompt-card {

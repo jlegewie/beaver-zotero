@@ -531,6 +531,22 @@ const versionUpdateMessageList: VersionUpdateMessageConfig[] = [
         inPanel: true,
         footer: `<a href="https://github.com/jlegewie/beaver-zotero/releases/tag/v0.23.0" target='_blank'>Full changelog</a>`,
     },
+    {
+        version: "0.23.2",
+        title: "Increased usage for Beaver Plus and Plus Max",
+        featureList: [
+            {
+                title: "Increased usage for Beaver Plus and Plus Max",
+                description: "We increased the number of credits you get with Beaver Plus and Plus Max by 20%.",
+            },
+            {
+                title: "IMPORTANT: Updated confirmation dialog for credit charges",
+                description: "Previously, Beaver asked for every extra credit. Now, you can set a threshold and Beaver will only ask when the total cost exceeds the threshold (default is 5 credits). Most responses still cost 1 credit.",
+            },
+        ],
+        inPanel: true,
+        footer: `<a href="https://www.beaverapp.ai/docs/credits">Learn more</a>. These changes do not impact BYOK users.`,
+    },
 
 ];
 

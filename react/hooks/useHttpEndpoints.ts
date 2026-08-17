@@ -160,6 +160,7 @@ import {
     handleTestLoadThreadHttpRequest,
     handleTestListActionsHttpRequest,
     handleTestApproveActionHttpRequest,
+    handleTestConfirmCreditsHttpRequest,
     handleTestUndoActionHttpRequest,
 } from './httpHandlers/testChatHandlers';
 import {
@@ -342,6 +343,7 @@ const ENDPOINT_PATHS = [
     '/beaver/test/load-thread',
     '/beaver/test/list-actions',
     '/beaver/test/approve-action',
+    '/beaver/test/confirm-credits',
     '/beaver/test/undo-action',
     '/beaver/test/application-state',
     '/beaver/test/beaver-window',
@@ -1223,6 +1225,8 @@ function registerEndpoints(): boolean {
             createEndpoint(handleTestListActionsHttpRequest);
         Zotero.Server.Endpoints['/beaver/test/approve-action'] =
             createEndpoint(handleTestApproveActionHttpRequest);
+        Zotero.Server.Endpoints['/beaver/test/confirm-credits'] =
+            createEndpoint(handleTestConfirmCreditsHttpRequest);
         Zotero.Server.Endpoints['/beaver/test/undo-action'] =
             createEndpoint(handleTestUndoActionHttpRequest);
 

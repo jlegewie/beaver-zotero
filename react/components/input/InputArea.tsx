@@ -17,15 +17,14 @@ import IconButton from '@beaver/agent-ui/primitives/IconButton';
 import Tooltip from '@beaver/agent-ui/primitives/Tooltip';
 import PendingActionsBar from './PendingActionsBar';
 import HighTokenUsageWarningBar from './HighTokenUsageWarningBar';
-import SoftCapWarningBar from './SoftCapWarningBar';
 import NextStepsPanel from '../pages/firstRun/NextStepsPanel';
 import BackToSuggestions, { FirstRunBackTarget } from '../pages/firstRun/BackToSuggestions';
 import { allRunsAtom } from '@beaver/agent-core/run-state/atoms';
 import { PromptOrigin } from '@beaver/agent-core/agents/types';
 import { firstRunNextStepsDismissedAtom } from '../../atoms/firstRun';
-import { dismissHighTokenWarningForThreadAtom, dismissedHighTokenWarningByThreadAtom, dismissSoftCapWarningForThreadAtom, dismissedSoftCapWarningByThreadAtom, backendHighTokenUsageRunsAtom, softCapTriggeredRunsAtom } from '../../atoms/messageUIState';
+import { dismissHighTokenWarningForThreadAtom, dismissedHighTokenWarningByThreadAtom, backendHighTokenUsageRunsAtom } from '../../atoms/messageUIState';
 import { getLastRequestInputTokens } from '../../utils/runUsage';
-import { getPref, setPref } from '../../../src/utils/prefs';
+import { getPref } from '../../../src/utils/prefs';
 import { LexicalEditorInput, LexicalEditorInputHandle, SlashCommandDescriptor } from '@beaver/agent-ui/composer/LexicalEditorInput';
 import { isImeKeyEvent } from '@beaver/agent-ui/primitives/ime';
 import { useSlashMenu } from '../../hooks/useSlashMenu';
@@ -65,10 +64,7 @@ const InputArea: React.FC<InputAreaProps> = ({
     const currentThreadId = useAtomValue(currentThreadIdAtom);
     const dismissedHighTokenByThread = useAtomValue(dismissedHighTokenWarningByThreadAtom);
     const dismissHighTokenWarning = useSetAtom(dismissHighTokenWarningForThreadAtom);
-    const dismissedSoftCapByThread = useAtomValue(dismissedSoftCapWarningByThreadAtom);
-    const dismissSoftCapWarning = useSetAtom(dismissSoftCapWarningForThreadAtom);
     const backendHighTokenUsageRuns = useAtomValue(backendHighTokenUsageRunsAtom);
-    const softCapTriggeredRuns = useAtomValue(softCapTriggeredRunsAtom);
     const isWebSearchAllowed = useAtomValue(isWebSearchAllowedAtom);
     const currentNoteItem = useAtomValue(currentNoteItemAtom);
     // Only the oldest staged pill is claimable; the rest follow as it is
@@ -137,9 +133,7 @@ const InputArea: React.FC<InputAreaProps> = ({
     const lastRequestInputTokens = lastRunUsage ? getLastRequestInputTokens(lastRunUsage) : null;
     const warningThreadId = lastRun?.thread_id ?? currentThreadId;
     const isHighTokenDismissed = warningThreadId ? dismissedHighTokenByThread[warningThreadId] : false;
-    const dismissedSoftCapRunId = warningThreadId ? dismissedSoftCapByThread[warningThreadId] : undefined;
     const showHighTokenUsageWarningMessage = getPref('showHighTokenUsageWarningMessage');
-    const pauseLongRunningAgent = getPref('pauseLongRunningAgent');
     const threadHasHighTokenUsage = allRuns.some(r => backendHighTokenUsageRuns[r.id])
         || (lastRequestInputTokens !== null && lastRequestInputTokens > HIGH_INPUT_TOKEN_WARNING_THRESHOLD);
     const shouldShowHighTokenWarning = Boolean(
@@ -148,14 +142,6 @@ const InputArea: React.FC<InputAreaProps> = ({
         warningThreadId &&
         threadHasHighTokenUsage &&
         !isHighTokenDismissed
-    );
-    const shouldShowSoftCapWarning = Boolean(
-        !isAwaitingApproval &&
-        lastRun &&
-        warningThreadId &&
-        softCapTriggeredRuns[lastRun.id] &&
-        pauseLongRunningAgent &&
-        dismissedSoftCapRunId !== lastRun.id
     );
 
     // First-run next steps — driven by persisted origin on the last run, with
@@ -196,11 +182,10 @@ const InputArea: React.FC<InputAreaProps> = ({
     ) ? 'launcher' : 'suggestions';
 
     // Mutual exclusion: NextSteps/BackToSuggestions take precedence over the
-    // token/soft-cap warning bars; HighToken takes precedence over SoftCap.
+    // high-token warning bar.
     const firstRunPanelVisible = showNextSteps || showBackToSuggestions;
     const showHighTokenWarningBar = shouldShowHighTokenWarning && !firstRunPanelVisible;
     const canRenderHighTokenWarningBar = showHighTokenWarningBar && lastRequestInputTokens !== null;
-    const showSoftCapWarningBar = shouldShowSoftCapWarning && !firstRunPanelVisible && !canRenderHighTokenWarningBar;
 
     const {
         isSlashMenuOpen,
@@ -458,28 +443,6 @@ const InputArea: React.FC<InputAreaProps> = ({
         dismissHighTokenWarning(warningThreadId);
     };
 
-    const handleDismissSoftCapWarning = (e: React.MouseEvent) => {
-        e.preventDefault();
-        e.stopPropagation();
-        if (!warningThreadId || !lastRun) return;
-        dismissSoftCapWarning({
-            threadId: warningThreadId,
-            runId: lastRun.id,
-        });
-    };
-
-    const handleEnableLongRunning = (e: React.MouseEvent) => {
-        e.preventDefault();
-        e.stopPropagation();
-        setPref('pauseLongRunningAgent', false);
-        if (warningThreadId && lastRun) {
-            dismissSoftCapWarning({
-                threadId: warningThreadId,
-                runId: lastRun.id,
-            });
-        }
-    };
-
     const handleWebSearchToggle = () => {
         if (isAwaitingApproval || !isWebSearchAllowed) return;
         setIsWebSearchEnabled(!isWebSearchEnabled);
@@ -488,7 +451,6 @@ const InputArea: React.FC<InputAreaProps> = ({
     const getPlaceholderText = () => {
         if (placeholder !== undefined) return placeholder;
         if (isAwaitingApproval) return "Add instructions to reject";
-        if (showSoftCapWarningBar) return "Yes to continue, or add instructions to adjust";
         if (isLibraryTab) return "@ to add a source, / for actions";
         if (currentNoteItem) return "@ to add a source, / for actions";
         return "@ to add a source, / for actions, drag to add annotations";
@@ -519,12 +481,6 @@ const InputArea: React.FC<InputAreaProps> = ({
                     }}
                     onDismiss={handleDismissHighTokenWarning}
                     isUsingBeaverCredits={isUsingBeaverCredits}
-                />
-            )}
-            {showSoftCapWarningBar && (
-                <SoftCapWarningBar
-                    onEnableLongRunning={handleEnableLongRunning}
-                    onDismiss={handleDismissSoftCapWarning}
                 />
             )}
 

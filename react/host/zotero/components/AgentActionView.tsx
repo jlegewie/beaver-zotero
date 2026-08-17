@@ -47,8 +47,6 @@ import IconButton from '@beaver/agent-ui/primitives/IconButton';
 import Tooltip from '@beaver/agent-ui/primitives/Tooltip';
 import SplitApplyButton from '../../../components/ui/buttons/SplitApplyButton';
 import DeferredToolPreferenceButton from '../../../components/ui/buttons/DeferredToolPreferenceButton';
-import ExtractionApprovalButton from '../../../components/ui/buttons/ExtractionApprovalButton';
-import ExternalSearchApprovalButton from '../../../components/ui/buttons/ExternalSearchApprovalButton';
 import {
     ActionStatus,
     STATUS_CONFIGS,
@@ -607,22 +605,18 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                     )}
 
                     <div className="display-flex flex-row gap-2 px-2 py-2">
-                        {(isAwaitingApproval || status === 'pending') && !hasNoActionData && (
-                            isConfirmExtraction ? (
-                                <ExtractionApprovalButton onAlwaysApprove={handleApprove} />
-                            ) : isConfirmExternalSearch ? (
-                                <ExternalSearchApprovalButton onAlwaysApprove={handleApprove} />
-                            ) : (
-                                <DeferredToolPreferenceButton
-                                    toolName={toolName}
-                                    disabled={toolName === 'delete_annotations'}
-                                    tooltipContent={
-                                        toolName === 'delete_annotations'
-                                            ? 'The approval preference cannot be changed for annotation deletion'
-                                            : undefined
-                                    }
-                                />
-                            )
+                        {/* A cost confirmation has no per-tool preference to offer:
+                            what a request may spend is set once by the credit limit. */}
+                        {(isAwaitingApproval || status === 'pending') && !hasNoActionData && !isConfirmAction && (
+                            <DeferredToolPreferenceButton
+                                toolName={toolName}
+                                disabled={toolName === 'delete_annotations'}
+                                tooltipContent={
+                                    toolName === 'delete_annotations'
+                                        ? 'The approval preference cannot be changed for annotation deletion'
+                                        : undefined
+                                }
+                            />
                         )}
                         <div className="flex-1" />
 

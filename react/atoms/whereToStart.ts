@@ -36,8 +36,7 @@ const WEB_SEARCH_ACTIONS = new Set([START_PROJECT, DISCOVER]);
 
 // Launcher actions should start without cost-confirmation UI.
 const WHERE_TO_START_PERMISSIONS_OVERRIDE: Partial<ChargingPermissions> = {
-    confirm_extraction_costs: false,
-    confirm_external_search_costs: false,
+    confirm_credits: false,
 };
 
 /**

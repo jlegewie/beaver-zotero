@@ -8,7 +8,7 @@
 import { atom, Getter, Setter } from 'jotai';
 import { v4 as uuidv4 } from 'uuid';
 import { agentService, AgentConnectionError } from '@beaver/agent-core/transport/agentService';
-import { notifyRunComplete, notifyUserQuestion } from '../../src/services/systemNotifications';
+import { notifyCreditConfirmation, notifyRunComplete, notifyUserQuestion } from '../../src/services/systemNotifications';
 import { reportConnectionFailure } from '@beaver/agent-core/transport/clients/diagnosticsService';
 import {
     baselineConnectionEvidence,
@@ -36,6 +36,8 @@ import {
     WSDeferredApprovalRequest,
     WSDeferredApprovalStale,
     WSAskUserQuestionRequest,
+    WSCreditConfirmationRequest,
+    WSCreditConfirmationStale,
     AskUserQuestionAnswer,
     WSStreamingDoneEvent,
     WSThreadNameEvent,
@@ -126,6 +128,12 @@ import {
     removePendingQuestionAtom,
     clearAllPendingQuestionsAtom,
 } from '@beaver/agent-core/run-state/pendingQuestions';
+import {
+    addPendingCreditConfirmationAtom,
+    removePendingCreditConfirmationAtom,
+    clearAllPendingCreditConfirmationsAtom,
+} from '@beaver/agent-core/run-state/pendingCreditConfirmations';
+import { readCreditThreshold } from '../utils/creditThreshold';
 import { getAppliedPdfAnnotationCount } from '../agents/agentActionCounts';
 import { undoEditMetadataAction } from '../utils/editMetadataActions';
 import { undoCreateItemAction } from '../utils/createItemActions';
@@ -141,7 +149,7 @@ import { processToolReturnResults } from '../agents/toolResultProcessing';
 import { upgradeToolReturn } from '../compat/legacyToolResults';
 import { isToolResultView } from '@beaver/agent-core/run-state/toolResultViews';
 import { addWarningAtom, clearWarningsAtom } from './warnings';
-import { backendHighTokenUsageRunsAtom, softCapTriggeredRunsAtom } from './messageUIState';
+import { backendHighTokenUsageRunsAtom } from './messageUIState';
 import { currentThreadNameAtom, loadThreadAtom } from './threads';
 import { loadItemDataForAgentActions, autoApplyAnnotationAgentActions, autoCreateNoteAgentActions } from '../utils/agentActionUtils';
 import { extractZoteroReferencesFromToolCall } from '@beaver/agent-core/run-state/toolLabels';
@@ -458,11 +466,16 @@ function createAgentRunShell(
 ): { run: AgentRun; request: AgentRunRequest } {
     const runId = runIdOverride ?? uuidv4();
 
-    // Get user preferences for charging permissions, then apply any partial override
+    // Get user preferences for charging permissions, then apply any partial override.
+    // What a request may spend is one run-level preference: the credit limit,
+    // or no limit at all. The per-tool cost booleans and the turn pause this
+    // build no longer sets are left to their default on a backend old enough to
+    // read them, so such a backend asks per tool and keeps pausing long runs
+    // rather than charging silently.
+    const confirmCredits = getPref('confirmCredits');
     const permissions: ChargingPermissions = {
-        confirm_extraction_costs: getPref('confirmExtractionCosts'),
-        confirm_external_search_costs: getPref('confirmExternalSearchCosts'),
-        pause_long_running_agent: getPref('pauseLongRunningAgent'),
+        confirm_credits: confirmCredits,
+        credit_confirm_threshold: confirmCredits ? readCreditThreshold() : null,
         ...permissionsOverride,
     };
 
@@ -1190,63 +1203,11 @@ export const prepareForNewRunAtom = atom(null, (_get, set) => {
     set(resetWSStateAtom);
     set(clearAllPendingApprovalsAtom);
     set(clearAllPendingQuestionsAtom);
+    set(clearAllPendingCreditConfirmationsAtom);
     set(clearApprovalResponseIntentsAtom);
     set(clearStaleApprovalsAtom);
     set(clearRunApprovalPolicyAtom);
 });
-
-/**
- * Pre-validate a confirm_extraction approval by checking which attachments
- * actually have files locally. If the number of existing attachments is within
- * the free tier (included_free), auto-approve without showing the dialog.
- * Credit logic stays on the backend -- this only gates whether to bother the user.
- */
-async function prevalidateExtractionApproval(
-    set: Setter,
-    event: WSDeferredApprovalRequest,
-    attachmentIds: string[],
-    includedFree: number,
-): Promise<void> {
-    let existingCount = 0;
-
-    for (const attachmentId of attachmentIds) {
-        try {
-            const ref = createZoteroItemReference(attachmentId);
-            if (!ref) continue;
-
-            const resolved = await resolveItemReference(ref);
-            if (resolved.status !== 'found') continue;
-            const item = resolved.item;
-            if (item && item.isAttachment()) {
-                existingCount++;
-            } else if (item && item.isRegularItem()) {
-                // Count regular items with exactly one supported attachment
-                // (the agent likely confused item ID with attachment ID)
-                await Zotero.Items.loadDataTypes([item], ['childItems']);
-                const attachmentIDs = item.getAttachments();
-                const supportedAttachments = attachmentIDs
-                    .map((id: number) => Zotero.Items.get(id))
-                    .filter((a: any) => a && a.isAttachment() && isAgentSupportedItem(a));
-                if (supportedAttachments.length === 1) {
-                    existingCount++;
-                }
-            }
-        } catch {
-            // Skip attachments that fail to resolve
-        }
-    }
-
-    logger(`prevalidateExtractionApproval: ${existingCount}/${attachmentIds.length} attachments have files locally (included_free=${includedFree})`, 1);
-
-    if (existingCount <= includedFree) {
-        // Not enough real attachments to incur extra charges -- auto-approve
-        logger(`prevalidateExtractionApproval: Auto-approving (${existingCount} <= ${includedFree})`, 1);
-        agentService.sendApprovalResponse(event.action_id, true);
-    } else {
-        // Show the dialog with the backend's original numbers
-        set(addPendingApprovalAtom, event);
-    }
-}
 
 /**
  * Find the args of the tool-call part that produced a given tool return, by
@@ -1500,7 +1461,6 @@ function createWSCallbacks(set: Setter): WSCallbacks {
                 citationsCount: event.citations?.length ?? 0,
                 actionsCount: event.agent_actions?.length ?? 0,
                 highTokenUsage: event.high_token_usage,
-                softCapTriggered: event.soft_cap_triggered,
             }, 1);
             set(activeRunAtom, (prev) => prev ? updateRunComplete(prev, event) : prev);
             // Streaming-done is deliberately left set: this frame now arrives
@@ -1516,9 +1476,6 @@ function createWSCallbacks(set: Setter): WSCallbacks {
             // Store transient backend flags (not persisted on AgentRun)
             if (event.high_token_usage) {
                 set(backendHighTokenUsageRunsAtom, (prev) => ({ ...prev, [event.run_id]: true }));
-            }
-            if (event.soft_cap_triggered) {
-                set(softCapTriggeredRunsAtom, (prev) => ({ ...prev, [event.run_id]: true }));
             }
 
             // Citations, for a backend that still embeds them here. Current
@@ -1606,6 +1563,7 @@ function createWSCallbacks(set: Setter): WSCallbacks {
             // Clear pending approvals and dismiss diff preview
             set(clearAllPendingApprovalsAtom);
             set(clearAllPendingQuestionsAtom);
+            set(clearAllPendingCreditConfirmationsAtom);
             set(clearRunApprovalPolicyAtom);
         },
 
@@ -1637,19 +1595,17 @@ function createWSCallbacks(set: Setter): WSCallbacks {
             // Clear pending approvals and dismiss diff preview (run failed)
             set(clearAllPendingApprovalsAtom);
             set(clearAllPendingQuestionsAtom);
+            set(clearAllPendingCreditConfirmationsAtom);
             set(clearRunApprovalPolicyAtom);
 
-            // Run quality flags, which a current backend puts here rather than
-            // on a `run_complete` for a run that did not complete. Keyed by run
-            // id in atoms that never consult run status, so a failed run drives
-            // the same composer warnings a finished one does — and for
-            // high_token_usage this is the only source, since the composer's
-            // fallback reads `total_usage`, which a failed run has none of.
+            // Run quality flag for a run that did not complete. Keyed by run id
+            // in an atom that never consults run status, so a failed run drives
+            // the same composer warning a finished one does — the composer's
+            // own fallback reads `total_usage`, which a failed run has none of.
+            // Defensive: the backend carries this on the `run_complete` frame it
+            // sends ahead of the error, so `onRunComplete` normally has it first.
             if (errorRunId && event.high_token_usage) {
                 set(backendHighTokenUsageRunsAtom, (prev) => ({ ...prev, [errorRunId]: true }));
-            }
-            if (errorRunId && event.soft_cap_triggered) {
-                set(softCapTriggeredRunsAtom, (prev) => ({ ...prev, [errorRunId]: true }));
             }
 
             if (
@@ -1783,37 +1739,10 @@ function createWSCallbacks(set: Setter): WSCallbacks {
                 actionType: event.action_type,
             }, 1);
 
-            // confirm_extraction: skip confirmation if user disabled it, then pre-validate
-            if (event.action_type === 'confirm_extraction') {
-                const confirmCosts = getPref('confirmExtractionCosts') as boolean;
-                if (!confirmCosts) {
-                    logger('WS onDeferredApprovalRequest: Auto-approving confirm_extraction (confirmation disabled)', 1);
-                    agentService.sendApprovalResponse(event.action_id, true);
-                    return;
-                }
-
-                // Pre-validate: auto-approve if few attachments exist locally
-                const attachmentIds: string[] = event.action_data?.attachment_ids ?? [];
-                const includedFree: number = event.action_data?.included_free ?? 0;
-
-                if (attachmentIds.length > 0) {
-                    prevalidateExtractionApproval(set, event, attachmentIds, includedFree).catch(err => {
-                        logger(`WS onDeferredApprovalRequest: Pre-validation failed, showing dialog: ${err}`, 1);
-                        set(addPendingApprovalAtom, event);
-                    });
-                    return;
-                }
-            }
-
-            // confirm_external_search: skip confirmation if user disabled it
-            if (event.action_type === 'confirm_external_search') {
-                const confirmCosts = getPref('confirmExternalSearchCosts') as boolean;
-                if (!confirmCosts) {
-                    logger('WS onDeferredApprovalRequest: Auto-approving confirm_external_search (confirmation disabled)', 1);
-                    agentService.sendApprovalResponse(event.action_id, true);
-                    return;
-                }
-            }
+            // Cost confirmations arrive this way only from a backend that
+            // predates the run-level credit confirmation. They are shown like
+            // any other approval: what a request may spend is decided once per
+            // run by the credit limit, never per tool call.
 
             // A grant can be selected while other validation requests are
             // already in flight. Catch those requests here even though future
@@ -1846,6 +1775,34 @@ function createWSCallbacks(set: Setter): WSCallbacks {
             set(markApprovalStaleAtom, event.action_id);
             set(removePendingApprovalAtom, event.action_id);
             set(removeApprovalResponseIntentAtom, event.action_id);
+        },
+
+        onCreditConfirmationRequest: (event: WSCreditConfirmationRequest) => {
+            logger('WS onCreditConfirmationRequest:', {
+                confirmationId: event.confirmation_id,
+                runId: event.run_id,
+                pendingCredits: event.pending_credits,
+                projectedTotalCredits: event.projected_total_credits,
+                threshold: event.threshold,
+            }, 1);
+            // Always surface the card. Whether to ask at all, and above which
+            // projected total, is decided by the backend from the preferences
+            // sent with the run request.
+            set(addPendingCreditConfirmationAtom, event);
+
+            // Surface an OS-native notification if the user can't currently see
+            // the card — the run stays parked until they decide.
+            notifyCreditConfirmation(event);
+        },
+
+        onCreditConfirmationStale: (event: WSCreditConfirmationStale) => {
+            logger('WS onCreditConfirmationStale:', {
+                confirmationId: event.confirmation_id,
+                reason: event.reason,
+            }, 1);
+            // The run moved on without the answer and there is nothing to apply
+            // locally, so the card is simply retired.
+            set(removePendingCreditConfirmationAtom, event.confirmation_id);
         },
 
         onAskUserQuestionRequest: (event: WSAskUserQuestionRequest) => {
@@ -1890,6 +1847,7 @@ function createWSCallbacks(set: Setter): WSCallbacks {
             // Clear pending approvals and dismiss diff preview (connection lost)
             set(clearAllPendingApprovalsAtom);
             set(clearAllPendingQuestionsAtom);
+            set(clearAllPendingCreditConfirmationsAtom);
             set(clearRunApprovalPolicyAtom);
 
             // A run that reached `completed` (run_complete processed) but whose
@@ -2847,6 +2805,7 @@ export const closeWSConnectionAtom = atom(null, async (get, set) => {
     // Clear any pending approvals (for parallel tool calls that were awaiting user response)
     set(clearAllPendingApprovalsAtom);
     set(clearAllPendingQuestionsAtom);
+    set(clearAllPendingCreditConfirmationsAtom);
     set(clearApprovalResponseIntentsAtom);
     set(clearRunApprovalPolicyAtom);
 
@@ -2888,6 +2847,7 @@ export const clearThreadAtom = atom(null, (_get, set) => {
     // Clear pending questions so a reset never leaves the composer disabled
     // behind an unanswerable card (pending approvals are left as-is here).
     set(clearAllPendingQuestionsAtom);
+    set(clearAllPendingCreditConfirmationsAtom);
     set(clearRunApprovalPolicyAtom);
 });
 
@@ -3027,5 +2987,33 @@ export const sendAskUserQuestionResponseAtom = atom(
         logger(`sendAskUserQuestionResponseAtom: Sending question response for ${questionId}: ${cancelled ? 'cancelled' : `${answers.length} answer(s)`}`, 1);
         agentService.sendAskUserQuestionResponse(questionId, answers, cancelled ?? false);
         set(removePendingQuestionAtom, toolcallId);
+    }
+);
+
+/**
+ * Send the user's decision for a run-level credit confirmation and retire the
+ * pending card.
+ *
+ * The card is removed even when the send fails: the decision can no longer
+ * reach the run, so leaving it up would strand the user on a card that can
+ * never be answered.
+ */
+export const sendCreditConfirmationResponseAtom = atom(
+    null,
+    (_get, set, { confirmationId, approved, userInstructions }: {
+        confirmationId: string;
+        approved: boolean;
+        userInstructions?: string | null;
+    }) => {
+        logger(`sendCreditConfirmationResponseAtom: Sending credit confirmation response for ${confirmationId}: ${approved}`, 1);
+        const delivered = agentService.sendCreditConfirmationResponse(
+            confirmationId,
+            approved,
+            userInstructions,
+        );
+        if (!delivered) {
+            logger(`sendCreditConfirmationResponseAtom: Credit confirmation response for ${confirmationId} was not sent`, 1);
+        }
+        set(removePendingCreditConfirmationAtom, confirmationId);
     }
 );

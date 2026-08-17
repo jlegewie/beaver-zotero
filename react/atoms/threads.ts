@@ -30,6 +30,7 @@ import {
     clearAllPendingApprovalsAtom,
 } from "../agents/agentActions";
 import { clearAllPendingQuestionsAtom } from "@beaver/agent-core/run-state/pendingQuestions";
+import { clearAllPendingCreditConfirmationsAtom } from "@beaver/agent-core/run-state/pendingCreditConfirmations";
 import { processToolReturnResults } from "../agents/toolResultProcessing";
 import { upgradeToolReturn } from "../compat/legacyToolResults";
 import { loadItemDataForAgentActions } from "../utils/agentActionUtils";
@@ -306,6 +307,7 @@ export const newThreadAtom = atom(
             set(threadAgentActionsAtom, []);
             set(clearAllPendingApprovalsAtom);
             set(clearAllPendingQuestionsAtom);
+            set(clearAllPendingCreditConfirmationsAtom);
             
             set(isWebSearchEnabledAtom, false);
             
@@ -446,6 +448,7 @@ export const loadThreadAtom = atom(
             // Clear all pending approvals/questions when loading a different thread
             set(clearAllPendingApprovalsAtom);
             set(clearAllPendingQuestionsAtom);
+            set(clearAllPendingCreditConfirmationsAtom);
             // A reopened thread takes a fresh snapshot containing only actions
             // that are still pending.
             set(retainedReviewActionsAtom, {});
