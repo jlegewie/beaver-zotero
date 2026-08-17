@@ -39,7 +39,8 @@ async function onLoad() {
             if (window.arguments[0].tab) {
                 initialTab = window.arguments[0].tab;
             }
-            if (window.arguments[0].actionsCategoryFilter) {
+            // `!= null` so the uncategorized filter (`""`) is not dropped as falsy.
+            if (window.arguments[0].actionsCategoryFilter != null) {
                 initialActionsCategoryFilter = window.arguments[0].actionsCategoryFilter;
             }
             if (window.arguments[0].actionId) {

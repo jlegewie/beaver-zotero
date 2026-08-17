@@ -4,7 +4,7 @@ import Button from "@beaver/agent-ui/primitives/Button";
 import Tooltip from "@beaver/agent-ui/primitives/Tooltip";
 import { CSSIcon, CSSItemTypeIcon } from "./icons/zotero";
 import { ArrowUpRightIcon, ArrowRightIcon } from "./icons/icons";
-import { Action, ActionCategory, TARGET_TYPE_LABELS } from "@beaver/agent-core/types/actions";
+import { Action, ActionCategory, TARGET_TYPE_LABELS, UNCATEGORIZED_FILTER } from "@beaver/agent-core/types/actions";
 import { actionsForContextAtom, actionContextAtom } from "../atoms/actions";
 import { GroupIconInfo, splitCategoryActions, getActiveTarget } from "../utils/actionVisibility";
 import { useActionRunner } from "../hooks/useActionRunner";
@@ -51,8 +51,7 @@ const CategoryPanel: React.FC<CategoryPanelProps> = ({ category, style }) => {
     const active = getActiveTarget(ctx);
     const { targetActions, globalActions } = splitCategoryActions(contextActions, category, active?.targetType ?? null);
 
-    // The uncategorized "Actions" bucket maps to the "uncategorized" filter value.
-    const categoryFilter = category ?? "uncategorized";
+    const categoryFilter = category ?? UNCATEGORIZED_FILTER;
 
     const renderAction = (action: Action) => {
         const popup = buildActionPopup({

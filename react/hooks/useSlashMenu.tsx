@@ -6,21 +6,22 @@ import { currentMessageContentAtom } from '../atoms/messageComposition';
 import { actionsAtom, actionContextAtom, resolveActionForStagingAtom } from '../atoms/actions';
 import { computeActionGroups } from '../utils/actionVisibility';
 import { openPreferencesWindow } from '../../src/ui/openPreferencesWindow';
-import { Action, ActionCategory, ActionTargetType } from '@beaver/agent-core/types/actions';
+import { Action, ActionCategory, ActionTargetType, KnownActionCategory } from '@beaver/agent-core/types/actions';
 import { SlashCommandDescriptor, getActionCommand } from '@beaver/agent-ui/composer/slashCommands';
 import { MenuPosition, SearchMenuItem } from '@beaver/agent-ui/primitives/SearchMenu';
 
-// Category icons mirror the homepage launcher and Actions preferences so the
-// slash menu matches what users see elsewhere. Uncategorized actions fall
-// back to the general "Actions" icon (Zap).
-const CATEGORY_ICONS: Record<ActionCategory, React.ComponentType<React.SVGProps<SVGSVGElement>>> = {
+// Category icons match the homepage launcher and Actions preferences. Zap for missing/unknown categories.
+const CATEGORY_ICON_ENTRIES = {
     research: BookSearchIcon,
     write: QuillWriteIcon,
     organize: LayersIcon,
     annotate: HighlighterIcon,
-};
+} satisfies Record<KnownActionCategory, React.ComponentType<React.SVGProps<SVGSVGElement>>>;
+
+/** Map so Object.prototype names (`constructor`, …) don't inherit a function. */
+const CATEGORY_ICONS = new Map<string, React.ComponentType<React.SVGProps<SVGSVGElement>>>(Object.entries(CATEGORY_ICON_ENTRIES));
 const categoryIcon = (cat: ActionCategory | undefined): React.ComponentType<React.SVGProps<SVGSVGElement>> =>
-    cat ? CATEGORY_ICONS[cat] : ZapIcon;
+    (cat && CATEGORY_ICONS.get(cat)) || ZapIcon;
 
 export function useSlashMenu(
     inputRef: React.RefObject<HTMLElement | null>,

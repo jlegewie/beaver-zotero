@@ -186,7 +186,8 @@ export function getMergedActions(): Action[] {
             if (o.name !== undefined) merged.name = o.name;
             if (o.id_model !== undefined) merged.id_model = o.id_model;
             if (o.targets !== undefined) merged.targets = o.targets;
-            if (o.category !== undefined) merged.category = o.category;
+            // null = cleared; coerce to undefined so it doesn't leak onto Action.
+            if (o.category !== undefined) merged.category = o.category ?? undefined;
             if (o.argumentHint !== undefined) merged.argumentHint = o.argumentHint;
             if (o.sortOrder !== undefined) merged.sortOrder = o.sortOrder;
         }

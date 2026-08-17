@@ -10,7 +10,7 @@ import { getActionCustomizations, getHiddenBuiltinActions, getMergedActions, sav
 import { BUILTIN_ACTIONS, ALL_BUILTIN_ACTIONS } from '../../../react/types/builtinActions';
 import { ARCHIVED_ACTIONS } from '../../../react/types/archivedActions';
 import { getActionCommand, toSlashToken } from '@beaver/agent-ui/composer/slashCommands';
-import type { ActionCustomizations } from '@beaver/agent-core/types/actions';
+import { categoryLabel, type ActionCustomizations } from '@beaver/agent-core/types/actions';
 
 // In-memory pref store backing the Zotero.Prefs stub from tests/setup.ts, so
 // customizations round-trip through the real JSON serialization.
@@ -147,6 +147,87 @@ describe('actionStorage', () => {
         const custom = getMergedActions().find(a => a.id === 'custom-locked');
         expect(custom).toBeDefined();
         expect(custom?.locked).toBeUndefined();
+    });
+
+    it('keeps a custom action whose category this build does not know', () => {
+        const raw = {
+            version: 1,
+            overrides: {},
+            custom: [{
+                id: 'custom-open-category',
+                title: 'Check citations',
+                text: 'Do the thing',
+                targets: ['global'],
+                category: 'cite-check',
+            }],
+        };
+        Prefs.set('extensions.zotero.beaver.actions', JSON.stringify(raw));
+
+        expect(getActionCustomizations().custom[0]?.category).toBe('cite-check');
+
+        // Round-trip: the filtered list is what gets written back.
+        saveActionCustomizations(getActionCustomizations());
+        expect(getMergedActions().find(a => a.id === 'custom-open-category')?.category).toBe('cite-check');
+    });
+
+    it('drops a custom action whose category is malformed', () => {
+        const withCategory = (category: unknown) => ({
+            version: 1,
+            overrides: {},
+            custom: [{ id: 'custom-bad-category', title: 'T', text: 'P', targets: ['global'], category }],
+        });
+        for (const category of ['', '   ', 7, null, {}]) {
+            Prefs.set('extensions.zotero.beaver.actions', JSON.stringify(withCategory(category)));
+            expect(getActionCustomizations().custom, JSON.stringify(category)).toEqual([]);
+        }
+    });
+
+    it('resolves a category named after an Object.prototype member', () => {
+        // Object.prototype names must not resolve to inherited functions via object index.
+        for (const category of ['constructor', 'toString', 'hasOwnProperty', 'valueOf', 'isPrototypeOf']) {
+            expect(typeof categoryLabel(category), category).toBe('string');
+        }
+        Prefs.set('extensions.zotero.beaver.actions', JSON.stringify({
+            version: 1,
+            overrides: {},
+            custom: [{ id: 'custom-proto', title: 'T', text: 'P', targets: ['global'], category: 'constructor' }],
+        }));
+        expect(getActionCustomizations().custom[0]?.category).toBe('constructor');
+    });
+
+    it('keeps a category that happens to be spelled "uncategorized"', () => {
+        // "uncategorized" is a legal category; the no-category filter is "".
+        Prefs.set('extensions.zotero.beaver.actions', JSON.stringify({
+            version: 1,
+            overrides: {},
+            custom: [{ id: 'custom-word', title: 'T', text: 'P', targets: ['global'], category: 'uncategorized' }],
+        }));
+        expect(getActionCustomizations().custom[0]?.category).toBe('uncategorized');
+        saveActionCustomizations(getActionCustomizations());
+        expect(getMergedActions().find(a => a.id === 'custom-word')?.category).toBe('uncategorized');
+    });
+
+    it('survives a malformed override category and never merges the cleared sentinel', () => {
+        const outline = BUILTIN_ACTIONS[0];
+        // Non-string override must not throw on string methods.
+        Prefs.set('extensions.zotero.beaver.actions', JSON.stringify({
+            version: 1,
+            overrides: { [outline.id]: { category: 7 } },
+            custom: [],
+        }));
+        const malformedMerged = getMergedActions().find(a => a.id === outline.id);
+        expect(malformedMerged?.category).toBe(outline.category);
+
+        // Cleared category must be undefined on Action, not null.
+        Prefs.set('extensions.zotero.beaver.actions', JSON.stringify({
+            version: 1,
+            overrides: { [outline.id]: { category: '' } },
+            custom: [],
+        }));
+        const merged = getMergedActions().find(a => a.id === outline.id);
+        expect(merged?.category).toBeUndefined();
+        expect(Object.prototype.hasOwnProperty.call(merged ?? {}, 'category')).toBe(true);
+        expect(merged?.category).not.toBeNull();
     });
 
     it('does not persist locked built-in overrides or custom locked flags', () => {

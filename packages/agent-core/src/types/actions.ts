@@ -63,14 +63,37 @@ export function getActionClient(): ActionClient {
 }
 
 /**
+ * Categories this build has a dedicated label/icon for. Not the legal set —
+ * see {@link ActionCategory}.
+ */
+export const KNOWN_ACTION_CATEGORIES = ["research", "write", "organize", "annotate"] as const;
+
+/** A category this build renders with a dedicated label and icon. */
+export type KnownActionCategory = (typeof KNOWN_ACTION_CATEGORIES)[number];
+
+/**
  * Skill category for the homepage launcher. Orthogonal to `targets`:
  * `targets` is what an action binds to; `category` is what kind of work it is.
- * An action can have both, independently.
+ *
+ * Open vocabulary: any non-empty string is legal. Unknown values are stored
+ * and rendered with a generic label/icon — rejecting them would drop the
+ * action on the next save. `string & {}` keeps autocomplete for known values.
  */
-export type ActionCategory = "research" | "write" | "organize" | "annotate";
+export type ActionCategory = KnownActionCategory | (string & {});
+
+/**
+ * Filter value for "has no category". Empty string so it cannot collide with a
+ * real category (those are non-empty). Falsy — pass it with `??`, not `||`.
+ * Don't replace this with a word like `"uncategorized"`: that is a legal category.
+ */
+export const UNCATEGORIZED_FILTER = "";
 
 /** Category filter for the Actions preferences list — a skill category, or the "no category" bucket. */
-export type ActionCategoryFilter = ActionCategory | "uncategorized";
+export type ActionCategoryFilter = ActionCategory | typeof UNCATEGORIZED_FILTER;
+
+/** Blank (including {@link UNCATEGORIZED_FILTER}) → undefined. */
+const storedCategory = (value: unknown): ActionCategory | undefined =>
+    typeof value === "string" && value.trim().length > 0 ? value : undefined;
 
 export interface Action {
     id: string;                    // "builtin-*" for built-ins, crypto.randomUUID() for user
@@ -98,8 +121,12 @@ export interface Action {
 }
 
 /**
- * Surgical override for a built-in action. Only changed fields are stored.
+ * Surgical override for a built-in. Only changed fields are stored.
  * `targets` replaces the base list wholesale when set.
+ *
+ * Absent vs cleared: absent means use the shipped value; `null` means the user
+ * removed it. Other fields use `""` for that; category cannot (`""` is not a
+ * category). Merges must coerce `null` to undefined so it never lands on Action.
  */
 export interface ActionOverride {
     hidden?: boolean;
@@ -109,7 +136,7 @@ export interface ActionOverride {
     name?: string;
     id_model?: string;
     targets?: ActionTargetType[];
-    category?: ActionCategory;
+    category?: ActionCategory | null;
     argumentHint?: string;
     sortOrder?: number;
 }
@@ -146,12 +173,37 @@ export const TARGET_TYPE_DESCRIPTIONS: Record<ActionTargetType, string> = {
     collection: "Works with collections",
 };
 
-/** User-facing labels for the homepage skill categories. */
-export const CATEGORY_LABELS: Record<ActionCategory, string> = {
+/** Labels for known categories. Not exhaustive — use {@link categoryLabel}. */
+export const CATEGORY_LABELS: Record<string, string | undefined> = {
     research: "Research",
     write: "Write",
     organize: "Organize",
     annotate: "Annotate",
+} satisfies Record<KnownActionCategory, string>;
+
+/**
+ * Map, not object: category is any string, and `{}.constructor` is a function
+ * (inherited), so `labels[category] ?? fallback` would return that function.
+ * Every lookup keyed by a category value must go through a Map.
+ */
+const CATEGORY_LABEL_LOOKUP = new Map<string, string>(
+    Object.entries(CATEGORY_LABELS).filter(
+        (entry): entry is [string, string] => entry[1] !== undefined,
+    ),
+);
+
+/** Title-case an unfamiliar category id ("deep-research" → "Deep Research"). */
+const titleCaseCategory = (category: string): string =>
+    category
+        .split(/[-_\s]+/)
+        .filter(word => word.length > 0)
+        .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+        .join(" ");
+
+/** Known label, title-cased id for unknown categories, or "Uncategorized". */
+export const categoryLabel = (category: ActionCategory | undefined): string => {
+    if (!category) return "Uncategorized";
+    return CATEGORY_LABEL_LOOKUP.get(category) ?? titleCaseCategory(category);
 };
 
 // ---------------------------------------------------------------------------
@@ -203,7 +255,10 @@ export const targetsDescription = (targets: ActionTargetType[]): string =>
 // ---------------------------------------------------------------------------
 
 const VALID_TARGET_TYPES: Set<string> = new Set(["items", "attachment", "note", "collection", "global"]);
-const VALID_CATEGORIES: Set<string> = new Set(["research", "write", "organize", "annotate"]);
+
+/** Shape only. Rejecting an unknown value would drop the action on save. */
+const isValidCategory = (value: unknown): boolean =>
+    typeof value === 'string' && value.trim().length > 0;
 
 const isValidTargetsArray = (value: unknown): value is ActionTargetType[] =>
     Array.isArray(value) &&
@@ -222,7 +277,7 @@ export const isStoredAction = (obj: unknown): boolean => {
         typeof o.text === 'string' &&
         (o.description === undefined || typeof o.description === 'string') &&
         hasValidTargets &&
-        (o.category === undefined || (typeof o.category === 'string' && VALID_CATEGORIES.has(o.category as string))) &&
+        (o.category === undefined || isValidCategory(o.category)) &&
         (o.name === undefined || (typeof o.name === 'string' && !/\s/.test(o.name))) &&
         (o.argumentHint === undefined || typeof o.argumentHint === 'string') &&
         (o.id_model === undefined || typeof o.id_model === 'string') &&
@@ -243,6 +298,8 @@ export const normalizeStoredAction = (raw: Record<string, unknown>): Action => {
     };
     return {
         ...(rest as unknown as Omit<Action, 'targets'>),
+        // Blank is not a category — don't copy rest.category through.
+        category: storedCategory((rest as { category?: unknown }).category),
         targets: isValidTargetsArray(targets) ? targets : [targetType as ActionTargetType],
     };
 };
@@ -252,6 +309,18 @@ export const normalizeStoredAction = (raw: Record<string, unknown>): Action => {
 export const normalizeStoredOverride = (raw: ActionOverride & { targetType?: string; minItems?: number }): ActionOverride => {
     const { targetType, minItems: _minItems, targets, ...rest } = raw;
     const normalized: ActionOverride = { ...rest };
+    // Blank → null (cleared, beats the shipped value). Non-strings are dropped
+    // without calling string methods — prefs aren't field-validated.
+    const storedOverrideCategory = normalized.category;
+    if (typeof storedOverrideCategory === 'string' && storedOverrideCategory.trim() === '') {
+        normalized.category = null;
+    } else if (
+        storedOverrideCategory !== undefined &&
+        storedOverrideCategory !== null &&
+        typeof storedOverrideCategory !== 'string'
+    ) {
+        delete normalized.category;
+    }
     if (isValidTargetsArray(targets)) {
         normalized.targets = targets;
     } else if (typeof targetType === 'string' && VALID_TARGET_TYPES.has(targetType)) {

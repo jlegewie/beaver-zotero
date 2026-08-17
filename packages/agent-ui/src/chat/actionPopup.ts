@@ -1,6 +1,6 @@
 import type React from 'react';
 import type { ChipPopupContent } from './ChipPopup';
-import type { ActionCategory } from '@beaver/agent-core/types/actions';
+import type { ActionCategory, KnownActionCategory } from '@beaver/agent-core/types/actions';
 import { ZapIcon, BookSearchIcon, LayersIcon, HighlighterIcon, QuillWriteIcon } from '../icons';
 import { truncateText } from '../utils/stringUtils';
 
@@ -15,13 +15,16 @@ import { truncateText } from '../utils/stringUtils';
  * client-agnostic.
  */
 
-/** Category icons, mirroring the homepage launcher (Zap = uncategorized). */
-const CATEGORY_ICONS: Record<ActionCategory, React.ComponentType<React.SVGProps<SVGSVGElement>>> = {
+/** Category icons matching the homepage launcher. Zap for missing/unknown categories. */
+const CATEGORY_ICON_ENTRIES = {
     research: BookSearchIcon,
     write: QuillWriteIcon,
     organize: LayersIcon,
     annotate: HighlighterIcon,
-};
+} satisfies Record<KnownActionCategory, React.ComponentType<React.SVGProps<SVGSVGElement>>>;
+
+/** Map so Object.prototype names (`constructor`, …) don't inherit a function. */
+const CATEGORY_ICONS = new Map<string, React.ComponentType<React.SVGProps<SVGSVGElement>>>(Object.entries(CATEGORY_ICON_ENTRIES));
 
 /** Same cap as chip labels (MAX_CHIP_TEXT_LENGTH in RequestChipPrimitives). */
 const MAX_ACTION_TITLE_LENGTH = 30;
@@ -39,6 +42,8 @@ export interface ActionPopupSource {
     prompt?: string | null;
     /** Skill category, drives the footer icon. */
     category?: ActionCategory;
+    /** Footer icon. Pass this when the client has a glyph this package doesn't know. */
+    icon?: React.ComponentType<React.SVGProps<SVGSVGElement>>;
 }
 
 export function buildActionPopup(source: ActionPopupSource): ChipPopupContent {
@@ -52,7 +57,9 @@ export function buildActionPopup(source: ActionPopupSource): ChipPopupContent {
         title: truncateText(title, MAX_ACTION_TITLE_LENGTH),
         subtitle: subtitleText ? { text: subtitleText } : null,
         action: {
-            icon: (source.category && CATEGORY_ICONS[source.category]) || ZapIcon,
+            icon:
+                source.icon ??
+                ((source.category && CATEGORY_ICONS.get(source.category)) || ZapIcon),
             label: 'Click to edit in preferences',
         },
     };
