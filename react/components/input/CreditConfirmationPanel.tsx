@@ -9,6 +9,7 @@ import {
 import Button from '@beaver/agent-ui/primitives/Button';
 import Tooltip from '@beaver/agent-ui/primitives/Tooltip';
 import { DollarCircleIcon, Icon, StopStrokeIcon } from '../icons/icons';
+import { DocLink } from '../preferences/components/SettingsElements';
 import { logger } from '@beaver/agent-core/platform/logger';
 
 /** The decision callbacks the card's buttons fire. */
@@ -98,27 +99,21 @@ export const CreditConfirmationCard: React.FC<CreditConfirmationCardProps> = ({
                 </div>
             </div>
 
-            {/* Body: the backend's message, its charge lines, then its footer.
-                The charges are secondary text; the footer is not one of them —
-                it says what the decision means, so it reads as body text and
-                stands off from the list above it. */}
-            <div className="display-flex flex-col gap-3 min-w-0">
-                <div className="font-color-primary">{confirmation.message}</div>
-                {confirmation.details.length > 0 && (
-                    <div className="display-flex flex-col gap-05 mt-1 min-w-0" role="list">
-                        {confirmation.details.map((detail, index) => (
-                            <div
-                                key={`${index}-${detail}`}
-                                role="listitem"
-                                className="font-color-secondary text-base"
-                            >
-                                {detail}
-                            </div>
-                        ))}
-                    </div>
-                )}
+            {/* DocLink resolves the backend-provided path for this environment. */}
+            <div className="display-flex flex-col gap-4 min-w-0">
+                <div className="font-color-primary">
+                    {confirmation.message}
+                    {confirmation.learnMorePath && confirmation.learnMoreLabel && (
+                        <>
+                            {' '}
+                            <DocLink path={confirmation.learnMorePath}>
+                                {confirmation.learnMoreLabel}
+                            </DocLink>
+                        </>
+                    )}
+                </div>
                 {confirmation.footer && (
-                    <div className="font-color-primary mt-2 min-w-0">
+                    <div className="font-color-primary min-w-0">
                         {confirmation.footer}
                     </div>
                 )}

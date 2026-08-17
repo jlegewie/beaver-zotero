@@ -331,10 +331,8 @@ export function notifyCreditConfirmation(event: WSCreditConfirmationRequest): vo
         return;
     }
 
-    // The card's message is written for a panel, so a notification-sized slice
-    // of it ends mid-sentence and points at detail lines no notification shows.
-    // The details themselves are short, backend-composed and self-contained.
-    const body = event.details?.length ? event.details.join(" · ") : event.message;
+    // Keep notification copy consistent with the backend-provided card text.
+    const body = event.message;
 
     const visibility = getBeaverVisibility();
 

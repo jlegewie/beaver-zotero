@@ -1894,13 +1894,12 @@ export interface WSCreditConfirmationRequest extends WSBaseEvent {
     title: string;
     /** Card body text, composed by the backend */
     message: string;
-    /**
-     * The charges the run is about to incur, one line each, with a charge's own
-     * label on the line below it. Rendered as-is.
-     */
-    details: string[];
-    /** Closing line about what continuing means, set apart from the charges */
+    /** Closing line about what continuing means */
     footer?: string;
+    /** Backend-provided docs link text */
+    learn_more_label?: string;
+    /** Docs path resolved against the client's environment-specific docs URL */
+    learn_more_path?: string;
     /** Label for the approve button */
     approve_label: string;
     /** Label for the decline button */

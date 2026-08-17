@@ -53,7 +53,8 @@ import { sendCreditConfirmationResponseAtom } from '../../../react/atoms/agentRu
 // have come from the numeric fields below.
 const TITLE = 'Continue past your credit limit?';
 const MESSAGE = 'This request is about to go over your limit. Wrapping up stops any further charges.';
-const DETAILS = ['Very large context — one credit', 'Extract from attachments — some credits', 'Deep search of external sources — one credit'];
+const LEARN_MORE_LABEL = 'Learn more';
+const LEARN_MORE_PATH = 'credits#credit-overview';
 const FOOTER = 'Continuing may add further charges without asking again.';
 const APPROVE_LABEL = 'Continue';
 const DECLINE_LABEL = 'Wrap up now';
@@ -65,8 +66,9 @@ function confirmation(overrides: Partial<PendingCreditConfirmation> = {}): Pendi
         threadId: 'thread-1',
         title: TITLE,
         message: MESSAGE,
-        details: [...DETAILS],
         footer: FOOTER,
+        learnMoreLabel: LEARN_MORE_LABEL,
+        learnMorePath: LEARN_MORE_PATH,
         approveLabel: APPROVE_LABEL,
         declineLabel: DECLINE_LABEL,
         pendingCredits: 12,
@@ -86,8 +88,9 @@ function confirmationEvent(): WSCreditConfirmationRequest {
         thread_id: pending.threadId,
         title: pending.title,
         message: pending.message,
-        details: pending.details,
         footer: pending.footer,
+        learn_more_label: pending.learnMoreLabel,
+        learn_more_path: pending.learnMorePath,
         approve_label: pending.approveLabel,
         decline_label: pending.declineLabel,
         pending_credits: pending.pendingCredits,
@@ -112,6 +115,21 @@ function collectText(node: React.ReactNode): string {
         return collectText((node.props as { children?: React.ReactNode }).children);
     }
     return '';
+}
+
+/** The first element in the tree carrying this prop, if any. */
+function findByProp(node: React.ReactNode, prop: string): React.ReactNode | null {
+    if (Array.isArray(node)) {
+        for (const child of node) {
+            const found = findByProp(child, prop);
+            if (found) return found;
+        }
+        return null;
+    }
+    if (!React.isValidElement(node)) return null;
+    const props = node.props as Record<string, unknown> & { children?: React.ReactNode };
+    if (props[prop] !== undefined) return node;
+    return findByProp(props.children ?? null, prop);
 }
 
 /** The first element in the tree with this ARIA role, if any. */
@@ -174,25 +192,30 @@ describe('CreditConfirmationCard', () => {
 
         expect(text).toContain(TITLE);
         expect(text).toContain(MESSAGE);
-        for (const detail of DETAILS) {
-            expect(text).toContain(detail);
-        }
+        expect(text).toContain(LEARN_MORE_LABEL);
         expect(text).toContain(FOOTER);
         expect(text).toContain(APPROVE_LABEL);
         expect(text).toContain(DECLINE_LABEL);
     });
 
-    it('renders the footer apart from the charge lines', () => {
-        // The footer says what the decision means; the details are the charges
-        // it qualifies. A backend that sends no footer must not leave a gap.
-        const { tree } = renderCard();
-        const listed = collectText(
-            findByRole(tree, 'list') as React.ReactNode,
-        );
+    it('omits the footer when the backend sent none', () => {
+        const text = collectText(renderCard({ footer: undefined }).tree);
 
-        expect(listed).not.toContain(FOOTER);
-        expect(collectText(tree)).toContain(FOOTER);
-        expect(collectText(renderCard({ footer: undefined }).tree)).not.toContain(FOOTER);
+        expect(text).toContain(MESSAGE);
+        expect(text).not.toContain(FOOTER);
+    });
+
+    it('links to the docs section the backend chose, and only when it sent one', () => {
+        const { tree } = renderCard();
+        const link = findByProp(tree, 'path') as React.ReactElement | null;
+
+        expect(link).not.toBeNull();
+        expect((link!.props as { path: string }).path).toBe(LEARN_MORE_PATH);
+        expect(collectText(tree)).toContain(LEARN_MORE_LABEL);
+
+        const withoutLink = renderCard({ learnMorePath: undefined });
+        expect(findByProp(withoutLink.tree, 'path')).toBeNull();
+        expect(collectText(withoutLink.tree)).not.toContain(LEARN_MORE_LABEL);
     });
 
     it('writes no prose of its own from the numeric fields', () => {
@@ -201,13 +224,6 @@ describe('CreditConfirmationCard', () => {
         const text = collectText(renderCard().tree);
 
         expect(text).not.toMatch(/\d/);
-    });
-
-    it('omits the detail list when the backend sent no lines', () => {
-        const text = collectText(renderCard({ details: [] }).tree);
-
-        expect(text).toContain(MESSAGE);
-        expect(text).not.toContain(DETAILS[0]);
     });
 
     it('wires the approve and decline buttons to their own labels', () => {

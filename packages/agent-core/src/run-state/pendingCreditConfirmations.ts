@@ -30,14 +30,12 @@ export interface PendingCreditConfirmation {
     title: string;
     /** Card body text, rendered verbatim */
     message: string;
-    /** The upcoming charges, rendered as-is under the message */
-    details: string[];
-    /**
-     * Closing line about what continuing means, rendered verbatim and set
-     * apart from the charges it qualifies. Absent from a backend that predates
-     * the field.
-     */
+    /** Closing line about what continuing means, rendered verbatim */
     footer?: string;
+    /** Backend-provided docs link text */
+    learnMoreLabel?: string;
+    /** Docs path resolved against the client's environment-specific docs URL */
+    learnMorePath?: string;
     /** Approve button label, rendered verbatim */
     approveLabel: string;
     /** Decline button label, rendered verbatim */
@@ -83,8 +81,9 @@ export const addPendingCreditConfirmationAtom = atom(
                 threadId: event.thread_id,
                 title: event.title,
                 message: event.message,
-                details: event.details ?? [],
                 footer: event.footer,
+                learnMoreLabel: event.learn_more_label,
+                learnMorePath: event.learn_more_path,
                 approveLabel: event.approve_label,
                 declineLabel: event.decline_label,
                 pendingCredits: event.pending_credits,

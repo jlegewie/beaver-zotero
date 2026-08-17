@@ -121,7 +121,7 @@ function currentIds() {
             confirmationId: c.confirmationId,
             title: c.title,
             message: c.message,
-            details: c.details,
+            footer: c.footer,
             pendingCredits: c.pendingCredits,
             projectedTotalCredits: c.projectedTotalCredits,
         })),
