@@ -67,6 +67,7 @@ describe("createAnnotation tag application", () => {
     (globalThis as any).Zotero = {
       Item: MockAnnotationItem,
       DB: { inTransaction: () => inTransaction },
+      Prefs: { get: vi.fn() },
       Beaver: {
         documentCache: {
           getMetadata: vi.fn().mockResolvedValue({ pages: [geometry] }),

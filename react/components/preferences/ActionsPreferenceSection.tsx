@@ -4,7 +4,7 @@ import { Icon, TickIcon, ArrowDownIcon, UploadCircleIcon, ImportIcon } from '../
 import PlusSignIcon from '@beaver/agent-ui/icons/PlusSignIcon';
 import Button from "@beaver/agent-ui/primitives/Button";
 import { useSetAtom } from 'jotai';
-import { Action, ActionCategory, ActionCategoryFilter, ActionTargetType, generateActionId, TARGET_TYPE_LABELS, CATEGORY_LABELS } from "@beaver/agent-core/types/actions";
+import { Action, ActionCategory, ActionCategoryFilter, ActionTargetType, generateActionId, TARGET_TYPE_LABELS, UNCATEGORIZED_FILTER, categoryLabel } from "@beaver/agent-core/types/actions";
 import { actionsAtom, saveActionsAtom, hideActionAtom, restoreActionAtom, resetActionToDefaultAtom, importActionAtom } from "../../atoms/actions";
 import { pendingActionsCategoryFilterAtom, pendingActionEditRequestAtom } from "../../atoms/ui";
 import { importActionFromFile } from "../../utils/actionShareFile";
@@ -102,7 +102,7 @@ const ActionsPreferenceSection: React.FC = () => {
     // right in the filtered list.
     const handleAddAction = useCallback(() => {
         const targets: ActionTargetType[] = [targetFilter ?? 'global'];
-        const category = categoryFilter && categoryFilter !== 'uncategorized' ? categoryFilter : undefined;
+        const category = categoryFilter && categoryFilter !== UNCATEGORIZED_FILTER ? categoryFilter : undefined;
         const newAction: Action = {
             id: generateActionId(),
             title: "",
@@ -163,7 +163,7 @@ const ActionsPreferenceSection: React.FC = () => {
     const filteredActions = useMemo(() => actions.filter(a =>
         (targetFilter === null || a.targets.includes(targetFilter)) &&
         (categoryFilter === null
-            || (categoryFilter === 'uncategorized' ? !a.category : a.category === categoryFilter))
+            || (categoryFilter === UNCATEGORIZED_FILTER ? !a.category : a.category === categoryFilter))
     ), [actions, targetFilter, categoryFilter]);
 
     // --- Filter menu items ---
@@ -179,17 +179,17 @@ const ActionsPreferenceSection: React.FC = () => {
         filterMenuItem('All categories', categoryFilter === null, () => setCategoryFilter(null)),
         { label: '', isDivider: true, onClick: () => {} },
         ...CATEGORY_FILTER_OPTIONS.map(cat =>
-            filterMenuItem(CATEGORY_LABELS[cat], categoryFilter === cat, () => setCategoryFilter(cat))
+            filterMenuItem(categoryLabel(cat), categoryFilter === cat, () => setCategoryFilter(cat))
         ),
-        filterMenuItem('Uncategorized', categoryFilter === 'uncategorized', () => setCategoryFilter('uncategorized')),
+        filterMenuItem('Uncategorized', categoryFilter === UNCATEGORIZED_FILTER, () => setCategoryFilter(UNCATEGORIZED_FILTER)),
     ], [categoryFilter]);
 
     const targetButtonLabel = targetFilter ? TARGET_TYPE_LABELS[targetFilter] : 'All targets';
     const categoryButtonLabel = categoryFilter === null
         ? 'All categories'
-        : categoryFilter === 'uncategorized'
+        : categoryFilter === UNCATEGORIZED_FILTER
             ? 'Uncategorized'
-            : CATEGORY_LABELS[categoryFilter];
+            : categoryLabel(categoryFilter);
 
     // No background when a filter dimension is unset ("All ..."); a filled, bordered
     // chip once it's narrowed down, so the active filters stand out at a glance.

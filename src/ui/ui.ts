@@ -661,7 +661,8 @@ export class BeaverUIFactory {
             'chrome://beaver/content/beaverPreferences.xhtml',
             BEAVER_PREFERENCES_WINDOW_NAME,
             'chrome,resizable,centerscreen,dialog=false',
-            { tab: tab || null, actionsCategoryFilter: actionsCategoryFilter || null, actionId: actionId || null }
+            // `??` so the uncategorized filter (`""`) is not dropped as falsy.
+            { tab: tab || null, actionsCategoryFilter: actionsCategoryFilter ?? null, actionId: actionId || null }
         );
         Zotero.debug("Beaver: Opened preferences window");
     }

@@ -107,13 +107,22 @@ describe('actionShare — schema', () => {
         expect(parseShareableAction(JSON.stringify({ ...base, action: { title: 'T', text: 'P' } })).ok).toBe(false);
     });
 
-    it('rejects an unknown category', () => {
+    it('keeps a category this build does not know', () => {
         const r = parseShareableAction(JSON.stringify({
             kind: SHAREABLE_ACTION_KIND,
             version: 1,
-            action: { title: 'T', text: 'P', targets: ['global'], category: 'bogus' },
+            action: { title: 'T', text: 'P', targets: ['global'], category: 'cite-check' },
         }));
-        expect(r.ok).toBe(false);
+        expect(r.ok).toBe(true);
+        expect(r.ok && r.action.category).toBe('cite-check');
+    });
+
+    it('rejects a malformed category', () => {
+        const base = { kind: SHAREABLE_ACTION_KIND, version: 1 };
+        const action = { title: 'T', text: 'P', targets: ['global'] };
+        expect(parseShareableAction(JSON.stringify({ ...base, action: { ...action, category: '' } })).ok).toBe(false);
+        expect(parseShareableAction(JSON.stringify({ ...base, action: { ...action, category: '   ' } })).ok).toBe(false);
+        expect(parseShareableAction(JSON.stringify({ ...base, action: { ...action, category: 7 } })).ok).toBe(false);
     });
 
     it('rejects a slash-command name containing whitespace', () => {

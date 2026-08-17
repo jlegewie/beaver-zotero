@@ -222,4 +222,17 @@ describe('importActionAtom — conflict handling', () => {
         const saved = saveActionCustomizationsMock.mock.calls[0][0];
         expect(saved.custom.some((a: Action) => a.title === 'Outline')).toBe(true);
     });
+
+    it('stores a cleared built-in category as null so it survives serialization', () => {
+        const categorized = BUILTIN_ACTIONS.find(a => !a.locked && a.category)!;
+        getActionCustomizationsMock.mockReturnValue({ version: 1, overrides: {}, custom: [] });
+        const store = makeStore([categorized]);
+
+        store.set(saveActionsAtom, [{ ...categorized, category: undefined }]);
+
+        const saved = saveActionCustomizationsMock.mock.calls[0][0];
+        // JSON.stringify drops undefined; null is what actually survives a save.
+        expect(saved.overrides[categorized.id]).toEqual({ category: null });
+        expect(JSON.parse(JSON.stringify(saved)).overrides[categorized.id]).toEqual({ category: null });
+    });
 });

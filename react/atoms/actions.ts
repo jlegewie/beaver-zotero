@@ -83,7 +83,8 @@ export const saveActionsAtom = atom(
                 if ((action.name ?? undefined) !== (base.name ?? undefined)) { override.name = action.name; hasChange = true; }
                 if ((action.id_model ?? undefined) !== (base.id_model ?? undefined)) { override.id_model = action.id_model; hasChange = true; }
                 if (!sameTargets(action.targets, base.targets)) { override.targets = action.targets; hasChange = true; }
-                if ((action.category ?? undefined) !== (base.category ?? undefined)) { override.category = action.category; hasChange = true; }
+                // Persist null (not undefined): JSON drops undefined, which would restore the shipped category.
+                if ((action.category ?? undefined) !== (base.category ?? undefined)) { override.category = action.category ?? null; hasChange = true; }
                 if ((action.argumentHint ?? undefined) !== (base.argumentHint ?? undefined)) { override.argumentHint = action.argumentHint; hasChange = true; }
                 if ((action.sortOrder ?? undefined) !== (base.sortOrder ?? undefined)) { override.sortOrder = action.sortOrder; hasChange = true; }
 

@@ -26,7 +26,8 @@ const PreferencesWindow: React.FC<PreferencesWindowProps> = ({ initialTab, initi
 
         // Set the initial tab, defaulting to 'general' for generic opens
         setActiveTab(initialTab || 'general');
-        if (initialActionsCategoryFilter) {
+        // `!= null` so the uncategorized filter (`""`) is not dropped as falsy.
+        if (initialActionsCategoryFilter != null) {
             setPendingActionsCategoryFilter({ filter: initialActionsCategoryFilter, requestId: Date.now() });
         }
         if (initialActionId) {

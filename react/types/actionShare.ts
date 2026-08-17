@@ -120,9 +120,6 @@ export const serializeAction = (action: Action): string =>
 const VALID_TARGET_TYPES: ReadonlySet<string> = new Set([
     'items', 'attachment', 'note', 'collection', 'global',
 ]);
-const VALID_CATEGORIES: ReadonlySet<string> = new Set([
-    'research', 'write', 'organize', 'annotate',
-]);
 
 /**
  * The share format has its own client vocabulary, mapped to and from the runtime
@@ -190,8 +187,9 @@ const parseV1: VersionParser = (envelope, currentClient) => {
     ) {
         return { ok: false, error: 'The action does not target anything Beaver recognizes.' };
     }
-    if (a.category !== undefined && !(typeof a.category === 'string' && VALID_CATEGORIES.has(a.category))) {
-        return { ok: false, error: 'The action has an unknown category.' };
+    // Open vocabulary: keep unknown categories, reject only malformed ones.
+    if (a.category !== undefined && !isNonEmptyString(a.category)) {
+        return { ok: false, error: 'The action has a malformed category.' };
     }
     // Client compatibility. Absent → runs anywhere. Present → must be a
     // non-empty list of client strings that includes the importing client.
