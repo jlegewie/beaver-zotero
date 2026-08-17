@@ -86,7 +86,7 @@ export const CreditConfirmationCard: React.FC<CreditConfirmationCardProps> = ({
         // screen reader the run has stopped and is waiting on a decision.
         aria-live="assertive"
     >
-        <div className="display-flex flex-col gap-15">
+        <div className="display-flex flex-col gap-4">
             {/* Header: static icon + the backend's title */}
             <div className="display-flex flex-row items-center gap-2 min-w-0">
                 <Icon icon={DollarCircleIcon} className="font-color-secondary scale-12 flex-none" />
@@ -98,8 +98,11 @@ export const CreditConfirmationCard: React.FC<CreditConfirmationCardProps> = ({
                 </div>
             </div>
 
-            {/* Body: the backend's message, then its detail lines */}
-            <div className="display-flex flex-col gap-1 min-w-0">
+            {/* Body: the backend's message, its charge lines, then its footer.
+                The charges are secondary text; the footer is not one of them —
+                it says what the decision means, so it reads as body text and
+                stands off from the list above it. */}
+            <div className="display-flex flex-col gap-3 min-w-0">
                 <div className="font-color-primary">{confirmation.message}</div>
                 {confirmation.details.length > 0 && (
                     <div className="display-flex flex-col gap-05 mt-1 min-w-0" role="list">
@@ -112,6 +115,11 @@ export const CreditConfirmationCard: React.FC<CreditConfirmationCardProps> = ({
                                 {detail}
                             </div>
                         ))}
+                    </div>
+                )}
+                {confirmation.footer && (
+                    <div className="font-color-primary mt-2 min-w-0">
+                        {confirmation.footer}
                     </div>
                 )}
             </div>

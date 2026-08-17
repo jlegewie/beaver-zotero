@@ -54,6 +54,7 @@ import { sendCreditConfirmationResponseAtom } from '../../../react/atoms/agentRu
 const TITLE = 'Continue past your credit limit?';
 const MESSAGE = 'This request is about to go over your limit. Wrapping up stops any further charges.';
 const DETAILS = ['Very large context — one credit', 'Extract from attachments — some credits', 'Deep search of external sources — one credit'];
+const FOOTER = 'Continuing may add further charges without asking again.';
 const APPROVE_LABEL = 'Continue';
 const DECLINE_LABEL = 'Wrap up now';
 
@@ -65,6 +66,7 @@ function confirmation(overrides: Partial<PendingCreditConfirmation> = {}): Pendi
         title: TITLE,
         message: MESSAGE,
         details: [...DETAILS],
+        footer: FOOTER,
         approveLabel: APPROVE_LABEL,
         declineLabel: DECLINE_LABEL,
         pendingCredits: 12,
@@ -85,6 +87,7 @@ function confirmationEvent(): WSCreditConfirmationRequest {
         title: pending.title,
         message: pending.message,
         details: pending.details,
+        footer: pending.footer,
         approve_label: pending.approveLabel,
         decline_label: pending.declineLabel,
         pending_credits: pending.pendingCredits,
@@ -109,6 +112,21 @@ function collectText(node: React.ReactNode): string {
         return collectText((node.props as { children?: React.ReactNode }).children);
     }
     return '';
+}
+
+/** The first element in the tree with this ARIA role, if any. */
+function findByRole(node: React.ReactNode, role: string): React.ReactNode | null {
+    if (Array.isArray(node)) {
+        for (const child of node) {
+            const found = findByRole(child, role);
+            if (found) return found;
+        }
+        return null;
+    }
+    if (!React.isValidElement(node)) return null;
+    const props = node.props as { role?: string; children?: React.ReactNode };
+    if (props.role === role) return node;
+    return findByRole(props.children ?? null, role);
 }
 
 /** Every element in the tree that carries an onClick handler. */
@@ -159,8 +177,22 @@ describe('CreditConfirmationCard', () => {
         for (const detail of DETAILS) {
             expect(text).toContain(detail);
         }
+        expect(text).toContain(FOOTER);
         expect(text).toContain(APPROVE_LABEL);
         expect(text).toContain(DECLINE_LABEL);
+    });
+
+    it('renders the footer apart from the charge lines', () => {
+        // The footer says what the decision means; the details are the charges
+        // it qualifies. A backend that sends no footer must not leave a gap.
+        const { tree } = renderCard();
+        const listed = collectText(
+            findByRole(tree, 'list') as React.ReactNode,
+        );
+
+        expect(listed).not.toContain(FOOTER);
+        expect(collectText(tree)).toContain(FOOTER);
+        expect(collectText(renderCard({ footer: undefined }).tree)).not.toContain(FOOTER);
     });
 
     it('writes no prose of its own from the numeric fields', () => {
