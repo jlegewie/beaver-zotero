@@ -46,7 +46,7 @@ import type { WSCreditConfirmationRequest } from '@beaver/agent-core/protocol/ag
 import {
     CreditConfirmationCard,
     createCreditDecisionHandlers,
-} from '../../../react/components/input/CreditConfirmationPanel';
+} from '@beaver/agent-ui/chat/CreditConfirmationCard';
 import { sendCreditConfirmationResponseAtom } from '../../../react/atoms/agentRunAtoms';
 
 // Deliberately digit-free copy, so any digit in the rendered output can only

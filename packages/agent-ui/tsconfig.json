@@ -189,6 +189,7 @@
     "./src/chat/Citation.tsx",
     "./src/chat/CitedSourcesList.tsx",
     "./src/chat/ChipPopup.tsx",
+    "./src/chat/CreditConfirmationCard.tsx",
     "./src/chat/actionPopup.ts",
     "./src/chat/useCitationMarker.ts",
     "./src/chat/useCitationViewModel.ts",
