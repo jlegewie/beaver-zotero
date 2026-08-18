@@ -102,6 +102,21 @@ describe('getToolCallLabel', () => {
         expect(label).toBe('List collections: "My Library" (5 collections)');
     });
 
+    it('names the documentation reader instead of falling back to the generic label', () => {
+        const label = getToolCallLabel(tc('read_documentation', { path: '/docs/searching.mdx' }), 'completed');
+        expect(label).toBe('Reading documentation');
+    });
+
+    it('labels a legacy skill path served by the documentation reader as a skill load', () => {
+        const label = getToolCallLabel(tc('read_documentation', { path: '/skills/library-management/SKILL.md' }), 'completed');
+        expect(label).toBe('Loading skill: Library management');
+    });
+
+    it('keeps a documentation path with a skills segment as documentation', () => {
+        const label = getToolCallLabel(tc('read_documentation', { path: '/docs/skills/overview.mdx' }), 'completed');
+        expect(label).toBe('Reading documentation');
+    });
+
     it('falls back to the host-resolved source name for an empty completed annotation view', () => {
         const view = annotationView([]);
         const label = getToolCallLabel(tc('get_annotations', { attachment_id: '1-AAA' }), 'completed', {

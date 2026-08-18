@@ -232,6 +232,23 @@ function detectReadFileType(path: string): 'tool_result' | 'skill' | 'skill_reso
 }
 
 /**
+ * Display name for a skill file path (`/skills/{skill-name}/...`): the mapped
+ * label, else the directory name title-cased.
+ */
+function skillNameFromPath(path: string): string {
+    const skillKey = path.match(/\/skills\/([^/]+)/i)?.[1];
+    if (!skillKey) return 'skill';
+    return (
+        SKILL_NAME_LABELS[skillKey] ??
+        skillKey
+            .replace(/-/g, ' ')
+            .split(' ')
+            .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+            .join(' ')
+    );
+}
+
+/**
  * Truncate a string to a maximum length, adding ellipsis if needed.
  */
 function truncate(str: string, maxLength: number): string {
@@ -468,20 +485,29 @@ function computeMainLabel(
                     case 'tool_result':
                         return 'Retrieving previous results';
                     case 'skill':
-                    case 'skill_resource': {
-                        // Extract skill name from path: /skills/{skill-name}/...
-                        const skillMatch = path.match(/\/skills\/([^/]+)/i);
-                        const skillKey = skillMatch?.[1];
-                        const skillName = SKILL_NAME_LABELS[skillKey as string] 
-                            || skillKey?.replace(/-/g, ' ').split(' ').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ')
-                            || 'skill';
-                        return `Loading skill: ${truncate(skillName, 30)}`;
-                    }
+                    case 'skill_resource':
+                        return `Loading skill: ${truncate(skillNameFromPath(path), 30)}`;
                     case 'documentation':
                         return 'Reading documentation';
                     case 'unknown':
                     default:
                         return `${baseLabel}: ${truncate(path, 40)}`;
+                }
+            }
+            return baseLabel;
+        }
+
+        // The documentation reader also serves the skill files that markers in
+        // older threads ask to re-read, so those calls read as a skill load
+        // rather than as documentation. A documentation path wins: the skill
+        // test matches "/skills/" anywhere, which a docs page is allowed to
+        // contain.
+        case 'read_documentation': {
+            const path = args.path as string | undefined;
+            if (path && !/^\/?docs\//i.test(path.trim())) {
+                const fileType = detectReadFileType(path);
+                if (fileType === 'skill' || fileType === 'skill_resource') {
+                    return `Loading skill: ${truncate(skillNameFromPath(path), 30)}`;
                 }
             }
             return baseLabel;

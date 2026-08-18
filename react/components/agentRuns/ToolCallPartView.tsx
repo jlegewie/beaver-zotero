@@ -22,6 +22,7 @@ import {
     ViewIcon,
     Icon,
     PuzzleIcon,
+    HelpCircleIcon,
     FileViewIcon,
     GlobalSearchIcon,
     TextAlignLeftIcon,
@@ -105,6 +106,7 @@ const TOOL_ICONS: Record<string, IconComponent> = {
 
     // Read tool result
     read_file: TextAlignLeftIcon,
+    read_documentation: HelpCircleIcon,
     load_tool_results: LayersIcon,
     
     // Progressive disclosure tools
@@ -115,14 +117,24 @@ const TOOL_ICONS: Record<string, IconComponent> = {
     ask_user_question: ChattingIcon,
 };
 
-/** Progressive disclosure tools whose returns are framework-internal and shouldn't be expandable. */
-const NON_EXPANDABLE_TOOLS = new Set(['read_file', 'load_capability', 'search_tools', 'load_tool_results']);
+/**
+ * Progressive disclosure tools whose returns are framework-internal and shouldn't
+ * be expandable. Their result is a file or an instruction blob written for the
+ * model, so expanding one shows raw text rather than anything a reader can use.
+ */
+const NON_EXPANDABLE_TOOLS = new Set([
+    'read_file',
+    'read_documentation',
+    'load_capability',
+    'search_tools',
+    'load_tool_results',
+]);
 
 /** Tools that support streaming argument preview */
 const STREAMING_PREVIEW_TOOLS = new Set(['create_note']);
 
 /**
- * Detect the type of file being read by the read_file tool.
+ * Detect the type of file being read by the file-reading tools.
  * Simplified version of detectReadFileType from toolLabels.ts
  */
 function detectReadFileType(path: string): 'tool_result' | 'skill' | 'skill_resource' | 'documentation' | 'unknown' {
@@ -163,8 +175,8 @@ function detectReadFileType(path: string): 'tool_result' | 'skill' | 'skill_reso
 function getToolIcon(part: ToolCallPart): IconComponent {
     const toolName = part.tool_name;
     
-    // Special handling for read_file - check file type
-    if (toolName === 'read_file') {
+    // Special handling for the file readers - check file type
+    if (toolName === 'read_file' || toolName === 'read_documentation') {
         let args: Record<string, unknown> | undefined;
         try {
             args = typeof part.args === 'string'
