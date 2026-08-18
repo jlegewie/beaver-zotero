@@ -2212,6 +2212,8 @@ export const CLIENT_FEATURES = {
      * per-tool `confirm_extraction` / `confirm_external_search` approvals.
      */
     CREDIT_CONFIRMATION: 'credit_confirmation',
+    /** `batch_operations` capability (batch_start / batch_resolve). */
+    BATCH_OPERATIONS: 'batch_operations',
 } as const;
 
 /** Client type identifier for the Zotero plugin. */
@@ -2241,13 +2243,24 @@ export type BeaverClientType =
 export const ZOTERO_AGENT_NAME = 'beaver';
 
 /**
- * Features the current Zotero plugin build supports, declared explicitly in the
- * auth handshake. This build supports the full set, which equals what the
- * backend would otherwise derive from this plugin version — so declaring it is
- * behavior-preserving while letting the backend stop relying on version
- * derivation for current clients.
+ * Features the current Zotero plugin build always declares in the auth
+ * handshake. Equals the full CLIENT_FEATURES vocabulary except
+ * `batch_operations`, which is a backend rollout switch this plugin only
+ * opts into in development (see `zoteroPluginFeatures`).
  */
-export const ZOTERO_PLUGIN_FEATURES: string[] = Object.values(CLIENT_FEATURES);
+export const ZOTERO_PLUGIN_FEATURES: string[] = Object.values(CLIENT_FEATURES).filter(
+    (feature) => feature !== CLIENT_FEATURES.BATCH_OPERATIONS,
+);
+
+/**
+ * Handshake feature list for this Zotero plugin build.
+ * Development builds additionally declare `batch_operations` so the backend
+ * offers the deferred batch capability without shipping it to production.
+ */
+export function zoteroPluginFeatures(isDevelopment: boolean): string[] {
+    if (!isDevelopment) return ZOTERO_PLUGIN_FEATURES;
+    return [...ZOTERO_PLUGIN_FEATURES, CLIENT_FEATURES.BATCH_OPERATIONS];
+}
 
 /** Current library context for application state */
 export interface CurrentLibrary {
