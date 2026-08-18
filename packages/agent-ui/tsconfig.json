@@ -112,6 +112,7 @@
     "./src/icons/FolderDetailIcon.tsx",
     "./src/icons/FourIcon.tsx",
     "./src/icons/GlobalSearchIcon.tsx",
+    "./src/icons/HelpCircleIcon.tsx",
     "./src/icons/HighlighterIcon.tsx",
     "./src/icons/Icon.tsx",
     "./src/icons/IdeaIcon.tsx",
