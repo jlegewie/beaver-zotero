@@ -172,6 +172,7 @@
     "./src/primitives/index.ts",
     "./src/primitives/Button.tsx",
     "./src/primitives/ContextMenu.tsx",
+    "./src/primitives/DocsLink.tsx",
     "./src/primitives/IconButton.tsx",
     "./src/primitives/MenuButton.tsx",
     "./src/primitives/SearchMenu.tsx",

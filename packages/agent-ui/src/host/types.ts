@@ -314,6 +314,15 @@ export interface ConfigHost {
     /** Whether to expose development-only UI affordances. */
     isDevelopment(): boolean;
     /**
+     * Absolute URL for a documentation page, from a path relative to the docs
+     * site root (e.g. `'credits#credit-overview'`). The docs site is a separate
+     * deployment whose base URL each client learns its own way — one substitutes
+     * it at build time, another derives it from the runtime origin — so the join
+     * belongs to the host. Optional: a host that omits it gets no documentation
+     * links (the link degrades to plain text).
+     */
+    docsUrl?(path: string): string;
+    /**
      * Whether the composer applies the Windows composition-order workaround for
      * input methods (see the composer's composition-end deferral).
      *

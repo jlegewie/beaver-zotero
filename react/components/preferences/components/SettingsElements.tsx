@@ -1,4 +1,5 @@
 import React from "react";
+import DocsLink from "@beaver/agent-ui/primitives/DocsLink";
 
 
 /** Section label displayed above a settings group */
@@ -115,20 +116,14 @@ export const SettingsRow: React.FC<SettingsRowProps> = ({
     );
 };
 
-export const DocLink: React.FC<{ path: string; children: React.ReactNode }> = ({ path, children }) => {
-    const href = `${process.env.WEBAPP_BASE_URL}/docs/${path}`;
-    return (
-    <a
-        href={href}
-        onClick={(event) => {
-            event.preventDefault();
-            Zotero.launchURL(href);
-        }}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="text-link"
-    >
-        {children}
-    </a>
-    );
-};
+/**
+ * Link to a documentation page, given a path relative to the docs site root.
+ *
+ * Delegates to the shared {@link DocsLink}, which resolves the base URL and
+ * opens the URL through the host registry: the preferences and every shared
+ * surface that links to the docs then behave identically, and there is one
+ * implementation to change when either half moves.
+ */
+export const DocLink: React.FC<{ path: string; children: React.ReactNode }> = ({ path, children }) => (
+    <DocsLink path={path}>{children}</DocsLink>
+);
