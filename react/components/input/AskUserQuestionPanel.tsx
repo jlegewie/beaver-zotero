@@ -5,6 +5,18 @@ import type {
     AskUserQuestionAnswer,
     AskUserQuestionItem,
 } from '@beaver/agent-core/protocol/agentProtocol';
+import type { QuestionDraft } from '@beaver/agent-core/run-state/askUserQuestionAnswers';
+import {
+    allowsCustomAnswer,
+    buildAnswers,
+    clearAnswer,
+    EMPTY_QUESTION_DRAFT,
+    isQuestionAnswered,
+    selectOther,
+    setCustomText,
+    toggleOption,
+    toggleOther,
+} from '@beaver/agent-core/run-state/askUserQuestionAnswers';
 import {
     closeWSConnectionAtom,
     sendAskUserQuestionResponseAtom,
@@ -54,9 +66,7 @@ export const AskUserQuestionPanel: React.FC<AskUserQuestionPanelProps> = ({ pend
     const [index, setIndex] = useState(0);
     // Selected option ids / custom text / "Other" selection per question id —
     // preserved across back/forward navigation, sent together on Submit.
-    const [selections, setSelections] = useState<Record<string, string[]>>({});
-    const [customTexts, setCustomTexts] = useState<Record<string, string>>({});
-    const [otherSelected, setOtherSelected] = useState<Record<string, boolean>>({});
+    const [draft, setDraft] = useState<QuestionDraft>(EMPTY_QUESTION_DRAFT);
     // Guards double-submit in the instant before the panel unmounts.
     const [isSubmitted, setIsSubmitted] = useState(false);
 
@@ -64,15 +74,6 @@ export const AskUserQuestionPanel: React.FC<AskUserQuestionPanelProps> = ({ pend
 
     const question: AskUserQuestionItem | undefined = questions[Math.min(index, total - 1)];
     const isLast = index >= total - 1;
-
-    const allowsCustom = (q: AskUserQuestionItem) => q.allow_custom ?? true;
-
-    // Custom text counts only while "Other" is selected — an Other selection
-    // with nothing typed keeps Next/Submit disabled, and text left behind
-    // after deselecting Other neither counts nor gets sent.
-    const isAnswered = (q: AskUserQuestionItem) =>
-        (selections[q.id]?.length ?? 0) > 0 ||
-        (allowsCustom(q) && !!otherSelected[q.id] && (customTexts[q.id]?.trim() ?? '') !== '');
 
     // Keep the custom-answer field's height fitted to its (per-question)
     // content when the panel appears or the question changes. Deliberately no
@@ -84,94 +85,58 @@ export const AskUserQuestionPanel: React.FC<AskUserQuestionPanelProps> = ({ pend
         ta.style.height = `${ta.scrollHeight}px`;
     }, [index]);
 
-    const toggleOption = (q: AskUserQuestionItem, optionId: string) => {
-        setSelections((prev) => {
-            const current = prev[q.id] ?? [];
-            const isSelected = current.includes(optionId);
-            if (q.allow_multiple) {
-                return {
-                    ...prev,
-                    [q.id]: isSelected
-                        ? current.filter((id) => id !== optionId)
-                        : [...current, optionId],
-                };
-            }
-            return { ...prev, [q.id]: isSelected ? [] : [optionId] };
-        });
-        // Radio semantics: picking a listed option deselects "Other".
-        if (!q.allow_multiple) {
-            setOtherSelected((prev) => (prev[q.id] ? { ...prev, [q.id]: false } : prev));
-        }
+    const handleOptionClick = (q: AskUserQuestionItem, optionId: string) => {
+        setDraft((prev) => toggleOption(q, optionId, prev));
         // Move the caret out of the "Other" field when a listed option is
         // picked — refocusing/typing there would re-select Other.
         const ta = textareaRef.current;
         if (ta && ta.ownerDocument.activeElement === ta) ta.blur();
     };
 
-    // Select "Other" (idempotent). Radio semantics: clears the listed
-    // selections when the question is single-select. Also invoked from the
-    // textarea's focus handler so clicking straight into the text field
-    // selects Other without an extra click.
-    const selectOther = (q: AskUserQuestionItem) => {
-        setOtherSelected((prev) => (prev[q.id] ? prev : { ...prev, [q.id]: true }));
-        if (!q.allow_multiple) {
-            setSelections((prev) => ((prev[q.id]?.length ?? 0) > 0 ? { ...prev, [q.id]: [] } : prev));
-        }
-    };
-
     const handleOtherClick = (q: AskUserQuestionItem) => {
-        if (otherSelected[q.id]) {
-            setOtherSelected((prev) => ({ ...prev, [q.id]: false }));
-        } else {
-            selectOther(q);
-            textareaRef.current?.focus();
-        }
+        const wasSelected = !!draft.otherSelected[q.id];
+        setDraft((prev) => toggleOther(q, prev));
+        if (!wasSelected) textareaRef.current?.focus();
     };
 
-    const submitAll = useCallback((overrides?: { clearQuestionId?: string }) => {
+    const submitAnswers = useCallback((answers: AskUserQuestionAnswer[]) => {
         if (isSubmitted) return;
         setIsSubmitted(true);
-        const answers: AskUserQuestionAnswer[] = questions.map((q) => {
-            const cleared = overrides?.clearQuestionId === q.id;
-            return {
-                item_id: q.id,
-                selected_option_ids: cleared ? [] : (selections[q.id] ?? []),
-                custom_text: cleared || !allowsCustom(q) || !otherSelected[q.id]
-                    ? null
-                    : (customTexts[q.id]?.trim() || null),
-            };
-        });
         sendResponse({
             questionId: pendingQuestion.questionId,
             toolcallId: pendingQuestion.toolcallId,
             answers,
             cancelled: false,
         });
-    }, [isSubmitted, questions, selections, customTexts, otherSelected, sendResponse, pendingQuestion]);
+    }, [isSubmitted, sendResponse, pendingQuestion]);
+
+    const submitAll = useCallback(() => {
+        submitAnswers(buildAnswers(questions, draft));
+    }, [submitAnswers, questions, draft]);
 
     const handleNext = useCallback(() => {
-        if (!question || !isAnswered(question) || isSubmitted) return;
+        if (!question || !isQuestionAnswered(question, draft) || isSubmitted) return;
         if (isLast) {
             submitAll();
         } else {
             setIndex((i) => i + 1);
         }
-    }, [question, isLast, isSubmitted, submitAll, selections, customTexts, otherSelected]);
+    }, [question, draft, isLast, isSubmitted, submitAll]);
 
     // Skip advances past the current question without an answer (clearing any
     // partial one). On the last question that means sending the response with
-    // this question unanswered.
+    // this question unanswered — built from the cleared draft here, because the
+    // state setter has not settled by the time the response goes out.
     const handleSkip = useCallback(() => {
         if (!question || isSubmitted) return;
-        setSelections((prev) => ({ ...prev, [question.id]: [] }));
-        setCustomTexts((prev) => ({ ...prev, [question.id]: '' }));
-        setOtherSelected((prev) => ({ ...prev, [question.id]: false }));
+        const cleared = clearAnswer(question, draft);
+        setDraft(cleared);
         if (isLast) {
-            submitAll({ clearQuestionId: question.id });
+            submitAnswers(buildAnswers(questions, cleared));
         } else {
             setIndex((i) => i + 1);
         }
-    }, [question, isLast, isSubmitted, submitAll]);
+    }, [question, draft, questions, isLast, isSubmitted, submitAnswers]);
 
     const handleStop = useCallback(() => {
         logger('AskUserQuestionPanel: Stopping run while question pending');
@@ -180,8 +145,8 @@ export const AskUserQuestionPanel: React.FC<AskUserQuestionPanelProps> = ({ pend
 
     if (!question) return null;
 
-    const selectedIds = selections[question.id] ?? [];
-    const isOther = !!otherSelected[question.id];
+    const selectedIds = draft.selections[question.id] ?? [];
+    const isOther = !!draft.otherSelected[question.id];
 
     return (
         <div
@@ -243,7 +208,7 @@ export const AskUserQuestionPanel: React.FC<AskUserQuestionPanelProps> = ({ pend
                                     key={option.id}
                                     variant='ghost-secondary'
                                     className="text-left w-full"
-                                    onClick={() => toggleOption(question, option.id)}
+                                    onClick={() => handleOptionClick(question, option.id)}
                                     aria-pressed={isSelected}
                                     disabled={isSubmitted}
                                     style={{ padding: '3px 6px' }}
@@ -271,7 +236,7 @@ export const AskUserQuestionPanel: React.FC<AskUserQuestionPanelProps> = ({ pend
                             selects Other and focuses the field; focusing or
                             typing in the field selects Other. The row mirrors
                             an option row's geometry and selected styling. */}
-                        {allowsCustom(question) && (
+                        {allowsCustomAnswer(question) && (
                             <div
                                 className="display-flex flex-row gap-2 items-start w-full min-w-0"
                                 style={{ padding: '3px 6px', }}
@@ -304,16 +269,13 @@ export const AskUserQuestionPanel: React.FC<AskUserQuestionPanelProps> = ({ pend
                                     rows={1}
                                     placeholder="Other..."
                                     aria-label={`Custom answer for: ${question.question}`}
-                                    value={customTexts[question.id] ?? ''}
+                                    value={draft.customTexts[question.id] ?? ''}
                                     disabled={isSubmitted}
                                     style={{ flex: 1 }}
-                                    onFocus={() => selectOther(question)}
+                                    onFocus={() => setDraft((prev) => selectOther(question, prev))}
                                     onChange={(e) => {
-                                        selectOther(question);
-                                        setCustomTexts((prev) => ({
-                                            ...prev,
-                                            [question.id]: e.target.value,
-                                        }));
+                                        const text = e.target.value;
+                                        setDraft((prev) => setCustomText(question, text, prev));
                                     }}
                                     onInput={(e) => {
                                         e.currentTarget.style.height = 'auto';
@@ -358,7 +320,7 @@ export const AskUserQuestionPanel: React.FC<AskUserQuestionPanelProps> = ({ pend
                         ariaLabel={isLast ? 'Submit answers' : 'Next question'}
                         style={{ padding: '2px 5px' }}
                         onClick={handleNext}
-                        disabled={!isAnswered(question) || isSubmitted}
+                        disabled={!isQuestionAnswered(question, draft) || isSubmitted}
                     >
                         {isLast
                             ? (<span>Submit <span className="opacity-50">⏎</span></span>)
