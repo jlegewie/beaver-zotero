@@ -1,5 +1,5 @@
 /**
- * Batch approval: transport.
+ * Batch approval: transport, pending state, and the host wiring around them.
  *
  * The backend asks once per batch — not per mutating tool call — before a
  * batch starts changing the library, and composes the card copy itself. These
@@ -8,6 +8,10 @@
  * with no such surface has to decline in a shape the backend can read, and a
  * decision has to leave the socket with the correlation id and coverage mode
  * the backend answers on.
+ *
+ * The host half is pinned here too: every way the decision can fail to arrive
+ * has to retire the card instead of leaving it holding the composer, and Stop
+ * has to abandon the run rather than answer for the user.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -56,12 +60,28 @@ vi.mock('../../../src/services/agentDataProvider', () => ({
     handleReadNoteRequest: vi.fn(),
 }));
 
-import { AgentService } from '@beaver/agent-core/transport/agentService';
+import { createStore } from 'jotai';
+import { AgentService, agentService } from '@beaver/agent-core/transport/agentService';
 import type {
     AgentRunRequest,
     WSBatchApprovalRequest,
     WSCallbacks,
+    WSToolReturnEvent,
 } from '@beaver/agent-core/protocol/agentProtocol';
+import {
+    addPendingBatchApprovalAtom,
+    clearAllPendingBatchApprovalsAtom,
+    pendingBatchApprovalsAtom,
+    removePendingBatchApprovalAtom,
+} from '@beaver/agent-core/run-state/pendingBatchApprovals';
+import {
+    clearThreadAtom,
+    closeWSConnectionAtom,
+    createWSCallbacks,
+    prepareForNewRunAtom,
+    sendBatchApprovalResponseAtom,
+} from '../../../react/atoms/agentRunAtoms';
+import { store } from '../../../react/store';
 
 class MockWebSocket {
     static CONNECTING = 0;
@@ -330,5 +350,214 @@ describe('AgentService batch approval transport', () => {
         const service = new AgentService('https://api.example.com');
 
         expect(service.sendBatchApprovalResponse('appr-1', false, 'ask_each_time')).toBe(false);
+    });
+});
+
+describe('pendingBatchApprovals atoms', () => {
+    it('adds a pending approval keyed by approvalId', () => {
+        const store = createStore();
+        store.set(addPendingBatchApprovalAtom, approvalEvent());
+
+        const map = store.get(pendingBatchApprovalsAtom);
+        expect(map.size).toBe(1);
+        expect(map.get('appr-1')).toMatchObject({
+            approvalId: 'appr-1',
+            runId: 'run-1',
+            threadId: 'thread-1',
+            toolcallId: 'call-1',
+            batchId: 'b1',
+            title: 'Approve batch operation',
+            message: 'Assign one broad topic tag to every item and remove all prior tags',
+            destructiveWarning: 'Removes every existing tag from these items',
+            creditNote: 'Approving raises the confirmation limit for this thread to 12 credits.',
+            defaultMode: 'full_access',
+            approveLabel: 'Approve',
+            declineLabel: 'Reject',
+            timeoutSeconds: 180,
+        });
+    });
+
+    it('removes a pending approval by id (the stale-notice path)', () => {
+        const store = createStore();
+        store.set(addPendingBatchApprovalAtom, approvalEvent());
+        store.set(addPendingBatchApprovalAtom, approvalEvent({ approval_id: 'appr-2' }));
+
+        store.set(removePendingBatchApprovalAtom, 'appr-1');
+
+        const map = store.get(pendingBatchApprovalsAtom);
+        expect(map.has('appr-1')).toBe(false);
+        expect(map.has('appr-2')).toBe(true);
+    });
+
+    it('remove is a no-op for an unknown approvalId', () => {
+        const store = createStore();
+        store.set(addPendingBatchApprovalAtom, approvalEvent());
+        const before = store.get(pendingBatchApprovalsAtom);
+
+        store.set(removePendingBatchApprovalAtom, 'appr-unknown');
+
+        // Same Map reference — no state churn for an approval we never held.
+        expect(store.get(pendingBatchApprovalsAtom)).toBe(before);
+    });
+
+    it('clears all pending approvals (run end / disconnect / thread switch)', () => {
+        const store = createStore();
+        store.set(addPendingBatchApprovalAtom, approvalEvent());
+        store.set(addPendingBatchApprovalAtom, approvalEvent({ approval_id: 'appr-2' }));
+
+        store.set(clearAllPendingBatchApprovalsAtom);
+
+        expect(store.get(pendingBatchApprovalsAtom).size).toBe(0);
+    });
+});
+
+describe('sendBatchApprovalResponseAtom', () => {
+    afterEach(() => {
+        vi.restoreAllMocks();
+    });
+
+    it('sends the decision and retires the card', () => {
+        const store = createStore();
+        const send = vi.spyOn(agentService, 'sendBatchApprovalResponse').mockReturnValue(true);
+        store.set(addPendingBatchApprovalAtom, approvalEvent());
+
+        store.set(sendBatchApprovalResponseAtom, {
+            approvalId: 'appr-1',
+            approved: true,
+            mode: 'full_access',
+            userInstructions: 'keep CD4/CD8',
+        });
+
+        expect(send).toHaveBeenCalledWith('appr-1', true, 'full_access', 'keep CD4/CD8');
+        expect(store.get(pendingBatchApprovalsAtom).has('appr-1')).toBe(false);
+    });
+
+    it('retires the card even when the decision never left the client', () => {
+        // The run can no longer be told, so keeping the card up would strand the
+        // user on a card that can never be answered.
+        const store = createStore();
+        vi.spyOn(agentService, 'sendBatchApprovalResponse').mockReturnValue(false);
+        store.set(addPendingBatchApprovalAtom, approvalEvent());
+
+        store.set(sendBatchApprovalResponseAtom, {
+            approvalId: 'appr-1',
+            approved: false,
+            mode: 'ask_each_time',
+        });
+
+        expect(store.get(pendingBatchApprovalsAtom).has('appr-1')).toBe(false);
+    });
+});
+
+/** A tool return carrying a view the render layer accepts as-is. */
+function toolReturnEvent(toolCallId: string): WSToolReturnEvent {
+    return {
+        event: 'tool_return',
+        run_id: 'run-1',
+        message_index: 0,
+        part: {
+            part_kind: 'tool-return',
+            tool_name: 'batch_start',
+            tool_call_id: toolCallId,
+            content: {},
+            metadata: { view: { view_type: 'tag_list', tags: [] } },
+        },
+    } as unknown as WSToolReturnEvent;
+}
+
+describe('batch approval WebSocket callbacks', () => {
+    const callbacks = createWSCallbacks(store.set);
+
+    beforeEach(() => {
+        store.set(clearAllPendingBatchApprovalsAtom);
+    });
+
+    it('adds the pending approval on batch_approval_request', () => {
+        callbacks.onBatchApprovalRequest?.(approvalEvent());
+
+        expect(store.get(pendingBatchApprovalsAtom).get('appr-1')).toMatchObject({
+            approvalId: 'appr-1',
+            toolcallId: 'call-1',
+        });
+    });
+
+    it('retires the pending approval on batch_approval_stale', () => {
+        callbacks.onBatchApprovalRequest?.(approvalEvent());
+
+        callbacks.onBatchApprovalStale?.({
+            event: 'batch_approval_stale',
+            approval_id: 'appr-1',
+            reason: 'timed_out',
+        });
+
+        expect(store.get(pendingBatchApprovalsAtom).size).toBe(0);
+    });
+
+    it('retires the pending approval when the batch_start call that owns it returns', async () => {
+        // The backend-timeout path: the wait expires, batch_start returns with
+        // no coverage granted and the run continues. Without this the card
+        // would hold the composer for the rest of the run.
+        callbacks.onBatchApprovalRequest?.(approvalEvent());
+
+        await callbacks.onToolReturn?.(toolReturnEvent('call-1'));
+
+        expect(store.get(pendingBatchApprovalsAtom).size).toBe(0);
+    });
+
+    it('leaves the pending approval alone when an unrelated call returns', async () => {
+        callbacks.onBatchApprovalRequest?.(approvalEvent());
+
+        await callbacks.onToolReturn?.(toolReturnEvent('call-other'));
+
+        expect(store.get(pendingBatchApprovalsAtom).has('appr-1')).toBe(true);
+    });
+
+    it('clears the pending approval when the run ends', () => {
+        callbacks.onBatchApprovalRequest?.(approvalEvent());
+
+        callbacks.onDone?.();
+
+        expect(store.get(pendingBatchApprovalsAtom).size).toBe(0);
+    });
+});
+
+describe('stopping a run with a batch approval pending', () => {
+    afterEach(() => {
+        vi.restoreAllMocks();
+    });
+
+    it('cancels the run instead of declining the batch', () => {
+        // Stop is not a decline: the batch is never answered, the run is
+        // abandoned, and the card goes with it.
+        const send = vi.spyOn(agentService, 'sendBatchApprovalResponse');
+        store.set(clearAllPendingBatchApprovalsAtom);
+        store.set(addPendingBatchApprovalAtom, approvalEvent());
+
+        store.set(closeWSConnectionAtom);
+
+        expect(send).not.toHaveBeenCalled();
+        expect(store.get(pendingBatchApprovalsAtom).size).toBe(0);
+    });
+});
+
+describe('run-lifecycle clear sites', () => {
+    beforeEach(() => {
+        store.set(clearAllPendingBatchApprovalsAtom);
+    });
+
+    it('clears the pending approval before a replacement run starts', () => {
+        store.set(addPendingBatchApprovalAtom, approvalEvent());
+
+        store.set(prepareForNewRunAtom);
+
+        expect(store.get(pendingBatchApprovalsAtom).size).toBe(0);
+    });
+
+    it('clears the pending approval on a thread reset', () => {
+        store.set(addPendingBatchApprovalAtom, approvalEvent());
+
+        store.set(clearThreadAtom);
+
+        expect(store.get(pendingBatchApprovalsAtom).size).toBe(0);
     });
 });

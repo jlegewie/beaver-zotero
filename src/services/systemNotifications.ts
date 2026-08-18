@@ -2,7 +2,7 @@
  * OS-native system notifications for events the user may miss while working
  * outside the Beaver UI.
  *
- * Four events are surfaced:
+ * Five events are surfaced:
  *   - Deferred approval requests (note edit, metadata change, cost
  *     confirmation, ...): the approval UI only renders inside the Beaver
  *     sidebar, so if the user is elsewhere the task stalls waiting for a
@@ -12,6 +12,9 @@
  *     working elsewhere has no signal it is waiting (see notifyUserQuestion).
  *   - Credit confirmations: the run pauses on a spending decision that can only
  *     be answered in the sidebar (see notifyCreditConfirmation).
+ *   - Batch approvals: the run pauses before a batch starts changing the
+ *     library, and the card only renders in the sidebar (see
+ *     notifyBatchApproval).
  *   - Completed responses: the reply only renders inside the sidebar, so a
  *     user working elsewhere has no signal it is ready (see notifyRunComplete).
  *
@@ -36,6 +39,7 @@ import { isSidebarVisibleAtom } from "../../react/atoms/ui";
 import { BeaverUIFactory } from "../ui/ui";
 import {
     WSAskUserQuestionRequest,
+    WSBatchApprovalRequest,
     WSCreditConfirmationRequest,
     WSDeferredApprovalRequest,
 } from "@beaver/agent-core/protocol/agentProtocol";
@@ -51,6 +55,7 @@ const NOTIFICATION_ICON = `chrome://${config.addonRef}/content/icons/beaver.png`
 const APPROVAL_NOTIFICATION_NAME = "beaver-approval";
 const QUESTION_NOTIFICATION_NAME = "beaver-question";
 const CREDIT_CONFIRMATION_NOTIFICATION_NAME = "beaver-credit-confirmation";
+const BATCH_APPROVAL_NOTIFICATION_NAME = "beaver-batch-approval";
 const RUN_COMPLETE_NOTIFICATION_NAME = "beaver-run-complete";
 
 // Notification bodies are one-liners in the OS shell; longer copy is elided
@@ -354,6 +359,46 @@ export function notifyCreditConfirmation(event: WSCreditConfirmationRequest): vo
         event.title,
         truncateBody(body),
         CREDIT_CONFIRMATION_NOTIFICATION_NAME,
+    );
+}
+
+/**
+ * Surface a system notification when a run pauses for a batch approval and the
+ * user can't currently see the Beaver UI.
+ *
+ * The title and body are the backend's own copy — this path composes no
+ * wording of its own, exactly as the card does.
+ *
+ * The body is the batch goal. The destructive warning stays on the card: it is
+ * a separate claim about what will be removed, it only reads as one in its own
+ * block, and appending it here would both invent a combined sentence and risk
+ * eliding a destruction claim mid-word at the one-line limit.
+ */
+export function notifyBatchApproval(event: WSBatchApprovalRequest): void {
+    if (getPref("enableSystemNotifications") !== true) {
+        return;
+    }
+
+    const visibility = getBeaverVisibility();
+
+    switch (visibility) {
+        case "beaver-visible":
+            // Scenario A: the card is already on screen — nothing to do.
+            return;
+        case "zotero-focused":
+            // SCENARIO B: Zotero is focused but Beaver is not visible.
+            // TODO: when an in-app Zotero notification exists, route this case
+            // there instead of falling through to a system notification.
+            break;
+        case "zotero-unfocused":
+            // Scenario C: Zotero is in the background.
+            break;
+    }
+
+    showNotification(
+        event.title,
+        truncateBody(event.message),
+        BATCH_APPROVAL_NOTIFICATION_NAME,
     );
 }
 
