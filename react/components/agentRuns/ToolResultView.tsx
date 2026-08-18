@@ -1,7 +1,7 @@
 import React from 'react';
-import { ToolReturnPart } from '../../agents/types';
-import { isToolResultView, ToolResultView as ToolResultViewModel } from '../../types/toolResultViews';
-import { getHost } from '../../host';
+import { ToolReturnPart } from '@beaver/agent-core/agents/types';
+import { isToolResultView, ToolResultView as ToolResultViewModel } from '@beaver/agent-core/run-state/toolResultViews';
+import { getHost } from '@beaver/agent-ui/host';
 import { ItemListResultView } from './toolResultViews/ItemListResultView';
 import { ExternalReferenceListResultView } from './toolResultViews/ExternalReferenceListResultView';
 import { CollectionListResultView } from './toolResultViews/CollectionListResultView';

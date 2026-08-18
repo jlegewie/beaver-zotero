@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('../../../src/utils/logger', () => ({ logger: vi.fn() }));
+vi.mock('@beaver/agent-core/platform/logger', () => ({ logger: vi.fn() }));
 
 // The fix suppresses the auto-sync spinner via three additional runner APIs.
 // Install them as spies on every mock runner so the module's suppress/restore

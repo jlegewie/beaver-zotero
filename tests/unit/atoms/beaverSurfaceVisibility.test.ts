@@ -13,7 +13,7 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 
 // The atoms module's import chain reaches Supabase at load time.
-vi.mock('../../../src/services/supabaseClient', () => ({
+vi.mock('@beaver/agent-core/transport/supabaseClient', () => ({
     supabase: { auth: { getSession: vi.fn() } },
 }));
 

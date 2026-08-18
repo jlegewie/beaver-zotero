@@ -9,68 +9,23 @@
  * item contributes all agent-supported attachments.
  */
 
-import { logger } from '../../utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 import { agentItemFilter } from '../../utils/agentItemSupport';
-import { searchableLibraryIdsAtom } from '../../../react/atoms/profile';
-import { store } from '../../../react/store';
-import { ZoteroItemReference } from '../../../react/types/zotero';
+import { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import {
     WSResolveSearchFiltersRequest,
     WSResolveSearchFiltersResponse,
     ResolveSearchFiltersUnresolved,
-} from '../agentProtocol';
+} from '@beaver/agent-core/protocol/agentProtocol';
 import { resolveItemsByFilters } from '../../../react/utils/searchTools';
-import { getCollectionByIdOrName } from './utils';
-
-interface ResolvedLibraries {
-    libraryIds: number[];
-    /** Library filter inputs that resolved to no searchable library. */
-    unresolved: (string | number)[];
-}
-
-/**
- * Resolve library filter inputs (names or ids) to searchable library IDs,
- * tracking which inputs resolved to nothing. With no filter, returns all
- * searchable libraries.
- */
-function resolveLibraries(
-    librariesFilter: (string | number)[] | undefined,
-    searchableLibraryIds: number[],
-): ResolvedLibraries {
-    if (!librariesFilter || librariesFilter.length === 0) {
-        return { libraryIds: [...searchableLibraryIds], unresolved: [] };
-    }
-
-    const libraryIds = new Set<number>();
-    const unresolved: (string | number)[] = [];
-
-    for (const filter of librariesFilter) {
-        const before = libraryIds.size;
-
-        if (typeof filter === 'number') {
-            if (searchableLibraryIds.includes(filter)) libraryIds.add(filter);
-        } else {
-            const asNum = parseInt(filter, 10);
-            if (!isNaN(asNum) && String(asNum) === filter.trim()) {
-                if (searchableLibraryIds.includes(asNum)) libraryIds.add(asNum);
-            } else {
-                // Library names match searchable libraries by case-insensitive substring.
-                for (const lib of Zotero.Libraries.getAll()) {
-                    if (
-                        lib.name.toLowerCase().includes(filter.toLowerCase()) &&
-                        searchableLibraryIds.includes(lib.libraryID)
-                    ) {
-                        libraryIds.add(lib.libraryID);
-                    }
-                }
-            }
-        }
-
-        if (libraryIds.size === before) unresolved.push(filter);
-    }
-
-    return { libraryIds: Array.from(libraryIds), unresolved };
-}
+import { libraryRefForLibraryID } from '../../utils/libraryIdentity';
+import {
+    getCollectionByIdOrName,
+    getSearchableLibraryIds,
+    isLibraryAccessReady,
+    librariesFilterError,
+    resolveLibrariesFilter,
+} from './utils';
 
 /** Build the response envelope with timing metadata. */
 function buildResponse(
@@ -79,12 +34,14 @@ function buildResponse(
     unresolved: ResolveSearchFiltersUnresolved | undefined,
     startTime: number,
     itemCount: number,
+    error?: { message: string; error_code: WSResolveSearchFiltersResponse['error_code'] },
 ): WSResolveSearchFiltersResponse {
     return {
         type: 'resolve_search_filters',
         request_id: request.request_id,
         attachments,
         ...(unresolved ? { unresolved } : {}),
+        ...(error ? { error: error.message, error_code: error.error_code } : {}),
         timing: {
             total_ms: Date.now() - startTime,
             item_count: itemCount,
@@ -107,20 +64,43 @@ export async function handleResolveSearchFiltersRequest(
         (request.year.exact ?? 0) > 0
     );
 
-    // Intersect the library filter with searchable libraries.
-    const searchableLibraryIds = store.get(searchableLibraryIdsAtom);
-    const { libraryIds, unresolved: unresolvedLibraries } = resolveLibraries(
-        request.libraries,
-        searchableLibraryIds,
-    );
+    // Intersect the library filter with searchable libraries, through the same
+    // resolution every other search op uses: portable refs ("u"/"g<groupID>")
+    // resolve, and a library the user excluded is reported as excluded rather
+    // than as unknown.
+    let libraryIds: number[] = getSearchableLibraryIds();
+    const unresolvedLibraries: (string | number)[] = [];
+    if (request.libraries && request.libraries.length > 0) {
+        const resolution = resolveLibrariesFilter(request.libraries);
 
-    // Nothing can match when the library filter resolves to no searchable libraries.
-    if (request.libraries && request.libraries.length > 0 && libraryIds.length === 0) {
-        logger('handleResolveSearchFiltersRequest: libraries filter resolved to no searchable libraries', 1);
+        // A filter that resolves to nothing must narrow the search to no
+        // results, never widen it to every library — and it is reported as an
+        // error so a bad reference is not mistaken for an empty library.
+        const filterError = librariesFilterError(resolution);
+        if (filterError) {
+            logger(`handleResolveSearchFiltersRequest: ${filterError.message}`, 1);
+            return buildResponse(request, [], undefined, startTime, 0, filterError);
+        }
+
+        libraryIds = resolution.libraryIds;
+        unresolvedLibraries.push(
+            ...resolution.unresolved,
+            ...resolution.excluded.map((entry) => entry.input),
+        );
+    }
+
+    // `librariesFilterError` returns null while the library-access snapshot is
+    // still loading, so the fail-closed empty scope has to be handled here too.
+    // In that state every classification above is wrong — the searchable set is
+    // `[]`, so a valid reference looks excluded — hence no reason is reported
+    // rather than a misleading one, the same rule `librariesFilterError` follows.
+    if (libraryIds.length === 0) {
+        logger('handleResolveSearchFiltersRequest: no searchable library to resolve against', 1);
+        const reportable = isLibraryAccessReady() && unresolvedLibraries.length > 0;
         return buildResponse(
             request,
             [],
-            unresolvedLibraries.length ? { libraries: unresolvedLibraries } : undefined,
+            reportable ? { libraries: unresolvedLibraries } : undefined,
             startTime,
             0,
         );
@@ -157,7 +137,11 @@ export async function handleResolveSearchFiltersRequest(
     const addAttachment = (item: Zotero.Item) => {
         const key = `${item.libraryID}-${item.key}`;
         if (!attachmentRefs.has(key)) {
-            attachmentRefs.set(key, { library_id: item.libraryID, zotero_key: item.key });
+            attachmentRefs.set(key, {
+                library_id: item.libraryID,
+                library_ref: libraryRefForLibraryID(item.libraryID) ?? undefined,
+                zotero_key: item.key,
+            });
         }
     };
 

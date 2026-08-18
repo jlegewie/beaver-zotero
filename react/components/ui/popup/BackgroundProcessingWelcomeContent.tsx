@@ -1,6 +1,6 @@
 import React from 'react';
 import { useSetAtom } from 'jotai';
-import Button from '../Button';
+import Button from '@beaver/agent-ui/primitives/Button';
 import { removeFloatingPopupMessageAtom } from '../../../atoms/floatingPopup';
 import { setPref } from '../../../../src/utils/prefs';
 import { openPreferencesWindow } from '../../../../src/ui/openPreferencesWindow';

@@ -1,5 +1,5 @@
-import React, { useEffect } from "react";
-import Button from "../ui/Button";
+import React, { useCallback, useEffect, useState } from "react";
+import Button from "@beaver/agent-ui/primitives/Button";
 import {SettingsGroup, SettingsRow, SectionLabel, DocLink} from "./components/SettingsElements";
 import { Spinner } from '../icons/icons';
 import { activePreferencePageTabAtom } from "../../atoms/ui";
@@ -7,8 +7,14 @@ import { userAtom } from "../../atoms/auth";
 import { creditBreakdownAtom, creditPlanAtom, hasCreditPlanAtom, isCreditPlanPastDueAtom, profileBalanceAtom } from "../../atoms/profile";
 import { useAtomValue, useSetAtom } from "jotai";
 import { useBilling } from "../../hooks/useBilling";
-import { PlanInfo } from "../../../src/services/accountService";
-import { CreditBreakdown, ProfileBalance, CreditPlan } from "../../types/profile";
+import { PlanInfo } from "@beaver/agent-core/transport/clients/accountService";
+import { CreditBreakdown, ProfileBalance, CreditPlan } from "@beaver/agent-core/types/profile";
+import { getPref, setPref } from "../../../src/utils/prefs";
+import {
+    MIN_CREDIT_THRESHOLD,
+    parseCreditLimitEntry,
+    readCreditThreshold,
+} from "../../utils/creditThreshold";
 
 
 const getPackPrice = (pack: PlanInfo) => {
@@ -61,9 +67,9 @@ const ProgressBar: React.FC<{ creditPlan: CreditPlan, creditBreakdown: CreditBre
     return (
         <div style={{ marginTop: '12px' }}>
             <div className="display-flex flex-row items-center gap-3" style={{ marginBottom: '4px' }}>
-                <span className="text-sm font-color-primary font-medium">Plan Credits</span>
+                <span className="text-base font-color-primary font-medium">Plan Credits</span>
                 <div className="flex-1" />
-                <span className="text-sm font-color-primary font-medium">
+                <span className="text-base font-color-primary font-medium">
                     {usedPct}% used
                 </span>
             </div>
@@ -89,7 +95,7 @@ const ProgressBar: React.FC<{ creditPlan: CreditPlan, creditBreakdown: CreditBre
                 </div>
             </div>
             <div className="display-flex flex-col">
-                <div className="text-sm font-color-secondary" style={{ marginTop: '4px' }}>
+                <div className="text-base font-color-secondary" style={{ marginTop: '4px' }}>
                     {used} / {total} used
                 </div>
                 {creditBreakdown.rolledOverCredits > 0 && (
@@ -193,6 +199,35 @@ const BillingSection: React.FC = () => {
     const hasPlan = useAtomValue(hasCreditPlanAtom);
     const { subscribe, buyCredits, manageSubscription, upgradeSubscription, isLoading: isBillingLoading, plans, plansLoading, plansError, fetchPlans } = useBilling();
     const creditPacks = plans.filter(p => !p.interval);
+    // One control drives both stored values: a number is the limit, an empty
+    // field means never ask. `confirmCredits` is what carries "never" — the
+    // limit itself keeps its last value so clearing and refilling the field
+    // does not lose it.
+    const [creditThresholdText, setCreditThresholdText] = useState(() =>
+        getPref('confirmCredits') ? String(readCreditThreshold()) : '');
+
+    // The field is edited as free text and only written on commit (blur or
+    // Enter): writing per keystroke would store "1" on the way to "10". An
+    // empty field is a deliberate "never ask", not an invalid entry. The
+    // preference holds an integer, so a number is rounded and capped before it
+    // is stored — an out-of-range value would otherwise wrap and be rejected by
+    // the server on every run. Anything else snaps back to what is stored.
+    const commitCreditThreshold = useCallback(() => {
+        const entry = parseCreditLimitEntry(creditThresholdText);
+        if (entry.kind === 'never') {
+            setPref('confirmCredits', false);
+            setCreditThresholdText('');
+            return;
+        }
+        if (entry.kind === 'invalid') {
+            setCreditThresholdText(getPref('confirmCredits') ? String(readCreditThreshold()) : '');
+            return;
+        }
+        setPref('creditConfirmThreshold', entry.value);
+        setPref('confirmCredits', true);
+        setCreditThresholdText(String(entry.value));
+    }, [creditThresholdText]);
+
     const upgradePlan = hasPlan && !creditPlan.cancelAtPeriodEnd
         ? plans.filter(p => p.interval && p.monthly_credits > (creditPlan.monthlyCredits || 0))
             .sort((a, b) => a.monthly_credits - b.monthly_credits)[0] ?? null
@@ -298,16 +333,16 @@ const BillingSection: React.FC = () => {
                                         {' '}({formatTimeRemaining(creditPlan.periodEnd, creditPlan.plan?.includes('annual') ?? false)})
                                     </span>
                                 )}
-                                {creditPlan.plan?.includes('annual') && creditPlan.monthlyResetAt && !creditPlan.cancelAtPeriodEnd && (
-                                    <div className="text-sm font-color-secondary">
-                                        Next monthly credit reset: {new Date(creditPlan.monthlyResetAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
-                                    </div>
-                                )}
                                 {creditPlan.cancelAtPeriodEnd && creditPlan.periodEnd && (
-                                    <span className="text-sm font-color-secondary">
-                                        Your plan ends {new Date(creditPlan.periodEnd).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                                    <span className="text-base font-color-secondary">
+                                        Your plan ends {new Date(creditPlan.periodEnd).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
                                         {' '}({formatTimeRemaining(creditPlan.periodEnd, creditPlan.plan?.includes('annual') ?? false)} remaining)
                                     </span>
+                                )}
+                                {creditPlan.plan?.includes('annual') && creditPlan.monthlyResetAt && (
+                                    <div className="text-base font-color-secondary">
+                                        Next monthly credit reset: {new Date(creditPlan.monthlyResetAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                                    </div>
                                 )}
                             </div>
                             <div className="flex-1" />
@@ -420,6 +455,37 @@ const BillingSection: React.FC = () => {
                         }
                     />
                 )}
+            </SettingsGroup>
+
+            <SectionLabel>Credit Limit</SectionLabel>
+            <SettingsGroup>
+                <SettingsRow
+                    title="Credit Limit"
+                    description={
+                        <>
+                            Ask before a single request uses more than this many credits in total. Leave empty to never ask. Only relevant when using Beaver credits. <DocLink path="credits">Learn more</DocLink>
+                        </>
+                    }
+                    control={
+                        <input
+                            type="number"
+                            min={MIN_CREDIT_THRESHOLD}
+                            step={1}
+                            inputMode="numeric"
+                            placeholder="Never"
+                            aria-label="Credit limit"
+                            value={creditThresholdText}
+                            onChange={(e) => setCreditThresholdText(e.target.value)}
+                            onBlur={commitCreditThreshold}
+                            onKeyDown={(e) => {
+                                if (e.key === 'Enter') e.currentTarget.blur();
+                            }}
+                            onClick={(e) => e.stopPropagation()}
+                            className="py-1 px-2 preference-input text-sm font-color-primary"
+                            style={{ width: '32px', margin: 0 }}
+                        />
+                    }
+                />
             </SettingsGroup>
 
             {/* --- Section 4: Cross-links --- */}

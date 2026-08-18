@@ -3,7 +3,7 @@ import { useAtomValue } from "jotai";
 import { profileSyncStatusAtom } from "../../atoms/profile";
 import { triggerProfileRefresh } from "../../hooks/useProfileSync";
 import { Spinner } from "../icons/icons";
-import Button from "../ui/Button";
+import Button from "@beaver/agent-ui/primitives/Button";
 
 /**
  * Rendered by Sidebar when the user is authenticated but the profile has not been

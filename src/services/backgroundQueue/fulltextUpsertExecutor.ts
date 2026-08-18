@@ -6,7 +6,7 @@ import type {
 } from '../database';
 import { resolveAttachmentFileSource } from '../documentExtraction/attachmentSource';
 import { computeStructuredDocumentHash } from '../documentExtraction/structuredDocumentHash';
-import type { DocumentExtractResult } from '../documentExtraction/shared/documentExtractResult';
+import type { DocumentExtractResult } from '@beaver/agent-core/extract/document/shared/documentExtractResult';
 import { expectedExtractionSchemaVersion } from '../documentExtraction/shared/extractionSchemaVersions';
 import {
     type IndexDocumentRef,
@@ -25,8 +25,8 @@ import {
 } from '../backgroundProcessing/utils';
 import { getIndexScopeRef, getZoteroUserIdentifier } from '../../utils/zoteroUtils';
 import { safeIsInTrash } from '../../utils/zoteroItemUtils';
-import { logger } from '../../utils/logger';
-import { ApiError } from '../../../react/types/apiErrors';
+import { logger } from '@beaver/agent-core/platform/logger';
+import { ApiError } from '@beaver/agent-core/types/apiErrors';
 import type {
     JobExecutionContext,
     JobExecutor,

@@ -12,8 +12,7 @@
  * dispatcher never imports it.
  */
 
-import { ApiService } from '../apiService';
-import API_BASE_URL from '../../utils/getAPIBaseURL';
+import { ApiService } from '@beaver/agent-core/transport/apiService';
 import { OCR_API_PREFIX } from './constants';
 
 /** Lifecycle phase of a job (the `/uploaded` and `/status` `status` field). */
@@ -125,4 +124,4 @@ export class OcrApiClient extends ApiService {
     }
 }
 
-export const ocrApiClient = new OcrApiClient(API_BASE_URL);
+export const ocrApiClient = new OcrApiClient();

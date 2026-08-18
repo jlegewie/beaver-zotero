@@ -18,16 +18,15 @@ import { remainingBeaverCreditsAtom } from '../../atoms/profile';
 import SuggestionCardButton from './firstRun/SuggestionCardButton';
 import SuggestionCardSkeleton from './firstRun/SuggestionCardSkeleton';
 import EmptyLibraryDiscovery from './firstRun/EmptyLibraryDiscovery';
-import IconButton from '../ui/IconButton';
-import RepeatIcon from '../icons/RepeatIcon';
+import IconButton from '@beaver/agent-ui/primitives/IconButton';
+import RepeatIcon from '@beaver/agent-ui/icons/RepeatIcon';
 import { OnboardingHeader, OnboardingFooter } from './onboarding';
-import { ChargingPermissions } from '../../../src/services/agentProtocol';
-import { logger } from '../../../src/utils/logger';
+import { ChargingPermissions } from '@beaver/agent-core/protocol/agentProtocol';
+import { logger } from '@beaver/agent-core/platform/logger';
 
 // Suggested first-run actions launch without cost-confirmation prompts.
 const FIRST_RUN_PERMISSIONS_OVERRIDE: Partial<ChargingPermissions> = {
-    confirm_extraction_costs: false,
-    confirm_external_search_costs: false,
+    confirm_credits: false,
 };
 
 interface FirstRunPageProps {

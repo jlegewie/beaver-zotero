@@ -4,7 +4,7 @@ import {
     HARD_ATTACHMENT_LIMITS,
     effectiveMaxFileSizeMB,
     effectiveMaxPageCount,
-} from '../../../src/services/attachmentLimits';
+} from '@beaver/agent-core/transport/attachmentLimits';
 
 const { maxFileSizeMB, maxPageCount } = HARD_ATTACHMENT_LIMITS;
 

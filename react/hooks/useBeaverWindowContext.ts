@@ -28,7 +28,7 @@ import {
     updateMessageItemsFromZoteroSelectionAtom,
 } from '../atoms/messageComposition';
 import { isProfileLoadedAtom } from '../atoms/profile';
-import { logger } from '../../src/utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 
 export function useBeaverWindowContext() {
     const setIsBeaverWindowOpen = useSetAtom(isBeaverWindowOpenAtom);

@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { useSetAtom } from 'jotai';
 import { setPref } from '../../src/utils/prefs';
-import { logger } from '../../src/utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 import { addFloatingPopupMessageAtom } from '../atoms/floatingPopup';
 import { addPopupMessageAtom } from '../utils/popupMessageUtils';
 import { getPendingVersionNotifications, clearPendingVersionNotifications } from '../../src/utils/versionNotificationPrefs';

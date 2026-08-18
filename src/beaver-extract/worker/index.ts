@@ -7,7 +7,7 @@
  * URLs supplied by `getConfig()` and would try to spawn a worker from
  * inside this worker. Worker code imports analyzers and types directly:
  *   import { StyleAnalyzer } from "../StyleAnalyzer";
- *   import type { RawPageData, InternalExtractionResult } from "../types";
+ *   import type { RawPageData, InternalExtractionResult } from "@beaver/agent-core/extract/types";
  *
  * Built as a separate worker bundle by the host's build system.
  *

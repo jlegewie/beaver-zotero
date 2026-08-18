@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useSetAtom, useAtomValue } from 'jotai';
-import { AgentRunStatus, ToolCallPart } from '../../../agents/types';
-import { toolResultsMapAtom, getToolCallStatus } from '../../../agents/atoms';
+import { AgentRunStatus, ToolCallPart } from '@beaver/agent-core/agents/types';
+import { toolResultsMapAtom, getToolCallStatus } from '@beaver/agent-core/run-state/atoms';
 import {
     AgentAction,
     getAgentActionsByToolcallAtom,
@@ -12,14 +12,14 @@ import {
     rejectAgentActionAtom,
     undoAgentActionAtom,
 } from '../../../agents/agentActions';
-import { AckActionLink } from '../../../../src/services/agentActionsService';
-import { AnnotationResultData } from '../../../types/agentActions/annotations';
+import { AckActionLink } from '@beaver/agent-core/transport/clients/agentActionsService';
+import { AnnotationResultData } from '@beaver/agent-core/types/agentActions/annotations';
 import { applyAnnotation, deleteAnnotationFromReader } from '../../../utils/annotationActions';
 import { getCurrentPage, getCurrentReaderAndWaitForView, navigateToAnnotation, navigateToPage } from '../../../utils/readerUtils';
 import { currentReaderAttachmentKeyAtom } from '../../../atoms/messageComposition';
 import { isLibraryEditable, shortItemTitle } from '../../../../src/utils/zoteroUtils';
 import { ZoteroReader } from '../../../utils/annotationUtils';
-import { logger } from '../../../../src/utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 import { resolveItemReference, resolveLibraryRef } from '../../../../src/utils/libraryIdentity';
 import { notifyReferenceUnavailable } from '../sourceActions';
 import { ZoteroIcon, ZOTERO_ICONS } from '../../../components/icons/ZoteroIcon';
@@ -33,8 +33,8 @@ import {
     CancelIcon,
     HighlighterIcon,
 } from '../../../components/icons/icons';
-import IconButton from '../../../components/ui/IconButton';
-import Tooltip from '../../../components/ui/Tooltip';
+import IconButton from '@beaver/agent-ui/primitives/IconButton';
+import Tooltip from '@beaver/agent-ui/primitives/Tooltip';
 import {
     annotationAttachmentTitlesAtom,
     annotationBusyAtom,
@@ -45,7 +45,7 @@ import {
     setAnnotationPanelStateAtom,
     toggleAnnotationPanelVisibilityAtom
 } from '../../../atoms/messageUIState';
-import { isNoteAnnotationToolResult, isHighlightAnnotationToolResult } from '../../../agents/toolResultTypes';
+import { isNoteAnnotationToolResult, isHighlightAnnotationToolResult } from '@beaver/agent-core/run-state/toolResultTypes';
 
 // =============================================================================
 // Types

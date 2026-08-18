@@ -20,7 +20,7 @@ import {
     OCR_POLL_MAX_MS,
     OCR_STATUS_BATCH_MAX,
 } from './constants';
-import { logger } from '../../utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 
 /** Thrown to unwind an aborted poll into the executor's `release` outcome. */
 export class OcrAbort extends Error {}

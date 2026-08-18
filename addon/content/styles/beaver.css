@@ -1,75 +1,31 @@
-:root {
-    --tag-blue-primary: #2ea8e5;
-    --tag-blue-secondary: #2ea8e58c;
-    --tag-blue-tertiary: #2ea8e54d;
-    --tag-blue-quarternary: #2ea8e51f;
-    --tag-blue-quinary: #2ea8e50f;
-    --tag-blue-senary: #2ea8e508;
 
-    --tag-yellow-primary: #ffd400e5;
-    --tag-yellow-secondary: #ffd4008c;
-    --tag-yellow-tertiary: #ffd4004d;
-    --tag-yellow-quarternary: #ffd4001f;
-    --tag-yellow-quinary: #ffd4000f;
-    --tag-yellow-senary: #ffd40008;
 
-    --tag-red-primary: #ff6666e5;
-    --tag-yellow-primary: #ffd400e5;
-    --tag-yellow-secondary: #ffd4008c;
-    --tag-yellow-tertiary: #ffd4004d;
-    --tag-yellow-quarternary: #ffd4001f;
-    --tag-yellow-quinary: #ffd4000f;
-    --tag-yellow-senary: #ffd40008;
+/*
+ * Beaver's Zotero stylesheet.
+ *
+ * Three shared sheets from @beaver/agent-ui are registered before this file (see
+ * GLOBAL_STYLESHEETS in `src/hooks.ts` and the `<?xml-stylesheet?>` links in
+ * `beaverWindow.xhtml` / `beaverPreferences.xhtml`):
+ *
+ *   agent-ui-tokens.css      Beaver's own custom properties, plus the documented
+ *                            contract of platform tokens Zotero supplies.
+ *   agent-ui-utilities.css   the utility layer, scoped `.beaver-root`.
+ *   agent-ui-components.css  shared component rules — the sign-in surface, the
+ *                            link vocabulary, and `@keyframes spin`, which the
+ *                            `.animate-spin` rule below still resolves by name.
+ *
+ * `.beaver-root` sits on every element that carries a `beaver-pane-*` id, so
+ * `.beaver-root .foo` matches exactly what `[id^="beaver-pane-"] .foo` matched.
+ * Both weigh (0,2,0); the shared sheets load first, so a rule here of equal
+ * specificity wins — that is the intended direction, and the utilities the old
+ * source order made win instead are annotated and kept below.
+ *
+ * What stays in this file: component rules, everything that touches Zotero's own
+ * chrome, and the XUL toolbar button (which is outside every React root and must
+ * stay unscoped).
+ */
 
-    --tag-orange-primary: #e8850ce5;
-    --tag-orange-secondary: #e8850c8c;
-    --tag-orange-tertiary: #e8850c4d;
-    --tag-orange-quarternary: #e8850c1f;
-    --tag-orange-quinary: #e8850c0f;
-    --tag-orange-senary: #e8850c08;
-
-    --tag-red-primary: #ff6666e5;
-    --tag-red-secondary: #ff66668c;
-    --tag-red-tertiary: #ff66664d;
-    --tag-red-quarternary: #ff66661f;
-    --tag-red-quinary: #ff66660f;
-    --tag-red-senary: #ff666608;
-    --tag-red-primary: #ff6666e5;
-    --tag-red-secondary: #ff66668c;
-    --tag-red-tertiary: #ff66664d;
-    --tag-red-quarternary: #ff66661f;
-    --tag-red-quinary: #ff66660f;
-    --tag-red-senary: #ff666608;
-
-    --tag-green-primary: #22c55ee5;
-    --tag-green-secondary: #22c55e8c;
-    --tag-green-tertiary: #22c55e4d;
-    --tag-green-quarternary: #22c55e1f;
-    --tag-green-quinary: #22c55e0f;
-    --tag-green-senary: #22c55e08;
-
-    --tag-purple-primary: #8b5cf6e5;
-    --tag-purple-secondary: #8b5cf68c;
-    --tag-purple-tertiary: #8b5cf64d;
-    --tag-purple-quarternary: #8b5cf61f;
-    --tag-purple-quinary: #8b5cf60f;
-    --tag-purple-senary: #8b5cf608;
-
-    /* Webapp color scheme */
-    --webapp-background: #F5F0ED;
-    --webapp-foreground: #111729;
-    --webapp-primary: #111729;
-    --webapp-primary-foreground: #F5F0ED;
-    --webapp-secondary: #FFF;
-    --webapp-secondary-foreground: #111729;
-    --webapp-accent: #FFD700;
-    --webapp-muted: #F5F0ED;
-    --webapp-muted-foreground: #6B7280;
-    --webapp-border: #E8DDD6;
-    --webapp-input: #FFFFFF;
-    --webapp-ring: #111729;
-}
-
+/* Unscoped: applied to markup outside a pane root as well. */
 .sr-only {
     position: absolute;
     width: 1px;
@@ -400,33 +356,6 @@
     overflow-y: auto;
 }
 
-[id^="beaver-pane-"] .bg-quarternary {
-    background-color: var(--fill-quarternary);
-}
-
-[id^="beaver-pane-"] .bg-senary {
-    background-color: var(--fill-senary);
-}
-
-[id^="beaver-pane-"] .bg-tertiary {
-    background-color: var(--fill-tertiary);
-}
-
-[id^="beaver-pane-"] .bg-transparent {
-    background-color: transparent;
-}
-
-[id^="beaver-pane-"] .opacity-90 {
-    opacity: 0.9;
-}
-
-[id^="beaver-pane-"] .inset-0 {
-    top: 0;
-    right: 0;
-    bottom: 0;
-    left: 0;
-}
-
 [id^="beaver-pane-"] .source-error-message {
     background-color: var(--fill-senary);
     border: 1px solid var(--tag-red);
@@ -647,6 +576,21 @@
     color: var(--fill-tertiary);
 }
 
+/* Compact numeric fields in SettingsRows. Hide the platform spinner so the
+ * control matches other preference inputs. */
+[id^="beaver-pane-"] .preference-input[type="number"] {
+    appearance: textfield;
+    -moz-appearance: textfield;
+    text-align: center;
+}
+
+[id^="beaver-pane-"] .preference-input[type="number"]::-webkit-inner-spin-button,
+[id^="beaver-pane-"] .preference-input[type="number"]::-webkit-outer-spin-button {
+    -webkit-appearance: none;
+    appearance: none;
+    margin: 0;
+}
+
 
 /* Custom Prompt Card (custom instructions textarea wrapper) */
 [id^="beaver-pane-"] .custom-prompt-card {
@@ -795,8 +739,9 @@
     margin-top: 5px;
 }
 
-/* Create Annotations Preview — clickable row hover */
-[id^="beaver-pane-"] .create-annotations-preview-row {
+/* Annotation previews — clickable row hover */
+[id^="beaver-pane-"] .create-annotations-preview-row,
+[id^="beaver-pane-"] .edit-annotations-preview-row {
     border-radius: 4px;
     padding-left: 6px;
     padding-right: 6px;
@@ -805,7 +750,17 @@
     transition: background-color 0.15s ease;
 }
 
-[id^="beaver-pane-"] .create-annotations-preview-row:hover {
+/* Bordered edit list: keep hover inside the thin outline */
+[id^="beaver-pane-"] .edit-annotations-preview-list .edit-annotations-preview-row {
+    border-radius: 0;
+    margin-left: 0;
+    margin-right: 0;
+    margin-top: 2px;
+    padding: 8px 10px;
+}
+
+[id^="beaver-pane-"] .create-annotations-preview-row:hover,
+[id^="beaver-pane-"] .edit-annotations-preview-row:hover {
     background-color: var(--material-mix-quarternary);
 }
 
@@ -881,63 +836,47 @@
 }
 
 
-/* Layout Utilities */
-[id^="beaver-pane-"], [id^="beaver-pane-"] .display-flex { display: flex; }
-[id^="beaver-pane-"] .flex-none { flex: none; }
-[id^="beaver-pane-"] .flex-row { flex-direction: row; }
-[id^="beaver-pane-"] .flex-col { flex-direction: column; }
-[id^="beaver-pane-"], [id^="beaver-pane-"] .flex-1 { flex: 1; }
-[id^="beaver-pane-"] .flex-wrap { flex-wrap: wrap; }
-[id^="beaver-pane-"] .flex-shrink-0 { flex-shrink: 0 }
-[id^="beaver-pane-"] .items-center { align-items: center; }
-[id^="beaver-pane-"] .items-start { align-items: flex-start; }
-[id^="beaver-pane-"] .items-end { align-items: flex-end; }
-[id^="beaver-pane-"] .justify-center { justify-content: center; }
-[id^="beaver-pane-"] .justify-between { justify-content: space-between; }
-[id^="beaver-pane-"] .justify-end { justify-content: flex-end; }
-[id^="beaver-pane-"], [id^="beaver-pane-"] .h-full { height: 100%; }
-[id^="beaver-pane-"] .h-screen { height: 100vh; }
-[id^="beaver-pane-"] .w-full { width: 100%; }
-[id^="beaver-pane-"] .w-90 { width: 90%; }
-[id^="beaver-pane-"] .w-screen { width: 100vw; }
-[id^="beaver-pane-"] .max-w-full { max-width: 100%; }
-[id^="beaver-pane-"] .max-h-full { max-height: 100%; }
-[id^="beaver-pane-"] .max-height-200 { max-height: 200px; }
-[id^="beaver-pane-"] .fit-content { width: fit-content; }
-[id^="beaver-pane-"] .object-contain { object-fit: contain; }
-[id^="beaver-pane-"] .min-w-0 { min-width: 0; }
-[id^="beaver-pane-"] .min-h-0 { min-height: 0; }
-[id^="beaver-pane-"] .relative { position: relative; }
-[id^="beaver-pane-"] .fixed { position: fixed; }
-[id^="beaver-pane-"] .truncate { text-overflow: ellipsis; overflow: hidden; white-space: nowrap; }
-[id^="beaver-pane-"] .text-left { text-align: left; }
-[id^="beaver-pane-"] .text-center { text-align: center; }
-[id^="beaver-pane-"] .text-right { text-align: right; }
-[id^="beaver-pane-"] .align-self-start { align-self: flex-start; }
+/* ---------------------------------------------------------------------------
+ * Utility classes that did NOT move into @beaver/agent-ui.
+ *
+ * The rest of the utility layer now lives in
+ * `packages/agent-ui/src/theme/agent-ui-utilities.css`, which is registered
+ * BEFORE this file. A utility rule and a component rule scoped the same way
+ * weigh the same — `[id^="beaver-pane-"]` is (0,1,0) and so is a class — so in
+ * one interleaved file source order decided the winner. Splitting the file
+ * turns every such tie in the utility layer's favour into a loss. The classes
+ * below are the ones that would have changed, so they stay here where their
+ * position relative to the component rules is preserved. Each is annotated with
+ * what it ties against; move one only after that tie is gone.
+ * ------------------------------------------------------------------------- */
 
-[id^="beaver-pane-"] .absolute { position: absolute; }
-[id^="beaver-pane-"] .left-1\/2 { left: 50%; }
-[id^="beaver-pane-"] .transform { transform: none; }
-[id^="beaver-pane-"] .-translate-x-1\/2 { transform: translateX(-50%); }
-[id^="beaver-pane-"] .z-10 { z-index: 10; }
-[id^="beaver-pane-"] .z-1000 { z-index: 1000; }
-/* Floating overlays (tooltips) must clear Zotero's focused items-tree row,
-   which gets z-index: 10000 while the tree has focus (blue selection). */
-[id^="beaver-pane-"] .z-100000 { z-index: 100000; }
+/* The `display` family, kept whole.
+ *
+ * The first three rules also style the bare pane root, which the shared package
+ * must not do. Splitting `.display-flex` out of the first one would put it
+ * before `.action-target-badge` (`display: inline-block`), which ActionCard's
+ * placeholder badge carries together with `display-flex` — the badge's icon row
+ * would collapse. `.hidden`, `.block` and `.single-line` in turn beat
+ * `.display-flex` only by sitting after it (AgentRunFooter hides itself with
+ * `display-flex … hidden` while streaming; Tooltip toggles between `block` and
+ * `display-flex`), so they cannot move while it stays. */
+[id^="beaver-pane-"], [id^="beaver-pane-"] .display-flex { display: flex; }
+[id^="beaver-pane-"], [id^="beaver-pane-"] .flex-1 { flex: 1; }
+[id^="beaver-pane-"], [id^="beaver-pane-"] .h-full { height: 100%; }
 [id^="beaver-pane-"] .hidden { display: none; }
 
 [id^="beaver-pane-"] .inline-flex { display: inline-flex; }
 [id^="beaver-pane-"] .inline-block { display: inline-block; }
 [id^="beaver-pane-"] .block { display: block; }
-[id^="beaver-pane-"] .whitespace-nowrap { white-space: nowrap; }
-[id^="beaver-pane-"] .whitespace-normal { white-space: normal; }
 
 [id^="beaver-pane-"] .single-line {
     display: inline-block;
     white-space: nowrap;
 }
 
-/* Shimmer text */
+/* Shimmer text. Unscoped, so it also reaches markup rendered outside a pane
+ * root; scoping it under `.beaver-root` to share it would shrink that match
+ * set. */
 .shimmer-text {
     background: linear-gradient(90deg,
             var(--fill-tertiary) 30%,
@@ -963,161 +902,16 @@
     }
 }
 
-
-/* Spacing */
-[id^="beaver-pane-"] .gap-05 { column-gap: 0.125rem; row-gap: 0.125rem; }
-[id^="beaver-pane-"] .gap-1 { column-gap: 0.375rem; row-gap: 0.25rem; }
-[id^="beaver-pane-"] .gap-15 { column-gap: 0.425rem; row-gap: 0.30rem; }
-[id^="beaver-pane-"] .gap-2 { column-gap: 0.5rem; row-gap: 0.35rem; }
-[id^="beaver-pane-"] .gap-25 { column-gap: 0.625rem; row-gap: 0.45rem; }
-[id^="beaver-pane-"] .gap-3 { column-gap: 0.75rem; row-gap: 0.5rem; }
-[id^="beaver-pane-"] .gap-4 { column-gap: 1rem; row-gap: 0.75rem; }
-[id^="beaver-pane-"] .gap-5 { column-gap: 1.25rem; row-gap: 1.2rem; }
-[id^="beaver-pane-"] .gap-col-1 { column-gap: 0.25rem; }
-[id^="beaver-pane-"] .gap-col-2 { column-gap: 0.35rem; }
-[id^="beaver-pane-"] .gap-col-3 { column-gap: 0.5rem; }
-[id^="beaver-pane-"] .gap-row-1 { row-gap: 0.25rem; }
-[id^="beaver-pane-"] .gap-row-2 { row-gap: 0.35rem; }
-[id^="beaver-pane-"] .gap-row-3 { row-gap: 0.5rem; }
-[id^="beaver-pane-"] .p-0 { padding: 0.1rem; }
-[id^="beaver-pane-"] .p-1 { padding: 0.25rem; }
-[id^="beaver-pane-"] .p-15 { padding: 0.375rem; }
-[id^="beaver-pane-"] .p-2 { padding: 0.5rem; }
-[id^="beaver-pane-"] .p-25 { padding: 0.625rem; }
-[id^="beaver-pane-"] .p-3 { padding: 0.75rem; }
-[id^="beaver-pane-"] .p-4 { padding: 1rem; }
-[id^="beaver-pane-"] .p-5 { padding: 1.25rem; }
-[id^="beaver-pane-"] .px-1 { padding-left: 0.25rem; padding-right: 0.25rem; }
-[id^="beaver-pane-"] .px-15 { padding-left: 0.375rem; padding-right: 0.375rem; }
-[id^="beaver-pane-"] .px-2 { padding-left: 0.5rem; padding-right: 0.5rem; }
+/* Spacing and type utilities that override a component's own padding or size.
+ * `.px-25` beats `.edit-annotations-preview-row` (padding 6px) on the annotation
+ * preview rows; `.px-3` / `.py-2` beat `.user-message-display` (0.65rem) on the
+ * onboarding example prompts; `.text-base` (1rem) beats `.chat-input`'s literal
+ * 13px, and `rem` here resolves against the host's root font size, so the two
+ * are not interchangeable. */
 [id^="beaver-pane-"] .px-25 { padding-left: 0.625rem; padding-right: 0.625rem; }
 [id^="beaver-pane-"] .px-3 { padding-left: 0.75rem; padding-right: 0.75rem; }
-[id^="beaver-pane-"] .px-4 { padding-left: 1rem; padding-right: 1rem; }
-[id^="beaver-pane-"] .px-5 { padding-left: 1.25rem; padding-right: 1.25rem; }
-[id^="beaver-pane-"] .px-6 { padding-left: 1.5rem; padding-right: 1.5rem; }
-[id^="beaver-pane-"] .py-05 { padding-top: 0.125rem; padding-bottom: 0.125rem; }
-[id^="beaver-pane-"] .py-1 { padding-top: 0.25rem; padding-bottom: 0.25rem; }
-[id^="beaver-pane-"] .py-15 { padding-top: 0.375rem; padding-bottom: 0.375rem; }
 [id^="beaver-pane-"] .py-2 { padding-top: 0.5rem; padding-bottom: 0.5rem; }
-[id^="beaver-pane-"] .py-3 { padding-top: 0.75rem; padding-bottom: 0.75rem; }
-[id^="beaver-pane-"] .py-4 { padding-top: 1rem; padding-bottom: 1rem; }
-[id^="beaver-pane-"] .pb-1 { padding-bottom: 0.25rem; }
-[id^="beaver-pane-"] .pb-2 { padding-bottom: 0.5rem; }
-[id^="beaver-pane-"] .pb-25 { padding-bottom: 0.625rem; }
-[id^="beaver-pane-"] .pb-3 { padding-bottom: 0.75rem; }
-[id^="beaver-pane-"] .pb-4 { padding-bottom: 1rem; }
-[id^="beaver-pane-"] .pb-5 { padding-bottom: 1.25rem; }
-[id^="beaver-pane-"] .pt-0 { padding-top: 0rem; }
-[id^="beaver-pane-"] .pt-1 { padding-top: 0.25rem; }
-[id^="beaver-pane-"] .pt-2 { padding-top: 0.5rem; }
-[id^="beaver-pane-"] .pt-3 { padding-top: 0.75rem; }
-[id^="beaver-pane-"] .pt-4 { padding-top: 1rem; }
-[id^="beaver-pane-"] .m-0 { margin: 0rem; }
-[id^="beaver-pane-"] .m-1 { margin: 0.25rem; }
-[id^="beaver-pane-"] .m-2 { margin: 0.5rem; }
-[id^="beaver-pane-"] .m-3 { margin: 0.75rem; }
-[id^="beaver-pane-"] .mx-1 { margin-left: 0.25rem; margin-right: 0.25rem; }
-[id^="beaver-pane-"] .mx-2 { margin-left: 0.5rem; margin-right: 0.5rem; }
-[id^="beaver-pane-"] .mx-3 { margin-left: 0.75rem; margin-right: 0.75rem; }
-[id^="beaver-pane-"] .mx-auto { margin-left: auto; margin-right: auto; }
-[id^="beaver-pane-"] .mb-075 { margin-bottom: 0.075rem; }
-[id^="beaver-pane-"] .mb-1 { margin-bottom: 0.15rem; }
-[id^="beaver-pane-"] .mb-15 { margin-bottom: 0.35rem; }
-[id^="beaver-pane-"] .mb-2 { margin-bottom: 0.5rem; }
-[id^="beaver-pane-"] .mb-3 { margin-bottom: 0.75rem; }
-[id^="beaver-pane-"] .mb-4 { margin-bottom: 1rem; }
-[id^="beaver-pane-"] .mb-6 { margin-bottom: 1.5rem; }
-[id^="beaver-pane-"] .mb-8 { margin-bottom: 2rem; }
-[id^="beaver-pane-"] .mr-01 { margin-right: 0.1rem; }
-[id^="beaver-pane-"] .mr-015 { margin-right: 0.15rem; }
-[id^="beaver-pane-"] .mr-1 { margin-right: 0.25rem; }
-[id^="beaver-pane-"] .mr-2 { margin-right: 0.5rem; }
-[id^="beaver-pane-"] .mr-3 { margin-right: 0.75rem; }
-[id^="beaver-pane-"] .mr-4 { margin-right: 1rem; }
-[id^="beaver-pane-"] .mr-5 { margin-right: 1.25rem; }
-[id^="beaver-pane-"] .ml-025 { margin-left: 0.0625rem; }
-[id^="beaver-pane-"] .ml-05 { margin-left: 0.125rem; }
-[id^="beaver-pane-"] .ml-1 { margin-left: 0.25rem; }
-[id^="beaver-pane-"] .ml-15 { margin-left: 0.375rem; }
-[id^="beaver-pane-"] .ml-2 { margin-left: 0.5rem; }
-[id^="beaver-pane-"] .ml-3 { margin-left: 0.75rem; }
-[id^="beaver-pane-"] .ml-4 { margin-left: 1rem; }
-[id^="beaver-pane-"] .ml-5 { margin-left: 1.25rem; }
-[id^="beaver-pane-"] .mt-010 { margin-top: 0.1rem; }
-[id^="beaver-pane-"] .mt-015 { margin-top: 0.15rem; }
-[id^="beaver-pane-"] .mt-020 { margin-top: 0.20rem; }
-[id^="beaver-pane-"] .mt-1 { margin-top: 0.25rem; }
-[id^="beaver-pane-"] .mt-15 { margin-top: 0.375rem; }
-[id^="beaver-pane-"] .mt-2 { margin-top: 0.5rem; }
-[id^="beaver-pane-"] .mt-3 { margin-top: 0.75rem; }
-[id^="beaver-pane-"] .mt-4 { margin-top: 1rem; }
-[id^="beaver-pane-"] .mt-5 { margin-top: 1.25rem; }
-[id^="beaver-pane-"] .mt-6 { margin-top: 1.5rem; }
-[id^="beaver-pane-"] .mt-7 { margin-top: 1.75rem; }
-[id^="beaver-pane-"] .mt-8 { margin-top: 2rem; }
-[id^="beaver-pane-"] .my-1 { margin-top: 0.25rem; margin-bottom: 0.25rem; }
-[id^="beaver-pane-"] .my-2 { margin-top: 0.5rem; margin-bottom: 0.5rem; }
-[id^="beaver-pane-"] .my-3 { margin-top: 0.75rem; margin-bottom: 0.75rem; }
-[id^="beaver-pane-"] .h-2 { height: 0.5rem; }
-[id^="beaver-pane-"] .-mt-010 { margin-top: -0.1rem; }
-[id^="beaver-pane-"] .-mb-015 { margin-bottom: -0.15rem; }
-[id^="beaver-pane-"] .-mb-1 { margin-bottom: -0.25rem; }
-[id^="beaver-pane-"] .-mt-1 { margin-top: -0.25rem; }
-[id^="beaver-pane-"] .-mt-2 { margin-top: -0.5rem; }
-[id^="beaver-pane-"] .-mt-3 { margin-top: -0.75rem; }
-
-[id^="beaver-pane-"] .-ml-015 { margin-left: -0.15rem; }
-[id^="beaver-pane-"] .-ml-020 { margin-left: -0.20rem; }
-[id^="beaver-pane-"] .-ml-05 { margin-left: -0.125rem; }
-[id^="beaver-pane-"] .-ml-1 { margin-left: -0.25rem; }
-[id^="beaver-pane-"] .-ml-15 { margin-left: -0.375rem; }
-[id^="beaver-pane-"] .-ml-2 { margin-left: -0.5rem; }
-[id^="beaver-pane-"] .-ml-3 { margin-left: -0.75rem; }
-[id^="beaver-pane-"] .-mr-005 { margin-right: -0.05rem; }
-[id^="beaver-pane-"] .-mr-0035 { margin-right: -0.035rem; }
-[id^="beaver-pane-"] .-mr-010 { margin-right: -0.10rem; }
-[id^="beaver-pane-"] .-mr-015 { margin-right: -0.15rem; }
-[id^="beaver-pane-"] .-mr-020 { margin-right: -0.20rem; }
-[id^="beaver-pane-"] .-mr-1 { margin-right: -0.25rem; }
-[id^="beaver-pane-"] .-mr-2 { margin-right: -0.5rem; }
-[id^="beaver-pane-"] .-mr-3 { margin-right: -0.75rem; }
-[id^="beaver-pane-"] .-mx-4 { margin-right: -0.75rem; margin-left: -0.75rem; }
-
-[id^="beaver-pane-"] .inset-x-0 { left: 0; right: 0; }
-[id^="beaver-pane-"] .translate-y-full { transform: translateY(100%); }
-[id^="beaver-pane-"] .-translate-y-full { transform: translateY(-100%); }
-[id^="beaver-pane-"] .top-4 { top: 1rem; }
-
-
-/* Typography */
-[id^="beaver-pane-"] .uppercase { text-transform: uppercase; }
-[id^="beaver-pane-"] .text-xs { font-size: 0.75rem; }
-[id^="beaver-pane-"] .text-sm { font-size: 0.875rem; }
 [id^="beaver-pane-"] .text-base { font-size: 1rem; }
-[id^="beaver-pane-"] .text-lg { font-size: 1.125rem; }
-[id^="beaver-pane-"] .text-xl { font-size: 1.25rem; }
-[id^="beaver-pane-"] .text-2xl { font-size: 1.5rem; }
-[id^="beaver-pane-"] .text-underline { text-decoration: underline; }
-[id^="beaver-pane-"] .font-medium { font-weight: 500; }
-[id^="beaver-pane-"] .font-semibold { font-weight: 600; }
-[id^="beaver-pane-"] .font-italic { font-style: italic; }
-[id^="beaver-pane-"] .font-bold { font-weight: 700; }
-[id^="beaver-pane-"] .font-color-primary { color: var(--fill-primary); }
-[id^="beaver-pane-"] .font-color-secondary { color: var(--fill-secondary); }
-[id^="beaver-pane-"] .font-color-tertiary { color: var(--fill-tertiary); }
-[id^="beaver-pane-"] .font-color-quarternary { color: var(--fill-quarternary); }
-[id^="beaver-pane-"] .font-color-quinary { color: var(--fill-quinary); }
-[id^="beaver-pane-"] .font-color-senary { color: var(--fill-senary); }
-[id^="beaver-pane-"] .font-color-red { color: var(--tag-red); opacity: 0.8; }
-[id^="beaver-pane-"] .font-color-green { color: var(--tag-green); opacity: 0.8; }
-[id^="beaver-pane-"] .font-color-accent-green { color: var(--accent-green); opacity: 0.8; }
-[id^="beaver-pane-"] .font-color-orange { color: var(--tag-orange); opacity: 0.8; }
-[id^="beaver-pane-"] .font-color-blue { color: var(--tag-blue); opacity: 0.8; }
-[id^="beaver-pane-"] .font-color-accent-blue { color: var(--accent-blue); }
-[id^="beaver-pane-"] .stroke-width-2 path { stroke-width: 2; }
-[id^="beaver-pane-"] .font-color-yellow { color: var(--tag-yellow); opacity: 0.8; }
-[id^="beaver-pane-"] .font-color-purple { color: var(--tag-purple); opacity: 0.8; }
-[id^="beaver-pane-"] .font-color-error { color: var(--tag-red); opacity: 0.8; }
 
 /* Hover effects for colored icons inside buttons */
 [id^="beaver-pane-"] .variant-ghost:hover .font-color-green,
@@ -1140,102 +934,8 @@
 [id^="beaver-pane-"] .variant-ghost-secondary:hover .font-color-purple,
 [id^="beaver-pane-"] .icon-button:hover .font-color-purple { color: var(--tag-purple); opacity: 1; }
 
-[id^="beaver-pane-"] .user-select-none { user-select: none; }
-[id^="beaver-pane-"] .user-select-text { user-select: text; }
-
-[id^="beaver-pane-"] .line-through { text-decoration: line-through; }
-
-/* Transitions */
-[id^="beaver-pane-"] .transition { transition: all 0.2s ease-in-out; }
-[id^="beaver-pane-"] .transition-colors { transition: background-color 0.2s ease-in-out, color 0.2s ease-in-out; }
-[id^="beaver-pane-"] .transition-opacity { transition: opacity 0.2s ease-in-out; }
-[id^="beaver-pane-"] .duration-300 { transition-duration: 0.3s; }
-[id^="beaver-pane-"] .duration-400 { transition-duration: 0.4s; }
-[id^="beaver-pane-"] .duration-500 { transition-duration: 0.5s; }
-[id^="beaver-pane-"] .duration-700 { transition-duration: 0.7s; }
-[id^="beaver-pane-"] .duration-1000 { transition-duration: 1s; }
-[id^="beaver-pane-"] .ease-in-out { transition-timing-function: ease-in-out; }
-[id^="beaver-pane-"] .ease-in { transition-timing-function: ease-in; }
-[id^="beaver-pane-"] .ease-out { transition-timing-function: ease-out; }
-
-/* States */
-[id^="beaver-pane-"] .opacity-0 { opacity: 0; }
-[id^="beaver-pane-"] .opacity-50 { opacity: 0.5; }
-[id^="beaver-pane-"] .opacity-60 { opacity: 0.6; }
-[id^="beaver-pane-"] .opacity-70 { opacity: 0.7; }
-[id^="beaver-pane-"] .opacity-80 { opacity: 0.8; }
-[id^="beaver-pane-"] .opacity-85 { opacity: 0.85; }
-[id^="beaver-pane-"] .opacity-90 { opacity: 0.9; }
-[id^="beaver-pane-"] .opacity-100 { opacity: 1; }
-[id^="beaver-pane-"] .cursor-pointer { cursor: pointer; }
-[id^="beaver-pane-"] .cursor-default { cursor: default; }
-[id^="beaver-pane-"] .cursor-not-allowed { cursor: not-allowed; }
-/* Scaling */
-
-[id^="beaver-pane-"] .scale-60 { transform: scale(0.6); }
-[id^="beaver-pane-"] .scale-70 { transform: scale(0.7); }
-[id^="beaver-pane-"] .scale-75 { transform: scale(0.75); }
-[id^="beaver-pane-"] .scale-80 { transform: scale(0.8); }
-[id^="beaver-pane-"] .scale-85 { transform: scale(0.85); }
-[id^="beaver-pane-"] .scale-90 { transform: scale(0.9); }
-[id^="beaver-pane-"] .scale-95 { transform: scale(0.95); }
-[id^="beaver-pane-"] .scale-100 { transform: scale(1); }
-[id^="beaver-pane-"] .scale-105 { transform: scale(1.05); }
-[id^="beaver-pane-"] .scale-11 { transform: scale(1.1); }
-[id^="beaver-pane-"] .scale-115 { transform: scale(1.15); }
-[id^="beaver-pane-"] .scale-12 { transform: scale(1.2); }
-[id^="beaver-pane-"] .scale-125 { transform: scale(1.25); }
-[id^="beaver-pane-"] .scale-13 { transform: scale(1.3); }
-[id^="beaver-pane-"] .scale-14 { transform: scale(1.4); }
-[id^="beaver-pane-"] .scale-15 { transform: scale(1.5); }
-[id^="beaver-pane-"] .scale-16 { transform: scale(1.6); }
-[id^="beaver-pane-"] .scale-17 { transform: scale(1.7); }
-
-/* Overflow */
-[id^="beaver-pane-"] .overflow-scroll { overflow: scroll; }
-[id^="beaver-pane-"] .overflow-auto { overflow: auto; }
-[id^="beaver-pane-"] .overflow-y-auto { overflow-y: auto; }
-[id^="beaver-pane-"] .overflow-x-auto { overflow-x: auto; }
-[id^="beaver-pane-"] .overflow-hidden { overflow: hidden; }
-[id^="beaver-pane-"] .overflow-x-hidden { overflow-x: hidden; }
-[id^="beaver-pane-"] .overflow-y-hidden { overflow-y: hidden; }
-[id^="beaver-pane-"] .text-ellipsis { text-overflow: ellipsis; }
-
-/* Opacity */
-[id^="beaver-pane-"] .opacity-0 { opacity: 0; }
-[id^="beaver-pane-"] .opacity-25 { opacity: 0.25; }
-[id^="beaver-pane-"] .opacity-50 { opacity: 0.5; }
-[id^="beaver-pane-"] .opacity-75 { opacity: 0.75; }
-[id^="beaver-pane-"] .opacity-90 { opacity: 0.9; }
-
-/* Background colors */
-[id^="beaver-pane-"] .bg-sidepane { background-color: var(--material-sidepane); }
-[id^="beaver-pane-"] .bg-primary { background-color: var(--fill-primary); }
-[id^="beaver-pane-"] .bg-secondary { background-color: var(--fill-secondary); }
-[id^="beaver-pane-"] .bg-tertiary { background-color: var(--fill-tertiary); }
+/* Beats `.chat-input`'s transparent background on SearchMenu's filter field. */
 [id^="beaver-pane-"] .bg-quaternary { background-color: var(--material-mix-quarternary); }
-[id^="beaver-pane-"] .bg-quinary { background-color: var(--fill-quinary); }
-[id^="beaver-pane-"] .bg-senary { background-color: var(--fill-senary); }
-
-/* Rounded corners */
-[id^="beaver-pane-"] .rounded-sm { border-radius: 0.125rem; }
-[id^="beaver-pane-"] .rounded-md { border-radius: 0.375rem; }
-[id^="beaver-pane-"] .rounded-lg { border-radius: 0.5rem; }
-[id^="beaver-pane-"] .rounded-xl { border-radius: 0.75rem; }
-
-/* Borders */
-[id^="beaver-pane-"] .border-left-quinary { border-left: 1px solid var(--fill-quinary); }
-[id^="beaver-pane-"] .border-left-quarternary { border-left: 1px solid var(--fill-quarternary); }
-[id^="beaver-pane-"] .border-right-quinary { border-right: 1px solid var(--fill-quinary); }
-[id^="beaver-pane-"] .border-top-quinary { border-top: 1px solid var(--fill-quinary); }
-[id^="beaver-pane-"] .border-bottom-quinary { border-bottom: 1px solid var(--fill-quinary); }
-[id^="beaver-pane-"] .border-bottom-quarternary { border-bottom: 1px solid var(--fill-quarternary); }
-[id^="beaver-pane-"] .border-quinary { border: 1px solid var(--fill-quinary); }
-[id^="beaver-pane-"] .border-quarternary { border: 1px solid var(--material-mix-quarternary); }
-[id^="beaver-pane-"] .border-popup { border: 1px solid var(--fill-quarternary); }
-[id^="beaver-pane-"] .border-top-popup { border-top: 1px solid var(--fill-quarternary); }
-[id^="beaver-pane-"] .border-transparent { border: 1px solid transparent; }
-[id^="beaver-pane-"] .border-error { border: 1px solid var(--tag-red-tertiary); }
 
 /* Menu items use roving focus, so replace the browser outline with Beaver's menu highlight. */
 [id^="beaver-pane-"] .beaver-menu-item:focus {
@@ -1244,19 +944,6 @@
 
 [id^="beaver-pane-"] .beaver-menu-item:focus-visible {
     box-shadow: inset 0 0 0 1px var(--fill-tertiary);
-}
-
-/* Shadows */
-[id^="beaver-pane-"] .shadow-sm { box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.1); }
-[id^="beaver-pane-"] .shadow-md { box-shadow: 0 0.375rem 0.75rem rgba(0, 0, 0, 0.15); }
-[id^="beaver-pane-"] .shadow-sm-top { box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.1), 0 -0.075rem 0.25rem rgba(0, 0, 0, 0.075); }
-[id^="beaver-pane-"] .shadow-md-top { box-shadow: 0 0.375rem 0.75rem rgba(0, 0, 0, 0.125), 0 -0.075rem 0.75rem rgba(0, 0, 0, 0.075); }
-[id^="beaver-pane-"] .shadow-lg { box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.15); }
-[id^="beaver-pane-"] .shadow-xl { box-shadow: 0 0.75rem 1.5rem rgba(0, 0, 0, 0.15); }
-
-/* Scrollbar */
-[id^="beaver-pane-"] .scrollbar {
-    scrollbar-color: var(--color-scrollbar) var(--color-scrollbar-background);
 }
 
 
@@ -1269,6 +956,19 @@
 [id^="beaver-pane-"] .markdown p {
     margin-block-start: 0px !important;
     margin-block-end: 0px !important;
+}
+
+/* The review card repeats action details already shown in the conversation.
+   Keep create-note previews scannable there without changing the full inline
+   note rendered by AgentActionView. */
+[id^="beaver-pane-"] .create-note-preview-compact {
+    max-height: 12em;
+    overflow: hidden;
+}
+
+[id^="beaver-pane-"] .create-note-preview-compact.is-truncated {
+    -webkit-mask-image: linear-gradient(to bottom, #000 0, #000 calc(100% - 2.5em), transparent 100%);
+    mask-image: linear-gradient(to bottom, #000 0, #000 calc(100% - 2.5em), transparent 100%);
 }
 
 [id^="beaver-pane-"] .markdown .katex {
@@ -1495,8 +1195,8 @@
 
 [id^="beaver-pane-"] .markdown :not(pre)>code {
     font-size: 85%;
-    padding-top: 0.15em;
-    padding-bottom: 0.15em;
+    /* padding-top: 0.15em; */
+    /* padding-bottom: 0.15em; */
     padding-left: 0.2em;
     padding-right: 0.2em;
     border-radius: 4px;
@@ -2334,27 +2034,6 @@
     gap: 6px;
 }
 
-[id^="beaver-pane-"] .outline-none {
-    outline: none;
-}
-
-[id^="beaver-pane-"] .ring-0 {
-    outline: 0 solid transparent;
-}
-
-[id^="beaver-pane-"] .shadow-none {
-    box-shadow: none;
-}
-
-[id^="beaver-pane-"] .appearance-none {
-    appearance: none;
-}
-
-@keyframes spin {
-    0% { transform: rotate(0deg); }
-    100% { transform: rotate(360deg); }
-}
-
 [id^="beaver-pane-"] .animate-spin {
     animation: spin 1.2s linear infinite;
 }
@@ -2374,208 +2053,6 @@
 [id^="beaver-pane-"] .beaver-flash-text-failed {
     /* Use !important to override base color during animation */
     color: var(--tag-red) !important; 
-}
-
-/* Webapp button styles for login forms - using existing theme colors */
-[id^="beaver-pane-"] .webapp-btn {
-    padding: 12px;
-    font-size: 0.875rem;
-    font-weight: 500;
-    border-radius: 0.5rem;
-    transition: all 300ms ease-in-out;
-    border: 1px solid;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    /* align-self: center; */
-    gap: 0.5rem;
-    cursor: pointer;
-    width: 100%;
-    box-sizing: border-box;
-}
-
-/* Primary button variant (Send code to email / Sign in) */
-[id^="beaver-pane-"] .webapp-btn-primary {
-    /* background-color: var(--accent-blue); */
-    font-size: 0.9rem;
-    background-color: var(--fill-primary);
-    color: var(--material-sidepane);
-    border-color: var(--fill-primary);
-}
-
-[id^="beaver-pane-"] .webapp-btn-primary:hover:not(:disabled) {
-    filter: opacity(0.9);
-}
-
-[id^="beaver-pane-"] .webapp-btn-primary:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-    filter: none;
-}
-
-/* Secondary button variant (Use password / Sign in with email code) */
-[id^="beaver-pane-"] .webapp-btn-secondary {
-    background-color: var(--fill-quarternary);
-    color: var(--fill-secondary);
-    border-color: var(--fill-quarternary);
-}
-
-[id^="beaver-pane-"] .webapp-btn-secondary:hover:not(:disabled) {
-    background-color: var(--fill-tertiary);
-    color: var(--fill-primary);
-}
-
-[id^="beaver-pane-"] .webapp-btn-secondary:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-}
-
-/* Input styles for login forms */
-[id^="beaver-pane-"] .webapp-input {
-    width: 100%;
-    padding: 0.75rem 1rem;
-    border: 1px solid var(--fill-quarternary);
-    border-radius: 0.5rem;
-    background-color: var(--material-mix-quarternary);
-    color: var(--fill-primary);
-    font-size: 0.875rem;
-    transition: border-color 0.2s ease-in-out;
-    outline: none;
-    box-sizing: border-box;
-    margin: 0;
-}
-
-[id^="beaver-pane-"] .webapp-input::placeholder {
-    color: var(--fill-tertiary);
-}
-
-[id^="beaver-pane-"] .webapp-input:focus {
-    border-color: var(--fill-tertiary);
-    outline: none;
-}
-
-/* Typography styles for login forms */
-[id^="beaver-pane-"] .webapp-text-3xl {
-    font-size: 1.875rem;
-    line-height: 2.25rem;
-}
-
-[id^="beaver-pane-"] .webapp-text-2xl {
-    font-size: 1.5rem;
-    line-height: 2rem;
-}
-
-[id^="beaver-pane-"] .webapp-text-lg {
-    font-size: 1.125rem;
-    line-height: 1.75rem;
-}
-
-[id^="beaver-pane-"] .webapp-font-bold {
-    font-weight: 700;
-}
-
-/* Layout utilities for login forms */
-[id^="beaver-pane-"] .webapp-space-y-6 > * + * {
-    margin-top: 1.5rem;
-}
-
-[id^="beaver-pane-"] .webapp-space-y-5 > * + * {
-    margin-top: 1.25rem;
-}
-
-[id^="beaver-pane-"] .webapp-space-y-3 > * + * {
-    margin-top: 0.75rem;
-}
-
-[id^="beaver-pane-"] .webapp-space-y-2 > * + * {
-    margin-top: 0.5rem;
-}
-
-[id^="beaver-pane-"] .webapp-max-w-md {
-    max-width: 28rem;
-}
-
-[id^="beaver-pane-"] .webapp-mx-auto {
-    margin-left: auto;
-    margin-right: auto;
-}
-
-/* OTP input styles */
-[id^="beaver-pane-"] .webapp-otp-input {
-    width: 3rem;
-    height: 3rem;
-    text-align: center;
-    border: 1px solid var(--fill-quarternary);
-    border-radius: 0.5rem;
-    background-color: var(--material-mix-quarternary);
-    color: var(--fill-primary);
-    font-size: 1.125rem;
-    font-weight: 500;
-    outline: none;
-    transition: border-color 0.2s ease-in-out;
-    box-sizing: border-box;
-}
-
-[id^="beaver-pane-"] .webapp-otp-input:focus {
-    border-color: var(--fill-secondary);
-}
-
-[id^="beaver-pane-"] .webapp-otp-input:disabled {
-    opacity: 0.5;
-}
-
-/* Spinner for loading states */
-[id^="beaver-pane-"] .webapp-spinner {
-    width: 11px;
-    height: 11px;
-    border: 2px solid transparent;
-    border-top: 2px solid currentColor;
-    border-radius: 50%;
-    animation: spin 1s linear infinite;
-}
-
-/* Link styles */
-[id^="beaver-pane-"] .text-link {
-    color: var(--accent-blue);
-    opacity: 0.8;
-    text-decoration: none;
-    cursor: pointer;
-    border: 0px solid transparent;
-    box-shadow: none;
-    background-color: transparent;
-}
-
-[id^="beaver-pane-"] .text-link:hover {
-    text-decoration: underline;
-}
-
-[id^="beaver-pane-"] .text-link-muted {
-    color: var(--fill-secondary);
-    text-decoration: none;
-    cursor: pointer;
-    border: 0px solid transparent;
-    box-shadow: none;
-    background-color: transparent;
-}
-
-[id^="beaver-pane-"] .text-link-muted:hover {
-    color: var(--fill-primary);
-    text-decoration: underline;
-}
-
-[id^="beaver-pane-"] .text-link-red {
-    color: var(--tag-red);
-    opacity: 0.8;
-    text-decoration: underline;
-    cursor: pointer;
-    border: 0px solid transparent;
-    box-shadow: none;
-    background-color: transparent;
-}
-
-[id^="beaver-pane-"] .text-link-red:hover {
-    color: var(--tag-red-primary);
-    opacity: 1;
 }
 
 [id^="beaver-pane-"] .icon-css.icon-tag {

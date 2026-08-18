@@ -29,7 +29,7 @@
  * Pure and React/Zotero-free so it can be unit tested and used from the
  * worker without pulling in bundle-specific code.
  */
-import type { RawBlock } from "./types";
+import type { RawBlock } from "@beaver/agent-core/extract/types";
 
 const REPLACEMENT_CHAR_RE = /�/g;
 const LETTER_RE = /\p{L}/gu;

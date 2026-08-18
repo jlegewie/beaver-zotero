@@ -16,7 +16,7 @@ import type {
     DomItem,
     DomItemKind,
     DomSection,
-} from '../../../src/services/documentExtraction/dom/schema';
+} from '@beaver/agent-core/extract/document/dom/schema';
 import { UNRESOLVED_LIBRARY_ID } from '../../../src/utils/libraryIdentity';
 
 // Sentences at or below this length are flagged as likely fragments or

@@ -1,17 +1,18 @@
-import { truncateText } from './stringUtils';
+import { getItemDisplayName, MAX_NOTE_TITLE_LENGTH } from '../../src/utils/itemDisplayName';
 import { stripHtmlTags, computeDiff } from '../components/agentRuns/EditNotePreview';
-import { logger } from '../../src/utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 import { isAgentSupportedItem, agentItemFilter, agentItemFilterAsync } from '../../src/utils/agentItemSupport';
-import { isValidAnnotationType, SourceAttachment } from '../types/attachments/apiTypes';
+import { isValidAnnotationType, SourceAttachment } from '@beaver/agent-core/types/attachments/apiTypes';
 import { selectItemById } from '../../src/utils/selectItem';
-import { ZoteroItemReference } from '../types/zotero';
+import { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import { searchableLibraryIdsAtom } from '../atoms/profile';
 import { store } from '../store';
 import { userIdAtom } from '../atoms/auth';
 import { isAttachmentOnServer } from '../../src/utils/webAPI';
 import { safeFileExists } from '../../src/utils/zoteroUtils';
+import { getSelectedCollection } from '../../src/utils/zoteroSelection';
 import { getNoteContentPreviewText } from './noteText';
-import type { EditNoteOperation } from '../types/agentActions/editNote';
+import type { EditNoteOperation } from '@beaver/agent-core/types/agentActions/editNote';
 import { getBeaverFooterAppendPoint } from '../../src/utils/noteEditFooter';
 import { notifyReferenceUnavailable } from '../host/zotero/sourceActions';
 import {
@@ -25,27 +26,22 @@ import {
     getPageLocator,
     normalizeCitationTag,
     parseRawCitationAttributes,
-} from './citationGrammar';
+} from '@beaver/agent-core/citations/citationGrammar';
 
 // Constants
-export const MAX_NOTE_TITLE_LENGTH = 20;
 export const MAX_NOTE_CONTENT_LENGTH = 150;
 
-export function getDisplayNameFromItem(item: Zotero.Item, count: number | null = null, noteTitleLength: number = MAX_NOTE_TITLE_LENGTH): string {
-    let displayName: string;
+export { MAX_NOTE_TITLE_LENGTH };
 
-    if (item.isNote()) {
-        displayName = truncateText(item.getNoteTitle(), noteTitleLength) || 'Untitled Note';
-    } else if(item.isAttachment() && !item.parentItem) {
-        displayName = item.getField('title') || '';
-    } else {
-        const firstCreator = item.firstCreator || item.getField('title') || 'Unknown Author';
-        const year = item.getField('date')?.match(/\d{4}/)?.[0] || '';
-        displayName = `${firstCreator}${year ? ` ${year}` : ''}`;
-    }
-    
-    if (count && count > 1) displayName = `${displayName} (${count})`;
-    return displayName;
+/**
+ * Short display label for an item.
+ *
+ * Thin alias for the shared formatter in `src/utils/itemDisplayName.ts`; that
+ * module is React-free so the data provider can serve the same label to clients
+ * without a local Zotero.
+ */
+export function getDisplayNameFromItem(item: Zotero.Item, count: number | null = null, noteTitleLength: number = MAX_NOTE_TITLE_LENGTH): string {
+    return getItemDisplayName(item, count, noteTitleLength);
 }
 
 export function getReferenceFromItem(item: Zotero.Item): string {
@@ -258,7 +254,7 @@ export async function getCurrentCollectionKeyForItem(
 ): Promise<string | undefined> {
     if (libraryId === UNRESOLVED_LIBRARY_ID) return undefined;
     try {
-        const selectedCollection = Zotero.getActiveZoteroPane()?.getSelectedCollection?.();
+        const selectedCollection = getSelectedCollection(Zotero.getActiveZoteroPane());
         if (!selectedCollection || selectedCollection.libraryID !== libraryId) return undefined;
 
         const item = await Zotero.Items.getByLibraryAndKeyAsync(libraryId, zoteroKey);

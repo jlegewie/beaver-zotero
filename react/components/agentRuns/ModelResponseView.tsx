@@ -1,13 +1,13 @@
 import React, { useMemo, useRef } from 'react';
-import { AgentRunStatus, ModelResponse, ToolCallPart } from '../../agents/types';
+import { AgentRunStatus, ModelResponse, ToolCallPart } from '@beaver/agent-core/agents/types';
 import { TextPartView } from './TextPartView';
 import { ThinkingPartView } from './ThinkingPartView';
 import { ToolCallPartView } from './ToolCallPartView';
-import { isAnnotationToolResult } from '../../agents/toolResultTypes';
-import ContextMenu from '../ui/menu/ContextMenu';
+import { isAnnotationToolResult } from '@beaver/agent-core/run-state/toolResultTypes';
+import ContextMenu from '@beaver/agent-ui/primitives/ContextMenu';
 import useSelectionContextMenu from '../../hooks/useSelectionContextMenu';
 import { buildEditNoteRenderItems, getEditNoteGroupInstanceId } from './editNoteShared';
-import { getHost } from '../../host';
+import { getHost } from '@beaver/agent-ui/host';
 import { GenericAgentActionView } from './GenericAgentActionView';
 
 /**

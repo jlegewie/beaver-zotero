@@ -6,7 +6,7 @@ import { visibleTextContent } from "../../../src/services/documentExtraction/dom
 import {
     SNAPSHOT_HARD_MAX_FILE_SIZE_MB,
     effectiveMaxSnapshotFileSizeMB,
-} from "../../../src/services/attachmentLimits";
+} from "@beaver/agent-core/transport/attachmentLimits";
 
 function docWith(bodyHtml: string): Document {
     const doc = globalThis.document.implementation.createHTMLDocument("");

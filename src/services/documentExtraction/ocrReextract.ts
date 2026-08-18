@@ -25,10 +25,10 @@ import {
     type PDFWorkerSlotName,
 } from '../../beaver-extract';
 import type { BeaverExtractResult } from '../../beaver-extract/schema';
-import type { PageGeometry } from '../../beaver-extract/types';
+import type { PageGeometry } from '@beaver/agent-core/extract/types';
 import type { DocumentCacheExtractionMode } from '../database';
 import { buildExtractedDocumentCacheMetadata } from '../documentExtractionCore';
-import { logger } from '../../utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 
 /** Extraction modes populated so neither read path re-extracts the original. */
 const OCR_REEXTRACT_MODES: DocumentCacheExtractionMode[] = ['structured', 'markdown'];

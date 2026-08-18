@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { SearchMenuItem } from '../SearchMenu';
+import { SearchMenuItem } from '@beaver/agent-ui/primitives/SearchMenu';
 import { LibraryMenuItemContext, createLibraryMenuItem } from '../utils/menuItemFactories';
 
 interface UseLibrariesMenuOptions {
@@ -58,7 +58,7 @@ export const useLibrariesMenu = ({
             library.name.toLowerCase().includes(lowerCaseQuery)
         );
         const items = filteredLibraries.map((library) =>
-            createLibraryMenuItem(library, libraryMenuItemContext)
+            createLibraryMenuItem(library, libraryMenuItemContext, searchQuery)
         );
         const header: SearchMenuItem = { label: 'Select Library', isGroupHeader: true, onClick: () => {} };
         if (verticalPosition === 'above') {

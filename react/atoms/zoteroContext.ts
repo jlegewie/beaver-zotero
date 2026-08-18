@@ -8,11 +8,33 @@ export const selectedZoteroItemsAtom = atom<Zotero.Item[]>([]);
 export const selectedZoteroItemCountAtom = atom<number>(0);
 
 // --- Library View State (collection tree row) ---
+/**
+ * Row types the collections tree can report. Mirrors Zotero's own row types, so
+ * it includes kinds Beaver has no dedicated handling for yet ('recentlyRead',
+ * 'bucket').
+ *
+ * Note that a group library's root row reports 'group', not 'library'.
+ */
 export type LibraryTreeRowType =
-    | 'library' | 'collection' | 'search' | 'duplicates'
+    | 'library' | 'group' | 'collection' | 'search' | 'duplicates'
     | 'unfiled' | 'trash' | 'publications' | 'retracted'
-    | 'feeds' | 'feed' | null;
+    | 'feeds' | 'feed' | 'recentlyRead' | 'bucket' | null;
 
+/** Row types that behave as a library root, whether personal or group. */
+export const LIBRARY_ROOT_TYPES: Set<LibraryTreeRowType> = new Set([
+    'library', 'group',
+]);
+
+/** A collection row within the collections-tree selection. */
+export interface SelectedCollectionInfo {
+    collectionId: number;
+    collectionName: string;
+    libraryId: number;
+}
+
+/**
+ * The collections-tree selection.
+ */
 export interface LibraryViewInfo {
     treeRowType: LibraryTreeRowType;
     libraryId: number;
@@ -20,6 +42,13 @@ export interface LibraryViewInfo {
     collectionId: number | null;
     collectionName: string | null;
     searchName: string | null;
+    // --- whole selection ---
+    /** Number of selected rows of any kind (>= 1 whenever a view is reported). */
+    selectedRowCount: number;
+    /** Every selected collection row, in collections-list order. */
+    selectedCollections: SelectedCollectionInfo[];
+    /** Distinct library IDs spanned by the selection, in collections-list order. */
+    selectedLibraryIds: number[];
 }
 
 const defaultLibraryView: LibraryViewInfo = {
@@ -29,6 +58,9 @@ const defaultLibraryView: LibraryViewInfo = {
     collectionId: null,
     collectionName: null,
     searchName: null,
+    selectedRowCount: 1,
+    selectedCollections: [],
+    selectedLibraryIds: [1],
 };
 
 export const libraryViewAtom = atom<LibraryViewInfo>(defaultLibraryView);
@@ -107,7 +139,7 @@ export const zoteroContextAtom = atom<ZoteroContext>((get) => {
             type = 'collection';
         } else if (SPECIAL_VIEW_TYPES.has(libraryView.treeRowType)) {
             type = 'special_view';
-        } else if (libraryView.treeRowType === 'library') {
+        } else if (LIBRARY_ROOT_TYPES.has(libraryView.treeRowType)) {
             type = 'library';
         }
     }

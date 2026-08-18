@@ -7,7 +7,7 @@ import {
     searchableLibraryIdsAtom,
 } from '../atoms/profile';
 import { purgeExcludedLibraries } from '../../src/services/backgroundProcessing/exclusionCleanup';
-import { logger } from '../../src/utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 
 const EXCLUDED_LIBRARY_CLEANUP_RETRY_MS = 15 * 60_000;
 

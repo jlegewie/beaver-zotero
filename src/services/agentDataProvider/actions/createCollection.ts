@@ -1,4 +1,4 @@
-import { logger } from '../../../utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 import { searchableLibraryIdsAtom } from '../../../../react/atoms/profile';
 import { store } from '../../../../react/store';
 import {
@@ -7,7 +7,7 @@ import {
     WSAgentActionExecuteRequest,
     WSAgentActionExecuteResponse,
 
-} from '../../agentProtocol';
+} from '@beaver/agent-core/protocol/agentProtocol';
 import { checkLibraryExcluded, excludedLibraryMessage, getDeferredToolPreference } from '../utils';
 import {
     libraryRefForLibraryID,

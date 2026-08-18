@@ -10,7 +10,7 @@
  * readability path and the esbuild background extract lane.
  */
 
-import { logger } from '../../utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 import { isLibraryInScope } from '../libraryScope';
 import { OCR_ENGINE_VERSION, OCR_PRIORITY_ON_DEMAND } from './constants';
 

@@ -1,9 +1,9 @@
 import React from 'react';
-import MenuButton from '../MenuButton';
-import { MenuItem } from '../menu/ContextMenu';
-import PdfIcon from '../../icons/PdfIcon';
-import SearchIcon from '../../icons/SearchIcon';
-import ToolsIcon from '../../icons/ToolsIcon';
+import MenuButton from '@beaver/agent-ui/primitives/MenuButton';
+import { MenuItem } from '@beaver/agent-ui/primitives/ContextMenu';
+import PdfIcon from '@beaver/agent-ui/icons/PdfIcon';
+import SearchIcon from '@beaver/agent-ui/icons/SearchIcon';
+import ToolsIcon from '@beaver/agent-ui/icons/ToolsIcon';
 import {
     ExtractionError,
     ExtractionErrorCode,
@@ -20,12 +20,13 @@ import {
 import { getCurrentReaderAndWaitForView } from '../../../utils/readerUtils';
 import { semanticSearchService } from '../../../../src/services/semanticSearchService';
 import { BeaverDB } from '../../../../src/services/database';
-import { threadService } from '../../../../src/services/threadService';
+import { threadService } from '@beaver/agent-core/transport/threadService';
+import { libraryRefForLibraryID } from '../../../../src/utils/libraryIdentity';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { zoteroContextAtom } from '../../../atoms/zoteroContext';
 import { firstRunReturnRequestedAtom } from '../../../atoms/firstRun';
 import { whereToStartVisibleAtom } from '../../../atoms/whereToStart';
-import { logger } from '../../../../src/utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 
 interface DevToolsMenuButtonProps {
     className?: string;
@@ -320,7 +321,11 @@ const DevToolsMenuButton: React.FC<DevToolsMenuButtonProps> = ({
         }
         console.log('[Find Threads by Item] attachments mode, libraryId:', libraryId, 'keys:', Array.from(keys));
         try {
-            const results = await threadService.findThreadsByItem(libraryId, Array.from(keys), 'attachments');
+            const results = await threadService.findThreadsByItem(
+                { libraryId, libraryRef: libraryRefForLibraryID(libraryId) },
+                Array.from(keys),
+                'attachments'
+            );
             console.log('[Find Threads by Item] attachments results:', results);
         } catch (err) {
             console.error('[Find Threads by Item] attachments failed:', err);
@@ -346,7 +351,11 @@ const DevToolsMenuButton: React.FC<DevToolsMenuButtonProps> = ({
         }
         console.log('[Find Threads by Item] citations mode, libraryId:', libraryId, 'keys:', Array.from(keys));
         try {
-            const results = await threadService.findThreadsByItem(libraryId, Array.from(keys), 'citations');
+            const results = await threadService.findThreadsByItem(
+                { libraryId, libraryRef: libraryRefForLibraryID(libraryId) },
+                Array.from(keys),
+                'citations'
+            );
             console.log('[Find Threads by Item] citations results:', results);
         } catch (err) {
             console.error('[Find Threads by Item] citations failed:', err);

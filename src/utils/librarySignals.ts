@@ -2,7 +2,7 @@
  * Library-suggestions payload assembly helpers.
  */
 import { serializeItemSummary } from "./zoteroSerializers";
-import { logger } from "./logger";
+import { logger } from "@beaver/agent-core/platform/logger";
 import { hasAgentSupportedAttachment } from "./agentItemSupport";
 import { libraryRefForLibraryID } from "./libraryIdentity";
 import {
@@ -11,7 +11,7 @@ import {
     CollectionSignal,
     RecentItem,
     SignalItem,
-} from "../../react/types/librarySuggestions";
+} from "@beaver/agent-core/types/librarySuggestions";
 
 const ABSTRACT_MAX_CHARS = 500;
 const ACTIVE_LOOKBACK_DAYS = 30;

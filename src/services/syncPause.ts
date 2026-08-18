@@ -1,4 +1,9 @@
-import { logger } from '../utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
+import {
+    LOCAL_MUTATING_RUN_SYNC_PAUSE_OWNER,
+    PROVIDER_MUTATING_RUN_SYNC_PAUSE_OWNER,
+    setSyncPauseResumeHandler,
+} from '@beaver/agent-core/transport/agentDataDispatch';
 
 export const RELEASE_DEBOUNCE_MS = 1000;
 export const SAFETY_IDLE_MS = 600_000;
@@ -13,8 +18,10 @@ const AUTO_SYNC_EDIT_TIMEOUT_SECONDS = 3;
 type ResumeSync = () => void;
 export type SyncPauseOwner = string;
 
-export const LOCAL_MUTATING_RUN_SYNC_PAUSE_OWNER = 'local-mutating-run';
-export const PROVIDER_MUTATING_RUN_SYNC_PAUSE_OWNER = 'provider-mutating-run';
+// Re-exported for existing local importers (e.g. `zoteroDataProvider.ts`) —
+// the tokens themselves live in `agentDataDispatch.ts` so the transport layer
+// can reference them without importing this Zotero-only module.
+export { LOCAL_MUTATING_RUN_SYNC_PAUSE_OWNER, PROVIDER_MUTATING_RUN_SYNC_PAUSE_OWNER };
 
 interface SyncRunner {
     delayIndefinite?: () => ResumeSync;
@@ -216,4 +223,13 @@ try {
 
 if (currentWindow) {
     currentWindow.__beaverResumeSyncAfterRun = resumeSyncNow;
+}
+
+/**
+ * Register this module's resume path as the default sync-pause resume
+ * handler. Call once at webpack bundle init (from `react/index.tsx`),
+ * alongside the other `register*` calls.
+ */
+export function registerZoteroSyncPause(): void {
+    setSyncPauseResumeHandler(scheduleResumeAfterRun);
 }

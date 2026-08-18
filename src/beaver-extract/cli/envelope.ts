@@ -12,7 +12,7 @@
  * only opt-in to base64 is via the explicit `--inline-base64` flag on
  * the render command itself.
  */
-import { ExtractionError } from "../types";
+import { ExtractionError } from "@beaver/agent-core/extract/types";
 import { pdfSha256 } from "./io";
 
 export interface InputDescriptor {

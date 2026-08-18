@@ -9,11 +9,8 @@ const PermissionsSection: React.FC = () => {
     // --- Atoms: Permissions ---
     const [autoApplyAnnotations, setAutoApplyAnnotations] = useState(() => getPref('autoApplyAnnotations'));
     const [autoCreateNotes, setAutoCreateNotes] = useState(() => getPref('autoCreateNotes'));
-    const [confirmExtractionCosts, setConfirmExtractionCosts] = useState(() => getPref('confirmExtractionCosts'));
-    const [confirmExternalSearchCosts, setConfirmExternalSearchCosts] = useState(() => getPref('confirmExternalSearchCosts'));
     const [enableSystemNotifications, setEnableSystemNotifications] = useState(() => getPref('enableSystemNotifications'));
     const [enableResponseCompleteNotifications, setEnableResponseCompleteNotifications] = useState(() => getPref('enableResponseCompleteNotifications'));
-    const [pauseLongRunningAgent, setPauseLongRunningAgent] = useState(() => getPref('pauseLongRunningAgent'));
     const [accessRemoteFiles, setAccessRemoteFiles] = useState(() => getPref('accessRemoteFiles'));
 
     // --- Handle Auto-Apply Annotations Toggle ---
@@ -30,20 +27,6 @@ const PermissionsSection: React.FC = () => {
         setAutoCreateNotes(newValue);
     }, [autoCreateNotes]);
 
-    // --- Handle Confirm Extraction Costs Toggle ---
-    const handleConfirmExtractionCostsToggle = useCallback(() => {
-        const newValue = !confirmExtractionCosts;
-        setPref('confirmExtractionCosts', newValue);
-        setConfirmExtractionCosts(newValue);
-    }, [confirmExtractionCosts]);
-
-    // --- Handle Confirm External Search Costs Toggle ---
-    const handleConfirmExternalSearchCostsToggle = useCallback(() => {
-        const newValue = !confirmExternalSearchCosts;
-        setPref('confirmExternalSearchCosts', newValue);
-        setConfirmExternalSearchCosts(newValue);
-    }, [confirmExternalSearchCosts]);
-
     // --- Handle System Notifications Toggle ---
     const handleEnableSystemNotificationsToggle = useCallback(() => {
         const newValue = !enableSystemNotifications;
@@ -57,13 +40,6 @@ const PermissionsSection: React.FC = () => {
         setPref('enableResponseCompleteNotifications', newValue);
         setEnableResponseCompleteNotifications(newValue);
     }, [enableResponseCompleteNotifications]);
-
-    // --- Handle Pause Long-Running Agent Toggle ---
-    const handlePauseLongRunningAgentToggle = useCallback(() => {
-        const newValue = !pauseLongRunningAgent;
-        setPref('pauseLongRunningAgent', newValue);
-        setPauseLongRunningAgent(newValue);
-    }, [pauseLongRunningAgent]);
 
     // --- Handle Access Remote Files Toggle ---
     const handleAccessRemoteFilesToggle = useCallback(() => {
@@ -107,7 +83,7 @@ const PermissionsSection: React.FC = () => {
                     <DeferredToolPreferenceSetting
                         toolName="create_highlight_annotations"
                         label="PDF Annotations"
-                        description="Creating highlight and note annotations on PDF attachments"
+                        description="Creating and editing annotations. Deleting annotations always asks for confirmation."
                     />
                 </div>
                 <div className="border-top-quinary" style={{ padding: '8px 12px' }}>
@@ -133,60 +109,11 @@ const PermissionsSection: React.FC = () => {
                 </div>
             </SettingsGroup>
 
-            <SectionLabel>Checkpoints</SectionLabel>
+            <SectionLabel>System Notifications</SectionLabel>
             <SettingsGroup>
                 <SettingsRow
-                    title="Pause Long-Running Tasks"
-                    description={
-                        <>
-                            Beaver pauses during long-running tasks to summarize progress and check in. Disabling may use additional credits or increase API costs. <DocLink path="credits">Learn more</DocLink>
-                        </>
-                    }
-                    onClick={handlePauseLongRunningAgentToggle}
-                    // tooltip="When enabled, the agent pauses after a set number of steps, reports progress, and asks whether to continue. Disable to let the agent run to completion without interruption."
-                    control={
-                        <input
-                            type="checkbox"
-                            checked={pauseLongRunningAgent}
-                            onChange={handlePauseLongRunningAgentToggle}
-                            onClick={(e) => e.stopPropagation()}
-                            style={{ cursor: 'pointer', margin: 0 }}
-                        />
-                    }
-                />
-                <SettingsRow
-                    title="Confirm Extraction Costs"
-                    description="Ask before using extra credits for batch extraction. Only relevant when using Beaver credits."
-                    onClick={handleConfirmExtractionCostsToggle}
-                    hasBorder
-                    control={
-                        <input
-                            type="checkbox"
-                            checked={confirmExtractionCosts}
-                            onChange={handleConfirmExtractionCostsToggle}
-                            onClick={(e) => e.stopPropagation()}
-                            style={{ cursor: 'pointer', margin: 0 }}
-                        />
-                    }
-                />
-                <SettingsRow
-                    title="Confirm External Search Costs"
-                    description="Ask before using extra credits for external literature search. Only relevant when using Beaver credits."
-                    onClick={handleConfirmExternalSearchCostsToggle}
-                    hasBorder
-                    control={
-                        <input
-                            type="checkbox"
-                            checked={confirmExternalSearchCosts}
-                            onChange={handleConfirmExternalSearchCostsToggle}
-                            onClick={(e) => e.stopPropagation()}
-                            style={{ cursor: 'pointer', margin: 0 }}
-                        />
-                    }
-                />
-                <SettingsRow
                     title="Approval Notifications"
-                    description="Show a system notification when an agent action needs your approval and Beaver is not visible."
+                    description="Show a system notification when Beaver is waiting for your decision and is not visible."
                     onClick={handleEnableSystemNotificationsToggle}
                     hasBorder
                     control={

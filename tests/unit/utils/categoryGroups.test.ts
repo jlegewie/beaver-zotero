@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { Action, ActionCategory, ActionTargetType } from '../../../react/types/actions';
+import { Action, ActionCategory, ActionTargetType } from '@beaver/agent-core/types/actions';
 
 // actionVisibility has Zotero/supabase-coupled value imports that run side
 // effects at module load (e.g. apiService throws on missing env). Stub the

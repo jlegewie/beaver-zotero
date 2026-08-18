@@ -27,7 +27,7 @@ import {
     type RawChar,
     type RawLineDetailed,
     type RawPageDataDetailed,
-} from "../../../src/beaver-extract/types";
+} from "@beaver/agent-core/extract/types";
 
 function makeLine(text: string, yTop: number, xStart = 50): RawLineDetailed {
     const chars: RawChar[] = [];

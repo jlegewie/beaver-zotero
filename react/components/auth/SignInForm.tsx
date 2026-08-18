@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react'
-import { supabase } from '../../../src/services/supabaseClient'
+import { supabase } from '@beaver/agent-core/transport/supabaseClient'
 import { useAtom, useAtomValue, useSetAtom } from 'jotai'
 import { isProfileLoadedAtom } from '../../atoms/profile'
 import {
@@ -14,10 +14,10 @@ import {
   resetLoginFormAtom,
   setAuthMethodAtom,
 } from '../../atoms/auth'
-import { OTPVerification } from './OTPVerification'
-import { sendOTP, verifyOTP, getOTPErrorMessage, isServiceUnavailableError, SERVICE_UNAVAILABLE_MESSAGE } from './otp'
-import { getPref } from '../../../src/utils/prefs'
-import { logger } from '../../../src/utils/logger'
+import { OTPVerification } from '@beaver/agent-ui/auth/OTPVerification'
+import { sendOTP, verifyOTP, getOTPErrorMessage, isServiceUnavailableError, SERVICE_UNAVAILABLE_MESSAGE } from '@beaver/agent-core/transport/otp'
+import { getPref, setPref } from '../../../src/utils/prefs'
+import { logger } from '@beaver/agent-core/platform/logger'
 import { performAccountSwitchAtom } from '../../atoms/accountSwitch'
 
 interface SignInFormProps {
@@ -153,6 +153,11 @@ export default function SignInForm({ setErrorMsg, emailInputRef }: SignInFormPro
 
     try {
       await verifyOTP(email, otpCode, 'email')
+      // Which method to offer first next time. Written here rather than inside
+      // the shared code screen: the preference is this client's, and the screen
+      // does not know it was reached from the email-code path rather than from
+      // another flow that also verifies a code.
+      setPref("authMethod", "otp")
       logger('SignInForm: OTP verification succeeded, waiting for profile');
       // Wait for useProfileSync to fetch the profile; the userEmail sentinel
       // is persisted there once the profile fetch succeeds.

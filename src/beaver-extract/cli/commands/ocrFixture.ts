@@ -50,7 +50,7 @@ import {
     mergeEffectiveOptions,
     projectOcrSnapshot,
 } from "../../debug/ocrSnapshot";
-import type { OCRDetectionOptions } from "../../types";
+import type { OCRDetectionOptions } from "@beaver/agent-core/extract/types";
 
 const DEFAULT_ISSUE_RATIO_TOL = 0.02;
 const DEFAULT_TEXT_LENGTH_TOL = 5;

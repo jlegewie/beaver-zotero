@@ -6,15 +6,15 @@
  * the hover card is built entirely from persisted data. The only
  * client-specific behavior (clicking a pill to edit the action) goes through
  * the optional `navigation.openActionSettings` host method. The token
- * matching itself lives in the React-free `utils/slashCommands.ts`.
+ * matching itself lives in the React-free `@beaver/agent-ui/composer/slashCommands`.
  */
 
 import React from 'react';
-import type { PromptAction } from '../../agents/types';
-import { splitContentBySlashTokens } from '../../utils/slashCommands';
-import { ChipWithPopup } from './requestChips/ChipPopup';
-import { buildActionPopup } from './requestChips/actionPopup';
-import { getHost } from '../../host';
+import type { PromptAction } from '@beaver/agent-core/agents/types';
+import { splitContentBySlashTokens } from '@beaver/agent-ui/composer/slashCommands';
+import { ChipWithPopup } from '@beaver/agent-ui/chat/ChipPopup';
+import { buildActionPopup } from '@beaver/agent-ui/chat/actionPopup';
+import { getHost } from '@beaver/agent-ui/host';
 
 /**
  * Render message content with recognized `/command` tokens styled as pills.

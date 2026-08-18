@@ -1,8 +1,8 @@
-import { logger } from '../../utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 import { safeIsInTrash } from '../../utils/zoteroUtils';
 import type { TimingAccumulator } from '../../utils/timing';
 import { getAttachmentInfo, type AttachmentInfoOptions } from './attachmentInfo';
-import type { AttachmentInfo } from './shared/contentKinds';
+import type { AttachmentInfo } from '@beaver/agent-core/extract/document/shared/contentKinds';
 import { modelObjectId } from '../../utils/libraryIdentity';
 
 /**

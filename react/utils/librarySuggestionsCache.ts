@@ -1,5 +1,5 @@
 import { getPref, setPref } from '../../src/utils/prefs';
-import { CardKind, LibrarySuggestionsResponse } from '../types/librarySuggestions';
+import { CardKind, LibrarySuggestionsResponse } from '@beaver/agent-core/types/librarySuggestions';
 
 const LIBRARY_SUGGESTIONS_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 

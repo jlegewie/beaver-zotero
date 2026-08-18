@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { ToolCallPart } from '../../../react/agents/types';
+import type { ToolCallPart } from '@beaver/agent-core/agents/types';
 import {
     buildEditNoteRenderItems,
     findPendingApprovalForToolcall,

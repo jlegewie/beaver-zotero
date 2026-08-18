@@ -7,9 +7,9 @@ import {
     undoAgentActionAtom,
     isCreateNoteAgentAction,
 } from '../../../agents/agentActions';
-import { NoteProposedData } from '../../../types/agentActions/base';
-import { AgentRun } from '../../../agents/types';
-import { ZoteroItemReference } from '../../../types/zotero';
+import { NoteProposedData } from '@beaver/agent-core/types/agentActions/base';
+import { AgentRun } from '@beaver/agent-core/agents/types';
+import { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import { ZOTERO_ICONS, ZoteroIcon } from '../../../components/icons/ZoteroIcon';
 import {
     TickIcon,
@@ -23,8 +23,8 @@ import {
     CheckmarkCircleIcon,
     DeleteIcon,
 } from '../../../components/icons/icons';
-import IconButton from '../../../components/ui/IconButton';
-import Tooltip from '../../../components/ui/Tooltip';
+import IconButton from '@beaver/agent-ui/primitives/IconButton';
+import Tooltip from '@beaver/agent-ui/primitives/Tooltip';
 import { selectItemById } from '../../../../src/utils/selectItem';
 import { revealSource, getCurrentCollectionKeyForItem } from '../../../utils/sourceUtils';
 import { isLibraryEditable } from '../../../../src/utils/zoteroUtils';
@@ -37,16 +37,16 @@ import {
     noteTagsMatch,
     ParsedNoteBlock,
 } from '../../../utils/agentActionUtils';
-import { citationMapAtom } from '../../../atoms/citations';
-import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '../../../atoms/externalReferences';
+import { citationMapAtom } from '@beaver/agent-core/citations/atoms';
+import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '@beaver/agent-core/citations/externalReferences';
 import { isLibraryTabAtom } from '../../../atoms/ui';
 import {
     annotationPanelStateAtom,
     defaultAnnotationPanelState,
     toggleAnnotationPanelVisibilityAtom,
 } from '../../../atoms/messageUIState';
-import { logger } from '../../../../src/utils/logger';
-import Button from '../../../components/ui/Button';
+import { logger } from '@beaver/agent-core/platform/logger';
+import Button from '@beaver/agent-ui/primitives/Button';
 import { textWithTrailingNoWrap } from '../../../utils/textWithTrailingNoWrap';
 
 interface NoteAgentActionRowProps {
@@ -517,7 +517,7 @@ interface NoteAgentActionDisplayProps {
  * pattern of EditNoteGroupView.
  */
 const NoteAgentActionDisplay: React.FC<NoteAgentActionDisplayProps> = ({ run, actions }) => {
-    // Show pending/error (awaiting user confirmation) and auto-applied notes (allowing undo).
+    // Show created notes and allow undo.
     // Auto-applied notes are tracked in a session-only set — they don't reappear on reload.
     // Manually confirmed notes become 'applied' but aren't in the auto-applied set, so they disappear.
     const visibleActions = actions.filter(a =>

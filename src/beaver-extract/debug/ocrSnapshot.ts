@@ -8,13 +8,13 @@
  *
  * Browser-safe — no `fs` or other Node-only imports.
  */
-import { DEFAULT_OCR_DETECTION_OPTIONS } from "../types";
+import { DEFAULT_OCR_DETECTION_OPTIONS } from "@beaver/agent-core/extract/types";
 import type {
     OCRDetectionOptions,
     OCRDetectionResult,
     OCRIssueReason,
     PageOCRAnalysis,
-} from "../types";
+} from "@beaver/agent-core/extract/types";
 import type {
     CapturedOcrFixture,
     OcrSnapshot,

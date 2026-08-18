@@ -5,7 +5,7 @@ import { isBeaverUIVisibleAtom, isLibraryTabAtom } from '../atoms/ui';
 import { addFloatingPopupMessageAtom, floatingPopupMessagesAtom } from '../atoms/floatingPopup';
 import { currentNoteItemAtom } from '../atoms/zoteroContext';
 import { getCurrentReader } from '../utils/readerUtils';
-import { logger } from '../../src/utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 
 const WELCOME_POPUP_ID = 'onboarding-welcome';
 const READER_TIP_POPUP_ID = 'onboarding-reader-tip';

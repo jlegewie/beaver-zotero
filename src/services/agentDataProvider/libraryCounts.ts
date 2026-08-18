@@ -1,6 +1,7 @@
-import type { LibrarySummary } from '../agentProtocol';
-import { logger } from '../../utils/logger';
+import type { LibrarySummary } from '@beaver/agent-core/protocol/agentProtocol';
+import { logger } from '@beaver/agent-core/platform/logger';
 import { libraryRefForLibraryID } from '../../utils/libraryIdentity';
+import { getLibraryVersions } from './libraryVersions';
 
 async function countRegularItems(libraryId: number): Promise<number> {
     try {
@@ -32,6 +33,47 @@ async function countRegularItems(libraryId: number): Promise<number> {
     }
 }
 
+/**
+ * Count attachments that sit at the top level of the library rather than under
+ * a parent item.
+ *
+ * Loose files are counted separately from {@link countRegularItems} because a
+ * library can consist entirely of them — reporting only regular items would
+ * make such a library look empty.
+ */
+async function countStandaloneAttachments(libraryId: number): Promise<number> {
+    try {
+        const sql = `
+            SELECT COUNT(*) as cnt
+            FROM items I
+            JOIN itemAttachments IA ON I.itemID = IA.itemID
+            WHERE I.libraryID = ?
+            AND IA.parentItemID IS NULL
+            AND I.itemID NOT IN (SELECT itemID FROM deletedItems)
+        `;
+        let count = 0;
+        await Zotero.DB.queryAsync(sql, [libraryId], {
+            onRow: (row: any) => {
+                count = row.getResultByIndex(0) as number;
+            }
+        });
+        return count;
+    } catch (error) {
+        logger(
+            `getLibrarySummaries: Error counting standalone attachments for library ${libraryId}: ${error}`,
+            2
+        );
+        return 0;
+    }
+}
+
+/**
+ * Count every non-trashed note in the library, both standalone notes and notes
+ * attached to an item.
+ *
+ * This is a library-wide total, so unlike the per-collection note count it is
+ * not restricted to standalone notes.
+ */
 async function countNotes(libraryId: number): Promise<number> {
     try {
         const sql = `
@@ -98,13 +140,15 @@ async function countTags(libraryId: number): Promise<number> {
     }
 }
 
-async function getLibrarySummary(library: any): Promise<LibrarySummary | null> {
+async function getLibrarySummary(library: any, includeVersions: boolean): Promise<LibrarySummary | null> {
     try {
-        const [itemCount, noteCount, collectionCount, tagCount] = await Promise.all([
+        const [itemCount, attachmentCount, noteCount, collectionCount, tagCount, versions] = await Promise.all([
             countRegularItems(library.libraryID),
+            countStandaloneAttachments(library.libraryID),
             countNotes(library.libraryID),
             countCollections(library.libraryID),
             countTags(library.libraryID),
+            includeVersions ? getLibraryVersions(library.libraryID) : undefined,
         ]);
 
         return {
@@ -114,9 +158,11 @@ async function getLibrarySummary(library: any): Promise<LibrarySummary | null> {
             is_group: library.isGroup,
             read_only: !library.editable || !library.filesEditable,
             item_count: itemCount,
+            standalone_attachment_count: attachmentCount,
             note_count: noteCount,
             collection_count: collectionCount,
             tag_count: tagCount,
+            versions,
         };
     } catch (error) {
         logger(
@@ -129,9 +175,16 @@ async function getLibrarySummary(library: any): Promise<LibrarySummary | null> {
 
 /**
  * Return per-library count snapshots for the requested Zotero libraries.
+ *
+ * @param includeVersions - Also compute the per-scope cache-freshness markers.
+ * Off by default: they exist for a client caching a library between calls
+ * (`list_libraries`), and the application-state snapshot this also feeds runs
+ * on every message, where they would be two extra aggregate queries per library
+ * and an opaque string in the model's context for no one's benefit.
  */
 export async function getLibrarySummaries(
-    libraryIds: number[]
+    libraryIds: number[],
+    includeVersions = false
 ): Promise<LibrarySummary[]> {
     if (libraryIds.length === 0) {
         return [];
@@ -142,7 +195,9 @@ export async function getLibrarySummaries(
         const libraries = Zotero.Libraries.getAll()
             .filter((lib: any) => searchableIds.has(lib.libraryID));
 
-        const summaries = (await Promise.all(libraries.map(getLibrarySummary)))
+        const summaries = (await Promise.all(
+            libraries.map((library: any) => getLibrarySummary(library, includeVersions))
+        ))
             .filter((summary): summary is LibrarySummary => summary !== null);
         return summaries.sort((a, b) => a.library_id - b.library_id);
     } catch (error) {

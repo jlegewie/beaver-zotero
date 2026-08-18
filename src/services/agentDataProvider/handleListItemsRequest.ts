@@ -7,18 +7,18 @@
  * The Beaver agent is the primary agent that handles chat completions and tool execution.
  */
 
-import { logger } from '../../utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 import {
     WSListItemsRequest,
     WSListItemsResponse,
     ListItemsResultItem,
     RegularListResultItem,
     AttachmentRowResult,
-} from '../agentProtocol';
-import { ItemStub } from '../../../react/types/zotero';
+} from '@beaver/agent-core/protocol/agentProtocol';
+import { ItemStub } from '@beaver/agent-core/types/zotero';
 import { serializeNote, serializeItemStub } from '../../utils/zoteroSerializers';
 import { libraryRefForLibraryID, modelObjectId } from '../../utils/libraryIdentity';
-import { getCollectionByIdOrName, validateLibraryAccess, isLibrarySearchable, getSearchableLibraries, excludedLibraryMessage, extractYear, formatCreatorsString, getAttachmentInfoForItem } from './utils';
+import { getCollectionByIdOrName, validateLibraryAccess, isLibrarySearchable, getSearchableLibraries, excludedLibraryMessage, extractYear, formatCreatorsString, getAttachmentInfoForItem, degradedAttachmentRow } from './utils';
 
 function isAnnotationItem(item: Zotero.Item): boolean {
     return String(item.itemType) === 'annotation' || (item as { isAnnotation?: () => boolean }).isAnnotation?.() === true;
@@ -362,19 +362,28 @@ export async function handleListItemsRequest(
                 items.push(serializeNote(item, parentInfo));
             } else if (item.isAttachment()) {
                 const parentInfo = item.parentItemID ? parentMap.get(item.parentItemID) : null;
-                const attachmentInfo = await getAttachmentInfoForItem(item, {
-                    parentItemId: parentInfo?.item_id ?? null,
-                    isPrimary: false,
-                    includeAnnotationsCount: true,
-                    skipWorkerFallback: true,
-                });
-                const attachmentItem: AttachmentRowResult = {
-                    ...attachmentInfo,
-                    result_type: 'attachment',
-                    parent_title: parentInfo?.title ?? null,
-                    parent_item: parentInfo ?? null,
-                    date_modified: item.dateModified,
-                };
+                let attachmentItem: AttachmentRowResult;
+                try {
+                    const attachmentInfo = await getAttachmentInfoForItem(item, {
+                        parentItemId: parentInfo?.item_id ?? null,
+                        isPrimary: false,
+                        includeAnnotationsCount: true,
+                        skipWorkerFallback: true,
+                    });
+                    attachmentItem = {
+                        ...attachmentInfo,
+                        result_type: 'attachment',
+                        parent_title: parentInfo?.title ?? null,
+                        parent_item: parentInfo ?? null,
+                        date_modified: item.dateModified,
+                    };
+                } catch (error) {
+                    // Isolate the row: a record Zotero cannot read (e.g. a linked
+                    // file whose stored path is not valid on this platform) must
+                    // degrade to a stub, not empty the whole page.
+                    logger(`handleListItemsRequest: Degrading unreadable attachment ${item.key}: ${error}`, 2);
+                    attachmentItem = degradedAttachmentRow(item, parentInfo ?? null);
+                }
                 items.push(attachmentItem);
             } else {
                 const creators = item.getCreators();

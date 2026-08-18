@@ -6,7 +6,7 @@ import type {
     Sentence,
     StructuredDocument,
     StructuredPage,
-} from "./schema";
+} from "@beaver/agent-core/extract/schema";
 
 export interface ResolvedCitation {
     pageIndex: number;

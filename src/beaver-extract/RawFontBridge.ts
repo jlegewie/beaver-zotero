@@ -18,7 +18,7 @@
  * and the worker-side sentence extraction path can use it.
  */
 
-import type { RawLine, RawPageData, RawPageDataDetailed } from "./types";
+import type { RawLine, RawPageData, RawPageDataDetailed } from "@beaver/agent-core/extract/types";
 
 /**
  * Vertical-distance tolerance for matching lines between the two walks.

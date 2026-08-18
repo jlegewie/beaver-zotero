@@ -24,8 +24,8 @@ import type {
     BoundingBox,
     RawLineDetailed,
     RawPageDataDetailed,
-} from "./types";
-import { bboxHeight, bboxWidth, mergeBoxes } from "./types";
+} from "@beaver/agent-core/extract/types";
+import { bboxHeight, bboxWidth, mergeBoxes } from "@beaver/agent-core/extract/types";
 
 // ---------------------------------------------------------------------------
 // Sentence splitter contract

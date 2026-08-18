@@ -20,7 +20,7 @@ import {
     searchableLibraryIdsAtom,
 } from '../atoms/profile';
 import { store } from '../store';
-import { logger } from '../../src/utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 
 type JotaiStore = ReturnType<typeof createStore>;
 

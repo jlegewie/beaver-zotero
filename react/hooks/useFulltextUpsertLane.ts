@@ -9,7 +9,7 @@ import { FulltextUpsertExecutor } from '../../src/services/backgroundQueue/fullt
 import { searchIndexApiClient } from '../../src/services/searchIndex/searchIndexApiClient';
 import { INDEX_RECONCILE_INTERVAL_MS } from '../../src/services/backgroundProcessing/constants';
 import { reconcileRemoteRefs } from '../../src/services/backgroundProcessing/remoteRefsReconcile';
-import { logger } from '../../src/utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 
 const INDEX_LANE_MAX_IN_FLIGHT = 2;
 const UNTAG_REDRIVE_INTERVAL_MS = 6 * 60 * 60_000;

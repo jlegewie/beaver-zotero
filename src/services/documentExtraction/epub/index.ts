@@ -12,9 +12,9 @@ export type {
     EpubContentKind,
     EpubDocument,
     ExtractEpubResult,
-} from "./schema";
+} from "@beaver/agent-core/extract/document/epub/schema";
 export {
     EPUB_CONTENT_KIND,
     EPUB_SCHEMA_VERSION,
     validateEpubDocument,
-} from "./schema";
+} from "@beaver/agent-core/extract/document/epub/schema";

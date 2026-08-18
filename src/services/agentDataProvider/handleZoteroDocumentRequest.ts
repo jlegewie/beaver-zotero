@@ -7,13 +7,13 @@
  * `document_extract` background job; EPUB timeouts are returned directly.
  */
 
-import { logger } from '../../utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 import {
     WSZoteroDocumentRequest,
     WSZoteroDocumentResponse,
-} from '../agentProtocol';
-import type { ZoteroDocumentErrorCode } from '../agentProtocol';
-import type { AttachmentStub, ItemStub } from '../../../react/types/zotero';
+} from '@beaver/agent-core/protocol/agentProtocol';
+import type { ZoteroDocumentErrorCode } from '@beaver/agent-core/protocol/agentProtocol';
+import type { AttachmentStub, ItemStub } from '@beaver/agent-core/types/zotero';
 import {
     extractAndCacheEpubDocument,
     extractAndCacheResolvedPdfDocument,
@@ -25,7 +25,7 @@ import {
     resolveToReadableAttachment,
     resolveAttachmentFileSource,
 } from '../documentExtraction';
-import { readableToExtractKind, type ExtractContentKind, type ReadableContentKind } from '../documentExtraction/shared/contentKinds';
+import { readableToExtractKind, type ExtractContentKind, type ReadableContentKind } from '@beaver/agent-core/extract/document/shared/contentKinds';
 import {
     DEFAULT_PAGES_TIMEOUT_SECONDS,
     MAX_PDF_TIMEOUT_SECONDS,
@@ -51,7 +51,7 @@ import { libraryRefForLibraryID, modelObjectIdFromReference } from '../../utils/
 import {
     createPreparedJsonMessage,
     type PreparedJsonMessage,
-} from '../preparedJsonMessage';
+} from '@beaver/agent-core/transport/preparedJsonMessage';
 
 export interface ZoteroDocumentRequestOptions {
     responseMode?: 'object' | 'websocket';
@@ -567,7 +567,9 @@ export async function handleZoteroDocumentRequest(
                 zoteroKey: attachment.zotero_key,
             };
             try {
-                // Enqueue a background job to retry the extraction.
+                // Exclusions can change while the foreground extraction is in
+                // flight. Recheck the live boundary before staging follow-up
+                // work so an excluded library never reaches the queue.
                 if (isLibrarySearchable(target.libraryId)) {
                     await Zotero.Beaver?.db?.enqueueBackgroundJob({
                         jobType: 'document_extract',

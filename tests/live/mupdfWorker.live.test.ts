@@ -367,6 +367,14 @@ describe('MuPDF worker — doc cache', () => {
 
         await pdfPageCount(SMALL_PDF);
         const before = await workerStats();
+        // `cacheStats` is null when no worker is alive, which would otherwise
+        // surface as an opaque TypeError on the next line. The op above just
+        // ran, so a missing worker means something disposed the hot slot
+        // underneath us — name that rather than letting it read as a cache bug.
+        expect(
+            before.stats.hasWorker,
+            'hot worker was gone right after a successful op, so cacheStats is null',
+        ).toBe(true);
         expect(before.cacheStats!.entries).toBeGreaterThanOrEqual(1);
 
         await workerMarkStale({ reason: 'doc-cache test' });

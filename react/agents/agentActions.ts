@@ -1,249 +1,34 @@
 import { atom } from 'jotai';
-import { logger } from '../../src/utils/logger';
-import { isLibraryReferencePortable, resolveItemReference } from '../../src/utils/libraryIdentity';
+import { logger } from '@beaver/agent-core/platform/logger';
+import { isLibraryReferencePortable, resolveItemReference, resolveLibraryRef } from '../../src/utils/libraryIdentity';
+import { checkLibraryExcluded } from '../../src/services/agentDataProvider/utils';
 import { dismissDiffPreview } from '../utils/noteEditorDiffPreview';
 import { updateDiffPreviewForNote, diffPreviewNoteKeyAtom } from '../utils/diffPreviewCoordinator';
-import { agentActionsService, AckActionLink } from '../../src/services/agentActionsService';
+import { agentActionsService, AckActionLink } from '@beaver/agent-core/transport/clients/agentActionsService';
 import { notifyApprovalRequest } from '../../src/services/systemNotifications';
-import { ZoteroItemReference } from '../types/zotero';
+import type { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
+import type { ActionStatus } from '@beaver/agent-core/types/agentActions/base';
+import type { WSDeferredApprovalRequest, AgentActionType } from '@beaver/agent-core/protocol/agentProtocol';
+// Declared in the shared host contract, since the render layer hands it to the
+// host's in-stream action UI.
+import type { PendingApproval } from '@beaver/agent-ui/host';
 import {
-    ActionStatus,
-    ActionType,
-    NoteProposedData,
-    EditMetadataProposedData,
-} from '../types/agentActions/base';
-import {
-    normalizePageLocations,
-    normalizeSentenceIdList,
-    normalizeNotePosition,
-} from '../types/agentActions/annotations';
-import type { CreateItemProposedData, CreateItemResultData } from '../types/agentActions/items';
-import type { ManageCollectionsProposedData, ManageCollectionsResultData } from '../types/agentActions/base';
-import type {
-    CreatedAnnotationResult,
-    CreateHighlightAnnotationsProposedData,
-    CreateHighlightAnnotationsResultData,
-    CreateNoteAnnotationsProposedData,
-    CreateNoteAnnotationsResultData,
-    FailedAnnotationResult,
-    HighlightAnnotationItem,
-    NoteAnnotationItem,
-} from '../types/agentActions/createAnnotations';
-import { normalizeAnnotationTags } from '../types/agentActions/createAnnotations';
-import type { WSDeferredApprovalRequest, AgentActionType } from '../../src/services/agentProtocol';
+    AgentAction,
+    CreateItemAgentAction,
+    isCreateItemAgentAction,
+    isCreateAnnotationsAgentAction,
+    isEditAnnotationsAgentAction,
+    isAnnotationAgentAction,
+    hasAppliedZoteroItem,
+    hasAppliedBulkAnnotations,
+    getZoteroItemReferenceFromAgentAction,
+} from '@beaver/agent-core/agents/agentActionTypes';
+
+export * from '@beaver/agent-core/agents/agentActionTypes';
 
 // =============================================================================
-// Agent Action Types
+// Applied Action Validation
 // =============================================================================
-
-/**
- * Agent action model
- * Created during agent runs via WebSocket streaming.
- */
-export interface AgentAction {
-    // Identity
-    id: string;
-    run_id: string;
-    toolcall_id?: string;
-    user_id?: string;
-
-    // Action type
-    action_type: ActionType;
-
-    // Status
-    status: ActionStatus;
-    error_message?: string;
-    error_details?: Record<string, any>;
-
-    // Action-specific proposed data and result data
-    proposed_data: Record<string, any>; // Will be cast to specific types based on action_type
-    result_data?: Record<string, any>; // Populated after application
-
-    // Timestamps
-    created_at?: string;
-    updated_at?: string;
-}
-
-/**
- * Type guard for highlight annotation actions
- */
-export const isHighlightAnnotationAgentAction = (action: AgentAction): boolean => {
-    return action.action_type === 'highlight_annotation';
-};
-
-/**
- * Type guard for note annotation actions
- */
-export const isNoteAnnotationAgentAction = (action: AgentAction): boolean => {
-    return action.action_type === 'note_annotation';
-};
-
-/**
- * Type guard for any annotation action
- */
-export const isAnnotationAgentAction = (action: AgentAction): boolean => {
-    return action.action_type === 'highlight_annotation' || action.action_type === 'note_annotation';
-};
-
-export const isCreateHighlightAnnotationsAgentAction = (action: AgentAction): action is CreateHighlightAnnotationsAgentAction => {
-    return action.action_type === 'create_highlight_annotations';
-};
-
-export const isCreateNoteAnnotationsAgentAction = (action: AgentAction): action is CreateNoteAnnotationsAgentAction => {
-    return action.action_type === 'create_note_annotations';
-};
-
-export const isCreateAnnotationsAgentAction = (action: AgentAction): action is CreateHighlightAnnotationsAgentAction | CreateNoteAnnotationsAgentAction => {
-    return isCreateHighlightAnnotationsAgentAction(action) || isCreateNoteAnnotationsAgentAction(action);
-};
-
-/**
- * Type guard for zotero note actions
- */
-export const isZoteroNoteAgentAction = (action: AgentAction): boolean => {
-    return action.action_type === 'zotero_note';
-};
-
-/**
- * Type guard for create note actions (via create_note tool)
- */
-export const isCreateNoteAgentAction = (action: AgentAction): boolean => {
-    return action.action_type === 'create_note';
-};
-
-/**
- * Type guard for create item actions
- */
-export const isCreateItemAgentAction = (action: AgentAction): action is CreateItemAgentAction => {
-    return action.action_type === 'create_item';
-};
-
-/**
- * Type guard for edit metadata actions
- */
-export const isEditMetadataAgentAction = (action: AgentAction): boolean => {
-    return action.action_type === 'edit_metadata';
-};
-
-/**
- * Type guard for create collection actions
- */
-export const isCreateCollectionAgentAction = (action: AgentAction): boolean => {
-    return action.action_type === 'create_collection';
-};
-
-/**
- * Type guard for organize items actions
- */
-export const isOrganizeItemsAgentAction = (action: AgentAction): boolean => {
-    return action.action_type === 'organize_items';
-};
-
-/**
- * Type guard for manage tags actions
- */
-export const isManageTagsAgentAction = (action: AgentAction): boolean => {
-    return action.action_type === 'manage_tags';
-};
-
-/**
- * Type guard for manage collections actions
- */
-export const isManageCollectionsAgentAction = (action: AgentAction): action is ManageCollectionsAgentAction => {
-    return action.action_type === 'manage_collections';
-};
-
-/**
- * Type guard for edit note actions
- */
-export const isEditNoteAgentAction = (action: AgentAction): boolean => {
-    return action.action_type === 'edit_note';
-};
-
-/**
- * Type guard for batch edit note actions
- */
-export const isEditNoteBatchAgentAction = (action: AgentAction): boolean => {
-    return action.action_type === 'edit_note_batch';
-};
-
-/** edit_note OR edit_note_batch — any note-edit action against a single note. */
-export const isAnyEditNoteAgentAction = (action: AgentAction): boolean =>
-    isEditNoteAgentAction(action) || isEditNoteBatchAgentAction(action);
-
-/**
- * Type guard for confirm extraction actions
- */
-export const isConfirmExtractionAgentAction = (action: AgentAction): boolean => {
-    return action.action_type === 'confirm_extraction';
-};
-
-/**
- * Type guard for confirm external search actions
- */
-export const isConfirmExternalSearchAgentAction = (action: AgentAction): boolean => {
-    return action.action_type === 'confirm_external_search';
-};
-
-/**
- * Typed agent action for create_item actions
- */
-export type CreateItemAgentAction = AgentAction & {
-    action_type: 'create_item';
-    proposed_data: CreateItemProposedData;
-    result_data?: CreateItemResultData;
-};
-
-/**
- * Typed agent action for manage_collections actions
- */
-export type ManageCollectionsAgentAction = AgentAction & {
-    action_type: 'manage_collections';
-    proposed_data: ManageCollectionsProposedData;
-    result_data?: ManageCollectionsResultData;
-};
-
-export type CreateHighlightAnnotationsAgentAction = AgentAction & {
-    action_type: 'create_highlight_annotations';
-    proposed_data: CreateHighlightAnnotationsProposedData;
-    result_data?: CreateHighlightAnnotationsResultData;
-};
-
-export type CreateNoteAnnotationsAgentAction = AgentAction & {
-    action_type: 'create_note_annotations';
-    proposed_data: CreateNoteAnnotationsProposedData;
-    result_data?: CreateNoteAnnotationsResultData;
-};
-
-/**
- * Check if an agent action has been applied and has a Zotero item reference
- */
-export const hasAppliedZoteroItem = (action: AgentAction): boolean => {
-    return action.status === 'applied' && 
-           !!action.result_data?.zotero_key && 
-           !!action.result_data?.library_id;
-};
-
-export const hasAppliedBulkAnnotations = (action: AgentAction): boolean => {
-    return isCreateAnnotationsAgentAction(action) &&
-        action.status === 'applied' &&
-        Array.isArray(action.result_data?.created) &&
-        action.result_data.created.length > 0;
-};
-
-/**
- * Get Zotero item reference from an applied agent action
- */
-export const getZoteroItemReferenceFromAgentAction = (action: AgentAction): ZoteroItemReference | null => {
-    if (!hasAppliedZoteroItem(action)) {
-        return null;
-    }
-    return {
-        library_id: action.result_data!.library_id,
-        zotero_key: action.result_data!.zotero_key,
-        library_ref: action.result_data!.library_ref,
-    } as ZoteroItemReference;
-};
 
 /**
  * Get Zotero item from an applied agent action
@@ -267,19 +52,36 @@ export type AppliedActionValidity = 'valid' | 'invalid' | 'unverifiable';
 
 const checkAppliedReference = async (
     ref: ZoteroItemReference,
-    mustBeAnnotation: boolean
+    mustBeAnnotation: boolean,
+    // Actions that only move an item to the trash leave it resolvable, so its
+    // existence proves nothing: being trashed *is* the applied state. Restoring
+    // it from the trash is the user reverting the action.
+    mustBeTrashed: boolean = false
 ): Promise<AppliedActionValidity> => {
+    // Validation reads live Zotero state and can flip the action to "undone"
+    // both locally and on the backend, so it stays behind the exclusion
+    // boundary — unlike rendering persisted history, which is allowed. An
+    // excluded library is simply not checkable; the status is left alone.
+    const libraryId = resolveLibraryRef(ref);
+    if (libraryId !== null && checkLibraryExcluded(libraryId)) return 'unverifiable';
     const resolved = await resolveItemReference(ref);
     if (resolved.status === 'library_unavailable') return 'unverifiable';
     if (resolved.status === 'not_found') {
-        // "Not found" is only proof of deletion when the reference identifies
-        // its library portably. A legacy reference (no library_ref) into a
-        // group library resolves through a device-local library_id, so a miss
-        // may just mean that id maps to a different group on this device — not
-        // that the item is gone. Treat that as unverifiable, never a revert.
-        return isLibraryReferencePortable(ref) ? 'invalid' : 'unverifiable';
+        // "Not found" is only decisive when the reference identifies its
+        // library portably. A legacy reference (no library_ref) into a group
+        // library resolves through a device-local library_id, so a miss may
+        // just mean that id maps to a different group on this device — not
+        // that the item is gone. Never conclude anything from that.
+        if (!isLibraryReferencePortable(ref)) return 'unverifiable';
+        // Portable and missing: for an action whose applied state IS deletion,
+        // the user emptied the trash and the deletion became permanent, so the
+        // action still holds. For anything else, the item being gone is the
+        // revert.
+        return mustBeTrashed ? 'valid' : 'invalid';
     }
-    return mustBeAnnotation && !resolved.item.isAnnotation() ? 'invalid' : 'valid';
+    if (mustBeAnnotation && !resolved.item.isAnnotation()) return 'invalid';
+    if (mustBeTrashed && !resolved.item.deleted) return 'invalid';
+    return 'valid';
 };
 
 /**
@@ -300,6 +102,22 @@ export const validateAppliedAgentAction = async (action: AgentAction): Promise<A
         return unverifiable ? 'unverifiable' : 'valid';
     }
 
+    if (isEditAnnotationsAgentAction(action)) {
+        const updated = action.result_data?.applied_refs ?? [];
+        // A delete keeps its applied_refs pointing at the (soft-deleted)
+        // originals, so the applied state is "still in the trash". An edit's
+        // applied_refs are live annotations — a move rewrites them in place,
+        // so identity is stable there too.
+        const mustBeTrashed = action.result_data?.operation === 'delete';
+        let unverifiable = false;
+        for (const ref of updated) {
+            const validity = await checkAppliedReference(ref, true, mustBeTrashed);
+            if (validity === 'invalid') return 'invalid';
+            if (validity === 'unverifiable') unverifiable = true;
+        }
+        return unverifiable ? 'unverifiable' : 'valid';
+    }
+
     // If action doesn't have an applied Zotero item, it's valid (nothing to check)
     if (!hasAppliedZoteroItem(action)) return 'valid';
 
@@ -309,329 +127,6 @@ export const validateAppliedAgentAction = async (action: AgentAction): Promise<A
     // For annotation actions, the resolved item must still be an annotation
     return checkAppliedReference(ref, isAnnotationAgentAction(action));
 };
-
-// =============================================================================
-// Deserialization
-// =============================================================================
-
-function normalizeZoteroItemReference(raw: any): ZoteroItemReference {
-    const libraryId = raw?.library_id ?? raw?.libraryId;
-    const zoteroKey = raw?.zotero_key ?? raw?.zoteroKey;
-    // Carry the device-portable library_ref through unchanged when the
-    // backend sent one
-    const libraryRef = raw?.library_ref ?? raw?.libraryRef;
-    return {
-        library_id: typeof libraryId === 'number' ? libraryId : Number(libraryId ?? 0),
-        zotero_key: typeof zoteroKey === 'string' ? zoteroKey : String(zoteroKey ?? ''),
-        ...(typeof libraryRef === 'string' && libraryRef ? { library_ref: libraryRef } : {}),
-    };
-}
-
-function normalizeCreateAnnotationBaseItem(item: any) {
-    return {
-        index: typeof item?.index === 'number' ? item.index : Number(item?.index ?? 0),
-        client_item_id: String(item?.client_item_id ?? item?.clientItemId ?? ''),
-        title: String(item?.title ?? ''),
-        loc_raw: String(item?.loc_raw ?? item?.locRaw ?? ''),
-        loc: item?.loc ?? { kind: 'unknown', value: '', raw: '' },
-        page_label: item?.page_label ?? item?.pageLabel ?? null,
-        section_href: item?.section_href ?? item?.sectionHref ?? null,
-        section_ordinal: item?.section_ordinal ?? item?.sectionOrdinal ?? null,
-        anchor_id: item?.anchor_id ?? item?.anchorId ?? null,
-    };
-}
-
-function normalizeHighlightAnnotationItem(item: any): HighlightAnnotationItem {
-    return {
-        ...normalizeCreateAnnotationBaseItem(item),
-        text: String(item?.text ?? ''),
-        color: item?.color ?? 'yellow',
-        comment: item?.comment ?? null,
-        page_locations: normalizePageLocations({ locations: item?.page_locations ?? item?.pageLocations ?? item?.locations }) ?? [],
-    };
-}
-
-function normalizeNoteAnnotationItem(item: any): NoteAnnotationItem {
-    const rawReadingOrder = item?.reading_order_offset ?? item?.readingOrderOffset;
-    const readingOrderOffset =
-        typeof rawReadingOrder === 'number' && Number.isFinite(rawReadingOrder)
-            ? rawReadingOrder
-            : (rawReadingOrder === null ? null : undefined);
-    return {
-        ...normalizeCreateAnnotationBaseItem(item),
-        comment: String(item?.comment ?? ''),
-        color: item?.color ?? 'yellow',
-        note_position: normalizeNotePosition({ note_position: item?.note_position ?? item?.notePosition }) ?? {
-            page_index: 0,
-            side: 'right',
-            x: 0,
-            y: 0,
-        },
-        text: item?.text != null ? String(item.text) : undefined,
-        ...(readingOrderOffset !== undefined ? { reading_order_offset: readingOrderOffset } : {}),
-    };
-}
-
-function normalizeCreatedAnnotation(item: any): CreatedAnnotationResult {
-    return {
-        ...normalizeZoteroItemReference(item),
-        client_item_id: String(item?.client_item_id ?? item?.clientItemId ?? ''),
-        index: typeof item?.index === 'number' ? item.index : Number(item?.index ?? 0),
-        loc_raw: String(item?.loc_raw ?? item?.locRaw ?? ''),
-    };
-}
-
-function normalizeFailedAnnotation(item: any): FailedAnnotationResult {
-    return {
-        client_item_id: String(item?.client_item_id ?? item?.clientItemId ?? ''),
-        index: typeof item?.index === 'number' ? item.index : Number(item?.index ?? 0),
-        loc_raw: String(item?.loc_raw ?? item?.locRaw ?? ''),
-        error: String(item?.error ?? ''),
-        error_code: item?.error_code ?? item?.errorCode ?? null,
-    };
-}
-
-function normalizeCreateAnnotationsResultData(raw: any): Record<string, any> {
-    const created = Array.isArray(raw?.created) ? raw.created.map(normalizeCreatedAnnotation) : [];
-    const failed = Array.isArray(raw?.failed) ? raw.failed.map(normalizeFailedAnnotation) : [];
-    return {
-        requested_ref: normalizeZoteroItemReference(raw?.requested_ref ?? raw?.requestedRef ?? {}),
-        resolved_ref: normalizeZoteroItemReference(raw?.resolved_ref ?? raw?.resolvedRef ?? {}),
-        created,
-        failed,
-        total_created: typeof raw?.total_created === 'number' ? raw.total_created : Number(raw?.totalCreated ?? created.length),
-        total_failed: typeof raw?.total_failed === 'number' ? raw.total_failed : Number(raw?.totalFailed ?? failed.length),
-    };
-}
-
-/**
- * Deserializes and normalizes a raw agent action object from the backend
- * into a typed AgentAction object.
- */
-export function toAgentAction(raw: Record<string, any>): AgentAction {
-    const actionType = (raw.action_type ?? raw.actionType) as ActionType;
-    
-    // Normalize proposed_data based on action type
-    let proposedData: Record<string, any> = raw.proposed_data ?? raw.proposedData ?? {};
-    
-    if (actionType === 'highlight_annotation' || actionType === 'note_annotation') {
-        const libraryIdRaw = proposedData.library_id ?? proposedData.libraryId;
-        const attachmentKeyRaw = proposedData.attachment_key ?? proposedData.attachmentKey;
-        const libraryRef = proposedData.library_ref ?? proposedData.libraryRef;
-        const sentenceIds = normalizeSentenceIdList(proposedData.sentence_ids ?? proposedData.sentenceIds);
-        
-        const normalizedData: any = {
-            title: proposedData.title ?? '',
-            comment: proposedData.comment ?? '',
-            library_id: typeof libraryIdRaw === 'number' ? libraryIdRaw : Number(libraryIdRaw ?? 0),
-            ...(typeof libraryRef === 'string' && libraryRef ? { library_ref: libraryRef } : {}),
-            attachment_key: typeof attachmentKeyRaw === 'string' ? attachmentKeyRaw : String(attachmentKeyRaw ?? ''),
-            raw_sentence_ids: proposedData.raw_sentence_ids ?? proposedData.rawSentenceIds ?? null,
-            sentence_ids: sentenceIds,
-        };
-        
-        if (actionType === 'highlight_annotation') {
-            normalizedData.text = proposedData.text ?? '';
-            normalizedData.color = proposedData.color ?? proposedData.highlight_color ?? null;
-            normalizedData.highlight_locations = normalizePageLocations(proposedData);
-        } else if (actionType === 'note_annotation') {
-            normalizedData.note_position = normalizeNotePosition(proposedData);
-        }
-        
-        proposedData = normalizedData;
-    } else if (actionType === 'create_highlight_annotations') {
-        proposedData = {
-            requested_ref: normalizeZoteroItemReference(proposedData.requested_ref ?? proposedData.requestedRef ?? {}),
-            resolved_ref: normalizeZoteroItemReference(proposedData.resolved_ref ?? proposedData.resolvedRef ?? {}),
-            items: Array.isArray(proposedData.items)
-                ? proposedData.items.map(normalizeHighlightAnnotationItem)
-                : [],
-            tags: normalizeAnnotationTags(proposedData.tags),
-        } as CreateHighlightAnnotationsProposedData;
-    } else if (actionType === 'create_note_annotations') {
-        proposedData = {
-            requested_ref: normalizeZoteroItemReference(proposedData.requested_ref ?? proposedData.requestedRef ?? {}),
-            resolved_ref: normalizeZoteroItemReference(proposedData.resolved_ref ?? proposedData.resolvedRef ?? {}),
-            items: Array.isArray(proposedData.items)
-                ? proposedData.items.map(normalizeNoteAnnotationItem)
-                : [],
-            tags: normalizeAnnotationTags(proposedData.tags),
-        } as CreateNoteAnnotationsProposedData;
-    } else if (actionType === 'zotero_note') {
-        const libraryIdRaw = proposedData.library_id ?? proposedData.libraryId;
-        const zoteroKeyRaw = proposedData.zotero_key ?? proposedData.zoteroKey;
-        const rawTag = proposedData.raw_tag ?? proposedData.rawTag;
-
-        let normalizedLibraryId: number | undefined;
-        if (libraryIdRaw !== undefined && libraryIdRaw !== null) {
-            const parsed = typeof libraryIdRaw === 'number' ? libraryIdRaw : Number(libraryIdRaw);
-            normalizedLibraryId = Number.isNaN(parsed) ? undefined : parsed;
-        }
-
-        proposedData = {
-            title: proposedData.title ?? '',
-            content: typeof proposedData.content === 'string' || proposedData.content === null
-                ? proposedData.content
-                : (proposedData.content ?? null),
-            library_id: normalizedLibraryId,
-            zotero_key: typeof zoteroKeyRaw === 'string'
-                ? zoteroKeyRaw
-                : (zoteroKeyRaw !== undefined && zoteroKeyRaw !== null ? String(zoteroKeyRaw) : undefined),
-            library_ref: typeof proposedData.library_ref === 'string'
-                ? proposedData.library_ref
-                : (typeof proposedData.libraryRef === 'string' ? proposedData.libraryRef : undefined),
-            library: typeof proposedData.library === 'string' ? proposedData.library : undefined,
-            collection: typeof proposedData.collection === 'string' ? proposedData.collection : undefined,
-            raw_tag: typeof rawTag === 'string' ? rawTag : undefined,
-        } as NoteProposedData;
-    } else if (actionType === 'create_item') {
-        const libraryIdRaw = proposedData.library_id ?? proposedData.libraryId;
-        const parsedLibraryId = libraryIdRaw == null || libraryIdRaw === ''
-            ? undefined
-            : (typeof libraryIdRaw === 'number' ? libraryIdRaw : Number(libraryIdRaw));
-
-        proposedData = {
-            library_id: parsedLibraryId,
-            library_ref: proposedData.library_ref ?? proposedData.libraryRef,
-            library_name: proposedData.library_name ?? proposedData.libraryName,
-            item: proposedData.item ?? {},
-            reason: proposedData.reason,
-            relevance_score: proposedData.relevance_score ?? proposedData.relevanceScore,
-            file_available: proposedData.file_available ?? proposedData.fileAvailable ?? false,
-            downloaded_url: proposedData.downloaded_url ?? proposedData.downloadedUrl,
-            storage_path: proposedData.storage_path ?? proposedData.storagePath,
-            text_path: proposedData.text_path ?? proposedData.textPath,
-            collection_keys: proposedData.collection_keys ?? proposedData.collectionKeys,
-            suggested_tags: proposedData.suggested_tags ?? proposedData.suggestedTags,
-        } as CreateItemProposedData;
-    } else if (actionType === 'edit_metadata') {
-        // Normalize edit_metadata proposed data
-        const edits = Array.isArray(proposedData.edits) ? proposedData.edits : [];
-        const creators = Array.isArray(proposedData.creators)
-            ? proposedData.creators
-            : (proposedData.creators && typeof proposedData.creators === 'object')
-                ? [proposedData.creators]  // wrap single creator object in array (common LLM output error)
-                : null;
-        const oldCreators = Array.isArray(proposedData.old_creators)
-            ? proposedData.old_creators
-            : null;
-        proposedData = {
-            library_id: typeof proposedData.library_id === 'number'
-                ? proposedData.library_id
-                : Number(proposedData.library_id ?? proposedData.libraryId ?? 0),
-            zotero_key: proposedData.zotero_key ?? proposedData.zoteroKey ?? '',
-            library_ref: proposedData.library_ref ?? proposedData.libraryRef,
-            edits: edits.map((edit: any) => ({
-                field: edit.field ?? '',
-                old_value: edit.old_value ?? edit.oldValue ?? null,
-                new_value: edit.new_value ?? edit.newValue ?? null,
-            })),
-            creators,
-            old_creators: oldCreators,
-        } as EditMetadataProposedData;
-    } else if (actionType === 'create_collection') {
-        // Normalize create_collection proposed data. library_id always names a
-        // resolved library: the agent may target a library by name, but the name
-        // is resolved to an id during validation, before the action is emitted.
-        proposedData = {
-            library_id: typeof proposedData.library_id === 'number'
-                ? proposedData.library_id
-                : Number(proposedData.library_id ?? proposedData.libraryId ?? 0),
-            library_ref: proposedData.library_ref ?? proposedData.libraryRef,
-            name: proposedData.name ?? '',
-            parent_key: proposedData.parent_key ?? proposedData.parentKey ?? null,
-            item_ids: proposedData.item_ids ?? proposedData.itemIds ?? [],
-        };
-    } else if (actionType === 'organize_items') {
-        // Normalize organize_items proposed data
-        proposedData = {
-            item_ids: proposedData.item_ids ?? proposedData.itemIds ?? [],
-            tags: proposedData.tags ?? null,
-            collections: proposedData.collections ?? null,
-            current_state: proposedData.current_state ?? proposedData.currentState ?? null,
-        };
-    } else if (actionType === 'confirm_extraction') {
-        // Normalize confirm_extraction proposed data
-        proposedData = {
-            attachment_count: proposedData.attachment_count ?? proposedData.attachmentCount ?? 0,
-            extra_credits: proposedData.extra_credits ?? proposedData.extraCredits ?? 0,
-            total_credits: proposedData.total_credits ?? proposedData.totalCredits ?? 0,
-            included_free: proposedData.included_free ?? proposedData.includedFree ?? 0,
-            attachment_ids: proposedData.attachment_ids ?? proposedData.attachmentIds ?? [],
-            label: proposedData.label ?? null,
-        };
-    } else if (actionType === 'confirm_external_search') {
-        // Normalize confirm_external_search proposed data
-        proposedData = {
-            extra_credits: proposedData.extra_credits ?? proposedData.extraCredits ?? 0,
-            total_credits: proposedData.total_credits ?? proposedData.totalCredits ?? 0,
-            label: proposedData.label ?? null,
-        };
-    }
-    
-    // Normalize result_data if present
-    let resultData: Record<string, any> | undefined = raw.result_data ?? raw.resultData;
-    if (resultData && (actionType === 'highlight_annotation' || actionType === 'note_annotation')) {
-        const zoteroKey = resultData.zotero_key ?? resultData.zoteroKey;
-        const libraryId = resultData.library_id ?? resultData.libraryId;
-        const libraryRef = resultData.library_ref ?? resultData.libraryRef;
-        const attachmentKey = resultData.attachment_key ?? resultData.attachmentKey;
-        
-        if (zoteroKey) {
-            resultData = {
-                zotero_key: zoteroKey,
-                library_id: typeof libraryId === 'number' ? libraryId : Number(libraryId ?? 0),
-                ...(typeof libraryRef === 'string' && libraryRef ? { library_ref: libraryRef } : {}),
-                attachment_key: typeof attachmentKey === 'string' ? attachmentKey : String(attachmentKey ?? ''),
-            };
-        }
-    } else if (resultData && (actionType === 'create_highlight_annotations' || actionType === 'create_note_annotations')) {
-        resultData = normalizeCreateAnnotationsResultData(resultData);
-    } else if (resultData && actionType === 'zotero_note') {
-        const zoteroKey = resultData.zotero_key ?? resultData.zoteroKey;
-        const libraryId = resultData.library_id ?? resultData.libraryId;
-        const libraryRef = resultData.library_ref ?? resultData.libraryRef;
-        const parentKey = resultData.parent_key ?? resultData.parentKey;
-        if (zoteroKey) {
-            resultData = {
-                zotero_key: String(zoteroKey),
-                library_id: typeof libraryId === 'number' ? libraryId : Number(libraryId ?? 0),
-                ...(typeof libraryRef === 'string' && libraryRef ? { library_ref: libraryRef } : {}),
-                ...(parentKey ? { parent_key: String(parentKey) } : {})
-            };
-        }
-    } else if (resultData && actionType === 'create_item') {
-        const zoteroKey = resultData.zotero_key ?? resultData.zoteroKey ?? resultData.item_key ?? resultData.itemKey;
-        const libraryId = resultData.library_id ?? resultData.libraryId;
-        const libraryRef = resultData.library_ref ?? resultData.libraryRef;
-        
-        if (zoteroKey) {
-            resultData = {
-                zotero_key: String(zoteroKey),
-                library_id: typeof libraryId === 'number' ? libraryId : Number(libraryId ?? 0),
-                ...(typeof libraryRef === 'string' && libraryRef ? { library_ref: libraryRef } : {}),
-                attachment_status: resultData.attachment_status ?? resultData.attachmentStatus ?? 'none',
-                attachment_key: resultData.attachment_key ?? resultData.attachmentKey,
-                attachment_resolved_at: resultData.attachment_resolved_at ?? resultData.attachmentResolvedAt,
-            };
-        }
-    }
-
-    return {
-        id: raw.id,
-        run_id: raw.run_id ?? raw.runId,
-        toolcall_id: raw.toolcall_id ?? raw.toolcallId,
-        user_id: raw.user_id ?? raw.userId,
-        action_type: actionType,
-        status: raw.status ?? 'pending',
-        error_message: raw.error_message ?? raw.errorMessage,
-        proposed_data: proposedData,
-        error_details: raw.error_details ?? raw.validationErrors,
-        result_data: resultData,
-        created_at: raw.created_at ?? raw.createdAt,
-        updated_at: raw.updated_at ?? raw.updatedAt,
-    };
-}
 
 // =============================================================================
 // State Atoms
@@ -993,20 +488,6 @@ export const clearAgentActionsAtom = atom(
 // =============================================================================
 
 /**
- * Pending approval request from the backend.
- * When set, the UI should show an approval dialog for this action.
- * Multiple approvals can be pending simultaneously for parallel tool calls.
- */
-export interface PendingApproval {
-    actionId: string;
-    /** Tool call ID for UI matching (always provided by backend) */
-    toolcallId: string;
-    actionType: AgentActionType;
-    actionData: Record<string, any>;
-    currentValue?: any;
-}
-
-/**
  * Atom storing all pending approval requests, keyed by actionId.
  * Supports multiple parallel approvals for parallel tool calls.
  */
@@ -1126,83 +607,10 @@ export const hasPendingApprovalsAtom = atom(
     (get) => get(pendingApprovalsAtom).size > 0
 );
 
-/**
- * Build a PendingApproval from an AgentAction.
- * Fetches current field values for edit_metadata actions.
- */
-export async function buildPendingApprovalFromAction(action: AgentAction): Promise<PendingApproval | null> {
-    if (!action.toolcall_id) {
-        return null;
-    }
-
-    const actionType = action.action_type as AgentActionType;
-    const actionData = action.proposed_data ?? {};
-    let currentValue: Record<string, any> | undefined;
-
-    if (actionType === 'edit_metadata') {
-        const libraryId = typeof actionData.library_id === 'number'
-            ? actionData.library_id
-            : Number(actionData.library_id ?? 0);
-        const zoteroKey = typeof actionData.zotero_key === 'string'
-            ? actionData.zotero_key
-            : '';
-        const edits = Array.isArray(actionData.edits) ? actionData.edits : [];
-        const hasCreators = Array.isArray(actionData.creators) && actionData.creators.length > 0;
-
-        if (libraryId && zoteroKey && (edits.length > 0 || hasCreators)) {
-            const resolved = await resolveItemReference({
-                library_id: libraryId,
-                library_ref: typeof actionData.library_ref === 'string' ? actionData.library_ref : undefined,
-                zotero_key: zoteroKey,
-            });
-            if (resolved.status === 'found') {
-                const item = resolved.item;
-                const values: Record<string, any> = {};
-                for (const edit of edits) {
-                    const field = typeof edit?.field === 'string' ? edit.field : null;
-                    if (!field) continue;
-                    const value = item.getField(field);
-                    values[field] = value ? String(value) : null;
-                }
-                // Always include current creators for before/after tracking
-                values.current_creators = item.getCreatorsJSON();
-                currentValue = values;
-            }
-        }
-    } else if (actionType === 'create_collection') {
-        const libraryId = typeof actionData.library_id === 'number'
-            ? actionData.library_id
-            : Number(actionData.library_id ?? 0);
-
-        if (libraryId) {
-            const library = Zotero.Libraries.get(libraryId);
-            currentValue = {
-                library_id: libraryId,
-                library_name: library ? library.name : 'Unknown Library',
-                parent_key: actionData.parent_key ?? null,
-                item_count: actionData.item_ids?.length ?? 0,
-            };
-        }
-    } else if (actionType === 'organize_items') {
-        // For organize_items, current_state contains the current tags/collections for each item
-        // We can use it directly from the proposed data if available
-        currentValue = actionData.current_state ?? null;
-    } else if (actionType === 'confirm_extraction') {
-        // No Zotero data fetching needed — cost info is entirely in proposed_data
-        currentValue = undefined;
-    } else if (actionType === 'confirm_external_search') {
-        // No Zotero data fetching needed — cost info is entirely in proposed_data
-        currentValue = undefined;
-    } else if (actionType === 'edit_note' || actionType === 'edit_note_batch') {
-        // No extra Zotero data fetching needed — old_string/new_string are in proposed_data
-        currentValue = undefined;
-    }
-
-    return {
-        actionId: action.id,
-        toolcallId: action.toolcall_id,
-        actionType,
-        actionData,
-        currentValue,
-    };
-}
+// Note: `pendingApprovalsAtom` means "the backend is blocked waiting on this
+// decision". Do not rebuild entries from stored pending actions — an action left
+// pending by a timeout has no waiter, so a re-added entry would show an
+// "awaiting approval" card whose Approve button sends into the void. Such
+// actions are applied locally through the `status === 'pending'` controls
+// instead, and `staleApprovalActionIdsAtom` marks approvals whose channel has
+// closed.

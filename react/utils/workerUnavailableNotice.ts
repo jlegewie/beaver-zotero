@@ -1,6 +1,6 @@
 import { store } from '../store';
 import { addPopupMessageAtom } from './popupMessageUtils';
-import { logger } from '../../src/utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 import type { WorkerStartFailureInfo } from '../../src/beaver-extract';
 
 // Only prompt after this many consecutive start failures

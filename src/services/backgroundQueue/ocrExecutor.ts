@@ -57,10 +57,10 @@ import {
     OCR_TERMINAL_GEOMETRY,
     OCR_TERMINAL_NO_TEXT,
 } from '../ocr/constants';
-import { logger } from '../../utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 import { UNRESOLVED_LIBRARY_ID } from '../../utils/libraryIdentity';
 import { safeIsInTrash } from '../../utils/zoteroItemUtils';
-import { ApiError } from '../../../react/types/apiErrors';
+import { ApiError } from '@beaver/agent-core/types/apiErrors';
 import {
     libraryScopeInitializedAtom,
     searchableLibraryIdsAtom,

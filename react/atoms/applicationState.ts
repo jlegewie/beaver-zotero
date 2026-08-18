@@ -9,33 +9,46 @@
  */
 
 import { Getter } from 'jotai';
-import { NoteState, ReaderState } from '../types/attachments/apiTypes';
-import { ZoteroItemReference } from '../types/zotero';
+import { NoteState, ReaderState } from '@beaver/agent-core/types/attachments/apiTypes';
+import { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import {
     ApplicationStateInput,
     CurrentCollection,
     CurrentLibrary,
+    CurrentSavedSearch,
     IndexingStatus,
-} from '../../src/services/agentProtocol';
+} from '@beaver/agent-core/protocol/agentProtocol';
 import { currentReaderAttachmentAtom, readerTextSelectionAtom } from './messageComposition';
 import { currentNoteItemAtom } from './zoteroContext';
 import { getCurrentPage, getCurrentReader, getEpubReaderPage } from '../utils/readerUtils';
 import { libraryRefForLibraryID } from '../../src/utils/libraryIdentity';
+import {
+    getSelectedLibraryId,
+    getSelectedCollections,
+    getSelectedSavedSearches,
+} from '../../src/utils/zoteroSelection';
+import {
+    countsFor,
+    getCollectionItemCounts,
+    getSubcollectionCounts,
+} from '../../src/services/agentDataProvider/collectionCounts';
 import { searchableLibraryIdsAtom, processingModeAtom } from './profile';
-import { ProcessingMode } from '../types/profile';
+import { ProcessingMode } from '@beaver/agent-core/types/profile';
 import { isLibraryTabAtom } from './ui';
 import { embeddingIndexStateAtom } from './embeddingIndex';
 import { BeaverDB } from '../../src/services/database';
 import { EmbeddingIndexer } from '../../src/services/embeddingIndexer';
 import { getLibrarySummaries } from '../../src/services/agentDataProvider/libraryCounts';
-import { logger } from '../../src/utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 
 /**
  * Maximum number of selected library items included in `library_selection`.
  * The selection is low-signal context (users often have items selected without
  * asking about them), so large selections (e.g. select-all) are truncated.
+ * `library_selection_total_count` reports the untruncated size so the model can
+ * tell the user what it is missing.
  */
-const MAX_LIBRARY_SELECTION = 5;
+const MAX_LIBRARY_SELECTION = 30;
 
 /**
  * Build reader state for the current reader attachment.
@@ -111,8 +124,10 @@ export async function buildZoteroApplicationState(get: Getter): Promise<Applicat
 
     // Get current library and collection context
     let currentLibrary: CurrentLibrary | undefined = undefined;
-    let currentCollection: CurrentCollection | undefined = undefined;
+    let currentCollections: CurrentCollection[] = [];
+    let currentSearches: CurrentSavedSearch[] = [];
     let librarySelection: ZoteroItemReference[] | undefined = undefined;
+    let librarySelectionTotalCount: number | undefined = undefined;
 
     // Detect the note-editor view from the raw tab context, NOT from the
     // exclusion-filtered noteState
@@ -149,8 +164,13 @@ export async function buildZoteroApplicationState(get: Getter): Promise<Applicat
         // In library view, get from ZoteroPane
         const zp = Zotero.getActiveZoteroPane();
         if (zp) {
-            const libraryId = zp.getSelectedLibraryID();
-            const library = Zotero.Libraries.get(libraryId);
+            // The primary (first) selected library. A selection can span
+            // libraries, so this is deliberately not "the only library in
+            // play" — it answers "where is the user working", while each
+            // entry in current_collections carries its own library identity
+            // for anything that needs to be addressed precisely.
+            const libraryId = getSelectedLibraryId(zp);
+            const library = libraryId !== null ? Zotero.Libraries.get(libraryId) : null;
             // Omit the current library entirely when it is excluded, rather than
             // reporting it with is_synced=false — excluded libraries are not
             // shared at all.
@@ -165,16 +185,46 @@ export async function buildZoteroApplicationState(get: Getter): Promise<Applicat
                 };
             }
 
-            const collection = zp.getSelectedCollection();
-            if (collection && searchableLibrarySet.has(collection.libraryID)) {
-                currentCollection = {
+            // The collections pane allows several rows to be selected at once,
+            // and a selection can mix collections with saved searches and span
+            // libraries. Report each kind as its own list, dropping rows in
+            // excluded libraries.
+            const selectedCollections = getSelectedCollections(zp)
+                .filter((collection: Zotero.Collection) => searchableLibrarySet.has(collection.libraryID));
+
+            // Counts come from the same queries the list_collections tool uses,
+            // so the model sees consistent numbers for a given collection. Both
+            // are batched, so this is a fixed cost regardless of how many rows
+            // are selected.
+            const collectionIds = selectedCollections.map((collection: Zotero.Collection) => collection.id);
+            const [itemCounts, subcollectionCounts] = await Promise.all([
+                getCollectionItemCounts(collectionIds),
+                getSubcollectionCounts(collectionIds),
+            ]);
+
+            currentCollections = selectedCollections.map((collection: Zotero.Collection) => {
+                const counts = countsFor(itemCounts, collection.id);
+                return {
                     collection_key: collection.key,
                     name: collection.name,
                     library_id: collection.libraryID,
                     library_ref: libraryRefForLibraryID(collection.libraryID) ?? undefined,
                     parent_key: collection.parentKey || null,
+                    item_count: counts.itemCount,
+                    standalone_attachment_count: counts.standaloneAttachmentCount,
+                    note_count: counts.standaloneNoteCount,
+                    subcollection_count: subcollectionCounts.get(collection.id) ?? 0,
                 };
-            }
+            });
+
+            currentSearches = getSelectedSavedSearches(zp)
+                .filter((search: Zotero.Search) => searchableLibrarySet.has(search.libraryID))
+                .map((search: Zotero.Search) => ({
+                    search_key: search.key,
+                    name: search.name,
+                    library_id: search.libraryID,
+                    library_ref: libraryRefForLibraryID(search.libraryID) ?? undefined,
+                }));
 
             // Drop any selected items that belong to an excluded library.
             const selectedItems = zp.getSelectedItems()
@@ -187,6 +237,9 @@ export async function buildZoteroApplicationState(get: Getter): Promise<Applicat
                         zotero_key: item.key,
                         library_ref: libraryRefForLibraryID(item.libraryID) ?? undefined,
                     }));
+                // Count after the exclusion filter: an excluded library must not
+                // be inferable from a selection count the model cannot reconcile.
+                librarySelectionTotalCount = selectedItems.length;
             }
         }
     }
@@ -252,8 +305,19 @@ export async function buildZoteroApplicationState(get: Getter): Promise<Applicat
         ...(readerState ? { reader_state: readerState } : {}),
         ...(noteState ? { note_state: noteState } : {}),
         ...(currentLibrary ? { current_library: currentLibrary } : {}),
-        ...(currentCollection ? { current_collection: currentCollection } : {}),
-        ...(librarySelection ? { library_selection: librarySelection } : {}),
+        // `current_collection` (first selected) is emitted alongside the full
+        // list so a server that only reads the single-collection field still
+        // understands a multi-row selection.
+        ...(currentCollections.length > 0
+            ? { current_collection: currentCollections[0], current_collections: currentCollections }
+            : {}),
+        ...(currentSearches.length > 0 ? { current_searches: currentSearches } : {}),
+        ...(librarySelection
+            ? {
+                library_selection: librarySelection,
+                library_selection_total_count: librarySelectionTotalCount,
+            }
+            : {}),
         ...(indexingStatus ? { indexing_status: indexingStatus } : {}),
         ...(libraries ? { libraries } : {}),
     };

@@ -17,6 +17,10 @@ pref("addSelectedItemsOnNewThread", true);
 pref("addBeaverProvenanceNote", false);
 pref("focusResponseForScreenReaders", false);
 pref("annotationToolEnabled", true);
+// Author name on annotations Beaver creates. Empty string = no attribution.
+// Only affects new annotations. Reader-created annotations ignore this —
+// Zotero stores no author for them.
+pref("annotationAuthorName", "Beaver");
 pref("maxAddAttachmentToMessage", 10);
 pref("readerExplainPrompt", "Explain the selected passage or annotation(s) from this paper in plain language. Provide context for any technical terms, statistical methods, or domain-specific concepts. If it references other work, briefly explain that context too.");
 
@@ -42,7 +46,10 @@ pref("autoCreateNotes", true);
 pref("autoImportItems", false);
 pref("confirmExtractionCosts", true);
 pref("confirmExternalSearchCosts", true);
-pref("pauseLongRunningAgent", true);
+// Ask once per run before it spends credits, and the projected run total (in
+// credits) above which the backend asks.
+pref("confirmCredits", true);
+pref("creditConfirmThreshold", 5);
 pref("requestPlusTools", false);
 pref("showDiffPreviewInNoteEditor", true);
 

@@ -7,7 +7,7 @@ import {
     SHAREABLE_ACTION_VERSION,
     SHAREABLE_ACTION_FILE_EXTENSION,
 } from '../../../react/types/actionShare';
-import type { Action } from '../../../react/types/actions';
+import type { Action } from '@beaver/agent-core/types/actions';
 
 const fullAction: Action = {
     id: 'custom-abc',
@@ -107,13 +107,22 @@ describe('actionShare — schema', () => {
         expect(parseShareableAction(JSON.stringify({ ...base, action: { title: 'T', text: 'P' } })).ok).toBe(false);
     });
 
-    it('rejects an unknown category', () => {
+    it('keeps a category this build does not know', () => {
         const r = parseShareableAction(JSON.stringify({
             kind: SHAREABLE_ACTION_KIND,
             version: 1,
-            action: { title: 'T', text: 'P', targets: ['global'], category: 'bogus' },
+            action: { title: 'T', text: 'P', targets: ['global'], category: 'cite-check' },
         }));
-        expect(r.ok).toBe(false);
+        expect(r.ok).toBe(true);
+        expect(r.ok && r.action.category).toBe('cite-check');
+    });
+
+    it('rejects a malformed category', () => {
+        const base = { kind: SHAREABLE_ACTION_KIND, version: 1 };
+        const action = { title: 'T', text: 'P', targets: ['global'] };
+        expect(parseShareableAction(JSON.stringify({ ...base, action: { ...action, category: '' } })).ok).toBe(false);
+        expect(parseShareableAction(JSON.stringify({ ...base, action: { ...action, category: '   ' } })).ok).toBe(false);
+        expect(parseShareableAction(JSON.stringify({ ...base, action: { ...action, category: 7 } })).ok).toBe(false);
     });
 
     it('rejects a slash-command name containing whitespace', () => {
@@ -130,19 +139,59 @@ describe('actionShare — schema', () => {
     it('stamps the current client on export and accepts it on import', () => {
         const minimal: Action = { id: 'x', title: 'T', text: 'P', targets: ['global'] };
         const file = toShareableActionFile(minimal);
+        // The file carries the format's spelling; the parser maps it back to the
+        // runtime id. See the separate forward-compatibility cases below.
         expect(file.action.client).toEqual(['zotero']);
         const r = parseShareableAction(serializeAction(minimal));
         expect(r.ok).toBe(true);
-        if (r.ok) expect(r.action.client).toEqual(['zotero']);
+        if (r.ok) expect(r.action.client).toEqual(['zotero-plugin']);
     });
 
     it('accepts an action whose client list includes the current client', () => {
         const r = parseShareableAction(JSON.stringify({
             kind: SHAREABLE_ACTION_KIND,
             version: 1,
+            action: { title: 'T', text: 'P', targets: ['global'], client: ['zotero-plugin'] },
+        }));
+        expect(r.ok).toBe(true);
+    });
+
+    it('accepts the legacy "zotero" client id and normalizes it', () => {
+        const r = parseShareableAction(JSON.stringify({
+            kind: SHAREABLE_ACTION_KIND,
+            version: 1,
             action: { title: 'T', text: 'P', targets: ['global'], client: ['zotero'] },
         }));
         expect(r.ok).toBe(true);
+        if (r.ok) expect(r.action.client).toEqual(['zotero-plugin']);
+    });
+
+    // Shipped builds compare the file's client list against the literal
+    // "zotero" and have no mapping step, so writing the runtime id would make
+    // every file exported here unimportable anywhere but this build.
+    it('writes the file-format client id, not the runtime one', () => {
+        expect(toShareableActionFile({ ...fullAction, client: undefined }).action.client)
+            .toEqual(['zotero']);
+        expect(toShareableActionFile({ ...fullAction, client: ['zotero-plugin'] }).action.client)
+            .toEqual(['zotero']);
+    });
+
+    it('leaves a client with no legacy spelling as its runtime id', () => {
+        expect(toShareableActionFile({ ...fullAction, client: ['word-addin'] }).action.client)
+            .toEqual(['word-addin']);
+    });
+
+    // A legacy file imported and re-exported must come back out unchanged, or
+    // an action stops being shareable with anyone who has not updated.
+    it('round-trips a legacy file without upgrading its client id', () => {
+        const parsed = parseShareableAction(JSON.stringify({
+            kind: SHAREABLE_ACTION_KIND,
+            version: 1,
+            action: { title: 'T', text: 'P', targets: ['global'], client: ['zotero'] },
+        }));
+        expect(parsed.ok).toBe(true);
+        if (!parsed.ok) return;
+        expect(toShareableActionFile(parsed.action).action.client).toEqual(['zotero']);
     });
 
     it('rejects an action whose client list excludes the current client', () => {
@@ -176,10 +225,11 @@ describe('actionShare — schema', () => {
         const json = JSON.stringify({
             kind: SHAREABLE_ACTION_KIND,
             version: 1,
-            action: { title: 'T', text: 'P', targets: ['global'], client: ['zotero'] },
+            action: { title: 'T', text: 'P', targets: ['global'], client: ['zotero-plugin'] },
         });
-        // A hypothetical other client is not in the list → rejected.
-        expect(parseShareableAction(json, 'zotero').ok).toBe(true);
+        expect(parseShareableAction(json, 'zotero-plugin').ok).toBe(true);
+        // Another client is not in the list → rejected.
+        expect(parseShareableAction(json, 'word-addin').ok).toBe(false);
     });
 
     it('preserves an empty-string id (importer regenerates as needed)', () => {

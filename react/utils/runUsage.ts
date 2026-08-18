@@ -1,4 +1,4 @@
-import { RunUsage } from '../agents/types';
+import { RunUsage } from '@beaver/agent-core/agents/types';
 
 /**
  * Returns input tokens for the latest model request in a run when determinable.

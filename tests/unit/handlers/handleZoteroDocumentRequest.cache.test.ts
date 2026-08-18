@@ -121,7 +121,7 @@ vi.mock('../../../src/beaver-extract', () => {
     };
 });
 
-vi.mock('../../../src/services/supabaseClient', () => ({
+vi.mock('@beaver/agent-core/transport/supabaseClient', () => ({
     supabase: { auth: { getSession: vi.fn() } },
 }));
 vi.mock('../../../react/store', () => ({

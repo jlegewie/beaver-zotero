@@ -1,9 +1,11 @@
 import { getDisplayNameFromItem } from "../../react/utils/sourceUtils";
-import { ZoteroItemReference } from "../../react/types/zotero";
-import type { CreatorJSON } from "../../react/types/agentActions/base";
-import { logger } from "./logger";
+import { ZoteroItemReference } from "@beaver/agent-core/types/zotero";
+import type { CreatorJSON } from "@beaver/agent-core/types/agentActions/base";
+import { logger } from "@beaver/agent-core/platform/logger";
 import { libraryRefForLibraryID, UNRESOLVED_LIBRARY_ID } from "./libraryIdentity";
-import type { ZoteroInstanceRef } from "../services/threadService";
+import { safeAttachmentFilename } from "./attachmentFiles";
+import type { ZoteroInstanceRef } from "@beaver/agent-core/transport/threadService";
+import { getSelectedLibraryId, getSelectedCollection } from "./zoteroSelection";
 
 function makeZoteroItemReference(libraryID: number, zoteroKey: string): ZoteroItemReference {
     return {
@@ -70,8 +72,8 @@ export async function getZoteroTargetContext(): Promise<ZoteroTargetContext> {
         }
     // No selection - add to current library/collection
     } else {
-        targetLibraryId = zp.getSelectedLibraryID();
-        const collection = zp.getSelectedCollection();
+        targetLibraryId = getSelectedLibraryId(zp) ?? undefined;
+        const collection = getSelectedCollection(zp);
         if (collection) {
             collectionToAddTo = collection;
         }
@@ -129,8 +131,8 @@ export function getZoteroTargetContextSync(): ZoteroTargetContext {
         }
     // No selection - add to current library/collection
     } else {
-        targetLibraryId = zp.getSelectedLibraryID();
-        const collection = zp.getSelectedCollection();
+        targetLibraryId = getSelectedLibraryId(zp) ?? undefined;
+        const collection = getSelectedCollection(zp);
         if (collection) {
             collectionToAddTo = collection;
         }
@@ -623,7 +625,7 @@ export function getMimeTypeFromData(attachment: Zotero.Item, fileData: Uint8Arra
         }
 
         // Get the file extension from the attachment's filename as a hint.
-        const extension = (attachment.attachmentFilename.split('.').pop() || '').toLowerCase();
+        const extension = ((safeAttachmentFilename(attachment) ?? '').split('.').pop() || '').toLowerCase();
 
         // Use Zotero's internal data-based MIME type detection
         return Zotero.MIME.getMIMETypeFromData(sampleString, extension);
@@ -770,18 +772,14 @@ export function getActiveZoteroLibraryId(): number | null {
     const zoteroPane = Zotero.getActiveZoteroPane?.() as any;
     if (!zoteroPane) return null;
 
-    if (typeof zoteroPane.getSelectedLibraryID === 'function') {
-        const libraryID = zoteroPane.getSelectedLibraryID();
-        if (typeof libraryID === 'number') {
-            return libraryID;
-        }
+    const libraryID = getSelectedLibraryId(zoteroPane);
+    if (typeof libraryID === 'number') {
+        return libraryID;
     }
 
-    if (typeof zoteroPane.getSelectedCollection === 'function') {
-        const collection = zoteroPane.getSelectedCollection();
-        if (collection && typeof collection.libraryID === 'number') {
-            return collection.libraryID;
-        }
+    const collection = getSelectedCollection(zoteroPane);
+    if (collection && typeof collection.libraryID === 'number') {
+        return collection.libraryID;
     }
 
     const selectedItems = zoteroPane.getSelectedItems?.();
@@ -829,7 +827,7 @@ export function getCurrentLibrary(): _ZoteroTypes.Library.LibraryLike | null {
 	// Otherwise, get library from library view
 	const zp = win.ZoteroPane;
 	if (zp && zp.collectionsView) {
-		const libraryID = zp.getSelectedLibraryID();
+		const libraryID = getSelectedLibraryId(zp);
 		if (libraryID) {
 			return Zotero.Libraries.get(libraryID) || null;
 		}
@@ -917,6 +915,93 @@ export { safeIsInTrash, getItemDetailsForLogging } from "./zoteroItemUtils";
 export { safeFileExists, isLinkedUrlAttachment } from "./attachmentFiles";
 
 /**
+ * The fields duplicate detection compares, extracted and normalized once per item.
+ * Field access and diacritic stripping dominate the cost of an all-pairs comparison,
+ * so callers that compare many items should build these up front.
+ */
+interface ItemDuplicateSignature {
+    id: number;
+    itemTypeID: number;
+    /**
+     * Whether the raw field was set. Two items that both carry an identifier are
+     * decided by it alone, even if one of them fails to parse.
+     */
+    hasDoi: boolean;
+    hasIsbn: boolean;
+    /** Normalized DOI; empty when absent or blank. */
+    doi: string;
+    /** Cleaned ISBN; empty when absent or unparseable. */
+    isbn: string;
+    /** Normalized title; empty when the item has no title. */
+    title: string;
+    /** Leading year of the raw date field, or NaN. */
+    year: number;
+    /** "<lastname>|<first initial>" per creator, diacritic-free and lowercased. */
+    creators: string[];
+}
+
+function normalizeDuplicateTitle(title: string): string {
+    return Zotero.Utilities.removeDiacritics(title)
+        .replace(/[ !-/:-@[-`{-~]+/g, ' ')
+        .trim()
+        .toLowerCase();
+}
+
+function buildItemDuplicateSignature(item: Zotero.Item): ItemDuplicateSignature {
+    const doi = (item.getField('DOI') as string) || '';
+    const isbnRaw = (item.getField('ISBN') as string) || '';
+    const titleRaw = (item.getField('title', false, true) as string) || '';
+
+    return {
+        id: item.id,
+        itemTypeID: item.itemTypeID,
+        hasDoi: !!doi,
+        hasIsbn: !!isbnRaw,
+        doi: doi.trim().toUpperCase(),
+        isbn: (isbnRaw && Zotero.Utilities.cleanISBN(isbnRaw)) || '',
+        title: titleRaw ? normalizeDuplicateTitle(titleRaw) : '',
+        year: parseInt(item.getField('date', false, true) as string),
+        creators: item.getCreators().map((c) => {
+            const lastName = Zotero.Utilities.removeDiacritics(c.lastName || '').toLowerCase();
+            const firstInitial = c.firstName
+                ? Zotero.Utilities.removeDiacritics(c.firstName[0]).toLowerCase()
+                : '';
+            return `${lastName}|${firstInitial}`;
+        }),
+    };
+}
+
+/**
+ * Compare two precomputed signatures. See areItemsDuplicates for the rules.
+ */
+function areSignaturesDuplicates(a: ItemDuplicateSignature, b: ItemDuplicateSignature): boolean {
+    // Same item
+    if (a.id === b.id) return true;
+
+    // Different item types are not duplicates
+    if (a.itemTypeID !== b.itemTypeID) return false;
+
+    // An identifier decides the match on its own when both items set the field and at
+    // least one value survives normalization: equal values are a duplicate, differing
+    // values are not. DOIs are compared as written (case-insensitively); ISBNs are
+    // cleaned first, so unparseable text counts as differing. When neither value
+    // survives there is nothing to compare, so the fallback below applies.
+    if (a.hasDoi && b.hasDoi && (a.doi || b.doi)) return a.doi === b.doi;
+    if (a.hasIsbn && b.hasIsbn && (a.isbn || b.isbn)) return a.isbn === b.isbn;
+
+    // Fall back to title plus a corroborating year or creator
+    if (!a.title || a.title !== b.title) return false;
+
+    // Year match (within 1 year)
+    if (!isNaN(a.year) && !isNaN(b.year) && Math.abs(a.year - b.year) <= 1) {
+        return true;
+    }
+
+    // Creator match (at least one last name + first initial)
+    return a.creators.some((c) => b.creators.includes(c));
+}
+
+/**
  * Check if two Zotero items are duplicates based on metadata similarity.
  * Uses logic similar to Zotero's built-in duplicate detection:
  * 1. Same ID = duplicate
@@ -924,78 +1009,16 @@ export { safeFileExists, isLinkedUrlAttachment } from "./attachmentFiles";
  * 3. Matching DOI (case-insensitive) = duplicate
  * 4. Matching ISBN (cleaned) = duplicate
  * 5. Matching normalized title + (year within 1 OR matching creator) = duplicate
- * 
+ *
  * @param item1 First Zotero item to compare
  * @param item2 Second Zotero item to compare
  * @returns true if items are considered duplicates
  */
 export function areItemsDuplicates(item1: Zotero.Item, item2: Zotero.Item): boolean {
-    // Same item
-    if (item1.id === item2.id) return true;
-    
-    // Different item types are not duplicates
-    if (item1.itemTypeID !== item2.itemTypeID) return false;
-    
-    // DOI match (case-insensitive)
-    const doi1 = item1.getField('DOI') as string;
-    const doi2 = item2.getField('DOI') as string;
-    if (doi1 && doi2) {
-        return doi1.trim().toUpperCase() === doi2.trim().toUpperCase();
-    }
-    
-    // ISBN match (cleaned)
-    const isbn1 = item1.getField('ISBN') as string;
-    const isbn2 = item2.getField('ISBN') as string;
-    if (isbn1 && isbn2) {
-        return Zotero.Utilities.cleanISBN(isbn1) === Zotero.Utilities.cleanISBN(isbn2);
-    }
-    
-    // Title normalization and comparison
-    const title1Raw = item1.getField('title', false, true) as string;
-    const title2Raw = item2.getField('title', false, true) as string;
-    
-    if (!title1Raw || !title2Raw) return false;
-    
-    const normalizeTitle = (title: string): string => {
-        return Zotero.Utilities.removeDiacritics(title)
-            .replace(/[ !-/:-@[-`{-~]+/g, ' ')
-            .trim()
-            .toLowerCase();
-    };
-    
-    const title1 = normalizeTitle(title1Raw);
-    const title2 = normalizeTitle(title2Raw);
-    
-    if (title1 !== title2 || !title1) return false;
-    
-    // Year match (within 1 year)
-    const year1 = parseInt(item1.getField('date', false, true) as string);
-    const year2 = parseInt(item2.getField('date', false, true) as string);
-    if (!isNaN(year1) && !isNaN(year2) && Math.abs(year1 - year2) <= 1) {
-        return true;
-    }
-    
-    // Creator match (at least one last name + first initial)
-    const creators1 = item1.getCreators();
-    const creators2 = item2.getCreators();
-    
-    for (const c1 of creators1) {
-        const ln1 = Zotero.Utilities.removeDiacritics(c1.lastName || '').toLowerCase();
-        const fi1 = c1.firstName 
-            ? Zotero.Utilities.removeDiacritics(c1.firstName[0]).toLowerCase() 
-            : '';
-        
-        for (const c2 of creators2) {
-            const ln2 = Zotero.Utilities.removeDiacritics(c2.lastName || '').toLowerCase();
-            const fi2 = c2.firstName 
-                ? Zotero.Utilities.removeDiacritics(c2.firstName[0]).toLowerCase() 
-                : '';
-            
-            if (ln1 === ln2 && fi1 === fi2) return true;
-        }
-    }
-    
-    return false;
+    return areSignaturesDuplicates(
+        buildItemDuplicateSignature(item1),
+        buildItemDuplicateSignature(item2)
+    );
 }
 
 /**
@@ -1006,39 +1029,160 @@ export function areItemsDuplicates(item1: Zotero.Item, item2: Zotero.Item): bool
  * @param preferredLibraryId Library ID to prioritize when choosing between duplicates (default: 1)
  * @returns Deduplicated array of items
  */
+/**
+ * Position of the first entry greater than `value` in an ascending array.
+ * Returns `sorted.length` when there is none.
+ */
+function firstIndexAbove(sorted: number[], value: number): number {
+    let low = 0;
+    let high = sorted.length;
+    while (low < high) {
+        const mid = (low + high) >>> 1;
+        if (sorted[mid] > value) high = mid;
+        else low = mid + 1;
+    }
+    return low;
+}
+
 export function deduplicateItems(
     items: Zotero.Item[],
     preferredLibraryId: number = 1
 ): Zotero.Item[] {
     if (items.length <= 1) return items;
-    
+
+    // Extract each item's fields once instead of on every comparison.
+    const signatures = items.map(buildItemDuplicateSignature);
+
+    // Every rule in areSignaturesDuplicates needs an exact match on the id, the
+    // DOI, the ISBN or the normalized title, so only items sharing one of those
+    // can possibly pair. Bucketing on them replaces the all-pairs scan with a
+    // scan of the few real candidates — without it a broad search across
+    // several libraries compares tens of millions of pairs on Zotero's main
+    // thread. The predicate itself is unchanged and still decides every pair,
+    // so the result is identical to comparing all of them.
+    const buckets = new Map<string, number[]>();
+    const addToBucket = (key: string, index: number): void => {
+        const bucket = buckets.get(key);
+        if (bucket) bucket.push(index);
+        else buckets.set(key, [index]);
+    };
+
+    // The title bucket is split by how each item's DOI participates in the rule
+    // that outranks the title one, because a shared title is by far the easiest
+    // key for many items to collide on — thousands of "Editorial" rows are
+    // ordinary in a large library, and comparing all of them pairwise is the
+    // cost bucketing is supposed to remove.
+    //
+    // For a pair that both carry a DOI field and where at least one value
+    // survives normalization, the DOI decides the match outright. Equal DOIs
+    // are already paired by the `d` bucket, so those pairs need never be drawn
+    // from the title bucket at all — which is what makes a bucket of
+    // same-titled, separately-identified items cost nothing.
+    const DOI_LIVE = 0;    // carries a DOI that survived normalization
+    const DOI_BLANK = 1;   // carries a DOI field that normalized away
+    const DOI_ABSENT = 2;  // carries no DOI field
+    const doiClass = (signature: ItemDuplicateSignature): number => {
+        if (!signature.hasDoi) return DOI_ABSENT;
+        return signature.doi ? DOI_LIVE : DOI_BLANK;
+    };
+    const TITLE_PREFIX = ['tL', 'tZ', 'tN'];
+
+    signatures.forEach((signature, index) => {
+        // Empty values are never a match (the predicate requires a surviving
+        // value on both sides), so they must not become a shared bucket key.
+        addToBucket(`#${signature.id}`, index);
+        if (signature.doi) addToBucket(`d${signature.doi}`, index);
+        if (signature.isbn) addToBucket(`i${signature.isbn}`, index);
+        if (signature.title) {
+            addToBucket(`${TITLE_PREFIX[doiClass(signature)]}${signature.title}`, index);
+        }
+    });
+
+    /**
+     * Title-bucket keys holding items whose match with `signature` is *not*
+     * already settled by the DOI rule, and so still has to be examined.
+     */
+    const titleKeysFor = (signature: ItemDuplicateSignature): string[] => {
+        if (!signature.title) return [];
+        switch (doiClass(signature)) {
+            // A live DOI settles the pair against anything else carrying the
+            // field, so only items with no DOI at all remain.
+            case DOI_LIVE:
+                return [`tN${signature.title}`];
+            // A blank DOI settles nothing against another blank or an absent
+            // one, but is settled by any live DOI.
+            case DOI_BLANK:
+                return [`tZ${signature.title}`, `tN${signature.title}`];
+            // No DOI field, so the DOI rule never applies: everything remains.
+            default:
+                return [`tL${signature.title}`, `tZ${signature.title}`, `tN${signature.title}`];
+        }
+    };
+
     const result: Zotero.Item[] = [];
     const processedIndices = new Set<number>();
-    
+
     for (let i = 0; i < items.length; i++) {
         if (processedIndices.has(i)) continue;
-        
-        const item = items[i];
-        let bestItem = item;
-        
-        // Find all duplicates of this item
-        for (let j = i + 1; j < items.length; j++) {
+
+        let bestItem = items[i];
+
+        // Merge i's buckets rather than collecting and sorting them. Each
+        // bucket is already ascending, so a k-way merge over at most four of
+        // them yields each candidate once, in ascending index order, without
+        // allocating or sorting per item — a bucket whose members mostly do not
+        // pair (same title, differing DOIs) is otherwise re-sorted on every
+        // pass, which costs more than the all-pairs scan this replaces.
+        // Ascending order is what keeps the surviving copy the same one the
+        // all-pairs scan would have kept.
+        const lists: number[][] = [];
+        const cursors: number[] = [];
+        for (const key of [
+            `#${signatures[i].id}`,
+            signatures[i].doi && `d${signatures[i].doi}`,
+            signatures[i].isbn && `i${signatures[i].isbn}`,
+            ...titleKeysFor(signatures[i]),
+        ]) {
+            if (!key) continue;
+            const bucket = buckets.get(key);
+            if (!bucket) continue;
+            const start = firstIndexAbove(bucket, i);
+            if (start < bucket.length) {
+                lists.push(bucket);
+                cursors.push(start);
+            }
+        }
+
+        for (;;) {
+            let j = -1;
+            for (let b = 0; b < lists.length; b++) {
+                if (cursors[b] >= lists[b].length) continue;
+                const value = lists[b][cursors[b]];
+                if (j === -1 || value < j) j = value;
+            }
+            if (j === -1) break;
+            // Advance every cursor sitting on it, so a candidate held by
+            // several of i's buckets is still examined only once.
+            for (let b = 0; b < lists.length; b++) {
+                if (cursors[b] < lists[b].length && lists[b][cursors[b]] === j) cursors[b]++;
+            }
+
             if (processedIndices.has(j)) continue;
-            
+
             const otherItem = items[j];
-            if (areItemsDuplicates(item, otherItem)) {
+            if (areSignaturesDuplicates(signatures[i], signatures[j])) {
                 processedIndices.add(j);
-                
+
                 // Prefer item from preferred library
                 if (otherItem.libraryID === preferredLibraryId && bestItem.libraryID !== preferredLibraryId) {
                     bestItem = otherItem;
                 }
             }
         }
-        
+
         result.push(bestItem);
     }
-    
+
     return result;
 }
 
@@ -1179,6 +1323,50 @@ export function resolveFieldForItemType(itemTypeID: number, field: string): stri
     }
 
     return Zotero.ItemFields.getName(equivID);
+}
+
+/** The creator vocabulary Zotero's schema defines for one item type. */
+export interface CreatorTypeInfo {
+    /** Every creator type valid for the item type, in Zotero's schema order. */
+    valid: string[];
+    /**
+     * The item type's primary creator type — the one that fills the `author`
+     * role for that type. `null` when the schema defines no primary.
+     */
+    primary: string | null;
+}
+
+/**
+ * Resolve the creator types Zotero's schema allows for an item type.
+ *
+ * Creator vocabularies are per item type, and `author` is *not* universal: a
+ * patent takes `inventor`, a film `director`, a presentation `presenter`, a
+ * map `cartographer`, and so on. `item.toJSON()` exposes an item's current
+ * creators but never the set of types its schema permits, so any consumer
+ * that has to choose a creator type needs this.
+ *
+ * Returns `null` for item types that take no creators at all (attachment,
+ * note, annotation).
+ */
+export function getCreatorTypeInfo(itemTypeID: number): CreatorTypeInfo | null {
+    let types: { id: number; name: string }[];
+    try {
+        types = Zotero.CreatorTypes.getTypesForItemType(itemTypeID);
+    } catch {
+        return null;
+    }
+    if (!types || types.length === 0) return null;
+
+    let primary: string | null = null;
+    try {
+        // getPrimaryIDForType() returns false when the type has no primary.
+        const primaryID = Zotero.CreatorTypes.getPrimaryIDForType(itemTypeID);
+        primary = primaryID ? Zotero.CreatorTypes.getName(primaryID) : null;
+    } catch {
+        // A missing primary is not fatal — the valid list still stands alone.
+    }
+
+    return { valid: types.map(t => t.name), primary };
 }
 
 /**

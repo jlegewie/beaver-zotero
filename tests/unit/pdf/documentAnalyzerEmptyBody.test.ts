@@ -28,7 +28,7 @@ import type {
     RawFont,
     RawLine,
     RawPageData,
-} from "../../../src/beaver-extract/types";
+} from "@beaver/agent-core/extract/types";
 
 const PAGE_W = 600;
 const PAGE_H = 800;

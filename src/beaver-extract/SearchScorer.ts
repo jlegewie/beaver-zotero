@@ -25,11 +25,11 @@ import type {
     SearchRoleWeights,
     TextRole,
     StyleProfile,
-} from "./types";
+} from "@beaver/agent-core/extract/types";
 import {
     DEFAULT_SEARCH_SCORING_OPTIONS,
     DEFAULT_SEARCH_ROLE_WEIGHTS,
-} from "./types";
+} from "@beaver/agent-core/extract/types";
 import { StyleAnalyzer } from "./StyleAnalyzer";
 import { pdfLog } from "./logging";
 

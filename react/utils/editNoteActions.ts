@@ -4,14 +4,14 @@
  */
 
 import { AgentAction } from '../agents/agentActions';
-import type { EditNoteResultData, EditNoteOperation } from '../types/agentActions/editNote';
+import type { EditNoteResultData, EditNoteOperation } from '@beaver/agent-core/types/agentActions/editNote';
 import type {
     EditNoteBatchProposedData,
     EditNoteBatchResultData,
     EditNoteBatchUndoRecord,
     EditNoteBatchEditItem,
-} from '../types/agentActions/editNoteBatch';
-import { logger } from '../../src/utils/logger';
+} from '@beaver/agent-core/types/agentActions/editNoteBatch';
+import { logger } from '@beaver/agent-core/platform/logger';
 import {
     libraryRefForLibraryID,
     resolveItemReference,
@@ -70,7 +70,7 @@ import { assertNoPreviewMarkers, containsPreviewMarkers, stripPreviewMarkers } f
 import {
     externalReferenceMappingAtom,
     externalReferenceItemMappingAtom,
-} from '../atoms/externalReferences';
+} from '@beaver/agent-core/citations/externalReferences';
 import {
     resolveBatchEdits,
     detectOverlaps,

@@ -1,4 +1,7 @@
-import { type ExtractContentKind, isExtractContentKind } from "./contentKinds";
+import {
+  type ExtractContentKind,
+  isExtractContentKind,
+} from "@beaver/agent-core/extract/document/shared/contentKinds";
 
 export interface IndexBackgroundJobMetadata {
   index_action?: "upsert" | "untag";

@@ -16,7 +16,7 @@ import type {
     BeaverExtractResult,
     SerializedBeaverExtractResult,
 } from '../beaver-extract/schema';
-import type { PageGeometry } from '../beaver-extract/types';
+import type { PageGeometry } from '@beaver/agent-core/extract/types';
 import {
     ExtractionError,
     ExtractionErrorCode,
@@ -37,15 +37,15 @@ import {
     awaitWithRequestAbort,
     createTimeoutController,
 } from './agentDataProvider/timeout';
-import type { ZoteroDocumentErrorCode } from './agentProtocol';
+import type { ZoteroDocumentErrorCode } from '@beaver/agent-core/protocol/agentProtocol';
 import type { DocumentCacheExtractionMode } from './database';
 import type {
     DocumentCacheItemRef,
     DocumentCacheSourceIdentity,
     SerializedDocumentCacheResult,
 } from './documentCache';
-import { logger } from '../utils/logger';
-import { effectiveMaxFileSizeMB, effectiveMaxPageCount, effectiveMaxSnapshotFileSizeMB } from './attachmentLimits';
+import { logger } from '@beaver/agent-core/platform/logger';
+import { effectiveMaxFileSizeMB, effectiveMaxPageCount, effectiveMaxSnapshotFileSizeMB } from '@beaver/agent-core/transport/attachmentLimits';
 import {
     loadAttachmentData,
     resolveAttachmentFileSource,
@@ -54,7 +54,7 @@ import {
     preflightCachedPdfMeta,
     type AttachmentFileSource,
 } from './documentExtraction';
-import { readableToExtractKind, type ExtractContentKind } from './documentExtraction/shared/contentKinds';
+import { readableToExtractKind, type ExtractContentKind } from '@beaver/agent-core/extract/document/shared/contentKinds';
 import { maybeEnqueueOcrJob } from './ocr/enqueueOcr';
 import {
     extractEpubDocumentFromFile,

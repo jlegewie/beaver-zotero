@@ -1,6 +1,6 @@
 import React from 'react';
 import { AlertIcon, CancelIcon, Icon } from '../icons/icons';
-import IconButton from '../ui/IconButton';
+import IconButton from '@beaver/agent-ui/primitives/IconButton';
 
 interface HighTokenUsageWarningBarProps {
     onNewThread: (e: React.MouseEvent) => void;

@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { BeaverDB, type BackgroundJobRecord } from '../../../src/services/database';
 import { FulltextUpsertExecutor } from '../../../src/services/backgroundQueue/fulltextUpsertExecutor';
 import type { JobExecutionContext } from '../../../src/services/backgroundQueue/jobExecutor';
-import { ApiError } from '../../../react/types/apiErrors';
+import { ApiError } from '@beaver/agent-core/types/apiErrors';
 import { MockDBConnection } from '../../mocks/mockDBConnection';
 
 vi.mock('../../../src/services/searchIndex/searchIndexApiClient', () => ({

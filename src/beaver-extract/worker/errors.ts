@@ -1,12 +1,13 @@
 /**
- * Error codes mirroring `ExtractionErrorCode` in `src/beaver-extract/types.ts`.
+ * Error codes mirroring `ExtractionErrorCode` in
+ * `@beaver/agent-core/extract/types`.
  *
- * The worker is bundled but kept narrow about what it imports from `src/`;
- * the canonical enum is owned by types.ts (which it imports). However, since
- * the worker's error envelope passes the *string* code over postMessage, we
- * also re-export plain string constants for convenience.
+ * The worker is bundled but kept narrow about what it imports; the canonical
+ * enum is owned by the extract types (which it imports). However, since the
+ * worker's error envelope passes the *string* code over postMessage, we also
+ * re-export plain string constants for convenience.
  */
-import { ExtractionErrorCode } from "../types";
+import { ExtractionErrorCode } from "@beaver/agent-core/extract/types";
 import { getWorkerSelf } from "./workerScope";
 import { pdfLog, type PDFLogLevel } from "../logging";
 

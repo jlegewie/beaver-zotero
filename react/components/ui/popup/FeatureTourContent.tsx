@@ -1,6 +1,6 @@
 import React, { useState, useCallback } from 'react';
 import { FeatureStep, ExamplePrompt } from '../../../constants/versionUpdateMessages';
-import Button from '../Button';
+import Button from '@beaver/agent-ui/primitives/Button';
 import { ArrowRightIcon } from '../../icons/icons';
 import { parseTextWithLinksAndNewlines } from '../../../utils/parseTextWithLinksAndNewlines';
 

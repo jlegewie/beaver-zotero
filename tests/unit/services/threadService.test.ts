@@ -1,31 +1,29 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 // ThreadService's import chain reaches supabaseClient, which throws at module
 // load without Supabase env. Stub it (we spy on `get` and never hit the network).
-vi.mock('../../../src/services/supabaseClient', () => ({
+vi.mock('@beaver/agent-core/transport/supabaseClient', () => ({
     supabase: { auth: { getSession: vi.fn() } },
 }));
 
-import { ThreadService } from '../../../src/services/threadService';
+import {
+    isThreadAgentMismatch,
+    setThreadAgentName,
+    ThreadService,
+} from '@beaver/agent-core/transport/threadService';
 
 /**
- * Unit tests for ThreadService.findThreadsByItem — verifies the device-portable
- * `library_ref` is derived from the local libraryID and appended to the query so
- * the backend can match group items written on another device.
+ * Unit tests for ThreadService.findThreadsByItem — the library arrives as a DTO
+ * carrying both identities, so these cover how the service turns it into query
+ * params. Deriving the portable ref from a local library id is the caller's job
+ * and is covered in `libraryIdentity.test.ts`.
  */
 describe('ThreadService.findThreadsByItem', () => {
-    const zotero = (globalThis as any).Zotero;
-    const getGroupIDFromLibraryID = vi.fn();
-
     let service: ThreadService;
     let getSpy: ReturnType<typeof vi.spyOn>;
     let lastEndpoint: string;
 
     beforeEach(() => {
-        getGroupIDFromLibraryID.mockReset();
-        zotero.Libraries = { ...zotero.Libraries, userLibraryID: 1 };
-        zotero.Groups = { ...zotero.Groups, getGroupIDFromLibraryID };
-
         service = new ThreadService('https://example.test');
         // Capture the endpoint the service would call; don't hit the network.
         getSpy = vi.spyOn(service as any, 'get').mockImplementation(async (endpoint: string) => {
@@ -40,8 +38,8 @@ describe('ThreadService.findThreadsByItem', () => {
         return new URLSearchParams(qs);
     }
 
-    it('appends library_ref="u" for the personal library', async () => {
-        await service.findThreadsByItem(1, ['ABC123'], 'both');
+    it('sends both identities for the personal library', async () => {
+        await service.findThreadsByItem({ libraryId: 1, libraryRef: 'u' }, ['ABC123'], 'both');
 
         expect(getSpy).toHaveBeenCalledOnce();
         const p = params();
@@ -51,32 +49,25 @@ describe('ThreadService.findThreadsByItem', () => {
         expect(p.get('mode')).toBe('both');
     });
 
-    it('appends library_ref="g<groupID>" for a group library', async () => {
-        getGroupIDFromLibraryID.mockReturnValue(12345);
-
-        await service.findThreadsByItem(7, ['GRP001'], 'citations');
+    it('sends both identities for a group library', async () => {
+        await service.findThreadsByItem({ libraryId: 7, libraryRef: 'g12345' }, ['GRP001'], 'citations');
 
         const p = params();
-        // The device-local id (7) still rides along for the numeric fallback.
+        // The device-local id still rides along for the numeric fallback.
         expect(p.get('library_id')).toBe('7');
         expect(p.get('library_ref')).toBe('g12345');
-        expect(getGroupIDFromLibraryID).toHaveBeenCalledWith(7);
     });
 
-    it('omits library_ref for the external-file sentinel (-1)', async () => {
-        await service.findThreadsByItem(-1, ['EXT00001']);
+    it('omits library_ref when the caller has none', async () => {
+        await service.findThreadsByItem({ libraryId: -1, libraryRef: null }, ['EXT00001']);
 
         const p = params();
         expect(p.get('library_id')).toBe('-1');
         expect(p.has('library_ref')).toBe(false);
     });
 
-    it('omits library_ref when the group lookup fails (feed / unknown library)', async () => {
-        getGroupIDFromLibraryID.mockImplementation(() => {
-            throw new Error('Group not found');
-        });
-
-        await service.findThreadsByItem(99, ['K1']);
+    it('omits library_ref when the caller leaves it out entirely', async () => {
+        await service.findThreadsByItem({ libraryId: 99 }, ['K1']);
 
         const p = params();
         expect(p.get('library_id')).toBe('99');
@@ -84,7 +75,7 @@ describe('ThreadService.findThreadsByItem', () => {
     });
 
     it('forwards multiple zotero keys alongside the ref', async () => {
-        await service.findThreadsByItem(1, ['K1', 'K2', 'K3']);
+        await service.findThreadsByItem({ libraryId: 1, libraryRef: 'u' }, ['K1', 'K2', 'K3']);
 
         const p = params();
         expect(p.getAll('zotero_keys')).toEqual(['K1', 'K2', 'K3']);
@@ -161,5 +152,75 @@ describe('ThreadService instance scoping', () => {
                 expected_user_id: 'beaver-user-uuid',
             });
         });
+    });
+});
+
+/**
+ * Thread lists are per agent, so the client scopes every list request to the
+ * agent it registered. The by-item route takes no such param — its rows carry
+ * the thread's agent instead and callers filter them client-side.
+ */
+describe('ThreadService agent scoping', () => {
+    let service: ThreadService;
+    let lastEndpoint: string;
+
+    beforeEach(() => {
+        service = new ThreadService('https://example.test');
+        vi.spyOn(service as any, 'get').mockImplementation(async (endpoint: string) => {
+            lastEndpoint = endpoint;
+            return { data: [], next_cursor: null, has_more: false };
+        });
+        lastEndpoint = '';
+        setThreadAgentName('beaver');
+    });
+
+    afterEach(() => {
+        setThreadAgentName(null);
+    });
+
+    function params(): URLSearchParams {
+        return new URLSearchParams(lastEndpoint.split('?')[1] ?? '');
+    }
+
+    it('scopes the paginated list to the registered agent', async () => {
+        await service.getPaginatedThreads(10);
+        expect(params().get('agent_name')).toBe('beaver');
+    });
+
+    it('scopes search to the registered agent', async () => {
+        await service.searchThreads('draft', 10);
+        expect(params().get('agent_name')).toBe('beaver');
+    });
+
+    it('scopes the starred list to the registered agent', async () => {
+        await service.getStarredThreads();
+        expect(params().get('agent_name')).toBe('beaver');
+    });
+
+    it('leaves lists unscoped when no host registered an agent', async () => {
+        setThreadAgentName(null);
+        await service.getPaginatedThreads(10);
+        expect(params().has('agent_name')).toBe(false);
+        await service.getStarredThreads();
+        expect(lastEndpoint).toBe('/api/v1/threads/starred');
+    });
+
+    it('does not scope by-item lookups server-side', async () => {
+        await service.findThreadsByItem({ libraryId: 1, libraryRef: 'u' }, ['K1']);
+        expect(params().has('agent_name')).toBe(false);
+    });
+
+    it('flags by-item rows belonging to another agent', () => {
+        expect(isThreadAgentMismatch({ agent_name: 'beaver_word' })).toBe(true);
+        expect(isThreadAgentMismatch({ agent_name: 'beaver' })).toBe(false);
+    });
+
+    it('keeps rows with no agent, and every row when unregistered', () => {
+        // A backend older than the column reports none; hiding those would
+        // empty the list.
+        expect(isThreadAgentMismatch({ agent_name: null })).toBe(false);
+        expect(isThreadAgentMismatch({})).toBe(false);
+        setThreadAgentName(null);
+        expect(isThreadAgentMismatch({ agent_name: 'beaver_word' })).toBe(false);
     });
 });

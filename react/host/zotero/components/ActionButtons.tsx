@@ -11,20 +11,22 @@ import {
     isExternalReferenceDetailsDialogVisibleAtom,
     selectedExternalReferenceAtom
 } from '../../../atoms/ui';
-import Button from '../../../components/ui/Button';
-import IconButton from '../../../components/ui/IconButton';
-import Tooltip from '../../../components/ui/Tooltip';
+import Button from '@beaver/agent-ui/primitives/Button';
+import IconButton from '@beaver/agent-ui/primitives/IconButton';
+import Tooltip from '@beaver/agent-ui/primitives/Tooltip';
 import { ZOTERO_ICONS } from '../../../components/icons/ZoteroIcon';
 import { ZoteroIcon } from '../../../components/icons/ZoteroIcon';
 import { revealSource } from '../../../utils/sourceUtils';
 import {
     checkExternalReferenceAtom,
-    externalReferenceItemMappingAtom,
-    isCheckingReferenceObjectAtom,
     markExternalReferenceImportedAtom,
 } from '../../../atoms/externalReferences';
+import {
+    externalReferenceItemMappingAtom,
+    isCheckingReferenceObjectAtom,
+} from '@beaver/agent-core/citations/externalReferences';
 import { createZoteroItem, stampBeaverProvenanceExtra } from '../../../utils/addItemActions';
-import { logger } from '../../../../src/utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 import { ensureItemSynced } from '../../../../src/utils/sync';
 import { getPref } from '../../../../src/utils/prefs';
 import { libraryRefForLibraryID } from '../../../../src/utils/libraryIdentity';
@@ -33,11 +35,12 @@ import {
     getPendingCreateItemActionBySourceIdAtom,
     ackAgentActionsAtom,
 } from '../../../agents/agentActions';
-import { CreateItemResultData } from '../../../types/agentActions/items';
+import { CreateItemResultData } from '@beaver/agent-core/types/agentActions/items';
 import { currentThreadIdAtom } from '../../../atoms/threads';
-import type { ZoteroItemReference } from '../../../types/zotero';
-import type { ExternalReferenceActionMode, ExternalReferenceActionsProps } from '../../types';
-import { resolveLocalLibraryId } from '../libraryAccess';
+import { searchableLibraryIdsAtom } from '../../../atoms/profile';
+import type { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
+import type { ExternalReferenceActionMode, ExternalReferenceActionsProps } from '@beaver/agent-ui/host/types';
+import { resolveSearchableLibraryId } from '../libraryAccess';
 
 const CITED_BY_URL = 'https://openalex.org/works?page=1&filter=cites:';
 
@@ -63,6 +66,7 @@ const ActionButtons: React.FC<ExternalReferenceActionsProps> = ({
     // Active thread ID — used to stamp the background PDF fetch so the
     // attachment_resolved ws event can route back to the live agent run.
     const threadId = useAtomValue(currentThreadIdAtom);
+    const searchableLibraryIds = useAtomValue(searchableLibraryIdsAtom);
 
     // Get cached reference directly from the cache for this item's source_id
     const sourceId = item.source_id;
@@ -216,7 +220,7 @@ const ActionButtons: React.FC<ExternalReferenceActionsProps> = ({
         setZoteroItemRef(cachedRef);
 
         const libraryId = cachedRef
-            ? resolveLocalLibraryId(cachedRef)
+            ? resolveSearchableLibraryId(cachedRef, searchableLibraryIds)
             : null;
         if (cachedRef && libraryId) {
             void (async () => {
@@ -242,7 +246,7 @@ const ActionButtons: React.FC<ExternalReferenceActionsProps> = ({
             setBestAttachment(null);
         }
         return () => { cancelled = true; };
-    }, [cachedRef]);
+    }, [cachedRef, searchableLibraryIds]);
 
     // Check cache and validate on mount
     useEffect(() => {
@@ -262,7 +266,7 @@ const ActionButtons: React.FC<ExternalReferenceActionsProps> = ({
                 setZoteroItemRef(result);
 
                 const libraryId = result
-                    ? resolveLocalLibraryId(result)
+                    ? resolveSearchableLibraryId(result, searchableLibraryIds)
                     : null;
                 if (result && libraryId) {
                     try {
@@ -289,7 +293,7 @@ const ActionButtons: React.FC<ExternalReferenceActionsProps> = ({
             setIsLoading(true);
         }
         return () => { cancelled = true; };
-    }, [item, sourceId, cachedRef, checkReference, isChecking]);
+    }, [item, sourceId, cachedRef, checkReference, isChecking, searchableLibraryIds]);
 
     // Update loading state when checking state changes
     useEffect(() => {

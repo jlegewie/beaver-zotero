@@ -1,16 +1,16 @@
 import React from "react";
-import Button from "./ui/Button";
+import Button from "@beaver/agent-ui/primitives/Button";
 import { useAtomValue } from "jotai";
-import { Action } from "../types/actions";
+import { Action } from "@beaver/agent-core/types/actions";
 import { actionsForContextAtom, actionContextAtom } from "../atoms/actions";
 import { useActionRunner } from "../hooks/useActionRunner";
 import { getActiveTarget } from "../utils/actionVisibility";
 import { searchableLibraryIdsAtom } from "../atoms/profile";
 import { CSSIcon, CSSItemTypeIcon } from "./icons/zotero";
-import Icon from "./icons/Icon";
+import Icon from "@beaver/agent-ui/icons/Icon";
 import { AlertIcon, SettingsIcon, ZapIcon } from './icons/icons';
 import { openPreferencesWindow } from "../../src/ui/openPreferencesWindow";
-import IconButton from "./ui/IconButton";
+import IconButton from "@beaver/agent-ui/primitives/IconButton";
 
 interface ActionSuggestionsProps {
     /** When true, global actions are always shown. When false, global actions only appear if no context-specific actions match. */
@@ -33,11 +33,20 @@ const ActionSuggestions: React.FC<ActionSuggestionsProps> = ({ showGlobal = true
     const searchableLibraryIds = useAtomValue(searchableLibraryIdsAtom);
     const { runAction, isBusy } = useActionRunner();
 
-    // Check if the current library is supported
-    const currentLibraryId = ctx.zotero.isLibraryTab
-        ? ctx.zotero.libraryView.libraryId
-        : ctx.zotero.readerAttachment?.libraryID ?? ctx.zotero.noteItem?.libraryID ?? null;
-    const isLibrarySupported = currentLibraryId && searchableLibraryIds.includes(currentLibraryId);
+    // Check whether the current view has a library Beaver can use. In the
+    // library tab the selection can span several libraries, so this asks
+    // whether ANY of them is searchable.
+    const viewLibraryIds = ctx.zotero.libraryView.selectedLibraryIds.length > 0
+        ? ctx.zotero.libraryView.selectedLibraryIds
+        : [ctx.zotero.libraryView.libraryId];
+    const isLibrarySupported = ctx.zotero.isLibraryTab
+        ? viewLibraryIds.some(id => searchableLibraryIds.includes(id))
+        : (() => {
+            const libraryId = ctx.zotero.readerAttachment?.libraryID
+                ?? ctx.zotero.noteItem?.libraryID
+                ?? null;
+            return libraryId !== null && searchableLibraryIds.includes(libraryId);
+        })();
 
     // Determine the single active target type the surface binds to
     const active = getActiveTarget(ctx);

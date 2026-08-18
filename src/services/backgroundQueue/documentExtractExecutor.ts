@@ -11,13 +11,13 @@ import {
 } from '../documentExtraction/attachmentSource';
 import { computeStructuredDocumentHash } from '../documentExtraction/structuredDocumentHash';
 import { expectedExtractionSchemaVersion } from '../documentExtraction/shared/extractionSchemaVersions';
-import type { DocumentExtractResult } from '../documentExtraction/shared/documentExtractResult';
+import type { DocumentExtractResult } from '@beaver/agent-core/extract/document/shared/documentExtractResult';
 import type {
     AttachmentProcessingStateRecord,
     BackgroundJobRecord,
 } from '../database';
 import { getFileSignature } from '../documentFileIdentity';
-import { logger } from '../../utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 import { UNRESOLVED_LIBRARY_ID } from '../../utils/libraryIdentity';
 import { safeIsInTrash } from '../../utils/zoteroItemUtils';
 import { OCR_PRIORITY_BACKFILL } from '../ocr/constants';

@@ -1,9 +1,9 @@
 import React from 'react';
 import { TickIcon, CancelIcon } from '../../icons/icons';
-import Icon from '../../icons/Icon';
+import Icon from '@beaver/agent-ui/icons/Icon';
 import { PopupMessage, PopupMessageFeature } from '../../../types/popupMessage';
-import Button from "../Button";
-import IconButton from '../IconButton';
+import Button from "@beaver/agent-ui/primitives/Button";
+import IconButton from '@beaver/agent-ui/primitives/IconButton';
 import { parseTextWithLinksAndNewlines } from '../../../utils/parseTextWithLinksAndNewlines';
 import FeatureTourContent from './FeatureTourContent';
 import { FeatureStep } from '../../../constants/versionUpdateMessages';

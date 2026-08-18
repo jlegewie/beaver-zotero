@@ -1,4 +1,4 @@
-import { setHost } from '../index';
+import { setHost } from '@beaver/agent-ui/host';
 import { zoteroNavigation } from './navigation';
 import { zoteroItemData } from './itemData';
 import { zoteroDocumentExport } from './citationExport';

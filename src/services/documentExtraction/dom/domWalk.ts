@@ -1,4 +1,4 @@
-import type { DomItemKind } from "./schema";
+import type { DomItemKind } from "@beaver/agent-core/extract/document/dom/schema";
 
 // EPUB-originated namespace support is harmless for plain HTML documents.
 const EPUB_TYPE_NS = "http://www.idpf.org/2007/ops";

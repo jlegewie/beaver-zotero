@@ -5,10 +5,10 @@ import EmbeddingIndexStatusButton from './ui/buttons/EmbeddingIndexStatusButton'
 import { triggerToggleChat } from '../../src/ui/toggleChat';
 import { openBeaverWindow } from '../../src/ui/openBeaverWindow';
 import { newThreadAtom } from '../atoms/threads';
-import { currentThreadIdAtom, runsCountAtom } from '../agents/atoms';
+import { currentThreadIdAtom, runsCountAtom } from '@beaver/agent-core/run-state/atoms';
 import { useAtom, useAtomValue, useSetAtom } from 'jotai';
-import IconButton from './ui/IconButton';
-import Tooltip from './ui/Tooltip';
+import IconButton from '@beaver/agent-ui/primitives/IconButton';
+import Tooltip from '@beaver/agent-ui/primitives/Tooltip';
 import { isAuthenticatedAtom, isWaitingForProfileAtom } from '../atoms/auth';
 import { isThreadListViewAtom } from '../atoms/ui';
 import UserAccountMenuButton from './ui/buttons/UserAccountMenuButton';
@@ -16,7 +16,7 @@ import DevToolsMenuButton from './ui/buttons/DevToolsMenuButton';
 import ThreadMenuButton from './ui/buttons/ThreadMenuButton';
 import { hasCompletedOnboardingAtom, isDatabaseSyncSupportedAtom, updateRequiredAtom, isProfileLoadedAtom, profileSyncStatusAtom } from '../atoms/profile';
 import { isFirstRunVisibleAtom } from '../atoms/firstRun';
-import { getWindowFromElement } from '../utils/windowContext';
+import { getWindowFromElement } from '@beaver/agent-ui/utils/windowContext';
 import { currentMessageContentAtom } from '../atoms/messageComposition';
 import { getPref } from '../../src/utils/prefs';
 
@@ -65,7 +65,7 @@ const Header: React.FC<HeaderProps> = ({ onClose, isWindow = false }) => {
         if (isWindow) {
             // Get the actual window where the button is rendered, not the main window
             const currentWindow = getWindowFromElement(closeButtonRef.current);
-            currentWindow.close();
+            currentWindow?.close();
         } else {
             triggerToggleChat(Zotero.getMainWindow());
         }

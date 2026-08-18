@@ -5,8 +5,11 @@ vi.mock('../../../react/host/zotero/itemData', () => ({
 }));
 
 vi.mock('../../../react/utils/pageLabels', () => ({
-    resolvePageLabelFromLabels: vi.fn((_labels, page: number) => String(page)),
     translatePageNumberToLabelFromLabels: vi.fn((_labels, page: string) => page),
+}));
+
+vi.mock('@beaver/agent-ui/utils/pageLabels', () => ({
+    resolvePageLabelFromLabels: vi.fn((_labels, page: number) => String(page)),
 }));
 
 vi.mock('../../../src/utils/zoteroLinkCitation', () => ({
@@ -14,7 +17,7 @@ vi.mock('../../../src/utils/zoteroLinkCitation', () => ({
     buildZoteroCitationLinkHTML: vi.fn(() => '<a href="https://example.com">Example</a>'),
 }));
 
-vi.mock('../../../src/utils/logger', () => ({ logger: vi.fn() }));
+vi.mock('@beaver/agent-core/platform/logger', () => ({ logger: vi.fn() }));
 
 import { zoteroDocumentExport } from '../../../react/host/zotero/citationExport';
 

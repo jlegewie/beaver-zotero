@@ -1,17 +1,17 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useSetAtom } from 'jotai';
-import type { PendingQuestion } from '../../agents/pendingQuestions';
+import type { PendingQuestion } from '@beaver/agent-core/run-state/pendingQuestions';
 import type {
     AskUserQuestionAnswer,
     AskUserQuestionItem,
-} from '../../../src/services/agentProtocol';
+} from '@beaver/agent-core/protocol/agentProtocol';
 import {
     closeWSConnectionAtom,
     sendAskUserQuestionResponseAtom,
 } from '../../atoms/agentRunAtoms';
-import Button from '../ui/Button';
-import IconButton from '../ui/IconButton';
-import Tooltip from '../ui/Tooltip';
+import Button from '@beaver/agent-ui/primitives/Button';
+import IconButton from '@beaver/agent-ui/primitives/IconButton';
+import Tooltip from '@beaver/agent-ui/primitives/Tooltip';
 import {
     ArrowLeftIcon,
     ArrowRightIcon,
@@ -20,7 +20,7 @@ import {
     Icon,
     StopStrokeIcon,
 } from '../icons/icons';
-import { logger } from '../../../src/utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 
 interface AskUserQuestionPanelProps {
     pendingQuestion: PendingQuestion;

@@ -1,13 +1,13 @@
 import React from 'react';
 import { CSSIcon, CSSItemTypeIcon, LibraryIcon, NoteIcon, HighlighterIcon, ExternalLinkIcon } from '../../icons/icons';
 import { ZoteroIcon, ZOTERO_ICONS } from '../../icons/ZoteroIcon';
-import { getHost } from '../../../host';
-import type { ZoteroItemReference } from '../../../types/zotero';
-import type { ContentKind } from '../../../types/zotero';
-import { truncateText } from '../../../utils/stringUtils';
+import { getHost } from '@beaver/agent-ui/host';
+import type { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
+import type { ContentKind } from '@beaver/agent-core/types/zotero';
+import { truncateText } from '@beaver/agent-ui/utils/stringUtils';
 import { ANNOTATION_ICON_BY_TYPE, ANNOTATION_TEXT_BY_TYPE } from '../../../utils/annotationDisplay';
-import type { ValidAnnotationType, ExternalFileContentKind } from '../../../types/attachments/apiTypes';
-import { ChipWithPopup, type ChipPopupContent, type ChipPopupSubtitle } from './ChipPopup';
+import type { ValidAnnotationType, ExternalFileContentKind } from '@beaver/agent-core/types/attachments/apiTypes';
+import { ChipWithPopup, type ChipPopupContent, type ChipPopupSubtitle } from '@beaver/agent-ui/chat/ChipPopup';
 import { ChipButton } from './ChipButton';
 
 const MAX_CHIP_TEXT_LENGTH = 30;

@@ -1,4 +1,4 @@
-import { ApiError, ServerError, SessionRefreshError } from '../types/apiErrors';
+import { ApiError, ServerError, SessionRefreshError } from '@beaver/agent-core/types/apiErrors';
 
 /**
  * True for errors that callers should retry rather than treat as terminal.

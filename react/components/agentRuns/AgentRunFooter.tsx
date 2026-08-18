@@ -1,30 +1,30 @@
 import React, { useMemo, useEffect, useState, useCallback } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { AgentRun } from '../../agents/types';
-import { RepeatIcon, ShareIcon, ArrowDownIcon, ArrowRightIcon } from '../icons/icons';
+import { AgentRun } from '@beaver/agent-core/agents/types';
+import { RepeatIcon, MoreHorizontalIcon, ArrowDownIcon, ArrowRightIcon } from '../icons/icons';
 import { copyToClipboard } from '../../utils/clipboard';
-import IconButton from '../ui/IconButton';
-import MenuButton from '../ui/MenuButton';
-import type { MenuItem } from '../ui/menu/ContextMenu';
-import Button from '../ui/Button';
-import CitedSourcesList from '../sources/CitedSourcesList';
+import IconButton from '@beaver/agent-ui/primitives/IconButton';
+import MenuButton from '@beaver/agent-ui/primitives/MenuButton';
+import type { MenuItem } from '@beaver/agent-ui/primitives/ContextMenu';
+import Button from '@beaver/agent-ui/primitives/Button';
+import CitedSourcesList from '@beaver/agent-ui/chat/CitedSourcesList';
 import { renderToMarkdown, renderToHTML, preprocessNoteContent } from '../../utils/citationRenderers';
 import CopyButton from '../ui/buttons/CopyButton';
-import { citationMapAtom, citationsByRunIdAtom, citationKeyToMarkerAtom } from '../../atoms/citations';
-import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '../../atoms/externalReferences';
-import { CitedSource, getCitationKey } from '../../types/citations';
+import { citationMapAtom, citationsByRunIdAtom, citationKeyToMarkerAtom } from '@beaver/agent-core/citations/atoms';
+import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '@beaver/agent-core/citations/externalReferences';
+import { CitedSource, getCitationKey } from '@beaver/agent-core/types/citations';
 import { messageSourcesVisibilityAtom, toggleMessageSourcesVisibilityAtom, setMessageSourcesVisibilityAtom } from '../../atoms/messageUIState';
-import { toolResultsMapAtom, allRunsAtom } from '../../agents/atoms';
+import { toolResultsMapAtom, allRunsAtom } from '@beaver/agent-core/run-state/atoms';
 import { extractRunResponseContent } from '../../utils/threadContent';
 import TokenUsageDisplay from './TokenUsageDisplay';
-import { regenerateFromRunAtom, streamingDoneRunIdsAtom } from '../../atoms/agentRunAtoms';
+import { regenerateFromRunAtom, retryPendingRunIdAtom, streamingDoneRunIdsAtom } from '../../atoms/agentRunAtoms';
 import { currentThreadIdAtom } from '../../atoms/threads';
 import { store } from '../../store';
-import Tooltip from '../ui/Tooltip';
-import Spinner from '../icons/Spinner';
+import Tooltip from '@beaver/agent-ui/primitives/Tooltip';
+import Spinner from '@beaver/agent-ui/icons/Spinner';
 import { prepareCitationRenderContext } from '../../utils/citationRenderContext';
 import { addPopupMessageAtom } from '../../utils/popupMessageUtils';
-import { getHost } from '../../host';
+import { getHost } from '@beaver/agent-ui/host';
 
 interface AgentRunFooterProps {
     run: AgentRun;
@@ -226,6 +226,9 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
     };
 
     const regenerateFromRun = useSetAtom(regenerateFromRunAtom);
+    // Loading state while this run's retry commits its removal on the
+    // backend (truncate POST + undo), before the replacement run appears.
+    const isRetryPending = useAtomValue(retryPendingRunIdAtom) === run.id;
 
     const handleRegenerate = async () => {
         // regenerateFromRunAtom walks the resume chain back to the root
@@ -269,13 +272,10 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
                 
                 {/* Action buttons */}
                 <div className="display-flex gap-4">
-                    {/* Usage display */}
-                    {(getHost().config?.isDevelopment() ?? false) && run.status === 'completed' && run.total_usage && run.total_cost && (
-                        <TokenUsageDisplay usage={run.total_usage} cost={run.total_cost} />
-                    )}
-                    {/* Share button */}
+                    {/* Additional action buttons */}
                     <MenuButton
-                        icon={ShareIcon}
+                        icon={MoreHorizontalIcon}
+                        iconClassName="scale-12"
                         menuItems={getShareMenuItems()}
                         className="scale-11"
                         ariaLabel="Share"
@@ -284,6 +284,13 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
                         toggleCallback={handleMenuToggle}
                         tooltipContent="More options"
                     />
+
+                    {/* Usage display */}
+                    {(getHost().config?.isDevelopment() ?? false) && run.status === 'completed' && run.total_usage != null && run.total_cost != null && (
+                        <TokenUsageDisplay usage={run.total_usage} cost={run.total_cost} />
+                    )}
+
+                    {/* Retry button */}
                     <Tooltip
                         content="Retry"
                         showArrow
@@ -293,8 +300,11 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
                             onClick={handleRegenerate}
                             className="scale-11"
                             ariaLabel="Retry"
+                            loading={isRetryPending}
                         />
                     </Tooltip>
+
+                    {/* Copy button */}
                     <Tooltip
                         content="Copy"
                         showArrow

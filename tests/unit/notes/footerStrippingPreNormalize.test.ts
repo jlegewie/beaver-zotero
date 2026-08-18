@@ -28,7 +28,7 @@ import { describe, it, expect, vi } from 'vitest';
 // =============================================================================
 
 // Mock transitive deps pulled in by noteHtmlSimplifier.
-vi.mock('../../../src/services/supabaseClient', () => ({
+vi.mock('@beaver/agent-core/transport/supabaseClient', () => ({
     supabase: { auth: { getSession: vi.fn() } },
 }));
 vi.mock('../../../src/utils/zoteroUtils', () => ({

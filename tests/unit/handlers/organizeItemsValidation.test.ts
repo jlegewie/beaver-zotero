@@ -11,10 +11,12 @@ vi.mock("../../../react/atoms/profile", () => ({
 
 vi.mock("../../../src/services/agentDataProvider/utils", () => ({
   getDeferredToolPreference: vi.fn(() => "always_ask"),
+  excludedLibraryMessage: vi.fn((libraryId: number) => `Library ${libraryId} is excluded from Beaver.`),
 }));
 
 import { validateOrganizeItemsAction } from "../../../src/services/agentDataProvider/actions/organizeItems";
-import type { WSAgentActionValidateRequest } from "../../../src/services/agentProtocol";
+import { store } from "../../../react/store";
+import type { WSAgentActionValidateRequest } from "@beaver/agent-core/protocol/agentProtocol";
 
 type ItemKind = "annotation" | "regular";
 
@@ -219,6 +221,56 @@ describe("validateOrganizeItemsAction", () => {
     expect(res.error).not.toContain("200");
   });
 
+  it("reports a nonexistent item and a nonexistent collection key together in one error", async () => {
+    const zotero = (globalThis as any).Zotero;
+    zotero.Items.getByLibraryAndKeyAsync = vi.fn(async (libId: number, key: string) =>
+      key === "GOODITEM" ? makeItem("regular", libId, key) : false,
+    );
+    zotero.Libraries.getAll = vi.fn(() => [{ libraryID: 1, name: "My Library" }]);
+    zotero.Collections.getByLibraryAndKeyAsync = vi.fn(async () => null);
+
+    const res = await validateOrganizeItemsAction(
+      buildRequest({
+        item_ids: ["1-GOODITEM", "1-MISSING01"],
+        tags: null,
+        collections: { add: ["BADCOLL1"], remove: [] },
+      }),
+    );
+
+    expect(res.valid).toBe(false);
+    expect(res.error_code).toBe("multiple_item_errors");
+    expect(res.error).toContain("1-MISSING01");
+    expect(res.error).toContain("BADCOLL1");
+    // The frontend never had to be asked twice — both problems in one shot.
+    expect(res.error).not.toContain("GOODITEM");
+  });
+
+  it("preserves the library-exclusion error code even when mixed with a different failure", async () => {
+    const zotero = (globalThis as any).Zotero;
+    // Library 100 is normally searchable per the module-level store mock —
+    // exclude it for this test only so "100-EXCLKEY1" hits library_not_searchable.
+    (store.get as any).mockReturnValueOnce([1]);
+    zotero.Items.getByLibraryAndKeyAsync = vi.fn(async (libId: number, key: string) =>
+      key === "MISSING01" ? false : makeItem("regular", libId, key),
+    );
+
+    const res = await validateOrganizeItemsAction(
+      buildRequest({
+        item_ids: ["100-EXCLKEY1", "1-MISSING01"],
+        tags: { add: ["x"], remove: [] },
+        collections: null,
+      }),
+    );
+
+    expect(res.valid).toBe(false);
+    // Must NOT collapse to the generic 'multiple_item_errors' bucket — the
+    // access-control classification has to survive mixing with an unrelated
+    // failure (here, a not-found item).
+    expect(res.error_code).toBe("library_not_searchable");
+    expect(res.error).toContain("100-EXCLKEY1");
+    expect(res.error).toContain("1-MISSING01");
+  });
+
   it("rejects a malformed item id", async () => {
     const res = await validateOrganizeItemsAction(
       buildRequest({
@@ -230,5 +282,44 @@ describe("validateOrganizeItemsAction", () => {
 
     expect(res.valid).toBe(false);
     expect(res.error_code).toBe("invalid_item_id");
+  });
+
+  it("reports every nonexistent item id in one error instead of only the first", async () => {
+    const zotero = (globalThis as any).Zotero;
+    zotero.Items.getByLibraryAndKeyAsync = vi.fn(async (libId: number, key: string) =>
+      key === "GOODKEY1" ? makeItem("regular", libId, key) : false,
+    );
+
+    const res = await validateOrganizeItemsAction(
+      buildRequest({
+        item_ids: ["1-GOODKEY1", "1-MISSING01", "1-MISSING02"],
+        tags: { add: ["x"], remove: [] },
+        collections: null,
+      }),
+    );
+
+    expect(res.valid).toBe(false);
+    expect(res.error_code).toBe("item_not_found");
+    expect(res.error).toContain("1-MISSING01");
+    expect(res.error).toContain("1-MISSING02");
+    expect(res.error).not.toContain("GOODKEY1");
+  });
+
+  it("uses a generic error_code when the batch has mixed failure reasons", async () => {
+    const zotero = (globalThis as any).Zotero;
+    zotero.Items.getByLibraryAndKeyAsync = vi.fn(async () => false);
+
+    const res = await validateOrganizeItemsAction(
+      buildRequest({
+        item_ids: ["1-MISSING01", "5abc-BADFORMAT"],
+        tags: { add: ["x"], remove: [] },
+        collections: null,
+      }),
+    );
+
+    expect(res.valid).toBe(false);
+    expect(res.error_code).toBe("multiple_item_errors");
+    expect(res.error).toContain("1-MISSING01");
+    expect(res.error).toContain("5abc-BADFORMAT");
   });
 });

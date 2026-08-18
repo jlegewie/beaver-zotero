@@ -440,7 +440,7 @@ Import the handler and request/response types at the top of `useMcpServer.ts`:
 
 ```typescript
 import { handleMyToolRequest } from '../../src/services/agentDataProvider';
-import type { WSMyToolRequest, WSMyToolResponse } from '../../src/services/agentProtocol';
+import type { WSMyToolRequest, WSMyToolResponse } from '@beaver/agent-core/protocol/agentProtocol';
 ```
 
 ### Step 6: Update this document

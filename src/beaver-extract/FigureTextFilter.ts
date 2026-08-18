@@ -23,8 +23,8 @@
  * `ColumnDetector`. No barrel imports.
  */
 import type { Rect } from "./ColumnDetector";
-import type { RawLine, RawPageData } from "./types";
-import { bboxHeight, bboxWidth } from "./types";
+import type { RawLine, RawPageData } from "@beaver/agent-core/extract/types";
+import { bboxHeight, bboxWidth } from "@beaver/agent-core/extract/types";
 
 export interface FigureTextDetectionOptions {
     /** Minimum tiny columns lacking body content needed for figure-heavy mode. */

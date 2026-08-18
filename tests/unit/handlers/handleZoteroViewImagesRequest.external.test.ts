@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('../../../src/utils/logger', () => ({ logger: vi.fn() }));
+vi.mock('@beaver/agent-core/platform/logger', () => ({ logger: vi.fn() }));
 
-vi.mock('../../../src/services/supabaseClient', () => ({
+vi.mock('@beaver/agent-core/transport/supabaseClient', () => ({
     supabase: { auth: { getSession: vi.fn() } },
 }));
 vi.mock('../../../react/store', () => ({
@@ -44,7 +44,7 @@ vi.mock('../../../src/services/agentDataProvider/imageProcessing', async () => {
 
 import { handleZoteroViewImagesRequest } from '../../../src/services/agentDataProvider/handleZoteroViewImagesRequest';
 import { resolveExternalFile } from '../../../src/services/externalFiles';
-import type { WSZoteroViewImagesRequest } from '../../../src/services/agentProtocol';
+import type { WSZoteroViewImagesRequest } from '@beaver/agent-core/protocol/agentProtocol';
 
 const EXT_KEY = 'AB12CD34';
 

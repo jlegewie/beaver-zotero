@@ -194,24 +194,6 @@ export const dismissHighTokenWarningForThreadAtom = atom(
  * These are NOT persisted -- they only live for the current session.
  */
 export const backendHighTokenUsageRunsAtom = atom<Record<string, boolean>>({});
-export const softCapTriggeredRunsAtom = atom<Record<string, boolean>>({});
-
-/**
- * Tracks dismissed soft cap warnings by thread ID.
- * Value is the run ID whose warning was dismissed in that thread.
- */
-export const dismissedSoftCapWarningByThreadAtom = atom<Record<string, string>>({});
-
-/**
- * Mark a soft cap warning as dismissed for a specific thread/run pair.
- */
-export const dismissSoftCapWarningForThreadAtom = atom(
-    null,
-    (get, set, { threadId, runId }: { threadId: string; runId: string }) => {
-        const current = get(dismissedSoftCapWarningByThreadAtom);
-        set(dismissedSoftCapWarningByThreadAtom, { ...current, [threadId]: runId });
-    }
-);
 
 // ---------------------------------------------------------------------------
 // Annotation groups (button + busy states)
@@ -249,6 +231,36 @@ export const setAgentActionItemTitleAtom = atom(
         const current = get(agentActionItemTitlesAtom);
         set(agentActionItemTitlesAtom, { ...current, [key]: title });
     }
+);
+
+// ---------------------------------------------------------------------------
+// Review card session snapshot
+// ---------------------------------------------------------------------------
+
+/**
+ * Actions resolved from the currently rendered review card, keyed
+ * `runId:actionId`. This keeps resolved rows stable until the last pending
+ * row settles. It is deliberately not persisted across thread loads.
+ */
+export const retainedReviewActionsAtom = atom<BooleanMap>({});
+
+export const retainReviewActionsAtom = atom(
+    null,
+    (get, set, { runId, actionIds }: { runId: string; actionIds: string[] }) => {
+        const current = get(retainedReviewActionsAtom);
+        const next = { ...current };
+        for (const actionId of actionIds) next[`${runId}:${actionId}`] = true;
+        set(retainedReviewActionsAtom, next);
+    },
+);
+
+/** Remove a completed review snapshot so it cannot replay after a React remount. */
+export const clearRetainedReviewActionsForRunAtom = atom(
+    null,
+    (get, set, runId: string) => {
+        const current = get(retainedReviewActionsAtom);
+        set(retainedReviewActionsAtom, removeEntriesWithPrefix(current, `${runId}:`));
+    },
 );
 
 // ---------------------------------------------------------------------------
@@ -350,6 +362,7 @@ export const resetMessageUIStateAtom = atom(
         set(annotationBusyAtom, {});
         set(annotationAttachmentTitlesAtom, {});
         set(agentActionItemTitlesAtom, {});
+        set(retainedReviewActionsAtom, {});
         set(notePanelStateAtom, {});
     }
 );

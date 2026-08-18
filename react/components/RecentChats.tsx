@@ -3,18 +3,19 @@ import { useAtomValue, useSetAtom } from 'jotai';
 import { userAtom } from '../atoms/auth';
 import { isThreadListViewAtom, isLibraryTabAtom, selectedZoteroTabIdAtom, hasPopupMessagesAtom, threadListFilterAtom, ThreadItemFilter } from '../atoms/ui';
 import { ThreadData, loadThreadAtom } from '../atoms/threads';
-import { currentThreadIdAtom } from '../agents/atoms';
+import { currentThreadIdAtom } from '@beaver/agent-core/run-state/atoms';
 import { searchableLibraryIdsAtom } from '../atoms/profile';
-import { threadService } from '../../src/services/threadService';
+import { threadService, isThreadAgentMismatch } from '@beaver/agent-core/transport/threadService';
 import { convertUTCToLocal } from '../utils/dateUtils';
 import { deduplicateByThread, threadModelToThreadData, isThreadInstanceMismatch } from '../utils/threadMatches';
 import { currentZoteroInstanceRef } from '../../src/utils/zoteroUtils';
+import { libraryRefForLibraryID } from '../../src/utils/libraryIdentity';
 import { getReaderOrNoteContextItem } from '../utils/zoteroTabContext';
 import { buildThreadItemFilter } from '../utils/threadItemFilter';
 import { buildRecentChatsCacheKey, buildRecentChatsItemLookup } from '../utils/recentChatsLookup';
-import Spinner from './icons/Spinner';
-import { logger } from '../../src/utils/logger';
-import Button from './ui/Button';
+import Spinner from '@beaver/agent-ui/icons/Spinner';
+import { logger } from '@beaver/agent-core/platform/logger';
+import Button from '@beaver/agent-ui/primitives/Button';
 
 const MAX_RECENT = 3;
 const CACHE_TTL = 60_000; // 1 minute
@@ -174,12 +175,19 @@ const RecentChats: React.FC = () => {
             if (itemLookup) {
                 try {
                     const matches = await threadService.findThreadsByItem(
-                        itemLookup.libraryId, itemLookup.zoteroKeys, 'both'
+                        {
+                            libraryId: itemLookup.libraryId,
+                            libraryRef: libraryRefForLibraryID(itemLookup.libraryId),
+                        },
+                        itemLookup.zoteroKeys,
+                        'both'
                     );
                     if (isCancelled()) return;
-                    // By-item results are scoped client-side from the identity
-                    // columns (bounded set; no server-side by-item scoping).
-                    const deduped = deduplicateByThread(matches).filter(t =>
+                    // By-item results are scoped client-side from the agent and
+                    // identity columns (bounded set; no server-side by-item
+                    // scoping).
+                    const ownAgent = matches.filter(m => !isThreadAgentMismatch(m));
+                    const deduped = deduplicateByThread(ownAgent).filter(t =>
                         !isThreadInstanceMismatch(instanceScope ?? null, {
                             zoteroUserId: t.zoteroUserId, zoteroLocalId: t.zoteroLocalId,
                         })

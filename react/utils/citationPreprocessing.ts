@@ -5,13 +5,13 @@
  * before they are rendered by React components.
  */
 
-import type { NormalizedCitationAttrs } from '../types/citations';
+import type { NormalizedCitationAttrs } from '@beaver/agent-core/types/citations';
 import {
     baseCitationKey,
     normalizeCitationTag,
     parseRawCitationAttributes,
     requestedCitationKey,
-} from './citationGrammar';
+} from '@beaver/agent-core/citations/citationGrammar';
 
 /**
  * State for tracking consecutive citations across preprocessing calls.

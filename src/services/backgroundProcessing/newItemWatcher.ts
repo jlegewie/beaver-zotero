@@ -3,7 +3,7 @@ import type { QueueDB } from '../backgroundQueue/jobExecutor';
 import { getReadableContentKind } from '../documentExtraction/attachmentResolution';
 import { resolveAttachmentFileSource } from '../documentExtraction/attachmentSource';
 import { safeIsInTrash } from '../../utils/zoteroItemUtils';
-import { logger } from '../../utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 import { BACKGROUND_EXTRACT_PRIORITY } from './constants';
 import {
     backgroundProcessingEnabled,

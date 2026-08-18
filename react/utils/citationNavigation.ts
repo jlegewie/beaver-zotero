@@ -1,7 +1,7 @@
 import { sourceBboxesToZoteroRects } from '../../src/services/annotations/annotationGeometry';
-import { logger } from '../../src/utils/logger';
-import type { BoundingBox } from '../types/citations';
-import type { ZoteroItemReference } from '../types/zotero';
+import { logger } from '@beaver/agent-core/platform/logger';
+import type { BoundingBox } from '@beaver/agent-core/types/citations';
+import type { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import {
     BeaverTemporaryAnnotations,
     installTemporaryAnnotationDismissOnNextClick,

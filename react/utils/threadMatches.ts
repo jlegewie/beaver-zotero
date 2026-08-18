@@ -1,4 +1,4 @@
-import type { ThreadModel, ThreadRunMatch, ZoteroInstanceRef } from '../../src/services/threadService';
+import type { ThreadModel, ThreadRunMatch, ZoteroInstanceRef } from '@beaver/agent-core/transport/threadService';
 import type { ThreadData } from '../atoms/threads';
 
 /** The `ThreadModel` fields the UI mapping needs (sources like the Supabase

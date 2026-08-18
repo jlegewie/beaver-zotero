@@ -1,13 +1,13 @@
 import React, { useState } from 'react';
 import { CSSItemTypeIcon } from '../../icons/icons';
-import { truncateText } from '../../../utils/stringUtils';
-import { itemTypeToIconName, ContentKind } from '../../../types/citations';
+import { truncateText } from '@beaver/agent-ui/utils/stringUtils';
+import { itemTypeToIconName, ContentKind } from '@beaver/agent-core/types/citations';
 import {
     ItemListView,
     ItemRowView,
     isItemRow,
-} from '../../../types/toolResultViews';
-import { getHost } from '../../../host';
+} from '@beaver/agent-core/run-state/toolResultViews';
+import { getHost } from '@beaver/agent-ui/host';
 import { EXTERNAL_LIBRARY_ID } from '../../../../src/services/externalFiles';
 import { AnnotationResultRow } from './AnnotationResultRow';
 

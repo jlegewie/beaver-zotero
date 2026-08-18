@@ -7,7 +7,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 // noteCitationExpand module pulls in via zoteroUtils → apiService → supabase.
 // These stubs are only here to let the module load in a unit-test harness.
 
-vi.mock('../../../src/services/supabaseClient', () => ({
+vi.mock('@beaver/agent-core/transport/supabaseClient', () => ({
     supabase: { auth: { getSession: vi.fn() } },
 }));
 
@@ -22,7 +22,7 @@ vi.mock('../../../src/utils/zoteroUtils', () => ({
     getZoteroUserIdentifier: vi.fn(() => ({ userID: undefined, localUserKey: 'test' })),
 }));
 
-vi.mock('../../../src/utils/logger', () => ({ logger: vi.fn() }));
+vi.mock('@beaver/agent-core/platform/logger', () => ({ logger: vi.fn() }));
 
 // =============================================================================
 // Imports
@@ -32,7 +32,10 @@ import {
     checkNewCitationItemsExist,
     enrichOldStringCitationRefs,
     detectPartialSimplifiedTag,
+    buildCitationRefHint,
+    buildExpansionErrorMessage,
 } from '../../../src/utils/editNoteValidation';
+import { expandToRawHtml } from '../../../src/utils/noteCitationExpand';
 import type { SimplificationMetadata } from '../../../src/utils/noteHtmlSimplifier';
 
 // =============================================================================
@@ -744,5 +747,293 @@ describe('checkNewCitationItemsExist (portable ids)', () => {
         // reveal whether the item exists in the excluded library.
         expect(error).toContain('excluded from Beaver');
         expect((globalThis as any).Zotero.Items.getByLibraryAndKey).not.toHaveBeenCalled();
+    });
+});
+
+// =============================================================================
+// buildCitationRefHint
+// =============================================================================
+
+/** Build a simplified note paragraph carrying one citation tag. */
+function para(text: string, ref?: string): string {
+    const tag = ref ? ` <citation id="u-ABCD1234" ref="${ref}"/>` : '';
+    return `<p>${text}${tag}</p>`;
+}
+
+describe('buildCitationRefHint', () => {
+    it('returns null when the note has no citations', () => {
+        expect(buildCitationRefHint('<p>Plain prose only.</p>', 'anything')).toBeNull();
+    });
+
+    it('lists every tag when the note has few, and names the ref as copyable', () => {
+        const note = [para('First point', 'c_ABCD1234_0'), para('Second point', 'c_ABCD1234_1')].join('\n');
+
+        const hint = buildCitationRefHint(note, 'First point');
+
+        expect(hint).toContain('All 2 citation tags in the note:');
+        expect(hint).toContain('<citation id="u-ABCD1234" ref="c_ABCD1234_0"/>');
+        expect(hint).toContain('<citation id="u-ABCD1234" ref="c_ABCD1234_1"/>');
+        expect(hint).toContain('Copy one of these verbatim');
+    });
+
+    it('uses singular phrasing for a lone citation', () => {
+        const hint = buildCitationRefHint(para('Only point', 'c_ABCD1234_0'), 'Only point');
+
+        expect(hint).toContain("The note's only citation tag:");
+    });
+
+    /** Six paragraphs, one citation each, distinct topics per paragraph. */
+    const sixParaNote = [
+        para('Alpha discussion of migration patterns', 'c_ABCD1234_0'),
+        para('Beta discussion of trade balances', 'c_ABCD1234_1'),
+        para('Gamma discussion of urban housing', 'c_ABCD1234_2'),
+        para('Delta discussion of labor unions', 'c_ABCD1234_3'),
+        para('Epsilon discussion of tax policy', 'c_ABCD1234_4'),
+        para('Zeta discussion of school choice', 'c_ABCD1234_5'),
+    ].join('\n');
+
+    it('caps the list and picks the citations nearest to old_string', () => {
+        const hint = buildCitationRefHint(sixParaNote, 'Zeta discussion of school choice', 2);
+
+        expect(hint).toContain('The 2 citation tags in the note closest to your old_string (of 6 total):');
+        expect(hint).toContain('ref="c_ABCD1234_5"');
+        expect(hint).toContain('ref="c_ABCD1234_4"');
+        expect(hint).not.toContain('ref="c_ABCD1234_0"');
+    });
+
+    it('anchors on a mid-note region rather than defaulting to an end of the note', () => {
+        const hint = buildCitationRefHint(sixParaNote, 'Gamma discussion of urban housing', 3) ?? '';
+
+        expect(hint).toContain('ref="c_ABCD1234_1"');
+        expect(hint).toContain('ref="c_ABCD1234_2"');
+        expect(hint).toContain('ref="c_ABCD1234_3"');
+        expect(hint).not.toContain('ref="c_ABCD1234_0"');
+        expect(hint).not.toContain('ref="c_ABCD1234_5"');
+    });
+
+    it('falls back to the head of the note when old_string has no scoreable words', () => {
+        const note = [
+            para('Alpha', 'c_ABCD1234_0'),
+            para('Beta', 'c_ABCD1234_1'),
+            para('Gamma', 'c_ABCD1234_2'),
+        ].join('\n');
+
+        const hint = buildCitationRefHint(note, '</p>', 2);
+
+        expect(hint).toContain('ref="c_ABCD1234_0"');
+        expect(hint).toContain('ref="c_ABCD1234_1"');
+        expect(hint).not.toContain('ref="c_ABCD1234_2"');
+    });
+
+    it('lists picked tags in document order, not nearest-first order', () => {
+        // Nearest-first ranks _5 ahead of _4; the rendered block must undo that
+        // so the tags read in the same order as the note itself.
+        const hint = buildCitationRefHint(sixParaNote, 'Zeta discussion of school choice', 2) ?? '';
+
+        expect(hint.indexOf('c_ABCD1234_4')).toBeLessThan(hint.indexOf('c_ABCD1234_5'));
+    });
+
+    /**
+     * One paragraph carrying six citations, so the whole note is a single line.
+     * Canonical note HTML only breaks lines at block boundaries, so a note like
+     * this gives the anchor no line to choose — it has to resolve an offset
+     * inside the line.
+     */
+    const oneLineNote = '<p>'
+        + [
+            'Alpha discussion of migration patterns',
+            'Beta discussion of trade balances',
+            'Gamma discussion of urban housing',
+            'Delta discussion of labor unions',
+            'Epsilon discussion of tax policy',
+            'Zeta discussion of school choice',
+        ]
+            .map((text, i) => `${text} <citation id="u-ABCD1234" ref="c_ABCD1234_${i}"/>`)
+            .join('. ')
+        + '</p>';
+
+    it('anchors inside the line for a newline-free note targeting a later section', () => {
+        expect(oneLineNote).not.toContain('\n');
+
+        const hint = buildCitationRefHint(oneLineNote, 'Zeta discussion of school choice', 2) ?? '';
+
+        expect(hint).toContain('The 2 citation tags in the note closest to your old_string (of 6 total):');
+        expect(hint).toContain('ref="c_ABCD1234_5"');
+        expect(hint).toContain('ref="c_ABCD1234_4"');
+        expect(hint).not.toContain('ref="c_ABCD1234_0"');
+    });
+
+    it('anchors mid-line for a newline-free note targeting a middle section', () => {
+        const hint = buildCitationRefHint(oneLineNote, 'Gamma discussion of urban housing', 3) ?? '';
+
+        expect(hint).toContain('ref="c_ABCD1234_1"');
+        expect(hint).toContain('ref="c_ABCD1234_2"');
+        expect(hint).toContain('ref="c_ABCD1234_3"');
+        expect(hint).not.toContain('ref="c_ABCD1234_0"');
+        expect(hint).not.toContain('ref="c_ABCD1234_5"');
+    });
+
+    /**
+     * One paragraph whose sections share most of their wording, so the words
+     * that identify the target section are a minority of the phrase's words.
+     */
+    const repeatedPhraseNote = '<p>'
+        + ['migration', 'trade balances', 'urban housing', 'labor unions', 'tax policy', 'school choice']
+            .map((topic, i) => `Discussion of ${topic} and evidence <citation id="u-ABCD1234" ref="c_ABCD1234_${i}"/>`)
+            .join('. ')
+        + '</p>';
+
+    it('anchors on the identifying words, not on shared phrase words repeated earlier', () => {
+        // 'discussion', 'and' and 'evidence' occur in every section; only
+        // 'school' and 'choice' identify the target one.
+        const hint = buildCitationRefHint(repeatedPhraseNote, 'Discussion of school choice and evidence', 2) ?? '';
+
+        expect(hint).toContain('ref="c_ABCD1234_5"');
+        expect(hint).not.toContain('ref="c_ABCD1234_0"');
+        expect(hint).not.toContain('ref="c_ABCD1234_1"');
+    });
+
+    it('anchors on a middle section whose identifying words repeat elsewhere', () => {
+        const hint = buildCitationRefHint(repeatedPhraseNote, 'Discussion of urban housing and evidence', 3) ?? '';
+
+        expect(hint).toContain('ref="c_ABCD1234_2"');
+        expect(hint).not.toContain('ref="c_ABCD1234_0"');
+        expect(hint).not.toContain('ref="c_ABCD1234_5"');
+    });
+
+    it('anchors on a single identifying word among otherwise identical sections', () => {
+        // Every word but the topic is shared by all six sections, so one word
+        // carries the entire signal.
+        const sections = ['migration', 'trade', 'housing', 'labor', 'taxes', 'schooling'].map(
+            (topic) => `The results of the study on ${topic} were consistent with the theory`,
+        );
+        const note = '<p>'
+            + sections.map((s, i) => `${s} <citation id="u-ABCD1234" ref="c_ABCD1234_${i}"/>`).join('. ')
+            + '</p>';
+
+        const hint = buildCitationRefHint(note, sections[5], 2) ?? '';
+
+        expect(hint).toContain('ref="c_ABCD1234_5"');
+        expect(hint).not.toContain('ref="c_ABCD1234_0"');
+    });
+
+    it('does not let a word repeated across a line outscore the line that matches most', () => {
+        // 'discussion' recurs in every paragraph, so scoring occurrences rather
+        // than distinct words would let any paragraph beat the real target.
+        const hint = buildCitationRefHint(sixParaNote, 'discussion discussion discussion school choice', 2) ?? '';
+
+        expect(hint).toContain('ref="c_ABCD1234_5"');
+        expect(hint).not.toContain('ref="c_ABCD1234_0"');
+    });
+
+    it('scores prose only, never tag names or attribute values', () => {
+        // old_string is entirely markup vocabulary present in every tag; none of
+        // it may score, so this has to fall back to the head of the note.
+        const hint = buildCitationRefHint(sixParaNote, 'citation ref ABCD1234', 2) ?? '';
+
+        expect(hint).toContain('ref="c_ABCD1234_0"');
+        expect(hint).toContain('ref="c_ABCD1234_1"');
+        expect(hint).not.toContain('ref="c_ABCD1234_5"');
+    });
+
+    it('does not run past a tag whose attribute value contains escaped angle brackets', () => {
+        const note = `<p>Text <citation id="u-ABCD1234" label="a &gt; b" ref="c_ABCD1234_0"/> more</p>`;
+
+        const hint = buildCitationRefHint(note, 'Text');
+
+        expect(hint).toContain('<citation id="u-ABCD1234" label="a &gt; b" ref="c_ABCD1234_0"/>');
+        expect(hint).not.toContain('more</p>');
+    });
+});
+
+// =============================================================================
+// buildExpansionErrorMessage
+// =============================================================================
+
+describe('buildExpansionErrorMessage', () => {
+    const note = [
+        para('Migration patterns shifted', 'c_ABCD1234_0'),
+        para('Trade balances followed', 'c_ABCD1234_1'),
+    ].join('\n');
+
+    /** Run the real expansion so the tests exercise the thrown error, not a stub. */
+    function expandOldString(oldString: string, refsInNote: string[]): unknown {
+        const metadata = buildMetadata(
+            refsInNote.map((ref) => ({ ref, itemId: 'u-ABCD1234' })),
+        );
+        try {
+            expandToRawHtml(oldString, metadata, 'old');
+            return null;
+        } catch (e) {
+            return e;
+        }
+    }
+
+    it('appends the note\'s real tags when old_string names a ref the note lacks', () => {
+        const error = expandOldString(
+            '<citation id="u-ABCD1234" ref="c_ABCD1234_4"/>',
+            ['c_ABCD1234_0', 'c_ABCD1234_1'],
+        );
+
+        const message = buildExpansionErrorMessage(error, note, '<citation id="u-ABCD1234" ref="c_ABCD1234_4"/>');
+
+        expect(message).toContain('ref="c_ABCD1234_4"');
+        expect(message).toContain('All 2 citation tags in the note:');
+        expect(message).toContain('ref="c_ABCD1234_0"');
+    });
+
+    it('keeps the "old_string" mention the backend branches on for re-read escalation', () => {
+        const error = expandOldString(
+            '<citation id="u-ABCD1234" ref="c_ABCD1234_4"/>',
+            ['c_ABCD1234_0'],
+        );
+
+        const message = buildExpansionErrorMessage(error, note, 'x');
+
+        expect(message).toContain('old_string');
+    });
+
+    it('tags the unresolvable-identity throw too (citation in old_string with no ref)', () => {
+        const error = expandOldString('<citation id="u-ZZZZ9999"/>', ['c_ABCD1234_0']);
+
+        const message = buildExpansionErrorMessage(error, note, '<citation id="u-ZZZZ9999"/>');
+
+        expect(message).toContain('was not found in the note');
+        expect(message).toContain('All 2 citation tags in the note:');
+    });
+
+    it('passes a non-citation expansion failure through unchanged', () => {
+        const error = new Error('Something else broke');
+
+        expect(buildExpansionErrorMessage(error, note, 'x')).toBe('Something else broke');
+    });
+
+    it('leaves the citation-ref error unchanged when the note has no citations', () => {
+        const error = expandOldString(
+            '<citation id="u-ABCD1234" ref="c_ABCD1234_4"/>',
+            ['c_ABCD1234_0'],
+        );
+        const baseMessage = (error as Error).message;
+
+        expect(buildExpansionErrorMessage(error, '<p>No citations here.</p>', 'x')).toBe(baseMessage);
+    });
+
+    it('stringifies a non-Error throw', () => {
+        expect(buildExpansionErrorMessage('boom', note, 'x')).toBe('boom');
+    });
+
+    it('falls back to the plain message when hint construction throws', () => {
+        const error = expandOldString(
+            '<citation id="u-ABCD1234" ref="c_ABCD1234_4"/>',
+            ['c_ABCD1234_0'],
+        );
+        const baseMessage = (error as Error).message;
+        // A throwing `simplified` stands in for any defect inside hint
+        // construction. The caller has already committed to reporting
+        // expansion_failed, so escaping here would downgrade a precise error
+        // into an opaque one.
+        const hostile = { split() { throw new Error('boom'); } } as unknown as string;
+
+        expect(buildExpansionErrorMessage(error, hostile, 'x')).toBe(baseMessage);
     });
 });

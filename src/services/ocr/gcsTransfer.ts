@@ -8,7 +8,7 @@
  * Bundle-neutral: plain `fetch`, no Supabase / React imports.
  */
 
-import { logger } from '../../utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 
 const DEFAULT_RETRIES = 2;
 const RETRY_DELAY_MS = 1_000;

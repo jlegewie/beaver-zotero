@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { computeCitationKeyFromAttrs, getCitationKey, parseCitationAttributes } from '../../../react/types/citations';
+import { computeCitationKeyFromAttrs, getCitationKey, parseCitationAttributes } from '@beaver/agent-core/types/citations';
 
 describe('parseCitationAttributes', () => {
     describe('double-quoted attributes', () => {

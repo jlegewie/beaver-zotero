@@ -6,7 +6,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import { assertDocumentHasPages } from '../../../src/beaver-extract/worker/docHelpers';
-import { ExtractionErrorCode } from '../../../src/beaver-extract/types';
+import { ExtractionErrorCode } from '@beaver/agent-core/extract/types';
 
 describe('assertDocumentHasPages', () => {
     it('does not throw for a positive integer page count', () => {

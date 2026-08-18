@@ -18,7 +18,7 @@ import { isLinkedUrlAttachment, safeFileExists } from './attachmentFiles';
 import { safeIsInTrash } from './zoteroItemUtils';
 import { isAttachmentOnServer, isAttachmentAvailableRemotely } from './webAPI';
 import { getPref } from './prefs';
-import { logger } from './logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 
 /**
  * True when the item is a kind the agent can work with: a regular item or an

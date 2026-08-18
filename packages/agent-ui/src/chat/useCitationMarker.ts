@@ -1,0 +1,60 @@
+import { useEffect } from 'react';
+import { useAtomValue, useSetAtom } from 'jotai';
+import {
+    citationKeyToMarkerAtom,
+    getNextCitationMarker,
+    getOrAssignCitationMarkerAtom,
+} from '@beaver/agent-core/citations/atoms';
+import { useIsomorphicLayoutEffect } from '../utils/useIsomorphicLayoutEffect';
+
+/**
+ * Hook to get or assign a numeric citation marker for a given citation key.
+ * 
+ * Marker assignment is thread-scoped and consistent across all scenarios:
+ * 
+ * **During streaming:**
+ * - Citations render as they appear in text
+ * - Markers are assigned in render order (first citation = "1")
+ * - When metadata arrives, processCitationsAtom uses the SAME markers
+ * 
+ * **When loading existing threads:**
+ * - resetCitationMarkersAtom clears markers
+ * - processCitationsAtom assigns markers based on citationsAtom order
+ * - Components then retrieve existing markers (no re-assignment)
+ * - Order depends on backend: runs are processed chronologically,
+ *   citations within runs use backend order (typically text-appearance order)
+ * 
+ * **Key guarantees:**
+ * - Same citation key always gets the same marker within a thread
+ * - Markers reset when thread changes (new thread, load thread, clear thread)
+ * 
+ * @param citationKey Unique key for the citation (e.g., "zotero:1-ABC123" or "external:xyz")
+ * @param isStaticRender Whether the component is being rendered to static markup (e.g. for note export)
+ * @returns Numeric marker string (e.g., "1", "2", "3")
+ */
+export function useCitationMarker(citationKey: string, isStaticRender: boolean = false): string {
+    const markerMap = useAtomValue(citationKeyToMarkerAtom);
+    const assignMarker = useSetAtom(getOrAssignCitationMarkerAtom);
+    
+    const existingMarker = markerMap[citationKey];
+    
+    // Choose effect hook based on render mode
+    // In static render (export), useLayoutEffect warns, so we use useEffect (which doesn't run but avoids warning)
+    const useIsomorphicEffect = isStaticRender ? useEffect : useIsomorphicLayoutEffect;
+    
+    // Use layout effect to assign marker synchronously after render (before paint)
+    // This ensures no visual flicker - the assignment happens before the browser paints
+    // Uses isomorphic version to avoid SSR warnings during renderToStaticMarkup (when not flagged as static)
+    // Note: Effects don't run during SSR/static render; the fallback prediction below handles this
+    useIsomorphicEffect(() => {
+        if (!existingMarker && citationKey && citationKey !== 'unknown') {
+            assignMarker(citationKey);
+        }
+    }, [citationKey, existingMarker, assignMarker]);
+    
+    // Return existing marker, or compute what it will be after assignment.
+    // Predicted with the same rule the atom assigns by, so the number shown
+    // before the effect runs is the number the effect goes on to hand out.
+    return existingMarker || getNextCitationMarker(markerMap);
+}
+

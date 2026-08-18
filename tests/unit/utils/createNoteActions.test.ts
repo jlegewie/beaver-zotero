@@ -10,11 +10,11 @@ vi.mock('../../../react/store', () => ({
     },
 }));
 
-vi.mock('../../../react/atoms/citations', () => ({
+vi.mock('@beaver/agent-core/citations/atoms', () => ({
     citationMapAtom: Symbol('citationMapAtom'),
 }));
 
-vi.mock('../../../react/atoms/externalReferences', () => ({
+vi.mock('@beaver/agent-core/citations/externalReferences', () => ({
     externalReferenceItemMappingAtom: Symbol('externalReferenceItemMappingAtom'),
     externalReferenceMappingAtom: Symbol('externalReferenceMappingAtom'),
 }));
@@ -36,7 +36,7 @@ vi.mock('../../../react/utils/noteActions', () => ({
     getBeaverNoteFooterHTML: vi.fn(() => '<footer/>'),
 }));
 
-vi.mock('../../../src/utils/logger', () => ({
+vi.mock('@beaver/agent-core/platform/logger', () => ({
     logger: vi.fn(),
 }));
 

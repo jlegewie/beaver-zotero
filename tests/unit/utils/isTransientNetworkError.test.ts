@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ApiError, ServerError, SessionRefreshError } from '../../../react/types/apiErrors';
+import { ApiError, ServerError, SessionRefreshError } from '@beaver/agent-core/types/apiErrors';
 import { isTransientNetworkError } from '../../../react/utils/isTransientNetworkError';
 
 describe('isTransientNetworkError', () => {

@@ -7,11 +7,11 @@
  * The Beaver agent is the primary agent that handles chat completions and tool execution.
  */
 
-import { logger } from '../../utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 import {
     WSListLibrariesRequest,
     WSListLibrariesResponse,
-} from '../agentProtocol';
+} from '@beaver/agent-core/protocol/agentProtocol';
 import { getSearchableLibraryIds } from './utils';
 import { getLibrarySummaries } from './libraryCounts';
 
@@ -30,7 +30,9 @@ export async function handleListLibrariesRequest(
     try {
         // Get only searchable libraries (Pro: synced, Free: all local)
         const searchableLibraryIds = getSearchableLibraryIds();
-        const libraries = await getLibrarySummaries(searchableLibraryIds);
+        // With versions: this is the call a client makes before deciding
+        // whether its cached collections and tags for a library are still good.
+        const libraries = await getLibrarySummaries(searchableLibraryIds, true);
 
         logger(`handleListLibrariesRequest: Returning ${libraries.length} libraries`, 1);
 

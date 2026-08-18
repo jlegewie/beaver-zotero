@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { SearchMenuItem } from '../SearchMenu';
+import { SearchMenuItem } from '@beaver/agent-ui/primitives/SearchMenu';
 import { CollectionMenuItemContext, createCollectionMenuItem } from '../utils/menuItemFactories';
 import { getActiveZoteroLibraryId } from '../../../../../src/utils/zoteroUtils';
 
@@ -100,7 +100,7 @@ export const useCollectionsMenu = ({
             collection.name.toLowerCase().includes(lowerCaseQuery)
         );
         const items = filteredCollections.map((collection) =>
-            createCollectionMenuItem(collection, collectionMenuItemContext)
+            createCollectionMenuItem(collection, collectionMenuItemContext, searchQuery)
         );
         let headerLabel = 'Select Collections';
         if (activeLibraryId) {

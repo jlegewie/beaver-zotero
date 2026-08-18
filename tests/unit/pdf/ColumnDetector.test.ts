@@ -17,7 +17,7 @@ import {
     type RawLine,
     type RawPageData,
     type TextStyle,
-} from '../../../src/beaver-extract/types';
+} from '@beaver/agent-core/extract/types';
 
 // ---------------------------------------------------------------------------
 // Helpers

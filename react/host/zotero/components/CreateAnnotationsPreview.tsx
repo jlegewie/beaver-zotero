@@ -4,10 +4,10 @@ import { ZoteroIcon, ZOTERO_ICONS } from '../../../components/icons/ZoteroIcon';
 import { AlertIcon, Icon } from '../../../components/icons/icons';
 import { navigateToAnnotation, navigateToPage } from '../../../utils/readerUtils';
 import { flashHighlightBoundingBoxes } from '../../../utils/citationNavigation';
-import { formatLocationChip } from '../../../utils/locationDisplay';
+import { formatLocationChip } from '@beaver/agent-ui/utils/locationDisplay';
 import { resolveEpubAnnotationTarget } from '../../../../src/services/annotations/epub/epubAnnotationResolver';
 import { BeaverTemporaryAnnotations } from '../../../utils/annotationUtils';
-import { logger } from '../../../../src/utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 import { BEAVER_ANNOTATION_COLORS } from '../../../../src/constants/annotations';
 import { resolveLibraryRef } from '../../../../src/utils/libraryIdentity';
 import { TagPill } from '../../../components/agentRuns/TagPill';
@@ -21,7 +21,7 @@ import type {
     FailedAnnotationResult,
     HighlightAnnotationItem,
     NoteAnnotationItem,
-} from '../../../types/agentActions/createAnnotations';
+} from '@beaver/agent-core/types/agentActions/createAnnotations';
 
 type ActionStatus = 'pending' | 'applied' | 'rejected' | 'undone' | 'error' | 'awaiting';
 

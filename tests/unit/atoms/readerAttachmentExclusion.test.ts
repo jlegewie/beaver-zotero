@@ -9,11 +9,11 @@ import { atom, createStore } from 'jotai';
 
 // The real module's import chain reaches Supabase and Zotero APIs at load
 // time; stub those out.
-vi.mock('../../../src/services/supabaseClient', () => ({
+vi.mock('@beaver/agent-core/transport/supabaseClient', () => ({
     supabase: { auth: { getSession: vi.fn() } },
 }));
 
-vi.mock('../../../src/utils/logger', () => ({ logger: vi.fn() }));
+vi.mock('@beaver/agent-core/platform/logger', () => ({ logger: vi.fn() }));
 
 vi.mock('../../../src/utils/zoteroUtils', () => ({
     getZoteroUserIdentifier: vi.fn(() => ({ userID: undefined, localUserKey: 'test' })),
@@ -24,6 +24,13 @@ vi.mock('../../../src/utils/prefs', () => ({
     setPref: vi.fn(),
 }));
 
+// Spy on the excluded-library notice so tests can assert the user is told why
+// the open file did not become context.
+const { excludedLibraryPopupMock, removePopupMock } = vi.hoisted(() => ({
+    excludedLibraryPopupMock: vi.fn(),
+    removePopupMock: vi.fn(),
+}));
+
 // The real module pulls in popup UI, validation, and reader utils. Mock the
 // pieces the reader-attachment path touches; keep everything else real.
 vi.mock('../../../react/utils/popupMessageUtils', async () => {
@@ -32,7 +39,14 @@ vi.mock('../../../react/utils/popupMessageUtils', async () => {
         addPopupMessageAtom: jotaiAtom(null, () => undefined),
         addRegularItemPopupAtom: jotaiAtom(null, () => undefined),
         addRegularItemsSummaryPopupAtom: jotaiAtom(null, () => undefined),
-        removePopupMessageAtom: jotaiAtom(null, () => undefined),
+        removePopupMessageAtom: jotaiAtom(null, (_get, _set, messageId: unknown) => {
+            removePopupMock(messageId);
+        }),
+        addExcludedLibraryPopupAtom: jotaiAtom(null, (_get, _set, payload: unknown) => {
+            excludedLibraryPopupMock(payload);
+        }),
+        EXCLUDED_LIBRARY_READER_POPUP_ID: 'library-excluded-reader',
+        EXCLUDED_LIBRARY_SELECTION_POPUP_ID: 'library-excluded-selection',
         safeChildAttachments: vi.fn(() => []),
     };
 });
@@ -65,12 +79,19 @@ vi.mock('../../../react/utils/readerUtils', () => ({
 
 const SEARCHABLE_LIBRARY_ID = 1;
 const EXCLUDED_LIBRARY_ID = 2;
+// A library type Beaver never supports (e.g. a feed): unsearchable, but not
+// something the user excluded and not something Preferences can change.
+const UNSUPPORTED_LIBRARY_ID = 3;
 
 // Stand in for the derived searchable-libraries atom so the test controls the
 // exclusion scope directly.
 const searchableLibraryIdsTestAtom = atom<number[]>([SEARCHABLE_LIBRARY_ID]);
+// Only the libraries the user explicitly excluded — the narrower set that may
+// be reported as an exclusion.
+const excludedLibraryIdsTestAtom = atom<number[]>([EXCLUDED_LIBRARY_ID]);
 vi.mock('../../../react/atoms/profile', () => ({
     searchableLibraryIdsAtom: searchableLibraryIdsTestAtom,
+    excludedLibraryIdsAtom: excludedLibraryIdsTestAtom,
 }));
 
 const {
@@ -126,6 +147,62 @@ describe('updateReaderAttachmentAtom library exclusion', () => {
         expect(getAsync).not.toHaveBeenCalled();
     });
 
+    it('tells the user why the open file was not added when the library is excluded', async () => {
+        stubZotero(EXCLUDED_LIBRARY_ID);
+        const store = createStore();
+
+        await store.set(updateReaderAttachmentAtom, { itemID: READER_ITEM_ID });
+
+        expect(excludedLibraryPopupMock).toHaveBeenCalledWith(
+            expect.objectContaining({
+                id: 'library-excluded-reader',
+                libraryIDs: [EXCLUDED_LIBRARY_ID],
+                expire: false,
+            }),
+        );
+    });
+
+    it('clears only the reader notice, leaving another funnel\'s notice alone', async () => {
+        stubZotero(SEARCHABLE_LIBRARY_ID);
+        const store = createStore();
+
+        store.set(clearReaderAttachmentAtom);
+
+        // Both funnels run as Beaver opens and share the popup list, so reader
+        // teardown must not delete the selection funnel's notice.
+        expect(removePopupMock).toHaveBeenCalledWith('library-excluded-reader');
+        expect(removePopupMock).not.toHaveBeenCalledWith('library-excluded-selection');
+    });
+
+    it('does not warn about exclusion when the reader library is searchable', async () => {
+        stubZotero(SEARCHABLE_LIBRARY_ID);
+        const store = createStore();
+
+        await store.set(updateReaderAttachmentAtom, { itemID: READER_ITEM_ID });
+
+        expect(excludedLibraryPopupMock).not.toHaveBeenCalled();
+    });
+
+    it('rejects the attachment from an unsupported library type', async () => {
+        stubZotero(UNSUPPORTED_LIBRARY_ID);
+        const store = createStore();
+
+        await store.set(updateReaderAttachmentAtom, { itemID: READER_ITEM_ID });
+
+        expect(store.get(currentReaderAttachmentAtom)).toBeNull();
+    });
+
+    it('does not blame an exclusion for an unsupported library type', async () => {
+        stubZotero(UNSUPPORTED_LIBRARY_ID);
+        const store = createStore();
+
+        await store.set(updateReaderAttachmentAtom, { itemID: READER_ITEM_ID });
+
+        // Unsearchable but never excluded: pointing at Beaver Preferences would
+        // send the user to a setting that cannot change the outcome.
+        expect(excludedLibraryPopupMock).not.toHaveBeenCalled();
+    });
+
     it('rejects the attachment while the searchable scope is still loading', async () => {
         stubZotero(SEARCHABLE_LIBRARY_ID);
         const store = createStore();
@@ -135,6 +212,19 @@ describe('updateReaderAttachmentAtom library exclusion', () => {
         await store.set(updateReaderAttachmentAtom, { itemID: READER_ITEM_ID });
 
         expect(store.get(currentReaderAttachmentAtom)).toBeNull();
+    });
+
+    it('does not blame an exclusion while the library-access snapshot is loading', async () => {
+        stubZotero(SEARCHABLE_LIBRARY_ID);
+        const store = createStore();
+        // Same fail-closed empty scope, but nothing is known yet — reporting it
+        // as the user's exclusion setting would be a false warning.
+        store.set(searchableLibraryIdsTestAtom, []);
+        store.set(excludedLibraryIdsTestAtom, []);
+
+        await store.set(updateReaderAttachmentAtom, { itemID: READER_ITEM_ID });
+
+        expect(excludedLibraryPopupMock).not.toHaveBeenCalled();
     });
 });
 
@@ -178,11 +268,15 @@ describe('updateReaderAttachmentAtom staleness', () => {
         const update = store.set(updateReaderAttachmentAtom, { itemID: READER_ITEM_ID });
         // The user excludes the library in Preferences while the item loads.
         store.set(searchableLibraryIdsTestAtom, []);
+        store.set(excludedLibraryIdsTestAtom, [SEARCHABLE_LIBRARY_ID]);
         release();
         await update;
 
         expect(store.get(currentReaderAttachmentAtom)).toBeNull();
         expect(validateItemsMock).not.toHaveBeenCalled();
+        expect(excludedLibraryPopupMock).toHaveBeenCalledWith(
+            expect.objectContaining({ libraryIDs: [SEARCHABLE_LIBRARY_ID] }),
+        );
     });
 
     it('does not repopulate the attachment after it was cleared', async () => {

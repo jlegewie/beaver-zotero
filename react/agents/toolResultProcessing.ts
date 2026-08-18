@@ -1,11 +1,12 @@
 import { Setter } from "jotai";
-import { addExternalReferencesToMappingAtom, checkExternalReferencesAtom } from "../atoms/externalReferences";
+import { checkExternalReferencesAtom } from "../atoms/externalReferences";
+import { addExternalReferencesToMappingAtom } from "@beaver/agent-core/citations/externalReferences";
 import { loadFullItemDataWithAllTypes } from "../../src/utils/zoteroUtils";
 import { resolveItemReference } from "../../src/utils/libraryIdentity";
-import { extractExternalSearchData, extractLookupWorkData, isExternalSearchResult, isLookupWorkResult } from "./toolResultTypes";
-import { ToolReturnPart } from "./types";
-import { extractZoteroReferences } from "./toolResultTypes";
-import { logger } from "../../src/utils/logger";
+import { extractExternalSearchData, extractLookupWorkData, isExternalSearchResult, isLookupWorkResult } from "@beaver/agent-core/run-state/toolResultTypes";
+import { ToolReturnPart, isUnsuccessfulToolReturn } from "@beaver/agent-core/agents/types";
+import { extractZoteroReferences } from "@beaver/agent-core/run-state/toolResultTypes";
+import { logger } from "@beaver/agent-core/platform/logger";
 
 /**
  * Process tool return results: extract and cache external references,
@@ -18,6 +19,9 @@ export async function processToolReturnResults(
     set: Setter
 ): Promise<void> {
     if (part.part_kind !== "tool-return") return;
+    // A non-success return carries an explanatory message where the result
+    // payload would be, so there are no references to cache or items to preload.
+    if (isUnsuccessfulToolReturn(part)) return;
 
     // Check for external references and populate cache
     if (

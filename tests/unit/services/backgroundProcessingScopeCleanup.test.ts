@@ -9,7 +9,7 @@ vi.mock('../../../src/utils/zoteroUtils', () => ({
     getIndexScopeRef: vi.fn(() => 'lLOCAL123'),
     getZoteroUserIdentifier: vi.fn(() => ({ localUserKey: 'LOCAL123' })),
 }));
-vi.mock('../../../src/utils/logger', () => ({ logger: vi.fn() }));
+vi.mock('@beaver/agent-core/platform/logger', () => ({ logger: vi.fn() }));
 
 import { purgeExcludedLibraries } from '../../../src/services/backgroundProcessing/exclusionCleanup';
 

@@ -1,6 +1,6 @@
-import { ApiService } from '../apiService';
-import API_BASE_URL from '../../utils/getAPIBaseURL';
-import type { DocumentExtractResult } from '../documentExtraction/shared/documentExtractResult';
+import { ApiService } from '@beaver/agent-core/transport/apiService';
+import { gzipJsonValueChunked } from '../../utils/gzip';
+import type { DocumentExtractResult } from '@beaver/agent-core/extract/document/shared/documentExtractResult';
 
 export const SEARCH_INDEX_API_PREFIX = '/api/v1/index';
 
@@ -66,8 +66,13 @@ export class SearchIndexApiClient extends ApiService {
         return this.post<IndexUpsertResponse>(`${SEARCH_INDEX_API_PREFIX}/upsert`, request);
     }
 
-    upsertPayload(request: IndexUpsertRequest): Promise<IndexUpsertResponse> {
-        return this.postGzip<IndexUpsertResponse>(`${SEARCH_INDEX_API_PREFIX}/upsert`, request);
+    /** Payload upserts are large, so the body goes over the wire gzipped. */
+    async upsertPayload(request: IndexUpsertRequest): Promise<IndexUpsertResponse> {
+        return await this.postRaw<IndexUpsertResponse>(
+            `${SEARCH_INDEX_API_PREFIX}/upsert`,
+            await gzipJsonValueChunked(request),
+            { 'Content-Type': 'application/json', 'Content-Encoding': 'gzip' },
+        );
     }
 
     untag(
@@ -127,5 +132,5 @@ export class SearchIndexApiClient extends ApiService {
     }
 }
 
-export const searchIndexApiClient = new SearchIndexApiClient(API_BASE_URL);
+export const searchIndexApiClient = new SearchIndexApiClient();
 

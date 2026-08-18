@@ -7,15 +7,15 @@
  * only touches the filesystem and the picker.
  */
 
-import type { Action } from '../types/actions';
+import type { Action } from '@beaver/agent-core/types/actions';
 import {
     serializeAction,
     parseShareableAction,
     SHAREABLE_ACTION_FILE_EXTENSION,
     type ParseShareableActionResult,
 } from '../types/actionShare';
-import { getActionCommand } from './slashCommands';
-import { logger } from '../../src/utils/logger';
+import { getActionCommand } from '@beaver/agent-ui/composer/slashCommands';
+import { logger } from '@beaver/agent-core/platform/logger';
 
 const DOT_EXT = `.${SHAREABLE_ACTION_FILE_EXTENSION}`;
 

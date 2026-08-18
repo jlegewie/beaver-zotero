@@ -41,7 +41,7 @@ vi.mock('../../../src/utils/zoteroItemUtils', () => ({
     safeIsInTrash: vi.fn(() => false),
 }));
 
-vi.mock('../../../src/utils/logger', () => ({ logger: vi.fn() }));
+vi.mock('@beaver/agent-core/platform/logger', () => ({ logger: vi.fn() }));
 
 const libraryScope = vi.hoisted(() => ({ initialized: true, searchableIds: [1] }));
 const profileAtoms = vi.hoisted(() => ({
@@ -72,7 +72,7 @@ import {
     resolveAttachmentFileSource,
 } from '../../../src/services/documentExtraction/attachmentSource';
 import { OCR_ENGINE_VERSION, OCR_PRIORITY_BACKFILL } from '../../../src/services/ocr/constants';
-import { ApiError } from '../../../react/types/apiErrors';
+import { ApiError } from '@beaver/agent-core/types/apiErrors';
 import type { JobExecutionContext } from '../../../src/services/backgroundQueue/jobExecutor';
 
 const api = ocrApiClient as unknown as {

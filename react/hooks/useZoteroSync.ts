@@ -5,7 +5,7 @@ import { isAuthenticatedAtom, userAtom } from "../atoms/auth";
 import { fileUploader } from "../../src/services/FileUploader";
 import { hasAuthorizedProAccessAtom, syncedLibraryIdsAtom, isDeviceAuthorizedAtom, planFeaturesAtom, syncWithZoteroAtom, isDatabaseSyncSupportedAtom } from "../atoms/profile";
 import { store } from "../store";
-import { logger } from "../../src/utils/logger";
+import { logger } from "@beaver/agent-core/platform/logger";
 import { deleteItems } from "../../src/utils/sync";
 import { threadAgentActionsAtom, undoAgentActionAtom, getZoteroItemReferenceFromAgentAction, isCreateItemAgentAction, AgentAction } from "../agents/agentActions";
 import { markExternalReferenceDeletedAtom } from "../atoms/externalReferences";

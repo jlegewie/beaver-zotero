@@ -1,5 +1,5 @@
 import { disposeMuPDFWorker } from '../../beaver-extract';
-import { logger } from '../../utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 
 /**
  * Serializes background MuPDF worker use and recycles the worker after a

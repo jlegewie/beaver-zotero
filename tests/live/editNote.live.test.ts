@@ -481,7 +481,7 @@ describe('edit_note undo after PM normalization', () => {
         expect(applied.result_data?.occurrences_replaced).toBe(3);
 
         await new Promise((r) => setTimeout(r, 800));
-        let mid = await readNote(ref.library_id, ref.zotero_key);
+        const mid = await readNote(ref.library_id, ref.zotero_key);
         expect((mid.saved_html.match(/gadget/g) ?? []).length).toBe(3);
         expect(mid.saved_html.includes('widget')).toBe(false);
 

@@ -21,16 +21,16 @@ import {
     EPUB_SCHEMA_VERSION,
     type EpubDocument,
     type ExtractEpubResult,
-} from "./schema";
+} from "@beaver/agent-core/extract/document/epub/schema";
 import {
     epubPageLabelForPosition,
     extractSectionPageMarkers,
     scorePageMarkers,
     type PageMappingSectionMarkers,
 } from "./epubPageMapping";
-import { effectiveMaxFileSizeMB } from "../../attachmentLimits";
+import { effectiveMaxFileSizeMB } from "@beaver/agent-core/transport/attachmentLimits";
 import { isRemoteAccessAvailable } from "../attachmentSource";
-import { logger } from "../../../utils/logger";
+import { logger } from "@beaver/agent-core/platform/logger";
 
 // Coverage below this fraction means the walk dropped a meaningful share of the
 // book's visible text (an unrecognized container/table structure) and warrants a

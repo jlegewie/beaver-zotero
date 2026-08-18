@@ -3,7 +3,7 @@ import {
     WSAgentActionExecuteResponse,
     WSAgentActionValidateRequest,
     WSAgentActionValidateResponse,
-} from '../../agentProtocol';
+} from '@beaver/agent-core/protocol/agentProtocol';
 import {
     EpubAnnotationError,
     MissingPageGeometryError,
@@ -11,7 +11,9 @@ import {
     createEpubHighlightAnnotation,
     createHighlightAnnotation,
     createSnapshotHighlightAnnotation,
+    highlightPartComment,
     prepareSnapshotAnnotationDocument,
+    resolvedAnnotationPageLabel,
 } from '../../annotations/createAnnotation';
 import { getReadableContentKind } from '../../documentExtraction/attachmentResolution';
 import { checkLibraryExcluded, getAttachmentFileStatus, getDeferredToolPreference, validateLibraryAccess } from '../utils';
@@ -21,13 +23,13 @@ import type {
     CreateHighlightAnnotationsProposedData,
     FailedAnnotationResult,
     HighlightAnnotationItem,
-} from '../../../../react/types/agentActions/createAnnotations';
-import type { ZoteroItemReference } from '../../../../react/types/zotero';
-import { normalizePageLocations } from '../../../../react/types/agentActions/annotations';
-import { normalizeAnnotationTags } from '../../../../react/types/agentActions/createAnnotations';
+} from '@beaver/agent-core/types/agentActions/createAnnotations';
+import type { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
+import { normalizePageLocations } from '@beaver/agent-core/types/agentActions/annotations';
+import { normalizeAnnotationTags } from '@beaver/agent-core/types/agentActions/createAnnotations';
 import { shortItemTitle } from '../../../utils/zoteroUtils';
 import { libraryRefForLibraryID, resolveItemReference, resolveLibraryRef } from '../../../utils/libraryIdentity';
-import { logger } from '../../../utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 
 function mapAnnotationErrorCode(error: unknown): string {
     if (error instanceof MissingPageGeometryError) {
@@ -377,14 +379,16 @@ export async function executeCreateHighlightAnnotationsAction(
                 ? (item.page_label ?? null)
                 : null;
 
-            for (const loc of item.page_locations) {
+            const partCount = item.page_locations.length;
+            for (let partIndex = 0; partIndex < partCount; partIndex++) {
+                const loc = item.page_locations[partIndex];
                 try {
                     const ref = await createHighlightAnnotation(attachment, {
                         pageIndex: loc.page_idx,
                         boxes: loc.boxes ?? [],
                         text: item.text ?? '',
                         color: item.color,
-                        comment: item.comment ?? item.title,
+                        comment: highlightPartComment(item.comment ?? item.title, partIndex, partCount),
                         pageLabel: loc.page_label ?? itemPageLabelFallback,
                         readingOrderOffset: loc.reading_order_offset ?? null,
                         tags,
@@ -396,6 +400,11 @@ export async function executeCreateHighlightAnnotationsAction(
                         library_id: ref.library_id,
                         zotero_key: ref.zotero_key,
                         library_ref: libraryRefForLibraryID(ref.library_id) ?? undefined,
+                        page_idx: loc.page_idx,
+                        page_label: resolvedAnnotationPageLabel(
+                            loc.page_idx,
+                            loc.page_label ?? itemPageLabelFallback,
+                        ),
                     });
                 } catch (error: any) {
                     failed.push({

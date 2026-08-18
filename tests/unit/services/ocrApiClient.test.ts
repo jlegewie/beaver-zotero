@@ -1,8 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
-vi.mock('../../../src/utils/logger', () => ({ logger: vi.fn() }));
-vi.mock('../../../src/services/supabaseClient', () => ({ supabase: {} }));
-vi.mock('../../../src/utils/getAPIBaseURL', () => ({ default: 'https://api.test' }));
+vi.mock('@beaver/agent-core/platform/logger', () => ({ logger: vi.fn() }));
+vi.mock('@beaver/agent-core/transport/supabaseClient', () => ({ supabase: {} }));
 
 import { OcrApiClient } from '../../../src/services/ocr/ocrApiClient';
 

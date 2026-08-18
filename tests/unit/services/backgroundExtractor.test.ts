@@ -52,7 +52,7 @@ vi.mock('../../../src/utils/zoteroItemUtils', () => ({
     safeIsInTrash: vi.fn(() => false),
 }));
 
-vi.mock('../../../src/utils/logger', () => ({
+vi.mock('@beaver/agent-core/platform/logger', () => ({
     logger: vi.fn(),
 }));
 

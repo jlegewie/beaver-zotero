@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 
 // Mock transitives pulled in by noteHtmlSimplifier's dependency graph.
-vi.mock('../../../src/services/supabaseClient', () => ({
+vi.mock('@beaver/agent-core/transport/supabaseClient', () => ({
     supabase: { auth: { getSession: vi.fn() } },
 }));
 vi.mock('../../../src/utils/zoteroUtils', () => ({
@@ -11,7 +11,7 @@ vi.mock('../../../src/utils/zoteroUtils', () => ({
     sanitizeCreators: vi.fn(),
     getZoteroUserIdentifier: vi.fn(() => ({ userID: undefined, localUserKey: 'test' })),
 }));
-vi.mock('../../../src/utils/logger', () => ({
+vi.mock('@beaver/agent-core/platform/logger', () => ({
     logger: vi.fn(),
 }));
 

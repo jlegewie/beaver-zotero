@@ -1,10 +1,10 @@
 import { atom } from "jotai";
 import { selectAtom } from 'jotai/utils';
-import { ExcludedLibrary, SafeProfileWithPlan, PlanFeatures, ProfileBalance, ProcessingMode, CreditPlanStatus, CreditBreakdown, CreditPlan } from "../types/profile";
-import { ZoteroLibrary } from "../types/zotero";
+import { ExcludedLibrary, SafeProfileWithPlan, PlanFeatures, ProfileBalance, ProcessingMode, CreditPlanStatus, CreditBreakdown, CreditPlan } from "@beaver/agent-core/types/profile";
+import { ZoteroLibrary } from "@beaver/agent-core/types/zotero";
 import { fileStatusAtom } from "./files";
 import { compareVersions } from "../utils/compareVersions";
-import { effectiveMaxFileSizeMB, effectiveMaxPageCount } from "../../src/services/attachmentLimits";
+import { effectiveMaxFileSizeMB, effectiveMaxPageCount } from "@beaver/agent-core/transport/attachmentLimits";
 
 // Profile and plan state
 export const isProfileLoadedAtom = atom<boolean>(false);
@@ -107,6 +107,16 @@ export const searchableLibraryIdsAtom = atom<number[]>((get) => {
     const excluded = new Set(get(excludedLibrariesAtom).map(excludedEntryKey));
     return get(localZoteroLibrariesAtom)
         .filter(lib => !excluded.has(libraryExclusionKey(lib)))
+        .map(lib => lib.library_id);
+});
+
+/**
+ * Local library IDs the user explicitly excluded in Beaver Preferences.
+ */
+export const excludedLibraryIdsAtom = atom<number[]>((get) => {
+    const excluded = new Set(get(excludedLibrariesAtom).map(excludedEntryKey));
+    return get(localZoteroLibrariesAtom)
+        .filter(lib => excluded.has(libraryExclusionKey(lib)))
         .map(lib => lib.library_id);
 });
 

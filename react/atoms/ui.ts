@@ -1,9 +1,9 @@
 import { atom } from 'jotai';
 import { PopupMessage, PopupMessageType } from '../types/popupMessage';
-import { ExternalReference } from '../types/externalReferences';
+import { ExternalReference } from '@beaver/agent-core/types/externalReferences';
 import { getPref } from '../../src/utils/prefs';
 import { isUsingBeaverCreditsAtom } from './models';
-import type { ActionCategoryFilter } from '../types/actions';
+import type { ActionCategoryFilter } from '@beaver/agent-core/types/actions';
 
 const isSidebarVisibleBaseAtom = atom(false);
 

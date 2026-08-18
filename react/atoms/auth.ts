@@ -1,7 +1,7 @@
 import { atom } from 'jotai';
 import { selectAtom } from 'jotai/utils';
 import { Session } from '@supabase/supabase-js';
-import { supabase } from '../../src/services/supabaseClient';
+import { supabase } from '@beaver/agent-core/transport/supabaseClient';
 import { isProfileLoadedAtom, profileWithPlanAtom } from './profile';
 import {
     firstRunNextStepsDismissedAtom,
@@ -12,7 +12,7 @@ import {
 } from './firstRun';
 import { whereToStartVisibleAtom } from './whereToStart';
 import { getPref, setPref } from '../../src/utils/prefs';
-import { logger } from '../../src/utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 
 /**
  * Atom representing the current authentication session

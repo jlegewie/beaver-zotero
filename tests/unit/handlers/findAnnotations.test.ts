@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../../../src/services/agentDataProvider/utils.ts', () => ({
+    checkLibraryExcluded: vi.fn(() => null),
     validateLibraryAccess: vi.fn(() => ({
         valid: true,
         library: { libraryID: 1, name: 'My Library' },
@@ -33,7 +34,8 @@ vi.mock('../../../src/utils/zoteroSerializers', () => ({
 }));
 
 import { handleFindAnnotationsRequest } from '../../../src/services/agentDataProvider/handleFindAnnotationsRequest';
-import type { WSFindAnnotationsRequest } from '../../../src/services/agentProtocol';
+import { checkLibraryExcluded } from '../../../src/services/agentDataProvider/utils';
+import type { WSFindAnnotationsRequest } from '@beaver/agent-core/protocol/agentProtocol';
 
 type MockAnnotation = Zotero.Item & {
     annotationType: string;
@@ -306,6 +308,33 @@ describe('handleFindAnnotationsRequest', () => {
                 attachment_id: `g99999-${attachment.key}`,
             });
             expect(response.error_code).toBe('library_unavailable');
+        });
+
+        it('rejects an excluded attachment library before looking up or describing the item', async () => {
+            vi.mocked(checkLibraryExcluded).mockReturnValueOnce({
+                message: 'This library is excluded from Beaver.',
+            });
+            const getByLibraryAndKeyAsync = (globalThis as any).Zotero.Items.getByLibraryAndKeyAsync;
+
+            const response = await handleFindAnnotationsRequest({
+                ...baseRequest,
+                attachment_id: `u-${attachment.key}`,
+            });
+
+            expect(response.error).toBe('This library is excluded from Beaver.');
+            expect(response.error_code).toBe('library_excluded');
+            expect(checkLibraryExcluded).toHaveBeenCalledWith(attachment.libraryID);
+            expect(getByLibraryAndKeyAsync).not.toHaveBeenCalled();
+        });
+
+        it('reports attachment not found when the referenced library is not excluded', async () => {
+            const response = await handleFindAnnotationsRequest({
+                ...baseRequest,
+                attachment_id: 'u-MISSING1',
+            });
+
+            expect(response.error).toBe('Attachment not found');
+            expect(response.error_code).toBe('not_found');
         });
 
         it('rejects a malformed attachment_id', async () => {

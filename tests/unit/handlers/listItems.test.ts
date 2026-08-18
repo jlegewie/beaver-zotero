@@ -1,10 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('../../../src/utils/logger', () => ({
+vi.mock('@beaver/agent-core/platform/logger', () => ({
     logger: vi.fn(),
 }));
 
-vi.mock('../../../src/services/supabaseClient', () => ({
+vi.mock('@beaver/agent-core/transport/supabaseClient', () => ({
     supabase: {
         auth: {
             getSession: vi.fn(),
@@ -32,6 +32,24 @@ vi.mock('../../../src/services/agentDataProvider/utils', () => ({
     extractYear: vi.fn(() => null),
     formatCreatorsString: vi.fn(() => ''),
     getAttachmentInfoForItem: vi.fn(),
+    // Mirrors the real stub's shape. The guarded reads it is built from are
+    // covered directly by tests/unit/utils/attachmentFiles.test.ts.
+    degradedAttachmentRow: vi.fn((item: any, parentInfo: any) => ({
+        result_type: 'attachment',
+        attachment_id: `${item.libraryID}-${item.key}`,
+        parent_item_id: parentInfo?.item_id ?? null,
+        title: null,
+        filename: null,
+        content_kind: 'other',
+        status: 'unreadable',
+        status_reason: 'malformed',
+        page_count: null,
+        line_count: null,
+        is_primary: false,
+        parent_title: parentInfo?.title ?? null,
+        parent_item: parentInfo ?? null,
+        date_modified: null,
+    })),
 }));
 
 // Keep the real serializeNote; stub serializeItemStub so parent serialization
@@ -340,5 +358,73 @@ describe('handleListItemsRequest', () => {
             item_id: 'u-PORTABLE1',
             result_type: 'regular',
         }));
+    });
+
+    it('degrades an unreadable attachment to a stub instead of failing the page', async () => {
+        const good1 = makeItem({
+            id: 1,
+            key: 'GOOD1',
+            itemType: 'attachment',
+            isAttachment: vi.fn(() => true),
+            isRegularItem: vi.fn(() => false),
+            attachmentFilename: 'good1.pdf',
+            attachmentContentType: 'application/pdf',
+        });
+        // Stands in for a linked file whose stored path Zotero cannot parse:
+        // reading it throws NS_ERROR_FILE_UNRECOGNIZED_PATH.
+        const bad = makeItem({
+            id: 2,
+            key: 'BAD',
+            itemType: 'attachment',
+            isAttachment: vi.fn(() => true),
+            isRegularItem: vi.fn(() => false),
+        });
+        const good2 = makeItem({
+            id: 3,
+            key: 'GOOD2',
+            itemType: 'attachment',
+            isAttachment: vi.fn(() => true),
+            isRegularItem: vi.fn(() => false),
+            attachmentFilename: 'good2.pdf',
+            attachmentContentType: 'application/pdf',
+        });
+
+        const resolveInfo = vi.mocked(getAttachmentInfoForItem).getMockImplementation()!;
+        vi.mocked(getAttachmentInfoForItem).mockImplementation(async (item: any, options: any = {}) => {
+            if (item.key === 'BAD') {
+                throw new Error(
+                    'OperationError: PathUtils.filename: Could not initialize path: '
+                    + 'NS_ERROR_FILE_UNRECOGNIZED_PATH'
+                );
+            }
+            return resolveInfo(item, options);
+        });
+
+        for (const item of [good1, bad, good2]) {
+            itemsById.set(item.id, item);
+        }
+        searchResults.push([good1.id, bad.id, good2.id]);
+
+        const response = await handleListItemsRequest({
+            event: 'list_items_request',
+            request_id: 'req-6',
+            item_category: 'attachment',
+            recursive: true,
+            sort_by: 'dateModified',
+            sort_order: 'desc',
+            limit: 20,
+            offset: 0,
+        });
+
+        expect(response.error).toBeUndefined();
+        expect(response.error_code).toBeUndefined();
+        expect(response.total_count).toBe(3);
+        expect(response.items).toHaveLength(3);
+        expect(response.items.map((i: any) => i.attachment_id)).toEqual(
+            expect.arrayContaining(['1-GOOD1', '1-BAD', '1-GOOD2'])
+        );
+        expect(response.items.find((i: any) => i.attachment_id === '1-BAD')).toEqual(
+            expect.objectContaining({ result_type: 'attachment', status: 'unreadable' })
+        );
     });
 });

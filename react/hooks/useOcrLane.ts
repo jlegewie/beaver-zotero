@@ -20,7 +20,7 @@ import {
     searchableLibraryIdsAtom,
 } from '../atoms/profile';
 import { OcrExecutor } from '../../src/services/backgroundQueue/ocrExecutor';
-import { logger } from '../../src/utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 
 /** Caps local OCR upload/download work; backend waits run slot-free. */
 const OCR_LANE_MAX_IN_FLIGHT = 3;

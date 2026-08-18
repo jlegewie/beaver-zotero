@@ -12,9 +12,9 @@
  * `Zotero.Beaver` rather than the bare `addon` global.
  */
 
-import { logger } from '../utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 import { createAbortController } from '../utils/abortController';
-import { effectiveMaxFileSizeMB } from './attachmentLimits';
+import { effectiveMaxFileSizeMB } from '@beaver/agent-core/transport/attachmentLimits';
 import {
     isExternalFileContentKind,
     type ExternalFileContentKind,

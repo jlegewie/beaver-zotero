@@ -1,6 +1,6 @@
 import React from 'react';
-import { ToolCallPart, AgentRunStatus } from '../../agents/types';
-import { TOOL_BASE_LABELS, parseArgs } from '../../agents/toolCallRequest';
+import { ToolCallPart, AgentRunStatus } from '@beaver/agent-core/agents/types';
+import { TOOL_BASE_LABELS, parseArgs } from '@beaver/agent-core/run-state/toolCallRequest';
 
 /**
  * Client-agnostic fallback for agent-action tool calls.
@@ -49,6 +49,20 @@ function summarizeArgs(toolName: string, args: Record<string, unknown>): string 
         case 'add_highlight_annotations':
         case 'add_note_annotations': {
             const n = countOf(args.annotations);
+            return n != null ? `${n} ${n === 1 ? 'annotation' : 'annotations'}` : null;
+        }
+        case 'edit_annotations': {
+            // Targets live inside the per-group `edits` entries.
+            const edits = Array.isArray(args.edits) ? args.edits : null;
+            if (!edits) return null;
+            const n = edits.reduce(
+                (sum: number, group: any) => sum + (countOf(group?.annotation_ids) ?? 0),
+                0,
+            );
+            return `${n} ${n === 1 ? 'annotation' : 'annotations'}`;
+        }
+        case 'delete_annotations': {
+            const n = countOf(args.annotation_ids);
             return n != null ? `${n} ${n === 1 ? 'annotation' : 'annotations'}` : null;
         }
         case 'create_items':

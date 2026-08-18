@@ -15,8 +15,8 @@
 import type {
     OCRDetectionOptions,
     OCRIssueReason,
-} from "../../types";
-import { DEFAULT_OCR_DETECTION_OPTIONS } from "../../types";
+} from "@beaver/agent-core/extract/types";
+import { DEFAULT_OCR_DETECTION_OPTIONS } from "@beaver/agent-core/extract/types";
 
 export const OCR_FIXTURE_SCHEMA_VERSION = 1 as const;
 

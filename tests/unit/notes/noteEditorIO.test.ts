@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 // Mock logger to silence the diagnostic message getLatestNoteHtml emits when
 // it sees multiple distinct snapshots.
-vi.mock('../../../src/utils/logger', () => ({
+vi.mock('@beaver/agent-core/platform/logger', () => ({
     logger: vi.fn(),
 }));
 
@@ -10,7 +10,7 @@ vi.mock('../../../src/utils/logger', () => ({
 // `noteCitationExpand` → `zoteroUtils` → `agentDataProvider/*` → `apiService`
 // → `supabaseClient`. Stub the bottom layers so the module loads in a unit
 // harness without a Supabase env.
-vi.mock('../../../src/services/supabaseClient', () => ({
+vi.mock('@beaver/agent-core/transport/supabaseClient', () => ({
     supabase: { auth: { getSession: vi.fn() } },
 }));
 

@@ -39,7 +39,7 @@ import {
     type PageImageResult,
     type PDFMetadata,
     type RawPageDataDetailed,
-} from "../types";
+} from "@beaver/agent-core/extract/types";
 import type {
     BeaverExtractResult,
     StructuredExtractWithDebugResult,

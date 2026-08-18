@@ -7,7 +7,7 @@ import {
     formatValidationOcrLogSuffix,
     formatRegularItemOcrLogSuffix,
 } from '../../src/services/itemValidationManager';
-import { logger } from '../../src/utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 import { isLibraryAccessReadyAtom, searchableLibraryIdsAtom } from './profile';
 import { selectedModelAtom } from './models';
 import { getPref } from '../../src/utils/prefs';

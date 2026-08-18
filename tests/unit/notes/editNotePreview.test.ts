@@ -13,6 +13,8 @@ vi.mock('../../../src/utils/noteCitationExpand', () => ({
 }));
 
 import {
+    computeRewriteScope,
+    formatRewriteScope,
     recoverSimplifiedCitationLabel,
     shouldFetchNoteContext,
 } from '../../../react/components/agentRuns/EditNotePreview';
@@ -22,8 +24,8 @@ beforeEach(() => {
         Items: {
             getByLibraryAndKey: vi.fn((libraryID: number, key: string) => {
                 if (libraryID !== 1) return false;
-                if (key === 'ATTACH') return { kind: 'attachment', parentItemID: 10, isAttachment: () => true };
-                if (key === 'PARENT') return { kind: 'parent-direct', isAttachment: () => false };
+                if (key === 'ATTACH') return { kind: 'attachment', parentItemID: 10, isAttachment: (): boolean => true };
+                if (key === 'PARENT') return { kind: 'parent-direct', isAttachment: (): boolean => false };
                 return false;
             }),
             get: vi.fn((itemID: number) => itemID === 10 ? { kind: 'parent' } : false),
@@ -59,6 +61,48 @@ describe('EditNotePreview note-context fallback', () => {
             effectiveOld: '<p>',
             strippedNew: 'Inserted text',
         })).toBe(false);
+    });
+});
+
+describe('rewrite scope summary', () => {
+    const paragraphs = Array.from(
+        { length: 115 },
+        (_, i) => `<p>Paragraph ${i} of a long research note about corrugator activity.</p>`,
+    );
+    const oldHtml = paragraphs.join('\n');
+
+    it('names the share of text a shrinking rewrite deletes', () => {
+        const newHtml = paragraphs.slice(0, 22).join('\n');
+        const scope = computeRewriteScope(oldHtml, newHtml);
+
+        expect(scope).toMatchObject({ oldLines: 115, newLines: 22, isDestructive: true });
+        expect(formatRewriteScope(scope)).toBe(
+            'Replaces the entire note: 115 → 22 lines, about 81% of the text is deleted',
+        );
+    });
+
+    it('names replacement, not deletion, when a rewrite keeps the length', () => {
+        const newHtml = Array.from(
+            { length: 115 },
+            (_, i) => `<p>Section ${i}: housing markets reproduce urban inequality.</p>`,
+        ).join('\n');
+        const scope = computeRewriteScope(oldHtml, newHtml);
+
+        expect(scope?.isDestructive).toBe(true);
+        expect(formatRewriteScope(scope)).toContain('of the text is replaced');
+    });
+
+    it('stays neutral when a rewrite grows the note', () => {
+        const newHtml = `${oldHtml}\n${paragraphs.slice(0, 25).join('\n')}`;
+        const scope = computeRewriteScope(oldHtml, newHtml);
+
+        expect(scope?.isDestructive).toBe(false);
+        expect(formatRewriteScope(scope)).toBe('Replaces the entire note: 115 → 140 lines');
+    });
+
+    it('claims no magnitude while the old body is still unknown', () => {
+        expect(computeRewriteScope('', '<p>new</p>')).toBeNull();
+        expect(formatRewriteScope(null)).toBe('Replaces the entire note');
     });
 });
 

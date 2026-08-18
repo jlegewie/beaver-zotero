@@ -5,7 +5,7 @@
  * warming the simplification cache used by edit_note.
  */
 
-import { logger } from '../../utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 import { getOrSimplify } from '../../utils/noteHtmlSimplifier';
 import { preloadNotePageLabels } from '../../utils/noteCitationExpand';
 import { getNoteHtmlForRead } from '../../utils/noteEditorIO';
@@ -13,8 +13,8 @@ import { containsPreviewMarkers, stripPreviewMarkers } from '../../utils/notePre
 import {
     WSReadNoteRequest,
     WSReadNoteResponse,
-} from '../agentProtocol';
-import { ItemStub, ItemSummary } from '../../../react/types/zotero';
+} from '@beaver/agent-core/protocol/agentProtocol';
+import { ItemStub, ItemSummary } from '@beaver/agent-core/types/zotero';
 import { serializeItemStub, serializeItemSummary } from '../../utils/zoteroSerializers';
 import {
     libraryRefForLibraryID,
@@ -28,7 +28,7 @@ import {
     normalizeCitationTag,
     parseRawCitationAttributes,
     parseZoteroId,
-} from '../../../react/utils/citationGrammar';
+} from '@beaver/agent-core/citations/citationGrammar';
 import { getNoteContentPreviewText } from '../../../react/utils/noteText';
 
 const CITED_NOTE_PREVIEW_LENGTH = 500;

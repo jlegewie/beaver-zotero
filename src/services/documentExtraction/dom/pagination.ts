@@ -1,4 +1,4 @@
-import type { DomItem } from "./schema";
+import type { DomItem } from "@beaver/agent-core/extract/document/dom/schema";
 import type { DomItemCandidate } from "./domWalk";
 
 /**

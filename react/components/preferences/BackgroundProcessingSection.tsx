@@ -13,7 +13,7 @@ import {
     backgroundProcessingLibraryToken,
     getBackgroundProcessingSkipTokens,
 } from '../../../src/services/backgroundProcessing/utils';
-import Button from '../ui/Button';
+import Button from '@beaver/agent-ui/primitives/Button';
 import { SettingsGroup, SettingsRow, SectionLabel } from './components/SettingsElements';
 
 export default function BackgroundProcessingSection(props: {

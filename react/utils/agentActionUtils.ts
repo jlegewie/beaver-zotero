@@ -4,22 +4,22 @@
 
 import { Setter } from 'jotai';
 import { AgentAction, isAnnotationAgentAction, isZoteroNoteAgentAction, isCreateNoteAgentAction, hasAppliedZoteroItem, ackAgentActionsAtom, threadAgentActionsAtom } from '../agents/agentActions';
-import { NoteProposedData } from '../types/agentActions/base';
-import { AgentRun, ModelMessage } from '../agents/types';
-import { ZoteroItemReference } from '../types/zotero';
-import { activeRunAtom, threadRunsAtom } from '../agents/atoms';
+import { NoteProposedData } from '@beaver/agent-core/types/agentActions/base';
+import { AgentRun, ModelMessage } from '@beaver/agent-core/agents/types';
+import { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
+import { activeRunAtom, threadRunsAtom } from '@beaver/agent-core/run-state/atoms';
 import { loadFullItemDataWithAllTypes, isLibraryEditable } from '../../src/utils/zoteroUtils';
 import { getLibraryByIdOrName, getCollectionByIdOrName, isLibrarySearchable } from '../../src/services/agentDataProvider/utils';
 import { getPref } from '../../src/utils/prefs';
 import { store } from '../store';
 import { currentReaderAttachmentKeyAtom } from '../atoms/messageComposition';
-import { citationMapAtom } from '../atoms/citations';
-import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '../atoms/externalReferences';
+import { citationMapAtom } from '@beaver/agent-core/citations/atoms';
+import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '@beaver/agent-core/citations/externalReferences';
 import { toolAnnotationApplyBatcher, filterAnnotationAgentActions } from './toolAnnotationApplyBatcher';
 import { saveStreamingNote } from './noteActions';
 import { currentThreadIdAtom } from '../atoms/threads';
-import { logger } from '../../src/utils/logger';
-import { parseZoteroId } from './citationGrammar';
+import { logger } from '@beaver/agent-core/platform/logger';
+import { parseZoteroId } from '@beaver/agent-core/citations/citationGrammar';
 import { libraryRefForLibraryID, resolveItemReference, resolveWriteTargetLibrary } from '../../src/utils/libraryIdentity';
 
 /**

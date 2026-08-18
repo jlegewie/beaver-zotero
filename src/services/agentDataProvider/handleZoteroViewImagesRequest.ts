@@ -8,16 +8,17 @@
  * (length 1 for image attachments).
  */
 
-import { logger } from '../../utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 import {
     WSZoteroViewImagesRequest,
     WSZoteroViewImagesResponse,
     WSViewImage,
     ViewImagesErrorCode,
-} from '../agentProtocol';
-import { ZoteroItemReference, ItemStub, AttachmentStub } from '../../../react/types/zotero';
+} from '@beaver/agent-core/protocol/agentProtocol';
+import { ZoteroItemReference, ItemStub, AttachmentStub } from '@beaver/agent-core/types/zotero';
 import { libraryRefForLibraryID, modelObjectIdFromReference } from '../../utils/libraryIdentity';
 import {
+    describeItemKind,
     getReadableContentKind,
     resolveToImageAttachment,
     resolveToPdfAttachment,
@@ -42,7 +43,7 @@ import {
     WorkerAbortError,
     isWorkerDeadlineError,
 } from '../../beaver-extract';
-import { effectiveMaxFileSizeMB, effectiveMaxPageCount } from '../attachmentLimits';
+import { effectiveMaxFileSizeMB, effectiveMaxPageCount } from '@beaver/agent-core/transport/attachmentLimits';
 import { createWorkerDispatchFlag, withWorkerDiagnostics } from './workerDiagnostics';
 import {
     DEFAULT_IMAGES_TIMEOUT_SECONDS,
@@ -159,10 +160,9 @@ async function resolveViewTarget(
         };
     }
 
-    const kind = item.isNote() ? 'note' : item.isAnnotation() ? 'annotation' : 'non-attachment item';
     return {
         resolved: false,
-        error: `The id '${requestKey}' is a ${kind}, not an attachment.`,
+        error: `The id '${requestKey}' is a ${describeItemKind(item)}, not an attachment.`,
         error_code: 'not_attachment',
     };
 }

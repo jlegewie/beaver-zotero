@@ -11,8 +11,8 @@
  * those cases via `lookup_zotero_data`.
  */
 
-import { agentService } from '../../src/services/agentService';
-import { logger } from '../../src/utils/logger';
+import { agentService } from '@beaver/agent-core/transport/agentService';
+import { logger } from '@beaver/agent-core/platform/logger';
 
 import { libraryRefForLibraryID } from '../../src/utils/libraryIdentity';
 

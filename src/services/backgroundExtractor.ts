@@ -25,7 +25,7 @@ import type {
 } from './backgroundQueue/jobExecutor';
 import { MuPDFLane } from './backgroundQueue/muPDFLane';
 import { isLibraryInScope, isLibraryScopeKnown } from './libraryScope';
-import { logger } from '../utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 import { createAbortController } from '../utils/abortController';
 import { UNRESOLVED_LIBRARY_ID } from '../utils/libraryIdentity';
 import { getPref } from '../utils/prefs';

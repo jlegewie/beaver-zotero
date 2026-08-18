@@ -1,7 +1,7 @@
 import { createStore } from 'jotai';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('../../../src/utils/logger', () => ({ logger: vi.fn() }));
+vi.mock('@beaver/agent-core/platform/logger', () => ({ logger: vi.fn() }));
 
 import {
     isProfileLoadedAtom,
@@ -9,8 +9,8 @@ import {
     localZoteroLibrariesInitializedAtom,
     profileWithPlanAtom,
 } from '../../../react/atoms/profile';
-import { SafeProfileWithPlan } from '../../../react/types/profile';
-import { ZoteroLibrary } from '../../../react/types/zotero';
+import { SafeProfileWithPlan } from '@beaver/agent-core/types/profile';
+import { ZoteroLibrary } from '@beaver/agent-core/types/zotero';
 import {
     publishLibraryScope,
     subscribeLibraryScopeMirror,

@@ -10,7 +10,7 @@ import { describe, expect, it, vi } from 'vitest';
 // The handler module's import chain reaches supabaseClient (which throws
 // without env config) — stub it and its store dependencies like the
 // companion cache test does.
-vi.mock('../../../src/services/supabaseClient', () => ({
+vi.mock('@beaver/agent-core/transport/supabaseClient', () => ({
     supabase: { auth: { getSession: vi.fn() } },
 }));
 vi.mock('../../../react/store', () => ({
@@ -28,8 +28,8 @@ import type {
     WSZoteroDocumentRequest,
     WSZoteroDocumentResponse,
     ZoteroDocumentErrorCode,
-} from '../../../src/services/agentProtocol';
-import type { ExtractContentKind } from '../../../src/services/documentExtraction/shared/contentKinds';
+} from '@beaver/agent-core/protocol/agentProtocol';
+import type { ExtractContentKind } from '@beaver/agent-core/extract/document/shared/contentKinds';
 
 function makeRequest(maxPayloadBytes?: number | null): WSZoteroDocumentRequest {
     return {

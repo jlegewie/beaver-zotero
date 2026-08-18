@@ -25,8 +25,8 @@ import {
     profileWithPlanAtom,
     searchableLibraryIdsAtom,
 } from '../../atoms/profile';
-import type { ExcludedLibrary } from '../../types/profile';
-import type { ZoteroLibrary } from '../../types/zotero';
+import type { ExcludedLibrary } from '@beaver/agent-core/types/profile';
+import type { ZoteroLibrary } from '@beaver/agent-core/types/zotero';
 
 /** Snapshot of the derived exclusion state for assertions/restore. */
 function currentExclusionState() {

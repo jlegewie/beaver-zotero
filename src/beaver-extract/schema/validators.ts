@@ -4,8 +4,8 @@ import type {
     MarkdownExtractResult,
     Rect,
     StructuredExtractResult,
-} from "./schema";
-import { SCHEMA_VERSION } from "./schema";
+} from "@beaver/agent-core/extract/schema";
+import { SCHEMA_VERSION } from "@beaver/agent-core/extract/schema";
 
 function assertObject(value: unknown, path: string): asserts value is Record<string, unknown> {
     if (!value || typeof value !== "object" || Array.isArray(value)) {

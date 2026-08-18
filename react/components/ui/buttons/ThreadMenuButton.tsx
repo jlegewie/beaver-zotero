@@ -1,21 +1,22 @@
 import React, { useState, useCallback } from 'react';
 import { useAtomValue } from 'jotai';
-import MenuButton from '../MenuButton';
-import { MenuItem } from '../menu/ContextMenu';
+import MenuButton from '@beaver/agent-ui/primitives/MenuButton';
+import { MenuItem } from '@beaver/agent-ui/primitives/ContextMenu';
 import { MoreHorizontalIcon } from '../../icons/icons';
 import { copyToClipboard } from '../../../utils/clipboard';
 import { renderToMarkdown, renderToHTML, preprocessNoteContent } from '../../../utils/citationRenderers';
 import { getBeaverNoteFooterHTML } from '../../../utils/noteActions';
 import { extractThreadContent, ExtractThreadContentOptions } from '../../../utils/threadContent';
-import { allRunsAtom, toolResultsMapAtom } from '../../../agents/atoms';
+import { allRunsAtom, toolResultsMapAtom } from '@beaver/agent-core/run-state/atoms';
 import { currentThreadIdAtom, currentThreadNameAtom, newThreadAtom, recentThreadsAtom, ThreadData } from '../../../atoms/threads';
-import { citationMapAtom } from '../../../atoms/citations';
-import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '../../../atoms/externalReferences';
+import { citationMapAtom } from '@beaver/agent-core/citations/atoms';
+import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '@beaver/agent-core/citations/externalReferences';
 import { getZoteroTargetContextSync } from '../../../../src/utils/zoteroUtils';
+import { getSelectedCollection } from '../../../../src/utils/zoteroSelection';
 import { selectItem, selectItemById } from '../../../../src/utils/selectItem';
 import { store } from '../../../store';
 import { prepareCitationRenderContext } from '../../../utils/citationRenderContext';
-import { threadService } from '../../../../src/services/threadService';
+import { threadService } from '@beaver/agent-core/transport/threadService';
 import { clearRecentChatsCache } from '../../RecentChats';
 import { clearThreadListCache } from '../../ThreadListView';
 
@@ -96,7 +97,7 @@ const ThreadMenuButton: React.FC<ThreadMenuButtonProps> = ({
 
         // Always add to the current collection (even when items are selected)
         const zp = Zotero.getActiveZoteroPane();
-        const selectedCollection = zp?.getSelectedCollection() || null;
+        const selectedCollection = getSelectedCollection(zp);
         if (selectedCollection) {
             await Zotero.DB.executeTransaction(async () => {
                 selectedCollection.addItem(newNote.id);

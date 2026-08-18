@@ -18,7 +18,7 @@ import {
     createWorkerDispatchFlag,
     withWorkerDiagnostics,
 } from '../../../src/services/agentDataProvider/workerDiagnostics';
-import type { WSWorkerDiagnostics } from '../../../src/services/agentProtocol';
+import type { WSWorkerDiagnostics } from '@beaver/agent-core/protocol/agentProtocol';
 
 interface TestResponse {
     error: string;

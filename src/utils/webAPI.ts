@@ -1,4 +1,5 @@
-import { logger } from "./logger";
+import { logger } from "@beaver/agent-core/platform/logger";
+import { safeAttachmentFilename } from "./attachmentFiles";
 
 function redactUrlCredentials(message: string): string {
     if (!message) return message;
@@ -297,7 +298,7 @@ async function extractFileFromZip(zipData: Uint8Array, item: Zotero.Item): Promi
 
         try {
             // Find the entry to extract - prefer the expected filename, fallback to first entry
-            const expectedFilename = item.attachmentFilename;
+            const expectedFilename = safeAttachmentFilename(item);
             let entryName: string;
             
             if (expectedFilename && zipReader.hasEntry(expectedFilename)) {

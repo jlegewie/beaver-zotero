@@ -5,7 +5,7 @@ import {
     CLIENT_FEATURES,
     ZOTERO_PLUGIN_CLIENT_TYPE,
     ZOTERO_PLUGIN_FEATURES,
-} from '../../../src/services/agentProtocol';
+} from '@beaver/agent-core/protocol/agentProtocol';
 
 // Guards the client-feature handshake (Lane C).
 type Op = 'gt' | 'gte';
@@ -45,6 +45,24 @@ const VERSION_GATES: { feature: string; minVersion: string; op: Op }[] = [
 // shapes a client only honors if its handlers implement them: builds that
 // predate them drop the unknown fields, so the backend degrades gracefully
 // instead of assuming support from a version.
+// citations_event is declaration-only because it gates an outbound frame the
+// client must have a handler for — a version cannot vouch for that, and the
+// backend keeps embedding citations in run_complete without it.
+// recursive_collections_filter is declaration-only because it describes what
+// the client's two item-search handlers do with collections_filter; without it
+// the backend warns the model that only direct membership was matched.
+// item_quick_search is declaration-only because it gates an inbound request
+// event a client only answers if it has the handler: a build that predates it
+// drops the unknown event silently, so the backend refuses the op up front
+// rather than letting the caller wait out the request timeout.
+// list_collections_recursive and list_tags_name_query are declaration-only for
+// the same reason as list_items_include_children: they gate request fields a
+// client only honors if its handler implements them, and a build that predates
+// them drops the field and answers a narrower question without saying so.
+// credit_confirmation is declaration-only because it gates an inbound event a
+// client only answers if it has the handler: a build that predates it drops the
+// event and stalls the run for the whole confirmation timeout, so the backend
+// falls back to the per-tool confirmations instead.
 const DECLARATION_ONLY_FEATURES = [
     'external_files',
     'ask_user_question',
@@ -52,6 +70,13 @@ const DECLARATION_ONLY_FEATURES = [
     'list_items_include_children',
     'create_note_tags_collections',
     'edit_note_batch',
+    'edit_annotations',
+    'citations_event',
+    'recursive_collections_filter',
+    'item_quick_search',
+    'list_collections_recursive',
+    'list_tags_name_query',
+    'credit_confirmation',
 ];
 
 // The full backend feature vocabulary (ALL_FEATURES in version_gates.py): every

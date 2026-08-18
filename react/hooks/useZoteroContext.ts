@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { logger } from '../../src/utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 import { isLibraryTabAtom } from '../atoms/ui';
 import {
     selectedZoteroItemsAtom,
@@ -11,7 +11,10 @@ import {
     libraryItemCountAtom,
     SMALL_LIBRARY_THRESHOLD,
     LibraryTreeRowType,
+    LibraryViewInfo,
+    SelectedCollectionInfo,
 } from '../atoms/zoteroContext';
+import { getCollectionTreeRows } from '../../src/utils/zoteroSelection';
 import { updateNoteItemAtom } from '../atoms/messageComposition';
 import { isLibraryAccessReadyAtom, searchableLibraryIdsAtom } from '../atoms/profile';
 
@@ -80,43 +83,57 @@ async function queryRecentlyAddedTodayCount(): Promise<number> {
     return count;
 }
 
-/**
- * Read the current collection tree row and return LibraryViewInfo.
- */
-function readLibraryView(zp: any): {
-    treeRowType: LibraryTreeRowType;
-    libraryId: number;
-    libraryName: string;
-    collectionId: number | null;
-    collectionName: string | null;
-    searchName: string | null;
-} | null {
-    const cv = zp?.collectionsView;
-    if (!cv?.selection) return null;
-
-    const focusedIndex = cv.selection.focused;
-    if (focusedIndex < 0) return null;
-
-    const row = cv.getRow(focusedIndex);
-    if (!row) return null;
-
-    const type = row.type as LibraryTreeRowType;
-    const libraryId = row.ref?.libraryID ?? Zotero.Libraries.userLibraryID;
-    let libraryName = 'My Library';
+function readLibraryName(libraryId: number): string {
     try {
         const lib = Zotero.Libraries.get(libraryId);
-        if (lib) libraryName = lib.name;
+        if (lib) return lib.name;
     } catch {
         // fallback
+    }
+    return 'My Library';
+}
+
+/**
+ * Read the collections-tree selection and return LibraryViewInfo.
+ *
+ * The tree supports multi-row selection, so this reports both the primary
+ * (topmost) row and the whole selection — see {@link LibraryViewInfo}. Returns
+ * null when nothing is selected.
+ */
+function readLibraryView(zp: any): LibraryViewInfo | null {
+    const rows = getCollectionTreeRows(zp);
+    if (rows.length === 0) return null;
+
+    const primary = rows[0];
+    const type = primary.type as LibraryTreeRowType;
+    const libraryId = primary.ref?.libraryID ?? Zotero.Libraries.userLibraryID;
+
+    const selectedCollections: SelectedCollectionInfo[] = [];
+    const selectedLibraryIds: number[] = [];
+    for (const row of rows) {
+        const rowLibraryId = row?.ref?.libraryID;
+        if (typeof rowLibraryId === 'number' && !selectedLibraryIds.includes(rowLibraryId)) {
+            selectedLibraryIds.push(rowLibraryId);
+        }
+        if (row?.type === 'collection' && row.ref?.id != null) {
+            selectedCollections.push({
+                collectionId: row.ref.id,
+                collectionName: row.ref.name ?? '',
+                libraryId: typeof rowLibraryId === 'number' ? rowLibraryId : libraryId,
+            });
+        }
     }
 
     return {
         treeRowType: type,
         libraryId,
-        libraryName,
-        collectionId: type === 'collection' ? (row.ref?.id ?? null) : null,
-        collectionName: type === 'collection' ? (row.ref?.name ?? null) : null,
-        searchName: type === 'search' ? (row.ref?.name ?? null) : null,
+        libraryName: readLibraryName(libraryId),
+        collectionId: type === 'collection' ? (primary.ref?.id ?? null) : null,
+        collectionName: type === 'collection' ? (primary.ref?.name ?? null) : null,
+        searchName: type === 'search' ? (primary.ref?.name ?? null) : null,
+        selectedRowCount: rows.length,
+        selectedCollections,
+        selectedLibraryIds,
     };
 }
 

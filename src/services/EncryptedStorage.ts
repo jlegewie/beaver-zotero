@@ -1,4 +1,4 @@
-import { logger } from '../utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 
 /**
  * Encrypted storage for authentication tokens.

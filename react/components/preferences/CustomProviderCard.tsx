@@ -1,8 +1,9 @@
 import React, { useState, useCallback, useMemo, useRef, useEffect } from "react";
-import Button from "../ui/Button";
-import MenuButton from "../ui/MenuButton";
-import Spinner from "../icons/Spinner";
-import { MenuItem } from "../ui/menu/ContextMenu";
+import Button from "@beaver/agent-ui/primitives/Button";
+import CopyButton from "../ui/buttons/CopyButton";
+import MenuButton from "@beaver/agent-ui/primitives/MenuButton";
+import Spinner from "@beaver/agent-ui/icons/Spinner";
+import { MenuItem } from "@beaver/agent-ui/primitives/ContextMenu";
 import {
     Icon,
     ArrowDownIcon,
@@ -20,7 +21,7 @@ import {
     chatService,
     RockPaperScissorsMove,
     RockPaperScissorsTestResult,
-} from "../../../src/services/chatService";
+} from "@beaver/agent-core/transport/clients/chatService";
 
 interface CustomProviderCardProps {
     model: CustomChatModel;
@@ -252,7 +253,7 @@ const CustomProviderCard: React.FC<CustomProviderCardProps> = ({
                     />
                     {model.api_base?.trim() && !apiBaseValidation.valid && (
                         <span className="display-flex flex-row items-start text-sm font-color-error">
-                            <Icon icon={AlertIcon} className="flex-shrink-0 mt-020" />
+                            <Icon icon={AlertIcon} className="flex-shrink-0 mt-020 mr-1" />
                             <span>
                                 {apiBaseValidation.error}{' '}
                                 <DocLink path="custom-models">Network requirements</DocLink>
@@ -294,17 +295,29 @@ const CustomProviderCard: React.FC<CustomProviderCardProps> = ({
                     </label>
                 </div>
 
-                {/* API key */}
+                {/* API key. The copy button is required: Gecko's built-in reveal button
+                    unmasks a password input without changing its type, and clipboard
+                    copy stays blocked for as long as the input is type="password". */}
                 <label className="display-flex flex-col">
                     <span className="text-sm font-color-secondary">API key</span>
-                    <input
-                        type="password"
-                        value={model.api_key}
-                        onChange={(e) => update({ api_key: e.target.value })}
-                        placeholder="sk-..."
-                        aria-label="API key"
-                        className="chat-input text-base font-color-primary"
-                    />
+                    <div className="display-flex flex-row items-center gap-2">
+                        <input
+                            type="password"
+                            value={model.api_key}
+                            onChange={(e) => update({ api_key: e.target.value })}
+                            placeholder="sk-..."
+                            aria-label="API key"
+                            className="chat-input text-base font-color-primary flex-1 min-w-0"
+                        />
+                        {hasApiKey && (
+                            <CopyButton
+                                content={model.api_key}
+                                ariaLabel="Copy API key"
+                                title="Copy API key"
+                                className="scale-11 p-0 flex-shrink-0"
+                            />
+                        )}
+                    </div>
                 </label>
 
                 {/* Supports vision */}

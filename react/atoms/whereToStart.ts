@@ -3,8 +3,8 @@
  */
 import { atom } from 'jotai';
 import { v4 as uuidv4 } from 'uuid';
-import { ActionTargetType } from '../types/actions';
-import { SignalItem } from '../types/librarySuggestions';
+import { ActionTargetType } from '@beaver/agent-core/types/actions';
+import { SignalItem } from '@beaver/agent-core/types/librarySuggestions';
 import { getActiveItems, getRecentItems, toSignalItem } from '../../src/utils/librarySignals';
 import { libraryItemCountAtom, SMALL_LIBRARY_THRESHOLD } from './zoteroContext';
 import { currentReaderAttachmentAtom, currentMessageItemsAtom } from './messageComposition';
@@ -15,10 +15,10 @@ import { sendWSMessageAtom } from './agentRunAtoms';
 import { isWebSearchAllowedAtom, isWebSearchEnabledAtom } from './ui';
 import { beaverDefaultModelAtom, updateSelectedModelAtom } from './models';
 import { resolvePromptVariables } from '../utils/promptVariables';
-import { ensurePromptActionTokens, getActionCommand } from '../utils/slashCommands';
-import { PromptAction } from '../agents/types';
-import { ChargingPermissions } from '../../src/services/agentProtocol';
-import { logger } from '../../src/utils/logger';
+import { ensurePromptActionTokens, getActionCommand } from '@beaver/agent-ui/composer/slashCommands';
+import { PromptAction } from '@beaver/agent-core/agents/types';
+import { ChargingPermissions } from '@beaver/agent-core/protocol/agentProtocol';
+import { logger } from '@beaver/agent-core/platform/logger';
 
 // Built-in action ids the launcher maps to.
 const START_PROJECT = 'builtin-start-project';
@@ -36,8 +36,7 @@ const WEB_SEARCH_ACTIONS = new Set([START_PROJECT, DISCOVER]);
 
 // Launcher actions should start without cost-confirmation UI.
 const WHERE_TO_START_PERMISSIONS_OVERRIDE: Partial<ChargingPermissions> = {
-    confirm_extraction_costs: false,
-    confirm_external_search_costs: false,
+    confirm_credits: false,
 };
 
 /**

@@ -10,7 +10,7 @@ import {
     getExistingMuPDFWorkerClient,
     type PDFWorkerSlotName,
 } from '../../beaver-extract';
-import { WSWorkerDiagnostics } from '../agentProtocol';
+import { WSWorkerDiagnostics } from '@beaver/agent-core/protocol/agentProtocol';
 
 /**
  * Collect a compact health snapshot of a PDF worker slot. Returns null when

@@ -1,11 +1,11 @@
-import { logger } from '../../../utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 import { store } from '../../../../react/store';
 import { searchableLibraryIdsAtom } from '../../../../react/atoms/profile';
-import { citationMapAtom } from '../../../../react/atoms/citations';
-import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '../../../../react/atoms/externalReferences';
+import { citationMapAtom } from '@beaver/agent-core/citations/atoms';
+import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '@beaver/agent-core/citations/externalReferences';
 import { currentThreadIdAtom } from '../../../../react/atoms/threads';
 import { grantCreatedNoteEditsForRunAtom } from '../../../../react/atoms/runApprovalPolicy';
-import { activeRunAtom } from '../../../../react/agents/atoms';
+import { activeRunAtom } from '@beaver/agent-core/run-state/atoms';
 import { renderToHTML } from '../../../../react/utils/citationRenderers';
 import { prepareCitationRenderContext } from '../../../../react/utils/citationRenderContext';
 import { wrapWithSchemaVersion, getBeaverNoteFooterHTML } from '../../../../react/utils/noteActions';
@@ -17,8 +17,8 @@ import {
     WSAgentActionValidateResponse,
     WSAgentActionExecuteRequest,
     WSAgentActionExecuteResponse,
-} from '../../agentProtocol';
-import { ItemDataWithStatus, AttachmentDataWithStatus } from '../../../../react/types/zotero';
+} from '@beaver/agent-core/protocol/agentProtocol';
+import { ItemDataWithStatus, AttachmentDataWithStatus } from '@beaver/agent-core/types/zotero';
 import { checkLibraryExcluded, excludedLibraryMessage, getDeferredToolPreference, getLibraryByIdOrName, getCollectionByIdOrName } from '../utils';
 import {
     libraryRefForLibraryID,
@@ -30,7 +30,7 @@ import {
 import { TimeoutContext, checkAborted } from '../timeout';
 import { extractCitationReferences } from './extractCitationReferences';
 import { lookupZoteroReferences, LookupZoteroReferencesResult } from '../lookupZoteroReferences';
-import { WSDataError, NoteResultItem } from '../../agentProtocol';
+import { WSDataError, NoteResultItem } from '@beaver/agent-core/protocol/agentProtocol';
 import { resolveCreateNoteParent } from './resolveCreateNoteParent';
 import { TimingAccumulator } from '../../../utils/timing';
 

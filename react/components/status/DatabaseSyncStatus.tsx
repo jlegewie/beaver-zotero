@@ -1,8 +1,8 @@
 import React from "react";
 import { AlertIcon, ArrowDownIcon, ArrowRightIcon, CSSIcon, Icon, RepeatIcon, BugIcon } from "../icons/icons";
-import Tooltip from "../ui/Tooltip";
-import IconButton from "../ui/IconButton";
-import Button from "../ui/Button";
+import Tooltip from "@beaver/agent-ui/primitives/Tooltip";
+import IconButton from "@beaver/agent-ui/primitives/IconButton";
+import Button from "@beaver/agent-ui/primitives/Button";
 import { ProgressBar } from "../status/ProgressBar";
 import { syncStatusSummaryAtom, syncStatusAtom, failedSyncLibraryIdsAtom, overallSyncStatusAtom } from "../../atoms/sync";
 import { useAtomValue, useSetAtom } from "jotai";

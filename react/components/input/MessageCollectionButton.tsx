@@ -2,12 +2,12 @@ import React from 'react';
 import { useSetAtom, useAtomValue } from 'jotai';
 import { CSSIcon, LibraryIcon } from '../icons/icons';
 import { currentMessageCollectionsAtom } from '../../atoms/messageComposition';
-import { CollectionReference, collectionReferenceKey } from '../../types/zotero';
-import { truncateText } from '../../utils/stringUtils';
+import { CollectionReference, collectionReferenceKey } from '@beaver/agent-core/types/zotero';
+import { truncateText } from '@beaver/agent-ui/utils/stringUtils';
 import { selectCollection } from '../../../src/utils/selectItem';
 import { UNRESOLVED_LIBRARY_ID } from '../../../src/utils/libraryIdentity';
 import { useRemoveContextMenu } from '../../hooks/useRemoveContextMenu';
-import { ChipWithPopup, type ChipPopupContent } from '../agentRuns/requestChips/ChipPopup';
+import { ChipWithPopup, type ChipPopupContent } from '@beaver/agent-ui/chat/ChipPopup';
 import { ChipButton } from '../agentRuns/requestChips/ChipButton';
 import { ChipRemovableIcon } from '../agentRuns/requestChips/ChipRemovableIcon';
 

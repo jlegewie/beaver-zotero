@@ -55,10 +55,20 @@ async function findCachedGeometry(attachment: Zotero.Item, pageIndex: number) {
     return record?.pages?.[pageIndex] ?? null;
 }
 
+/**
+ * Poll the open reader until the newly created annotation reaches its
+ * annotation manager (the Zotero notifier drives that refresh).
+ *
+ * The budget is deliberately far above how long the refresh takes on an idle
+ * instance (well under a second): it runs on Zotero's main thread, so on an
+ * instance that a long live-test run has loaded up, the notifier round-trip can
+ * take many seconds. A tight budget here reads as "the annotation never reached
+ * the reader" when the refresh was merely slow.
+ */
 async function waitForReaderAnnotation(
     reader: any,
     zoteroKey: string,
-    timeoutMs = 5000,
+    timeoutMs = 15000,
 ): Promise<boolean> {
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {

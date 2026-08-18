@@ -2,7 +2,7 @@ import React, { useEffect, useRef } from 'react';
 import { useSetAtom } from 'jotai';
 import { isPreferencePageVisibleAtom, activePreferencePageTabAtom, pendingActionsCategoryFilterAtom, pendingActionEditRequestAtom, PreferencePageTab } from '../atoms/ui';
 import { prefWindowFocusRefreshAtom } from '../atoms/profile';
-import type { ActionCategoryFilter } from '../types/actions';
+import type { ActionCategoryFilter } from '@beaver/agent-core/types/actions';
 import PreferencePage from './preferences/PreferencePage';
 import DialogContainer from './dialog/DialogContainer';
 
@@ -26,7 +26,8 @@ const PreferencesWindow: React.FC<PreferencesWindowProps> = ({ initialTab, initi
 
         // Set the initial tab, defaulting to 'general' for generic opens
         setActiveTab(initialTab || 'general');
-        if (initialActionsCategoryFilter) {
+        // `!= null` so the uncategorized filter (`""`) is not dropped as falsy.
+        if (initialActionsCategoryFilter != null) {
             setPendingActionsCategoryFilter({ filter: initialActionsCategoryFilter, requestId: Date.now() });
         }
         if (initialActionId) {

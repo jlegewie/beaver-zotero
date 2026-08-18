@@ -1,6 +1,6 @@
 import React from 'react';
 import { useAtomValue } from 'jotai';
-import { AgentRun } from '../../../agents/types';
+import { AgentRun } from '@beaver/agent-core/agents/types';
 import {
     getAgentActionsByRunAtom,
     isCreateItemAgentAction,
@@ -12,19 +12,22 @@ import {
 } from '../../../agents/agentActions';
 import CreateItemAgentActionDisplay from './CreateItemAgentActionDisplay';
 import NoteAgentActionDisplay from './NoteAgentActionDisplay';
-import CreateAnnotationsAgentActionDisplay from './CreateAnnotationsAgentActionDisplay';
+import ReviewChangesCard from './reviewChanges/ReviewChangesCard';
+import { useReviewRows } from './reviewChanges/useReviewRows';
 
 interface AgentActionsReviewProps {
     run: AgentRun;
 }
 
 /**
- * Displays agent actions for a completed run.
+ * Displays agent actions for a terminal run.
  * Supports create_item actions from citations, zotero_note/create_note actions,
- * and bulk PDF annotation actions (create_highlight_annotations / create_note_annotations).
+ * and bulk PDF annotation actions (create_highlight_annotations / create_note_annotations),
+ * followed by the review card for actions the run left undecided.
  */
 export const AgentActionsReview: React.FC<AgentActionsReviewProps> = ({ run }) => {
     const getAgentActionsByRun = useAtomValue(getAgentActionsByRunAtom);
+    const reviewRows = useReviewRows(run.id);
 
     // Get create item actions with toolcall_id 'citations' (from citation extraction)
     // Sort by citation count (descending) for consistent ordering
@@ -61,7 +64,9 @@ export const AgentActionsReview: React.FC<AgentActionsReviewProps> = ({ run }) =
     const hasAnnotations = annotationActions.length > 0 &&
         !annotationActions.every(a => a.status === 'rejected' || a.status === 'undone');
 
-    if (!hasCreateItems && !hasNotes && !hasAnnotations) {
+    // The review card is a fourth, independent display: it renders whenever the run
+    // stranded something, even with all three of the others empty.
+    if (!hasCreateItems && !hasNotes && !hasAnnotations && reviewRows.length === 0) {
         return null;
     }
 
@@ -79,12 +84,7 @@ export const AgentActionsReview: React.FC<AgentActionsReviewProps> = ({ run }) =
                     actions={noteActions}
                 />
             )}
-            {/* {hasAnnotations && (
-                <CreateAnnotationsAgentActionDisplay
-                    run={run}
-                    actions={annotationActions}
-                />
-            )} */}
+            {reviewRows.length > 0 && <ReviewChangesCard run={run} rows={reviewRows} />}
         </div>
     );
 };

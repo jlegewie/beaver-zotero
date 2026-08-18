@@ -1,0 +1,608 @@
+import React, { useEffect, useRef, useState, ReactNode } from 'react';
+import { createPortal } from 'react-dom';
+import { Icon, SearchIcon } from '../icons';
+import { getWindowFromElement, getDocumentFromElement } from '../utils/windowContext';
+import { isImeKeyEvent } from './ime';
+
+/**
+* Menu item interface for search menu
+*/
+export interface SearchMenuItem {
+    /** Label text for the menu item */
+    label: string;
+    /** Callback function when item is clicked */
+    onClick: () => void;
+    /** Optional icon element */
+    icon?: React.ComponentType<React.SVGProps<SVGSVGElement>>;
+    /** Optional custom content to render instead of the default label and icon. */
+    customContent?: ReactNode;
+    /** Whether this item is a group header */
+    isGroupHeader?: boolean;
+    /** Whether this item is a divider */
+    isDivider?: boolean;
+    /** Whether this item is disabled */
+    disabled?: boolean;
+}
+
+const isFocusableItem = (item: SearchMenuItem) =>
+    !item.disabled && !item.isGroupHeader && !item.isDivider;
+
+/**
+* Why the menu closed. A caller that moved DOM focus into the menu needs this
+* to decide where focus belongs afterwards: back where it came from for a
+* keyboard dismissal, but not when the user clicked some other target.
+*/
+export type SearchMenuCloseReason = 'keyboard' | 'outside-click' | 'select';
+
+/**
+* Position interface for menu placement
+*/
+export interface MenuPosition {
+    x: number;
+    y: number;
+}
+
+/**
+* Props for the SearchMenu component
+*/
+export interface SearchMenuProps {
+    /** Initial array of menu items */
+    menuItems: SearchMenuItem[];
+    /** Controls menu visibility */
+    isOpen: boolean;
+    /** Search query */
+    searchQuery: string;
+    /** Set search query */
+    setSearchQuery: (query: string) => void;
+    /** Optional width for the menu */
+    width?: string;
+    /** Optional max width for the menu */
+    maxWidth?: string;
+    /** Optional max height for the menu */
+    maxHeight?: string;
+    /** Callback when menu should close */
+    onClose: (reason: SearchMenuCloseReason) => void;
+    /** Position coordinates for menu placement */
+    position: MenuPosition;
+    /** Optional CSS class name */
+    className?: string;
+    /** Whether to use fixed positioning instead of absolute */
+    verticalPosition: 'below' | 'above';
+    /** Whether to use fixed positioning instead of absolute */
+    useFixedPosition?: boolean;
+    /** Optional adjustments for the menu position */
+    positionAdjustment?: {
+        x?: number;
+        y?: number;
+    };
+    /** Search function that returns filtered menu items based on input */
+    onSearch: (query: string) => void;
+    /** Text to display when no results are found */
+    noResultsText: string;
+    /** Placeholder text for the search input */
+    placeholder: string;
+    /** Whether to close the menu when an item is selected */
+    closeOnSelect?: boolean;
+    /** Minimum number of items for search bar to appear */
+    showSearchInput?: boolean;
+    /** Optional callback when backspace/delete is pressed with empty search. Defaults to onClose. */
+    onEmptyBackspace?: () => void;
+    /** When true, Tab selects the focused item like Enter. Meant for menus
+     *  without a rendered search input (e.g. the slash menu, where typing
+     *  stays in the chat editor); menus with a real input keep Tab's normal
+     *  focus-navigation semantics. */
+    selectOnTab?: boolean;
+    /** Optional container for rendering overlay DOM away from the trigger. */
+    portalContainer?: HTMLElement | null;
+    /** Called after the menu performs its initial focus behavior. */
+    onAfterInitialFocus?: () => void;
+    /** Optional CSS class name for group headers */
+    groupHeaderClassName?: string;
+}
+
+/**
+* A search menu component with filterable items
+*/
+const SearchMenu: React.FC<SearchMenuProps> = ({ 
+    menuItems, 
+    isOpen, 
+    onClose, 
+    position,
+    width = undefined,
+    maxWidth = undefined,
+    maxHeight = undefined,
+    className = '',
+    useFixedPosition = false,
+    positionAdjustment = { x: 0, y: 0 },
+    verticalPosition = 'below',
+    onSearch,
+    noResultsText,
+    placeholder,
+    closeOnSelect = true,
+    searchQuery,
+    setSearchQuery,
+    showSearchInput = true,
+    onEmptyBackspace,
+    selectOnTab = false,
+    portalContainer,
+    onAfterInitialFocus,
+    groupHeaderClassName = 'font-color-secondary'
+}) => {
+    const menuRef = useRef<HTMLDivElement | null>(null);
+    const scrollContainerRef = useRef<HTMLDivElement | null>(null);
+    const inputRef = useRef<HTMLInputElement | null>(null);
+    const wasOpen = useRef(false);
+    const [focusedIndex, setFocusedIndex] = useState<number>(-1);
+    const [adjustedPosition, setAdjustedPosition] = useState<MenuPosition>(position);
+    // const [menuItems, setMenuItems] = useState<SearchMenuItem[]>(initialMenuItems);
+    
+    // Modified reset effect
+    // useEffect(() => {
+    //     if (!wasOpen.current && isOpen) {
+    //         setSearchQuery('');
+    //         setMenuItems(initialMenuItems);
+    //     }
+    //     wasOpen.current = isOpen;
+    // }, [isOpen, initialMenuItems]);
+    
+    // Block scrolling when menu is open
+    useEffect(() => {
+        if (!isOpen) return;
+        
+        // Get the correct document context for this component
+        const doc = getDocumentFromElement(menuRef.current);
+        if (!doc) return;
+
+        // Prevent scroll on all elements when menu is open except for the menu itself
+        const preventScroll = (e: Event) => {
+            // Check if the event originated from within the menu
+            if (menuRef.current && menuRef.current.contains(e.target as Node)) {
+                // Allow scrolling within the menu
+                return;
+            }
+            
+            // Prevent scroll on elements outside the menu
+            e.preventDefault();
+            e.stopPropagation();
+        };
+        
+        // Get all scrollable containers
+        const messagesArea = doc.getElementById('beaver-messages');
+        if (messagesArea) {
+            messagesArea.addEventListener('wheel', preventScroll, { passive: false });
+            messagesArea.addEventListener('touchmove', preventScroll, { passive: false });
+        }
+        
+        // Also prevent on document for safety
+        doc.addEventListener('wheel', preventScroll, { capture: true, passive: false });
+        doc.addEventListener('touchmove', preventScroll, { capture: true, passive: false });
+        
+        return () => {
+            if (messagesArea) {
+                messagesArea.removeEventListener('wheel', preventScroll);
+                messagesArea.removeEventListener('touchmove', preventScroll);
+            }
+            doc.removeEventListener('wheel', preventScroll, { capture: true });
+            doc.removeEventListener('touchmove', preventScroll, { capture: true });
+        };
+    }, [isOpen]);
+    
+    // Calculate adjusted position when menu opens
+    useEffect(() => {
+        if (!isOpen || !menuRef.current) return;
+        
+        // Get the correct window context for this component
+        const win = getWindowFromElement(menuRef.current);
+        if (!win) return;
+
+        // Get viewport dimensions
+        const viewportWidth = win.innerWidth;
+        const viewportHeight = win.innerHeight;
+        
+        // Get menu dimensions
+        const menuRect = menuRef.current.getBoundingClientRect();
+        const menuWidth = menuRect.width;
+        const menuHeight = menuRect.height;
+        
+        // Original anchor position
+        const anchorX = position.x + (positionAdjustment.x || 0);
+        const anchorY = position.y + (positionAdjustment.y || 0);
+        
+        // Calculate adjusted position to keep menu within viewport with a margin of 8px
+        let adjustedX = anchorX;
+        let adjustedY = anchorY;
+        
+        // Check if menu would go off the right side
+        if (adjustedX + menuWidth > viewportWidth - 8) {
+            adjustedX = Math.max(8, viewportWidth - menuWidth - 8);
+        }
+        
+        // Check if menu would go off the left side
+        if (adjustedX < 8) {
+            adjustedX = 8;
+        }
+        
+        // Add gap to prevent menu from covering the anchor
+        const gap = 8;
+        
+        // Vertical placement
+        if (verticalPosition === 'above') {
+            // Place menu above the anchor with a gap
+            adjustedY = anchorY - menuHeight;
+        } else {
+            // Place menu below the anchor with a gap
+            adjustedY = anchorY + gap;
+        }
+        
+        // Only update position if it's actually different to prevent infinite loops
+        if (adjustedX !== adjustedPosition.x || adjustedY !== adjustedPosition.y) {
+            setAdjustedPosition({ x: adjustedX, y: adjustedY });
+        }
+    }, [isOpen, position, positionAdjustment, verticalPosition]);
+    
+    // Handle outside clicks
+    useEffect(() => {
+        if (!isOpen) return;
+        
+        // Get the correct document context for this component
+        const doc = getDocumentFromElement(menuRef.current);
+        if (!doc) return;
+
+        const handleClickOutside = (e: MouseEvent) => {
+            if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+                onClose('outside-click');
+            }
+        };
+
+        const handleEscape = (e: KeyboardEvent) => {
+            // An Escape owned by an IME composition cancels the composition,
+            // not the menu.
+            if (isImeKeyEvent(e)) return;
+            if (e.key === 'Escape') {
+                onClose('keyboard');
+            }
+        };
+        
+        doc.addEventListener('mousedown', handleClickOutside);
+        doc.addEventListener('keydown', handleEscape);
+        
+        return () => {
+            doc.removeEventListener('mousedown', handleClickOutside);
+            doc.removeEventListener('keydown', handleEscape);
+        };
+    }, [isOpen, onClose]);
+    
+    // Handle keyboard navigation
+    useEffect(() => {
+        if (!isOpen || menuItems.length === 0) return;
+        
+        // Compute display order items based on verticalPosition inside the effect
+        const displayOrderMenuItems = verticalPosition === 'above' 
+            ? [...menuItems].reverse() 
+            : menuItems;
+        
+        const handleKeyNav = (e: KeyboardEvent) => {
+            // Keys owned by an active IME composition (e.g. candidate-window
+            // navigation) must not drive the menu.
+            if (isImeKeyEvent(e)) return;
+            // Only handle navigation keys if not coming from the input field
+            if (e.target === inputRef.current) {
+                // For input field, only handle arrow keys and enter
+                if (e.key === 'ArrowDown' || e.key === 'ArrowUp' || e.key === 'Enter') {
+                    e.preventDefault();
+                } else {
+                    // Let other keystrokes pass to input for typing
+                    return;
+                }
+            }
+            
+            switch (e.key) {
+                case 'ArrowDown':
+                    e.preventDefault();
+                    setFocusedIndex((prev: number) => {
+                        if (displayOrderMenuItems.length === 0) return -1;
+                        let next = (prev + 1) % displayOrderMenuItems.length;
+                        const initialNext = next;
+                        // Skip group headers, dividers, and disabled items
+                        while (!isFocusableItem(displayOrderMenuItems[next])) {
+                            next = (next + 1) % displayOrderMenuItems.length;
+                            if (next === initialNext) return prev; // Avoid infinite loop
+                        }
+                        return next;
+                    });
+                    break;
+                case 'ArrowUp':
+                    e.preventDefault();
+                    setFocusedIndex((prev: number) => {
+                        if (displayOrderMenuItems.length === 0) return -1;
+                        let next = (prev - 1 + displayOrderMenuItems.length) % displayOrderMenuItems.length;
+                        const initialNext = next;
+                        // Skip group headers, dividers, and disabled items
+                        while (!isFocusableItem(displayOrderMenuItems[next])) {
+                            next = (next - 1 + displayOrderMenuItems.length) % displayOrderMenuItems.length;
+                            if (next === initialNext) return prev; // Avoid infinite loop
+                        }
+                        return next;
+                    });
+                    break;
+                case 'Enter':
+                case 'Tab':
+                    if (e.key === 'Tab' && !selectOnTab) break;
+                    e.preventDefault();
+                    if (focusedIndex >= 0 &&
+                        focusedIndex < displayOrderMenuItems.length &&
+                        isFocusableItem(displayOrderMenuItems[focusedIndex])
+                    ) {
+                        displayOrderMenuItems[focusedIndex].onClick();
+                        if(closeOnSelect) onClose('select');
+                    }
+                    break;
+                default:
+                    break;
+            }
+        };
+        
+        // Get the correct document context for this component
+        const doc = getDocumentFromElement(menuRef.current);
+        if (!doc) return;
+        doc.addEventListener('keydown', handleKeyNav);
+        return () => doc.removeEventListener('keydown', handleKeyNav);
+    }, [isOpen, menuItems, focusedIndex, onClose, closeOnSelect, verticalPosition, selectOnTab]);
+    
+    // Scroll to bottom when menu opens in 'above' mode so items nearest the search input are visible
+    useEffect(() => {
+        if (isOpen && verticalPosition === 'above' && scrollContainerRef.current) {
+            scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight;
+        }
+    }, [isOpen, menuItems, verticalPosition]);
+
+    // Set initial focus
+    useEffect(() => {
+        if (isOpen) {
+            // Focus the input
+            inputRef.current?.focus();
+            onAfterInitialFocus?.();
+
+            const displayOrderMenuItems = verticalPosition === 'above' 
+                ? [...menuItems].reverse() 
+                : menuItems;
+
+            if (displayOrderMenuItems.length > 0) {
+                let initialIndex = -1;
+                
+                if (verticalPosition === 'above') {
+                    // For 'above', we want the bottom-most item, which is the last in the displayed list.
+                    initialIndex = displayOrderMenuItems.length - 1;
+                    while (initialIndex >= 0 && !isFocusableItem(displayOrderMenuItems[initialIndex])) {
+                        initialIndex--;
+                    }
+                } else {
+                    // For 'below', we want the top-most item, which is the first in the displayed list.
+                    initialIndex = 0;
+                    while (initialIndex < displayOrderMenuItems.length && !isFocusableItem(displayOrderMenuItems[initialIndex])) {
+                        initialIndex++;
+                    }
+                }
+                
+                const isValidIndex = initialIndex >= 0 && initialIndex < displayOrderMenuItems.length;
+                setFocusedIndex(isValidIndex ? initialIndex : -1);
+            } else {
+                setFocusedIndex(-1);
+            }
+        } else {
+            setFocusedIndex(-1);
+        }
+    }, [isOpen, menuItems, onAfterInitialFocus, verticalPosition]);
+    
+    // Modified search input handler
+    const handleSearchInput = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const query = e.target.value;
+        setSearchQuery(query);
+        
+        try {
+            if (query.trim()) await onSearch(query);
+        } catch (error) {
+            console.error('Error during search:', error);
+        }
+    };
+    
+    if (!isOpen) return null;
+    
+    // Compute display order items based on verticalPosition for rendering
+    const displayOrderMenuItems = verticalPosition === 'above' 
+        ? [...menuItems].reverse() 
+        : menuItems;
+
+    // Highlight matching substring in a label
+    const highlightMatch = (label: string, query: string): ReactNode => {
+        if (!query) return label;
+        const lowerLabel = label.toLowerCase();
+        const lowerQuery = query.toLowerCase();
+        const matchIndex = lowerLabel.indexOf(lowerQuery);
+        if (matchIndex === -1) return label;
+        const before = label.slice(0, matchIndex);
+        const match = label.slice(matchIndex, matchIndex + query.length);
+        const after = label.slice(matchIndex + query.length);
+        return (
+            <>
+                {before}
+                <span className="font-color-accent-blue">{match}</span>
+                {after}
+            </>
+        );
+    };
+
+    // Helper function to render menu item
+    const renderMenuItem = (item: SearchMenuItem, index: number) => {
+        if (item.isDivider) {
+            return (
+                <div
+                    key={index}
+                    role="presentation"
+                    className="border-t border-top-quinary"
+                />
+            );
+        }
+
+        if (item.isGroupHeader) {
+            // Render group header
+            return (
+                <div
+                    key={index}
+                    role="presentation"
+                    className={`px-2 py-1 text-sm font-semibold mt-1 first:mt-0 ${groupHeaderClassName}`}
+                >
+                    {item.customContent ?? <span className="truncate">{item.label}</span>}
+                </div>
+            );
+        }
+        
+        // Regular menu item
+        return (
+            <div
+                key={index}
+                role="menuitem"
+                tabIndex={focusedIndex === index ? 0 : -1}
+                className={`
+                    display-flex items-center gap-2 px-2 py-15 transition user-select-none
+                    ${focusedIndex === index && !item.disabled ? 'bg-quinary' : ''}
+                    ${item.disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
+                `}
+                style={{ maxWidth: '100%', minWidth: 0 }}
+                onClick={(e) => {
+                    e.stopPropagation();
+                    if (item.disabled) return;
+                    item.onClick();
+                    if(closeOnSelect) onClose('select');
+                }}
+                onMouseDown={(e) => {
+                    // A menu without its own search field is driven by an
+                    // external editor. Keep the caret there when a row is
+                    // clicked so mouse navigation into a submenu does not
+                    // stop subsequent typing from reaching that editor.
+                    if (!showSearchInput) e.preventDefault();
+                }}
+                // Hover moves the focused item rather than highlighting on top
+                // of it: a separate hover highlight would keep showing the row
+                // under the pointer while the arrow keys moved the real focus
+                // elsewhere, so Enter picked a row the user could not see.
+                onMouseEnter={() => {
+                    if (isFocusableItem(item)) {
+                        setFocusedIndex(index);
+                    }
+                }}
+                onFocus={() => {
+                    if (isFocusableItem(item)) {
+                        setFocusedIndex(index);
+                    }
+                }}
+            >
+                {item.customContent ? (
+                    item.customContent
+                ) : (
+                    <span className="display-flex items-center gap-2 w-full min-w-0">
+                        {item.icon && (
+                            <Icon icon={item.icon} size={14} className="font-color-secondary flex-shrink-0"/>
+                        )}
+                        <span className="flex-1 text-sm font-color-secondary truncate">{highlightMatch(item.label, searchQuery)}</span>
+                    </span>
+                )}
+            </div>
+        );
+    };
+
+    const textInput = (
+        <div 
+            className={`display-flex flex-row items-center gap-05 p-1 px-2 ${
+                verticalPosition === 'above' 
+                    ? 'mt-1 border-top-quinary' 
+                    : 'mb-1 border-bottom-quinary'
+            }`}
+        >
+            <Icon icon={SearchIcon} size={14} className="font-color-tertiary flex-shrink-0"/>
+            <input
+                ref={inputRef}
+                type="text"
+                value={searchQuery}
+                onChange={handleSearchInput}
+                onKeyDown={(e) => {
+                    if ((e.key === 'Backspace' || e.key === 'Delete') && searchQuery.length === 0) {
+                        e.preventDefault();
+                        if (onEmptyBackspace) onEmptyBackspace();
+                        else onClose('keyboard');
+                    }
+                }}
+                placeholder={placeholder}
+                className="w-full bg-quaternary font-color-primary outline-none chat-input"
+                style={{ fontSize: '12px' }}
+                aria-label="Search"
+            />
+        </div>
+    )
+
+    const menu = (
+        <div
+            ref={menuRef}
+            className={`bg-quaternary border-popup rounded-md outline-none z-1000 shadow-md display-flex flex-col ${className}`}
+            style={{
+                position: useFixedPosition ? 'fixed' : 'absolute',
+                top: adjustedPosition.y,
+                left: adjustedPosition.x,
+                maxWidth: maxWidth || undefined,
+                width: width || undefined,
+                maxHeight: maxHeight || '80vh'
+            }}
+            tabIndex={-1}
+            role="menu"
+            aria-orientation="vertical"
+            onClick={(e) => e.stopPropagation()} // Prevent clicks from propagating
+        >
+            {/* Render menu items and search input based on vertical position */}
+            {verticalPosition === 'above' ? (
+                <>
+                    {/* Menu items take remaining space and scroll */}
+                    <div ref={scrollContainerRef} className="overflow-y-auto overflow-x-hidden scrollbar flex-1">
+                        {displayOrderMenuItems.length > 0 ? (
+                            displayOrderMenuItems.map((item, index) => renderMenuItem(item, index))
+                        ) : (
+                            <div className="px-2 p-1 py-2 text-sm font-color-tertiary text-center">
+                                {searchQuery.trim() ? "No results found" : "Start typing to search"}
+                            </div>
+                        )}
+                    </div>
+
+                    {/* Search input at the bottom, ensure it doesn't shrink */}
+                    {showSearchInput && (
+                        <div className="flex-shrink-0"> 
+                            {textInput}
+                        </div>
+                    )}
+                </>
+            ) : (
+                <>
+                    {/* Search input at the top, ensure it doesn't shrink */}
+                    {showSearchInput && (
+                        <div className="flex-shrink-0">
+                            {textInput}
+                        </div>
+                    )}
+                    
+                    {/* Menu items take remaining space and scroll */}
+                    <div className="overflow-y-auto overflow-x-hidden scrollbar flex-1">
+                        {displayOrderMenuItems.length > 0 ? (
+                            displayOrderMenuItems.map((item, index) => renderMenuItem(item, index))
+                        ) : (
+                            <div className="px-2 py-1 text-sm font-color-tertiary text-center">
+                                {noResultsText}
+                            </div>
+                        )}
+                    </div>
+                </>
+            )}
+        </div>
+    );
+
+    return portalContainer ? createPortal(menu, portalContainer) : menu;
+};
+
+export default SearchMenu; 

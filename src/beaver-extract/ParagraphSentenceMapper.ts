@@ -39,8 +39,8 @@ import type {
     SentenceItem,
     TextBearingItem,
     TextItem,
-} from "./types";
-import { bboxHeight, mergeBoxes } from "./types";
+} from "@beaver/agent-core/extract/types";
+import { bboxHeight, mergeBoxes } from "@beaver/agent-core/extract/types";
 import type { PageLine } from "./LineDetector";
 import type {
     ContentItem,

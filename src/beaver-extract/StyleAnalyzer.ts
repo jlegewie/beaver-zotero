@@ -14,8 +14,8 @@ import type {
     RawFont,
     TextStyle,
     StyleProfile,
-} from "./types";
-import { styleToKey } from "./types";
+} from "@beaver/agent-core/extract/types";
+import { styleToKey } from "@beaver/agent-core/extract/types";
 import { pdfLog, isAnalyzerLoggingEnabled } from "./logging";
 
 /** Minimum characters in a span to include in analysis */

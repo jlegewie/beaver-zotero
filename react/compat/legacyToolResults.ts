@@ -2,7 +2,7 @@
  * Legacy tool-result compatibility layer.
  *
  * The shared render layer understands ONLY the hydrated `ToolResultView` models
- * (`react/types/toolResultViews.ts`). New backends ship those on
+ * (`@beaver/agent-core/run-state/toolResultViews`). New backends ship those on
  * `ToolReturnMetadata.view`. But two row shapes predate them:
  *
  *  1. Old threads, whose tool returns carry only the reference-only `summary`
@@ -15,11 +15,13 @@
  * plus live Zotero loads (display names, subtitles, icons, annotation fields).
  */
 
-import { ToolReturnPart } from "../agents/types";
-import { ZoteroItemReference } from "../types/zotero";
-import { logger } from "../../src/utils/logger";
+import { ToolReturnPart, isUnsuccessfulToolReturn } from "@beaver/agent-core/agents/types";
+import { ZoteroItemReference } from "@beaver/agent-core/types/zotero";
+import { logger } from "@beaver/agent-core/platform/logger";
 import { resolveItemReference } from "../../src/utils/libraryIdentity";
-import { truncateText, formatNumberRanges } from "../utils/stringUtils";
+import { safeAttachmentFilename } from "../../src/utils/attachmentFiles";
+import { truncateText } from "@beaver/agent-ui/utils/stringUtils";
+import { formatNumberRanges } from "@beaver/agent-ui/utils/pageRanges";
 import { EXTERNAL_LIBRARY_ID } from "../../src/services/externalFiles";
 import {
     ToolResultView,
@@ -34,7 +36,7 @@ import {
     AttachmentSearchRowView,
     AttachmentMatchView,
     isToolResultView,
-} from "../types/toolResultViews";
+} from "@beaver/agent-core/run-state/toolResultViews";
 import {
     // type guards
     isZoteroSearchResult,
@@ -81,7 +83,7 @@ import {
     LineReference,
     AttachmentSearchReference,
     AttachmentMatchSummary,
-} from "../agents/toolResultTypes";
+} from "@beaver/agent-core/run-state/toolResultTypes";
 
 const NOTE_TITLE_MAX_LENGTH = 100;
 /** Maximum annotation text/comment preview stored in legacy view rows. */
@@ -159,7 +161,7 @@ function titleOf(item: Zotero.Item): string {
 }
 
 function attachmentOwnName(item: Zotero.Item): string {
-    return item.getField?.("title") || item.attachmentFilename || "";
+    return item.getField?.("title") || safeAttachmentFilename(item) || "";
 }
 
 /**
@@ -885,6 +887,10 @@ export async function upgradeToolReturn(
     toolCallArgs?: string | Record<string, any> | null,
 ): Promise<ToolReturnPart> {
     if (part.part_kind !== "tool-return") return part;
+    // A non-success return carries an explanatory message where the result
+    // payload would be. Synthesizing a view from the stale summary would
+    // fabricate a result card for a call that produced nothing.
+    if (isUnsuccessfulToolReturn(part)) return part;
     // Pass through only when the existing view is a VALID, renderable view model.
     // A truthy-but-malformed view falls through to re-synthesis below (and, if it
     // can't be rebuilt, is rejected by the same `isToolResultView` check at render

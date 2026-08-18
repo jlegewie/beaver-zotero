@@ -12,7 +12,7 @@ import { OCR_ENGINE_VERSION, OCR_PRIORITY_BACKFILL } from '../ocr/constants';
 import { maybeEnqueueOcrJob } from '../ocr/enqueueOcr';
 import { getSystemIdleTimeMs } from '../../utils/idleService';
 import { safeIsInTrash } from '../../utils/zoteroItemUtils';
-import { logger } from '../../utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 import {
     ATTACHMENT_SCAN_BATCH_SIZE,
     BACKGROUND_EXTRACT_PRIORITY,

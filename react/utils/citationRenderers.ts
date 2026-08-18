@@ -4,25 +4,22 @@ import { Provider, createStore } from 'jotai';
 import { store } from '../store';
 import MarkdownRenderer from '../components/messages/MarkdownRenderer';
 import { Citation } from '../../src/services/CitationService';
-import { citationsAtom, citationByKeyAtom, citationKeyToMarkerAtom, pageLabelsByAttachmentIdAtom, externalFileLocalPathsAtom, type PageLabelsByAttachmentId } from '../atoms/citations';
-import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '../atoms/externalReferences';
-import { Citation as BeaverCitation } from '../types/citations';
+import { citationsAtom, citationByKeyAtom, citationKeyToMarkerAtom, compactCitationMarkers, getCitationMarkerBaseKeys, pageLabelsByAttachmentIdAtom, externalFileLocalPathsAtom, type PageLabelsByAttachmentId } from '@beaver/agent-core/citations/atoms';
+import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '@beaver/agent-core/citations/externalReferences';
+import { Citation as BeaverCitation } from '@beaver/agent-core/types/citations';
 import { CITATION_TAG_PATTERN } from '../utils/citationPreprocessing';
-import { ZoteroItemReference } from '../types/zotero';
-import { logger } from '../../src/utils/logger';
-import { ExternalReference } from '../types/externalReferences';
-import { formatExternalCitation } from '../atoms/externalReferences';
+import { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
+import { logger } from '@beaver/agent-core/platform/logger';
+import { ExternalReference } from '@beaver/agent-core/types/externalReferences';
+import { formatExternalCitation } from '@beaver/agent-core/citations/externalReferences';
 import { UNRESOLVED_LIBRARY_ID } from '../../src/utils/libraryIdentity';
 import {
     baseCitationKey,
-    externalCompatKey,
-    getRequestedRef,
-    getResolvedRef,
     getPageLocator,
     normalizeCitationTag,
     parseRawCitationAttributes,
     requestedCitationKey,
-} from './citationGrammar';
+} from '@beaver/agent-core/citations/citationGrammar';
 
 // Regex for citation syntax - matches self-closing (/>) and non-self-closing (>) with or without closing tag
 const citationRegex = /<citation(?:\s+([^>]*?))?\s*(\/>|>(?:.*?<\/citation>)?)/g;
@@ -232,6 +229,56 @@ export interface RenderContextData {
 }
 
 /**
+ * Assign the thread-scoped citation markers a static render needs up front.
+ *
+ * The live path assigns markers from effects, which never run under
+ * `renderToStaticMarkup`, so the numbers are computed here instead: in tag
+ * order first, then merged across the identities that name one source. The
+ * alias groups come from `getCitationMarkerBaseKeys`, the same grouping the
+ * live path assigns by, so a source cited by one name in the text and carrying
+ * another in its metadata is numbered once in either path. Merging frees the
+ * numbers the folded-in aliases held, so the result is compacted back to a
+ * contiguous 1..N.
+ */
+export function computeStaticCitationMarkers(
+    content: string,
+    citationDataMap?: Record<string, BeaverCitation>,
+): Record<string, string> {
+    const markerMap: Record<string, string> = {};
+    let markerCount = 0;
+
+    // Use the same regex as preprocessCitations to find citations in order
+    const pattern = new RegExp(CITATION_TAG_PATTERN);
+
+    let match;
+    while ((match = pattern.exec(content)) !== null) {
+        const attributesStr = match[1] || '';
+        const normalized = normalizeCitationTag(parseRawCitationAttributes(attributesStr));
+        const citationKey = normalized.ok ? baseCitationKey(normalized.ref) : '';
+
+        if (citationKey && !markerMap[citationKey]) {
+            markerCount++;
+            markerMap[citationKey] = markerCount.toString();
+        }
+    }
+
+    if (!citationDataMap) return markerMap;
+
+    const aliasGroups: string[][] = [];
+    for (const citation of Object.values(citationDataMap)) {
+        const uniqueKeys = getCitationMarkerBaseKeys(citation);
+        if (uniqueKeys.length > 1) aliasGroups.push(uniqueKeys);
+    }
+    for (const keys of aliasGroups) {
+        const existing = getEarliestExistingMarker(markerMap, keys);
+        if (!existing) continue;
+        for (const key of keys) markerMap[key] = existing;
+    }
+
+    return compactCitationMarkers(markerMap);
+}
+
+/**
  * Converts markdown content to HTML string using the MarkdownRenderer component
  * @param content Markdown content to convert
  * @param className Optional class name to apply to the markdown (defaults to "markdown")
@@ -239,7 +286,7 @@ export interface RenderContextData {
  * @returns HTML string representation of the markdown
  */
 export function renderToHTML(
-    content: string, 
+    content: string,
     className: string = "markdown",
     contextData?: RenderContextData
 ): string {
@@ -247,43 +294,7 @@ export function renderToHTML(
 
     // Pre-calculate citation markers for static render to avoid React state updates during render.
     // This must happen before the render since effects don't run during renderToStaticMarkup.
-    // Note: This only depends on content, not contextData, so we always calculate markers.
-    const markerMap: Record<string, string> = {};
-    let markerCount = 0;
-    
-    // Use the same regex as preprocessCitations to find citations in order
-    const pattern = new RegExp(CITATION_TAG_PATTERN);
-    
-    let match;
-    const aliasGroups: string[][] = [];
-    while ((match = pattern.exec(content)) !== null) {
-        const attributesStr = match[1] || '';
-        const normalized = normalizeCitationTag(parseRawCitationAttributes(attributesStr));
-        const citationKey = normalized.ok ? baseCitationKey(normalized.ref) : '';
-        
-        if (citationKey && !markerMap[citationKey]) {
-            markerCount++;
-            markerMap[citationKey] = markerCount.toString();
-        }
-    }
-
-    if (contextData?.citationDataMap) {
-        for (const citation of Object.values(contextData.citationDataMap)) {
-            const keys: string[] = [];
-            for (const ref of [getRequestedRef(citation), getResolvedRef(citation)]) {
-                if (!ref) continue;
-                keys.push(baseCitationKey(ref));
-                if (ref.kind === 'external') keys.push(externalCompatKey(ref.external_id));
-            }
-            const uniqueKeys = [...new Set(keys.filter(Boolean))];
-            if (uniqueKeys.length > 1) aliasGroups.push(uniqueKeys);
-        }
-        for (const keys of aliasGroups) {
-            const existing = getEarliestExistingMarker(markerMap, keys);
-            if (!existing) continue;
-            for (const key of keys) markerMap[key] = existing;
-        }
-    }
+    const markerMap = computeStaticCitationMarkers(content, contextData?.citationDataMap);
 
     // If context data is provided, we create a temporary store to ensure the data 
     // is available during the synchronous static render.

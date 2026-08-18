@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
-import { CollectionListView } from '../../../types/toolResultViews';
+import { CollectionListView } from '@beaver/agent-core/run-state/toolResultViews';
 import { CSSIcon } from '../../icons/icons';
-import { getHost } from '../../../host';
+import { getHost } from '@beaver/agent-ui/host';
 
 /**
  * Shared renderer for the {@link CollectionListView} view model (list_collections).

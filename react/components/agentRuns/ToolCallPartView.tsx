@@ -1,17 +1,17 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { AgentRunStatus, ToolCallPart } from '../../agents/types';
-import { toolResultsMapAtom, getToolCallStatus } from '../../agents/atoms';
-import { getToolCallLabel, getLabelEnrichmentNeeds, type ToolCallLabelEnrich } from '../../agents/toolLabels';
-import { extractZoteroReferencesFromToolCall, parseArgs } from '../../agents/toolCallRequest';
+import { AgentRunStatus, ToolCallPart, isUnsuccessfulToolReturn } from '@beaver/agent-core/agents/types';
+import { toolResultsMapAtom, getToolCallStatus } from '@beaver/agent-core/run-state/atoms';
+import { getToolCallLabel, getLabelEnrichmentNeeds, type ToolCallLabelEnrich } from '@beaver/agent-core/run-state/toolLabels';
+import { extractZoteroReferencesFromToolCall, parseArgs } from '@beaver/agent-core/run-state/toolCallRequest';
 import {
     isToolResultView,
     getToolResultRenderableCount,
     type ToolResultView as ToolResultViewModel,
-} from '../../types/toolResultViews';
+} from '@beaver/agent-core/run-state/toolResultViews';
 import { ToolResultView } from './ToolResultView';
 import { GenericAgentActionView } from './GenericAgentActionView';
-import { getHost } from '../../host';
+import { getHost } from '@beaver/agent-ui/host';
 import { getPendingApprovalForToolcallAtom, getAgentActionsByToolcallAtom } from '../../agents/agentActions';
 import {
     Spinner,
@@ -36,6 +36,7 @@ import {
     PropertyEditIcon,
     HighlighterIcon,
     ChattingIcon,
+    LayersIcon,
 } from '../icons/icons';
 import { toolExpandedAtom, toggleToolExpandedAtom, setToolExpandedAtom } from '../../atoms/messageUIState';
 import { parseLibraryRef, resolveLibraryRef } from '../../../src/utils/libraryIdentity';
@@ -104,7 +105,7 @@ const TOOL_ICONS: Record<string, IconComponent> = {
 
     // Read tool result
     read_file: TextAlignLeftIcon,
-    load_tool_results: PuzzleIcon,
+    load_tool_results: LayersIcon,
     
     // Progressive disclosure tools
     load_capability: PuzzleIcon,
@@ -286,6 +287,8 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
         part.tool_name === 'create_collection' ||
         part.tool_name === 'create_highlight_annotations' ||
         part.tool_name === 'create_note_annotations' ||
+        part.tool_name === 'edit_annotations' ||
+        part.tool_name === 'delete_annotations' ||
         part.tool_name === 'organize_items' ||
         part.tool_name === 'manage_tags' ||
         part.tool_name === 'manage_collections' ||
@@ -347,6 +350,9 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
     const canExpand =
         hasResult &&
         result?.part_kind === 'tool-return' &&
+        // A non-success return holds an explanatory message, not a result
+        // payload. Keep it collapsed so it reads as a failed call, not a result.
+        !isUnsuccessfulToolReturn(result) &&
         // If we can compute a count (search-like tools), block expansion for 0 results.
         (renderableCount === null || renderableCount > 0) &&
         !NON_EXPANDABLE_TOOLS.has(part.tool_name) &&

@@ -19,13 +19,13 @@ import {
     PDFMetadata,
     PDFSearchOptions,
     PDFSearchResult,
-} from "./types";
+} from "@beaver/agent-core/extract/types";
 import type { BeaverExtractResult } from "./schema";
 import type { ParagraphDetectionSettings } from "./ParagraphDetector";
 import type { SentenceSplitterConfig } from "./sentenceTypes";
 
 // Re-export types and classes for convenience
-export * from "./types";
+export * from "@beaver/agent-core/extract/types";
 export { configurePDF, isConfigured } from "./config";
 export type {
     PDFConfig,
@@ -115,7 +115,7 @@ export type {
     DegradationSummary,
     DegradationNote,
     DegradationReason,
-} from "./types";
+} from "@beaver/agent-core/extract/types";
 export {
     normalizeLanguageCode,
     buildByteOffsetTable,

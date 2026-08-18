@@ -1,0 +1,8 @@
+{
+    // Own program so test files pick up the root `@beaver/agent-core/*`
+    // path mapping. Tests are intentionally absent from the root tsconfig
+    // (build `tsc --noEmit` stays free of test-only errors).
+    "extends": "../tsconfig.json",
+    "include": ["./**/*.ts", "../typings"],
+    "exclude": ["../build", "../addon"]
+}

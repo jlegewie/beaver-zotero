@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { readableToExtractKind } from '../../../src/services/documentExtraction/shared/contentKinds';
+import { readableToExtractKind } from '@beaver/agent-core/extract/document/shared/contentKinds';
 import type {
     DocumentExtractResult,
     PdfDocumentExtractResult,
     TextDocumentExtractResult,
-} from '../../../src/services/documentExtraction/shared/documentExtractResult';
+} from '@beaver/agent-core/extract/document/shared/documentExtractResult';
 import type { EpubDocument } from '../../../src/services/documentExtraction/epub';
 
 describe('document extract result envelope', () => {

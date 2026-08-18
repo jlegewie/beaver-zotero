@@ -1,5 +1,5 @@
 import React from 'react';
-import type { BeaverAgentPrompt } from '../../../agents/types';
+import type { BeaverAgentPrompt } from '@beaver/agent-core/agents/types';
 import {
     AnnotationAttachment,
     CollectionAttachment,
@@ -7,8 +7,8 @@ import {
     ItemMetadataAttachment,
     NoteAttachment,
     SourceAttachment,
-} from '../../../types/attachments/apiTypes';
-import type { ZoteroItemReference } from '../../../types/zotero';
+} from '@beaver/agent-core/types/attachments/apiTypes';
+import type { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import { EXTERNAL_LIBRARY_ID } from '../../../../src/services/externalFiles';
 import {
     AnnotationChip,
@@ -19,7 +19,7 @@ import {
     NoteChip,
     TagChip,
 } from './RequestChipPrimitives';
-import type { ChipPopupSubtitle } from './ChipPopup';
+import type { ChipPopupSubtitle } from '@beaver/agent-ui/chat/ChipPopup';
 
 const EMPTY_ATTACHMENTS: NonNullable<BeaverAgentPrompt['attachments']> = [];
 

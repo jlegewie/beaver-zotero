@@ -1,6 +1,6 @@
 import { searchIndexApiClient } from '../searchIndex/searchIndexApiClient';
 import { getIndexScopeRef, getZoteroUserIdentifier } from '../../utils/zoteroUtils';
-import { logger } from '../../utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 import { BACKGROUND_UNTAG_PRIORITY } from './constants';
 import { buildIndexJobPayload } from './utils';
 

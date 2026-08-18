@@ -28,7 +28,7 @@ import {
     type RawBlockDetailed,
     type RawPageDataDetailed,
     type QuadPoint,
-} from '../../../src/beaver-extract/types';
+} from '@beaver/agent-core/extract/types';
 
 // ---------------------------------------------------------------------------
 // Synthetic line/page builders (same grid as paragraphSentenceMapper tests)

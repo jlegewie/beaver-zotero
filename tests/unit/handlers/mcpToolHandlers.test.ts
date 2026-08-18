@@ -44,7 +44,7 @@ vi.mock('../../../src/utils/zoteroUtils', () => ({
     getCitationKeyFromItem: vi.fn().mockResolvedValue(null),
 }));
 
-vi.mock('../../../src/utils/logger', () => ({
+vi.mock('@beaver/agent-core/platform/logger', () => ({
     logger: vi.fn(),
 }));
 
@@ -1835,6 +1835,9 @@ describe('MCP Tool Handlers (via useMcpServer)', () => {
             expect(data.collections[0]).toEqual({
                 collection_key: 'COL1',
                 name: 'Machine Learning',
+                // Null rather than absent: a recursive listing is flat, so the
+                // caller reads parent_key on every row to rebuild the tree.
+                parent_key: null,
                 item_count: 42,
                 subcollection_count: 3,
             });

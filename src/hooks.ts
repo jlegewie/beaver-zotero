@@ -21,6 +21,8 @@ import { cancelAllActiveTasks } from "./utils/backgroundTasks";
 import { initContextMenus, cleanupContextMenus } from "./modules/zoteroContextMenu";
 import { initReaderIntegration, cleanupReaderIntegration } from "./modules/readerIntegration";
 import { initReaderToolbarMenu, cleanupReaderToolbarMenu } from "./modules/readerToolbarMenu";
+import { setActionClient } from "@beaver/agent-core/types/actions";
+import { ZOTERO_PLUGIN_CLIENT_TYPE } from "@beaver/agent-core/protocol/agentProtocol";
 
 /** Timeout for individual async shutdown operations to prevent hangs. */
 const SHUTDOWN_TIMEOUT_MS = 3000;
@@ -88,12 +90,14 @@ const quitObserver = {
             Zotero.__beaverShuttingDown = true;
         }
         // Close beaver.sqlite on quit-application, BEFORE the
-        // profile-before-change barrier where Sqlite.sys.mjs waits for
-        // all connections
+        // profile-before-change barrier where Sqlite.sys.mjs waits for all
+        // connections.
         if (topic === "quit-application") {
             try {
                 if (addon?.db) {
-                    addon.db.closeDatabase().catch(() => {});
+                    addon.db.closeDatabase().catch((error: unknown) => {
+                        Zotero.logError(error as Error);
+                    });
                     addon.db = undefined;
                 }
             } catch (_) {
@@ -203,6 +207,11 @@ async function onStartup() {
     // Idempotent. Must run before any PDF op. The webpack bundle calls the
     // same adapter from `react/index.tsx` for its own copy of the config.
     configurePDFForBeaver();
+
+    // -------- Declare the client actions are gated on --------
+    // Each bundle holds its own copy of this seam, so the webpack bundle
+    // registers the same value from `react/index.tsx`.
+    setActionClient(ZOTERO_PLUGIN_CLIENT_TYPE);
 
     // -------- Store plugin version --------
     addon.pluginVersion = version;
@@ -524,10 +533,11 @@ async function onMainWindowUnload(win: Window): Promise<void> {
 
         // 1. Stop Supabase auto-refresh timer to prevent stale timers
         //    surviving plugin reload and causing token refresh races.
-        //    The cleanup function is registered by supabaseClient.ts (webpack bundle)
-        //    on the window where the bundle was loaded.  Use the `win` parameter
-        //    (the window being unloaded) rather than Zotero.getMainWindow(), which
-        //    may be unreliable during unload of the last window.
+        //    The cleanup function is published by zoteroSupabaseStorage.ts
+        //    (webpack bundle) on the window where the bundle was loaded.  Use
+        //    the `win` parameter (the window being unloaded) rather than
+        //    Zotero.getMainWindow(), which may be unreliable during unload of
+        //    the last window.
         // Reset the shared auth lock even if disposing Supabase fails so a
         // stale held-lock cannot block authentication on the next load.
         await cleanupSupabaseWindowState(win);
@@ -609,6 +619,8 @@ async function onMainWindowUnload(win: Window): Promise<void> {
         // 15. Drop React-bundle cross-bundle globals attached to Zotero
         Zotero.__beaverJotaiStore = undefined;
         Zotero.__beaverShuttingDown = undefined;
+        Zotero.__beaverWrittenAnnotationItems = undefined;
+        Zotero.__beaverWrittenAnnotationKeys = undefined;
 
         ztoolkit.log("onMainWindowUnload: Cleanup completed successfully");
     } catch (error: any) {
@@ -616,27 +628,71 @@ async function onMainWindowUnload(win: Window): Promise<void> {
     }
 }
 
+/**
+ * Global AUTHOR_SHEETs, in cascade order.
+ *
+ * The `agent-ui-*` sheets come from `packages/agent-ui/src/theme/` and are copied
+ * into `addon/content/styles/` at build time by `scripts/copy-agent-ui-css.mjs`,
+ * so they are generated, not checked in. `agent-ui-tokens.css` holds Beaver's own
+ * custom properties plus the documented contract of platform tokens Zotero
+ * supplies; `agent-ui-utilities.css` holds the utility layer, scoped
+ * `.beaver-root`; `agent-ui-components.css` holds the shared component rules —
+ * today the sign-in surface and the link vocabulary.
+ *
+ * Order is the cascade. The shared sheets are registered *before* `beaver.css` so
+ * this client's own rules win at equal specificity — the package supplies the
+ * shared baseline, this client adapts it. Tokens precede the utilities that
+ * consume them, and the components sheet follows both: it is written in that
+ * vocabulary and has to beat it where the two land on one element, which
+ * `.text-link` beside `.font-color-secondary` does.
+ *
+ * Kept as separate sheets rather than concatenated, so provenance stays readable
+ * and the shared files are byte-identical to what the Word add-in imports. Keep
+ * this list in step with the `<?xml-stylesheet?>` links in `beaverWindow.xhtml`
+ * and `beaverPreferences.xhtml`.
+ */
+const GLOBAL_STYLESHEETS = [
+    "agent-ui-tokens.css",
+    "agent-ui-utilities.css",
+    "agent-ui-components.css",
+    "beaver.css",
+];
+
 function loadStylesheet() {
-    const styleURI = `chrome://${addon.data.config.addonRef}/content/styles/beaver.css`;
     const ssService = Cc["@mozilla.org/content/style-sheet-service;1"]
         .getService(Ci.nsIStyleSheetService);
-    const styleSheet = Services.io.newURI(styleURI);
     const sheetType = Ci.nsIStyleSheetService.AUTHOR_SHEET!;
-    if (ssService.sheetRegistered(styleSheet, sheetType)) {
-        ssService.unregisterSheet(styleSheet, sheetType);
+    for (const name of GLOBAL_STYLESHEETS) {
+        const styleURI = `chrome://${addon.data.config.addonRef}/content/styles/${name}`;
+        const styleSheet = Services.io.newURI(styleURI);
+        // Per sheet, so one missing file cannot cost the others. The agent-ui
+        // sheets are copied in at build time rather than checked in, so a build
+        // that skipped `copy:agent-ui-css` would otherwise take beaver.css down
+        // with it and render the whole plugin unstyled.
+        try {
+            if (ssService.sheetRegistered(styleSheet, sheetType)) {
+                ssService.unregisterSheet(styleSheet, sheetType);
+            }
+            ssService.loadAndRegisterSheet(styleSheet, sheetType);
+        } catch (error) {
+            Zotero.logError(
+                new Error(`Beaver: failed to register ${name}: ${error}`),
+            );
+        }
     }
-    ssService.loadAndRegisterSheet(styleSheet, sheetType);
 }
 
 function unloadStylesheet() {
-    const styleURI = `chrome://${addon.data.config.addonRef}/content/styles/beaver.css`;
     const ssService = Cc["@mozilla.org/content/style-sheet-service;1"]
         .getService(Ci.nsIStyleSheetService);
-    const styleSheet = Services.io.newURI(styleURI);
     const sheetType = Ci.nsIStyleSheetService.AUTHOR_SHEET!;
-    if (ssService.sheetRegistered(styleSheet, sheetType)) {
-        ssService.unregisterSheet(styleSheet, sheetType);
-    }	
+    for (const name of GLOBAL_STYLESHEETS) {
+        const styleURI = `chrome://${addon.data.config.addonRef}/content/styles/${name}`;
+        const styleSheet = Services.io.newURI(styleURI);
+        if (ssService.sheetRegistered(styleSheet, sheetType)) {
+            ssService.unregisterSheet(styleSheet, sheetType);
+        }
+    }
 }
 
 /**
@@ -785,6 +841,8 @@ async function onShutdown(): Promise<void> {
         // shutdown flag that would short-circuit the next onStartup().
         Zotero.__beaverJotaiStore = undefined;
         Zotero.__beaverShuttingDown = undefined;
+        Zotero.__beaverWrittenAnnotationItems = undefined;
+        Zotero.__beaverWrittenAnnotationKeys = undefined;
         // Note: the singleton is removed from Zotero in addon/bootstrap.js's
     } catch (error) {
         ztoolkit.log("onShutdown: Error during cleanup:", error);

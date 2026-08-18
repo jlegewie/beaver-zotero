@@ -1,6 +1,6 @@
 import React from 'react';
 import { PopupMessage } from '../../../types/popupMessage';
-import Button from "../Button";
+import Button from "@beaver/agent-ui/primitives/Button";
 import { Icon, CancelCircleIcon, InformationCircleIcon, CheckmarkCircleIcon } from '../../icons/icons';
 import { showFileStatusDetailsAtom } from '../../../atoms/ui';
 import { useSetAtom, useAtomValue } from 'jotai';

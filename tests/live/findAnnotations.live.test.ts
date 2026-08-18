@@ -21,7 +21,7 @@
 
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
-import { CoordOrigin } from '../../react/types/citations';
+import { CoordOrigin } from '@beaver/agent-core/types/citations';
 import { GROUP_LIB_PDF, NORMAL_PDF, PARENT_ITEM, type AttachmentFixture } from '../helpers/fixtures';
 import { isZoteroAvailable, skipIfNoZotero } from '../helpers/zoteroAvailability';
 import { post } from '../helpers/zoteroHttpClient';

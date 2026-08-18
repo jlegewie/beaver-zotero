@@ -1,24 +1,24 @@
 import React, { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { SearchIcon, EditIcon, DeleteIcon, TickIcon, CancelIcon } from './icons/icons';
-import Spinner from './icons/Spinner';
-import IconButton from './ui/IconButton';
+import Spinner from '@beaver/agent-ui/icons/Spinner';
+import IconButton from '@beaver/agent-ui/primitives/IconButton';
 import { isThreadListViewAtom, threadListFilterAtom, showAllThreadInstancesAtom } from '../atoms/ui';
 import { ThreadData, loadThreadAtom, newThreadAtom } from '../atoms/threads';
-import { currentThreadIdAtom } from '../agents/atoms';
+import { currentThreadIdAtom } from '@beaver/agent-core/run-state/atoms';
 import { userAtom } from '../atoms/auth';
 import { searchableLibraryIdsAtom } from '../atoms/profile';
-import { threadService } from '../../src/services/threadService';
+import { threadService, isThreadAgentMismatch } from '@beaver/agent-core/transport/threadService';
 import { currentZoteroInstanceRef } from '../../src/utils/zoteroUtils';
 import { getDateGroup } from '../utils/dateUtils';
 import { formatTimeAgo } from '../utils/formatTimeAgo';
 import { buildThreadItemFilter } from '../utils/threadItemFilter';
 import { deduplicateByThread, threadModelToThreadData, isThreadInstanceMismatch } from '../utils/threadMatches';
-import Button from './ui/Button';
+import Button from '@beaver/agent-ui/primitives/Button';
 import { ChipButton } from './agentRuns/requestChips/ChipButton';
 import { CSSIcon, CSSItemTypeIcon } from './icons/zotero';
 import ThreadFilterMenu from './ui/menus/ThreadFilterMenu';
-import Tooltip from './ui/Tooltip';
+import Tooltip from '@beaver/agent-ui/primitives/Tooltip';
 import { clearRecentChatsCache } from './RecentChats';
 import { isTransientNetworkError } from '../utils/isTransientNetworkError';
 
@@ -185,8 +185,14 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
             setThreads([]);
             setIsLoading(true);
             try {
-                const matches = await threadService.findThreadsByItem(filter.libraryId, filter.keys, 'both');
-                const deduped = deduplicateByThread(matches);
+                const matches = await threadService.findThreadsByItem(
+                    { libraryId: filter.libraryId, libraryRef: filter.libraryRef },
+                    filter.keys,
+                    'both'
+                );
+                // The by-item route takes no agent scope, so drop another
+                // client's threads here (the other lists are scoped server-side).
+                const deduped = deduplicateByThread(matches.filter(m => !isThreadAgentMismatch(m)));
                 if (seq === fetchSeqRef.current) {
                     setThreads(deduped);
                     setHasMore(false);

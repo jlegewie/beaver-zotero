@@ -1,6 +1,6 @@
 import { store } from '../../store';
-import { pageLabelsByAttachmentIdAtom } from '../../atoms/citations';
-import { externalReferenceMappingAtom } from '../../atoms/externalReferences';
+import { pageLabelsByAttachmentIdAtom } from '@beaver/agent-core/citations/atoms';
+import { externalReferenceMappingAtom } from '@beaver/agent-core/citations/externalReferences';
 import {
     isExternalReferenceDetailsDialogVisibleAtom,
     selectedExternalReferenceAtom,
@@ -10,8 +10,8 @@ import {
     getCitationBoundingBoxes,
     getContentKind,
     getSymbolicLocation,
-} from '../../types/citations';
-import { ZoteroItemReference } from '../../types/zotero';
+} from '@beaver/agent-core/types/citations';
+import { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import { revealSource } from '../../utils/sourceUtils';
 import { createZoteroURI } from '../../utils/zoteroURI';
 import { getCurrentReaderAndWaitForView } from '../../utils/readerUtils';
@@ -25,11 +25,11 @@ import {
 } from '../../utils/citationNavigation';
 import { navigateToEpubCitation } from '../../utils/epubVisualizer/epubCitationNavigation';
 import { navigateToSnapshotCitation } from '../../utils/snapshotVisualizer/snapshotCitationNavigation';
-import { resolvePageLabelFromLabels } from '../../utils/pageLabels';
+import { resolvePageLabelFromLabels } from '@beaver/agent-ui/utils/pageLabels';
 import { getPageLabelsForItem } from './itemData';
 import { launchExternalFile, notifyReferenceUnavailable } from './sourceActions';
 import { getPref } from '../../../src/utils/prefs';
-import { logger } from '../../../src/utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 import { selectItemById } from '../../../src/utils/selectItem';
 import {
     getBestPDFAttachmentAsync,
@@ -37,7 +37,7 @@ import {
 } from '../../../src/utils/zoteroItemHelpers';
 import { BEAVER_CITATION_ANNOTATION_AUTHOR } from '../../../src/constants/annotations';
 import { libraryRefForLibraryID, resolveItemReference } from '../../../src/utils/libraryIdentity';
-import type { CitationActivation } from '../types';
+import type { CitationActivation } from '@beaver/agent-ui/host/types';
 
 /** Reveal the cited item in the library view. */
 function revealInLibrary(libraryID: number, zoteroKey: string): void {

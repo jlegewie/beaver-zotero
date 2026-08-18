@@ -49,7 +49,7 @@ import {
 import {
     ExtractionError,
     ExtractionErrorCode,
-} from '../../../src/beaver-extract/types';
+} from '@beaver/agent-core/extract/types';
 import type { WorkerStartFailureInfo } from '../../../src/beaver-extract/config';
 
 describe('MuPDFWorkerClient', () => {

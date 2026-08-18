@@ -508,6 +508,46 @@ const versionUpdateMessageList: VersionUpdateMessageConfig[] = [
         footer: "Please report any remaining IME issues to <a href='mailto:support@beaverapp.ai'>support@beaverapp.ai</a>.",
         inPanel: true,
     },
+    {
+        version: "0.22.6",
+        title: "Version 0.22.6: Improved Zotero 10 support",
+        text: "Actions now support selecting multiple collections at once, and all remaining compatibility issues with Zotero 10 have been resolved.",
+
+        inPanel: true,
+    },
+    {
+        version: "0.23.0",
+        title: "Version 0.23: Agent redesign and annotation editing",
+        featureList: [
+            {
+                title: "Under-the-hood agent redesign",
+                description: "Redesigned agent that rolled out over the last weeks. More efficient under the hood, and a stronger foundation for what's next.",
+            },
+            {
+                title: "Edit annotations",
+                description: "Beaver can now update existing PDF annotations: change color, edit comment, change position and more.",
+            },
+        ],
+        inPanel: true,
+        footer: `<a href="https://github.com/jlegewie/beaver-zotero/releases/tag/v0.23.0" target='_blank'>Full changelog</a>`,
+    },
+    {
+        version: "0.23.2",
+        title: "Increased usage for Beaver Plus and Plus Max",
+        featureList: [
+            {
+                title: "Increased usage for Beaver Plus and Plus Max",
+                description: "We increased the number of credits you get with Beaver Plus and Plus Max by 20%.",
+            },
+            {
+                title: "IMPORTANT: Updated confirmation dialog for credit charges",
+                description: "Previously, Beaver asked for every extra credit. Now, you can set a threshold and Beaver will only ask when the total cost exceeds the threshold (default is 5 credits). Most responses still cost 1 credit.",
+            },
+        ],
+        inPanel: true,
+        footer: `<a href="https://www.beaverapp.ai/docs/credits">Learn more</a>. These changes do not impact BYOK users.`,
+    },
+
 ];
 
 versionUpdateMessageList.sort((a, b) => compareVersions(a.version, b.version));

@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useAtomValue } from 'jotai';
-import { activeRunAtom, threadRunsAtom } from '../../agents/atoms';
-import { AgentRun } from '../../agents/types';
+import { activeRunAtom, threadRunsAtom } from '@beaver/agent-core/run-state/atoms';
+import { AgentRun } from '@beaver/agent-core/agents/types';
 import { buildRunCompletionAnnouncement, extractAssistantResponseText } from '../../utils/screenReaderAnnouncements';
 import { getPref } from '../../../src/utils/prefs';
 

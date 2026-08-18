@@ -1,4 +1,4 @@
-import type { ActionTargetType } from '../types/actions';
+import type { ActionTargetType } from '@beaver/agent-core/types/actions';
 
 export interface BeaverEvents {
     toggleChat: {
@@ -17,7 +17,11 @@ export interface BeaverEvents {
         actionTitle: string;
         targetType: ActionTargetType;
         itemIds: number[];
-        collectionId: number | null;
+        /** Every collection the action targets. Empty for non-collection
+         *  dispatches and whenever the selection is not purely collections.
+         *  Carries each collection's library so the receiver can apply
+         *  library-exclusion filtering before looking the collection up. */
+        collections: { libraryId: number; collectionId: number }[];
     };
     readerSelectionAction: {
         action: 'explain' | 'ask';

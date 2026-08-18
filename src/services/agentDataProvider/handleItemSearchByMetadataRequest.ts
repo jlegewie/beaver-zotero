@@ -7,23 +7,25 @@
  * The Beaver agent is the primary agent that handles chat completions and tool execution.
  */
 
-import { logger } from '../../utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 import { deduplicateItems } from '../../utils/zoteroUtils';
 import { agentItemFilter } from '../../utils/agentItemSupport';
-import { serializeItem } from '../../utils/zoteroSerializers';
+import { serializeItemSearchRows } from './itemSearchSerialization';
 import {
     WSItemSearchByMetadataRequest,
     WSItemSearchByMetadataResponse,
     ItemSearchFrontendResultItem,
     FrontendTimingMetadata,
-} from '../agentProtocol';
+} from '@beaver/agent-core/protocol/agentProtocol';
 import { searchItemsByMetadata, SearchItemsByMetadataOptions } from '../../../react/utils/searchTools';
 import {
-    getCollectionByIdOrName,
+    collectionsFilterError,
     getSearchableLibraryIds,
-    prepareAttachmentInfoBatchData,
-    processAttachmentInfoBatch,
-    resolveLibrariesFilterToSearchableIds,
+    librariesFilterError,
+    resolveCollectionsFilter,
+    resolveLibrariesFilter,
+    resolveTagsFilter,
+    tagsFilterError,
 } from './utils';
 import { TimingAccumulator } from '../../utils/timing';
 
@@ -53,9 +55,11 @@ export async function handleItemSearchByMetadataRequest(
     const hasQuery = !!request.title_query ||
                      !!request.author_query ||
                      !!request.publication_query;
-    const hasFilter = !!(request.collections_filter?.length) ||
+    const collectionsFilter = request.collections_filter ?? [];
+    const hasFilter = collectionsFilter.length > 0 ||
                       !!(request.tags_filter?.length) ||
                       !!(request.libraries_filter?.length) ||
+                      !!request.item_type_filter ||
                       !!request.year_min ||
                       !!request.year_max;
 
@@ -76,58 +80,144 @@ export async function handleItemSearchByMetadataRequest(
     // Apply libraries_filter if provided, but always intersect with searchable libraries.
     // Accepts portable library refs ("u"/"g<groupID>"), numeric IDs, numeric-ID
     // strings, and library name substrings.
-    const libraryIds: number[] = request.libraries_filter && request.libraries_filter.length > 0
-        ? resolveLibrariesFilterToSearchableIds(request.libraries_filter)
-        : getSearchableLibraryIds();
+    let libraryIds: number[] = getSearchableLibraryIds();
+    if (request.libraries_filter && request.libraries_filter.length > 0) {
+        const resolution = resolveLibrariesFilter(request.libraries_filter);
 
-    // Guard: if libraries_filter was provided but resolved to no searchable libraries,
-    // return empty results instead of potentially widening scope
-    if (request.libraries_filter && request.libraries_filter.length > 0 && libraryIds.length === 0) {
-        logger('handleItemSearchByMetadataRequest: libraries_filter resolved to no searchable libraries', 1);
-        return {
-            type: 'item_search_by_metadata',
-            request_id: request.request_id,
-            items: [],
-            timing: {
-                total_ms: Date.now() - startTime,
-                item_count: 0,
-                attachment_count: 0,
-            },
-        };
+        // A libraries_filter that resolves to nothing must narrow the search to no
+        // results, never widen it to every library — and it is reported as an error
+        // rather than an empty result so a bad library reference is not mistaken for
+        // a library that holds no matching items.
+        const filterError = librariesFilterError(resolution);
+        if (filterError) {
+            logger(`handleItemSearchByMetadataRequest: ${filterError.message}`, 1);
+            return {
+                type: 'item_search_by_metadata',
+                request_id: request.request_id,
+                items: [],
+                error: filterError.message,
+                error_code: filterError.error_code,
+                timing: {
+                    total_ms: Date.now() - startTime,
+                    item_count: 0,
+                    attachment_count: 0,
+                },
+            };
+        }
+
+        libraryIds = resolution.libraryIds;
     }
 
-    // Convert collections_filter names to keys if needed (scoped to libraryIds)
-    const collectionKeysSet = new Set<string>();
-    if (request.collections_filter && request.collections_filter.length > 0) {
-        for (const collectionFilter of request.collections_filter) {
-            if (typeof collectionFilter === 'number') {
-                const collection = Zotero.Collections.get(collectionFilter);
-                if (collection && (libraryIds.length === 0 || libraryIds.includes(collection.libraryID))) {
-                    collectionKeysSet.add(collection.key);
-                }
-                continue;
-            }
+    // Resolve collections_filter to collection keys, bucketed by library.
+    // Keys must stay library-scoped: a Zotero search scoped to library B that is
+    // given a collection key from library A matches nothing, so a shared collection
+    // name (e.g. "Papers") in two libraries would silently empty out both searches.
+    const collectionKeysByLibrary = new Map<number, Set<string>>();
+    const hasCollectionsFilter = collectionsFilter.length > 0;
+    if (hasCollectionsFilter) {
+        const resolution = resolveCollectionsFilter(collectionsFilter, libraryIds);
 
-            // String filter: search within each library
-            if (libraryIds.length > 0) {
-                for (const libId of libraryIds) {
-                    const result = getCollectionByIdOrName(collectionFilter, libId);
-                    if (result) {
-                        collectionKeysSet.add(result.collection.key);
-                    }
-                }
-            } else {
-                const result = getCollectionByIdOrName(collectionFilter);
-                if (result) {
-                    collectionKeysSet.add(result.collection.key);
-                }
+        // A collections_filter that resolves to nothing must narrow the search to
+        // no results, never widen it to the whole library — and it is reported as
+        // an error rather than an empty result so a bad collection reference is
+        // not mistaken for a collection that holds no matching items.
+        const filterError = collectionsFilterError(resolution);
+        if (filterError) {
+            logger(`handleItemSearchByMetadataRequest: ${filterError.message}`, 1);
+            return {
+                type: 'item_search_by_metadata',
+                request_id: request.request_id,
+                items: [],
+                error: filterError.message,
+                error_code: filterError.error_code,
+                timing: {
+                    total_ms: Date.now() - startTime,
+                    item_count: 0,
+                    attachment_count: 0,
+                },
+            };
+        }
+
+        for (const collection of resolution.collections) {
+            let keys = collectionKeysByLibrary.get(collection.libraryID);
+            if (!keys) {
+                keys = new Set<string>();
+                collectionKeysByLibrary.set(collection.libraryID, keys);
             }
+            keys.add(collection.key);
         }
     }
-    const collectionKeys = Array.from(collectionKeysSet);
+
+    // Resolve tags_filter to the tag names Zotero stores. Rewriting the filter is
+    // what makes it work at all: the Zotero search matches tags case-sensitively,
+    // so a differently cased entry would silently match nothing.
+    const tagsFilter = request.tags_filter ?? [];
+    let tagNames: string[] | undefined;
+    if (tagsFilter.length > 0) {
+        const resolution = await resolveTagsFilter(tagsFilter, libraryIds);
+
+        // A tag the library doesn't have is reported as an error rather than an
+        // empty result, so the model can tell a misspelled tag from a real tag
+        // that carries no matching item.
+        const filterError = tagsFilterError(resolution);
+        if (filterError) {
+            logger(`handleItemSearchByMetadataRequest: ${filterError.message}`, 1);
+            return {
+                type: 'item_search_by_metadata',
+                request_id: request.request_id,
+                items: [],
+                error: filterError.message,
+                error_code: filterError.error_code,
+                timing: {
+                    total_ms: Date.now() - startTime,
+                    item_count: 0,
+                    attachment_count: 0,
+                },
+            };
+        }
+
+        // A tags_filter must narrow the search, never drop off it: when nothing
+        // resolved and no error explained why (no library in scope), return no
+        // results instead of searching as if no tag had been requested.
+        if (resolution.tags.length === 0) {
+            logger('handleItemSearchByMetadataRequest: tags_filter resolved to no tags', 1);
+            return {
+                type: 'item_search_by_metadata',
+                request_id: request.request_id,
+                items: [],
+                timing: {
+                    total_ms: Date.now() - startTime,
+                    item_count: 0,
+                    attachment_count: 0,
+                },
+            };
+        }
+
+        tagNames = resolution.tags;
+    }
 
     // Calculate offset for pagination (default 0, guard against negative values)
     const offset = Math.max(0, request.offset ?? 0);
+
+    // Per-library search limit. Deduplication runs before the page slice and
+    // agentItemFilter after it, so each search has to over-fetch to fill a page of
+    // `limit` items at `offset`. Every library is searched with this budget before the
+    // union is deduplicated and sliced — stopping early would both hide libraries and
+    // rob deduplication of the copies it prefers.
+    // A non-positive limit means unlimited and is passed through as-is.
+    //
+    // The cap bounds pagination depth, because every fetched row costs data loading and
+    // each page re-fetches the whole prefix. It deliberately ends pagination rather than
+    // scaling with an arbitrary offset: with a single library, a page straddling the cap
+    // comes back short and anything beyond it empty, which the model reads as the end of
+    // the results. With several libraries, offsets past the cap keep paging through the
+    // later libraries and a library with more than `MAX_ROWS_PER_LIBRARY` matches loses
+    // its tail — reaching that needs 40+ pages at the largest allowed limit. Raising the
+    // cap trades a rarely reached depth for a much slower worst case.
+    const MAX_ROWS_PER_LIBRARY = 1000;
+    const perLibraryLimit = request.limit > 0
+        ? Math.min((offset + request.limit) * 2, MAX_ROWS_PER_LIBRARY)
+        : request.limit;
 
     logger('handleItemSearchByMetadataRequest: Metadata search', {
         libraryIds,
@@ -140,8 +230,17 @@ export async function handleItemSearchByMetadataRequest(
     const uniqueItems = new Map<string, Zotero.Item>();
     const makeKey = (libraryId: number, key: string) => `${libraryId}-${key}`;
 
+    let searchedLibraries = 0;
+    let failedLibraries = 0;
+
     // Search each library using searchItemsByMetadata
     for (const libraryId of libraryIds) {
+        const collectionKeys = collectionKeysByLibrary.get(libraryId);
+
+        // A collection-scoped request must not fall back to a library-wide search
+        // in libraries where no collection resolved.
+        if (hasCollectionsFilter && !collectionKeys?.size) continue;
+
         const options: SearchItemsByMetadataOptions = {
             title_query: request.title_query,
             author_query: request.author_query,
@@ -149,12 +248,12 @@ export async function handleItemSearchByMetadataRequest(
             year_min: request.year_min,
             year_max: request.year_max,
             item_type: request.item_type_filter,
-            tags: request.tags_filter,
-            collection_key: collectionKeys.length > 0 ? collectionKeys[0] : undefined,
-            limit: request.limit,
-            join_mode: 'all', // AND logic between query params
+            tags: tagNames,
+            collection_keys: collectionKeys ? Array.from(collectionKeys) : undefined,
+            limit: perLibraryLimit,
         };
 
+        searchedLibraries++;
         try {
             const results = await searchItemsByMetadata(libraryId, options);
             for (const item of results) {
@@ -166,14 +265,29 @@ export async function handleItemSearchByMetadataRequest(
                 }
             }
         } catch (error) {
+            failedLibraries++;
             logger(`handleItemSearchByMetadataRequest: Error searching library ${libraryId}: ${error}`, 1);
         }
+    }
 
-        // Early exit if we have enough results (fetch extra to account for cross-library duplicates and pagination offset)
-        const preDedupBuffer = (offset + request.limit) * 2;
-        if (request.limit > 0 && uniqueItems.size >= preDedupBuffer) {
-            break;
-        }
+    // A search that failed everywhere is reported as an error rather than an empty
+    // result: "no matches" is an answer the model acts on and stops looking, so a
+    // broken search must not be indistinguishable from an empty library. A partial
+    // failure still returns the libraries that answered — dropping good results
+    // because one library faulted is the worse trade.
+    if (failedLibraries > 0 && failedLibraries === searchedLibraries) {
+        return {
+            type: 'item_search_by_metadata',
+            request_id: request.request_id,
+            items: [],
+            error: 'Searching the Zotero library failed. Please try again.',
+            error_code: 'internal_error',
+            timing: {
+                total_ms: Date.now() - startTime,
+                item_count: 0,
+                attachment_count: 0,
+            },
+        };
     }
 
     // Convert to array
@@ -185,16 +299,9 @@ export async function handleItemSearchByMetadataRequest(
     // Timing accumulator for serialization breakdown
     const ta = new TimingAccumulator();
 
-    // Load item data needed for serialization (searchItemsByMetadata only loads itemData/creators/childItems)
-    if (items.length > 0) {
-        await ta.track('data_loading_ms', () =>
-            Zotero.Items.loadDataTypes(items, ["primaryData", "tags", "collections", "relations", "childItems"])
-        );
-    }
-
     // Record search completion time
     searchEndTime = Date.now();
-    
+
     logger('handleItemSearchByMetadataRequest: Final items', {
         libraryIds,
         items: items.length,
@@ -203,46 +310,14 @@ export async function handleItemSearchByMetadataRequest(
     // Serialize items in parallel in bounded batches (with backfill on failures to ensure limit is reached)
     const targetLimit = request.limit > 0 ? request.limit : items.length;
     const candidates = items.slice(offset).filter(item => agentItemFilter(item));
-    const BATCH_SIZE = Math.min(targetLimit, 20);
 
-    // Batch-fetch best attachments and sync dates for all candidate items
-    const batchAttachmentData = await prepareAttachmentInfoBatchData(candidates, ta);
+    const resultItems = await serializeItemSearchRows(
+        candidates,
+        targetLimit,
+        ta,
+        'handleItemSearchByMetadataRequest',
+    );
 
-    const resultItems: ItemSearchFrontendResultItem[] = [];
-    for (let batchStart = 0; batchStart < candidates.length && resultItems.length < targetLimit; batchStart += BATCH_SIZE) {
-        const batch = candidates.slice(batchStart, batchStart + BATCH_SIZE);
-
-        const serialized = await Promise.all(
-            batch.map(async (item): Promise<ItemSearchFrontendResultItem | null> => {
-                try {
-                    const [itemData, attachments] = await Promise.all([
-                        ta.track('item_serialization_ms', () => serializeItem(item, undefined, { skipHash: true })),
-                        ta.track('attachment_processing_ms', () => processAttachmentInfoBatch(
-                            item,
-                            batchAttachmentData,
-                            {
-                                skipWorkerFallback: true,
-                                timing: ta,
-                                includeAnnotationsCount: true,
-                            },
-                        )),
-                    ]);
-                    return { item: itemData, attachments };
-                } catch (error) {
-                    logger(`handleItemSearchByMetadataRequest: Failed to serialize item ${item.key}: ${error}`, 1);
-                    return null;
-                }
-            })
-        );
-
-        for (const result of serialized) {
-            if (result !== null) {
-                resultItems.push(result);
-                if (resultItems.length >= targetLimit) break;
-            }
-        }
-    }
-    
     // Record serialization completion time
     serializationEndTime = Date.now();
     

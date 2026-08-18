@@ -1,8 +1,8 @@
-import type { PageGeometry } from "../../beaver-extract/types";
+import type { PageGeometry } from "@beaver/agent-core/extract/types";
 import {
     CoordOrigin,
     type BoundingBox,
-} from "../../../react/types/citations";
+} from "@beaver/agent-core/types/citations";
 
 type TopLeftBox = { l: number; t: number; r: number; b: number };
 

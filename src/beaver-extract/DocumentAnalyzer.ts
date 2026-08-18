@@ -16,9 +16,9 @@ import type {
     OCRDetectionResult,
     PageOCRAnalysis,
     OCRIssueReason,
-} from "./types";
-import { DEFAULT_OCR_DETECTION_OPTIONS, DEFAULT_MARGIN_ZONE, bboxToTuple } from "./types";
-import { bboxHeight, bboxWidth } from "./types";
+} from "@beaver/agent-core/extract/types";
+import { DEFAULT_OCR_DETECTION_OPTIONS, DEFAULT_MARGIN_ZONE, bboxToTuple } from "@beaver/agent-core/extract/types";
+import { bboxHeight, bboxWidth } from "@beaver/agent-core/extract/types";
 import { isRecoverablePageError } from "./wasmFatal";
 
 /**

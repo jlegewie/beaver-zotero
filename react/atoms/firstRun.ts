@@ -1,9 +1,9 @@
 import { atom } from 'jotai';
 import { v4 as uuidv4 } from 'uuid';
-import { LibrarySuggestionsResponse, SuggestionCard } from '../types/librarySuggestions';
-import { MessageAttachment, isCollectionAttachment } from '../types/attachments/apiTypes';
+import { LibrarySuggestionsResponse, SuggestionCard } from '@beaver/agent-core/types/librarySuggestions';
+import { MessageAttachment, isCollectionAttachment } from '@beaver/agent-core/types/attachments/apiTypes';
 import { librarySuggestionsService } from '../../src/services/librarySuggestionsService';
-import { accountService } from '../../src/services/accountService';
+import { accountService } from '@beaver/agent-core/transport/clients/accountService';
 import {
     readCachedSuggestions,
     writeCachedSuggestions,
@@ -13,15 +13,16 @@ import {
     currentMessageItemsAtom,
     currentMessageCollectionsAtom,
 } from './messageComposition';
-import { CollectionReference, collectionToReference } from '../types/zotero';
+import { CollectionReference } from '@beaver/agent-core/types/zotero';
+import { collectionToReference } from '../utils/zoteroReferences';
 import { sendWSMessageAtom } from './agentRunAtoms';
 import { newThreadAtom } from './threads';
 import { profileWithPlanAtom, isDeviceAuthorizedAtom, isDatabaseSyncSupportedAtom } from './profile';
 import { libraryItemCountAtom, SMALL_LIBRARY_THRESHOLD } from './zoteroContext';
 import { isWebSearchAllowedAtom, isWebSearchEnabledAtom } from './ui';
 import { beaverDefaultModelAtom, updateSelectedModelAtom } from './models';
-import { ChargingPermissions } from '../../src/services/agentProtocol';
-import { logger } from '../../src/utils/logger';
+import { ChargingPermissions } from '@beaver/agent-core/protocol/agentProtocol';
+import { logger } from '@beaver/agent-core/platform/logger';
 import { UNRESOLVED_LIBRARY_ID } from '../../src/utils/libraryIdentity';
 
 export const firstRunSuggestionsAtom = atom<LibrarySuggestionsResponse | null>(null);
@@ -338,8 +339,7 @@ export const submitFirstRunCardAtom = atom(
 );
 
 const FIRST_RUN_DISCOVER_PERMISSIONS_OVERRIDE: Partial<ChargingPermissions> = {
-    confirm_extraction_costs: false,
-    confirm_external_search_costs: false,
+    confirm_credits: false,
 };
 
 /**

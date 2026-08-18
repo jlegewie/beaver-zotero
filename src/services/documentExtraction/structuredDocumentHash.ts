@@ -1,5 +1,5 @@
-import type { DocumentExtractResult } from './shared/documentExtractResult';
-import type { ExtractContentKind } from './shared/contentKinds';
+import type { DocumentExtractResult } from '@beaver/agent-core/extract/document/shared/documentExtractResult';
+import type { ExtractContentKind } from '@beaver/agent-core/extract/document/shared/contentKinds';
 
 type IndexableContentKind = Extract<ExtractContentKind, 'pdf' | 'epub' | 'snapshot'>;
 

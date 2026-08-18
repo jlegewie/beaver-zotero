@@ -12,8 +12,8 @@ import {
 } from "../atoms/embeddingIndex";
 import { EmbeddingIndexer, IndexingError, MIN_CONTENT_LENGTH, INDEX_BATCH_SIZE, mergeIndexingErrors } from "../../src/services/embeddingIndexer";
 import { BeaverDB } from "../../src/services/database";
-import { embeddingsService } from "../../src/services/embeddingsService";
-import { logger } from "../../src/utils/logger";
+import { embeddingsService } from "@beaver/agent-core/transport/clients/embeddingsService";
+import { logger } from "@beaver/agent-core/platform/logger";
 import { getPref, setPref } from "../../src/utils/prefs";
 import { store } from "../store";
 

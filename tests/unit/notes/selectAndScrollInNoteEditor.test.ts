@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 // Module Mocks (must be before imports)
 // =============================================================================
 
-vi.mock('../../../src/utils/logger', () => ({
+vi.mock('@beaver/agent-core/platform/logger', () => ({
     logger: vi.fn(),
 }));
 
@@ -76,7 +76,7 @@ vi.mock('../../../src/utils/zoteroUtils', () => ({
     safeFileExists: vi.fn(),
 }));
 
-vi.mock('../../../react/utils/stringUtils', () => ({
+vi.mock('@beaver/agent-ui/utils/stringUtils', () => ({
     truncateText: vi.fn((s: string) => s),
 }));
 

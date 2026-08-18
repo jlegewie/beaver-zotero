@@ -8,15 +8,18 @@ const mockLoadFullItemDataWithAllTypes = vi.fn();
 const mockExtractZoteroReferences = vi.fn();
 
 vi.mock('../../../react/atoms/externalReferences', () => ({
-    addExternalReferencesToMappingAtom: {},
     checkExternalReferencesAtom: {},
+}));
+
+vi.mock('@beaver/agent-core/citations/externalReferences', () => ({
+    addExternalReferencesToMappingAtom: {},
 }));
 
 vi.mock('../../../src/utils/zoteroUtils', () => ({
     loadFullItemDataWithAllTypes: (...args: unknown[]) => mockLoadFullItemDataWithAllTypes(...args),
 }));
 
-vi.mock('../../../react/agents/toolResultTypes', () => ({
+vi.mock('@beaver/agent-core/run-state/toolResultTypes', () => ({
     extractZoteroReferences: (...args: unknown[]) => mockExtractZoteroReferences(...args),
     isExternalSearchResult: vi.fn(() => false),
     isLookupWorkResult: vi.fn(() => false),
@@ -24,7 +27,7 @@ vi.mock('../../../react/agents/toolResultTypes', () => ({
     extractLookupWorkData: vi.fn(),
 }));
 
-vi.mock('../../../src/utils/logger', () => ({ logger: vi.fn() }));
+vi.mock('@beaver/agent-core/platform/logger', () => ({ logger: vi.fn() }));
 
 import { processToolReturnResults } from '../../../react/agents/toolResultProcessing';
 
@@ -88,5 +91,26 @@ describe('processToolReturnResults — eager item loading', () => {
         await expect(processToolReturnResults(makePart(), vi.fn() as any)).resolves.toBeUndefined();
 
         expect(mockLoadFullItemDataWithAllTypes).toHaveBeenCalledWith([]);
+    });
+
+    it('skips a non-success return, whose content is a message rather than results', async () => {
+        const failed = { ...makePart(), outcome: 'failed', content: 'Reading files is not available.' };
+
+        await expect(processToolReturnResults(failed, vi.fn() as any)).resolves.toBeUndefined();
+
+        expect(mockExtractZoteroReferences).not.toHaveBeenCalled();
+        expect(mockLoadFullItemDataWithAllTypes).not.toHaveBeenCalled();
+    });
+
+    // Parts from a pre-outcome backend must keep taking the original path.
+    it('still processes a part with no outcome field', async () => {
+        mockExtractZoteroReferences.mockReturnValue([{ library_id: 1, zotero_key: 'GOODKEY1' }]);
+        const legacy = makePart();
+        expect('outcome' in legacy).toBe(false);
+
+        await processToolReturnResults(legacy, vi.fn() as any);
+
+        expect(mockExtractZoteroReferences).toHaveBeenCalled();
+        expect(mockLoadFullItemDataWithAllTypes).toHaveBeenCalledWith([foundItem]);
     });
 });
