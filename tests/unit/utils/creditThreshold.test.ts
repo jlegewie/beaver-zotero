@@ -5,7 +5,7 @@ import {
     clampCreditThreshold,
     parseCreditLimitEntry,
     MIN_CREDIT_THRESHOLD,
-} from '../../../react/utils/creditThreshold';
+} from '@beaver/agent-ui/utils/creditThreshold';
 
 describe('clampCreditThreshold', () => {
     it('keeps a usable limit as it is', () => {

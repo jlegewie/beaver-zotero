@@ -219,6 +219,7 @@
     "./src/utils/pageLabels.ts",
     "./src/utils/pageRanges.ts",
     "./src/utils/useIsomorphicLayoutEffect.ts",
+    "./src/utils/creditThreshold.ts",
 
     // The client-host registry: the seam a shared component reaches client
     // behavior through. Its slice interfaces are the whole of `types.ts`, which
