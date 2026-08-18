@@ -103,3 +103,4 @@ export { default as FilterIcon } from './FilterIcon';
 export { default as ImportIcon } from './ImportIcon';
 export { default as HelpCircleIcon } from './HelpCircleIcon';
 export { default as HandIcon } from './HandIcon';
+export { default as SecurityWarningIcon } from './SecurityWarningIcon';
