@@ -275,6 +275,11 @@ if (
 // and the editor now imports both, so the orphan scan keeps them honest through
 // their real importer. That is the stronger signal — a root that no longer needs
 // to be one only hides a file falling out of the closure.
+//
+// src/utils/creditThreshold.ts is a root for the opposite reason: it holds the
+// credit limit's bounds and parsing for every client to agree on, and no shared
+// component reads them — each client imports it directly from its own settings
+// UI. Nothing inside the package would otherwise make it reachable.
 const entryPaths = [
   "src/icons/index.tsx",
   "src/primitives/index.ts",
@@ -282,6 +287,7 @@ const entryPaths = [
   "src/chat/index.ts",
   "src/auth/index.ts",
   "src/composer/index.ts",
+  "src/utils/creditThreshold.ts",
 ].map((p) => path.join(pkgDir, p));
 
 const listed = parsed.fileNames.map((f) => path.resolve(f));

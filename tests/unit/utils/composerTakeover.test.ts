@@ -1,7 +1,7 @@
 /**
  * Composer takeover precedence.
  *
- * Three run-blocking states can be live at once and only one can occupy the
+ * Several run-blocking states can be live at once and only one can occupy the
  * footer. These tests pin the order, because getting it wrong strands the user
  * on a card that cannot unblock the run.
  */
@@ -9,7 +9,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { PendingCreditConfirmation } from '@beaver/agent-core/run-state/pendingCreditConfirmations';
 import type { PendingQuestion } from '@beaver/agent-core/run-state/pendingQuestions';
-import { selectComposerTakeover } from '../../../react/utils/composerTakeover';
+import { selectComposerTakeover } from '@beaver/agent-ui/chat/composerTakeover';
 
 function confirmation(id = 'conf-1'): PendingCreditConfirmation {
     return {
@@ -42,25 +42,31 @@ const noQuestions = new Map<string, PendingQuestion>();
 
 describe('selectComposerTakeover', () => {
     it('leaves the composer in place when nothing is pending', () => {
-        expect(selectComposerTakeover(0, noConfirmations, noQuestions)).toEqual({ kind: 'input' });
+        expect(
+            selectComposerTakeover({
+                pendingApprovalCount: 0,
+                creditConfirmations: noConfirmations,
+                questions: noQuestions,
+            }),
+        ).toEqual({ kind: 'input' });
     });
 
     it('picks the credit confirmation over a pending question', () => {
-        const takeover = selectComposerTakeover(
-            0,
-            new Map([['conf-1', confirmation()]]),
-            new Map([['call-1', question()]]),
-        );
+        const takeover = selectComposerTakeover({
+            pendingApprovalCount: 0,
+            creditConfirmations: new Map([['conf-1', confirmation()]]),
+            questions: new Map([['call-1', question()]]),
+        });
 
         expect(takeover).toEqual({ kind: 'credit-confirmation', confirmation: confirmation() });
     });
 
     it('picks the question when only a question is pending', () => {
-        const takeover = selectComposerTakeover(
-            0,
-            noConfirmations,
-            new Map([['call-1', question()]]),
-        );
+        const takeover = selectComposerTakeover({
+            pendingApprovalCount: 0,
+            creditConfirmations: noConfirmations,
+            questions: new Map([['call-1', question()]]),
+        });
 
         expect(takeover).toEqual({ kind: 'question', question: question() });
     });
@@ -68,24 +74,35 @@ describe('selectComposerTakeover', () => {
     it('keeps InputArea when agent-action approvals are pending, whatever else waits', () => {
         // Those approvals are answered on the action cards in the stream, and
         // InputArea owns that flow — a takeover would hide them.
-        const takeover = selectComposerTakeover(
-            1,
-            new Map([['conf-1', confirmation()]]),
-            new Map([['call-1', question()]]),
-        );
+        const takeover = selectComposerTakeover({
+            pendingApprovalCount: 1,
+            creditConfirmations: new Map([['conf-1', confirmation()]]),
+            questions: new Map([['call-1', question()]]),
+        });
 
         expect(takeover).toEqual({ kind: 'input' });
     });
 
+    it('reads an omitted member as no such state, not as a missing argument', () => {
+        // A client without an approval flow or a question panel reports only
+        // what it can render; the remaining precedence must not change.
+        const takeover = selectComposerTakeover({
+            creditConfirmations: new Map([['conf-1', confirmation()]]),
+        });
+
+        expect(takeover).toEqual({ kind: 'credit-confirmation', confirmation: confirmation() });
+        expect(selectComposerTakeover({})).toEqual({ kind: 'input' });
+    });
+
     it('takes the first confirmation when several are somehow live', () => {
-        const takeover = selectComposerTakeover(
-            0,
-            new Map([
+        const takeover = selectComposerTakeover({
+            pendingApprovalCount: 0,
+            creditConfirmations: new Map([
                 ['conf-1', confirmation('conf-1')],
                 ['conf-2', confirmation('conf-2')],
             ]),
-            noQuestions,
-        );
+            questions: noQuestions,
+        });
 
         expect(takeover).toEqual({
             kind: 'credit-confirmation',

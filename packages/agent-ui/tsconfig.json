@@ -172,6 +172,7 @@
     "./src/primitives/index.ts",
     "./src/primitives/Button.tsx",
     "./src/primitives/ContextMenu.tsx",
+    "./src/primitives/DocsLink.tsx",
     "./src/primitives/IconButton.tsx",
     "./src/primitives/MenuButton.tsx",
     "./src/primitives/SearchMenu.tsx",
@@ -188,6 +189,8 @@
     "./src/chat/Citation.tsx",
     "./src/chat/CitedSourcesList.tsx",
     "./src/chat/ChipPopup.tsx",
+    "./src/chat/CreditConfirmationCard.tsx",
+    "./src/chat/composerTakeover.ts",
     "./src/chat/actionPopup.ts",
     "./src/chat/useCitationMarker.ts",
     "./src/chat/useCitationViewModel.ts",
@@ -216,6 +219,7 @@
     "./src/utils/pageLabels.ts",
     "./src/utils/pageRanges.ts",
     "./src/utils/useIsomorphicLayoutEffect.ts",
+    "./src/utils/creditThreshold.ts",
 
     // The client-host registry: the seam a shared component reaches client
     // behavior through. Its slice interfaces are the whole of `types.ts`, which
