@@ -29,3 +29,6 @@ export type { ActionPopupSource } from './actionPopup';
 
 export { default as CreditConfirmationCard, createCreditDecisionHandlers } from './CreditConfirmationCard';
 export type { CreditConfirmationCardProps, CreditDecisionHandlers } from './CreditConfirmationCard';
+
+export { selectComposerTakeover } from './composerTakeover';
+export type { ComposerTakeover, ComposerTakeoverInput } from './composerTakeover';

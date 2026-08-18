@@ -5,7 +5,7 @@ import CreditConfirmationPanel from "./input/CreditConfirmationPanel"
 import { pendingApprovalsAtom } from '../agents/agentActions';
 import { pendingQuestionsAtom } from '@beaver/agent-core/run-state/pendingQuestions';
 import { pendingCreditConfirmationsAtom } from '@beaver/agent-core/run-state/pendingCreditConfirmations';
-import { selectComposerTakeover } from '../utils/composerTakeover';
+import { selectComposerTakeover } from '@beaver/agent-ui/chat/composerTakeover';
 import Header from "./Header"
 import { useEventSubscription } from '../hooks/useEventSubscription';
 import { ThreadView } from "./agentRuns";
@@ -191,15 +191,16 @@ const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
     // Composer takeover: while the run blocks on a question or a credit
     // confirmation, that panel replaces the composer entirely (the draft
     // message atom is untouched, so the composer restores it afterwards).
-    // selectComposerTakeover owns the precedence between the three states.
+    // selectComposerTakeover is shared across clients and owns the precedence
+    // between the blocking states; this client reports all three of them.
     const pendingApprovalsMap = useAtomValue(pendingApprovalsAtom);
     const pendingQuestionsMap = useAtomValue(pendingQuestionsAtom);
     const pendingCreditConfirmationsMap = useAtomValue(pendingCreditConfirmationsAtom);
-    const composerTakeover = selectComposerTakeover(
-        pendingApprovalsMap.size,
-        pendingCreditConfirmationsMap,
-        pendingQuestionsMap,
-    );
+    const composerTakeover = selectComposerTakeover({
+        pendingApprovalCount: pendingApprovalsMap.size,
+        creditConfirmations: pendingCreditConfirmationsMap,
+        questions: pendingQuestionsMap,
+    });
 
     useEffect(() => {
         setIsSkippedFilesDialogVisible(false);
