@@ -19,6 +19,13 @@ export type { DocsLinkProps } from './DocsLink';
 
 export { default as MenuButton } from './MenuButton';
 
+export { default as PermissionMenu } from './PermissionMenu';
+export type {
+    PermissionMenuProps,
+    PermissionMenuOption,
+    PermissionMenuTone,
+} from './PermissionMenu';
+
 export { default as ContextMenu } from './ContextMenu';
 export type { ContextMenuProps, MenuItem, MenuPosition } from './ContextMenu';
 
