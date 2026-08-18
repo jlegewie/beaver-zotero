@@ -11,7 +11,6 @@ import { PlanInfo } from "@beaver/agent-core/transport/clients/accountService";
 import { CreditBreakdown, ProfileBalance, CreditPlan } from "@beaver/agent-core/types/profile";
 import { getPref, setPref } from "../../../src/utils/prefs";
 import {
-    MIN_CREDIT_THRESHOLD,
     parseCreditLimitEntry,
     readCreditThreshold,
 } from "../../utils/creditThreshold";
@@ -468,9 +467,18 @@ const BillingSection: React.FC = () => {
                     }
                     control={
                         <input
-                            type="number"
-                            min={MIN_CREDIT_THRESHOLD}
-                            step={1}
+                            // Text, not a number field. A number field
+                            // sanitizes anything it cannot parse to the empty
+                            // string, and an empty field here is not a failed
+                            // entry but a decision — "never ask". A lone `-` or
+                            // `.`, both of which such a field accepts as
+                            // keystrokes, would therefore read back as a request
+                            // to stop asking, so clicking away part-way through
+                            // retyping the limit would switch it off. Text keeps
+                            // the entry intact, which is what lets
+                            // `parseCreditLimitEntry` tell an unusable one from
+                            // an empty one and snap it back.
+                            type="text"
                             inputMode="numeric"
                             placeholder="Never"
                             aria-label="Credit limit"
@@ -481,7 +489,7 @@ const BillingSection: React.FC = () => {
                                 if (e.key === 'Enter') e.currentTarget.blur();
                             }}
                             onClick={(e) => e.stopPropagation()}
-                            className="py-1 px-2 preference-input text-sm font-color-primary"
+                            className="py-1 px-2 preference-input preference-input-numeric text-sm font-color-primary"
                             style={{ width: '32px', margin: 0 }}
                         />
                     }
