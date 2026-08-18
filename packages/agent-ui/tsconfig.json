@@ -194,6 +194,7 @@
     "./src/chat/CitedSourcesList.tsx",
     "./src/chat/ChipPopup.tsx",
     "./src/chat/AskUserQuestionCard.tsx",
+    "./src/chat/BatchApprovalCard.tsx",
     "./src/chat/CreditConfirmationCard.tsx",
     "./src/chat/composerTakeover.ts",
     "./src/chat/actionPopup.ts",
