@@ -101,3 +101,4 @@ export { default as LayersIcon } from './LayersIcon';
 export { default as BookSearchIcon } from './BookSearchIcon';
 export { default as FilterIcon } from './FilterIcon';
 export { default as ImportIcon } from './ImportIcon';
+export { default as HelpCircleIcon } from './HelpCircleIcon';
