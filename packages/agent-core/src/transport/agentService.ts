@@ -1061,14 +1061,17 @@ export class AgentService {
      * @param questionId The question ID from the request
      * @param answers The user's answers (empty when cancelled)
      * @param cancelled Whether the user skipped the question(s)
+     * @returns false if the socket was not open, so the response never left the
+     *   client. The caller must recover the card rather than wait for a reply
+     *   that cannot come.
      */
     sendAskUserQuestionResponse(
         questionId: string,
         answers: AskUserQuestionAnswer[],
         cancelled: boolean = false,
-    ): void {
+    ): boolean {
         logger(`AgentService: Sending ask_user_question response for ${questionId}: ${cancelled ? 'cancelled' : `${answers.length} answer(s)`}`, 1);
-        this.send({
+        return this.send({
             type: 'ask_user_question_response',
             question_id: questionId,
             answers,

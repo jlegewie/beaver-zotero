@@ -102,6 +102,7 @@
 
     // Run-state: the wire-shape guards, view models and run-lifecycle helpers a
     // client needs to turn an agent run into render state.
+    "./src/run-state/askUserQuestionAnswers.ts",
     "./src/run-state/toolResultViews.ts",
     "./src/run-state/toolResultTypes.ts",
     "./src/run-state/toolCallRequest.ts",
