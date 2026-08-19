@@ -1430,7 +1430,10 @@ export interface WSResolvePopulationRequest extends WSBaseEvent {
     item_category: 'regular' | 'attachment';
     /** Filter regular items by attachment presence; null = no filter. */
     has_attachments?: boolean | null;
-    /** Maximum number of ids to return. Further matches are counted, not returned. */
+    /**
+     * Maximum number of ids to return. Further matches are counted, not
+     * returned. 0 returns no ids (total_count is still the true match count).
+     */
     max_items: number;
 }
 
@@ -1438,7 +1441,11 @@ export interface WSResolvePopulationRequest extends WSBaseEvent {
 export interface WSResolvePopulationResponse {
     type: 'resolve_population';
     request_id: string;
-    /** Matching item ids ("<library_id>-<zotero_key>"), deterministic order, <= max_items. */
+    /**
+     * Matching item ids in portable form (`u-<key>` for the personal library,
+     * `g<groupID>-<key>` for groups — group id, not the device-local library
+     * id), deterministic order, length <= max_items.
+     */
     item_ids: string[];
     /** True number of matches, counted before truncation. */
     total_count: number;

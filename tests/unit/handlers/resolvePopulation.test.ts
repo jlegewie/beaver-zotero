@@ -56,11 +56,11 @@ describe('handleResolvePopulationRequest', () => {
     const callsMatching = (pattern: RegExp) => dbCalls().filter(([sql]) => pattern.test(sql));
 
     /** Seed an item row plus, optionally, the attachments hanging off it. */
-    function seedItem(itemID: number, options: { key?: string; dateAdded?: string; attachments?: number[] } = {}) {
+    function seedItem(itemID: number, options: { key?: string; libraryID?: number; dateAdded?: string; attachments?: number[] } = {}) {
         itemRows.set(itemID, {
             itemID,
             key: options.key ?? `KEY${itemID}`,
-            libraryID: LIBRARY_ID,
+            libraryID: options.libraryID ?? LIBRARY_ID,
             dateAdded: options.dateAdded ?? `2024-01-01 00:00:${String(itemID).padStart(2, '0')}`,
         });
         if (options.attachments) {
@@ -438,6 +438,38 @@ describe('handleResolvePopulationRequest', () => {
             expect(response.truncated).toBe(false);
             expect(response.total_count).toBe(2);
             expect(response.item_ids).toEqual(['u-KEY2', 'u-KEY1']);
+        });
+
+        it('returns no ids and still reports the count when max_items is 0', async () => {
+            searchResultIds = [1, 2, 3];
+            seedItem(1);
+            seedItem(2);
+            seedItem(3);
+
+            const response = await handleResolvePopulationRequest(makeRequest({ max_items: 0 }));
+
+            expect(response.item_ids).toEqual([]);
+            expect(response.total_count).toBe(3);
+            expect(response.truncated).toBe(true);
+            // Count-only: do not materialize keys or a sort order.
+            expect((globalThis as any).Zotero.DB.queryAsync).not.toHaveBeenCalled();
+        });
+
+        it('emits group ids as g<groupID>-<key>, not library_id-key', async () => {
+            const groupLibraryID = 3;
+            vi.mocked(validateLibraryAccess).mockReturnValue({
+                valid: true,
+                library: { libraryID: groupLibraryID, name: 'Some Group' },
+            } as any);
+            (globalThis as any).Zotero.Groups = {
+                getGroupIDFromLibraryID: vi.fn(() => 287629),
+            };
+            searchResultIds = [1];
+            seedItem(1, { key: '4BXI95WE', libraryID: groupLibraryID });
+
+            const response = await handleResolvePopulationRequest(makeRequest());
+
+            expect(response.item_ids).toEqual(['g287629-4BXI95WE']);
         });
 
         it('breaks a dateAdded tie by itemID', async () => {

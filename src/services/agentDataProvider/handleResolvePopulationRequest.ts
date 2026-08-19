@@ -21,7 +21,7 @@ import { addSearchCondition } from './searchConditions';
 /** SQLite's bound-variable limit is well above this; 500 keeps a margin. */
 const SQL_CHUNK_SIZE = 500;
 
-/** Mirrors the backend's `max_items` default, for a request that omits it. */
+/** Mirrors the backend's `max_items` default when the request omits it or sends a negative value. */
 const DEFAULT_MAX_ITEMS = 1000;
 
 /** Row of the id/order query. `key`, `libraryID` and `dateAdded` are all columns on `items`. */
@@ -279,10 +279,30 @@ export async function handleResolvePopulationRequest(
             ? await attachmentIdsForItems(itemIds)
             : itemIds;
 
-        const maxItems = typeof request.max_items === 'number' && request.max_items > 0
+        // 0 is a real cap (return no ids, still report the count). Only omit /
+        // NaN / negative fall back to the backend default.
+        const maxItems = typeof request.max_items === 'number' && request.max_items >= 0
             ? request.max_items
             : DEFAULT_MAX_ITEMS;
         const totalCount = matchedIds.length;
+
+        // Count-only: total_count is already known, so skip the id/order query.
+        if (maxItems === 0) {
+            logger(
+                `handleResolvePopulationRequest: Returning 0/${totalCount} item ids`
+                    + `${totalCount > 0 ? ' (truncated)' : ''}${warnings.length ? ` with ${warnings.length} warning(s)` : ''}`,
+                1,
+            );
+            return {
+                type: 'resolve_population',
+                request_id: request.request_id,
+                item_ids: [],
+                total_count: totalCount,
+                truncated: totalCount > 0,
+                warnings: warnings.length ? warnings : undefined,
+            };
+        }
+
         const truncated = totalCount > maxItems;
 
         // Ids and a stable order in one query — no getAsync, no loadDataTypes,
