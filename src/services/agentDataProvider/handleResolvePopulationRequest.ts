@@ -60,6 +60,33 @@ async function itemIdsWithAttachments(itemIds: number[]): Promise<Set<number>> {
 }
 
 /**
+ * The non-trashed attachments of the given items, as item ids.
+ * The population of an attachment scope: the filters describe bibliographic
+ * items, and these are the attachments hanging off the ones that matched.
+ */
+async function attachmentIdsForItems(itemIds: number[]): Promise<number[]> {
+    const attachmentIds: number[] = [];
+
+    for (let i = 0; i < itemIds.length; i += SQL_CHUNK_SIZE) {
+        const chunk = itemIds.slice(i, i + SQL_CHUNK_SIZE);
+        const placeholders = chunk.map(() => '?').join(', ');
+        await Zotero.DB.queryAsync(
+            'SELECT ia.itemID FROM itemAttachments ia '
+                + 'LEFT JOIN deletedItems di ON di.itemID = ia.itemID '
+                + `WHERE ia.parentItemID IN (${placeholders}) AND di.itemID IS NULL`,
+            chunk,
+            {
+                onRow: (row: any) => {
+                    attachmentIds.push(row.getResultByIndex(0));
+                },
+            },
+        );
+    }
+
+    return attachmentIds;
+}
+
+/**
  * Read key/library/dateAdded for the matched ids without loading any item.
  * Chunked, so the caller must re-sort globally — a per-chunk `ORDER BY` only
  * orders within its own chunk.
@@ -187,27 +214,11 @@ export async function handleResolvePopulationRequest(
         const search = new Zotero.Search() as unknown as ZoteroSearchWritable;
         search.libraryID = library.libraryID;
 
-        // Collection membership.
-        //
-        // For a regular population the condition is enough. An attachment
-        // population is made of CHILD items, and a child attachment is not a
-        // row in `collectionItems` — only its parent is — so a plain collection
-        // condition would resolve to nothing. The collection therefore becomes
-        // a search *scope* with includeChildren, which admits the collection's
-        // items and their attachments.
-        let scopeSearch: Zotero.Search | null = null;
         if (collectionId !== null) {
-            let collectionTarget = search;
-            if (itemCategory === 'attachment') {
-                collectionTarget = new Zotero.Search() as unknown as ZoteroSearchWritable;
-                collectionTarget.libraryID = library.libraryID;
-                scopeSearch = collectionTarget as unknown as Zotero.Search;
-            }
-            collectionTarget.addCondition('collectionID', 'is', String(collectionId));
-            // `recursive` only affects collection conditions, so it is added
-            // wherever the collection condition went.
+            search.addCondition('collectionID', 'is', String(collectionId));
+            // `recursive` only affects collection conditions.
             if (request.recursive !== false) {
-                collectionTarget.addCondition('recursive', 'true', '');
+                search.addCondition('recursive', 'true', '');
             }
         }
 
@@ -228,22 +239,19 @@ export async function handleResolvePopulationRequest(
             addSearchCondition(search, condition, warnings, 'handleResolvePopulationRequest');
         }
 
-        if (itemCategory === 'attachment') {
-            search.addCondition('itemType', 'is', 'attachment');
-        } else {
-            search.addCondition('itemType', 'isNot', 'attachment');
-            search.addCondition('itemType', 'isNot', 'note');
-            search.addCondition('itemType', 'isNot', 'annotation');
-            // noChildren only for the regular category: an attachment
-            // population is made of child items and this would empty it.
-            search.addCondition('noChildren', 'true', '');
-        }
+        // Every filter above describes a bibliographic item, so the search
+        // always selects regular items — including for an attachment
+        // population, whose members are then derived from the matches below.
+        // Filtering attachments directly would evaluate `tag`, `unfiled` and
+        // `conditions` against the attachment rows instead, where a field like
+        // DOI is never present and the population silently becomes every
+        // attachment in the library.
+        search.addCondition('itemType', 'isNot', 'attachment');
+        search.addCondition('itemType', 'isNot', 'note');
+        search.addCondition('itemType', 'isNot', 'annotation');
+        search.addCondition('noChildren', 'true', '');
 
-        if (scopeSearch) {
-            search.setScope(scopeSearch, true);
-        }
-
-        const itemIds = await search.search();
+        let itemIds = await search.search();
 
         // has_attachments, in SQL. This is the only filter that could
         // reintroduce an O(population) item load, so it must never become a
@@ -251,13 +259,20 @@ export async function handleResolvePopulationRequest(
         //
         // It describes a regular item, and the combination with an attachment
         // population was rejected above.
-        let matchedIds = itemIds;
         if (request.has_attachments != null && itemIds.length > 0) {
             const withAttachments = await itemIdsWithAttachments(itemIds);
-            matchedIds = request.has_attachments
+            itemIds = request.has_attachments
                 ? itemIds.filter(id => withAttachments.has(id))
                 : itemIds.filter(id => !withAttachments.has(id));
         }
+
+        // An attachment population is the matched items' own attachments, so
+        // it is derived here rather than searched for. Standalone attachments
+        // are not included: they have none of the bibliographic fields the
+        // filters describe.
+        const matchedIds = itemCategory === 'attachment'
+            ? await attachmentIdsForItems(itemIds)
+            : itemIds;
 
         const maxItems = typeof request.max_items === 'number' && request.max_items > 0
             ? request.max_items
