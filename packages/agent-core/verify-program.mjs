@@ -187,6 +187,7 @@ const entryPaths = [
   "src/run-state/pendingQuestions.ts",
   "src/run-state/pendingCreditConfirmations.ts",
   "src/run-state/runErrorCopy.ts",
+  "src/run-state/runStatusCopy.ts",
   "src/citations/atoms.ts",
   "src/citations/externalReferences.ts",
 ].map((p) => path.join(pkgDir, p));

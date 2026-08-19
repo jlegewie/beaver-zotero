@@ -113,6 +113,7 @@
     "./src/run-state/pendingQuestions.ts",
     "./src/run-state/pendingCreditConfirmations.ts",
     "./src/run-state/toolLabels.ts",
-    "./src/run-state/runErrorCopy.ts"
+    "./src/run-state/runErrorCopy.ts",
+    "./src/run-state/runStatusCopy.ts"
   ]
 }
