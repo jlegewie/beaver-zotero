@@ -7,14 +7,12 @@
 
 import { atom, Getter, Setter } from 'jotai';
 import { v4 as uuidv4 } from 'uuid';
-import { agentService, AgentConnectionError } from '@beaver/agent-core/transport/agentService';
+import { agentService } from '@beaver/agent-core/transport/agentService';
+import { connectWithRetry } from '@beaver/agent-core/transport/connectWithRetry';
 import { notifyBatchApproval, notifyCreditConfirmation, notifyRunComplete, notifyUserQuestion } from '../../src/services/systemNotifications';
 import { reportConnectionFailure } from '@beaver/agent-core/transport/clients/diagnosticsService';
 import {
-    baselineConnectionEvidence,
     ConnectionFailureEvidence,
-    connectRecoveryAuthFields,
-    isRetryablePreReadyConnectFailure,
     presentConnectionFailure,
 } from '@beaver/agent-core/transport/connectionFailure';
 import {
@@ -89,6 +87,8 @@ import {
     updateRunWithToolCallArgsStream,
     allUserAttachmentKeysAtom,
     resetRunMessages,
+    wsReconnectingAtom,
+    wsRetryAtom,
 } from '@beaver/agent-core/run-state/atoms';
 import { userIdAtom } from './auth';
 import { citationsAtom, processCitationsAtom, resetCitationMarkersAtom, mergePageLabelsByAttachmentIdAtom } from '@beaver/agent-core/citations/atoms';
@@ -171,7 +171,6 @@ import {
     runApprovalPolicyAtom,
 } from './runApprovalPolicy';
 import { loadFullItemDataWithAllTypes } from '../../src/utils/zoteroUtils';
-import { resolveClientIdentity } from '@beaver/agent-core/transport/clientIdentity';
 import { dismissDiffPreview } from '../utils/noteEditorDiffPreview';
 import { store } from '../store';
 import { triggerProfileRefresh } from '../hooks/useProfileSync';
@@ -1160,28 +1159,8 @@ export const wsErrorAtom = atom<WSErrorEvent | null>(null);
 /** Last warning from WebSocket */
 export const wsWarningAtom = atom<WSWarningEvent | null>(null);
 
-/** Retry state from WebSocket (when backend is retrying a failed request) */
-export interface RetryState {
-    runId: string;
-    attempt: number;
-    maxAttempts: number;
-    reason: string;
-    waitSeconds?: number | null;
-}
-export const wsRetryAtom = atom<RetryState | null>(null);
 /** Deduplicates concurrent auto-resume/auto-retry scheduling for the same run. */
 const scheduledAutoResumeRunIdsAtom = atom<Set<string>>(new Set<string>());
-
-/**
- * Transient reconnect state while the client automatically retries a failed
- * connect attempt. Drives the status indicator's "Reconnecting…" copy instead
- * of a user-visible error.
- */
-export interface ReconnectState {
-    attempt: number;
-    maxAttempts: number;
-}
-export const wsReconnectingAtom = atom<ReconnectState | null>(null);
 
 // =============================================================================
 // Action Atoms
@@ -1335,8 +1314,17 @@ function applyRunCitations(
 /**
  * Create WebSocket callbacks for handling streaming events.
  * Shared between sendWSMessageAtom and regenerateFromRunAtom.
+ *
+ * @param connectAttempts Reads how many attempts opened the connection these
+ * callbacks belong to. A drop after `ready` has no attempt count of its own —
+ * the connection it lost is the one that succeeded — so the number that
+ * describes it is the number that got it open. Read lazily because the count is
+ * only known once the connect settles, which is after these callbacks exist.
  */
-export function createWSCallbacks(set: Setter): WSCallbacks {
+export function createWSCallbacks(
+    set: Setter,
+    connectAttempts: () => number | null = () => null,
+): WSCallbacks {
     return {
         onReady: (data: WSReadyData) => {
             logger('WS onReady:', data, 1);
@@ -1933,21 +1921,17 @@ export function createWSCallbacks(set: Setter): WSCallbacks {
                     (activeRun.status === 'in_progress' ||
                         activeRun.status === 'awaiting_deferred')
                 ) {
-                    surfaceAndDiagnoseConnectionFailure(set, activeRun.id, transportEvidence);
+                    surfaceAndDiagnoseConnectionFailure(
+                        set,
+                        activeRun.id,
+                        transportEvidence,
+                        connectAttempts() ?? undefined,
+                    );
                 }
             }
         }
     };
 }
-
-/** Total connect attempts per WS request (initial attempt + auto-retries). */
-export const CONNECT_MAX_ATTEMPTS = 4;
-/** Bounded-jitter backoff ranges before the 2nd, 3rd, and 4th attempts. */
-const CONNECT_RETRY_BACKOFF_MS = [
-    { min: 50, max: 200 },
-    { min: 200, max: 1000 },
-    { min: 500, max: 2500 },
-];
 
 /**
  * Execute a WebSocket request with the given run and request.
@@ -1957,10 +1941,10 @@ const CONNECT_RETRY_BACKOFF_MS = [
  * Transient pre-`ready` transport failures (1005/1006, connect timeout) are
  * retried automatically with jittered backoff before anything is surfaced to
  * the user: a cold-starting instance or momentary network block routinely
- * succeeds on the next attempt. Auth and application-level failures are never
- * retried. A recovered connect reports attempt count on the auth handshake;
- * one error surface and one diagnostics report (carrying the attempt count)
- * happen only after the final attempt fails.
+ * succeeds on the next attempt. The shared loop owns that policy, including
+ * which failures never qualify; this function owns only what the user and the
+ * store see. One error surface and one diagnostics report (carrying the attempt
+ * count) happen only after the final attempt fails.
  */
 async function executeWSRequest(
     run: AgentRun,
@@ -1968,107 +1952,98 @@ async function executeWSRequest(
     get: Getter,
     set: Setter
 ): Promise<void> {
-    const callbacks = createWSCallbacks(set);
-    let lastFailure: unknown = null;
-    let attemptsMade = 0;
-    const connectStartedAtMs = Date.now();
+    // How many attempts this run's connection cost, once it has one.
+    let attemptsMade: number | null = null;
 
-    for (let attempt = 1; attempt <= CONNECT_MAX_ATTEMPTS; attempt++) {
-        attemptsMade = attempt;
-        try {
-            logger(`WS Starting connection for run: ${run.id} (attempt ${attempt}/${CONNECT_MAX_ATTEMPTS})`);
-            // A new connection attempt starts from a clean ready state.
-            set(isWSReadyAtom, false);
-            // Resolved fresh for this attempt (not cached) — the searchable
-            // library set can change between reconnects.
-            const identity = resolveClientIdentity();
-            const recovery = connectRecoveryAuthFields(
-                attemptsMade,
-                lastFailure instanceof AgentConnectionError ? lastFailure.evidence : null,
-                connectStartedAtMs,
-            );
-            // connect() applies its own attempt-scoped backstop timeout, so this
-            // await cannot hang forever.
-            await agentService.connect(
-                request,
-                callbacks,
-                identity.frontendVersion,
-                identity.clientType,
-                identity.clientFeatures,
-                identity.zoteroInstance,
-                recovery,
-            );
-            logger('WS connect settled');
-            set(wsReconnectingAtom, null);
-            return;
-        } catch (error: any) {
-            logger(`WS connection attempt ${attempt}/${CONNECT_MAX_ATTEMPTS} failed:`, error, 1);
-            lastFailure = error;
+    /**
+     * Whether a different run has taken over the state this function writes.
+     *
+     * A connect loop outlives its own run by up to one backoff, and the reconnect
+     * state and the pending flag are both connection-wide rather than per-run. So
+     * a run cancelled mid-backoff, followed straight away by another, leaves an
+     * older loop about to write over the newer run's state — clearing a reconnect
+     * it is in the middle of, or releasing a composer it is still holding.
+     */
+    const supersededByLiveRun = (): boolean => {
+        const activeRun = store.get(activeRunAtom);
+        return (
+            !!activeRun &&
+            activeRun.id !== run.id &&
+            (activeRun.status === 'in_progress' || activeRun.status === 'awaiting_deferred')
+        );
+    };
 
-            // Check if an error was already set by the onError callback
-            // If so, don't overwrite it with a generic connection_error (and
-            // never retry it — application-level failures won't fix themselves).
-            const currentError = get(wsErrorAtom);
-            if (currentError && currentError.type !== 'connection_error') {
-                logger('WS connection error: Error already set by onError callback, not overwriting', 1);
+    const result = await connectWithRetry({
+        service: agentService,
+        request,
+        callbacks: createWSCallbacks(set, () => attemptsMade),
+        logLabel: `run ${run.id}`,
+        // Every attempt starts from a clean ready state.
+        onAttempt: () => set(isWSReadyAtom, false),
+        onRetrying: (progress) => {
+            if (supersededByLiveRun()) return;
+            if (!progress) {
                 set(wsReconnectingAtom, null);
-                // The onError that set this error may have dispatched an
-                // auto-retry whose commit is now in flight and owns the
-                // pending flag (see retryPendingRunIdAtom).
-                if (!get(retryPendingRunIdAtom)) {
-                    set(isWSChatPendingAtom, false);
-                }
                 return;
             }
-
-            const retryable =
-                attempt < CONNECT_MAX_ATTEMPTS &&
-                error instanceof AgentConnectionError &&
-                isRetryablePreReadyConnectFailure(error.evidence);
-            if (!retryable) break;
-
-            // Fully tear down the failed attempt so AgentService's overlap
-            // guard cannot swallow the next connect (a no-op when the failure
-            // path already reset the connection state).
-            agentService.close(1000, 'Retrying connection', { notifyClose: false });
-            // The transport close cleared the pending flag via onClose; restore
-            // it so the composer stays blocked while we quietly retry.
+            // The failed attempt's own close cleared the pending flag on its way
+            // out; restore it so the composer stays blocked while we quietly
+            // retry.
             set(isWSChatPendingAtom, true);
-            set(wsReconnectingAtom, { attempt: attempt + 1, maxAttempts: CONNECT_MAX_ATTEMPTS });
-
-            const backoffRange = CONNECT_RETRY_BACKOFF_MS[
-                Math.min(attempt - 1, CONNECT_RETRY_BACKOFF_MS.length - 1)
-            ];
-            const backoffMs = backoffRange.min
-                + Math.random() * (backoffRange.max - backoffRange.min);
-            await new Promise((resolve) => setTimeout(resolve, backoffMs));
-
-            // The run may have been cancelled, replaced, or rolled back during
-            // the wait — a retry whose tail was restored drops its shell here.
+            set(wsReconnectingAtom, progress);
+        },
+        // An error already set by the onError callback must not be overwritten
+        // with a generic connection_error.
+        isAlreadyReported: () => {
+            const currentError = get(wsErrorAtom);
+            return !!currentError && currentError.type !== 'connection_error';
+        },
+        // The run may have been cancelled, replaced, or rolled back during the
+        // backoff wait — a retry whose tail was restored drops its shell here.
+        isStillWanted: () => {
             const activeRun = store.get(activeRunAtom);
-            if (
-                activeRun?.id !== run.id ||
-                (activeRun.status !== 'in_progress' && activeRun.status !== 'awaiting_deferred')
-            ) {
-                logger(`WS connect retry abandoned: run ${run.id} is no longer active`, 1);
-                set(wsReconnectingAtom, null);
-                // Release the flag this loop raised for the quiet retry. Nothing
-                // downstream clears it on this path, and a stuck flag leaves the
-                // composer blocked with no run to finish and no error to show.
+            return (
+                activeRun?.id === run.id &&
+                (activeRun.status === 'in_progress' || activeRun.status === 'awaiting_deferred')
+            );
+        },
+    });
+
+    attemptsMade = result.attemptsMade;
+
+    if (result.kind === 'connected') return;
+
+    if (result.kind === 'abandoned') {
+        if (result.reason === 'already_reported') {
+            logger('WS connection error: Error already set by onError callback, not overwriting', 1);
+            // The onError that set this error may have dispatched an auto-retry
+            // whose commit is now in flight and owns the pending flag (see
+            // retryPendingRunIdAtom) — or a newer run may be holding it, which
+            // this loop has no business releasing.
+            if (!get(retryPendingRunIdAtom) && !supersededByLiveRun()) {
                 set(isWSChatPendingAtom, false);
-                return;
             }
+            return;
         }
+        logger(`WS connect retry abandoned: run ${run.id} is no longer active`, 1);
+        // Release the flag the quiet retry raised. Nothing downstream clears it
+        // on this path, and a stuck flag leaves the composer blocked with no run
+        // to finish and no error to show. Unless the run that superseded this one
+        // is now holding the flag for itself, in which case releasing it would
+        // open the composer over a run that is still going.
+        if (!supersededByLiveRun()) set(isWSChatPendingAtom, false);
+        return;
     }
 
-    set(wsReconnectingAtom, null);
-    const evidence = lastFailure instanceof AgentConnectionError
-        ? lastFailure.evidence
-        : baselineConnectionEvidence('opening', {
-              errorName: lastFailure instanceof Error ? lastFailure.name : 'UnknownError',
-          });
-    surfaceAndDiagnoseConnectionFailure(set, run.id, evidence, attemptsMade);
-    set(isWSChatPendingAtom, false);
+    surfaceAndDiagnoseConnectionFailure(set, run.id, result.evidence, result.attemptsMade);
+    // Guarded like the abandoned paths above, because this one is reachable with
+    // a newer run live too: an attempt can be in flight for twenty seconds, and a
+    // run that starts in that window has already raised the flag for itself
+    // before its own connect begins. Releasing it here would open the composer
+    // over that run and let a second send go out behind it. The error itself
+    // needs no such guard — it is filed against this run, and
+    // `surfaceAndDiagnoseConnectionFailure` drops it if that run is gone.
+    if (!supersededByLiveRun()) set(isWSChatPendingAtom, false);
 }
 
 /**

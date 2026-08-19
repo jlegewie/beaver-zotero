@@ -43,6 +43,18 @@ export interface PendingBatchApproval {
     batchId: string;
     /** Card title, rendered verbatim */
     title: string;
+    /**
+     * The population's size, e.g. "184 items". Rendered verbatim as the
+     * emphasised half of the scope line, and always set.
+     */
+    scopePrimary: string;
+    /**
+     * Where that population lives, e.g. "in Methods and its subcollections".
+     * Empty when the backend could not state it truthfully — a batch whose ids
+     * the model typed, or a collection the client never named back — and the
+     * card then shows the count alone.
+     */
+    scopeSecondary: string;
     /** The batch goal, rendered verbatim */
     message: string;
     /**
@@ -52,10 +64,16 @@ export interface PendingBatchApproval {
      */
     destructiveWarning: string;
     /**
-     * Line about the confirmation limit approving raises; empty when the run
-     * has no credit ledger or the user switched confirmations off.
+     * Short line about the confirmation limit approving raises, shown beside
+     * the title. Empty when the run has no credit ledger or the user switched
+     * confirmations off, and the chip is then hidden.
      */
-    creditNote: string;
+    creditChip: string;
+    /**
+     * The sentence the chip abbreviates, shown on hover; empty under the same
+     * conditions as the chip.
+     */
+    creditTooltip: string;
     /** Coverage mode the card preselects */
     defaultMode: BatchApprovalMode;
     /** Approve button label, rendered verbatim */
@@ -90,9 +108,12 @@ export const addPendingBatchApprovalAtom = atom(
                 toolcallId: event.toolcall_id,
                 batchId: event.batch_id,
                 title: event.title,
+                scopePrimary: event.scope_primary,
+                scopeSecondary: event.scope_secondary,
                 message: event.message,
                 destructiveWarning: event.destructive_warning,
-                creditNote: event.credit_note,
+                creditChip: event.credit_chip,
+                creditTooltip: event.credit_tooltip,
                 defaultMode: event.default_mode,
                 approveLabel: event.approve_label,
                 declineLabel: event.decline_label,

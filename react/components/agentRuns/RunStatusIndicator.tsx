@@ -2,7 +2,8 @@ import React from 'react';
 import { useAtomValue } from 'jotai';
 import { Icon, Spinner, RepeatIcon } from '../icons/icons';
 import { AgentRunStatus } from '@beaver/agent-core/agents/types';
-import { wsReconnectingAtom, wsRetryAtom } from '../../atoms/agentRunAtoms';
+import { wsReconnectingAtom, wsRetryAtom } from '@beaver/agent-core/run-state/atoms';
+import { runStatusText } from '@beaver/agent-core/run-state/runStatusCopy';
 
 interface RunStatusIndicatorProps {
     status: AgentRunStatus;
@@ -28,14 +29,11 @@ export const RunStatusIndicator: React.FC<RunStatusIndicatorProps> = ({ status, 
 
     // Reconnect state is connection-scoped (one active connection at a time),
     // so it applies to whichever run the indicator is spinning for.
-    const text = reconnectState
-        ? (reconnectState.attempt > 1
-            ? `Reconnecting… (${reconnectState.attempt}/${reconnectState.maxAttempts})`
-            : 'Reconnecting…')
-        : isRetrying
-            // ? `Retrying (${retryState.attempt}/${retryState.maxAttempts}): ${retryState.reason}`
-            ? `Retrying...`
-            : 'Generating';
+    const text = runStatusText({
+        reconnect: reconnectState,
+        backendRetry: isRetrying ? retryState : null,
+        idleLabel: 'Generating',
+    });
 
     // Structure matches ThinkingPartView for smooth visual transition
     return (
