@@ -1948,6 +1948,109 @@ export interface WSCreditConfirmationStale extends WSBaseEvent {
     reason: 'timed_out' | 'unknown';
 }
 
+/**
+ * Coverage a batch approval grants.
+ *
+ * `full_access` lets the batch's library edits apply without asking again;
+ * `ask_each_time` keeps every per-call prompt. Mirrors the backend's
+ * `BatchApprovalMode`; the two must stay in step.
+ */
+export type BatchApprovalMode = 'full_access' | 'ask_each_time';
+
+/**
+ * Ask the user to approve a batch operation before it starts mutating.
+ *
+ * One decision covers a whole batch rather than a single tool call, so this
+ * renders as a run-level card. Unlike a credit confirmation it carries a
+ * `toolcall_id` — the call that declared the batch — so the card can be
+ * anchored to it.
+ *
+ * Every user-facing string here is composed by the backend and must be
+ * rendered verbatim; the client contributes only its own chrome (the mode
+ * labels and the instructions placeholder). `destructive_warning` is
+ * model-authored prose about what the batch removes or overwrites and belongs
+ * in its own visually distinct block; it is empty when the batch declared
+ * nothing destructive, and the block is then hidden.
+ */
+export interface WSBatchApprovalRequest extends WSBaseEvent {
+    event: 'batch_approval_request';
+    /** Correlation id for the response */
+    approval_id: string;
+    /** The agent run awaiting approval */
+    run_id: string;
+    /** Thread the run belongs to */
+    thread_id?: string | null;
+    /** Tool call that declared the batch, so the client can anchor the card */
+    toolcall_id: string;
+    /** Id of the batch awaiting approval */
+    batch_id: string;
+    /** Card title, composed by the backend */
+    title: string;
+    /** The batch goal, composed by the backend */
+    message: string;
+    /**
+     * What the batch removes or overwrites, rendered verbatim in its own
+     * block; empty when the batch declared nothing destructive.
+     */
+    destructive_warning: string;
+    /**
+     * Line about the confirmation limit approving raises; empty when the run
+     * has no credit ledger or the user switched confirmations off.
+     */
+    credit_note: string;
+    /** Coverage mode the card preselects */
+    default_mode: BatchApprovalMode;
+    /** Label for the approve button */
+    approve_label: string;
+    /** Label for the decline button */
+    decline_label: string;
+    /** Backend-provided docs link text; empty means no link */
+    learn_more_label?: string;
+    /** Docs path resolved against the client's environment-specific docs URL */
+    learn_more_path?: string;
+    /** How long the backend will wait for a response */
+    timeout_seconds: number;
+}
+
+/**
+ * Response to a batch approval request (the user's decision).
+ *
+ * Both outcomes may carry instructions: on an approval they constrain how the
+ * batch runs, on a decline they say what to do instead.
+ */
+export interface WSBatchApprovalResponse {
+    type: 'batch_approval_response';
+    approval_id: string;
+    /** Whether the user approved the batch */
+    approved: boolean;
+    /** Coverage the approval grants */
+    mode: BatchApprovalMode;
+    /**
+     * Optional instructions from the user, kept in front of the model for the
+     * life of the batch and taking precedence over the batch goal.
+     */
+    user_instructions?: string | null;
+}
+
+/**
+ * The backend is no longer waiting on a batch approval.
+ *
+ * Sent when a `batch_approval_response` arrives after the backend's wait
+ * expired. The batch then runs with no coverage and every mutating call keeps
+ * its own prompt, so there is nothing to apply locally — the client just
+ * retires the card.
+ */
+export interface WSBatchApprovalStale extends WSBaseEvent {
+    event: 'batch_approval_stale';
+    /** The approval whose response was too late */
+    approval_id: string;
+    /**
+     * `timed_out`: the backend was waiting and gave up.
+     * `unknown`: no record of this approval on this connection.
+     */
+    reason: 'timed_out' | 'unknown';
+}
+
 /** One selectable option of an ask_user_question item (ids are server-assigned) */
 export interface AskUserQuestionOption {
     /** Server-assigned option id (e.g. 'q0-o1') */
@@ -2061,6 +2164,9 @@ export type WSEvent =
     // Run-level credit confirmation
     | WSCreditConfirmationRequest
     | WSCreditConfirmationStale
+    // Run-level batch approval
+    | WSBatchApprovalRequest
+    | WSBatchApprovalStale
     // User interaction events
     | WSAskUserQuestionRequest;
 
@@ -2624,6 +2730,22 @@ export interface WSCallbacks {
      * @param event The stale-confirmation notice, keyed by confirmation id
      */
     onCreditConfirmationStale?: (event: WSCreditConfirmationStale) => void;
+
+    /**
+     * Called when the backend asks the user to approve a batch operation before
+     * it starts mutating. The frontend should render the backend-composed card
+     * verbatim and send a WSBatchApprovalResponse when the user decides.
+     * @param event The approval request with copy and correlation id
+     */
+    onBatchApprovalRequest?: (event: WSBatchApprovalRequest) => void;
+
+    /**
+     * Called when a batch approval response we sent arrived too late to be
+     * used. The frontend should retire the card; there is nothing to apply
+     * locally.
+     * @param event The stale-approval notice, keyed by approval id
+     */
+    onBatchApprovalStale?: (event: WSBatchApprovalStale) => void;
 
     /**
      * Called when the backend asks the user structured multiple-choice

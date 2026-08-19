@@ -7,6 +7,7 @@
  */
 import { describe, expect, it } from 'vitest';
 
+import type { PendingBatchApproval } from '@beaver/agent-core/run-state/pendingBatchApprovals';
 import type { PendingCreditConfirmation } from '@beaver/agent-core/run-state/pendingCreditConfirmations';
 import type { PendingQuestion } from '@beaver/agent-core/run-state/pendingQuestions';
 import { selectComposerTakeover } from '@beaver/agent-ui/chat/composerTakeover';
@@ -37,6 +38,24 @@ function question(toolcallId = 'call-1'): PendingQuestion {
     };
 }
 
+function batchApproval(id = 'approval-1'): PendingBatchApproval {
+    return {
+        approvalId: id,
+        runId: 'run-1',
+        threadId: 'thread-1',
+        toolcallId: 'call-1',
+        batchId: 'b1',
+        title: 'Approve batch operation',
+        message: 'Tag every item.',
+        destructiveWarning: '',
+        creditNote: '',
+        defaultMode: 'full_access',
+        approveLabel: 'Approve',
+        declineLabel: 'Reject',
+        timeoutSeconds: 180,
+    };
+}
+
 const noConfirmations = new Map<string, PendingCreditConfirmation>();
 const noQuestions = new Map<string, PendingQuestion>();
 
@@ -49,6 +68,19 @@ describe('selectComposerTakeover', () => {
                 questions: noQuestions,
             }),
         ).toEqual({ kind: 'input' });
+    });
+
+    it('picks the batch approval over a credit confirmation and a question', () => {
+        // The batch gates the work the credits would be spent on, and
+        // declining it can remove the cost altogether.
+        const takeover = selectComposerTakeover({
+            pendingApprovalCount: 0,
+            batchApprovals: new Map([['approval-1', batchApproval()]]),
+            creditConfirmations: new Map([['conf-1', confirmation()]]),
+            questions: new Map([['call-1', question()]]),
+        });
+
+        expect(takeover).toEqual({ kind: 'batch-approval', approval: batchApproval() });
     });
 
     it('picks the credit confirmation over a pending question', () => {
@@ -92,6 +124,32 @@ describe('selectComposerTakeover', () => {
 
         expect(takeover).toEqual({ kind: 'credit-confirmation', confirmation: confirmation() });
         expect(selectComposerTakeover({})).toEqual({ kind: 'input' });
+    });
+
+    it('reads an omitted batch-approval map exactly like an empty one', () => {
+        const empty = selectComposerTakeover({
+            pendingApprovalCount: 0,
+            batchApprovals: new Map<string, PendingBatchApproval>(),
+            creditConfirmations: new Map([['conf-1', confirmation()]]),
+            questions: noQuestions,
+        });
+        const omitted = selectComposerTakeover({
+            pendingApprovalCount: 0,
+            creditConfirmations: new Map([['conf-1', confirmation()]]),
+            questions: noQuestions,
+        });
+
+        expect(empty).toEqual({ kind: 'credit-confirmation', confirmation: confirmation() });
+        expect(omitted).toEqual(empty);
+    });
+
+    it('keeps InputArea when agent-action approvals are pending, batch included', () => {
+        const takeover = selectComposerTakeover({
+            pendingApprovalCount: 1,
+            batchApprovals: new Map([['approval-1', batchApproval()]]),
+        });
+
+        expect(takeover).toEqual({ kind: 'input' });
     });
 
     it('takes the first confirmation when several are somehow live', () => {
