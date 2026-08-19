@@ -30,11 +30,8 @@ export interface BatchApprovalDraft {
 }
 
 /**
- * A draft with nothing chosen yet.
- *
- * `full_access` is the mode a request carries unless it says otherwise, so a
- * card whose request preselects it seeds from this object rather than building
- * an equal one.
+ * A draft with nothing chosen yet, on the mode a request carries unless it
+ * says otherwise. Every seeded draft starts from a copy of this.
  */
 export const DEFAULT_BATCH_APPROVAL_DRAFT: BatchApprovalDraft = {
     mode: 'full_access',
@@ -47,9 +44,10 @@ export const DEFAULT_BATCH_APPROVAL_DRAFT: BatchApprovalDraft = {
  * Takes the mode rather than the request so these rules stay independent of
  * the pending-store shape, and so a card never has to assemble a draft literal
  * of its own — the seeding rule is part of the shared semantics, not chrome.
+ *
+ * Always a fresh object, so no two cards ever seed onto the same draft.
  */
 export function initialDraft(defaultMode: BatchApprovalMode): BatchApprovalDraft {
-    if (defaultMode === DEFAULT_BATCH_APPROVAL_DRAFT.mode) return DEFAULT_BATCH_APPROVAL_DRAFT;
     return { ...DEFAULT_BATCH_APPROVAL_DRAFT, mode: defaultMode };
 }
 

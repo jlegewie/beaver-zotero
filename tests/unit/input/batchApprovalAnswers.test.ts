@@ -35,8 +35,23 @@ describe('initialDraft', () => {
         });
     });
 
-    it('reuses the default draft when the request preselects full access', () => {
-        expect(initialDraft('full_access')).toBe(DEFAULT_BATCH_APPROVAL_DRAFT);
+    it('seeds the default mode when the request preselects full access', () => {
+        expect(initialDraft('full_access')).toEqual(DEFAULT_BATCH_APPROVAL_DRAFT);
+    });
+
+    it('hands every card its own draft', () => {
+        const first = initialDraft('full_access');
+        const second = initialDraft('full_access');
+
+        // Two cards preselecting the default must not share one object.
+        expect(first).not.toBe(second);
+        // Nor may either of them alias the exported starting point.
+        expect(first).not.toBe(DEFAULT_BATCH_APPROVAL_DRAFT);
+
+        first.userInstructions = 'keep p53';
+
+        expect(second.userInstructions).toBe('');
+        expect(DEFAULT_BATCH_APPROVAL_DRAFT.userInstructions).toBe('');
     });
 });
 

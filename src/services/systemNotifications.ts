@@ -107,6 +107,31 @@ function getBeaverVisibility(): BeaverVisibility {
 }
 
 /**
+ * Whether an event that stalls waiting for the user should surface an
+ * OS-native notification: the user opted in, and the Beaver UI is not already
+ * in front of them.
+ */
+function shouldNotifySystem(): boolean {
+    if (getPref("enableSystemNotifications") !== true) {
+        return false;
+    }
+
+    switch (getBeaverVisibility()) {
+        case "beaver-visible":
+            // Scenario A: the pending UI is already on screen — nothing to do.
+            return false;
+        case "zotero-focused":
+            // SCENARIO B: Zotero is focused but Beaver is not visible.
+            // TODO: when an in-app Zotero notification exists, route this case
+            // there instead of falling through to a system notification.
+            return true;
+        case "zotero-unfocused":
+            // Scenario C: Zotero is in the background.
+            return true;
+    }
+}
+
+/**
  * Human-readable notification text for an approval request.
  */
 function describeApproval(event: WSDeferredApprovalRequest): { title: string; body: string } {
@@ -237,24 +262,8 @@ function flushQueuedApprovals(): void {
  * request, based on whether the user can currently see the Beaver UI.
  */
 export function notifyApprovalRequest(event: WSDeferredApprovalRequest): void {
-    if (getPref("enableSystemNotifications") !== true) {
+    if (!shouldNotifySystem()) {
         return;
-    }
-
-    const visibility = getBeaverVisibility();
-
-    switch (visibility) {
-        case "beaver-visible":
-            // Scenario A: the approval UI is already on screen — nothing to do.
-            return;
-        case "zotero-focused":
-            // SCENARIO B: Zotero is focused but Beaver is not visible.
-            // TODO: when an in-app Zotero notification exists, route this case
-            // there instead of falling through to a system notification.
-            break;
-        case "zotero-unfocused":
-            // Scenario C: Zotero is in the background.
-            break;
     }
 
     // Coalesce a burst of parallel approvals into a single notification. The
@@ -292,24 +301,8 @@ function describeQuestions(event: WSAskUserQuestionRequest): { title: string; bo
  * and the user can't currently see the Beaver UI.
  */
 export function notifyUserQuestion(event: WSAskUserQuestionRequest): void {
-    if (getPref("enableSystemNotifications") !== true) {
+    if (!shouldNotifySystem()) {
         return;
-    }
-
-    const visibility = getBeaverVisibility();
-
-    switch (visibility) {
-        case "beaver-visible":
-            // Scenario A: the question is already on screen — nothing to do.
-            return;
-        case "zotero-focused":
-            // SCENARIO B: Zotero is focused but Beaver is not visible.
-            // TODO: when an in-app Zotero notification exists, route this case
-            // there instead of falling through to a system notification.
-            break;
-        case "zotero-unfocused":
-            // Scenario C: Zotero is in the background.
-            break;
     }
 
     const { title, body } = describeQuestions(event);
@@ -332,32 +325,14 @@ function truncateBody(text: string): string {
  * wording of its own, exactly as the card does.
  */
 export function notifyCreditConfirmation(event: WSCreditConfirmationRequest): void {
-    if (getPref("enableSystemNotifications") !== true) {
+    if (!shouldNotifySystem()) {
         return;
     }
 
     // Keep notification copy consistent with the backend-provided card text.
-    const body = event.message;
-
-    const visibility = getBeaverVisibility();
-
-    switch (visibility) {
-        case "beaver-visible":
-            // Scenario A: the card is already on screen — nothing to do.
-            return;
-        case "zotero-focused":
-            // SCENARIO B: Zotero is focused but Beaver is not visible.
-            // TODO: when an in-app Zotero notification exists, route this case
-            // there instead of falling through to a system notification.
-            break;
-        case "zotero-unfocused":
-            // Scenario C: Zotero is in the background.
-            break;
-    }
-
     showNotification(
         event.title,
-        truncateBody(body),
+        truncateBody(event.message),
         CREDIT_CONFIRMATION_NOTIFICATION_NAME,
     );
 }
@@ -375,24 +350,8 @@ export function notifyCreditConfirmation(event: WSCreditConfirmationRequest): vo
  * eliding a destruction claim mid-word at the one-line limit.
  */
 export function notifyBatchApproval(event: WSBatchApprovalRequest): void {
-    if (getPref("enableSystemNotifications") !== true) {
+    if (!shouldNotifySystem()) {
         return;
-    }
-
-    const visibility = getBeaverVisibility();
-
-    switch (visibility) {
-        case "beaver-visible":
-            // Scenario A: the card is already on screen — nothing to do.
-            return;
-        case "zotero-focused":
-            // SCENARIO B: Zotero is focused but Beaver is not visible.
-            // TODO: when an in-app Zotero notification exists, route this case
-            // there instead of falling through to a system notification.
-            break;
-        case "zotero-unfocused":
-            // Scenario C: Zotero is in the background.
-            break;
     }
 
     showNotification(
