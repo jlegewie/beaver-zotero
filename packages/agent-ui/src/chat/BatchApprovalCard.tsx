@@ -32,7 +32,7 @@ const MODE_OPTIONS: readonly PermissionMenuOption<BatchApprovalMode>[] = [
     },
     {
         value: 'ask_each_time',
-        label: 'Ask permission each time',
+        label: 'Ask permission',
         description: 'Review every change in this batch before it is applied',
         icon: HandIcon,
     },
@@ -144,9 +144,9 @@ export const BatchApprovalCard: React.FC<BatchApprovalCardProps> = ({
                         >
                             <Icon
                                 icon={SecurityWarningIcon}
-                                className="font-color-orange scale-12 flex-none mt-015"
+                                className="font-color-primary scale-12 flex-none mt-1"
                             />
-                            <div className="font-color-orange min-w-0">
+                            <div className="font-color-primary min-w-0">
                                 {approval.destructiveWarning}
                             </div>
                         </div>
@@ -204,10 +204,9 @@ export const BatchApprovalCard: React.FC<BatchApprovalCardProps> = ({
                         value={draft.mode}
                         onChange={(mode) => setDraft((prev) => setMode(mode, prev))}
                         heading={MODE_HEADING}
-                        showChevron
                         disabled={isDecided}
                         tooltipContent="How this batch's changes are approved"
-                        style={{ padding: '2px 6px', fontSize: '0.80rem' }}
+                        style={{ padding: '2px 6px', fontSize: '0.95rem' }}
                     />
                     <div className="flex-1" />
                     <Button
