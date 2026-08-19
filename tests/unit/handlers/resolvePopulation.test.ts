@@ -35,6 +35,8 @@ describe('handleResolvePopulationRequest', () => {
     const attachmentsByParent = new Map<number, number[]>();
     /** What the native search resolves to. */
     let searchResultIds: number[] = [];
+    /** Tags that exist in the library; an unknown tag is reported, not silently empty. */
+    let libraryTags: string[] = [];
     /** Every Zotero.Search the handler constructed, in construction order. */
     let searches: MockSearchInstance[] = [];
     /** Collections the handler can resolve, keyed by "<libraryID>/<key>". */
@@ -94,6 +96,7 @@ describe('handleResolvePopulationRequest', () => {
         collections.clear();
         searchResultIds = [];
         searches = [];
+        libraryTags = ['to-read', 'reviewed'];
 
         vi.mocked(validateLibraryAccess).mockReturnValue({
             valid: true,
@@ -115,6 +118,10 @@ describe('handleResolvePopulationRequest', () => {
         (globalThis as any).Zotero.Collections = {
             getByLibraryAndKey: vi.fn((libraryID: number, key: string) =>
                 collections.get(`${libraryID}/${key}`) ?? false),
+        };
+
+        (globalThis as any).Zotero.Tags = {
+            getAll: vi.fn(async () => libraryTags.map(tag => ({ tag }))),
         };
 
         // Spies only — the resolve path must never touch either of these.
@@ -563,6 +570,15 @@ describe('handleResolvePopulationRequest', () => {
             expect(response.error).toContain('list_collections');
             expect(response.item_ids).toEqual([]);
             expect(searches).toHaveLength(0);
+        });
+
+        it('reports tag_not_found for a tag the library does not have', async () => {
+            const response = await handleResolvePopulationRequest(makeRequest({ tag: 'To Read' }));
+
+            expect(response.error_code).toBe('tag_not_found');
+            expect(response.error).toContain('To Read');
+            expect(response.item_ids).toEqual([]);
+            expect(searches[0].addCondition).not.toHaveBeenCalledWith('tag', 'is', 'To Read');
         });
 
         it('rejects an empty tag and points at untagged', async () => {
