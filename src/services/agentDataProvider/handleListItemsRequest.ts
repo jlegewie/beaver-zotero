@@ -18,7 +18,7 @@ import {
 import { ItemStub } from '@beaver/agent-core/types/zotero';
 import { serializeNote, serializeItemStub } from '../../utils/zoteroSerializers';
 import { libraryRefForLibraryID, modelObjectId } from '../../utils/libraryIdentity';
-import { getCollectionByIdOrName, validateLibraryAccess, isLibrarySearchable, getSearchableLibraries, excludedLibraryMessage, extractYear, formatCreatorsString, getAttachmentInfoForItem, degradedAttachmentRow } from './utils';
+import { getCollectionByIdOrName, validateLibraryAccess, isLibrarySearchable, getSearchableLibraries, excludedLibraryMessage, extractYear, formatCreatorsString, getAttachmentInfoForItem, degradedAttachmentRow, resolveStoredTagName } from './utils';
 
 function isAnnotationItem(item: Zotero.Item): boolean {
     return String(item.itemType) === 'annotation' || (item as { isAnnotation?: () => boolean }).isAnnotation?.() === true;
@@ -103,26 +103,22 @@ export async function handleListItemsRequest(
             }
         }
         
-        // Validate and add tag filter if specified
+        // Tag filter: resolve to stored casing; unknown tags error instead of matching nothing.
         if (request.tag) {
-            // Check if the tag exists in the library
-            const allTags = await Zotero.Tags.getAll(library.libraryID);
-            const tagExists = (allTags as { tag: string }[]).some(
-                (t) => t.tag.toLowerCase() === request.tag!.toLowerCase()
-            );
+            const resolvedTag = await resolveStoredTagName(library.libraryID, library.name, request.tag);
             
-            if (!tagExists) {
+            if (!resolvedTag.found) {
                 return {
                     type: 'list_items',
                     request_id: request.request_id,
                     items: [],
                     total_count: 0,
-                    error: `Tag not found: "${request.tag}" in library "${library.name}"`,
+                    error: resolvedTag.error,
                     error_code: 'tag_not_found',
                 };
             }
             
-            search.addCondition('tag', 'is', request.tag);
+            search.addCondition('tag', 'is', resolvedTag.name);
         }
         
         // Item category: Filter by Zotero item category (regular/attachment/note/annotation)

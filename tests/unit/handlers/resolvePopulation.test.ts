@@ -6,11 +6,12 @@ vi.mock('@beaver/agent-core/platform/logger', () => ({
 
 vi.mock('../../../src/services/agentDataProvider/utils', () => ({
     validateLibraryAccess: vi.fn(),
+    resolveStoredTagName: vi.fn(),
 }));
 
 import type { WSResolvePopulationRequest } from '@beaver/agent-core/protocol/agentProtocol';
 import { handleResolvePopulationRequest } from '../../../src/services/agentDataProvider/handleResolvePopulationRequest';
-import { validateLibraryAccess } from '../../../src/services/agentDataProvider/utils';
+import { resolveStoredTagName, validateLibraryAccess } from '../../../src/services/agentDataProvider/utils';
 
 /** One row of the fake `items` table the handler reads key/dateAdded from. */
 interface ItemRow {
@@ -102,6 +103,13 @@ describe('handleResolvePopulationRequest', () => {
             valid: true,
             library: { libraryID: LIBRARY_ID, name: 'My Library' },
         } as any);
+
+        vi.mocked(resolveStoredTagName).mockImplementation(async (_libraryID, libraryName, tag) => {
+            const stored = libraryTags.find((t) => t.toLowerCase() === tag.toLowerCase());
+            return stored
+                ? { found: true, name: stored }
+                : { found: false, error: `Tag not found: "${tag}" in library "${libraryName}"` };
+        });
 
         // modelObjectId() derives the portable "u-" prefix from this.
         (globalThis as any).Zotero.Libraries.userLibraryID = LIBRARY_ID;
@@ -204,6 +212,17 @@ describe('handleResolvePopulationRequest', () => {
             expect(addedConditions()).toContainEqual(['tag', 'is', 'to-read']);
             expect(addedConditions()).toContainEqual(['collectionID', 'is', '77']);
             expect(addedConditions()).toContainEqual(['recursive', 'true', '']);
+        });
+
+        it('searches the casing the library stores, not the one the caller sent', async () => {
+            searchResultIds = [1];
+            seedItem(1);
+
+            const response = await handleResolvePopulationRequest(makeRequest({ tag: 'TO-READ' }));
+
+            expect(response.error).toBeUndefined();
+            expect(addedConditions()).toContainEqual(['tag', 'is', 'to-read']);
+            expect(addedConditions()).not.toContainEqual(['tag', 'is', 'TO-READ']);
         });
 
         it('omits the recursive condition when recursive is false', async () => {

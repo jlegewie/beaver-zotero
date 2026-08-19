@@ -1033,6 +1033,49 @@ export function tagsFilterError(resolution: TagsFilterResolution): TagsFilterErr
     };
 }
 
+/** A tag resolved to the casing a library stores, or the reason it wasn't. */
+export type StoredTagResolution =
+    | { found: true; name: string }
+    | { found: false; error: string };
+
+/**
+ * Resolve a tag to the casing the library stores.
+ *
+ * `tag`/`is` search is case-sensitive, so a mis-cased filter would match
+ * nothing. If several stored casings match, report them rather than picking
+ * one — a single `tag is` condition can only search one name.
+ */
+export async function resolveStoredTagName(
+    libraryID: number,
+    libraryName: string,
+    tag: string
+): Promise<StoredTagResolution> {
+    const allTags = (await Zotero.Tags.getAll(libraryID)) as { tag: string }[];
+    // getAll() returns one row per tag type; dedupe so that isn't treated as
+    // distinct casings.
+    const matches = Array.from(new Set(
+        allTags
+            .filter((t) => t.tag.toLowerCase() === tag.toLowerCase())
+            .map((t) => t.tag)
+    ));
+
+    if (matches.length === 0) {
+        return { found: false, error: `Tag not found: "${tag}" in library "${libraryName}"` };
+    }
+    if (matches.includes(tag)) {
+        return { found: true, name: tag };
+    }
+    if (matches.length > 1) {
+        const names = matches.map((name) => `"${name}"`).join(', ');
+        return {
+            found: false,
+            error: `Tag not found: "${tag}" in library "${libraryName}". `
+                + `Tags are case-sensitive; did you mean ${names}?`,
+        };
+    }
+    return { found: true, name: matches[0] };
+}
+
 /**
  * Format creators array into a string for display.
  */

@@ -15,7 +15,7 @@ import {
     WSResolvePopulationResponse,
 } from '@beaver/agent-core/protocol/agentProtocol';
 import { modelObjectId } from '../../utils/libraryIdentity';
-import { validateLibraryAccess } from './utils';
+import { resolveStoredTagName, validateLibraryAccess } from './utils';
 import { addSearchCondition } from './searchConditions';
 
 /** SQLite's bound-variable limit is well above this; 500 keeps a margin. */
@@ -223,21 +223,12 @@ export async function handleResolvePopulationRequest(
         }
 
         if (request.tag) {
-            // A tag that does not exist matches nothing, which reads to the
-            // model as "these filters cover no items" rather than "you typed
-            // the tag wrong". Name it, as list_items does.
-            const allTags = await Zotero.Tags.getAll(library.libraryID);
-            const tagExists = (allTags as { tag: string }[]).some(
-                (t) => t.tag.toLowerCase() === request.tag!.toLowerCase()
-            );
-            if (!tagExists) {
-                return errorResponse(
-                    request.request_id,
-                    `Tag not found: "${request.tag}" in library "${library.name}"`,
-                    'tag_not_found',
-                );
+            // Resolve to stored casing; unknown tags error instead of matching nothing.
+            const resolvedTag = await resolveStoredTagName(library.libraryID, library.name, request.tag);
+            if (!resolvedTag.found) {
+                return errorResponse(request.request_id, resolvedTag.error, 'tag_not_found');
             }
-            search.addCondition('tag', 'is', request.tag);
+            search.addCondition('tag', 'is', resolvedTag.name);
         }
 
         // Both predicates are native Zotero conditions; emulating them in the
