@@ -1964,8 +1964,9 @@ async function executeWSRequest(
             logger('WS connection error: Error already set by onError callback, not overwriting', 1);
             // The onError that set this error may have dispatched an auto-retry
             // whose commit is now in flight and owns the pending flag (see
-            // retryPendingRunIdAtom).
-            if (!get(retryPendingRunIdAtom)) {
+            // retryPendingRunIdAtom) — or a newer run may be holding it, which
+            // this loop has no business releasing.
+            if (!get(retryPendingRunIdAtom) && !supersededByLiveRun()) {
                 set(isWSChatPendingAtom, false);
             }
             return;
@@ -1981,7 +1982,14 @@ async function executeWSRequest(
     }
 
     surfaceAndDiagnoseConnectionFailure(set, run.id, result.evidence, result.attemptsMade);
-    set(isWSChatPendingAtom, false);
+    // Guarded like the abandoned paths above, because this one is reachable with
+    // a newer run live too: an attempt can be in flight for twenty seconds, and a
+    // run that starts in that window has already raised the flag for itself
+    // before its own connect begins. Releasing it here would open the composer
+    // over that run and let a second send go out behind it. The error itself
+    // needs no such guard — it is filed against this run, and
+    // `surfaceAndDiagnoseConnectionFailure` drops it if that run is gone.
+    if (!supersededByLiveRun()) set(isWSChatPendingAtom, false);
 }
 
 /**

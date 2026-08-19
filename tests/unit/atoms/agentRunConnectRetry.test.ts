@@ -63,6 +63,7 @@ import { activeRunAtom, wsReconnectingAtom } from '@beaver/agent-core/run-state/
 import { store } from '../../../react/store';
 import {
     isWSChatPendingAtom,
+    isWSReadyAtom,
     sendWSMessageAtom,
     wsErrorAtom,
 } from '../../../react/atoms/agentRunAtoms';
@@ -78,6 +79,14 @@ const PRE_READY_DROP: ConnectionFailureEvidence = {
     readyReceived: false,
     timedOut: false,
     navigatorOnline: true,
+};
+
+/** The same drop, after the run was under way — never retried, always reported. */
+const MID_RUN_DROP: ConnectionFailureEvidence = {
+    ...PRE_READY_DROP,
+    stage: 'mid_run',
+    socketOpened: true,
+    readyReceived: true,
 };
 
 /** The lock as each attempt found it, which is the whole point of the file. */
@@ -96,6 +105,56 @@ function failEveryAttempt(beforeThrow?: (attempt: number) => void): void {
         throw new AgentConnectionError('connection closed before ready', PRE_READY_DROP);
     });
 }
+
+describe('what a connection reports about how it was opened', () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+        lockOnEntry = [];
+        reportConnectionFailureMock.mockResolvedValue(undefined);
+        resolveClientIdentityMock.mockReturnValue({
+            frontendVersion: '0.99.1-test',
+            clientType: 'zotero-plugin',
+            clientFeatures: [],
+        });
+        store.set(wsErrorAtom, null);
+        store.set(wsReconnectingAtom, null);
+        store.set(isWSChatPendingAtom, false);
+        store.set(isWSReadyAtom, false);
+        store.set(sessionAtom, { user: { id: 'user-1' } } as any);
+    });
+
+    it('names the attempts that opened it when it later drops mid-run', async () => {
+        // A drop after `ready` has no attempt count of its own: the connection it
+        // lost is the one that succeeded, so the number that describes it is the
+        // number that got it open. The count is only known once the connect has
+        // settled, which is why it is read when the report is made rather than
+        // captured when the callbacks are built.
+        let lastCallbacks: any = null;
+        let attempt = 0;
+        connectMock.mockImplementation(async (_request: unknown, callbacks: any) => {
+            attempt += 1;
+            lastCallbacks = callbacks;
+            if (attempt >= 3) return;
+            callbacks.onClose?.(1006, '', false, PRE_READY_DROP);
+            throw new AgentConnectionError('connection closed before ready', PRE_READY_DROP);
+        });
+
+        await store.set(sendWSMessageAtom, 'hello');
+        expect(attempt).toBe(3);
+        // Nothing was reported for the two failures the client recovered from.
+        expect(reportConnectionFailureMock).not.toHaveBeenCalled();
+
+        // Now that connection drops, with the run under way.
+        store.set(isWSReadyAtom, true);
+        lastCallbacks.onClose?.(1006, '', false, MID_RUN_DROP);
+
+        expect(reportConnectionFailureMock).toHaveBeenCalledTimes(1);
+        expect(reportConnectionFailureMock.mock.calls[0][0]).toMatchObject({
+            connect_attempts: 3,
+            evidence: { stage: 'mid_run' },
+        });
+    }, 15000);
+});
 
 describe('the composer lock across a retried connect', () => {
     beforeEach(() => {
@@ -166,6 +225,27 @@ describe('the composer lock across a retried connect', () => {
         expect(connectMock).toHaveBeenCalledTimes(1);
         expect(store.get(isWSChatPendingAtom)).toBe(true);
         expect(store.get(wsReconnectingAtom)).toEqual({ attempt: 2, maxAttempts: 4 });
+    }, 15000);
+
+    it('leaves a newer run\'s lock alone when it gives up for good', async () => {
+        // An attempt can be in flight for twenty seconds, so a run that starts in
+        // that window has already raised the lock for itself before this loop
+        // finds out its own attempt failed. Every attempt fails here, so the loop
+        // ends by reporting rather than abandoning — the path that has to refuse
+        // to release the lock just the same.
+        failEveryAttempt((attempt) => {
+            if (attempt !== 4) return;
+            store.set(activeRunAtom, {
+                id: 'run-taking-over',
+                status: 'in_progress',
+            } as any);
+            store.set(isWSChatPendingAtom, true);
+        });
+
+        await store.set(sendWSMessageAtom, 'hello');
+
+        expect(connectMock).toHaveBeenCalledTimes(4);
+        expect(store.get(isWSChatPendingAtom)).toBe(true);
     }, 15000);
 
     it('releases the lock when the run stops being active mid-retry', async () => {
