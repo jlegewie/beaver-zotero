@@ -156,20 +156,33 @@ export const BatchApprovalCard: React.FC<BatchApprovalCardProps> = ({
                         {approval.creditChip && (
                             <>
                                 <div className="flex-1" />
-                                <Tooltip content={approval.creditTooltip} showArrow>
-                                    <div
-                                        className="text-sm font-color-secondary  items-center display-flex"
-                                        style={{
-                                            border: '1px solid var(--fill-quarternary)',
-                                            borderRadius: '12px',
-                                            padding: '2px 7px',
-                                            whiteSpace: 'nowrap',
-                                        }}
+                                {/* flex-none wrapper so the popup is not a
+                                    sibling of this wrapping min-w-0 row — an
+                                    in-flow tooltip is measured as a flex item,
+                                    and its x and wrap then change on every
+                                    hover. No portal: the host document may
+                                    have no HTML body to portal into. */}
+                                <div className="flex-none">
+                                    <Tooltip
+                                        content={approval.creditTooltip}
+                                        showArrow
+                                        width="220px"
+                                        horizontalAlign="end"
                                     >
-                                        <Icon icon={DollarCircleIcon} className="font-color-secondary scale-11 flex-none mr-1" />
-                                        {approval.creditChip}
-                                    </div>
-                                </Tooltip>
+                                        <div
+                                            className="text-sm font-color-secondary items-center display-flex"
+                                            style={{
+                                                border: '1px solid var(--fill-quarternary)',
+                                                borderRadius: '6px',
+                                                padding: '2px 7px',
+                                                whiteSpace: 'nowrap',
+                                            }}
+                                        >
+                                            <Icon icon={DollarCircleIcon} className="font-color-secondary scale-11 flex-none mr-1" />
+                                            {approval.creditChip}
+                                        </div>
+                                    </Tooltip>
+                                </div>
                             </>
                         )}
                     </div>
