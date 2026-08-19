@@ -81,6 +81,7 @@
     "./src/transport/otp.ts",
     "./src/transport/config.ts",
     "./src/transport/clientIdentity.ts",
+    "./src/transport/connectWithRetry.ts",
     "./src/transport/agentDataDispatch.ts",
     "./src/transport/agentActionQueue.ts",
     "./src/transport/threadService.ts",
@@ -114,6 +115,7 @@
     "./src/run-state/pendingCreditConfirmations.ts",
     "./src/run-state/pendingBatchApprovals.ts",
     "./src/run-state/toolLabels.ts",
-    "./src/run-state/runErrorCopy.ts"
+    "./src/run-state/runErrorCopy.ts",
+    "./src/run-state/runStatusCopy.ts"
   ]
 }

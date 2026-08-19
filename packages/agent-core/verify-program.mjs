@@ -165,6 +165,7 @@ const entryPaths = [
   "src/protocol/agentProtocol.ts",
   "src/protocol/wordProtocol.ts",
   "src/transport/providerConnection.ts",
+  "src/transport/connectWithRetry.ts",
   "src/transport/threadService.ts",
   "src/transport/otp.ts",
   "src/transport/agentActionQueue.ts",
@@ -188,6 +189,7 @@ const entryPaths = [
   "src/run-state/pendingCreditConfirmations.ts",
   "src/run-state/pendingBatchApprovals.ts",
   "src/run-state/runErrorCopy.ts",
+  "src/run-state/runStatusCopy.ts",
   "src/citations/atoms.ts",
   "src/citations/externalReferences.ts",
 ].map((p) => path.join(pkgDir, p));
