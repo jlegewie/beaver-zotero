@@ -47,7 +47,7 @@ export interface PermissionMenuProps<T extends string = string> {
 
 const TITLE_TONE_CLASS: Record<PermissionMenuTone, string> = {
     neutral: 'font-color-primary',
-    warning: 'font-color-orange-opacity-1',
+    warning: 'font-color-orange',
 };
 
 const DESCRIPTION_TONE_CLASS: Record<PermissionMenuTone, string> = {
@@ -127,7 +127,7 @@ function PermissionMenu<T extends string>({
                         </div>
                         <Icon
                             icon={TickIcon}
-                            size={14}
+                            size={16}
                             className={`mt-015 ${TITLE_TONE_CLASS[tone]}`}
                             // Kept mounted so the title column has the same width
                             // in every row and the rows do not shift on select.

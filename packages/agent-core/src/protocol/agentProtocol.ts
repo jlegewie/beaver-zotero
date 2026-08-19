@@ -1986,6 +1986,17 @@ export interface WSBatchApprovalRequest extends WSBaseEvent {
     batch_id: string;
     /** Card title, composed by the backend */
     title: string;
+    /**
+     * The population's size, e.g. "184 items" — the emphasised half of the
+     * scope line, and always set.
+     */
+    scope_primary: string;
+    /**
+     * Where that population lives, e.g. "in Methods and its subcollections";
+     * empty when it cannot be stated truthfully, and the card then shows the
+     * count alone.
+     */
+    scope_secondary: string;
     /** The batch goal, composed by the backend */
     message: string;
     /**
@@ -1994,10 +2005,16 @@ export interface WSBatchApprovalRequest extends WSBaseEvent {
      */
     destructive_warning: string;
     /**
-     * Line about the confirmation limit approving raises; empty when the run
-     * has no credit ledger or the user switched confirmations off.
+     * Short line about the confirmation limit approving raises, shown beside
+     * the title; empty when the run has no credit ledger or the user switched
+     * confirmations off, and the chip is then hidden.
      */
-    credit_note: string;
+    credit_chip: string;
+    /**
+     * The sentence the chip abbreviates, shown on hover; empty under the same
+     * conditions as the chip.
+     */
+    credit_tooltip: string;
     /** Coverage mode the card preselects */
     default_mode: BatchApprovalMode;
     /** Label for the approve button */
