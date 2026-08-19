@@ -1305,7 +1305,14 @@ function applyRunCitations(
  * Create WebSocket callbacks for handling streaming events.
  * Shared between sendWSMessageAtom and regenerateFromRunAtom.
  */
-function createWSCallbacks(set: Setter): WSCallbacks {
+/**
+ * @param connectAttempts Reads how many attempts opened the connection these
+ * callbacks belong to. A drop after `ready` has no attempt count of its own —
+ * the connection it lost is the one that succeeded — so the number that
+ * describes it is the number that got it open. Read lazily because the count is
+ * only known once the connect settles, which is after these callbacks exist.
+ */
+function createWSCallbacks(set: Setter, connectAttempts: () => number | null): WSCallbacks {
     return {
         onReady: (data: WSReadyData) => {
             logger('WS onReady:', data, 1);
@@ -1860,7 +1867,12 @@ function createWSCallbacks(set: Setter): WSCallbacks {
                     (activeRun.status === 'in_progress' ||
                         activeRun.status === 'awaiting_deferred')
                 ) {
-                    surfaceAndDiagnoseConnectionFailure(set, activeRun.id, transportEvidence);
+                    surfaceAndDiagnoseConnectionFailure(
+                        set,
+                        activeRun.id,
+                        transportEvidence,
+                        connectAttempts() ?? undefined,
+                    );
                 }
             }
         }
@@ -1886,21 +1898,43 @@ async function executeWSRequest(
     get: Getter,
     set: Setter
 ): Promise<void> {
+    // How many attempts this run's connection cost, once it has one.
+    let attemptsMade: number | null = null;
+
+    /**
+     * Whether a different run has taken over the state this function writes.
+     *
+     * A connect loop outlives its own run by up to one backoff, and the reconnect
+     * state and the pending flag are both connection-wide rather than per-run. So
+     * a run cancelled mid-backoff, followed straight away by another, leaves an
+     * older loop about to write over the newer run's state — clearing a reconnect
+     * it is in the middle of, or releasing a composer it is still holding.
+     */
+    const supersededByLiveRun = (): boolean => {
+        const activeRun = store.get(activeRunAtom);
+        return (
+            !!activeRun &&
+            activeRun.id !== run.id &&
+            (activeRun.status === 'in_progress' || activeRun.status === 'awaiting_deferred')
+        );
+    };
+
     const result = await connectWithRetry({
         service: agentService,
         request,
-        callbacks: createWSCallbacks(set),
+        callbacks: createWSCallbacks(set, () => attemptsMade),
         logLabel: `run ${run.id}`,
         // Every attempt starts from a clean ready state.
         onAttempt: () => set(isWSReadyAtom, false),
         onRetrying: (progress) => {
+            if (supersededByLiveRun()) return;
             if (!progress) {
                 set(wsReconnectingAtom, null);
                 return;
             }
-            // The loop's teardown of the failed attempt cleared the pending flag
-            // via onClose; restore it so the composer stays blocked while we
-            // quietly retry.
+            // The failed attempt's own close cleared the pending flag on its way
+            // out; restore it so the composer stays blocked while we quietly
+            // retry.
             set(isWSChatPendingAtom, true);
             set(wsReconnectingAtom, progress);
         },
@@ -1921,6 +1955,8 @@ async function executeWSRequest(
         },
     });
 
+    attemptsMade = result.attemptsMade;
+
     if (result.kind === 'connected') return;
 
     if (result.kind === 'abandoned') {
@@ -1937,8 +1973,10 @@ async function executeWSRequest(
         logger(`WS connect retry abandoned: run ${run.id} is no longer active`, 1);
         // Release the flag the quiet retry raised. Nothing downstream clears it
         // on this path, and a stuck flag leaves the composer blocked with no run
-        // to finish and no error to show.
-        set(isWSChatPendingAtom, false);
+        // to finish and no error to show. Unless the run that superseded this one
+        // is now holding the flag for itself, in which case releasing it would
+        // open the composer over a run that is still going.
+        if (!supersededByLiveRun()) set(isWSChatPendingAtom, false);
         return;
     }
 

@@ -61,7 +61,12 @@ export interface ConnectableAgentService {
     ): void;
 }
 
-/** Which attempt is about to run, out of how many the loop will make. */
+/**
+ * Which attempt is about to run, out of how many the loop will make.
+ *
+ * Shaped to be assignable to the reconnect state a client renders, so a caller
+ * can hand a progress report straight to its store without restating it.
+ */
 export interface ConnectRetryProgress {
     attempt: number;
     maxAttempts: number;
@@ -109,7 +114,6 @@ export interface ConnectWithRetryOptions {
      * cannot be tied to the run that paid for them.
      */
     logLabel?: string;
-    maxAttempts?: number;
     /** Test seam for the backoff wait. */
     sleep?: (ms: number) => Promise<void>;
     /** Test seam for the backoff jitter. */
@@ -138,11 +142,14 @@ export async function connectWithRetry(
         isAlreadyReported,
         isStillWanted,
         logLabel,
-        maxAttempts = CONNECT_MAX_ATTEMPTS,
         sleep = defaultSleep,
         random = Math.random,
     } = options;
 
+    // Not an option: the budget and the backoff table below are one policy, and
+    // a caller that could raise the count without extending the table would
+    // silently reuse the last range for every extra attempt.
+    const maxAttempts = CONNECT_MAX_ATTEMPTS;
     const prefix = logLabel ? `connectWithRetry (${logLabel}):` : 'connectWithRetry:';
     let lastFailure: unknown = null;
     let attemptsMade = 0;

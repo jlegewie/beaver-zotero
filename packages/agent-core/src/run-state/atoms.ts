@@ -176,9 +176,12 @@ export const allUserAttachmentKeysAtom = atom((get) => {
  * server rather than anything this client is doing: the run has not ended and no
  * error is being reported.
  *
- * It is not self-clearing, and a client that renders it owes it two things: a
- * clear when the run it names ends, and a `runId` match before showing it — the
- * backend can emit a retry for a run the client has already stopped waiting on.
+ * It is not self-clearing: a client owes it a clear when the run it names ends.
+ * It also has to make sure the state cannot outlive that run, because the
+ * backend can emit a retry for a run the client has already stopped waiting on —
+ * either by matching `runId` before showing it, which is what a per-run
+ * indicator does, or by refusing the write for a run that is over, which is
+ * enough for a client that renders one line for whatever run is in flight.
  */
 export interface RetryState {
     /** The run being retried. A renderer must match on this before showing it. */
@@ -199,8 +202,13 @@ export const wsRetryAtom = atom<RetryState | null>(null);
  * started and before anything reaches the reader as an error.
  *
  * Written from the shared connect-retry loop's `onRetrying` callback, which
- * guarantees a final `null` on every exit — so a client that renders
- * "Reconnecting…" from this can never be left showing a reconnect that is over.
+ * reports every attempt it is about to make and then clears the state as it
+ * exits.
+ *
+ * One loop can outlive its own run by a backoff while another is already
+ * running, and this state describes the connection rather than any one run — so
+ * a client has to let only its newest loop write here, and clear the state
+ * itself when a run ends, rather than relying on a loop it has moved past.
  */
 export interface ReconnectState {
     /** The attempt about to be made, out of `maxAttempts`. */
