@@ -84,6 +84,8 @@ import {
     updateRunWithToolCallArgsStream,
     allUserAttachmentKeysAtom,
     resetRunMessages,
+    wsReconnectingAtom,
+    wsRetryAtom,
 } from '@beaver/agent-core/run-state/atoms';
 import { userIdAtom } from './auth';
 import { citationsAtom, processCitationsAtom, resetCitationMarkersAtom, mergePageLabelsByAttachmentIdAtom } from '@beaver/agent-core/citations/atoms';
@@ -1148,28 +1150,8 @@ export const wsErrorAtom = atom<WSErrorEvent | null>(null);
 /** Last warning from WebSocket */
 export const wsWarningAtom = atom<WSWarningEvent | null>(null);
 
-/** Retry state from WebSocket (when backend is retrying a failed request) */
-export interface RetryState {
-    runId: string;
-    attempt: number;
-    maxAttempts: number;
-    reason: string;
-    waitSeconds?: number | null;
-}
-export const wsRetryAtom = atom<RetryState | null>(null);
 /** Deduplicates concurrent auto-resume/auto-retry scheduling for the same run. */
 const scheduledAutoResumeRunIdsAtom = atom<Set<string>>(new Set<string>());
-
-/**
- * Transient reconnect state while the client automatically retries a failed
- * connect attempt. Drives the status indicator's "Reconnecting…" copy instead
- * of a user-visible error.
- */
-export interface ReconnectState {
-    attempt: number;
-    maxAttempts: number;
-}
-export const wsReconnectingAtom = atom<ReconnectState | null>(null);
 
 // =============================================================================
 // Action Atoms
