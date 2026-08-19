@@ -90,6 +90,36 @@ export function notifySyncPauseOwnerSettled(owner: string): void {
     syncPauseResumeHandler?.(owner);
 }
 
+const REQUEST_EVENT_SUFFIX = '_request';
+
+/**
+ * Error reply for a data-request event the provider map has no entry for.
+ *
+ * Data requests are named `<response_type>_request` and carry a `request_id`.
+ * Echoing those with `error` set lets the backend fail the waiter instead of
+ * sitting on the request timeout. Returns null when the event is not a
+ * request/response exchange — there is nothing to answer.
+ */
+export function unknownDataRequestErrorResponse(event: {
+    event?: unknown;
+    request_id?: unknown;
+}): Record<string, any> | null {
+    const eventName = event.event;
+    const requestId = event.request_id;
+    if (typeof eventName !== 'string' || !eventName.endsWith(REQUEST_EVENT_SUFFIX)) {
+        return null;
+    }
+    if (typeof requestId !== 'string' || requestId.length === 0) {
+        return null;
+    }
+    return {
+        type: eventName.slice(0, -REQUEST_EVENT_SUFFIX.length),
+        request_id: requestId,
+        error: `Unknown event type: ${eventName}. Do not try this operation again.`,
+        error_code: 'internal_error',
+    };
+}
+
 /** Map from backend request event name to its handler entry. */
 export type AgentDataProviderMap = Record<string, AgentDataRequestEntry>;
 
