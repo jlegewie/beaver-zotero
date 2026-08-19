@@ -113,6 +113,10 @@ const TOOL_ICONS: Record<string, IconComponent> = {
     load_capability: PuzzleIcon,
     search_tools: PuzzleIcon,
 
+    // Batch operations
+    batch_start: LayersIcon,
+    batch_resolve: LayersIcon,
+
     // User interaction
     ask_user_question: ChattingIcon,
 };
