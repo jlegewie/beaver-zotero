@@ -459,6 +459,51 @@ describe('handleListItemsRequest', () => {
             expect(addedConditions()).not.toContainEqual(['tag', 'is', 'TO-READ']);
         });
 
+        it('keeps a collection child whose tag differs only in casing from the caller\'s', async () => {
+            // The primary search resolves to the stored casing; the child
+            // expansion compares tag names itself, so it has to resolve too or
+            // the child is dropped from a listing its parent matched.
+            const parent = makeItem({
+                id: 1,
+                key: 'PARENT',
+                itemType: 'journalArticle',
+                getNotes: vi.fn(() => [2]),
+                getAttachments: vi.fn(() => []),
+            });
+            const note = makeItem({
+                id: 2,
+                key: 'NOTE',
+                itemType: 'note',
+                parentItemID: parent.id,
+                isNote: vi.fn(() => true),
+                isRegularItem: vi.fn(() => false),
+                getDisplayTitle: vi.fn(() => 'Note'),
+                getTags: vi.fn(() => [{ tag: 'to-read' }]),
+            });
+            itemsById.set(parent.id, parent);
+            itemsById.set(note.id, note);
+            searchResults.push([parent.id], [parent.id]);
+
+            const response = await handleListItemsRequest({
+                event: 'list_items_request',
+                request_id: 'req-child-tag-casing',
+                library_id: 1,
+                collection_key: 'COLLECTION',
+                tag: 'TO-READ',
+                item_category: 'all',
+                recursive: true,
+                sort_by: 'dateModified',
+                sort_order: 'desc',
+                limit: 20,
+                offset: 0,
+            } as any);
+
+            expect(response.error).toBeUndefined();
+            expect(response.items).toContainEqual(
+                expect.objectContaining({ item_id: 'u-NOTE', result_type: 'note' })
+            );
+        });
+
         it('reports tag_not_found rather than an empty list when the tag does not resolve', async () => {
             vi.mocked(resolveStoredTagName).mockResolvedValue({
                 found: false,

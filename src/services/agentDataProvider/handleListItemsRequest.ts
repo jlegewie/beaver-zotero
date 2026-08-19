@@ -104,6 +104,10 @@ export async function handleListItemsRequest(
         }
         
         // Tag filter: resolve to stored casing; unknown tags error instead of matching nothing.
+        // The resolved spelling is kept for the child-expansion filter below, which
+        // compares tag names itself and would otherwise re-introduce the casing
+        // mismatch this lookup exists to remove.
+        let storedTagName: string | null = null;
         if (request.tag) {
             const resolvedTag = await resolveStoredTagName(library.libraryID, library.name, request.tag);
             
@@ -118,7 +122,8 @@ export async function handleListItemsRequest(
                 };
             }
             
-            search.addCondition('tag', 'is', resolvedTag.name);
+            storedTagName = resolvedTag.name;
+            search.addCondition('tag', 'is', storedTagName);
         }
         
         // Item category: Filter by Zotero item category (regular/attachment/note/annotation)
@@ -204,9 +209,9 @@ export async function handleListItemsRequest(
                     .filter((c): c is Zotero.Item => c !== null);
 
                 let filteredChildren = children;
-                if (request.tag) {
+                if (storedTagName) {
                     await Zotero.Items.loadDataTypes(children, ['tags']);
-                    const tagExact = request.tag;
+                    const tagExact = storedTagName;
                     filteredChildren = children.filter(c => {
                         const tags = c.getTags?.() ?? [];
                         return tags.some((t: { tag: string }) => t.tag === tagExact);

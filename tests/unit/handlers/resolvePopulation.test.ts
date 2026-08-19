@@ -632,6 +632,60 @@ describe('handleResolvePopulationRequest', () => {
             expect(searches[0].addCondition).not.toHaveBeenCalledWith('tag', 'is', 'To Read');
         });
 
+        it('refuses a joinMode condition instead of letting it flip the search to OR', async () => {
+            searchResultIds = [1];
+            const response = await handleResolvePopulationRequest(makeRequest({
+                conditions: [
+                    { field: 'joinMode', operator: 'any', value: '' },
+                    { field: 'DOI', operator: 'is', value: '' },
+                ],
+            }));
+
+            expect(searches[0].addCondition).not.toHaveBeenCalledWith('joinMode', expect.anything(), expect.anything());
+            expect(searches[0].addCondition).toHaveBeenCalledWith('DOI', 'doesNotContain', '');
+            expect(response.warnings?.join(' ')).toContain('joinMode');
+        });
+
+        it('refuses conditions that would admit trashed or child items', async () => {
+            searchResultIds = [1];
+            const response = await handleResolvePopulationRequest(makeRequest({
+                conditions: [
+                    { field: 'includeDeleted', operator: 'true', value: '' },
+                    { field: 'includeParentsAndChildren', operator: 'true', value: '' },
+                    { field: 'noChildren', operator: 'false', value: '' },
+                ],
+            }));
+
+            const added = searches[0].addCondition.mock.calls.map((call: any[]) => call[0]);
+            expect(added).not.toContain('includeDeleted');
+            expect(added).not.toContain('includeParentsAndChildren');
+            // The handler adds noChildren itself; the caller's is dropped, so
+            // exactly one call remains and it is the handler's own 'true'.
+            expect(added.filter((field: string) => field === 'noChildren')).toHaveLength(1);
+            expect(searches[0].addCondition).toHaveBeenCalledWith('noChildren', 'true', '');
+            expect(response.warnings).toHaveLength(3);
+        });
+
+        it('keeps predicates that only narrow, however unfamiliar', async () => {
+            // The guard is about widening, not about vocabulary: each of these
+            // compiles to one more ANDed `itemID IN (...)`, so it can only
+            // shrink the population and belongs to the caller.
+            searchResultIds = [1];
+            const response = await handleResolvePopulationRequest(makeRequest({
+                conditions: [
+                    { field: 'retracted', operator: 'true', value: '' },
+                    { field: 'publications', operator: 'true', value: '' },
+                    { field: 'quicksearch-titleCreatorYear', operator: 'contains', value: 'gene' },
+                ],
+            }));
+
+            const added = searches[0].addCondition.mock.calls.map((call: any[]) => call[0]);
+            expect(added).toContain('retracted');
+            expect(added).toContain('publications');
+            expect(added).toContain('quicksearch-titleCreatorYear');
+            expect(response.warnings).toBeUndefined();
+        });
+
         it('rejects an empty tag and points at untagged', async () => {
             const response = await handleResolvePopulationRequest(makeRequest({ tag: '' }));
 

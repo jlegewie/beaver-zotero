@@ -22,6 +22,31 @@ export interface SearchConditionTarget {
 }
 
 /**
+ * Zotero conditions that restructure a search rather than narrow it.
+ *
+ * `Zotero.Search` accepts these happily, so `addCondition` would not reject one
+ * and it would never become a warning — `joinMode any` alone turns an ANDed
+ * filter set into an ORed one, which for a population about to be mutated means
+ * every item the loosest filter touches. The handler owns them and sets them
+ * itself, so a caller may not smuggle one in as a condition.
+ *
+ * The line is drawn at widening, not at unfamiliarity: a condition that
+ * compiles to one more ANDed `itemID IN (…)` can only shrink the result and
+ * belongs to the caller. `unfiled`, `retracted`, `publications`, `feed`,
+ * `savedSearch` and the `quicksearch-*` family are all of that kind and are
+ * deliberately absent.
+ */
+const CONTROL_CONDITION_FIELDS = new Set([
+    // Join semantics and grouping.
+    'joinMode', 'blockStart', 'blockEnd',
+    // Which items are admitted alongside the ones that matched.
+    'recursive', 'noChildren',
+    'includeParentsAndChildren', 'includeParents', 'includeChildren',
+    // The trash boundary.
+    'deleted', 'includeDeleted',
+]);
+
+/**
  * Wire operator names that map onto a `Zotero.Search` operator. Unknown names
  * are passed through unchanged so `addCondition` can reject them (and the
  * rejection becomes a warning) rather than being silently rewritten.
@@ -57,6 +82,16 @@ export function addSearchCondition(
     logLabel: string,
 ): boolean {
     const originalOperator = condition.operator;
+
+    if (CONTROL_CONDITION_FIELDS.has(condition.field)) {
+        logger(`${logLabel}: Refused control condition ${condition.field}`, 1);
+        warnings.push(
+            `Dropped condition field='${condition.field}': it controls how the search runs, `
+                + 'not what it matches, and cannot be given as a condition.'
+        );
+        return false;
+    }
+
     let operator = OPERATOR_MAP[originalOperator] || originalOperator;
     let value = condition.value ?? '';
 
