@@ -165,6 +165,7 @@ const entryPaths = [
   "src/protocol/agentProtocol.ts",
   "src/protocol/wordProtocol.ts",
   "src/transport/providerConnection.ts",
+  "src/transport/connectWithRetry.ts",
   "src/transport/threadService.ts",
   "src/transport/otp.ts",
   "src/transport/agentActionQueue.ts",
