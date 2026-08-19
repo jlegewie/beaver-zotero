@@ -16,7 +16,7 @@ import DocsLink from '../primitives/DocsLink';
 import Tooltip from '../primitives/Tooltip';
 import PermissionMenu from '../primitives/PermissionMenu';
 import type { PermissionMenuOption } from '../primitives/PermissionMenu';
-import { HandIcon, Icon, LayersIcon, SecurityWarningIcon, StopStrokeIcon } from '../icons';
+import { DollarCircleIcon, HandIcon, Icon, LayersIcon, PlusSignIcon, SecurityWarningIcon } from '../icons';
 
 /**
  * The coverage choices, and the only prose on this card the client owns.
@@ -26,27 +26,39 @@ const MODE_OPTIONS: readonly PermissionMenuOption<BatchApprovalMode>[] = [
     {
         value: 'full_access',
         label: 'Full access',
-        description: "Apply this batch's library changes without asking again",
+        description: "Apply library changes without asking again",
         icon: SecurityWarningIcon,
         tone: 'warning',
     },
     {
         value: 'ask_each_time',
         label: 'Ask permission',
-        description: 'Review every change in this batch before it is applied',
+        description: 'Review every change before it is applied',
         icon: HandIcon,
     },
 ];
 
-const MODE_HEADING = "How should this batch's changes be approved?";
+// const MODE_HEADING = "How should this batch's changes be approved?";
+const MODE_HEADING = "";
+
+/**
+ * Labels for the slots the card lays out, as opposed to what goes in them.
+ * Naming a slot is chrome — the same class of copy as the mode menu — while
+ * everything the slots hold is composed by the backend.
+ */
+const ACTION_HEADING = 'Requested action';
+const INSTRUCTIONS_HEADING = 'Your instructions';
+const ADD_INSTRUCTIONS_LABEL = 'Add instructions';
+
+/** Vertical rhythm. The card interrupts the user, so it is laid out loosely. */
+const BLOCK_GAP = '1rem';
+const LABEL_GAP = '0.3rem';
 
 export interface BatchApprovalCardProps {
     /** The request the run is blocked on, as the backend asked it. */
     approval: PendingBatchApproval;
     /** The user's decision, ready for the wire. */
     onSubmit: (response: BatchApprovalDecision) => void;
-    /** Abandon the run rather than decide. */
-    onStop: () => void;
 }
 
 /**
@@ -57,26 +69,39 @@ export interface BatchApprovalCardProps {
  * be scrolled away. The user's draft message is untouched — the card neither
  * reads nor writes it, and carries its own instructions field instead.
  *
- * Every word the user reads — title, goal, destructive warning, credit note,
- * button labels — is composed by the backend and rendered verbatim. This
- * component must not derive prose from those fields; the only copy it owns is
- * the mode menu and the instructions placeholder.
+ * Every word the user reads about the batch — title, scope line, goal,
+ * destructive warning, credit chip, button labels — is composed by the backend
+ * and rendered verbatim. This component must not derive prose from those
+ * fields; the only copy it owns is the mode menu and the slot headings.
+ *
+ * The scope line arrives in two halves so the card can weight them: the count
+ * is the fact the decision turns on, the location is context for it. The
+ * location is empty whenever the backend could not state it truthfully, and
+ * the count then stands alone.
  *
  * The destructive warning is model-authored and gets its own block so it reads
  * as a separate claim about what will be removed or overwritten, not as more
  * of the goal. It is hidden when the batch declared nothing destructive.
  *
- * The card owns the draft and the one-shot guard; a host binds send and stop
- * and nothing else. Deliberately hook-light so it can be exercised as a plain
+ * Both answers leave the run alive: approving starts the batch, cancelling
+ * cancels the batch and lets the run keep talking. Instructions travel with
+ * either, which is why the field that holds them is labelled for neither.
+ *
+ * The card owns the draft and the one-shot guard; a host binds send and
+ * nothing else. Deliberately hook-light so it can be exercised as a plain
  * function.
  */
 export const BatchApprovalCard: React.FC<BatchApprovalCardProps> = ({
     approval,
     onSubmit,
-    onStop,
 }) => {
     // Mode + instructions, seeded from the mode the request preselects.
     const [draft, setDraft] = useState<BatchApprovalDraft>(() => initialDraft(approval.defaultMode));
+    // Whether the instructions field has been asked for. Collapsed by default:
+    // most decisions carry none, and the composer this card replaces is gone,
+    // so an empty field sitting above the buttons reads as something left
+    // undone.
+    const [wantsInstructions, setWantsInstructions] = useState(false);
     // Drives the disabled styling in the instant before the card unmounts.
     const [isDecided, setIsDecided] = useState(false);
     // The guard that actually holds. Exactly one decision may leave the
@@ -101,7 +126,7 @@ export const BatchApprovalCard: React.FC<BatchApprovalCardProps> = ({
     return (
         <div
             className="user-message-display"
-            style={{ minHeight: 'fit-content' }}
+            style={{ minHeight: 'fit-content', padding: '0.8rem' }}
             role="group"
             aria-label="Batch operation approval"
             // The instructions field can take focus but nothing here announces
@@ -109,21 +134,62 @@ export const BatchApprovalCard: React.FC<BatchApprovalCardProps> = ({
             // and is waiting on a decision.
             aria-live="assertive"
         >
-            <div className="display-flex flex-col gap-4">
-                {/* Header: static icon + the backend's title */}
-                <div className="display-flex flex-row items-center gap-2 min-w-0">
-                    <Icon icon={LayersIcon} className="font-color-secondary scale-12 flex-none" />
+            <div className="display-flex flex-col min-w-0" style={{ gap: BLOCK_GAP }}>
+
+                {/* Header: static icon, the backend's title, the credit chip,
+                    and under them what the batch covers. */}
+                <div className="display-flex flex-col min-w-0" style={{ gap: '0.4rem' }}>
                     <div
-                        className="font-color-primary text-sm font-semibold uppercase truncate"
-                        style={{ letterSpacing: '0.05em' }}
+                        className="display-flex flex-row items-center gap-2 min-w-0"
+                        // The chip drops to its own line rather than squeezing
+                        // the title: this card renders in a sidebar the user
+                        // can drag as narrow as they like.
+                        style={{ flexWrap: 'wrap', rowGap: '0.25rem' }}
                     >
-                        {approval.title}
+                        <Icon icon={LayersIcon} className="font-color-secondary scale-12 flex-none" />
+                        <div
+                            className="font-color-primary text-sm font-semibold uppercase truncate"
+                            style={{ letterSpacing: '0.05em' }}
+                        >
+                            {approval.title}
+                        </div>
+                        {approval.creditChip && (
+                            <>
+                                <div className="flex-1" />
+                                <Tooltip content={approval.creditTooltip} showArrow>
+                                    <div
+                                        className="text-sm font-color-secondary  items-center display-flex"
+                                        style={{
+                                            border: '1px solid var(--fill-quarternary)',
+                                            borderRadius: '12px',
+                                            padding: '2px 7px',
+                                            whiteSpace: 'nowrap',
+                                        }}
+                                    >
+                                        <Icon icon={DollarCircleIcon} className="font-color-secondary scale-11 flex-none mr-1" />
+                                        {approval.creditChip}
+                                    </div>
+                                </Tooltip>
+                            </>
+                        )}
+                    </div>
+                    <div className="font-color-secondary min-w-0">
+                        <span className="font-color-primary font-medium">
+                            {approval.scopePrimary}
+                        </span>
+                        {approval.scopeSecondary && ` ${approval.scopeSecondary}`}
                     </div>
                 </div>
 
-                <div className="display-flex flex-col gap-4 min-w-0">
-                    {/* The batch goal. DocsLink resolves the backend-provided
-                        path for this client. */}
+                {/* The batch goal. DocsLink resolves the backend-provided
+                    path for this client. */}
+                <div className="display-flex flex-col min-w-0" style={{ gap: LABEL_GAP }}>
+                    <div
+                        className="text-xs font-semibold uppercase font-color-secondary"
+                        style={{ letterSpacing: '0.06em' }}
+                    >
+                        {ACTION_HEADING}
+                    </div>
                     <div className="font-color-primary">
                         {approval.message}
                         {approval.learnMorePath && approval.learnMoreLabel && (
@@ -135,70 +201,89 @@ export const BatchApprovalCard: React.FC<BatchApprovalCardProps> = ({
                             </>
                         )}
                     </div>
-
-                    {approval.destructiveWarning && (
-                        <div
-                            className="display-flex flex-row items-start gap-2 p-2 rounded-md bg-quinary min-w-0"
-                            role="note"
-                            aria-label="What this batch removes or overwrites"
-                        >
-                            <Icon
-                                icon={SecurityWarningIcon}
-                                className="font-color-primary scale-12 flex-none mt-1"
-                            />
-                            <div className="font-color-primary min-w-0">
-                                {approval.destructiveWarning}
-                            </div>
-                        </div>
-                    )}
-
-                    {approval.creditNote && (
-                        <div className="font-color-secondary min-w-0">
-                            {approval.creditNote}
-                        </div>
-                    )}
-
-                    {/* Instructions live on the card: the composer is taken
-                        over while the run blocks, so there is nothing else to
-                        type into. */}
-                    <textarea
-                        className="chat-input"
-                        rows={2}
-                        placeholder="Instructions, or what you want done instead (optional)"
-                        aria-label="Instructions for this batch (optional)"
-                        value={draft.userInstructions}
-                        disabled={isDecided}
-                        onChange={(e) => {
-                            const text = e.target.value;
-                            setDraft((prev) => setUserInstructions(text, prev));
-                        }}
-                        onKeyDown={(e) => {
-                            // Enter inserts a newline and never decides: the
-                            // field takes focus, so approving stays an explicit
-                            // click. Stopping propagation keeps a keystroke
-                            // meant for this field from reaching a host
-                            // shortcut that could answer for the user.
-                            if (e.key === 'Enter') e.stopPropagation();
-                        }}
-                    />
                 </div>
 
-                {/* Footer: Stop, mode ... Decline Approve. Stop keeps the
-                    leading position it has on the run-blocking cards next to
-                    this one, so escaping a blocked run is always in the same
-                    place. */}
-                <div className="display-flex flex-row items-center pt-2 gap-2 min-w-0">
-                    <Tooltip content="Stop the agent run" showArrow singleLine>
-                        <Button
-                            variant="outline"
-                            rightIcon={StopStrokeIcon}
-                            ariaLabel="Stop generating"
-                            style={{ padding: '2px 5px' }}
-                            onClick={onStop}
+                {approval.destructiveWarning && (
+                    <div
+                        className="display-flex flex-row items-start gap-2 p-2 rounded-md min-w-0"
+                        style={{
+                            backgroundColor: 'var(--tag-orange-quinary)',
+                            border: '1px solid var(--tag-orange-tertiary)',
+                        }}
+                        role="note"
+                        aria-label="What this batch removes or overwrites"
+                    >
+                        <Icon
+                            icon={SecurityWarningIcon}
+                            className="font-color-orange scale-12 flex-none mt-1"
+                        />
+                        <div className="font-color-orange min-w-0">
+                            {approval.destructiveWarning &&
+                                (approval.destructiveWarning.charAt(0).toUpperCase() +
+                                approval.destructiveWarning.slice(1))}
+                        </div>
+                    </div>
+                )}
+
+                {/* Instructions live on the card: the composer is taken over
+                    while the run blocks, so there is nothing else to type
+                    into. They constrain an approval and say what to do instead
+                    of a cancellation, so the affordance leans toward neither. */}
+                {wantsInstructions ? (
+                    <div className="display-flex flex-col min-w-0" style={{ gap: LABEL_GAP }}>
+                        <div
+                            className="text-xs font-semibold uppercase font-color-secondary"
+                            style={{ letterSpacing: '0.06em' }}
                         >
-                            Stop
-                        </Button>
-                    </Tooltip>
+                            {INSTRUCTIONS_HEADING}
+                        </div>
+                        <textarea
+                            className="chat-input"
+                            rows={2}
+                            // The field only exists because the user just asked
+                            // for it, so the caret belongs in it.
+                            autoFocus
+                            placeholder="What to change, or what you want done instead"
+                            aria-label="Instructions for this batch (optional)"
+                            value={draft.userInstructions}
+                            disabled={isDecided}
+                            onChange={(e) => {
+                                const text = e.target.value;
+                                setDraft((prev) => setUserInstructions(text, prev));
+                            }}
+                            onKeyDown={(e) => {
+                                // Enter inserts a newline and never decides:
+                                // the field takes focus, so approving stays an
+                                // explicit click. Stopping propagation keeps a
+                                // keystroke meant for this field from reaching
+                                // a host shortcut that could answer for the
+                                // user.
+                                if (e.key === 'Enter') e.stopPropagation();
+                            }}
+                        />
+                    </div>
+                ) : (
+                    <Button
+                        variant="ghost"
+                        icon={PlusSignIcon}
+                        ariaLabel="Add instructions for this batch"
+                        // Pulled back by its own padding so the label lines up
+                        // with the text above it rather than the button box.
+                        style={{ alignSelf: 'flex-start', marginLeft: '-6px' }}
+                        disabled={isDecided}
+                        onClick={() => setWantsInstructions(true)}
+                    >
+                        {ADD_INSTRUCTIONS_LABEL}
+                    </Button>
+                )}
+
+                {/* Footer: coverage ... cancel, approve. Both answers leave the
+                    run alive, so neither is an escape hatch and the destructive
+                    one is not given a leading position. */}
+                <div
+                    className="display-flex flex-row items-center gap-2 min-w-0"
+                    style={{ borderTop: '1px solid var(--fill-quinary)', paddingTop: '0.7rem' }}
+                >
                     <PermissionMenu
                         options={MODE_OPTIONS}
                         value={draft.mode}
@@ -211,16 +296,17 @@ export const BatchApprovalCard: React.FC<BatchApprovalCardProps> = ({
                     <div className="flex-1" />
                     <Button
                         variant="ghost"
-                        ariaLabel="Reject batch operation"
+                        ariaLabel="Cancel batch operation"
                         onClick={handleDecline}
                         disabled={isDecided}
+                        className="mr-1"
                     >
                         {approval.declineLabel}
                     </Button>
                     <Button
                         variant="solid"
                         ariaLabel="Approve batch operation"
-                        style={{ padding: '2px 5px' }}
+                        style={{ padding: '3px 5px' }}
                         onClick={handleApprove}
                         disabled={isDecided}
                     >

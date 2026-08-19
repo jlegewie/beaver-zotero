@@ -54,7 +54,10 @@ import { BatchApprovalCard } from '@beaver/agent-ui/chat/BatchApprovalCard';
 
 const GOAL = 'Assign one broad topic tag to every item and remove all prior tags';
 const WARNING = 'Removes every existing tag from these items';
-const CREDIT_NOTE = 'Approving raises this thread’s confirmation limit to 12 credits.';
+const SCOPE_PRIMARY = '184 items';
+const SCOPE_SECONDARY = 'in Computational Social Science and its subcollections';
+const CREDIT_CHIP = 'Asks again at 12 credits';
+const CREDIT_TOOLTIP = 'Approving raises this thread’s confirmation limit to 12 credits.';
 
 function approval(overrides: Partial<PendingBatchApproval> = {}): PendingBatchApproval {
     return {
@@ -63,13 +66,16 @@ function approval(overrides: Partial<PendingBatchApproval> = {}): PendingBatchAp
         threadId: 'thread-1',
         toolcallId: 'call-1',
         batchId: 'b1',
-        title: 'Approve batch operation',
+        title: 'Batch operation',
+        scopePrimary: SCOPE_PRIMARY,
+        scopeSecondary: SCOPE_SECONDARY,
         message: GOAL,
         destructiveWarning: WARNING,
-        creditNote: CREDIT_NOTE,
+        creditChip: CREDIT_CHIP,
+        creditTooltip: CREDIT_TOOLTIP,
         defaultMode: 'full_access',
-        approveLabel: 'Approve',
-        declineLabel: 'Reject',
+        approveLabel: 'Approve 184 items',
+        declineLabel: 'Cancel',
         timeoutSeconds: 180,
         ...overrides,
     };
@@ -116,20 +122,32 @@ const isWarningBlock = (el: Element) => el.props.role === 'note';
 const isTextarea = (el: Element) => el.type === 'textarea';
 const isModeMenu = (el: Element) => Array.isArray(el.props.options) && !!el.props.onChange;
 
+const ADD_INSTRUCTIONS = 'Add instructions for this batch';
+
 const ENTER = { key: 'Enter', stopPropagation: () => {} } as any;
 
 /** One render of the card. Hook state persists across calls within a test. */
 function render(
     onSubmit: (response: BatchApprovalDecision) => void,
     overrides: Partial<PendingBatchApproval> = {},
-    onStop: () => void = () => {},
 ) {
     hookState.index = 0;
     return BatchApprovalCard({
         approval: approval(overrides),
         onSubmit,
-        onStop,
     }) as React.ReactNode;
+}
+
+/**
+ * One render with the instructions field open. It starts collapsed, so every
+ * test that types into it has to ask for it the way a user would.
+ */
+function renderWithInstructions(
+    onSubmit: (response: BatchApprovalDecision) => void,
+    overrides: Partial<PendingBatchApproval> = {},
+) {
+    findOne(render(onSubmit, overrides), byAriaLabel(ADD_INSTRUCTIONS)).props.onClick();
+    return render(onSubmit, overrides);
 }
 
 describe('BatchApprovalCard one-decision guard', () => {
@@ -161,12 +179,12 @@ describe('BatchApprovalCard one-decision guard', () => {
         expect(onSubmit).toHaveBeenCalledTimes(1);
     });
 
-    it('sends one decision when Approve and Reject land in the same tick', () => {
+    it('sends one decision when Approve and Cancel land in the same tick', () => {
         const onSubmit = vi.fn();
         const tree = render(onSubmit);
 
         findOne(tree, byAriaLabel('Approve batch operation')).props.onClick();
-        findOne(tree, byAriaLabel('Reject batch operation')).props.onClick();
+        findOne(tree, byAriaLabel('Cancel batch operation')).props.onClick();
 
         expect(onSubmit).toHaveBeenCalledTimes(1);
         expect(onSubmit).toHaveBeenCalledWith({
@@ -178,7 +196,7 @@ describe('BatchApprovalCard one-decision guard', () => {
 
     it('sends one decision when a click and a stray Enter land in the same tick', () => {
         const onSubmit = vi.fn();
-        const tree = render(onSubmit);
+        const tree = renderWithInstructions(onSubmit);
 
         findOne(tree, byAriaLabel('Approve batch operation')).props.onClick();
         findOne(tree, isTextarea).props.onKeyDown(ENTER);
@@ -195,7 +213,7 @@ describe('BatchApprovalCard decision payload', () => {
 
     /** Types instructions, picks a mode, and re-renders with both in place. */
     function prepared(onSubmit: (response: BatchApprovalDecision) => void) {
-        const tree = render(onSubmit);
+        const tree = renderWithInstructions(onSubmit);
         findOne(tree, isTextarea).props.onChange({ target: { value: '  keep p53 and p63  ' } });
         findOne(tree, isModeMenu).props.onChange('ask_each_time');
         return render(onSubmit);
@@ -213,10 +231,10 @@ describe('BatchApprovalCard decision payload', () => {
         });
     });
 
-    it('carries the mode and the trimmed instructions on Reject', () => {
+    it('carries the mode and the trimmed instructions on Cancel', () => {
         const onSubmit = vi.fn();
 
-        findOne(prepared(onSubmit), byAriaLabel('Reject batch operation')).props.onClick();
+        findOne(prepared(onSubmit), byAriaLabel('Cancel batch operation')).props.onClick();
 
         expect(onSubmit).toHaveBeenCalledWith({
             approved: false,
@@ -243,19 +261,8 @@ describe('BatchApprovalCard decision payload', () => {
     it('does not decide when Enter is pressed in the instructions field', () => {
         const onSubmit = vi.fn();
 
-        findOne(render(onSubmit), isTextarea).props.onKeyDown(ENTER);
+        findOne(renderWithInstructions(onSubmit), isTextarea).props.onKeyDown(ENTER);
 
-        expect(onSubmit).not.toHaveBeenCalled();
-    });
-
-    it('stops the run without deciding the batch', () => {
-        // Stop cancels the run; it is not a decline, so nothing goes on the wire.
-        const onSubmit = vi.fn();
-        const onStop = vi.fn();
-
-        findOne(render(onSubmit, {}, onStop), byAriaLabel('Stop generating')).props.onClick();
-
-        expect(onStop).toHaveBeenCalledTimes(1);
         expect(onSubmit).not.toHaveBeenCalled();
     });
 });
@@ -266,13 +273,29 @@ describe('BatchApprovalCard backend copy', () => {
         hookState.index = 0;
     });
 
-    it('renders the goal, the warning block and the credit note verbatim', () => {
+    it('renders the goal, the warning block and the credit chip verbatim', () => {
         const text = renderedText(render(vi.fn()));
 
         expect(text).toContain(GOAL);
         expect(text).toContain(WARNING);
-        expect(text).toContain(CREDIT_NOTE);
+        expect(text).toContain(CREDIT_CHIP);
         expect(findAll(render(vi.fn()), isWarningBlock)).toHaveLength(1);
+    });
+
+    it('renders both halves of the scope line', () => {
+        const text = renderedText(render(vi.fn()));
+
+        expect(text).toContain(SCOPE_PRIMARY);
+        expect(text.join('')).toContain(`${SCOPE_PRIMARY} ${SCOPE_SECONDARY}`);
+    });
+
+    it('shows the count alone when the backend could not place it', () => {
+        // A batch whose ids the model typed has no scope to describe. The card
+        // must not invent one — or leave a dangling space after the count.
+        const text = renderedText(render(vi.fn(), { scopeSecondary: '' }));
+
+        expect(text).toContain(SCOPE_PRIMARY);
+        expect(text.join('')).not.toContain(`${SCOPE_PRIMARY} `);
     });
 
     it('hides the warning block when the batch declared nothing destructive', () => {
@@ -282,10 +305,43 @@ describe('BatchApprovalCard backend copy', () => {
         expect(renderedText(tree)).toContain(GOAL);
     });
 
-    it('hides the credit note when the run has none', () => {
-        const tree = render(vi.fn(), { creditNote: '' });
+    it('hides the credit chip when the run has none', () => {
+        const tree = render(vi.fn(), { creditChip: '', creditTooltip: '' });
 
-        expect(renderedText(tree)).not.toContain(CREDIT_NOTE);
+        expect(renderedText(tree)).not.toContain(CREDIT_CHIP);
         expect(renderedText(tree)).toContain(GOAL);
+    });
+});
+
+describe('BatchApprovalCard instructions disclosure', () => {
+    beforeEach(() => {
+        hookState.slots = [];
+        hookState.index = 0;
+    });
+
+    it('starts collapsed, behind a button that leans toward neither answer', () => {
+        const tree = render(vi.fn());
+
+        expect(findAll(tree, isTextarea)).toHaveLength(0);
+        expect(findAll(tree, byAriaLabel(ADD_INSTRUCTIONS))).toHaveLength(1);
+    });
+
+    it('opens the field and drops the button once it is asked for', () => {
+        const tree = renderWithInstructions(vi.fn());
+
+        expect(findAll(tree, isTextarea)).toHaveLength(1);
+        expect(findAll(tree, byAriaLabel(ADD_INSTRUCTIONS))).toHaveLength(0);
+    });
+
+    it('decides with no instructions when the field was never opened', () => {
+        const onSubmit = vi.fn();
+
+        findOne(render(onSubmit), byAriaLabel('Approve batch operation')).props.onClick();
+
+        expect(onSubmit).toHaveBeenCalledWith({
+            approved: true,
+            mode: 'full_access',
+            user_instructions: null,
+        });
     });
 });
