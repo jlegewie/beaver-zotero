@@ -190,6 +190,7 @@ const entryPaths = [
   "src/run-state/pendingBatchApprovals.ts",
   "src/run-state/runErrorCopy.ts",
   "src/run-state/runStatusCopy.ts",
+  "src/run-state/runStatusVisibility.ts",
   "src/citations/atoms.ts",
   "src/citations/externalReferences.ts",
 ].map((p) => path.join(pkgDir, p));
