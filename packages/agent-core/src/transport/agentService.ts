@@ -28,6 +28,7 @@ import {
     WSRequestAckData,
     WSRequestReceivedAck,
     AskUserQuestionAnswer,
+    BatchApprovalMode,
 } from '../protocol/agentProtocol';
 import { resolveBusyContext } from './busyContextProvider';
 import {
@@ -862,6 +863,34 @@ export class AgentService {
                     this.callbacks?.onCreditConfirmationStale?.(event);
                     break;
 
+                case 'batch_approval_request':
+                    logger("AgentService: Received batch_approval_request", event, 1);
+                    // This event is handled by the UI via callback
+                    if (this.callbacks?.onBatchApprovalRequest) {
+                        this.callbacks.onBatchApprovalRequest(event);
+                    } else {
+                        // No handler - decline. Declining cancels the batch, which
+                        // is the safe outcome for a client that cannot show the
+                        // card: dropping the event would stall the run for the
+                        // whole approval timeout, and approving would grant
+                        // coverage the user was never shown.
+                        logger("AgentService: No batch approval handler, auto-declining", 1);
+                        this.send({
+                            type: 'batch_approval_response',
+                            approval_id: event.approval_id,
+                            approved: false,
+                            // A response is only well-formed with a mode. Echo the
+                            // mode the card would have preselected.
+                            mode: event.default_mode ?? 'full_access',
+                        });
+                    }
+                    break;
+
+                case 'batch_approval_stale':
+                    logger("AgentService: Received batch_approval_stale", event, 1);
+                    this.callbacks?.onBatchApprovalStale?.(event);
+                    break;
+
                 case 'ask_user_question_request':
                     logger("AgentService: Received ask_user_question_request", event, 1);
                     // This event is handled by the UI via callback
@@ -1049,6 +1078,35 @@ export class AgentService {
             type: 'credit_confirmation_response',
             confirmation_id: confirmationId,
             approved,
+            user_instructions: userInstructions,
+        });
+    }
+
+    /**
+     * Send a response to a batch approval request.
+     * Called by the UI when the user approves or declines the batch.
+     * @param approvalId The approval ID from the request
+     * @param approved Whether the user approved the batch
+     * @param mode Coverage the decision grants for the life of the batch
+     * @param userInstructions Optional instructions from the user. Meaningful on
+     *   both paths: they constrain an approved batch and say what to do instead
+     *   when the batch is declined.
+     * @returns false if the socket was not open, so the decision never left the
+     *   client. The caller must recover the card rather than wait for a reply
+     *   that cannot come.
+     */
+    sendBatchApprovalResponse(
+        approvalId: string,
+        approved: boolean,
+        mode: BatchApprovalMode,
+        userInstructions?: string | null,
+    ): boolean {
+        logger(`AgentService: Sending batch approval response for ${approvalId}: ${approved} (${mode})${userInstructions ? ' (with instructions)' : ''}`, 1);
+        return this.send({
+            type: 'batch_approval_response',
+            approval_id: approvalId,
+            approved,
+            mode,
             user_instructions: userInstructions,
         });
     }

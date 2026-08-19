@@ -7,11 +7,13 @@
  * client answers the same way.
  */
 
+import type { PendingBatchApproval } from '@beaver/agent-core/run-state/pendingBatchApprovals';
 import type { PendingCreditConfirmation } from '@beaver/agent-core/run-state/pendingCreditConfirmations';
 import type { PendingQuestion } from '@beaver/agent-core/run-state/pendingQuestions';
 
 export type ComposerTakeover =
     | { kind: 'input' }
+    | { kind: 'batch-approval'; approval: PendingBatchApproval }
     | { kind: 'credit-confirmation'; confirmation: PendingCreditConfirmation }
     | { kind: 'question'; question: PendingQuestion };
 
@@ -27,6 +29,7 @@ export type ComposerTakeover =
  */
 export interface ComposerTakeoverInput {
     pendingApprovalCount?: number;
+    batchApprovals?: ReadonlyMap<string, PendingBatchApproval>;
     creditConfirmations?: ReadonlyMap<string, PendingCreditConfirmation>;
     questions?: ReadonlyMap<string, PendingQuestion>;
 }
@@ -42,9 +45,12 @@ const INPUT: ComposerTakeover = { kind: 'input' };
  *    approvals are answered on the action cards in the stream and the input
  *    area owns that flow, so a takeover would hide the controls the run is
  *    waiting on.
- * 2. A pending credit confirmation. It gates the run's spending decision, so
+ * 2. A pending batch approval. It gates the work a credit confirmation would
+ *    charge for, so deciding it first is what makes the cost decision
+ *    meaningful — and a declined batch may remove the cost entirely.
+ * 3. A pending credit confirmation. It gates the run's spending decision, so
  *    nothing else the run is waiting on can make progress behind it.
- * 3. A pending ask_user_question. Answering it cannot unblock a run that is
+ * 4. A pending ask_user_question. Answering it cannot unblock a run that is
  *    already stopped on a credit decision, so it waits its turn.
  *
  * Only one entry of each map is ever live per run; the first is taken when
@@ -52,6 +58,9 @@ const INPUT: ComposerTakeover = { kind: 'input' };
  */
 export function selectComposerTakeover(input: ComposerTakeoverInput): ComposerTakeover {
     if ((input.pendingApprovalCount ?? 0) > 0) return INPUT;
+
+    const approval = input.batchApprovals?.values().next().value;
+    if (approval) return { kind: 'batch-approval', approval };
 
     const confirmation = input.creditConfirmations?.values().next().value;
     if (confirmation) return { kind: 'credit-confirmation', confirmation };

@@ -9,7 +9,7 @@ import { atom, Getter, Setter } from 'jotai';
 import { v4 as uuidv4 } from 'uuid';
 import { agentService } from '@beaver/agent-core/transport/agentService';
 import { connectWithRetry } from '@beaver/agent-core/transport/connectWithRetry';
-import { notifyCreditConfirmation, notifyRunComplete, notifyUserQuestion } from '../../src/services/systemNotifications';
+import { notifyBatchApproval, notifyCreditConfirmation, notifyRunComplete, notifyUserQuestion } from '../../src/services/systemNotifications';
 import { reportConnectionFailure } from '@beaver/agent-core/transport/clients/diagnosticsService';
 import {
     ConnectionFailureEvidence,
@@ -34,9 +34,12 @@ import {
     WSDeferredApprovalRequest,
     WSDeferredApprovalStale,
     WSAskUserQuestionRequest,
+    WSBatchApprovalRequest,
+    WSBatchApprovalStale,
     WSCreditConfirmationRequest,
     WSCreditConfirmationStale,
     AskUserQuestionAnswer,
+    BatchApprovalMode,
     WSStreamingDoneEvent,
     WSThreadNameEvent,
     ChargingPermissions,
@@ -133,6 +136,12 @@ import {
     removePendingCreditConfirmationAtom,
     clearAllPendingCreditConfirmationsAtom,
 } from '@beaver/agent-core/run-state/pendingCreditConfirmations';
+import {
+    addPendingBatchApprovalAtom,
+    pendingBatchApprovalsAtom,
+    removePendingBatchApprovalAtom,
+    clearAllPendingBatchApprovalsAtom,
+} from '@beaver/agent-core/run-state/pendingBatchApprovals';
 import { readCreditThreshold } from '../utils/creditThreshold';
 import { getAppliedPdfAnnotationCount } from '../agents/agentActionCounts';
 import { undoEditMetadataAction } from '../utils/editMetadataActions';
@@ -1183,6 +1192,7 @@ export const prepareForNewRunAtom = atom(null, (_get, set) => {
     set(clearAllPendingApprovalsAtom);
     set(clearAllPendingQuestionsAtom);
     set(clearAllPendingCreditConfirmationsAtom);
+    set(clearAllPendingBatchApprovalsAtom);
     set(clearApprovalResponseIntentsAtom);
     set(clearStaleApprovalsAtom);
     set(clearRunApprovalPolicyAtom);
@@ -1304,15 +1314,17 @@ function applyRunCitations(
 /**
  * Create WebSocket callbacks for handling streaming events.
  * Shared between sendWSMessageAtom and regenerateFromRunAtom.
- */
-/**
+ *
  * @param connectAttempts Reads how many attempts opened the connection these
  * callbacks belong to. A drop after `ready` has no attempt count of its own —
  * the connection it lost is the one that succeeded — so the number that
  * describes it is the number that got it open. Read lazily because the count is
  * only known once the connect settles, which is after these callbacks exist.
  */
-function createWSCallbacks(set: Setter, connectAttempts: () => number | null): WSCallbacks {
+export function createWSCallbacks(
+    set: Setter,
+    connectAttempts: () => number | null = () => null,
+): WSCallbacks {
     return {
         onReady: (data: WSReadyData) => {
             logger('WS onReady:', data, 1);
@@ -1422,6 +1434,19 @@ function createWSCallbacks(set: Setter, connectAttempts: () => number | null): W
                 // the rest of the run (the full-clear sites only fire on run
                 // end / disconnect / thread switch).
                 set(removePendingQuestionAtom, toolCallId);
+
+                // Remove any pending batch approval owned by this tool call,
+                // covering the same backend-timeout path: batch_start returns
+                // with no coverage granted and the run continues. Batch
+                // approvals are keyed by approval id, so the owning entry is
+                // the one whose toolcallId is the call that just returned.
+                const pendingBatchApprovals = store.get(pendingBatchApprovalsAtom);
+                for (const [approvalId, pending] of pendingBatchApprovals.entries()) {
+                    if (pending.toolcallId === toolCallId) {
+                        set(removePendingBatchApprovalAtom, approvalId);
+                        break;
+                    }
+                }
             }
         },
 
@@ -1550,6 +1575,7 @@ function createWSCallbacks(set: Setter, connectAttempts: () => number | null): W
             set(clearAllPendingApprovalsAtom);
             set(clearAllPendingQuestionsAtom);
             set(clearAllPendingCreditConfirmationsAtom);
+            set(clearAllPendingBatchApprovalsAtom);
             set(clearRunApprovalPolicyAtom);
         },
 
@@ -1582,6 +1608,7 @@ function createWSCallbacks(set: Setter, connectAttempts: () => number | null): W
             set(clearAllPendingApprovalsAtom);
             set(clearAllPendingQuestionsAtom);
             set(clearAllPendingCreditConfirmationsAtom);
+            set(clearAllPendingBatchApprovalsAtom);
             set(clearRunApprovalPolicyAtom);
 
             // Run quality flag for a run that did not complete. Keyed by run id
@@ -1791,6 +1818,32 @@ function createWSCallbacks(set: Setter, connectAttempts: () => number | null): W
             set(removePendingCreditConfirmationAtom, event.confirmation_id);
         },
 
+        onBatchApprovalRequest: (event: WSBatchApprovalRequest) => {
+            logger('WS onBatchApprovalRequest:', {
+                approvalId: event.approval_id,
+                runId: event.run_id,
+                toolcallId: event.toolcall_id,
+                batchId: event.batch_id,
+                defaultMode: event.default_mode,
+                hasDestructiveWarning: Boolean(event.destructive_warning),
+            }, 1);
+            set(addPendingBatchApprovalAtom, event);
+
+            // Surface an OS-native notification if the user can't currently see
+            // the card — the batch stays parked until they decide.
+            notifyBatchApproval(event);
+        },
+
+        onBatchApprovalStale: (event: WSBatchApprovalStale) => {
+            logger('WS onBatchApprovalStale:', {
+                approvalId: event.approval_id,
+                reason: event.reason,
+            }, 1);
+            // The batch moved on without the decision and there is nothing to
+            // apply locally, so the card is simply retired.
+            set(removePendingBatchApprovalAtom, event.approval_id);
+        },
+
         onAskUserQuestionRequest: (event: WSAskUserQuestionRequest) => {
             logger('WS onAskUserQuestionRequest:', {
                 questionId: event.question_id,
@@ -1834,6 +1887,7 @@ function createWSCallbacks(set: Setter, connectAttempts: () => number | null): W
             set(clearAllPendingApprovalsAtom);
             set(clearAllPendingQuestionsAtom);
             set(clearAllPendingCreditConfirmationsAtom);
+            set(clearAllPendingBatchApprovalsAtom);
             set(clearRunApprovalPolicyAtom);
 
             // A run that reached `completed` (run_complete processed) but whose
@@ -2779,6 +2833,7 @@ export const closeWSConnectionAtom = atom(null, async (get, set) => {
     set(clearAllPendingApprovalsAtom);
     set(clearAllPendingQuestionsAtom);
     set(clearAllPendingCreditConfirmationsAtom);
+    set(clearAllPendingBatchApprovalsAtom);
     set(clearApprovalResponseIntentsAtom);
     set(clearRunApprovalPolicyAtom);
 
@@ -2821,6 +2876,7 @@ export const clearThreadAtom = atom(null, (_get, set) => {
     // behind an unanswerable card (pending approvals are left as-is here).
     set(clearAllPendingQuestionsAtom);
     set(clearAllPendingCreditConfirmationsAtom);
+    set(clearAllPendingBatchApprovalsAtom);
     set(clearRunApprovalPolicyAtom);
 });
 
@@ -2988,5 +3044,34 @@ export const sendCreditConfirmationResponseAtom = atom(
             logger(`sendCreditConfirmationResponseAtom: Credit confirmation response for ${confirmationId} was not sent`, 1);
         }
         set(removePendingCreditConfirmationAtom, confirmationId);
+    }
+);
+
+/**
+ * Send the user's decision for a batch approval and retire the pending card.
+ *
+ * The card is removed even when the send fails: the decision can no longer
+ * reach the run, so leaving it up would strand the user on a card that can
+ * never be answered.
+ */
+export const sendBatchApprovalResponseAtom = atom(
+    null,
+    (_get, set, { approvalId, approved, mode, userInstructions }: {
+        approvalId: string;
+        approved: boolean;
+        mode: BatchApprovalMode;
+        userInstructions?: string | null;
+    }) => {
+        logger(`sendBatchApprovalResponseAtom: Sending batch approval response for ${approvalId}: ${approved} (${mode})`, 1);
+        const delivered = agentService.sendBatchApprovalResponse(
+            approvalId,
+            approved,
+            mode,
+            userInstructions,
+        );
+        if (!delivered) {
+            logger(`sendBatchApprovalResponseAtom: Batch approval response for ${approvalId} was not sent`, 1);
+        }
+        set(removePendingBatchApprovalAtom, approvalId);
     }
 );

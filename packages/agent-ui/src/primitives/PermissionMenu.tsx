@@ -3,7 +3,6 @@ import MenuButton from './MenuButton';
 import type { MenuItem } from './ContextMenu';
 import Icon from '../icons/Icon';
 import TickIcon from '../icons/TickIcon';
-import ArrowDownIcon from '../icons/ArrowDownIcon';
 
 /**
  * How risky an option is. `warning` renders the row and — while it is the
@@ -35,8 +34,6 @@ export interface PermissionMenuProps<T extends string = string> {
     heading?: string;
     /** Button variant for the trigger. */
     variant?: string;
-    /** Show a chevron after the trigger label. */
-    showChevron?: boolean;
     /** Render the trigger as its icon alone. */
     iconOnly?: boolean;
     disabled?: boolean;
@@ -50,11 +47,11 @@ export interface PermissionMenuProps<T extends string = string> {
 
 const TITLE_TONE_CLASS: Record<PermissionMenuTone, string> = {
     neutral: 'font-color-primary',
-    warning: 'font-color-orange',
+    warning: 'font-color-orange-opacity-1',
 };
 
 const DESCRIPTION_TONE_CLASS: Record<PermissionMenuTone, string> = {
-    neutral: 'font-color-tertiary',
+    neutral: 'font-color-secondary',
     warning: 'font-color-orange',
 };
 
@@ -86,7 +83,6 @@ function PermissionMenu<T extends string>({
     onChange,
     heading,
     variant = 'ghost-secondary',
-    showChevron = false,
     iconOnly = false,
     disabled = false,
     ariaLabel,
@@ -161,7 +157,6 @@ function PermissionMenu<T extends string>({
             {!iconOnly && triggerLabel && (
                 <span className={`truncate ${triggerToneClass}`}>{triggerLabel}</span>
             )}
-            {showChevron && <Icon icon={ArrowDownIcon} className="scale-11 -ml-05" />}
         </div>
     );
 
