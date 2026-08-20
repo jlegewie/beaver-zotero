@@ -1,4 +1,4 @@
-import type { AgentRun } from '../agents/types';
+import type { AgentRun, RunUsage } from '../agents/types';
 import type { WSErrorEvent } from '../protocol/agentProtocol';
 
 export function appendRunIfMissing(runs: AgentRun[], run: AgentRun): AgentRun[] {
@@ -99,25 +99,87 @@ export function resolveErrorRunId(
 }
 
 /**
- * Walk the resume chain back to the root run (the first non-resume run).
+ * The runs that make up one answer, oldest first: the run that started it, the
+ * run that continued it, and so on up to `run`.
  *
  * Resume runs carry `is_resume: true` and `resumes_run_id` pointing at the run
- * they resumed, and they have an empty `user_prompt.content`. When retrying
- * from a resume run we want to regenerate from the original user message, not
- * from an intermediate resume prompt — so walk the chain to its root.
+ * they continued, and their own `user_prompt.content` is empty. On screen the
+ * whole chain reads as a single response, so anything describing that response
+ * — its text, its citations, its cost, the question that produced it — has to
+ * be gathered across the chain rather than taken from its last run.
  *
- * Guards against cycles by tracking visited run IDs.
+ * A run that continued nothing yields just itself. Guards against cycles by
+ * tracking visited run IDs.
  */
-export function findResumeChainRoot(run: AgentRun, allRuns: AgentRun[]): AgentRun {
+export function collectResumeChain(run: AgentRun, allRuns: AgentRun[]): AgentRun[] {
+    const chain: AgentRun[] = [run];
+    const visited = new Set<string>([run.id]);
     let current = run;
-    const visited = new Set<string>([current.id]);
     while (current.user_prompt.is_resume && current.user_prompt.resumes_run_id) {
         const parent = allRuns.find(r => r.id === current.user_prompt.resumes_run_id);
         if (!parent || visited.has(parent.id)) break;
         visited.add(parent.id);
+        chain.push(parent);
         current = parent;
     }
-    return current;
+    return chain.reverse();
+}
+
+/**
+ * Walk the resume chain back to the root run (the first non-resume run).
+ *
+ * When retrying from a resume run we want to regenerate from the original user
+ * message, not from an intermediate resume prompt (whose content is empty).
+ */
+export function findResumeChainRoot(run: AgentRun, allRuns: AgentRun[]): AgentRun {
+    return collectResumeChain(run, allRuns)[0];
+}
+
+/** The numeric totals of `RunUsage`, all summed the same way. */
+const RUN_USAGE_TOTALS = [
+    'requests',
+    'tool_calls',
+    'input_tokens',
+    'cache_write_tokens',
+    'cache_read_tokens',
+    'input_audio_tokens',
+    'cache_audio_read_tokens',
+    'output_tokens',
+] as const;
+
+/**
+ * What a whole answer cost, across every run that produced it.
+ *
+ * Returns nulls when no run in the chain reported the figure, which is what
+ * callers gate their display on — a run that was cut off before it finished
+ * reports neither.
+ */
+export function sumChainUsage(runs: AgentRun[]): { usage: RunUsage | null; cost: number | null } {
+    const withUsage = runs.filter(run => run.total_usage);
+    const costs = runs
+        .map(run => run.total_cost)
+        .filter((cost): cost is number => typeof cost === 'number');
+
+    const cost = costs.length ? costs.reduce((total, next) => total + next, 0) : null;
+    if (!withUsage.length) return { usage: null, cost };
+
+    const usage = { ...withUsage[0].total_usage } as RunUsage;
+    for (const key of RUN_USAGE_TOTALS) {
+        usage[key] = withUsage.reduce((total, run) => total + (run.total_usage?.[key] ?? 0), 0);
+    }
+
+    const modelRequests = withUsage.flatMap(run => run.total_usage?.model_requests ?? []);
+    if (modelRequests.length) usage.model_requests = modelRequests;
+
+    const details = withUsage.reduce<Record<string, number>>((merged, run) => {
+        for (const [key, value] of Object.entries(run.total_usage?.details ?? {})) {
+            merged[key] = (merged[key] ?? 0) + value;
+        }
+        return merged;
+    }, {});
+    if (Object.keys(details).length) usage.details = details;
+
+    return { usage, cost };
 }
 
 /**

@@ -3,12 +3,14 @@ import { describe, expect, it } from 'vitest';
 import type { AgentRun } from '@beaver/agent-core/agents/types';
 import {
     appendRunIfMissing,
+    collectResumeChain,
     findResumeChainRoot,
     findRunForResume,
     hasOnlyThinkingParts,
     isInterruptedRun,
     lingeringCompletedRun,
     shouldOfferResume,
+    sumChainUsage,
     wasRunContinued,
     resolveErrorRunId,
     toRunError,
@@ -384,5 +386,114 @@ describe('wasRunContinued', () => {
 
     it('does not count a completed run', () => {
         expect(wasRunContinued(makeRun('run-1', 'completed'), new Set(['run-1']))).toBe(false);
+    });
+});
+
+describe('collectResumeChain', () => {
+    it('returns a run that continued nothing on its own', () => {
+        const run = makeRun('run-1', 'completed');
+
+        expect(collectResumeChain(run, [run]).map(r => r.id)).toEqual(['run-1']);
+    });
+
+    it('returns the whole chain oldest first', () => {
+        const first = makeRun('first', 'error');
+        const second = makeResumeRun('second', 'first', 'error');
+        const third = makeResumeRun('third', 'second', 'completed');
+
+        expect(collectResumeChain(third, [first, second, third]).map(r => r.id))
+            .toEqual(['first', 'second', 'third']);
+    });
+
+    it('stops where the history it was given stops', () => {
+        // A run whose parent is not loaded: the chain is what can be shown.
+        const orphan = makeResumeRun('orphan', 'missing', 'completed');
+
+        expect(collectResumeChain(orphan, [orphan]).map(r => r.id)).toEqual(['orphan']);
+    });
+
+    it('does not loop on a cycle', () => {
+        const a = makeResumeRun('a', 'b', 'completed');
+        const b = makeResumeRun('b', 'a', 'error');
+
+        expect(collectResumeChain(a, [a, b]).map(r => r.id)).toEqual(['b', 'a']);
+    });
+
+    it('agrees with findResumeChainRoot', () => {
+        const first = makeRun('first', 'error');
+        const second = makeResumeRun('second', 'first', 'completed');
+
+        expect(collectResumeChain(second, [first, second])[0])
+            .toBe(findResumeChainRoot(second, [first, second]));
+    });
+});
+
+describe('sumChainUsage', () => {
+    function usage(overrides: Partial<AgentRun['total_usage']> = {}) {
+        return {
+            requests: 1,
+            tool_calls: 0,
+            input_tokens: 100,
+            cache_write_tokens: 0,
+            cache_read_tokens: 0,
+            input_audio_tokens: 0,
+            cache_audio_read_tokens: 0,
+            output_tokens: 10,
+            ...overrides,
+        } as NonNullable<AgentRun['total_usage']>;
+    }
+
+    function runWith(id: string, total_usage?: AgentRun['total_usage'], total_cost?: number): AgentRun {
+        const run = makeRun(id, 'completed');
+        run.total_usage = total_usage;
+        run.total_cost = total_cost;
+        return run;
+    }
+
+    it('adds up what every run in the chain spent', () => {
+        const chain = [
+            runWith('first', usage({ requests: 2, input_tokens: 100, output_tokens: 10 }), 0.5),
+            runWith('second', usage({ requests: 3, input_tokens: 250, output_tokens: 40 }), 0.25),
+        ];
+
+        const { usage: summed, cost } = sumChainUsage(chain);
+
+        expect(summed).toMatchObject({ requests: 5, input_tokens: 350, output_tokens: 50 });
+        expect(cost).toBeCloseTo(0.75);
+    });
+
+    it('leaves a single run reporting exactly what it did', () => {
+        const only = runWith('only', usage({ input_tokens: 42 }), 0.1);
+
+        const { usage: summed, cost } = sumChainUsage([only]);
+
+        expect(summed).toMatchObject({ input_tokens: 42 });
+        expect(cost).toBe(0.1);
+    });
+
+    it('ignores a run that reported nothing', () => {
+        // An interrupted run never reports its usage.
+        const chain = [runWith('interrupted'), runWith('continuation', usage({ input_tokens: 70 }), 0.2)];
+
+        const { usage: summed, cost } = sumChainUsage(chain);
+
+        expect(summed).toMatchObject({ input_tokens: 70 });
+        expect(cost).toBe(0.2);
+    });
+
+    it('reports nothing when no run in the chain did', () => {
+        expect(sumChainUsage([runWith('a'), runWith('b')])).toEqual({ usage: null, cost: null });
+    });
+
+    it('merges the per-request entries and the details map', () => {
+        const chain = [
+            runWith('first', { ...usage(), model_requests: [{ input_tokens: 1 } as any], details: { reasoning: 5 } }),
+            runWith('second', { ...usage(), model_requests: [{ input_tokens: 2 } as any], details: { reasoning: 7 } }),
+        ];
+
+        const { usage: summed } = sumChainUsage(chain);
+
+        expect(summed?.model_requests).toHaveLength(2);
+        expect(summed?.details).toEqual({ reasoning: 12 });
     });
 });
