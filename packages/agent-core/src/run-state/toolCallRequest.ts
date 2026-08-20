@@ -161,7 +161,8 @@ export const TOOL_BASE_LABELS: Record<string, string> = {
 
     // Batch operations
     batch_start: 'Batch operations',
-    batch_resolve: 'Batch operations',
+    batch_resolve: 'Skipping items',
+    batch_digest: 'Recording findings',
 
     // Framework tools
     load_capability: 'Loading tools',
