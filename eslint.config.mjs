@@ -394,6 +394,9 @@ export default tseslint.config(
             // getHost(), not the Zotero global. The label layer it calls lives in
             // the core and is covered by the stricter block below.
             "react/components/agentRuns/ToolCallPartView.tsx",
+            // Request-side label name resolution (extracted from ToolCallPartView):
+            // goes through getHost().itemData, never the Zotero global.
+            "react/utils/toolCallLabelEnrich.ts",
             // Pure thread-list helpers incl. the instance-mismatch check —
             // identities are passed in, never read from the Zotero global.
             "react/utils/threadMatches.ts",

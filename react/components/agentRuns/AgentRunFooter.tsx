@@ -16,6 +16,7 @@ import { CitedSource, getCitationKey } from '@beaver/agent-core/types/citations'
 import { messageSourcesVisibilityAtom, toggleMessageSourcesVisibilityAtom, setMessageSourcesVisibilityAtom } from '../../atoms/messageUIState';
 import { toolResultsMapAtom, allRunsAtom } from '@beaver/agent-core/run-state/atoms';
 import { extractRunResponseContent } from '../../utils/threadContent';
+import { resolveToolCallLabelEnrichMap } from '../../utils/toolCallLabelEnrich';
 import TokenUsageDisplay from './TokenUsageDisplay';
 import { regenerateFromRunAtom, retryPendingRunIdAtom, streamingDoneRunIdsAtom } from '../../atoms/agentRunAtoms';
 import { currentThreadIdAtom } from '../../atoms/threads';
@@ -91,10 +92,14 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
         }
     }, [run.id, setSourcesVisibility, sourcesVisible, uniqueCitations.length]);
 
-    // Combine all text content from the run's model messages
-    const combinedContent = useMemo(() => {
-        return extractRunResponseContent(run, toolResultsMap);
-    }, [run.model_messages, toolResultsMap]);
+    // Combine all text content from the run's model messages. Resolved lazily
+    // (copy / save-as-note), because tool-call labels need host-resolved
+    // library/collection names — without them a list_* label shows the raw
+    // library ref ("u") instead of the library name.
+    const buildRunContent = useCallback(async () => {
+        const enrichMap = await resolveToolCallLabelEnrichMap([run], toolResultsMap);
+        return extractRunResponseContent(run, toolResultsMap, enrichMap);
+    }, [run, toolResultsMap]);
 
     // Build share menu items
     const getShareMenuItems = () => {
@@ -147,7 +152,7 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
     };
 
     const handleCopy = async () => {
-        const formattedContent = renderToMarkdown(combinedContent);
+        const formattedContent = renderToMarkdown(await buildRunContent());
         await copyToClipboard(formattedContent);
     };
 
@@ -157,7 +162,7 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
         if (userQuestion) {
             sections.push(`## User\n\n> ${userQuestion.replace(/\n/g, '\n> ')}`);
         }
-        sections.push(`## Beaver\n\n${combinedContent}`);
+        sections.push(`## Beaver\n\n${await buildRunContent()}`);
         const noteMarkdown = sections.join('\n\n---\n\n');
 
         const renderContent = preprocessNoteContent(noteMarkdown);
@@ -310,7 +315,7 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
                         showArrow
                     >
                         <CopyButton
-                            content={combinedContent}
+                            content={buildRunContent}
                             formatContent={renderToMarkdown}
                             className="scale-11"
                         />

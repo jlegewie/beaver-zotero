@@ -44,6 +44,28 @@ describe('getToolCallDetails', () => {
         expect(count(details, '(3 results)')).toBe(1);
     });
 
+    it('uses the host-resolved library name from the enrich map, not the raw library ref', () => {
+        const result = ret('list_collections', {
+            view: { view_type: 'collection_list', tool_name: 'list_collections', collections: [], total_count: 44 },
+        });
+        const map = new Map<string, any>([['t1', result]]);
+        const enrichMap = new Map([['t1', { libraryName: 'My Library' }]]);
+        const details = getToolCallDetails(tc('list_collections', { library: 'u' }), map, enrichMap);
+
+        expect(details).toContain('"My Library"');
+        expect(details).not.toContain('"u"');
+    });
+
+    it('falls back to the raw library arg when no enrich map is supplied', () => {
+        const result = ret('list_collections', {
+            view: { view_type: 'collection_list', tool_name: 'list_collections', collections: [], total_count: 44 },
+        });
+        const map = new Map<string, any>([['t1', result]]);
+        const details = getToolCallDetails(tc('list_collections', { library: 'u' }), map);
+
+        expect(details).toContain('"u"');
+    });
+
     it('uses the view-typed count wording (collections), not a summary result count', () => {
         const result = ret('list_collections', {
             view: { view_type: 'collection_list', tool_name: 'list_collections', collections: [], total_count: 5 },
