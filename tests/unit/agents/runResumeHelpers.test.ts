@@ -9,6 +9,7 @@ import {
     isInterruptedRun,
     lingeringCompletedRun,
     shouldOfferResume,
+    wasRunContinued,
     resolveErrorRunId,
     toRunError,
 } from '@beaver/agent-core/run-state/runResumeHelpers';
@@ -347,5 +348,41 @@ describe('shouldOfferResume', () => {
         run.error = { type: 'llm_error', message: 'boom', is_resumable: true };
 
         expect(shouldOfferResume(run, { isLastRun: true, resumedRunIds: noneResumed })).toBe(false);
+    });
+});
+
+describe('wasRunContinued', () => {
+    function interrupted(id = 'run-1'): AgentRun {
+        const run = makeRun(id, 'canceled');
+        run.error = { type: 'canceled', message: 'Ended', reason_code: 'client_closed' };
+        return run;
+    }
+
+    it('counts a failed run a later run resumed', () => {
+        const run = makeRun('run-1', 'error');
+
+        expect(wasRunContinued(run, new Set(['run-1']))).toBe(true);
+    });
+
+    it('counts an interrupted run a later run continued', () => {
+        const run = interrupted();
+
+        expect(wasRunContinued(run, new Set([run.id]))).toBe(true);
+    });
+
+    it('counts nothing when no run continued it', () => {
+        expect(wasRunContinued(interrupted(), new Set<string>())).toBe(false);
+        expect(wasRunContinued(makeRun('run-1', 'error'), new Set(['other']))).toBe(false);
+    });
+
+    it('does not count a run the user stopped', () => {
+        const run = makeRun('run-1', 'canceled');
+        run.error = { type: 'canceled', message: 'Stopped', reason_code: 'client_cancel' };
+
+        expect(wasRunContinued(run, new Set([run.id]))).toBe(false);
+    });
+
+    it('does not count a completed run', () => {
+        expect(wasRunContinued(makeRun('run-1', 'completed'), new Set(['run-1']))).toBe(false);
     });
 });

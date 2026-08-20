@@ -44,6 +44,23 @@ export function isInterruptedRun(run: AgentRun | null | undefined): boolean {
 }
 
 /**
+ * True when a later run continued this one, so this run's own error card,
+ * footer and resume offer all give way to the continuation's — a run that was
+ * picked up is not one the reader acts on.
+ *
+ * Only a run that could be continued qualifies: a failed one, or one that was
+ * cut off. Any other run sharing its id with a `resumes_run_id` is a data
+ * error, not a continuation.
+ */
+export function wasRunContinued(
+    run: AgentRun,
+    resumedRunIds: ReadonlySet<string>,
+): boolean {
+    if (!resumedRunIds.has(run.id)) return false;
+    return run.status === 'error' || isInterruptedRun(run);
+}
+
+/**
  * Whether to offer to continue this run.
  *
  * Only the newest run: continuing an older one would pick up from a point the

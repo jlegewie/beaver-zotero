@@ -2,7 +2,7 @@ import React, { forwardRef, useMemo, useState, useCallback } from 'react';
 import { useAtomValue } from 'jotai';
 import { AgentRun, ToolCallPart } from '@beaver/agent-core/agents/types';
 import { shouldShowRunStatus } from '@beaver/agent-core/run-state/runStatusVisibility';
-import { shouldOfferResume } from '@beaver/agent-core/run-state/runResumeHelpers';
+import { shouldOfferResume, wasRunContinued } from '@beaver/agent-core/run-state/runResumeHelpers';
 import { UserRequestView } from './UserRequestView';
 import { ModelMessagesView } from './ModelMessagesView';
 import { AgentRunFooter } from './AgentRunFooter';
@@ -35,8 +35,10 @@ export const AgentRunView = React.memo(forwardRef<HTMLDivElement, AgentRunViewPr
     const streamingDoneRunIds = useAtomValue(streamingDoneRunIdsAtom);
     const isPostProcessing = streamingDoneRunIds.has(run.id);
 
-    // Check if this error run was resumed (to hide error display)
-    const wasResumed = hasError && resumedRunIds.has(run.id);
+    // A run a later run continued: its error card or resume offer and its
+    // footer give way to the continuation's, and it shows the subtle resume
+    // line instead. Covers a failed run and an interrupted one alike.
+    const wasResumed = wasRunContinued(run, resumedRunIds);
 
     // A run that was cut off (Beaver closed, connection dropped, server
     // restarted) rather than finished or stopped by the user gets an offer to
