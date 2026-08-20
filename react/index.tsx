@@ -18,6 +18,7 @@ import { useReaderTabSelection } from './hooks/useReaderTabSelection';
 import { useProfileSync } from './hooks/useProfileSync';
 import { useToggleSidebar } from './hooks/useToggleSidebar';
 import { store } from './store';
+import { closeWSConnectionForShutdownAtom } from './atoms/agentRunAtoms';
 import { useValidateSyncLibraries } from './hooks/useValidateSyncLibraries';
 import { useUpgradeHandler } from './hooks/useUpgradeHandler';
 import { useHttpEndpoints } from './hooks/useHttpEndpoints';
@@ -349,4 +350,12 @@ export function unmountFromElement(domElement: HTMLElement) {
 export async function cleanupTemporaryAnnotations() {
     if (process.env.NODE_ENV !== 'development') return;
     await BeaverTemporaryAnnotations.cleanupAll();
+}
+
+/**
+ * Close this window's agent connection. Called synchronously from esbuild
+ * shutdown hooks — must not add an await to teardown.
+ */
+export function closeAgentConnection(reason: string) {
+    store.set(closeWSConnectionForShutdownAtom, reason);
 }

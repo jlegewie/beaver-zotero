@@ -64,6 +64,24 @@ async function cleanupSupabaseWindowState(
     }
 }
 
+/**
+ * Close the agent connection via the window's React bundle (`agentService` is
+ * per-bundle). Synchronous and best-effort — teardown must not wait on the network.
+ */
+function closeAgentConnection(
+    win: Window | null | undefined,
+    reason: string,
+): void {
+    const close = (win as any)?.BeaverReact?.closeAgentConnection;
+    if (typeof close !== "function") return;
+
+    try {
+        close(reason);
+    } catch (e) {
+        ztoolkit.log(`closeAgentConnection: ${e}`);
+    }
+}
+
 async function cleanupDevTemporaryAnnotations(
     win: Window | null | undefined,
 ): Promise<void> {
@@ -380,6 +398,12 @@ async function onMainWindowUnload(win: Window): Promise<void> {
     ztoolkit.log("onMainWindowUnload: Starting cleanup");
 
     try {
+        // Close first: later steps can await, and the window may be gone when
+        // this handler returns. Read quitting here — the later scope check
+        // runs after those awaits.
+        const appGoingAway = isAppQuitting || (Services?.startup?.shuttingDown ?? false);
+        closeAgentConnection(win, appGoingAway ? "Zotero quitting" : "Main window closed");
+
         // Worker-window hygiene: dispose a slot's client when the closing
         // window is either the realm that spawned its worker (the next
         // postMessage would throw) or the realm whose bundle constructed
@@ -752,6 +776,8 @@ async function onShutdown(): Promise<void> {
         if (!isAppShuttingDown) {
             const openWindows = Zotero.getMainWindows?.().filter(w => w && !w.closed) ?? [];
             for (const win of openWindows) {
+                // Plugin disable/uninstall/upgrade: windows are still alive.
+                closeAgentConnection(win as Window, "Beaver plugin shutting down");
                 await cleanupDevTemporaryAnnotations(win as Window);
                 BeaverUIFactory.removeChatPanel(win as Window);
             }

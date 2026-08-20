@@ -330,6 +330,9 @@ export class BeaverUIFactory {
             // NOTE: This duplicates cleanup logic from dismissDiffPreview() in
             // react/utils/noteEditorDiffPreview.ts. If the cleanup steps change
             // (e.g., new artifacts to remove), update both locations.
+            //
+            // Backstop for a preview with no run to abandon; shutdown that
+            // abandons a run already dismisses the preview first.
             try {
                 const instances: any[] = (Zotero as any).Notes?._editorInstances ?? [];
                 for (const inst of instances) {

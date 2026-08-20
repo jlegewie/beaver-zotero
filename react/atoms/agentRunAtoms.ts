@@ -1934,6 +1934,26 @@ export function createWSCallbacks(
 }
 
 /**
+ * Connect loops this bundle currently owns, including pre-ready attempts and
+ * backoff. `agentService.isConnected()` is false in that window, so shutdown
+ * uses this count to abort an in-flight loop. Module-scoped: the store is
+ * shared across windows, a connect loop is not.
+ */
+let connectLoopsInFlight = 0;
+
+/**
+ * Set once this bundle's client is going away. A send still preparing a
+ * message has no socket or run yet; continuations check this so they don't
+ * connect after the client is gone.
+ */
+let clientShutDown = false;
+
+/** Test-only: reset `clientShutDown` between cases. */
+export function clearClientShutDownLatch(): void {
+    clientShutDown = false;
+}
+
+/**
  * Execute a WebSocket request with the given run and request.
  * Handles connection, callbacks, and error handling.
  * Model selection options are included in the request itself.
@@ -1952,6 +1972,13 @@ async function executeWSRequest(
     get: Getter,
     set: Setter
 ): Promise<void> {
+    // Every send/retry/resume lands here; stop if the client is already gone.
+    if (clientShutDown) {
+        logger('executeWSRequest: client is shutting down, not connecting', 1);
+        set(abandonActiveRunLocallyAtom);
+        return;
+    }
+
     // How many attempts this run's connection cost, once it has one.
     let attemptsMade: number | null = null;
 
@@ -1973,6 +2000,7 @@ async function executeWSRequest(
         );
     };
 
+    connectLoopsInFlight++;
     const result = await connectWithRetry({
         service: agentService,
         request,
@@ -2007,6 +2035,8 @@ async function executeWSRequest(
                 (activeRun.status === 'in_progress' || activeRun.status === 'awaiting_deferred')
             );
         },
+    }).finally(() => {
+        connectLoopsInFlight--;
     });
 
     attemptsMade = result.attemptsMade;
@@ -2822,10 +2852,10 @@ export const resumeFromRunAtom = atom(
 );
 
 /**
- * Close the WebSocket connection with proper cancellation.
- * Sends a cancel message to the backend before closing to ensure proper cleanup.
+ * Archive the active run as canceled and clear live-run UI state.
+ * Store-only — does not touch the socket.
  */
-export const closeWSConnectionAtom = atom(null, async (get, set) => {
+export const abandonActiveRunLocallyAtom = atom(null, (get, set) => {
     // Set pending to false immediately for better UI responsiveness
     set(isWSChatPendingAtom, false);
 
@@ -2837,9 +2867,10 @@ export const closeWSConnectionAtom = atom(null, async (get, set) => {
     set(clearApprovalResponseIntentsAtom);
     set(clearRunApprovalPolicyAtom);
 
-    // Mark active run as canceled if it exists
+    // Archive live runs (including deferred-approval). Error runs keep their
+    // slot so Retry still works.
     const activeRun = get(activeRunAtom);
-    if (activeRun && activeRun.status === 'in_progress') {
+    if (activeRun && isRunActive(activeRun)) {
         const canceledRun: AgentRun = {
             ...activeRun,
             status: 'canceled',
@@ -2850,14 +2881,43 @@ export const closeWSConnectionAtom = atom(null, async (get, set) => {
         set(activeRunAtom, null);
     }
 
-    // Clear streaming-done state (user canceled during post-processing)
+    // Clear streaming-done state (abandoned during post-processing)
     set(streamingDoneRunIdsAtom, new Set<string>());
+});
+
+/**
+ * User-initiated close: cancel on the backend, then close.
+ * Local bookkeeping is shared with shutdown via `abandonActiveRunLocallyAtom`.
+ */
+export const closeWSConnectionAtom = atom(null, async (_get, set) => {
+    set(abandonActiveRunLocallyAtom);
 
     // Send cancel message and close connection
     await agentService.cancel();
     set(isWSConnectedAtom, false);
     set(isWSReadyAtom, false);
 });
+
+/**
+ * Close because this client is going away (window close, quit, or plugin disable).
+ *
+ * Sends a 1000 close, not a cancel (cancel is billed as user-stop). Close is
+ * synchronous and happens first. Also aborts in-flight connect loops; if this
+ * bundle owns neither a socket nor a loop, skip — the store is shared and we
+ * must not archive another window's run.
+ *
+ * `reason` is logged server-side as the disconnect path.
+ */
+export const closeWSConnectionForShutdownAtom = atom(
+    null,
+    (_get, set, reason: string) => {
+        // Latch first: a send still preparing has nothing to close or abandon.
+        clientShutDown = true;
+        if (!agentService.isConnected() && connectLoopsInFlight === 0) return;
+        agentService.close(1000, reason);
+        set(abandonActiveRunLocallyAtom);
+    },
+);
 
 /**
  * Clear the current thread and start fresh
