@@ -15,6 +15,13 @@ import {
     extractEpubDocumentFromFile,
     extractEpubDocumentSafe,
 } from "../../../src/services/documentExtraction/epub";
+// The file-size ceiling is read through the platform runtime adapter, which the
+// running plugin installs at bundle load. This suite mocks away
+// `attachmentSource`, the module that would otherwise pull it in, so install it
+// here to make `Zotero.Prefs` the source of the ceiling.
+import { registerZoteroRuntime } from "../../../src/platform/zoteroRuntime";
+
+registerZoteroRuntime();
 
 function parseXhtml(markup: string): Document {
     return new DOMParser().parseFromString(
@@ -314,6 +321,7 @@ describe("extractEpubDocumentSafe", () => {
     beforeEach(() => {
         vi.clearAllMocks();
         (globalThis as any).Zotero.Promise = { delay: vi.fn().mockResolvedValue(undefined) };
+        (globalThis as any).Zotero.Prefs.get = vi.fn().mockReturnValue(undefined);
         isRemoteAccessAvailableMock.mockReturnValue(false);
         (globalThis as any).IOUtils.stat.mockResolvedValue({ lastModified: 0, size: 1024 });
     });
@@ -416,11 +424,15 @@ describe("extractEpubDocumentSafe", () => {
             lastModified: 0,
             size: 2 * 1024 * 1024,
         });
+        // The ceiling comes from the preference, not a per-call argument.
+        Zotero.Prefs.get = vi.fn((key: string) =>
+            key.endsWith(".maxAttachmentFileSizeMB") ? 1 : undefined,
+        ) as any;
 
         const result = await extractEpubDocumentSafe({
             isEPUBAttachment: () => true,
             getFilePathAsync: vi.fn().mockResolvedValue("/tmp/book.epub"),
-        } as any, { maxFileSizeMB: 1 });
+        } as any);
 
         expect(result).toMatchObject({
             kind: "response_error",

@@ -613,7 +613,6 @@ export class BackgroundExtractor {
                 zoteroKey: record.zoteroKey,
                 mode: record.payloadKind,
                 maxPages: payload.maxPages,
-                maxFileSizeMB: payload.maxFileSizeMB,
                 timeoutSeconds: payload.timeoutSeconds,
                 workerName: 'background',
                 externalAbortSignal,

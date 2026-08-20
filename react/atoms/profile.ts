@@ -4,7 +4,7 @@ import { ExcludedLibrary, SafeProfileWithPlan, PlanFeatures, ProfileBalance, Pro
 import { ZoteroLibrary } from "@beaver/agent-core/types/zotero";
 import { fileStatusAtom } from "./files";
 import { compareVersions } from "../utils/compareVersions";
-import { effectiveMaxFileSizeMB, effectiveMaxPageCount } from "@beaver/agent-core/transport/attachmentLimits";
+import { effectiveMaxPageCount } from "@beaver/agent-core/transport/attachmentLimits";
 
 // Profile and plan state
 export const isProfileLoadedAtom = atom<boolean>(false);
@@ -171,11 +171,15 @@ export const processingModeAtom = atom<ProcessingMode>(() => ProcessingMode.FRON
 // Plan features
 export const planFeaturesAtom = atom<PlanFeatures>((get) => {
     const profile = get(profileWithPlanAtom);
+    // The plan's own upload ceiling, which the backend enforces — unrelated to
+    // the local read ceiling in `attachmentLimits`. A plan row carries whatever
+    // the API returned, so treat anything but a positive number as unset.
+    const planFileSizeLimit = profile?.plan.max_file_size_mb;
     return {
         databaseSync: profile?.plan.sync_database || false,
         uploadFiles: profile?.plan.upload_files || false,
         maxUserAttachments: profile?.plan.max_user_attachments || 2,
-        uploadFileSizeLimit: effectiveMaxFileSizeMB(profile?.plan.max_file_size_mb ?? 10),
+        uploadFileSizeLimit: planFileSizeLimit && planFileSizeLimit > 0 ? planFileSizeLimit : 10,
         maxPageCount: effectiveMaxPageCount(profile?.plan.max_page_count ?? 100),
     } as PlanFeatures;
 });

@@ -522,7 +522,6 @@ async function handleAttachmentDocumentHttpRequest(request: any) {
         external_file_key: request.external_file_key,
         mode: request.mode ?? 'structured',
         max_pages: request.max_pages,
-        max_file_size_mb: request.max_file_size_mb,
         timeout_seconds: request.timeout_seconds,
     };
 

@@ -45,9 +45,16 @@ function makeAttachment(overrides: Partial<Zotero.Item> = {}): Zotero.Item {
 }
 
 describe('attachmentSource', () => {
+    // The file-size ceiling is read from the preference on every check, so
+    // tests set it here instead of passing a per-call limit.
+    let maxFileSizeMBPref = 10;
+
     beforeEach(() => {
         vi.clearAllMocks();
-        Zotero.Prefs.get = vi.fn().mockReturnValue(true);
+        maxFileSizeMBPref = 10;
+        Zotero.Prefs.get = vi.fn((key: string) =>
+            key.endsWith('.maxAttachmentFileSizeMB') ? maxFileSizeMBPref : true,
+        ) as any;
         Zotero.Attachments.getTotalFileSize = vi.fn().mockResolvedValue(1024);
         (globalThis as any).IOUtils.stat.mockResolvedValue({ lastModified: 0, size: 1024 });
         (globalThis as any).IOUtils.read.mockResolvedValue(new Uint8Array([1, 2, 3]));
@@ -60,7 +67,6 @@ describe('attachmentSource', () => {
 
         const result = await resolveAttachmentFileSource({
             item,
-            maxFileSizeMB: 10,
             localSizeStrategy: 'zotero-total',
         });
 
@@ -74,7 +80,6 @@ describe('attachmentSource', () => {
 
         const result = await resolveAttachmentFileSource({
             item,
-            maxFileSizeMB: 10,
             localSizeStrategy: 'stat',
         });
 
@@ -92,7 +97,6 @@ describe('attachmentSource', () => {
 
         const result = await resolveAttachmentFileSource({
             item,
-            maxFileSizeMB: 10,
             localSizeStrategy: 'stat',
         });
 
@@ -113,7 +117,6 @@ describe('attachmentSource', () => {
 
         const source = await resolveAttachmentFileSource({
             item,
-            maxFileSizeMB: 10,
             localSizeStrategy: 'stat',
         });
         expect(source.kind).toBe('ok');
@@ -122,7 +125,6 @@ describe('attachmentSource', () => {
         const data = await loadAttachmentData({
             item,
             source: source.source,
-            maxFileSizeMB: 10,
         });
 
         expect(data).toEqual({ kind: 'ok', data: new Uint8Array([4, 5, 6]) });
@@ -136,7 +138,6 @@ describe('attachmentSource', () => {
         Zotero.Attachments.getTotalFileSize = vi.fn().mockResolvedValue(11 * 1024 * 1024);
         const local = await resolveAttachmentFileSource({
             item: makeAttachment(),
-            maxFileSizeMB: 10,
             localSizeStrategy: 'zotero-total',
         });
         expect(local).toMatchObject({ kind: 'error', code: 'file_too_large' });
@@ -149,15 +150,14 @@ describe('attachmentSource', () => {
         mockGetAttachmentDataInMemory.mockResolvedValue(new Uint8Array(2 * 1024 * 1024));
         const remoteSource = await resolveAttachmentFileSource({
             item: remoteItem,
-            maxFileSizeMB: 10,
             localSizeStrategy: 'stat',
         });
         if (remoteSource.kind !== 'ok') throw new Error('remote source should resolve');
 
+        maxFileSizeMBPref = 1;
         const remote = await loadAttachmentData({
             item: remoteItem,
             source: remoteSource.source,
-            maxFileSizeMB: 1,
         });
         expect(remote).toMatchObject({ kind: 'error', code: 'file_too_large' });
     });
@@ -170,10 +170,63 @@ describe('attachmentSource', () => {
         const loaded = await loadPdfData(item, 'remote:k:1-REMOTE05-v1', true);
 
         expect(loaded).toBe(bytes);
-        expect(checkRemotePdfSize(loaded, false, 1)).toMatchObject({
+        maxFileSizeMBPref = 1;
+        expect(checkRemotePdfSize(loaded, false)).toMatchObject({
             sizeMB: 2,
             maxMB: 1,
         });
+    });
+
+    // Only `.length` is read on the downloaded bytes, so stub the size rather
+    // than allocating hundreds of megabytes per case.
+    function fakeBytes(sizeMB: number): Uint8Array {
+        return { length: sizeMB * 1024 * 1024 } as unknown as Uint8Array;
+    }
+
+    async function remoteSourceFor(key: string) {
+        const item = makeAttachment({ key, getFilePathAsync: vi.fn().mockResolvedValue(null) });
+        mockIsAttachmentAvailableRemotely.mockReturnValue(true);
+        const source = await resolveAttachmentFileSource({ item, localSizeStrategy: 'stat' });
+        if (source.kind !== 'ok') throw new Error('remote source should resolve');
+        return { item, source: source.source };
+    }
+
+    it('caches a remote download too large for the default ceiling', async () => {
+        maxFileSizeMBPref = 300;
+        mockGetAttachmentDataInMemory.mockResolvedValue(fakeBytes(150));
+        const { item, source } = await remoteSourceFor('REMOTE06');
+
+        expect(await loadAttachmentData({ item, source })).toMatchObject({ kind: 'ok' });
+        expect(await loadAttachmentData({ item, source })).toMatchObject({ kind: 'ok' });
+
+        expect(mockGetAttachmentDataInMemory).toHaveBeenCalledTimes(1);
+    });
+
+    it('declines to cache a remote download the ceiling rejects', async () => {
+        mockGetAttachmentDataInMemory.mockResolvedValue(fakeBytes(150));
+        const { item, source } = await remoteSourceFor('REMOTE08');
+
+        expect(await loadAttachmentData({ item, source })).toMatchObject({
+            kind: 'error',
+            code: 'file_too_large',
+        });
+        expect(await loadAttachmentData({ item, source })).toMatchObject({
+            kind: 'error',
+            code: 'file_too_large',
+        });
+
+        expect(mockGetAttachmentDataInMemory).toHaveBeenCalledTimes(2);
+    });
+
+    it('declines to cache a remote download larger than the whole cache budget', async () => {
+        maxFileSizeMBPref = 4000;
+        mockGetAttachmentDataInMemory.mockResolvedValue(fakeBytes(1200));
+        const { item, source } = await remoteSourceFor('REMOTE07');
+
+        expect(await loadAttachmentData({ item, source })).toMatchObject({ kind: 'ok' });
+        expect(await loadAttachmentData({ item, source })).toMatchObject({ kind: 'ok' });
+
+        expect(mockGetAttachmentDataInMemory).toHaveBeenCalledTimes(2);
     });
 
     it('returns read_failed and download_failed for expected read failures', async () => {
@@ -181,7 +234,6 @@ describe('attachmentSource', () => {
         const local = await loadAttachmentData({
             item: makeAttachment(),
             source: { kind: 'local', filePath: '/storage/test.txt', isRemoteOnly: false },
-            maxFileSizeMB: 10,
         });
         expect(local).toMatchObject({ kind: 'error', code: 'read_failed' });
 
@@ -189,7 +241,6 @@ describe('attachmentSource', () => {
         const remote = await loadAttachmentData({
             item: makeAttachment({ key: 'REMOTE03' }),
             source: { kind: 'remote', filePath: 'remote:k:1-REMOTE03-v1', isRemoteOnly: true },
-            maxFileSizeMB: 10,
         });
         expect(remote).toMatchObject({ kind: 'error', code: 'download_failed' });
     });
@@ -200,7 +251,6 @@ describe('attachmentSource', () => {
             const pathTimeout = createTimeoutController(1, 10);
             const pathPromise = resolveAttachmentFileSource({
                 item: makeAttachment({ getFilePathAsync: vi.fn(() => new Promise(() => {})) }),
-                maxFileSizeMB: 10,
                 localSizeStrategy: 'stat',
                 signal: pathTimeout.signal,
                 throwIfTimedOut: pathTimeout.throwIfTimedOut,
@@ -214,7 +264,6 @@ describe('attachmentSource', () => {
             (globalThis as any).IOUtils.stat.mockImplementation(() => new Promise(() => {}));
             const sizePromise = resolveAttachmentFileSource({
                 item: makeAttachment({ getFilePathAsync: vi.fn().mockResolvedValue('/storage/test.txt') }),
-                maxFileSizeMB: 10,
                 localSizeStrategy: 'stat',
                 signal: sizeTimeout.signal,
                 throwIfTimedOut: sizeTimeout.throwIfTimedOut,
@@ -229,7 +278,6 @@ describe('attachmentSource', () => {
             const readPromise = loadAttachmentData({
                 item: makeAttachment(),
                 source: { kind: 'local', filePath: '/storage/test.txt', isRemoteOnly: false },
-                maxFileSizeMB: 10,
                 signal: readTimeout.signal,
                 throwIfTimedOut: readTimeout.throwIfTimedOut,
             });
@@ -243,7 +291,6 @@ describe('attachmentSource', () => {
             const remotePromise = loadAttachmentData({
                 item: makeAttachment({ key: 'REMOTE04' }),
                 source: { kind: 'remote', filePath: 'remote:k:1-REMOTE04-v1', isRemoteOnly: true },
-                maxFileSizeMB: 10,
                 signal: remoteTimeout.signal,
                 throwIfTimedOut: remoteTimeout.throwIfTimedOut,
             });

@@ -159,7 +159,6 @@ export function fetchDocument(
     extra?: {
         mode?: 'markdown' | 'structured';
         max_pages?: number | null;
-        max_file_size_mb?: number | null;
         timeout_seconds?: number;
     },
     opts?: RequestOptions,
@@ -182,7 +181,6 @@ export function fetchExternalFileDocument(
     extra?: {
         mode?: 'markdown' | 'structured';
         max_pages?: number | null;
-        max_file_size_mb?: number | null;
         timeout_seconds?: number;
     },
     opts?: RequestOptions,
@@ -250,7 +248,6 @@ export function fetchDocumentSerialized(
     extra?: {
         mode?: 'markdown' | 'structured';
         max_pages?: number | null;
-        max_file_size_mb?: number | null;
         max_payload_bytes?: number | null;
         timeout_seconds?: number;
     },
@@ -271,7 +268,6 @@ export function fetchExternalFileDocumentSerialized(
     extra?: {
         mode?: 'markdown' | 'structured';
         max_pages?: number | null;
-        max_file_size_mb?: number | null;
         max_payload_bytes?: number | null;
         timeout_seconds?: number;
     },

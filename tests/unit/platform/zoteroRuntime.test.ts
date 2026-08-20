@@ -43,6 +43,18 @@ describe('the Zotero runtime adapter', () => {
         });
     });
 
+    describe('getPluginPref', () => {
+        it('qualifies an unprefixed key with the plugin preference namespace', () => {
+            vi.mocked(Zotero.Prefs.get).mockReturnValue(250);
+
+            expect(zoteroAdapter.getPluginPref?.('maxAttachmentFileSizeMB')).toBe(250);
+            expect(Zotero.Prefs.get).toHaveBeenCalledWith(
+                'extensions.zotero.beaver.maxAttachmentFileSizeMB',
+                true,
+            );
+        });
+    });
+
     describe('hostVersion', () => {
         it('reports the Zotero version', () => {
             vi.stubGlobal('Zotero', { version: '7.0.99' });

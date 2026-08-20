@@ -99,13 +99,12 @@ async function getLocalSizeBytes(
 /** Resolve a Zotero attachment to a local path or supported remote source. */
 export async function resolveAttachmentFileSource(args: {
     item: Zotero.Item;
-    maxFileSizeMB: number;
     localSizeStrategy: LocalSizeStrategy;
     signal?: AbortSignal;
     throwIfTimedOut?: (phase: string) => void;
 }): Promise<AttachmentSourceResult> {
     const { item, localSizeStrategy, signal, throwIfTimedOut } = args;
-    const maxFileSizeMB = effectiveMaxFileSizeMB(args.maxFileSizeMB);
+    const maxFileSizeMB = effectiveMaxFileSizeMB();
 
     throwIfTimedOut?.('file_path_lookup');
     const rawFilePath = await withDeadline(
@@ -180,6 +179,46 @@ const remoteDataCache = new Map<string, { data: Uint8Array; ts: number }>();
 const remoteInflight = new Map<string, Promise<Uint8Array>>();
 const REMOTE_CACHE_TTL_MS = 120_000;
 const REMOTE_CACHE_MAX = 10;
+// Resident-bytes budget for the cache above. Bounding total bytes rather than
+// per-entry size keeps the two properties that matter independent of the
+// configured file-size ceiling: memory stays capped however high a user raises
+// it, and a file large enough to read is still small enough to cache, so
+// successive handlers in one agent turn do not each re-download it.
+const REMOTE_CACHE_MAX_TOTAL_BYTES = 1000 * 1024 * 1024;
+
+/**
+ * Store a downloaded attachment, evicting expired then oldest entries until it
+ * fits both the entry count and the byte budget. A download the caller cannot
+ * use, or one larger than the whole budget, is returned but never cached.
+ */
+function admitToRemoteCache(cacheKey: string, data: Uint8Array): void {
+    // Every caller rejects bytes over the configured ceiling — some through
+    // `checkAttachmentDataSize` here, the `skipSizeCheck` ones by checking at
+    // the call site — so retaining them only holds memory for a re-read that
+    // will fail the same way.
+    if (data.length > effectiveMaxFileSizeMB() * 1024 * 1024) return;
+    if (data.length > REMOTE_CACHE_MAX_TOTAL_BYTES) return;
+
+    const now = Date.now();
+    for (const [key, value] of remoteDataCache) {
+        if (now - value.ts > REMOTE_CACHE_TTL_MS) remoteDataCache.delete(key);
+    }
+
+    let residentBytes = data.length;
+    for (const value of remoteDataCache.values()) residentBytes += value.data.length;
+
+    // Map iteration is insertion-ordered, and a cache hit refreshes `ts`
+    // without reinserting, so this evicts least-recently-*added* first.
+    for (const [key, value] of remoteDataCache) {
+        if (remoteDataCache.size < REMOTE_CACHE_MAX && residentBytes <= REMOTE_CACHE_MAX_TOTAL_BYTES) {
+            break;
+        }
+        remoteDataCache.delete(key);
+        residentBytes -= value.data.length;
+    }
+
+    remoteDataCache.set(cacheKey, { data, ts: now });
+}
 
 async function readRemoteAttachmentData(
     item: Zotero.Item,
@@ -217,32 +256,18 @@ async function readRemoteAttachmentData(
         remoteInflight.delete(cacheKey);
     }
 
-    const defaultMaxMB = effectiveMaxFileSizeMB();
-    if ((data.length / 1024 / 1024) <= defaultMaxMB) {
-        if (remoteDataCache.size >= REMOTE_CACHE_MAX) {
-            const now = Date.now();
-            for (const [key, value] of remoteDataCache) {
-                if (now - value.ts > REMOTE_CACHE_TTL_MS) remoteDataCache.delete(key);
-            }
-        }
-        if (remoteDataCache.size >= REMOTE_CACHE_MAX) {
-            const oldest = remoteDataCache.keys().next().value;
-            if (oldest !== undefined) remoteDataCache.delete(oldest);
-        }
-        remoteDataCache.set(cacheKey, { data, ts: Date.now() });
-    }
+    admitToRemoteCache(cacheKey, data);
 
     return data;
 }
 
-/** Check whether in-memory attachment data exceeds a caller's size limit. */
+/** Check whether in-memory attachment data exceeds the file-size ceiling. */
 export function checkAttachmentDataSize(
     data: Uint8Array,
     skipLimits?: boolean,
-    maxFileSizeMB?: number,
 ): { sizeMB: number; maxMB: number } | null {
     if (skipLimits) return null;
-    const maxMB = effectiveMaxFileSizeMB(maxFileSizeMB);
+    const maxMB = effectiveMaxFileSizeMB();
     const sizeMB = data.length / 1024 / 1024;
     return sizeMB > maxMB ? { sizeMB, maxMB } : null;
 }
@@ -255,7 +280,6 @@ export function checkAttachmentDataSize(
 export async function loadAttachmentData(args: {
     item?: Zotero.Item | null;
     source: AttachmentFileSource;
-    maxFileSizeMB: number;
     skipSizeCheck?: boolean;
     onRemoteDownloadFailure?: (error: unknown) => void;
     signal?: AbortSignal;
@@ -302,7 +326,7 @@ export async function loadAttachmentData(args: {
             return { kind: 'error', code: 'download_failed', error };
         }
 
-        const exceeded = checkAttachmentDataSize(data, args.skipSizeCheck, args.maxFileSizeMB);
+        const exceeded = checkAttachmentDataSize(data, args.skipSizeCheck);
         if (exceeded) {
             return {
                 kind: 'error',
