@@ -18,6 +18,7 @@ import { useReaderTabSelection } from './hooks/useReaderTabSelection';
 import { useProfileSync } from './hooks/useProfileSync';
 import { useToggleSidebar } from './hooks/useToggleSidebar';
 import { store } from './store';
+import { closeWSConnectionForShutdownAtom } from './atoms/agentRunAtoms';
 import { useValidateSyncLibraries } from './hooks/useValidateSyncLibraries';
 import { useUpgradeHandler } from './hooks/useUpgradeHandler';
 import { useHttpEndpoints } from './hooks/useHttpEndpoints';
@@ -29,6 +30,7 @@ import { useReaderSelectionActionHandler } from './hooks/useReaderSelectionActio
 import { useReaderAnnotationActionHandler } from './hooks/useReaderAnnotationActionHandler';
 import { useReaderVisualizerActionHandler } from './hooks/useReaderVisualizerActionHandler';
 import { useOnboardingPopups } from './hooks/useOnboardingPopups';
+import { useInterruptedThreadPopup } from './hooks/useInterruptedThreadPopup';
 import { useBackgroundWorkerStatus } from './hooks/useBackgroundWorkerStatus';
 import { useSyncSuppression } from './hooks/useSyncSuppression';
 import { BeaverTemporaryAnnotations } from './utils/annotationUtils';
@@ -193,6 +195,9 @@ const GlobalContextInitializer = () => {
     // Handle first-install and first-reader onboarding popups
     useOnboardingPopups();
 
+    // Offer to reopen a chat that was cut off when Beaver last shut down
+    useInterruptedThreadPopup();
+
     // Mirror background extraction activity into the shared Jotai store
     useBackgroundWorkerStatus();
 
@@ -349,4 +354,20 @@ export function unmountFromElement(domElement: HTMLElement) {
 export async function cleanupTemporaryAnnotations() {
     if (process.env.NODE_ENV !== 'development') return;
     await BeaverTemporaryAnnotations.cleanupAll();
+}
+
+/**
+ * Close this window's agent connection. Called synchronously from esbuild
+ * shutdown hooks — must not add an await to teardown.
+ *
+ * `rememberInterruptedThread` records the cut-off thread for the next session
+ * to offer. The caller decides — see `onMainWindowUnload`: closing one of
+ * several windows leaves Beaver running, so an offer announcing that it closed
+ * would be plainly wrong.
+ */
+export function closeAgentConnection(
+    reason: string,
+    options?: { rememberInterruptedThread?: boolean },
+) {
+    store.set(closeWSConnectionForShutdownAtom, reason, options);
 }

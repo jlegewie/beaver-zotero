@@ -15,6 +15,7 @@ import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '
 import { CitedSource, getCitationKey } from '@beaver/agent-core/types/citations';
 import { messageSourcesVisibilityAtom, toggleMessageSourcesVisibilityAtom, setMessageSourcesVisibilityAtom } from '../../atoms/messageUIState';
 import { toolResultsMapAtom, allRunsAtom } from '@beaver/agent-core/run-state/atoms';
+import { collectResumeChain, sumChainUsage } from '@beaver/agent-core/run-state/runResumeHelpers';
 import { extractRunResponseContent } from '../../utils/threadContent';
 import { resolveToolCallLabelEnrichMap } from '../../utils/toolCallLabelEnrich';
 import TokenUsageDisplay from './TokenUsageDisplay';
@@ -38,13 +39,26 @@ interface AgentRunFooterProps {
 export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
     const citationDataMap = useAtomValue(citationMapAtom);
     const citationsByRunId = useAtomValue(citationsByRunIdAtom);
-    const runCitations = citationsByRunId[run.id] || [];
     const externalReferenceMapping = useAtomValue(externalReferenceItemMappingAtom);
     const externalReferencesMap = useAtomValue(externalReferenceMappingAtom);
     const toolResultsMap = useAtomValue(toolResultsMapAtom);
     const citationMarkerMap = useAtomValue(citationKeyToMarkerAtom);
     const allRuns = useAtomValue(allRunsAtom);
     const addPopupMessage = useSetAtom(addPopupMessageAtom);
+
+    // A response that was continued after an error or an interruption spans
+    // several runs but reads as one message, and only its last run carries a
+    // footer. Everything below therefore describes the whole chain: its text,
+    // its citations, its cost, and the question that started it. An ordinary
+    // run is a chain of one, so nothing changes for it.
+    const chainRuns = useMemo(() => collectResumeChain(run, allRuns), [run, allRuns]);
+    // Where the message began: a continuation's own prompt is empty, and it is
+    // the opening run that a link or an id should point at.
+    const messageRun = chainRuns[0];
+    const runCitations = useMemo(
+        () => chainRuns.flatMap(chainRun => citationsByRunId[chainRun.id] || []),
+        [chainRuns, citationsByRunId],
+    );
 
     // Force re-render when menu opens to get fresh context for disabled state
     const [, forceUpdate] = useState({});
@@ -92,14 +106,23 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
         }
     }, [run.id, setSourcesVisibility, sourcesVisible, uniqueCitations.length]);
 
-    // Combine all text content from the run's model messages. Resolved lazily
-    // (copy / save-as-note), because tool-call labels need host-resolved
-    // library/collection names — without them a list_* label shows the raw
-    // library ref ("u") instead of the library name.
+    // Combine all text content from the message's runs, in the order they ran.
+    // Resolved lazily (copy / save-as-note), because tool-call labels need
+    // host-resolved library/collection names — without them a list_* label
+    // shows the raw library ref ("u") instead of the library name.
     const buildRunContent = useCallback(async () => {
-        const enrichMap = await resolveToolCallLabelEnrichMap([run], toolResultsMap);
-        return extractRunResponseContent(run, toolResultsMap, enrichMap);
-    }, [run, toolResultsMap]);
+        const enrichMap = await resolveToolCallLabelEnrichMap(chainRuns, toolResultsMap);
+        return chainRuns
+            .map(chainRun => extractRunResponseContent(chainRun, toolResultsMap, enrichMap))
+            .filter(Boolean)
+            .join('\n\n');
+    }, [chainRuns, toolResultsMap]);
+
+    // What the whole message cost, not just its final run
+    const { usage: chainUsage, cost: chainCost } = useMemo(
+        () => sumChainUsage(chainRuns),
+        [chainRuns],
+    );
 
     // Build share menu items
     const getShareMenuItems = () => {
@@ -157,7 +180,7 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
     };
 
     const buildRunNoteContentHtml = async () => {
-        const userQuestion = run.user_prompt.content;
+        const userQuestion = messageRun.user_prompt.content;
         const sections: string[] = [];
         if (userQuestion) {
             sections.push(`## User\n\n> ${userQuestion.replace(/\n/g, '\n> ')}`);
@@ -186,7 +209,7 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
         if (!noteWriter) return;
         try {
             const contentHtml = await buildRunNoteContentHtml();
-            const responseIndex = allRuns.findIndex(r => r.id === run.id) + 1;
+            const responseIndex = allRuns.findIndex(r => r.id === messageRun.id) + 1;
             await noteWriter.saveNote({
                 contentHtml,
                 asChild,
@@ -194,7 +217,7 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
                 format: {
                     kind: 'agent-run',
                     responseIndex: responseIndex || undefined,
-                    runId: run.id,
+                    runId: messageRun.id,
                 },
             });
         } catch (error: any) {
@@ -215,11 +238,11 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
     const copyRunUrl = async () => {
         const threadId = store.get(currentThreadIdAtom);
         if (!threadId) return;
-        await copyToClipboard(`zotero://beaver/thread/${threadId}/run/${run.id}`);
+        await copyToClipboard(`zotero://beaver/thread/${threadId}/run/${messageRun.id}`);
     };
 
     const copyRunId = async () => {
-        await copyToClipboard(run.id);
+        await copyToClipboard(messageRun.id);
     };
 
     const copyCitationMetadata = async () => {
@@ -291,8 +314,8 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
                     />
                     
                     {/* Usage display */}
-                    {(getHost().config?.isDevelopment() ?? false) && run.status === 'completed' && run.total_usage != null && run.total_cost != null && (
-                        <TokenUsageDisplay usage={run.total_usage} cost={run.total_cost} />
+                    {(getHost().config?.isDevelopment() ?? false) && run.status === 'completed' && chainUsage != null && chainCost != null && (
+                        <TokenUsageDisplay usage={chainUsage} cost={chainCost} />
                     )}
 
                     {/* Retry button */}

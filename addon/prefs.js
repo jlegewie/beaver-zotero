@@ -115,6 +115,12 @@ pref("onboardingWelcomeShownAt", "");
 pref("versionUpdatePopupShownAt", "");
 pref("onboardingSignInTextShown", false);
 
+// Thread whose agent run was cut off when Beaver's WebSocket was closed at
+// shutdown (JSON: threadId/userId/threadName/closedAt; userId is the Beaver
+// account, so a record is never offered to a different one). Consumed and
+// cleared by the "chat interrupted" popup on the next start.
+pref("interruptedThread", "");
+
 // Throttle for the automatic pre-sync thread claim: the
 // `${beaverUserId}:${zoteroUserId}:${localUserKey}` combination that was
 // last claimed successfully. Empty = never claimed (or cleared after
