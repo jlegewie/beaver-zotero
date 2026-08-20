@@ -158,22 +158,28 @@ describe('closing the agent connection on window unload', () => {
 
         await hooks.onMainWindowUnload(win);
 
-        expect(close).toHaveBeenCalledExactlyOnceWith('Zotero quitting');
+        expect(close).toHaveBeenCalledExactlyOnceWith('Zotero quitting', {
+            rememberInterruptedThread: true,
+        });
     });
 
-    it('names the quit for every window, not just the last one', async () => {
+    it('records the interrupted chat on a quit even when another window is still open', async () => {
         setupGlobals({ appShuttingDown: true });
         const hooks = await loadHooks();
         const close = vi.fn();
         const win = makeWindow(close);
+        // Every window is going away, and this one may be the one holding the
+        // socket — the windows that unload later have nothing left to close.
         vi.mocked(Zotero.getMainWindows).mockReturnValue([win, makeWindow()]);
 
         await hooks.onMainWindowUnload(win);
 
-        expect(close).toHaveBeenCalledExactlyOnceWith('Zotero quitting');
+        expect(close).toHaveBeenCalledExactlyOnceWith('Zotero quitting', {
+            rememberInterruptedThread: true,
+        });
     });
 
-    it('names the window close when the app keeps running', async () => {
+    it('names the window close, and leaves no record, while another window keeps the run on screen', async () => {
         setupGlobals({ appShuttingDown: false });
         const hooks = await loadHooks();
         const close = vi.fn();
@@ -182,7 +188,40 @@ describe('closing the agent connection on window unload', () => {
 
         await hooks.onMainWindowUnload(win);
 
-        expect(close).toHaveBeenCalledExactlyOnceWith('Main window closed');
+        expect(close).toHaveBeenCalledExactlyOnceWith('Main window closed', {
+            rememberInterruptedThread: false,
+        });
+    });
+
+    it('records the interrupted chat when the last window closes', async () => {
+        setupGlobals({ appShuttingDown: false });
+        const hooks = await loadHooks();
+        const close = vi.fn();
+        const win = makeWindow(close);
+        // Only this window, and it is on its way out.
+        vi.mocked(Zotero.getMainWindows).mockReturnValue([win]);
+
+        await hooks.onMainWindowUnload(win);
+
+        expect(close).toHaveBeenCalledExactlyOnceWith('Main window closed', {
+            rememberInterruptedThread: true,
+        });
+    });
+
+    it('ignores a window that is already closed when counting what remains', async () => {
+        setupGlobals({ appShuttingDown: false });
+        const hooks = await loadHooks();
+        const close = vi.fn();
+        const win = makeWindow(close);
+        const gone = makeWindow();
+        (gone as any).closed = true;
+        vi.mocked(Zotero.getMainWindows).mockReturnValue([win, gone]);
+
+        await hooks.onMainWindowUnload(win);
+
+        expect(close).toHaveBeenCalledExactlyOnceWith('Main window closed', {
+            rememberInterruptedThread: true,
+        });
     });
 
     it('closes the socket before anything else in teardown', async () => {
@@ -261,7 +300,12 @@ describe('closing the agent connection on plugin shutdown', () => {
 
         await hooks.onShutdown();
 
-        expect(firstClose).toHaveBeenCalledExactlyOnceWith('Beaver plugin shutting down');
-        expect(secondClose).toHaveBeenCalledExactlyOnceWith('Beaver plugin shutting down');
+        // The bundle goes away with the plugin, so both record.
+        expect(firstClose).toHaveBeenCalledExactlyOnceWith('Beaver plugin shutting down', {
+            rememberInterruptedThread: true,
+        });
+        expect(secondClose).toHaveBeenCalledExactlyOnceWith('Beaver plugin shutting down', {
+            rememberInterruptedThread: true,
+        });
     });
 });

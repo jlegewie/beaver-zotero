@@ -48,6 +48,7 @@ import { threadService } from '@beaver/agent-core/transport/threadService';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { selectedModelAtom, ModelConfig } from './models';
 import { getPref } from '../../src/utils/prefs';
+import { saveInterruptedThread } from '../../src/utils/interruptedThreadPrefs';
 import { MessageAttachment, SourceAttachment } from '@beaver/agent-core/types/attachments/apiTypes';
 import type { ZoteroCollection } from '@beaver/agent-core/types/zotero';
 import { toMessageAttachment } from '../types/attachments/converters';
@@ -2903,21 +2904,52 @@ export const closeWSConnectionAtom = atom(null, async (_get, set) => {
  *
  * Sends a 1000 close, not a cancel (cancel is billed as user-stop). Close is
  * synchronous and happens first. Also aborts in-flight connect loops; if this
- * bundle owns neither a socket nor a loop, skip — the store is shared and we
- * must not archive another window's run.
+ * bundle owns neither a socket nor a loop there is no live run of its own to
+ * abandon, so skip. Each main window evaluates its own copy of this bundle,
+ * so a window only ever closes the connection it opened.
  *
  * `reason` is logged server-side as the disconnect path.
  */
 export const closeWSConnectionForShutdownAtom = atom(
     null,
-    (_get, set, reason: string) => {
+    (
+        get,
+        set,
+        reason: string,
+        options?: { rememberInterruptedThread?: boolean },
+    ) => {
         // Latch first: a send still preparing has nothing to close or abandon.
         clientShutDown = true;
         if (!agentService.isConnected() && connectLoopsInFlight === 0) return;
         agentService.close(1000, reason);
+        if (options?.rememberInterruptedThread) rememberInterruptedThread(get);
         set(abandonActiveRunLocallyAtom);
     },
 );
+
+/**
+ * Persist the thread whose run this shutdown cut off, so the next session can
+ * offer to reopen it. Only a live run counts as interrupted — the socket also
+ * stays open for a moment around a run that already finished.
+ *
+ * The thread id is null until the backend assigns one during a new thread's
+ * first run; there is nothing to reopen in that window. The account is stamped
+ * on the record because the next session may start under a different one.
+ */
+function rememberInterruptedThread(get: Getter): void {
+    const activeRun = get(activeRunAtom);
+    if (!activeRun || !isRunActive(activeRun)) return;
+
+    const threadId = get(currentThreadIdAtom) || activeRun.thread_id;
+    const userId = get(userIdAtom);
+    if (!threadId || !userId) return;
+
+    saveInterruptedThread({
+        threadId,
+        userId,
+        threadName: get(currentThreadNameAtom),
+    });
+}
 
 /**
  * Clear the current thread and start fresh

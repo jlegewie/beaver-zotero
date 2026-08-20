@@ -4,14 +4,21 @@
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { cancelMock, closeMock, connectMock, isConnectedMock, reportConnectionFailureMock } =
-    vi.hoisted(() => ({
-        cancelMock: vi.fn().mockResolvedValue(undefined),
-        closeMock: vi.fn(),
-        connectMock: vi.fn(),
-        isConnectedMock: vi.fn(() => true),
-        reportConnectionFailureMock: vi.fn().mockResolvedValue(undefined),
-    }));
+const {
+    cancelMock,
+    closeMock,
+    connectMock,
+    isConnectedMock,
+    reportConnectionFailureMock,
+    saveInterruptedThreadMock,
+} = vi.hoisted(() => ({
+    cancelMock: vi.fn().mockResolvedValue(undefined),
+    closeMock: vi.fn(),
+    connectMock: vi.fn(),
+    isConnectedMock: vi.fn(() => true),
+    reportConnectionFailureMock: vi.fn().mockResolvedValue(undefined),
+    saveInterruptedThreadMock: vi.fn(),
+}));
 
 vi.mock('@beaver/agent-core/transport/agentService', () => ({
     agentService: {
@@ -51,8 +58,17 @@ vi.mock('@beaver/agent-core/transport/supabaseClient', () => ({
 }));
 vi.mock('../../../src/beaver-extract', () => ({ prewarmMuPDFWorker: vi.fn() }));
 vi.mock('@beaver/agent-core/platform/logger', () => ({ logger: vi.fn() }));
+vi.mock('../../../src/utils/interruptedThreadPrefs', () => ({
+    saveInterruptedThread: saveInterruptedThreadMock,
+}));
 
-import { activeRunAtom, threadRunsAtom, wsReconnectingAtom } from '@beaver/agent-core/run-state/atoms';
+import {
+    activeRunAtom,
+    currentThreadIdAtom,
+    currentThreadNameAtom,
+    threadRunsAtom,
+    wsReconnectingAtom,
+} from '@beaver/agent-core/run-state/atoms';
 import { pendingQuestionsAtom } from '@beaver/agent-core/run-state/pendingQuestions';
 import { pendingCreditConfirmationsAtom } from '@beaver/agent-core/run-state/pendingCreditConfirmations';
 import type { AgentRun } from '@beaver/agent-core/agents/types';
@@ -313,16 +329,18 @@ describe('closing the connection because the client is going away', () => {
         store.set(wsReconnectingAtom, null);
         const sending = store.set(sendWSMessageAtom, 'hello');
 
-        // First attempt fails immediately; shortest backoff is 50ms, so the
-        // loop is asleep with the next attempt already announced.
+        // First attempt fails immediately, leaving the loop asleep in its
+        // backoff with the next attempt already announced. Count the attempts
+        // made rather than assuming the backoff outlasts this line.
         await new Promise((r) => setTimeout(r, 10));
-        expect(connectMock).toHaveBeenCalledTimes(1);
         expect(store.get(wsReconnectingAtom)).not.toBeNull();
+        const attemptsBeforeShutdown = connectMock.mock.calls.length;
 
         store.set(closeWSConnectionForShutdownAtom, 'Beaver plugin shutting down');
         await sending;
 
-        expect(connectMock).toHaveBeenCalledTimes(1);
+        // No further attempt after the shutdown.
+        expect(connectMock).toHaveBeenCalledTimes(attemptsBeforeShutdown);
         expect(closeMock).toHaveBeenCalledWith(1000, 'Beaver plugin shutting down');
         expect(store.get(activeRunAtom)).toBeNull();
         expect(store.get(isWSChatPendingAtom)).toBe(false);
@@ -360,6 +378,116 @@ describe('closing the connection because the client is going away', () => {
         expect(store.get(threadRunsAtom)).toEqual([
             expect.objectContaining({ status: 'canceled' }),
         ]);
+    });
+});
+
+describe('remembering the chat a shutdown interrupted', () => {
+    /** What the caller passes when this is the last window going away. */
+    const REMEMBER = { rememberInterruptedThread: true };
+
+    beforeEach(() => {
+        vi.clearAllMocks();
+        closeMock.mockReset();
+        clearClientShutDownLatch();
+        isConnectedMock.mockReturnValue(true);
+        store.set(activeRunAtom, null);
+        store.set(threadRunsAtom, []);
+        store.set(currentThreadIdAtom, null);
+        store.set(currentThreadNameAtom, null);
+        store.set(sessionAtom, { access_token: 'token', user: { id: 'user-1' } } as any);
+    });
+
+    it('records the open thread, its name, and the account', () => {
+        store.set(activeRunAtom, makeRun());
+        store.set(currentThreadIdAtom, 'thread-1');
+        store.set(currentThreadNameAtom, 'Protein folding');
+
+        store.set(closeWSConnectionForShutdownAtom, 'Zotero quitting', REMEMBER);
+
+        expect(saveInterruptedThreadMock).toHaveBeenCalledExactlyOnceWith({
+            threadId: 'thread-1',
+            userId: 'user-1',
+            threadName: 'Protein folding',
+        });
+    });
+
+    it('falls back to the run\'s thread when the store has no current thread', () => {
+        store.set(activeRunAtom, makeRun({ thread_id: 'thread-from-run' }));
+
+        store.set(closeWSConnectionForShutdownAtom, 'Zotero quitting', REMEMBER);
+
+        expect(saveInterruptedThreadMock).toHaveBeenCalledExactlyOnceWith({
+            threadId: 'thread-from-run',
+            userId: 'user-1',
+            threadName: null,
+        });
+    });
+
+    it('records nothing when the caller keeps the window\'s run on screen', () => {
+        store.set(activeRunAtom, makeRun());
+        store.set(currentThreadIdAtom, 'thread-1');
+
+        // Another main window remains: no options, so no record.
+        store.set(closeWSConnectionForShutdownAtom, 'Main window closed');
+
+        expect(closeMock).toHaveBeenCalledOnce();
+        expect(store.get(activeRunAtom)).toBeNull();
+        expect(saveInterruptedThreadMock).not.toHaveBeenCalled();
+    });
+
+    it('records nothing when no run was live', () => {
+        store.set(currentThreadIdAtom, 'thread-1');
+
+        store.set(closeWSConnectionForShutdownAtom, 'Zotero quitting', REMEMBER);
+
+        expect(closeMock).toHaveBeenCalledOnce();
+        expect(saveInterruptedThreadMock).not.toHaveBeenCalled();
+    });
+
+    it('records nothing for a run that already finished', () => {
+        store.set(activeRunAtom, makeRun({ status: 'completed' }));
+        store.set(currentThreadIdAtom, 'thread-1');
+
+        store.set(closeWSConnectionForShutdownAtom, 'Zotero quitting', REMEMBER);
+
+        expect(saveInterruptedThreadMock).not.toHaveBeenCalled();
+    });
+
+    it('records nothing before the backend has assigned a thread id', () => {
+        store.set(activeRunAtom, makeRun({ thread_id: undefined as any }));
+
+        store.set(closeWSConnectionForShutdownAtom, 'Zotero quitting', REMEMBER);
+
+        expect(saveInterruptedThreadMock).not.toHaveBeenCalled();
+    });
+
+    it('records nothing it could not attribute to an account', () => {
+        store.set(sessionAtom, null);
+        store.set(activeRunAtom, makeRun());
+        store.set(currentThreadIdAtom, 'thread-1');
+
+        store.set(closeWSConnectionForShutdownAtom, 'Zotero quitting', REMEMBER);
+
+        expect(saveInterruptedThreadMock).not.toHaveBeenCalled();
+    });
+
+    it('records nothing when this bundle owns neither socket nor connect loop', () => {
+        isConnectedMock.mockReturnValue(false);
+        store.set(activeRunAtom, makeRun());
+        store.set(currentThreadIdAtom, 'thread-1');
+
+        store.set(closeWSConnectionForShutdownAtom, 'Main window closed', REMEMBER);
+
+        expect(saveInterruptedThreadMock).not.toHaveBeenCalled();
+    });
+
+    it('is not written by the user-initiated close', async () => {
+        store.set(activeRunAtom, makeRun());
+        store.set(currentThreadIdAtom, 'thread-1');
+
+        await store.set(closeWSConnectionAtom);
+
+        expect(saveInterruptedThreadMock).not.toHaveBeenCalled();
     });
 });
 

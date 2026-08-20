@@ -15,6 +15,7 @@ export interface PopupMessageButton {
     text: string;
     onClick: () => void;
     icon?: React.ComponentType<React.SVGProps<SVGSVGElement>>;
+    rightIcon?: React.ComponentType<React.SVGProps<SVGSVGElement>> | React.ReactElement;
     variant?: ButtonVariant;
 }
 
@@ -28,6 +29,7 @@ export interface PopupMessage {
     text?: string;
     customContent?: React.ReactNode;
     icon?: React.ReactNode;
+    rightIcon?: React.ReactElement;
     expire?: boolean; // Defaults to true
     buttonIcon?: React.ComponentType<React.SVGProps<SVGSVGElement>>;
     buttonOnClick?: () => void

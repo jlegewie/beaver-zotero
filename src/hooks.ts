@@ -71,12 +71,13 @@ async function cleanupSupabaseWindowState(
 function closeAgentConnection(
     win: Window | null | undefined,
     reason: string,
+    options?: { rememberInterruptedThread?: boolean },
 ): void {
     const close = (win as any)?.BeaverReact?.closeAgentConnection;
     if (typeof close !== "function") return;
 
     try {
-        close(reason);
+        close(reason, options);
     } catch (e) {
         ztoolkit.log(`closeAgentConnection: ${e}`);
     }
@@ -399,10 +400,25 @@ async function onMainWindowUnload(win: Window): Promise<void> {
 
     try {
         // Close first: later steps can await, and the window may be gone when
-        // this handler returns. Read quitting here — the later scope check
-        // runs after those awaits.
+        // this handler returns. Read quitting and the window count here — the
+        // later scope check runs after those awaits.
         const appGoingAway = isAppQuitting || (Services?.startup?.shuttingDown ?? false);
-        closeAgentConnection(win, appGoingAway ? "Zotero quitting" : "Main window closed");
+        const isLastMainWindow = Zotero.getMainWindows()
+            .filter(w => w !== win && !w.closed).length === 0;
+        // Record only when Beaver itself is going away. Closing one of several
+        // windows also abandons the run, but Beaver keeps running, so a
+        // "Beaver closed mid-response" offer would be false — in the surviving
+        // window (which runs its own bundle) it would even appear mid-session.
+        // That thread is still in the chat history to reopen.
+        //
+        // On a quit every window is going away, and the one holding the socket
+        // is not necessarily the last to unload — the later ones have nothing
+        // left to close, so gating on "last window" alone would record nothing.
+        closeAgentConnection(
+            win,
+            appGoingAway ? "Zotero quitting" : "Main window closed",
+            { rememberInterruptedThread: appGoingAway || isLastMainWindow },
+        );
 
         // Worker-window hygiene: dispose a slot's client when the closing
         // window is either the realm that spawned its worker (the next
@@ -777,7 +793,11 @@ async function onShutdown(): Promise<void> {
             const openWindows = Zotero.getMainWindows?.().filter(w => w && !w.closed) ?? [];
             for (const win of openWindows) {
                 // Plugin disable/uninstall/upgrade: windows are still alive.
-                closeAgentConnection(win as Window, "Beaver plugin shutting down");
+                // The bundle goes away with the plugin, so an interrupted run
+                // is worth recording however many windows are open.
+                closeAgentConnection(win as Window, "Beaver plugin shutting down", {
+                    rememberInterruptedThread: true,
+                });
                 await cleanupDevTemporaryAnnotations(win as Window);
                 BeaverUIFactory.removeChatPanel(win as Window);
             }
