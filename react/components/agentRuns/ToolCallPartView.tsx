@@ -132,7 +132,16 @@ const NON_EXPANDABLE_TOOLS = new Set([
     'load_capability',
     'search_tools',
     'load_tool_results',
+    'batch_resolve',
 ]);
+
+/**
+ * Tools whose expanded body exists only as a view model. Their raw return is
+ * framework-internal state written for the model (batch_start returns the
+ * whole batch ledger), so a call that predates the view — or one whose view
+ * could not be built — stays collapsed rather than showing that state.
+ */
+const VIEW_ONLY_EXPANDABLE_TOOLS = new Set(['batch_start']);
 
 /** Tools that support streaming argument preview */
 const STREAMING_PREVIEW_TOOLS = new Set(['create_note']);
@@ -372,6 +381,7 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
         // If we can compute a count (search-like tools), block expansion for 0 results.
         (renderableCount === null || renderableCount > 0) &&
         !NON_EXPANDABLE_TOOLS.has(part.tool_name) &&
+        (!VIEW_ONLY_EXPANDABLE_TOOLS.has(part.tool_name) || view !== null) &&
         !isExtractionRejected &&
         !isExternalSearchRejected &&
         !showAgentActionView; // Don't allow expand toggle for agent action tools
