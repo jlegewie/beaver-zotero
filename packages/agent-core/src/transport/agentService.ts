@@ -17,6 +17,7 @@ import { ApiService } from './apiService';
 import {
     AgentDataProviderMap,
     resolveDefaultAgentDataProvider,
+    unknownDataRequestErrorResponse,
 } from './agentDataDispatch';
 import { AgentRunRequest, ZoteroInstanceWire } from '../protocol/agentProtocol';
 import {
@@ -911,12 +912,17 @@ export class AgentService {
                 default: {
                     // Data-request events are dispatched through the injectable
                     // data-provider map rather than hardcoded cases. The handler
-                    // resolves with the response to send; on failure the entry's
-                    // error fallback is sent so the backend doesn't time out.
+                    // resolves with the response to send; on failure — or when
+                    // the map has no entry — an error reply is sent so the
+                    // backend doesn't time out.
                     const eventName = (event as any).event;
                     const entry = this.getDataProvider()[eventName];
                     if (!entry) {
                         logger(`AgentService: Unknown event type: ${eventName}`, 1);
+                        const errorResponse = unknownDataRequestErrorResponse(event);
+                        if (errorResponse) {
+                            this.send(errorResponse);
+                        }
                         break;
                     }
                     const dataEvent = event as any;

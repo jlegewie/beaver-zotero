@@ -634,3 +634,68 @@ describe('AgentService reconnect handling', () => {
         expect(outcome.ok).toBe(true);
     });
 });
+
+describe('AgentService unknown data-request events', () => {
+    beforeEach(() => {
+        vi.useFakeTimers();
+        MockWebSocket.instances = [];
+        vi.stubGlobal('WebSocket', MockWebSocket);
+
+        mockSupabase.auth.getSession.mockReset();
+        mockSupabase.auth.refreshSession.mockReset();
+        mockSupabase.auth.getSession.mockResolvedValue({
+            data: {
+                session: {
+                    access_token: 'token',
+                    expires_at: Math.floor(Date.now() / 1000) + 3600,
+                },
+            },
+            error: null,
+        });
+    });
+
+    afterEach(() => {
+        vi.unstubAllGlobals();
+        vi.useRealTimers();
+    });
+
+    it('replies with an error for an unmatched *_request so the backend does not time out', async () => {
+        const service = new AgentService('https://api.example.com', {});
+        const socket = await completeConnect(
+            service,
+            createCallbacks(),
+            { type: 'unknown-event' } as AgentRunRequest,
+        );
+
+        socket.emitMessage({
+            event: 'resolve_population_request',
+            request_id: 'req-1',
+        });
+        await flushMicrotasks();
+
+        const sent = socket.send.mock.calls.map(([raw]) => JSON.parse(raw as string));
+        expect(sent).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                type: 'resolve_population',
+                request_id: 'req-1',
+                error: 'Unknown event type: resolve_population_request',
+                error_code: 'internal_error',
+            }),
+        ]));
+    });
+
+    it('does not reply when the unknown event is not a request/response exchange', async () => {
+        const service = new AgentService('https://api.example.com', {});
+        const socket = await completeConnect(
+            service,
+            createCallbacks(),
+            { type: 'unknown-event' } as AgentRunRequest,
+        );
+        const sentBefore = socket.send.mock.calls.length;
+
+        socket.emitMessage({ event: 'some_new_notification' });
+        await flushMicrotasks();
+
+        expect(socket.send.mock.calls.length).toBe(sentBefore);
+    });
+});
