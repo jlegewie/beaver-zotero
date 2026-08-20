@@ -270,7 +270,7 @@ export const ChangesCard: React.FC<ChangesCardProps> = ({ run, rows, mode = 'rev
             >
                 <button
                     type="button"
-                    className="variant-ghost-secondary display-flex flex-row py-15 gap-2 text-left mt-015"
+                    className="variant-ghost-secondary display-flex flex-row py-15 gap-2 text-left"
                     style={{ fontSize: '0.95rem', background: 'transparent', border: 0, padding: 0 }}
                     aria-expanded={isExpanded}
                     onClick={toggleExpanded}
@@ -278,7 +278,7 @@ export const ChangesCard: React.FC<ChangesCardProps> = ({ run, rows, mode = 'rev
                     onMouseLeave={() => setIsHovered(false)}
                 >
                     <div className="display-flex flex-row ml-3 gap-2">
-                        <div className="flex-1 display-flex font-color-primary scale-11">
+                        <div className="flex-1 display-flex items-center scale-11">
                             <Icon icon={headerIcon} className={headerIconClassName} />
                         </div>
                         <div className="display-flex">

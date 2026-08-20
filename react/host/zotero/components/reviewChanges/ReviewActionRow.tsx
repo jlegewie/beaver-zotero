@@ -243,7 +243,7 @@ export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
                     onMouseEnter={() => setIsHovered(true)}
                     onMouseLeave={() => setIsHovered(false)}
                 >
-                    <div className="display-flex scale-11" style={{ flexShrink: 0 }}>
+                    <div className="display-flex items-center scale-11" style={{ flexShrink: 0 }}>
                         <Icon icon={headerIcon} className={!isHovered ? headerIconClassName : undefined} />
                     </div>
                     <div
