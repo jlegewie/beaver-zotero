@@ -38,6 +38,7 @@ import {
     HighlighterIcon,
     ChattingIcon,
     LayersIcon,
+    WrenchIcon,
 } from '../icons/icons';
 import { toolExpandedAtom, toggleToolExpandedAtom, setToolExpandedAtom } from '../../atoms/messageUIState';
 import { parseLibraryRef, resolveLibraryRef } from '../../../src/utils/libraryIdentity';
@@ -110,8 +111,8 @@ const TOOL_ICONS: Record<string, IconComponent> = {
     load_tool_results: LayersIcon,
     
     // Progressive disclosure tools
-    load_capability: PuzzleIcon,
-    search_tools: PuzzleIcon,
+    load_capability: WrenchIcon,
+    search_tools: WrenchIcon,
 
     // Batch operations
     batch_start: LayersIcon,
