@@ -242,6 +242,43 @@ export interface UserQuestionView {
     answers: UserQuestionAnswerView[];
 }
 
+/**
+ * A batch operation as it stands after a `batch_start` call — the read-only
+ * counterpart of the batch approval card.
+ *
+ * Every user-facing string is composed by the backend and rendered verbatim,
+ * exactly as on the approval card, so the two never drift apart in wording.
+ * The client must not derive prose of its own from these fields; it owns only
+ * its slot headings.
+ */
+export interface BatchOperationView {
+    view_type: "batch_operation";
+    tool_name: "batch_start";
+    /** Id of the batch this call wrote. */
+    batch_id: string;
+    /** Card title, rendered verbatim. */
+    title: string;
+    /**
+     * Where the batch stands after the call; drives styling only. "completed"
+     * is derived from the ledger (every item decided), not claimed.
+     */
+    status?: "active" | "completed" | "cancelled";
+    /** How the batch ended ("Completed" / "Cancelled"); empty while running. */
+    status_label?: string;
+    /** The population's size ("23 items") — the emphasised half of the scope line. */
+    scope_primary: string;
+    /** Where that population lives ("in Methods"); empty when it cannot be stated. */
+    scope_secondary?: string;
+    /** The batch goal, rendered verbatim. */
+    goal: string;
+    /** What the batch removes or overwrites; empty when it declared nothing. */
+    destructive_warning?: string;
+    /** What the user typed on the approval card; empty when they added none. */
+    user_instructions?: string;
+    /** How far the batch has got ("12 of 23 done"); empty before anything is recorded. */
+    progress_label?: string;
+}
+
 /** The general discriminated union — discriminated by `view_type`. */
 export type ToolResultView =
     | ItemListView
@@ -250,7 +287,8 @@ export type ToolResultView =
     | CollectionListView
     | TagListView
     | AttachmentSearchView
-    | UserQuestionView;
+    | UserQuestionView
+    | BatchOperationView;
 
 // ---------------------------------------------------------------------------
 // Type guards
@@ -267,7 +305,8 @@ export function isToolResultView(value: unknown): value is ToolResultView {
         viewType === "collection_list" ||
         viewType === "tag_list" ||
         viewType === "attachment_search" ||
-        viewType === "user_question"
+        viewType === "user_question" ||
+        viewType === "batch_operation"
     );
 }
 
@@ -297,6 +336,10 @@ export function isAttachmentSearchView(view: ToolResultView): view is Attachment
 
 export function isUserQuestionView(view: ToolResultView): view is UserQuestionView {
     return view.view_type === "user_question";
+}
+
+export function isBatchOperationView(view: ToolResultView): view is BatchOperationView {
+    return view.view_type === "batch_operation";
 }
 
 export function isItemRow(row: ItemListRow): row is ItemRowView {
@@ -332,6 +375,10 @@ export function getToolResultRenderableCount(view: ToolResultView): number | nul
             return view.found_count ?? view.references.length;
         case "user_question":
             return view.answers.length;
+        case "batch_operation":
+            // A batch card always has something to show (goal + population),
+            // so it must not be gated on a count.
+            return null;
         default:
             return null;
     }

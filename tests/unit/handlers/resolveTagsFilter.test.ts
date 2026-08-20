@@ -66,6 +66,7 @@ vi.mock('../../../src/services/documentExtraction', () => ({
 }));
 
 import {
+    resolveStoredTagName,
     resolveTagsFilter,
     tagsFilterError,
 } from '../../../src/services/agentDataProvider/utils';
@@ -244,5 +245,69 @@ describe('tagsFilterError', () => {
 
     it('raises no error for an empty filter, so callers keep their own no-filter path', async () => {
         expect(tagsFilterError(await resolveTagsFilter([], [1]))).toBeNull();
+    });
+});
+
+describe('resolveStoredTagName', () => {
+    let previousZotero: any;
+
+    beforeEach(() => {
+        vi.clearAllMocks();
+        previousZotero = (globalThis as any).Zotero;
+        installZoteroMock();
+    });
+
+    afterEach(() => {
+        (globalThis as any).Zotero = previousZotero;
+    });
+
+    it('resolves a mis-cased tag to the casing the library stores', async () => {
+        const resolution = await resolveStoredTagName(1, 'My Library', 'ECONOMICS');
+        expect(resolution).toEqual({ found: true, name: 'Economics' });
+    });
+
+    it('keeps a tag that already matches a stored casing', async () => {
+        const resolution = await resolveStoredTagName(1, 'My Library', 'Sociology');
+        expect(resolution).toEqual({ found: true, name: 'Sociology' });
+    });
+
+    it('reports a tag the library does not have, naming it and the library', async () => {
+        const resolution = await resolveStoredTagName(1, 'My Library', 'Methods');
+        expect(resolution.found).toBe(false);
+        expect(resolution.found === false && resolution.error).toContain('"Methods"');
+        expect(resolution.found === false && resolution.error).toContain('My Library');
+    });
+
+    it('prefers the exact casing when the library stores several', async () => {
+        TAGS_BY_LIBRARY.set(1, ['Economics', 'economics', 'Sociology']);
+        try {
+            const resolution = await resolveStoredTagName(1, 'My Library', 'economics');
+            expect(resolution).toEqual({ found: true, name: 'economics' });
+        } finally {
+            TAGS_BY_LIBRARY.set(1, ['Economics', 'economic history', 'Sociology', 'to read']);
+        }
+    });
+
+    it('resolves a name Zotero lists once per tag type', async () => {
+        // getAll() returns one row per tag type for the same name.
+        getAll.mockResolvedValueOnce([
+            { tag: 'Economics', type: 0 },
+            { tag: 'Economics', type: 1 },
+        ]);
+
+        const resolution = await resolveStoredTagName(1, 'My Library', 'ECONOMICS');
+        expect(resolution).toEqual({ found: true, name: 'Economics' });
+    });
+
+    it('names the stored casings rather than guessing when a mis-cased tag is ambiguous', async () => {
+        TAGS_BY_LIBRARY.set(1, ['Economics', 'economics', 'Sociology']);
+        try {
+            const resolution = await resolveStoredTagName(1, 'My Library', 'ECONOMICS');
+            expect(resolution.found).toBe(false);
+            expect(resolution.found === false && resolution.error).toContain('"Economics"');
+            expect(resolution.found === false && resolution.error).toContain('"economics"');
+        } finally {
+            TAGS_BY_LIBRARY.set(1, ['Economics', 'economic history', 'Sociology', 'to read']);
+        }
     });
 });

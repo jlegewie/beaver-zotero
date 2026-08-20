@@ -1400,6 +1400,77 @@ export interface WSListItemsResponse {
     available_libraries?: AvailableLibraryInfo[] | null;
 }
 
+/**
+ * Request from backend for resolve_population.
+ *
+ * Resolves the complete set of item ids matching a filter description in one
+ * round trip, so a batch operation never has to page through `list_items`.
+ * Every filter is ANDed (the join mode is always `all`); filters left unset do
+ * not constrain the result, so an otherwise empty request selects the whole
+ * library.
+ */
+export interface WSResolvePopulationRequest extends WSBaseEvent {
+    event: 'resolve_population_request';
+    request_id: string;
+    /** Library id or name. Null/absent = the user's default library. */
+    library_id?: number | string | null;
+    /** Bare collection key (never library-qualified); the backend down-converts. */
+    collection_key?: string | null;
+    /** Include items from subcollections when scoped to a collection. */
+    recursive: boolean;
+    /** Exact tag the items must carry. */
+    tag?: string | null;
+    /** Only items that belong to no collection. */
+    unfiled: boolean;
+    /** Only items that carry no tags. */
+    untagged: boolean;
+    /** Additional search conditions, ANDed with the other filters. */
+    conditions: ZoteroSearchCondition[];
+    /** 'regular' = bibliographic items, 'attachment' = child attachments. */
+    item_category: 'regular' | 'attachment';
+    /** Filter regular items by attachment presence; null = no filter. */
+    has_attachments?: boolean | null;
+    /**
+     * Maximum number of ids to return. Further matches are counted, not
+     * returned. 0 returns no ids (total_count is still the true match count).
+     */
+    max_items: number;
+}
+
+/** Response to resolve_population request */
+export interface WSResolvePopulationResponse {
+    type: 'resolve_population';
+    request_id: string;
+    /**
+     * Matching item ids in portable form (`u-<key>` for the personal library,
+     * `g<groupID>-<key>` for groups — group id, not the device-local library
+     * id), deterministic order, length <= max_items.
+     */
+    item_ids: string[];
+    /** True number of matches, counted before truncation. */
+    total_count: number;
+    /** True when total_count exceeded max_items and item_ids was cut short. */
+    truncated: boolean;
+    /**
+     * Display names of the library and collection the filters resolved
+     * against. The approval card names the population's location from these
+     * and says nothing about it when they are absent, so omitting them costs
+     * the user the WHERE half of what they are approving.
+     */
+    library_name?: string | null;
+    collection_name?: string | null;
+    error?: string | null;
+    error_code?: string | null;
+    /** Available libraries (only included when error_code is 'library_not_found') */
+    available_libraries?: AvailableLibraryInfo[] | null;
+    /**
+     * Non-fatal warnings (e.g. conditions Zotero rejected and the handler
+     * dropped). A dropped filter WIDENS the population, so the caller must
+     * treat any warning as a failed resolution rather than acting on the ids.
+     */
+    warnings?: string[] | null;
+}
+
 /** Request from backend for get_metadata */
 export interface WSGetMetadataRequest extends WSBaseEvent {
     event: 'get_metadata_request';
@@ -2165,6 +2236,7 @@ export type WSEvent =
     // Library management tools
     | WSZoteroSearchRequest
     | WSListItemsRequest
+    | WSResolvePopulationRequest
     | WSListCollectionsRequest
     | WSListTagsRequest
     | WSGetMetadataRequest

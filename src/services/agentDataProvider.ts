@@ -20,6 +20,7 @@ export { handleItemSearchByTopicRequest } from './agentDataProvider/handleItemSe
 export { handleItemQuickSearchRequest } from './agentDataProvider/handleItemQuickSearchRequest';
 export { handleZoteroSearchRequest } from './agentDataProvider/handleZoteroSearchRequest';
 export { handleListItemsRequest } from './agentDataProvider/handleListItemsRequest';
+export { handleResolvePopulationRequest } from './agentDataProvider/handleResolvePopulationRequest';
 export { handleGetMetadataRequest } from './agentDataProvider/handleGetMetadataRequest';
 export { handleGetAnnotationsRequest } from './agentDataProvider/handleGetAnnotationsRequest';
 export { handleFindAnnotationsRequest } from './agentDataProvider/handleFindAnnotationsRequest';
