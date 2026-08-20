@@ -287,6 +287,70 @@ function completedPhrase(typeKey: string, count: number): string | null {
     }
 }
 
+function uniqueActionsFromRows(rows: ReviewRow[]): AgentAction[] {
+    const counted = new Map<string, AgentAction>();
+    for (const row of rows) {
+        for (const action of row.actions) counted.set(action.id, action);
+    }
+    return Array.from(counted.values());
+}
+
+function isChangeInEffect(action: AgentAction): boolean {
+    return action.status === 'applied'
+        || (action.status === 'error' && action.result_data != null);
+}
+
+/**
+ * How many library things the in-effect actions changed. Deduplicates where an
+ * action names the thing it changed, so a note edited twice in one run is one
+ * edited note.
+ */
+function countInEffectUnits(actions: AgentAction[]): number {
+    const seenUnits = new Set<string>();
+    let units = 0;
+    for (const action of actions) {
+        const unitKey = changedUnitKey(action);
+        if (unitKey === null) {
+            units += countChangedUnits(action);
+        } else if (!seenUnits.has(unitKey)) {
+            seenUnits.add(unitKey);
+            units += 1;
+        }
+    }
+    return units;
+}
+
+/**
+ * How many library things the completed-changes card would summarize.
+ *
+ * Same counting as `getCompletedHeaderCopy`: a batch tool's targets, not its
+ * actions, and only changes still in effect. All-reverted cards count the
+ * original actions, matching "Reverted N library changes".
+ */
+export function countCompletedChangedUnits(rows: ReviewRow[]): number {
+    const actions = uniqueActionsFromRows(rows);
+    const inEffect = actions.filter(isChangeInEffect);
+    if (inEffect.length === 0) return actions.length;
+
+    const typeKeys = new Set(inEffect.map(completedTypeKey));
+    if (typeKeys.size === 1) return countInEffectUnits(inEffect);
+    return inEffect.length;
+}
+
+/**
+ * Whether to mount the completed-changes card.
+ *
+ * A single changed unit is already the in-stream action card, so the summary
+ * stays hidden — except a created note, which this card replaced a dedicated
+ * bottom-of-run display for, including the single-note case.
+ */
+export function shouldShowCompletedCard(rows: ReviewRow[]): boolean {
+    if (countCompletedChangedUnits(rows) > 1) return true;
+    return uniqueActionsFromRows(rows).some(
+        (action) => completedTypeKey(action) === 'create_note' && isChangeInEffect(action),
+    );
+}
+
 /**
  * Header copy for the completed-changes card.
  *
@@ -301,13 +365,8 @@ function completedPhrase(typeKey: string, count: number): string | null {
  * library, as opposed to a failed re-apply, which never made one.
  */
 export function getCompletedHeaderCopy(rows: ReviewRow[]): string {
-    const counted = new Map<string, AgentAction>();
-    for (const row of rows) {
-        for (const action of row.actions) counted.set(action.id, action);
-    }
-    const actions = Array.from(counted.values());
-    const inEffect = actions.filter((action) => action.status === 'applied'
-        || (action.status === 'error' && action.result_data != null));
+    const actions = uniqueActionsFromRows(rows);
+    const inEffect = actions.filter(isChangeInEffect);
 
     if (inEffect.length === 0) {
         return `Reverted ${plural(actions.length, 'library change')}`;
@@ -316,19 +375,7 @@ export function getCompletedHeaderCopy(rows: ReviewRow[]): string {
     const typeKeys = new Set(inEffect.map(completedTypeKey));
     if (typeKeys.size === 1) {
         const [typeKey] = typeKeys;
-        // Deduplicated where an action names the thing it changed, so a note
-        // edited twice in one run is one edited note.
-        const seenUnits = new Set<string>();
-        let units = 0;
-        for (const action of inEffect) {
-            const unitKey = changedUnitKey(action);
-            if (unitKey === null) {
-                units += countChangedUnits(action);
-            } else if (!seenUnits.has(unitKey)) {
-                seenUnits.add(unitKey);
-                units += 1;
-            }
-        }
+        const units = countInEffectUnits(inEffect);
         const phrase = units > 0 ? completedPhrase(typeKey, units) : null;
         if (phrase) return phrase;
     }
