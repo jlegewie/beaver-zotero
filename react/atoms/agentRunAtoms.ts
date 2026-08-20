@@ -76,7 +76,7 @@ import type { ExternalFileAttachment } from '@beaver/agent-core/types/attachment
 import { getApplicationStateProvider } from './applicationState';
 import { uint8ArrayToBase64 } from '../utils/fileUtils';
 import { isAttachmentOnServer } from '../../src/utils/webAPI';
-import { AgentRun, BeaverAgentPrompt, MessageSearchFilters, PromptAction, PromptOrigin, ToolRequest, isRunActive } from '@beaver/agent-core/agents/types';
+import { AgentRun, BeaverAgentPrompt, MessageSearchFilters, PromptAction, PromptOrigin, ResumeTrigger, ToolRequest, isRunActive } from '@beaver/agent-core/agents/types';
 import {
     threadRunsAtom,
     activeRunAtom,
@@ -531,6 +531,12 @@ function createAgentRunShell(
 
 type StartResumeRunOptions = {
     requireResumable: boolean;
+    /**
+     * Who is asking. Sent to the backend, which reorders its model chain only
+     * for `auto` — a user-clicked resume usually follows a dropped connection
+     * or a closed client, where no provider failed.
+     */
+    trigger: ResumeTrigger;
     logPrefix: string;
     failureErrorType: string;
     failureMessage: string;
@@ -605,6 +611,7 @@ async function startResumeRun(
             content: '',
             is_resume: true,
             resumes_run_id: failedRunId,
+            resume_trigger: options.trigger,
         };
 
         const { run: newRun, request } = createAgentRunShell(
@@ -2822,6 +2829,7 @@ export const autoResumeErroredRunAtom = atom(
         try {
             await startResumeRun(get, set, failedRunId, {
                 requireResumable: false,
+                trigger: 'auto',
                 logPrefix: 'autoResumeErroredRunAtom',
                 failureErrorType: 'auto_resume_error',
                 failureMessage: 'Failed to automatically resume run',
@@ -2863,6 +2871,7 @@ export const resumeFromRunAtom = atom(
     async (get, set, failedRunId: string) => {
         await startResumeRun(get, set, failedRunId, {
             requireResumable: true,
+            trigger: 'user',
             logPrefix: 'resumeFromRunAtom',
             failureErrorType: 'resume_error',
             failureMessage: 'Failed to resume run',
