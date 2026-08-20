@@ -264,6 +264,64 @@ export const clearRetainedReviewActionsForRunAtom = atom(
 );
 
 // ---------------------------------------------------------------------------
+// Applied changes session snapshot
+// ---------------------------------------------------------------------------
+
+/**
+ * Action ids written to Zotero *by a live run* in this app session.
+ *
+ * The completed-changes card summarizes what a run changed on its own, so the
+ * set holds only the writes the run itself made — the ones the user approved
+ * while it was streaming and the ones an always-apply permission let it make
+ * without asking. Changes the user applies from the review card after the run
+ * ended are deliberately excluded: that card already shows them resolved, and
+ * repeating them below it would show the same tool call twice.
+ *
+ * Scoped to this set rather than to the `applied` status because a create_note
+ * action stays `applied` forever, so a status-driven card would grow back onto
+ * the bottom of every thread the user ever reopens, while the in-stream cards
+ * already carry that history.
+ *
+ * Recorded where a run's write completes: the WS handlers for backend-executed
+ * actions, and the client-side auto-apply paths (`autoApplyAnnotationAgentActions`,
+ * `autoCreateNoteAgentActions`). Not in `ackAgentActionsAtom` — that funnel also
+ * carries the post-run applies this set must not contain.
+ *
+ * Session-only on purpose, and deliberately not cleared by
+ * `resetMessageUIStateAtom`: switching threads and coming back within one
+ * session should not drop what the user has not dismissed.
+ */
+export const sessionAppliedActionIdsAtom = atom<ReadonlySet<string>>(new Set<string>());
+
+/** Record a live run's writes, making them completed-card material. */
+export const recordAppliedActionsAtom = atom(
+    null,
+    (get, set, actionIds: string[]) => {
+        if (actionIds.length === 0) return;
+        const current = get(sessionAppliedActionIdsAtom);
+        const next = new Set(current);
+        for (const actionId of actionIds) next.add(actionId);
+        set(sessionAppliedActionIdsAtom, next);
+    },
+);
+
+/**
+ * Drop actions from the session snapshot, which is how the completed-changes
+ * card is dismissed. Nothing about the action records changes: the change stays
+ * applied in Zotero and in history — only this session's card forgets it.
+ */
+export const dismissAppliedActionsAtom = atom(
+    null,
+    (get, set, actionIds: string[]) => {
+        const current = get(sessionAppliedActionIdsAtom);
+        const next = new Set(current);
+        let removed = false;
+        for (const actionId of actionIds) removed = next.delete(actionId) || removed;
+        if (removed) set(sessionAppliedActionIdsAtom, next);
+    },
+);
+
+// ---------------------------------------------------------------------------
 // Note panels (button + visibility)
 // ---------------------------------------------------------------------------
 

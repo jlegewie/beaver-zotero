@@ -18,6 +18,7 @@ import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '
 import { toolAnnotationApplyBatcher, filterAnnotationAgentActions } from './toolAnnotationApplyBatcher';
 import { saveStreamingNote } from './noteActions';
 import { currentThreadIdAtom } from '../atoms/threads';
+import { recordAppliedActionsAtom } from '../atoms/messageUIState';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { parseZoteroId } from '@beaver/agent-core/citations/citationGrammar';
 import { libraryRefForLibraryID, resolveItemReference, resolveWriteTargetLibrary } from '../../src/utils/libraryIdentity';
@@ -296,22 +297,6 @@ function extractNoteBlocksFromRun(runId: string): ParsedNoteBlock[] {
 }
 
 /**
- * Tracks note action IDs that were auto-applied this session.
- * Resets on page/module reload — intentionally not persisted.
- */
-const sessionAutoAppliedNoteIds = new Set<string>();
-
-/** Check if a note action was auto-applied this session */
-export function isNoteAutoApplied(actionId: string): boolean {
-    return sessionAutoAppliedNoteIds.has(actionId);
-}
-
-/** Remove a note action from the auto-applied set (e.g. after undo or dismiss) */
-export function clearNoteAutoApplied(actionId: string): void {
-    sessionAutoAppliedNoteIds.delete(actionId);
-}
-
-/**
  * Auto-create Zotero notes from agent actions if enabled in settings.
  *
  * Note content is NOT stored in agent action proposed_data (it's always null).
@@ -483,7 +468,8 @@ export async function autoCreateNoteAgentActions(
 
             // Acknowledge the action (marks as 'applied')
             set(ackAgentActionsAtom, runId, [{ action_id: action.id, result_data: result }]);
-            sessionAutoAppliedNoteIds.add(action.id);
+            // A note the run created on its own belongs in its completed card.
+            set(recordAppliedActionsAtom, [action.id]);
         } catch (error: any) {
             logger(`autoCreateNoteAgentActions: Failed to create note "${title}": ${error.message}`, 1);
         }
