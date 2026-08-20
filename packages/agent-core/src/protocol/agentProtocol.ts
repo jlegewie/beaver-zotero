@@ -1451,6 +1451,14 @@ export interface WSResolvePopulationResponse {
     total_count: number;
     /** True when total_count exceeded max_items and item_ids was cut short. */
     truncated: boolean;
+    /**
+     * Display names of the library and collection the filters resolved
+     * against. The approval card names the population's location from these
+     * and says nothing about it when they are absent, so omitting them costs
+     * the user the WHERE half of what they are approving.
+     */
+    library_name?: string | null;
+    collection_name?: string | null;
     error?: string | null;
     error_code?: string | null;
     /** Available libraries (only included when error_code is 'library_not_found') */

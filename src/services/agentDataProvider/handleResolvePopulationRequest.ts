@@ -190,7 +190,10 @@ export async function handleResolvePopulationRequest(
 
         // Resolve the collection scope. The wire always carries a BARE key;
         // the backend has already down-converted a library-qualified one.
+        // The name is kept alongside the id: it is the only thing that turns
+        // the key back into something the approval card can show the user.
         let collectionId: number | null = null;
+        let collectionName: string | null = null;
         if (request.collection_key) {
             const collection = Zotero.Collections.getByLibraryAndKey(library.libraryID, request.collection_key);
             if (!collection) {
@@ -202,6 +205,7 @@ export async function handleResolvePopulationRequest(
                 );
             }
             collectionId = collection.id;
+            collectionName = collection.name;
         }
 
         // Warnings are surfaced to the backend so the agent can correct bad
@@ -299,6 +303,8 @@ export async function handleResolvePopulationRequest(
                 item_ids: [],
                 total_count: totalCount,
                 truncated: totalCount > 0,
+                library_name: library.name,
+                collection_name: collectionName,
                 warnings: warnings.length ? warnings : undefined,
             };
         }
@@ -329,6 +335,10 @@ export async function handleResolvePopulationRequest(
             item_ids: resultIds,
             total_count: totalCount,
             truncated,
+            // Where the population lives, in the names the user gave those
+            // places. The approval card states the location from these alone.
+            library_name: library.name,
+            collection_name: collectionName,
             warnings: warnings.length ? warnings : undefined,
         };
     } catch (error) {

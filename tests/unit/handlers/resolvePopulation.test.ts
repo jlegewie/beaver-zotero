@@ -41,7 +41,7 @@ describe('handleResolvePopulationRequest', () => {
     /** Every Zotero.Search the handler constructed, in construction order. */
     let searches: MockSearchInstance[] = [];
     /** Collections the handler can resolve, keyed by "<libraryID>/<key>". */
-    const collections = new Map<string, { id: number }>();
+    const collections = new Map<string, { id: number; name: string }>();
 
     const mainSearch = () => searches[0] ?? null;
 
@@ -201,7 +201,7 @@ describe('handleResolvePopulationRequest', () => {
         it('adds an exact tag condition and a recursive collection scope', async () => {
             searchResultIds = [1];
             seedItem(1);
-            collections.set(`${LIBRARY_ID}/ABCD2345`, { id: 77 });
+            collections.set(`${LIBRARY_ID}/ABCD2345`, { id: 77, name: 'Methods' });
 
             await handleResolvePopulationRequest(makeRequest({
                 tag: 'to-read',
@@ -228,7 +228,7 @@ describe('handleResolvePopulationRequest', () => {
         it('omits the recursive condition when recursive is false', async () => {
             searchResultIds = [1];
             seedItem(1);
-            collections.set(`${LIBRARY_ID}/ABCD2345`, { id: 77 });
+            collections.set(`${LIBRARY_ID}/ABCD2345`, { id: 77, name: 'Methods' });
 
             await handleResolvePopulationRequest(makeRequest({
                 collection_key: 'ABCD2345',
@@ -251,6 +251,48 @@ describe('handleResolvePopulationRequest', () => {
             }));
 
             expect(addedConditions().some(([field]) => field === 'joinMode')).toBe(false);
+        });
+    });
+
+    describe('display names', () => {
+        it('names the library and the collection the filters resolved against', async () => {
+            searchResultIds = [1];
+            seedItem(1);
+            collections.set(`${LIBRARY_ID}/ABCD2345`, { id: 77, name: 'Methods' });
+
+            const response = await handleResolvePopulationRequest(makeRequest({
+                collection_key: 'ABCD2345',
+            }));
+
+            expect(response.library_name).toBe('My Library');
+            expect(response.collection_name).toBe('Methods');
+        });
+
+        it('names the library alone when the population is not scoped to a collection', async () => {
+            searchResultIds = [1];
+            seedItem(1);
+
+            const response = await handleResolvePopulationRequest(makeRequest({ tag: 'to-read' }));
+
+            expect(response.library_name).toBe('My Library');
+            expect(response.collection_name).toBeNull();
+        });
+
+        it('names both on a count-only request, which returns no ids to name them from', async () => {
+            searchResultIds = [1, 2];
+            seedItem(1);
+            seedItem(2);
+            collections.set(`${LIBRARY_ID}/ABCD2345`, { id: 77, name: 'Methods' });
+
+            const response = await handleResolvePopulationRequest(makeRequest({
+                collection_key: 'ABCD2345',
+                max_items: 0,
+            }));
+
+            expect(response.item_ids).toEqual([]);
+            expect(response.total_count).toBe(2);
+            expect(response.library_name).toBe('My Library');
+            expect(response.collection_name).toBe('Methods');
         });
     });
 
