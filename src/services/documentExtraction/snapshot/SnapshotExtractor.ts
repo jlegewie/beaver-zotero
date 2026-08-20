@@ -38,7 +38,6 @@ const LOW_COVERAGE_WARN_THRESHOLD = 0.85;
 const SYNTHETIC_PAGE_CHAR_INTERVAL = 1800;
 
 export interface ExtractSnapshotDocumentOptions {
-    maxFileSizeMB?: number | null;
     onFileNotSyncedLocally?: () => void;
 }
 
@@ -318,7 +317,7 @@ export async function preflightSnapshotFile(
         return preflightResponseError("file_missing", "The snapshot file is not available locally.");
     }
 
-    const maxFileSizeMB = effectiveMaxSnapshotFileSizeMB(options?.maxFileSizeMB);
+    const maxFileSizeMB = effectiveMaxSnapshotFileSizeMB();
     try {
         const stat = await IOUtils.stat(filePath);
         const sizeMB = typeof stat.size === "number" ? stat.size / 1024 / 1024 : null;

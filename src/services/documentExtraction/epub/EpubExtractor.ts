@@ -51,7 +51,6 @@ interface ZoteroEpubModule {
 }
 
 export interface ExtractEpubDocumentOptions {
-    maxFileSizeMB?: number | null;
     onFileNotSyncedLocally?: () => void;
 }
 
@@ -365,7 +364,7 @@ export async function preflightEpubFile(
         return preflightResponseError("file_missing", "The EPUB file is not available locally.");
     }
 
-    const maxFileSizeMB = effectiveMaxFileSizeMB(options?.maxFileSizeMB);
+    const maxFileSizeMB = effectiveMaxFileSizeMB();
     try {
         const stat = await IOUtils.stat(filePath);
         const sizeMB = typeof stat.size === "number" ? stat.size / 1024 / 1024 : null;

@@ -280,7 +280,10 @@ export interface WSZoteroDocumentRequest extends WSBaseEvent {
     mode: BeaverExtractResult['mode'];
     /** Reject threshold for total document page count; not a page clamp. */
     max_pages?: number | null;
-    /** Backend-requested file size cap; frontend also applies its hard cap. */
+    /**
+     * Requested file size cap. Accepted for wire compatibility and ignored:
+     * the frontend's file-size ceiling is a client-side preference.
+     */
     max_file_size_mb?: number | null;
     /** Frontend-side extraction deadline in seconds. */
     timeout_seconds?: number;

@@ -25,6 +25,17 @@ export interface RuntimeAdapter {
     /** Clear a fully-qualified preference key. */
     clearPref(key: string): void;
     /**
+     * Read a Beaver preference by its *unqualified* key, letting the host apply
+     * its own preference namespace. Lets shared code carry a user-configurable
+     * setting without knowing how the host namespaces preferences.
+     *
+     * Optional: a host with no preference store omits it. Callers must treat a
+     * missing implementation, and any value they cannot use, the same as
+     * "unset" and fall back to their own default — so this seam is only for
+     * settings that have one.
+     */
+    getPluginPref?(key: string): unknown;
+    /**
      * The host application's own version (e.g. the Zotero version), or an empty
      * string when the host has none to report.
      */
@@ -45,8 +56,8 @@ export interface RuntimeAdapter {
  * caller reaching these without a registered host would otherwise read back
  * `undefined` and have writes silently discarded, which is a worse failure
  * mode (a wrong default, or a lost user preference) than an immediate error at
- * the source. `hostVersion`/`getVersionHeaders` are left off entirely, since
- * both are optional.
+ * the source. `getPluginPref`/`hostVersion`/`getVersionHeaders` are left off
+ * entirely, since all three are optional.
  */
 const unregisteredAdapter: RuntimeAdapter = {
     debug() {},

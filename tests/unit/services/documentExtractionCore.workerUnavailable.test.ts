@@ -107,7 +107,6 @@ describe('extractAndCacheResolvedPdfDocument worker-lifecycle classification', (
             contentType: 'application/pdf',
             mode: 'structured',
             maxPages: null,
-            maxFileSizeMB: 0,
             timeoutSeconds: 60,
             workerName: 'hot',
         });

@@ -60,7 +60,6 @@ function payload(overrides: Partial<BackgroundJobPayload> = {}): BackgroundJobPa
     return {
         content_kind: 'pdf',
         maxPages: 200,
-        maxFileSizeMB: 50,
         timeoutSeconds: 120,
         ...overrides,
     };

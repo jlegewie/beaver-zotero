@@ -10,6 +10,9 @@
  */
 
 import { setRuntimeAdapterIfUnset, type RuntimeAdapter } from '@beaver/agent-core/platform/runtime';
+import config from '../../package.json';
+
+const PREFS_PREFIX = config.config.prefsPrefix;
 
 /** The running Zotero's version, or an empty string when it reports none. */
 function zoteroVersion(): string {
@@ -33,6 +36,9 @@ const zoteroAdapter: RuntimeAdapter = {
     },
     clearPref(key) {
         Zotero.Prefs.clear(key, true);
+    },
+    getPluginPref(key) {
+        return Zotero.Prefs.get(`${PREFS_PREFIX}.${key}`, true);
     },
     hostVersion() {
         return zoteroVersion();

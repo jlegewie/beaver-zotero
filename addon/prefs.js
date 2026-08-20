@@ -147,3 +147,9 @@ pref("librarySuggestionsGeneratedAt", "");
 
 // Account-scoped first-run assignment map, keyed by Beaver user id.
 pref("firstRunAssignments", "{}");
+
+// Largest attachment file, in MB, that Beaver will read
+// for document extraction, page and image rendering, in-file search, and
+// attaching an external file. It also decides which attachments count as
+// readable at all, so raising it un-blocks oversized ones in the sidebar.
+pref("maxAttachmentFileSizeMB", 100);

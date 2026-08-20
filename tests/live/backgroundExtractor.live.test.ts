@@ -91,7 +91,6 @@ describe('background queue — enqueue endpoint', () => {
             payload: {
                 content_kind: 'pdf',
                 maxPages: null,
-                maxFileSizeMB: 0,
                 timeoutSeconds: 180,
             },
         });
@@ -117,7 +116,7 @@ describe('background queue — enqueue endpoint', () => {
             payload_kind: 'structured',
             job_type: 'document_timeout_retry',
             priority: 100,
-            payload: { content_kind: 'pdf', maxPages: null, maxFileSizeMB: 0, timeoutSeconds: 180 },
+            payload: { content_kind: 'pdf', maxPages: null, timeoutSeconds: 180 },
         });
         expect(first.enqueued).toBe(true);
 
@@ -128,7 +127,7 @@ describe('background queue — enqueue endpoint', () => {
             payload_kind: 'structured',
             job_type: 'document_timeout_retry',
             priority: 100,
-            payload: { content_kind: 'pdf', maxPages: null, maxFileSizeMB: 0, timeoutSeconds: 180 },
+            payload: { content_kind: 'pdf', maxPages: null, timeoutSeconds: 180 },
         });
         expect(second.enqueued).toBe(false);
         expect(second.id).toBe(first.id);
@@ -141,7 +140,7 @@ describe('background queue — enqueue endpoint', () => {
             content_kind: 'pdf',
             payload_kind: 'structured',
             job_type: 'document_timeout_retry',
-            payload: { content_kind: 'pdf', maxPages: null, maxFileSizeMB: 0, timeoutSeconds: 180 },
+            payload: { content_kind: 'pdf', maxPages: null, timeoutSeconds: 180 },
         });
         const markdown = await backgroundEnqueue({
             library_id: SMALL_PDF.library_id,
@@ -149,7 +148,7 @@ describe('background queue — enqueue endpoint', () => {
             content_kind: 'pdf',
             payload_kind: 'markdown',
             job_type: 'document_timeout_retry',
-            payload: { content_kind: 'pdf', maxPages: null, maxFileSizeMB: 0, timeoutSeconds: 180 },
+            payload: { content_kind: 'pdf', maxPages: null, timeoutSeconds: 180 },
         });
         expect(structured.enqueued).toBe(true);
         expect(markdown.enqueued).toBe(true);
@@ -179,7 +178,6 @@ describe('background queue — peek endpoint', () => {
             payload: {
                 content_kind: 'pdf',
                 maxPages: 50,
-                maxFileSizeMB: 25,
                 timeoutSeconds: 180,
             },
         });
@@ -200,7 +198,6 @@ describe('background queue — peek endpoint', () => {
         expect(job.payload).toEqual({
             content_kind: 'pdf',
             maxPages: 50,
-            maxFileSizeMB: 25,
             timeoutSeconds: 180,
         });
         expect(typeof job.enqueuedAt).toBe('number');
@@ -214,7 +211,7 @@ describe('background queue — peek endpoint', () => {
             content_kind: 'pdf',
             payload_kind: 'structured',
             job_type: 'document_timeout_retry',
-            payload: { content_kind: 'pdf', maxPages: null, maxFileSizeMB: 0, timeoutSeconds: 180 },
+            payload: { content_kind: 'pdf', maxPages: null, timeoutSeconds: 180 },
         });
         await backgroundEnqueue({
             library_id: NORMAL_PDF.library_id,
@@ -222,7 +219,7 @@ describe('background queue — peek endpoint', () => {
             content_kind: 'pdf',
             payload_kind: 'structured',
             job_type: 'document_timeout_retry',
-            payload: { content_kind: 'pdf', maxPages: null, maxFileSizeMB: 0, timeoutSeconds: 180 },
+            payload: { content_kind: 'pdf', maxPages: null, timeoutSeconds: 180 },
         });
 
         const limited = await backgroundPeek({ limit: 1 });
@@ -241,7 +238,7 @@ describe('background queue — peek endpoint', () => {
             payload_kind: 'structured',
             job_type: 'document_timeout_retry',
             priority: 200,
-            payload: { content_kind: 'pdf', maxPages: null, maxFileSizeMB: 0, timeoutSeconds: 180 },
+            payload: { content_kind: 'pdf', maxPages: null, timeoutSeconds: 180 },
         });
         const high = await backgroundEnqueue({
             library_id: NORMAL_PDF.library_id,
@@ -250,7 +247,7 @@ describe('background queue — peek endpoint', () => {
             payload_kind: 'structured',
             job_type: 'document_timeout_retry',
             priority: 10,
-            payload: { content_kind: 'pdf', maxPages: null, maxFileSizeMB: 0, timeoutSeconds: 180 },
+            payload: { content_kind: 'pdf', maxPages: null, timeoutSeconds: 180 },
         });
 
         const peek = await backgroundPeek();
@@ -286,7 +283,7 @@ describe('background queue — stats endpoint', () => {
             content_kind: 'pdf',
             payload_kind: 'structured',
             job_type: 'document_timeout_retry',
-            payload: { content_kind: 'pdf', maxPages: null, maxFileSizeMB: 0, timeoutSeconds: 180 },
+            payload: { content_kind: 'pdf', maxPages: null, timeoutSeconds: 180 },
         });
         const res = await backgroundStats();
         expect(res.queue!.pending).toBe(1);
@@ -327,7 +324,7 @@ describe('background queue — processOnce endpoint', () => {
             payload_kind: 'structured',
             job_type: 'document_timeout_retry',
             priority: DRAIN_PRIORITY,
-            payload: { content_kind: 'pdf', maxPages: null, maxFileSizeMB: 0, timeoutSeconds: 180 },
+            payload: { content_kind: 'pdf', maxPages: null, timeoutSeconds: 180 },
         });
 
         const res = await backgroundProcessOnce();
@@ -352,7 +349,7 @@ describe('background queue — processOnce endpoint', () => {
             payload_kind: 'structured',
             job_type: 'document_timeout_retry',
             priority: DRAIN_PRIORITY,
-            payload: { content_kind: 'pdf', maxPages: null, maxFileSizeMB: 0, timeoutSeconds: 180 },
+            payload: { content_kind: 'pdf', maxPages: null, timeoutSeconds: 180 },
         });
 
         const res = await backgroundProcessOnce();
@@ -372,7 +369,7 @@ describe('background queue — processOnce endpoint', () => {
             payload_kind: 'structured',
             job_type: 'document_timeout_retry',
             priority: DRAIN_PRIORITY,
-            payload: { content_kind: 'pdf', maxPages: null, maxFileSizeMB: 0, timeoutSeconds: 180 },
+            payload: { content_kind: 'pdf', maxPages: null, timeoutSeconds: 180 },
         });
 
         const res = await backgroundProcessOnce();
@@ -392,7 +389,7 @@ describe('background queue — processOnce endpoint', () => {
             payload_kind: 'structured',
             job_type: 'document_timeout_retry',
             priority: DRAIN_PRIORITY,
-            payload: { content_kind: 'pdf', maxPages: null, maxFileSizeMB: 0, timeoutSeconds: 180 },
+            payload: { content_kind: 'pdf', maxPages: null, timeoutSeconds: 180 },
         });
 
         const res = await backgroundProcessOnce();
@@ -411,7 +408,7 @@ describe('background queue — processOnce endpoint', () => {
             payload_kind: 'structured',
             job_type: 'document_timeout_retry',
             priority: DRAIN_PRIORITY,
-            payload: { content_kind: 'pdf', maxPages: null, maxFileSizeMB: 0, timeoutSeconds: 180 },
+            payload: { content_kind: 'pdf', maxPages: null, timeoutSeconds: 180 },
         });
         await backgroundEnqueue({
             library_id: SMALL_PDF.library_id,
@@ -420,7 +417,7 @@ describe('background queue — processOnce endpoint', () => {
             payload_kind: 'markdown',
             job_type: 'document_timeout_retry',
             priority: DRAIN_PRIORITY,
-            payload: { content_kind: 'pdf', maxPages: null, maxFileSizeMB: 0, timeoutSeconds: 180 },
+            payload: { content_kind: 'pdf', maxPages: null, timeoutSeconds: 180 },
         });
 
         const first = await backgroundProcessOnce();
@@ -449,7 +446,7 @@ describe('background queue — enqueue defaults', () => {
             content_kind: 'pdf',
             payload_kind: 'structured',
             job_type: 'document_timeout_retry',
-            payload: { content_kind: 'pdf', maxPages: null, maxFileSizeMB: 0, timeoutSeconds: 180 },
+            payload: { content_kind: 'pdf', maxPages: null, timeoutSeconds: 180 },
         });
         const peek = await backgroundPeek();
         expect(peek.jobs?.length).toBe(1);
@@ -463,7 +460,7 @@ describe('background queue — enqueue defaults', () => {
             content_kind: 'pdf',
             payload_kind: 'structured',
             job_type: 'document_timeout_retry',
-            payload: { content_kind: 'pdf', maxPages: null, maxFileSizeMB: 0, timeoutSeconds: 180 },
+            payload: { content_kind: 'pdf', maxPages: null, timeoutSeconds: 180 },
         });
         const peekNull = await backgroundPeek();
         expect(peekNull.jobs![0].itemId).toBeNull();
@@ -477,7 +474,7 @@ describe('background queue — enqueue defaults', () => {
             payload_kind: 'structured',
             job_type: 'document_timeout_retry',
             item_id: 42,
-            payload: { content_kind: 'pdf', maxPages: null, maxFileSizeMB: 0, timeoutSeconds: 180 },
+            payload: { content_kind: 'pdf', maxPages: null, timeoutSeconds: 180 },
         });
         const peek = await backgroundPeek();
         expect(peek.jobs![0].itemId).toBe(42);
@@ -517,7 +514,7 @@ describe('background queue — clear endpoint', () => {
             content_kind: 'pdf',
             payload_kind: 'structured',
             job_type: 'document_timeout_retry',
-            payload: { content_kind: 'pdf', maxPages: null, maxFileSizeMB: 0, timeoutSeconds: 180 },
+            payload: { content_kind: 'pdf', maxPages: null, timeoutSeconds: 180 },
         });
         await backgroundEnqueue({
             library_id: SMALL_PDF.library_id,
@@ -525,7 +522,7 @@ describe('background queue — clear endpoint', () => {
             content_kind: 'pdf',
             payload_kind: 'markdown',
             job_type: 'document_timeout_retry',
-            payload: { content_kind: 'pdf', maxPages: null, maxFileSizeMB: 0, timeoutSeconds: 180 },
+            payload: { content_kind: 'pdf', maxPages: null, timeoutSeconds: 180 },
         });
 
         const before = await backgroundStats();
@@ -558,7 +555,7 @@ describe('background queue — terminal response_error completes without retry',
             payload_kind: 'structured',
             job_type: 'document_timeout_retry',
             priority: DRAIN_PRIORITY,
-            payload: { content_kind: 'pdf', maxPages: null, maxFileSizeMB: 0, timeoutSeconds: 180 },
+            payload: { content_kind: 'pdf', maxPages: null, timeoutSeconds: 180 },
             notify: true,
         });
 
@@ -593,7 +590,7 @@ describe('background queue — group library extraction', () => {
             payload_kind: 'structured',
             job_type: 'document_timeout_retry',
             priority: DRAIN_PRIORITY,
-            payload: { content_kind: 'pdf', maxPages: null, maxFileSizeMB: 0, timeoutSeconds: 180 },
+            payload: { content_kind: 'pdf', maxPages: null, timeoutSeconds: 180 },
             notify: true,
         });
 
@@ -627,7 +624,7 @@ describe('background queue — worker slot isolation', () => {
             payload_kind: 'structured',
             job_type: 'document_timeout_retry',
             priority: DRAIN_PRIORITY,
-            payload: { content_kind: 'pdf', maxPages: null, maxFileSizeMB: 0, timeoutSeconds: 180 },
+            payload: { content_kind: 'pdf', maxPages: null, timeoutSeconds: 180 },
             notify: true,
         });
 
@@ -666,7 +663,7 @@ describe('background queue — stats.byJobType across payload kinds', () => {
             content_kind: 'pdf',
             payload_kind: 'structured',
             job_type: 'document_timeout_retry',
-            payload: { content_kind: 'pdf', maxPages: null, maxFileSizeMB: 0, timeoutSeconds: 180 },
+            payload: { content_kind: 'pdf', maxPages: null, timeoutSeconds: 180 },
         });
         await backgroundEnqueue({
             library_id: SMALL_PDF.library_id,
@@ -674,7 +671,7 @@ describe('background queue — stats.byJobType across payload kinds', () => {
             content_kind: 'pdf',
             payload_kind: 'markdown',
             job_type: 'document_timeout_retry',
-            payload: { content_kind: 'pdf', maxPages: null, maxFileSizeMB: 0, timeoutSeconds: 180 },
+            payload: { content_kind: 'pdf', maxPages: null, timeoutSeconds: 180 },
         });
 
         const stats = await backgroundStats();
@@ -697,7 +694,7 @@ describe('background queue — peek edge cases', () => {
             content_kind: 'pdf',
             payload_kind: 'structured',
             job_type: 'document_timeout_retry',
-            payload: { content_kind: 'pdf', maxPages: null, maxFileSizeMB: 0, timeoutSeconds: 180 },
+            payload: { content_kind: 'pdf', maxPages: null, timeoutSeconds: 180 },
         });
         const peek = await backgroundPeek({ limit: 0 });
         expect(peek.ok).toBe(true);
@@ -712,7 +709,7 @@ describe('background queue — peek edge cases', () => {
             payload_kind: 'structured',
             job_type: 'document_timeout_retry',
             priority: 5,
-            payload: { content_kind: 'pdf', maxPages: null, maxFileSizeMB: 0, timeoutSeconds: 180 },
+            payload: { content_kind: 'pdf', maxPages: null, timeoutSeconds: 180 },
         });
         const mid = await backgroundEnqueue({
             library_id: NORMAL_PDF.library_id,
@@ -721,7 +718,7 @@ describe('background queue — peek edge cases', () => {
             payload_kind: 'structured',
             job_type: 'document_timeout_retry',
             priority: 50,
-            payload: { content_kind: 'pdf', maxPages: null, maxFileSizeMB: 0, timeoutSeconds: 180 },
+            payload: { content_kind: 'pdf', maxPages: null, timeoutSeconds: 180 },
         });
         await backgroundEnqueue({
             library_id: NO_TEXT_PDF.library_id,
@@ -730,7 +727,7 @@ describe('background queue — peek edge cases', () => {
             payload_kind: 'structured',
             job_type: 'document_timeout_retry',
             priority: 500,
-            payload: { content_kind: 'pdf', maxPages: null, maxFileSizeMB: 0, timeoutSeconds: 180 },
+            payload: { content_kind: 'pdf', maxPages: null, timeoutSeconds: 180 },
         });
 
         const peek = await backgroundPeek({ limit: 2 });
