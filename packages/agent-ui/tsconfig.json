@@ -162,6 +162,7 @@
     "./src/icons/TickIcon.tsx",
     "./src/icons/TissuePaperIcon.tsx",
     "./src/icons/ToolsIcon.tsx",
+    "./src/icons/WrenchIcon.tsx",
     "./src/icons/TwoIcon.tsx",
     "./src/icons/UndoIcon.tsx",
     "./src/icons/UploadCircleIcon.tsx",
