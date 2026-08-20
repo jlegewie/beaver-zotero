@@ -2,7 +2,39 @@
  * Registry contract for the default agent data-provider.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { AgentDataProviderMap } from '@beaver/agent-core/transport/agentDataDispatch';
+import {
+    unknownDataRequestErrorResponse,
+    type AgentDataProviderMap,
+} from '@beaver/agent-core/transport/agentDataDispatch';
+
+describe('unknownDataRequestErrorResponse', () => {
+    it('builds a typed error reply for an unmatched *_request event', () => {
+        expect(unknownDataRequestErrorResponse({
+            event: 'resolve_population_request',
+            request_id: 'req-1',
+        })).toEqual({
+            type: 'resolve_population',
+            request_id: 'req-1',
+            error: 'Unknown event type: resolve_population_request. Do not try this operation again.',
+            error_code: 'internal_error',
+        });
+    });
+
+    it('returns null when the event is not a request/response exchange', () => {
+        expect(unknownDataRequestErrorResponse({
+            event: 'batch_approval_stale',
+            request_id: 'req-1',
+        })).toBeNull();
+        expect(unknownDataRequestErrorResponse({
+            event: 'resolve_population_request',
+        })).toBeNull();
+        expect(unknownDataRequestErrorResponse({
+            event: 'resolve_population_request',
+            request_id: '',
+        })).toBeNull();
+    });
+});
+
 
 describe('default agent data-provider registry', () => {
     afterEach(() => {

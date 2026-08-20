@@ -1,11 +1,13 @@
 import React, { useMemo, useRef, useEffect, type ReactNode } from 'react';
 import InputArea from "./input/InputArea"
 import AskUserQuestionPanel from "./input/AskUserQuestionPanel"
+import BatchApprovalPanel from "./input/BatchApprovalPanel"
 import CreditConfirmationPanel from "./input/CreditConfirmationPanel"
 import { pendingApprovalsAtom } from '../agents/agentActions';
 import { pendingQuestionsAtom } from '@beaver/agent-core/run-state/pendingQuestions';
+import { pendingBatchApprovalsAtom } from '@beaver/agent-core/run-state/pendingBatchApprovals';
 import { pendingCreditConfirmationsAtom } from '@beaver/agent-core/run-state/pendingCreditConfirmations';
-import { selectComposerTakeover } from '../utils/composerTakeover';
+import { selectComposerTakeover } from '@beaver/agent-ui/chat/composerTakeover';
 import Header from "./Header"
 import { useEventSubscription } from '../hooks/useEventSubscription';
 import { ThreadView } from "./agentRuns";
@@ -188,18 +190,21 @@ const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
             : 'first_run';
     }, [profile?.user_id, shouldAssignFirstRunVariant]);
 
-    // Composer takeover: while the run blocks on a question or a credit
-    // confirmation, that panel replaces the composer entirely (the draft
-    // message atom is untouched, so the composer restores it afterwards).
-    // selectComposerTakeover owns the precedence between the three states.
+    // Composer takeover: while the run blocks on a batch approval, a question
+    // or a credit confirmation, that panel replaces the composer entirely (the
+    // draft message atom is untouched, so the composer restores it afterwards).
+    // selectComposerTakeover is shared across clients and owns the precedence
+    // between the blocking states; this client reports all four of them.
     const pendingApprovalsMap = useAtomValue(pendingApprovalsAtom);
     const pendingQuestionsMap = useAtomValue(pendingQuestionsAtom);
+    const pendingBatchApprovalsMap = useAtomValue(pendingBatchApprovalsAtom);
     const pendingCreditConfirmationsMap = useAtomValue(pendingCreditConfirmationsAtom);
-    const composerTakeover = selectComposerTakeover(
-        pendingApprovalsMap.size,
-        pendingCreditConfirmationsMap,
-        pendingQuestionsMap,
-    );
+    const composerTakeover = selectComposerTakeover({
+        pendingApprovalCount: pendingApprovalsMap.size,
+        batchApprovals: pendingBatchApprovalsMap,
+        creditConfirmations: pendingCreditConfirmationsMap,
+        questions: pendingQuestionsMap,
+    });
 
     useEffect(() => {
         setIsSkippedFilesDialogVisible(false);
@@ -386,7 +391,13 @@ const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
                     <div id="beaver-prompt" className="flex-none px-3 pb-3 relative">
                         <PopupOverlayContainer />
                         <ScrollDownButton onClick={handleScrollToBottom} isWindow={isWindow} />
-                        {composerTakeover.kind === 'credit-confirmation' ? (
+                        {composerTakeover.kind === 'batch-approval' ? (
+                            // key resets local decision state per approval request
+                            <BatchApprovalPanel
+                                key={composerTakeover.approval.approvalId}
+                                approval={composerTakeover.approval}
+                            />
+                        ) : composerTakeover.kind === 'credit-confirmation' ? (
                             // key resets local decision state per confirmation
                             <CreditConfirmationPanel
                                 key={composerTakeover.confirmation.confirmationId}

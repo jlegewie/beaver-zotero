@@ -4,20 +4,12 @@ import { TextPartView } from './TextPartView';
 import { ThinkingPartView } from './ThinkingPartView';
 import { ToolCallPartView } from './ToolCallPartView';
 import { isAnnotationToolResult } from '@beaver/agent-core/run-state/toolResultTypes';
+import { isAutoLoadingToolCall } from '@beaver/agent-core/agents/messageVisibility';
 import ContextMenu from '@beaver/agent-ui/primitives/ContextMenu';
 import useSelectionContextMenu from '../../hooks/useSelectionContextMenu';
 import { buildEditNoteRenderItems, getEditNoteGroupInstanceId } from './editNoteShared';
 import { getHost } from '@beaver/agent-ui/host';
 import { GenericAgentActionView } from './GenericAgentActionView';
-
-/**
- * Backend-injected plumbing (load_capacity / read-tool auto_load injection).
- * Only `auto_load_*` IDs are suppressed — `tool_kind` is also set on normal
- * agent-initiated search/capability calls and must not drive visibility here.
- */
-export function isAutoLoadingToolCall(part: ToolCallPart): boolean {
-    return part.tool_call_id.startsWith('auto_load_');
-}
 
 interface ModelResponseViewProps {
     /** The model response */

@@ -235,7 +235,7 @@ describe('BeaverDB background processing state', () => {
         const first = await db.enqueueBackgroundJob({
             ...base,
             payload: {
-                content_kind: 'pdf', maxPages: null, maxFileSizeMB: 0,
+                content_kind: 'pdf', maxPages: null,
                 timeoutSeconds: 120, doc_hash: 'a'.repeat(64),
             },
         });
@@ -248,7 +248,7 @@ describe('BeaverDB background processing state', () => {
             ...base,
             now: 2,
             payload: {
-                content_kind: 'pdf', maxPages: null, maxFileSizeMB: 0,
+                content_kind: 'pdf', maxPages: null,
                 timeoutSeconds: 120, doc_hash: 'b'.repeat(64),
                 previous_doc_hash: 'a'.repeat(64),
             },
@@ -277,7 +277,7 @@ describe('BeaverDB background processing state', () => {
             ...common,
             jobType: 'fulltext_upsert',
             payload: {
-                content_kind: 'pdf', maxPages: null, maxFileSizeMB: 0,
+                content_kind: 'pdf', maxPages: null,
                 timeoutSeconds: 120, doc_hash: 'c'.repeat(64),
             },
         });
@@ -286,7 +286,7 @@ describe('BeaverDB background processing state', () => {
                 ...common,
                 jobType: 'fulltext_untag',
                 payload: {
-                    content_kind: 'pdf', maxPages: null, maxFileSizeMB: 0,
+                    content_kind: 'pdf', maxPages: null,
                     timeoutSeconds: 120, index_action: 'untag', doc_hash: hash,
                 },
             });
@@ -310,7 +310,7 @@ describe('BeaverDB background processing state', () => {
             payloadKind: 'structured',
             priority: 80,
             payload: {
-                content_kind: 'pdf', maxPages: null, maxFileSizeMB: 0,
+                content_kind: 'pdf', maxPages: null,
                 timeoutSeconds: 120, index_action: 'untag', doc_hash: hash,
             },
             now: 0,

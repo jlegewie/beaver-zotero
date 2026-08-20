@@ -1,10 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
+import { version as CURRENT_VERSION } from '../../../package.json';
 import {
     CLIENT_FEATURES,
     ZOTERO_PLUGIN_CLIENT_TYPE,
     ZOTERO_PLUGIN_FEATURES,
+    zoteroPluginFeatures,
 } from '@beaver/agent-core/protocol/agentProtocol';
 
 // Guards the client-feature handshake (Lane C).
@@ -63,6 +63,9 @@ const VERSION_GATES: { feature: string; minVersion: string; op: Op }[] = [
 // client only answers if it has the handler: a build that predates it drops the
 // event and stalls the run for the whole confirmation timeout, so the backend
 // falls back to the per-tool confirmations instead.
+// batch_operations is declaration-only because it is a backend rollout switch
+// for a deferred capability with no client handler: a client that does not
+// declare it sees no catalog entry. This plugin only opts in in development.
 const DECLARATION_ONLY_FEATURES = [
     'external_files',
     'ask_user_question',
@@ -77,6 +80,12 @@ const DECLARATION_ONLY_FEATURES = [
     'list_collections_recursive',
     'list_tags_name_query',
     'credit_confirmation',
+    'batch_operations',
+];
+
+// Features in the vocabulary that this plugin does not declare in production.
+const DEV_ONLY_FEATURES = [
+    'batch_operations',
 ];
 
 // The full backend feature vocabulary (ALL_FEATURES in version_gates.py): every
@@ -135,16 +144,13 @@ function featuresFromVersion(version: string): string[] {
 
 // The plugin version drives the derivation, so the contract is checked against
 // whatever this build actually is.
-const pkg = JSON.parse(
-    readFileSync(fileURLToPath(new URL('../../../package.json', import.meta.url)), 'utf8'),
-) as { version: string };
-const CURRENT_VERSION = pkg.version;
 
-// Expected declared set for the current build: everything the backend grants a
-// client of this version, plus the declaration-only features.
+// Expected declared set for the current production build: everything the
+// backend grants a client of this version, plus the declaration-only features
+// this plugin always ships — excluding the development-only rollout switches.
 const EXPECTED_DECLARED_FEATURES = [
     ...featuresFromVersion(CURRENT_VERSION),
-    ...DECLARATION_ONLY_FEATURES,
+    ...DECLARATION_ONLY_FEATURES.filter((f) => !DEV_ONLY_FEATURES.includes(f)),
 ].sort();
 
 describe('client feature declaration (Lane C)', () => {
@@ -172,6 +178,15 @@ describe('client feature declaration (Lane C)', () => {
         // threads — gated on the version header — still get v2 and render fine.
         expect(featuresFromVersion(CURRENT_VERSION)).toContain('citation_v2');
         expect(ZOTERO_PLUGIN_FEATURES).toContain('citation_v2');
+    });
+
+    it('declares batch_operations only in development', () => {
+        expect(ZOTERO_PLUGIN_FEATURES).not.toContain('batch_operations');
+        expect(zoteroPluginFeatures(false)).not.toContain('batch_operations');
+        expect(zoteroPluginFeatures(true)).toEqual([
+            ...ZOTERO_PLUGIN_FEATURES,
+            'batch_operations',
+        ]);
     });
 });
 

@@ -97,15 +97,18 @@ export type ExtractionSource =
     | { kind: 'zotero'; item: Zotero.Item }
     | { kind: 'external'; filePath: string; itemRef: DocumentCacheItemRef };
 
-/** Inline local-file source check for external files (no Zotero item). */
+/**
+ * Inline local-file source check for external files (no Zotero item).
+ * `maxMB` is the already-resolved ceiling, so snapshot callers can pass their
+ * tighter one.
+ */
 async function resolveExternalFileSource(
     filePath: string,
-    maxFileSizeMBInput: number,
+    maxMB: number,
 ): Promise<
     | { kind: 'ok'; filePath: string }
     | { kind: 'error'; code: 'file_missing' | 'file_too_large'; sizeMB?: number; maxMB?: number }
 > {
-    const maxMB = effectiveMaxFileSizeMB(maxFileSizeMBInput);
     let stat: { size?: number | null };
     try {
         stat = await IOUtils.stat(filePath);
@@ -165,7 +168,6 @@ export interface ExtractAndCacheArgs {
      * pages.
      */
     maxPages: number | null;
-    maxFileSizeMB: number;
     /** Extraction deadline in seconds. */
     timeoutSeconds: number;
     /** Default `"hot"`. Background processor sets `"background"`. */
@@ -207,7 +209,6 @@ export interface ExtractAndCacheEpubArgs {
      * markers, otherwise synthetic ~character-interval pages).
      */
     maxPages: number | null;
-    maxFileSizeMB: number;
     externalAbortSignal?: AbortSignal;
     onFileNotSyncedLocally?: () => void;
     /** Pre-resolved remote source: extract from a temporary local copy while
@@ -229,7 +230,6 @@ export interface ExtractAndCacheSnapshotArgs {
      * synthetic `pageNumber` coordinate (~character-interval pages).
      */
     maxPages: number | null;
-    maxFileSizeMB: number;
     externalAbortSignal?: AbortSignal;
     onFileNotSyncedLocally?: () => void;
     resolvedFile?: {
@@ -532,7 +532,6 @@ export async function extractAndCacheEpubDocument(
         sourceSizeBytes = args.resolvedFile.sourceSizeBytes;
     } else if (args.source.kind === 'zotero') {
         const preflight = await preflightEpubFile(args.source.item, {
-            maxFileSizeMB: args.maxFileSizeMB,
             onFileNotSyncedLocally: args.onFileNotSyncedLocally,
         });
         if (preflight.kind === 'response_error') {
@@ -549,7 +548,7 @@ export async function extractAndCacheEpubDocument(
     } else {
         // External files skip the Zotero preflight (kind already validated at
         // attach time; the managed copy is local-only).
-        const externalSource = await resolveExternalFileSource(args.source.filePath, args.maxFileSizeMB);
+        const externalSource = await resolveExternalFileSource(args.source.filePath, effectiveMaxFileSizeMB());
         if (externalSource.kind === 'error') {
             return {
                 kind: 'response_error',
@@ -565,7 +564,7 @@ export async function extractAndCacheEpubDocument(
         extractionFilePath = filePath;
     }
 
-    const maxFileSizeMB = effectiveMaxFileSizeMB(args.maxFileSizeMB);
+    const maxFileSizeMB = effectiveMaxFileSizeMB();
     const maxSourceSizeBytes = maxFileSizeMB * 1024 * 1024;
     const maxPages = effectiveMaxPageCount(args.maxPages);
 
@@ -717,7 +716,6 @@ export async function extractAndCacheSnapshotDocument(
         sourceSizeBytes = args.resolvedFile.sourceSizeBytes;
     } else if (args.source.kind === 'zotero') {
         const preflight = await preflightSnapshotFile(args.source.item, {
-            maxFileSizeMB: args.maxFileSizeMB,
             onFileNotSyncedLocally: args.onFileNotSyncedLocally,
         });
         if (preflight.kind === 'response_error') {
@@ -735,7 +733,7 @@ export async function extractAndCacheSnapshotDocument(
         // Match the tighter Zotero snapshot preflight limit for external files.
         const externalSource = await resolveExternalFileSource(
             args.source.filePath,
-            effectiveMaxSnapshotFileSizeMB(args.maxFileSizeMB),
+            effectiveMaxSnapshotFileSizeMB(),
         );
         if (externalSource.kind === 'error') {
             return {
@@ -759,7 +757,7 @@ export async function extractAndCacheSnapshotDocument(
         : {};
 
     // Keep cache and fallback errors aligned with snapshot preflight.
-    const maxFileSizeMB = effectiveMaxSnapshotFileSizeMB(args.maxFileSizeMB);
+    const maxFileSizeMB = effectiveMaxSnapshotFileSizeMB();
     const maxSourceSizeBytes = maxFileSizeMB * 1024 * 1024;
     const maxPages = effectiveMaxPageCount(args.maxPages);
 
@@ -895,7 +893,7 @@ export async function extractAndCacheResolvedPdfDocument(
     const workerName: PDFWorkerSlotName = args.workerName ?? 'hot';
     const requestKey = args.resolvedKey;
 
-    const maxFileSizeMB = effectiveMaxFileSizeMB(args.maxFileSizeMB);
+    const maxFileSizeMB = effectiveMaxFileSizeMB();
     const maxPages = effectiveMaxPageCount(args.maxPages);
 
     const ownsTimeout = !args.timeoutContext;
@@ -955,7 +953,7 @@ export async function extractAndCacheResolvedPdfDocument(
         if (args.source.kind === 'external') {
             // External files: the managed copy is the only source — no remote
             // fallback, plain stat-based existence/size check.
-            const externalSource = await resolveExternalFileSource(args.source.filePath, args.maxFileSizeMB);
+            const externalSource = await resolveExternalFileSource(args.source.filePath, maxFileSizeMB);
             throwIfTimedOut('file_missing_response');
             if (externalSource.kind === 'error') {
                 if (externalSource.code === 'file_too_large') {
@@ -979,7 +977,6 @@ export async function extractAndCacheResolvedPdfDocument(
         } else {
             const source = await resolveAttachmentFileSource({
                 item: args.source.item,
-                maxFileSizeMB: args.maxFileSizeMB,
                 localSizeStrategy: 'zotero-total',
                 signal,
                 throwIfTimedOut,
@@ -1121,7 +1118,6 @@ export async function extractAndCacheResolvedPdfDocument(
             const loaded = await loadAttachmentData({
                 item: zoteroItem,
                 source: attachmentSource,
-                maxFileSizeMB,
                 onRemoteDownloadFailure: args.onRemoteDownloadFailure,
                 signal,
                 throwIfTimedOut,
@@ -1187,7 +1183,6 @@ export async function extractAndCacheResolvedPdfDocument(
             const loaded = await loadAttachmentData({
                 item: zoteroItem,
                 source: attachmentSource,
-                maxFileSizeMB,
                 onRemoteDownloadFailure: args.onRemoteDownloadFailure,
                 signal,
                 throwIfTimedOut,

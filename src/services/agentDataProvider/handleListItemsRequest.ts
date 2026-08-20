@@ -18,7 +18,7 @@ import {
 import { ItemStub } from '@beaver/agent-core/types/zotero';
 import { serializeNote, serializeItemStub } from '../../utils/zoteroSerializers';
 import { libraryRefForLibraryID, modelObjectId } from '../../utils/libraryIdentity';
-import { getCollectionByIdOrName, validateLibraryAccess, isLibrarySearchable, getSearchableLibraries, excludedLibraryMessage, extractYear, formatCreatorsString, getAttachmentInfoForItem, degradedAttachmentRow } from './utils';
+import { getCollectionByIdOrName, validateLibraryAccess, isLibrarySearchable, getSearchableLibraries, excludedLibraryMessage, extractYear, formatCreatorsString, getAttachmentInfoForItem, degradedAttachmentRow, resolveStoredTagName } from './utils';
 
 function isAnnotationItem(item: Zotero.Item): boolean {
     return String(item.itemType) === 'annotation' || (item as { isAnnotation?: () => boolean }).isAnnotation?.() === true;
@@ -103,26 +103,27 @@ export async function handleListItemsRequest(
             }
         }
         
-        // Validate and add tag filter if specified
+        // Tag filter: resolve to stored casing; unknown tags error instead of matching nothing.
+        // The resolved spelling is kept for the child-expansion filter below, which
+        // compares tag names itself and would otherwise re-introduce the casing
+        // mismatch this lookup exists to remove.
+        let storedTagName: string | null = null;
         if (request.tag) {
-            // Check if the tag exists in the library
-            const allTags = await Zotero.Tags.getAll(library.libraryID);
-            const tagExists = (allTags as { tag: string }[]).some(
-                (t) => t.tag.toLowerCase() === request.tag!.toLowerCase()
-            );
+            const resolvedTag = await resolveStoredTagName(library.libraryID, library.name, request.tag);
             
-            if (!tagExists) {
+            if (!resolvedTag.found) {
                 return {
                     type: 'list_items',
                     request_id: request.request_id,
                     items: [],
                     total_count: 0,
-                    error: `Tag not found: "${request.tag}" in library "${library.name}"`,
+                    error: resolvedTag.error,
                     error_code: 'tag_not_found',
                 };
             }
             
-            search.addCondition('tag', 'is', request.tag);
+            storedTagName = resolvedTag.name;
+            search.addCondition('tag', 'is', storedTagName);
         }
         
         // Item category: Filter by Zotero item category (regular/attachment/note/annotation)
@@ -208,9 +209,9 @@ export async function handleListItemsRequest(
                     .filter((c): c is Zotero.Item => c !== null);
 
                 let filteredChildren = children;
-                if (request.tag) {
+                if (storedTagName) {
                     await Zotero.Items.loadDataTypes(children, ['tags']);
-                    const tagExact = request.tag;
+                    const tagExact = storedTagName;
                     filteredChildren = children.filter(c => {
                         const tags = c.getTags?.() ?? [];
                         return tags.some((t: { tag: string }) => t.tag === tagExact);

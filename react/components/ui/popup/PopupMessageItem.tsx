@@ -122,6 +122,7 @@ const PopupMessageItem: React.FC<PopupMessageItemProps> = ({ message, onRemove, 
                 {!(isFloating && (message.type === 'version_update' || message.type === 'welcome_onboarding' || message.type === 'reader_tip' || message.type === 'note_tip')) && (
                     <PopupMessageHeader
                         icon={message.icon || getDefaultIcon()}
+                        rightIcon={message.rightIcon}
                         title={message.title}
                         count={message.count}
                         buttonIcon={message.buttonIcon}
@@ -207,6 +208,7 @@ const PopupMessageItem: React.FC<PopupMessageItemProps> = ({ message, onRemove, 
                                 handleDismiss();
                             }}
                             icon={message.button.icon}
+                            rightIcon={message.button.rightIcon}
                             variant={message.button.variant ?? "outline"}
                         >
                             {message.button.text}

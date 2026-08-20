@@ -539,7 +539,6 @@ describe('background queue honors the searchable set', () => {
             payload: {
                 content_kind: 'pdf',
                 maxPages: 1,
-                maxFileSizeMB: 50,
                 timeoutSeconds: 60,
             },
         });

@@ -100,7 +100,6 @@ export class DocumentExtractExecutor implements JobExecutor {
         });
         const source = await resolveAttachmentFileSource({
             item,
-            maxFileSizeMB: 0,
             localSizeStrategy: 'stat',
         });
         if (source.kind === 'error') {
@@ -284,7 +283,6 @@ export class DocumentExtractExecutor implements JobExecutor {
                 zoteroKey: record.zoteroKey,
                 mode: record.payloadKind,
                 maxPages: payload.maxPages,
-                maxFileSizeMB: payload.maxFileSizeMB,
                 timeoutSeconds: payload.timeoutSeconds,
                 workerName: 'background',
                 externalAbortSignal: ctx.externalAbortSignal,
@@ -357,7 +355,6 @@ export class DocumentExtractExecutor implements JobExecutor {
             zoteroKey: record.zoteroKey,
             mode: record.payloadKind,
             maxPages: payload.maxPages,
-            maxFileSizeMB: payload.maxFileSizeMB,
             timeoutSeconds: payload.timeoutSeconds,
             workerName: 'background',
             externalAbortSignal: ctx.externalAbortSignal,
@@ -411,7 +408,6 @@ export class DocumentExtractExecutor implements JobExecutor {
             const loaded = await loadAttachmentData({
                 item,
                 source,
-                maxFileSizeMB: 0,
                 signal: ctx.externalAbortSignal,
             });
             if (loaded.kind === 'error') {
@@ -438,7 +434,6 @@ export class DocumentExtractExecutor implements JobExecutor {
                 kind === 'epub' ? 'application/epub+zip' : 'text/html'
             ),
             maxPages: null,
-            maxFileSizeMB: 0,
             externalAbortSignal: ctx.externalAbortSignal,
             resolvedFile,
         };

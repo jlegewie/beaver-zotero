@@ -280,7 +280,10 @@ export interface WSZoteroDocumentRequest extends WSBaseEvent {
     mode: BeaverExtractResult['mode'];
     /** Reject threshold for total document page count; not a page clamp. */
     max_pages?: number | null;
-    /** Backend-requested file size cap; frontend also applies its hard cap. */
+    /**
+     * Requested file size cap. Accepted for wire compatibility and ignored:
+     * the frontend's file-size ceiling is a client-side preference.
+     */
     max_file_size_mb?: number | null;
     /** Frontend-side extraction deadline in seconds. */
     timeout_seconds?: number;
@@ -1458,6 +1461,77 @@ export interface WSListItemsResponse {
     available_libraries?: AvailableLibraryInfo[] | null;
 }
 
+/**
+ * Request from backend for resolve_population.
+ *
+ * Resolves the complete set of item ids matching a filter description in one
+ * round trip, so a batch operation never has to page through `list_items`.
+ * Every filter is ANDed (the join mode is always `all`); filters left unset do
+ * not constrain the result, so an otherwise empty request selects the whole
+ * library.
+ */
+export interface WSResolvePopulationRequest extends WSBaseEvent {
+    event: 'resolve_population_request';
+    request_id: string;
+    /** Library id or name. Null/absent = the user's default library. */
+    library_id?: number | string | null;
+    /** Bare collection key (never library-qualified); the backend down-converts. */
+    collection_key?: string | null;
+    /** Include items from subcollections when scoped to a collection. */
+    recursive: boolean;
+    /** Exact tag the items must carry. */
+    tag?: string | null;
+    /** Only items that belong to no collection. */
+    unfiled: boolean;
+    /** Only items that carry no tags. */
+    untagged: boolean;
+    /** Additional search conditions, ANDed with the other filters. */
+    conditions: ZoteroSearchCondition[];
+    /** 'regular' = bibliographic items, 'attachment' = child attachments. */
+    item_category: 'regular' | 'attachment';
+    /** Filter regular items by attachment presence; null = no filter. */
+    has_attachments?: boolean | null;
+    /**
+     * Maximum number of ids to return. Further matches are counted, not
+     * returned. 0 returns no ids (total_count is still the true match count).
+     */
+    max_items: number;
+}
+
+/** Response to resolve_population request */
+export interface WSResolvePopulationResponse {
+    type: 'resolve_population';
+    request_id: string;
+    /**
+     * Matching item ids in portable form (`u-<key>` for the personal library,
+     * `g<groupID>-<key>` for groups — group id, not the device-local library
+     * id), deterministic order, length <= max_items.
+     */
+    item_ids: string[];
+    /** True number of matches, counted before truncation. */
+    total_count: number;
+    /** True when total_count exceeded max_items and item_ids was cut short. */
+    truncated: boolean;
+    /**
+     * Display names of the library and collection the filters resolved
+     * against. The approval card names the population's location from these
+     * and says nothing about it when they are absent, so omitting them costs
+     * the user the WHERE half of what they are approving.
+     */
+    library_name?: string | null;
+    collection_name?: string | null;
+    error?: string | null;
+    error_code?: string | null;
+    /** Available libraries (only included when error_code is 'library_not_found') */
+    available_libraries?: AvailableLibraryInfo[] | null;
+    /**
+     * Non-fatal warnings (e.g. conditions Zotero rejected and the handler
+     * dropped). A dropped filter WIDENS the population, so the caller must
+     * treat any warning as a failed resolution rather than acting on the ids.
+     */
+    warnings?: string[] | null;
+}
+
 /** Request from backend for get_metadata */
 export interface WSGetMetadataRequest extends WSBaseEvent {
     event: 'get_metadata_request';
@@ -2006,6 +2080,126 @@ export interface WSCreditConfirmationStale extends WSBaseEvent {
     reason: 'timed_out' | 'unknown';
 }
 
+/**
+ * Coverage a batch approval grants.
+ *
+ * `full_access` lets the batch's library edits apply without asking again;
+ * `ask_each_time` keeps every per-call prompt. Mirrors the backend's
+ * `BatchApprovalMode`; the two must stay in step.
+ */
+export type BatchApprovalMode = 'full_access' | 'ask_each_time';
+
+/**
+ * Ask the user to approve a batch operation before it starts mutating.
+ *
+ * One decision covers a whole batch rather than a single tool call, so this
+ * renders as a run-level card. Unlike a credit confirmation it carries a
+ * `toolcall_id` — the call that declared the batch — so the card can be
+ * anchored to it.
+ *
+ * Every user-facing string here is composed by the backend and must be
+ * rendered verbatim; the client contributes only its own chrome (the mode
+ * labels and the instructions placeholder). `destructive_warning` is
+ * model-authored prose about what the batch removes or overwrites and belongs
+ * in its own visually distinct block; it is empty when the batch declared
+ * nothing destructive, and the block is then hidden.
+ */
+export interface WSBatchApprovalRequest extends WSBaseEvent {
+    event: 'batch_approval_request';
+    /** Correlation id for the response */
+    approval_id: string;
+    /** The agent run awaiting approval */
+    run_id: string;
+    /** Thread the run belongs to */
+    thread_id?: string | null;
+    /** Tool call that declared the batch, so the client can anchor the card */
+    toolcall_id: string;
+    /** Id of the batch awaiting approval */
+    batch_id: string;
+    /** Card title, composed by the backend */
+    title: string;
+    /**
+     * The population's size, e.g. "184 items" — the emphasised half of the
+     * scope line, and always set.
+     */
+    scope_primary: string;
+    /**
+     * Where that population lives, e.g. "in Methods and its subcollections";
+     * empty when it cannot be stated truthfully, and the card then shows the
+     * count alone.
+     */
+    scope_secondary: string;
+    /** The batch goal, composed by the backend */
+    message: string;
+    /**
+     * What the batch removes or overwrites, rendered verbatim in its own
+     * block; empty when the batch declared nothing destructive.
+     */
+    destructive_warning: string;
+    /**
+     * Short line about the confirmation limit approving raises, shown beside
+     * the title; empty when the run has no credit ledger or the user switched
+     * confirmations off, and the chip is then hidden.
+     */
+    credit_chip: string;
+    /**
+     * The sentence the chip abbreviates, shown on hover; empty under the same
+     * conditions as the chip.
+     */
+    credit_tooltip: string;
+    /** Coverage mode the card preselects */
+    default_mode: BatchApprovalMode;
+    /** Label for the approve button */
+    approve_label: string;
+    /** Label for the decline button */
+    decline_label: string;
+    /** Backend-provided docs link text; empty means no link */
+    learn_more_label?: string;
+    /** Docs path resolved against the client's environment-specific docs URL */
+    learn_more_path?: string;
+    /** How long the backend will wait for a response */
+    timeout_seconds: number;
+}
+
+/**
+ * Response to a batch approval request (the user's decision).
+ *
+ * Both outcomes may carry instructions: on an approval they constrain how the
+ * batch runs, on a decline they say what to do instead.
+ */
+export interface WSBatchApprovalResponse {
+    type: 'batch_approval_response';
+    approval_id: string;
+    /** Whether the user approved the batch */
+    approved: boolean;
+    /** Coverage the approval grants */
+    mode: BatchApprovalMode;
+    /**
+     * Optional instructions from the user, kept in front of the model for the
+     * life of the batch and taking precedence over the batch goal.
+     */
+    user_instructions?: string | null;
+}
+
+/**
+ * The backend is no longer waiting on a batch approval.
+ *
+ * Sent when a `batch_approval_response` arrives after the backend's wait
+ * expired. The batch then runs with no coverage and every mutating call keeps
+ * its own prompt, so there is nothing to apply locally — the client just
+ * retires the card.
+ */
+export interface WSBatchApprovalStale extends WSBaseEvent {
+    event: 'batch_approval_stale';
+    /** The approval whose response was too late */
+    approval_id: string;
+    /**
+     * `timed_out`: the backend was waiting and gave up.
+     * `unknown`: no record of this approval on this connection.
+     */
+    reason: 'timed_out' | 'unknown';
+}
+
 /** One selectable option of an ask_user_question item (ids are server-assigned) */
 export interface AskUserQuestionOption {
     /** Server-assigned option id (e.g. 'q0-o1') */
@@ -2104,6 +2298,7 @@ export type WSEvent =
     // Library management tools
     | WSZoteroSearchRequest
     | WSListItemsRequest
+    | WSResolvePopulationRequest
     | WSListCollectionsRequest
     | WSListTagsRequest
     | WSGetMetadataRequest
@@ -2120,6 +2315,9 @@ export type WSEvent =
     // Run-level credit confirmation
     | WSCreditConfirmationRequest
     | WSCreditConfirmationStale
+    // Run-level batch approval
+    | WSBatchApprovalRequest
+    | WSBatchApprovalStale
     // User interaction events
     | WSAskUserQuestionRequest;
 
@@ -2271,6 +2469,8 @@ export const CLIENT_FEATURES = {
      * per-tool `confirm_extraction` / `confirm_external_search` approvals.
      */
     CREDIT_CONFIRMATION: 'credit_confirmation',
+    /** `batch_operations` capability (batch_start / batch_resolve). */
+    BATCH_OPERATIONS: 'batch_operations',
 } as const;
 
 /** Client type identifier for the Zotero plugin. */
@@ -2300,13 +2500,24 @@ export type BeaverClientType =
 export const ZOTERO_AGENT_NAME = 'beaver';
 
 /**
- * Features the current Zotero plugin build supports, declared explicitly in the
- * auth handshake. This build supports the full set, which equals what the
- * backend would otherwise derive from this plugin version — so declaring it is
- * behavior-preserving while letting the backend stop relying on version
- * derivation for current clients.
+ * Features the current Zotero plugin build always declares in the auth
+ * handshake. Equals the full CLIENT_FEATURES vocabulary except
+ * `batch_operations`, which is a backend rollout switch this plugin only
+ * opts into in development (see `zoteroPluginFeatures`).
  */
-export const ZOTERO_PLUGIN_FEATURES: string[] = Object.values(CLIENT_FEATURES);
+export const ZOTERO_PLUGIN_FEATURES: string[] = Object.values(CLIENT_FEATURES).filter(
+    (feature) => feature !== CLIENT_FEATURES.BATCH_OPERATIONS,
+);
+
+/**
+ * Handshake feature list for this Zotero plugin build.
+ * Development builds additionally declare `batch_operations` so the backend
+ * offers the deferred batch capability without shipping it to production.
+ */
+export function zoteroPluginFeatures(isDevelopment: boolean): string[] {
+    if (!isDevelopment) return ZOTERO_PLUGIN_FEATURES;
+    return [...ZOTERO_PLUGIN_FEATURES, CLIENT_FEATURES.BATCH_OPERATIONS];
+}
 
 /** Current library context for application state */
 export interface CurrentLibrary {
@@ -2670,6 +2881,22 @@ export interface WSCallbacks {
      * @param event The stale-confirmation notice, keyed by confirmation id
      */
     onCreditConfirmationStale?: (event: WSCreditConfirmationStale) => void;
+
+    /**
+     * Called when the backend asks the user to approve a batch operation before
+     * it starts mutating. The frontend should render the backend-composed card
+     * verbatim and send a WSBatchApprovalResponse when the user decides.
+     * @param event The approval request with copy and correlation id
+     */
+    onBatchApprovalRequest?: (event: WSBatchApprovalRequest) => void;
+
+    /**
+     * Called when a batch approval response we sent arrived too late to be
+     * used. The frontend should retire the card; there is nothing to apply
+     * locally.
+     * @param event The stale-approval notice, keyed by approval id
+     */
+    onBatchApprovalStale?: (event: WSBatchApprovalStale) => void;
 
     /**
      * Called when the backend asks the user structured multiple-choice

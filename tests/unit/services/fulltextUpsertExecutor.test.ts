@@ -109,7 +109,6 @@ describe('FulltextUpsertExecutor', () => {
             payload: {
                 content_kind: 'pdf',
                 maxPages: null,
-                maxFileSizeMB: 0,
                 timeoutSeconds: 120,
                 index_action: 'upsert',
             },

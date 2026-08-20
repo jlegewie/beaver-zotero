@@ -7,14 +7,12 @@
 
 import { atom, Getter, Setter } from 'jotai';
 import { v4 as uuidv4 } from 'uuid';
-import { agentService, AgentConnectionError } from '@beaver/agent-core/transport/agentService';
-import { notifyCreditConfirmation, notifyRunComplete, notifyUserQuestion } from '../../src/services/systemNotifications';
+import { agentService } from '@beaver/agent-core/transport/agentService';
+import { connectWithRetry } from '@beaver/agent-core/transport/connectWithRetry';
+import { notifyBatchApproval, notifyCreditConfirmation, notifyRunComplete, notifyUserQuestion } from '../../src/services/systemNotifications';
 import { reportConnectionFailure } from '@beaver/agent-core/transport/clients/diagnosticsService';
 import {
-    baselineConnectionEvidence,
     ConnectionFailureEvidence,
-    connectRecoveryAuthFields,
-    isRetryablePreReadyConnectFailure,
     presentConnectionFailure,
 } from '@beaver/agent-core/transport/connectionFailure';
 import {
@@ -36,9 +34,12 @@ import {
     WSDeferredApprovalRequest,
     WSDeferredApprovalStale,
     WSAskUserQuestionRequest,
+    WSBatchApprovalRequest,
+    WSBatchApprovalStale,
     WSCreditConfirmationRequest,
     WSCreditConfirmationStale,
     AskUserQuestionAnswer,
+    BatchApprovalMode,
     WSStreamingDoneEvent,
     WSThreadNameEvent,
     ChargingPermissions,
@@ -47,6 +48,7 @@ import { threadService } from '@beaver/agent-core/transport/threadService';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { selectedModelAtom, ModelConfig } from './models';
 import { getPref } from '../../src/utils/prefs';
+import { saveInterruptedThread } from '../../src/utils/interruptedThreadPrefs';
 import { MessageAttachment, SourceAttachment } from '@beaver/agent-core/types/attachments/apiTypes';
 import type { ZoteroCollection } from '@beaver/agent-core/types/zotero';
 import { toMessageAttachment } from '../types/attachments/converters';
@@ -86,6 +88,8 @@ import {
     updateRunWithToolCallArgsStream,
     allUserAttachmentKeysAtom,
     resetRunMessages,
+    wsReconnectingAtom,
+    wsRetryAtom,
 } from '@beaver/agent-core/run-state/atoms';
 import { userIdAtom } from './auth';
 import { citationsAtom, processCitationsAtom, resetCitationMarkersAtom, mergePageLabelsByAttachmentIdAtom } from '@beaver/agent-core/citations/atoms';
@@ -133,6 +137,12 @@ import {
     removePendingCreditConfirmationAtom,
     clearAllPendingCreditConfirmationsAtom,
 } from '@beaver/agent-core/run-state/pendingCreditConfirmations';
+import {
+    addPendingBatchApprovalAtom,
+    pendingBatchApprovalsAtom,
+    removePendingBatchApprovalAtom,
+    clearAllPendingBatchApprovalsAtom,
+} from '@beaver/agent-core/run-state/pendingBatchApprovals';
 import { readCreditThreshold } from '../utils/creditThreshold';
 import { getAppliedPdfAnnotationCount } from '../agents/agentActionCounts';
 import { undoEditMetadataAction } from '../utils/editMetadataActions';
@@ -149,7 +159,7 @@ import { processToolReturnResults } from '../agents/toolResultProcessing';
 import { upgradeToolReturn } from '../compat/legacyToolResults';
 import { isToolResultView } from '@beaver/agent-core/run-state/toolResultViews';
 import { addWarningAtom, clearWarningsAtom } from './warnings';
-import { backendHighTokenUsageRunsAtom } from './messageUIState';
+import { backendHighTokenUsageRunsAtom, recordAppliedActionsAtom } from './messageUIState';
 import { currentThreadNameAtom, loadThreadAtom } from './threads';
 import { loadItemDataForAgentActions, autoApplyAnnotationAgentActions, autoCreateNoteAgentActions } from '../utils/agentActionUtils';
 import { extractZoteroReferencesFromToolCall } from '@beaver/agent-core/run-state/toolLabels';
@@ -162,7 +172,6 @@ import {
     runApprovalPolicyAtom,
 } from './runApprovalPolicy';
 import { loadFullItemDataWithAllTypes } from '../../src/utils/zoteroUtils';
-import { resolveClientIdentity } from '@beaver/agent-core/transport/clientIdentity';
 import { dismissDiffPreview } from '../utils/noteEditorDiffPreview';
 import { store } from '../store';
 import { triggerProfileRefresh } from '../hooks/useProfileSync';
@@ -174,7 +183,7 @@ import { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import { createZoteroItemReference } from '../utils/zoteroReferences';
 import { markExternalReferenceImportedAtom } from './externalReferences';
 import type { CreateItemProposedData, CreateItemResultData } from '@beaver/agent-core/types/agentActions/items';
-import { appendRunIfMissing, findResumeChainRoot, findRunForResume, hasOnlyThinkingParts, lingeringCompletedRun, resolveErrorRunId, toRunError } from '@beaver/agent-core/run-state/runResumeHelpers';
+import { appendRunIfMissing, findResumeChainRoot, findRunForResume, hasOnlyThinkingParts, isInterruptedRun, lingeringCompletedRun, resolveErrorRunId, toRunError } from '@beaver/agent-core/run-state/runResumeHelpers';
 import { prewarmMuPDFWorker } from '../../src/beaver-extract';
 import { BeaverTemporaryAnnotations } from '../utils/annotationUtils';
 import { isRejectedItemValidation, itemValidationResultsAtom } from './itemValidation';
@@ -563,10 +572,14 @@ async function startResumeRun(
             return;
         }
 
-        if (
-            failedRun.status !== 'error' ||
-            (options.requireResumable && !failedRun.error?.is_resumable)
-        ) {
+        // Two shapes resume. A failed run carries the backend's own verdict in
+        // `is_resumable`, which the user-driven path insists on. A run that was
+        // cut off has no such flag — nothing failed, the client went away — so
+        // its termination cause is the signal instead.
+        const isResumableError =
+            failedRun.status === 'error'
+            && (!options.requireResumable || !!failedRun.error?.is_resumable);
+        if (!isResumableError && !isInterruptedRun(failedRun)) {
             logger(`${options.logPrefix}: Run ${failedRunId} is not resumable`, 1);
             return;
         }
@@ -1151,28 +1164,8 @@ export const wsErrorAtom = atom<WSErrorEvent | null>(null);
 /** Last warning from WebSocket */
 export const wsWarningAtom = atom<WSWarningEvent | null>(null);
 
-/** Retry state from WebSocket (when backend is retrying a failed request) */
-export interface RetryState {
-    runId: string;
-    attempt: number;
-    maxAttempts: number;
-    reason: string;
-    waitSeconds?: number | null;
-}
-export const wsRetryAtom = atom<RetryState | null>(null);
 /** Deduplicates concurrent auto-resume/auto-retry scheduling for the same run. */
 const scheduledAutoResumeRunIdsAtom = atom<Set<string>>(new Set<string>());
-
-/**
- * Transient reconnect state while the client automatically retries a failed
- * connect attempt. Drives the status indicator's "Reconnecting…" copy instead
- * of a user-visible error.
- */
-export interface ReconnectState {
-    attempt: number;
-    maxAttempts: number;
-}
-export const wsReconnectingAtom = atom<ReconnectState | null>(null);
 
 // =============================================================================
 // Action Atoms
@@ -1204,6 +1197,7 @@ export const prepareForNewRunAtom = atom(null, (_get, set) => {
     set(clearAllPendingApprovalsAtom);
     set(clearAllPendingQuestionsAtom);
     set(clearAllPendingCreditConfirmationsAtom);
+    set(clearAllPendingBatchApprovalsAtom);
     set(clearApprovalResponseIntentsAtom);
     set(clearStaleApprovalsAtom);
     set(clearRunApprovalPolicyAtom);
@@ -1228,6 +1222,18 @@ function findToolCallArgs(
         }
     }
     return null;
+}
+
+/**
+ * Ids of the actions a live run has already written to Zotero, for the
+ * completed-changes card. Only the WS handlers call this: an action arrives
+ * `applied` because the run executed it — the user approved it while it was
+ * streaming, or an always-apply permission let it run unattended. Thread
+ * hydration loads actions through a different atom, so reopening a thread
+ * cannot rebuild the card from history. See `sessionAppliedActionIdsAtom`.
+ */
+function appliedActionIds(actions: AgentAction[]): string[] {
+    return actions.filter((action) => action.status === 'applied').map((action) => action.id);
 }
 
 function surfaceAndDiagnoseConnectionFailure(
@@ -1325,8 +1331,17 @@ function applyRunCitations(
 /**
  * Create WebSocket callbacks for handling streaming events.
  * Shared between sendWSMessageAtom and regenerateFromRunAtom.
+ *
+ * @param connectAttempts Reads how many attempts opened the connection these
+ * callbacks belong to. A drop after `ready` has no attempt count of its own —
+ * the connection it lost is the one that succeeded — so the number that
+ * describes it is the number that got it open. Read lazily because the count is
+ * only known once the connect settles, which is after these callbacks exist.
  */
-function createWSCallbacks(set: Setter): WSCallbacks {
+export function createWSCallbacks(
+    set: Setter,
+    connectAttempts: () => number | null = () => null,
+): WSCallbacks {
     return {
         onReady: (data: WSReadyData) => {
             logger('WS onReady:', data, 1);
@@ -1436,6 +1451,19 @@ function createWSCallbacks(set: Setter): WSCallbacks {
                 // the rest of the run (the full-clear sites only fire on run
                 // end / disconnect / thread switch).
                 set(removePendingQuestionAtom, toolCallId);
+
+                // Remove any pending batch approval owned by this tool call,
+                // covering the same backend-timeout path: batch_start returns
+                // with no coverage granted and the run continues. Batch
+                // approvals are keyed by approval id, so the owning entry is
+                // the one whose toolcallId is the call that just returned.
+                const pendingBatchApprovals = store.get(pendingBatchApprovalsAtom);
+                for (const [approvalId, pending] of pendingBatchApprovals.entries()) {
+                    if (pending.toolcallId === toolCallId) {
+                        set(removePendingBatchApprovalAtom, approvalId);
+                        break;
+                    }
+                }
             }
         },
 
@@ -1487,6 +1515,7 @@ function createWSCallbacks(set: Setter): WSCallbacks {
                 logger(`WS onRunComplete: Processing ${event.agent_actions.length} agent actions`, 1);
                 const actions = event.agent_actions.map(toAgentAction);
                 set(addAgentActionsAtom, actions);
+                set(recordAppliedActionsAtom, appliedActionIds(actions));
                 // Load item data for agent actions
                 await loadItemDataForAgentActions(actions).catch(err => 
                     logger(`WS onRunComplete: Failed to load item data for agent actions: ${err}`, 1)
@@ -1564,6 +1593,7 @@ function createWSCallbacks(set: Setter): WSCallbacks {
             set(clearAllPendingApprovalsAtom);
             set(clearAllPendingQuestionsAtom);
             set(clearAllPendingCreditConfirmationsAtom);
+            set(clearAllPendingBatchApprovalsAtom);
             set(clearRunApprovalPolicyAtom);
         },
 
@@ -1596,6 +1626,7 @@ function createWSCallbacks(set: Setter): WSCallbacks {
             set(clearAllPendingApprovalsAtom);
             set(clearAllPendingQuestionsAtom);
             set(clearAllPendingCreditConfirmationsAtom);
+            set(clearAllPendingBatchApprovalsAtom);
             set(clearRunApprovalPolicyAtom);
 
             // Run quality flag for a run that did not complete. Keyed by run id
@@ -1683,6 +1714,7 @@ function createWSCallbacks(set: Setter): WSCallbacks {
             }, 1);
             const actions = event.actions.map(toAgentAction);
             set(upsertAgentActionsAtom, actions);
+            set(recordAppliedActionsAtom, appliedActionIds(actions));
             
             // Mark external references as imported for applied create_items actions
             // This handles cases where actions are applied via PendingActionsBar
@@ -1805,6 +1837,32 @@ function createWSCallbacks(set: Setter): WSCallbacks {
             set(removePendingCreditConfirmationAtom, event.confirmation_id);
         },
 
+        onBatchApprovalRequest: (event: WSBatchApprovalRequest) => {
+            logger('WS onBatchApprovalRequest:', {
+                approvalId: event.approval_id,
+                runId: event.run_id,
+                toolcallId: event.toolcall_id,
+                batchId: event.batch_id,
+                defaultMode: event.default_mode,
+                hasDestructiveWarning: Boolean(event.destructive_warning),
+            }, 1);
+            set(addPendingBatchApprovalAtom, event);
+
+            // Surface an OS-native notification if the user can't currently see
+            // the card — the batch stays parked until they decide.
+            notifyBatchApproval(event);
+        },
+
+        onBatchApprovalStale: (event: WSBatchApprovalStale) => {
+            logger('WS onBatchApprovalStale:', {
+                approvalId: event.approval_id,
+                reason: event.reason,
+            }, 1);
+            // The batch moved on without the decision and there is nothing to
+            // apply locally, so the card is simply retired.
+            set(removePendingBatchApprovalAtom, event.approval_id);
+        },
+
         onAskUserQuestionRequest: (event: WSAskUserQuestionRequest) => {
             logger('WS onAskUserQuestionRequest:', {
                 questionId: event.question_id,
@@ -1848,6 +1906,7 @@ function createWSCallbacks(set: Setter): WSCallbacks {
             set(clearAllPendingApprovalsAtom);
             set(clearAllPendingQuestionsAtom);
             set(clearAllPendingCreditConfirmationsAtom);
+            set(clearAllPendingBatchApprovalsAtom);
             set(clearRunApprovalPolicyAtom);
 
             // A run that reached `completed` (run_complete processed) but whose
@@ -1881,21 +1940,37 @@ function createWSCallbacks(set: Setter): WSCallbacks {
                     (activeRun.status === 'in_progress' ||
                         activeRun.status === 'awaiting_deferred')
                 ) {
-                    surfaceAndDiagnoseConnectionFailure(set, activeRun.id, transportEvidence);
+                    surfaceAndDiagnoseConnectionFailure(
+                        set,
+                        activeRun.id,
+                        transportEvidence,
+                        connectAttempts() ?? undefined,
+                    );
                 }
             }
         }
     };
 }
 
-/** Total connect attempts per WS request (initial attempt + auto-retries). */
-export const CONNECT_MAX_ATTEMPTS = 4;
-/** Bounded-jitter backoff ranges before the 2nd, 3rd, and 4th attempts. */
-const CONNECT_RETRY_BACKOFF_MS = [
-    { min: 50, max: 200 },
-    { min: 200, max: 1000 },
-    { min: 500, max: 2500 },
-];
+/**
+ * Connect loops this bundle currently owns, including pre-ready attempts and
+ * backoff. `agentService.isConnected()` is false in that window, so shutdown
+ * uses this count to abort an in-flight loop. Module-scoped: the store is
+ * shared across windows, a connect loop is not.
+ */
+let connectLoopsInFlight = 0;
+
+/**
+ * Set once this bundle's client is going away. A send still preparing a
+ * message has no socket or run yet; continuations check this so they don't
+ * connect after the client is gone.
+ */
+let clientShutDown = false;
+
+/** Test-only: reset `clientShutDown` between cases. */
+export function clearClientShutDownLatch(): void {
+    clientShutDown = false;
+}
 
 /**
  * Execute a WebSocket request with the given run and request.
@@ -1905,10 +1980,10 @@ const CONNECT_RETRY_BACKOFF_MS = [
  * Transient pre-`ready` transport failures (1005/1006, connect timeout) are
  * retried automatically with jittered backoff before anything is surfaced to
  * the user: a cold-starting instance or momentary network block routinely
- * succeeds on the next attempt. Auth and application-level failures are never
- * retried. A recovered connect reports attempt count on the auth handshake;
- * one error surface and one diagnostics report (carrying the attempt count)
- * happen only after the final attempt fails.
+ * succeeds on the next attempt. The shared loop owns that policy, including
+ * which failures never qualify; this function owns only what the user and the
+ * store see. One error surface and one diagnostics report (carrying the attempt
+ * count) happen only after the final attempt fails.
  */
 async function executeWSRequest(
     run: AgentRun,
@@ -1916,107 +1991,108 @@ async function executeWSRequest(
     get: Getter,
     set: Setter
 ): Promise<void> {
-    const callbacks = createWSCallbacks(set);
-    let lastFailure: unknown = null;
-    let attemptsMade = 0;
-    const connectStartedAtMs = Date.now();
-
-    for (let attempt = 1; attempt <= CONNECT_MAX_ATTEMPTS; attempt++) {
-        attemptsMade = attempt;
-        try {
-            logger(`WS Starting connection for run: ${run.id} (attempt ${attempt}/${CONNECT_MAX_ATTEMPTS})`);
-            // A new connection attempt starts from a clean ready state.
-            set(isWSReadyAtom, false);
-            // Resolved fresh for this attempt (not cached) — the searchable
-            // library set can change between reconnects.
-            const identity = resolveClientIdentity();
-            const recovery = connectRecoveryAuthFields(
-                attemptsMade,
-                lastFailure instanceof AgentConnectionError ? lastFailure.evidence : null,
-                connectStartedAtMs,
-            );
-            // connect() applies its own attempt-scoped backstop timeout, so this
-            // await cannot hang forever.
-            await agentService.connect(
-                request,
-                callbacks,
-                identity.frontendVersion,
-                identity.clientType,
-                identity.clientFeatures,
-                identity.zoteroInstance,
-                recovery,
-            );
-            logger('WS connect settled');
-            set(wsReconnectingAtom, null);
-            return;
-        } catch (error: any) {
-            logger(`WS connection attempt ${attempt}/${CONNECT_MAX_ATTEMPTS} failed:`, error, 1);
-            lastFailure = error;
-
-            // Check if an error was already set by the onError callback
-            // If so, don't overwrite it with a generic connection_error (and
-            // never retry it — application-level failures won't fix themselves).
-            const currentError = get(wsErrorAtom);
-            if (currentError && currentError.type !== 'connection_error') {
-                logger('WS connection error: Error already set by onError callback, not overwriting', 1);
-                set(wsReconnectingAtom, null);
-                // The onError that set this error may have dispatched an
-                // auto-retry whose commit is now in flight and owns the
-                // pending flag (see retryPendingRunIdAtom).
-                if (!get(retryPendingRunIdAtom)) {
-                    set(isWSChatPendingAtom, false);
-                }
-                return;
-            }
-
-            const retryable =
-                attempt < CONNECT_MAX_ATTEMPTS &&
-                error instanceof AgentConnectionError &&
-                isRetryablePreReadyConnectFailure(error.evidence);
-            if (!retryable) break;
-
-            // Fully tear down the failed attempt so AgentService's overlap
-            // guard cannot swallow the next connect (a no-op when the failure
-            // path already reset the connection state).
-            agentService.close(1000, 'Retrying connection', { notifyClose: false });
-            // The transport close cleared the pending flag via onClose; restore
-            // it so the composer stays blocked while we quietly retry.
-            set(isWSChatPendingAtom, true);
-            set(wsReconnectingAtom, { attempt: attempt + 1, maxAttempts: CONNECT_MAX_ATTEMPTS });
-
-            const backoffRange = CONNECT_RETRY_BACKOFF_MS[
-                Math.min(attempt - 1, CONNECT_RETRY_BACKOFF_MS.length - 1)
-            ];
-            const backoffMs = backoffRange.min
-                + Math.random() * (backoffRange.max - backoffRange.min);
-            await new Promise((resolve) => setTimeout(resolve, backoffMs));
-
-            // The run may have been cancelled, replaced, or rolled back during
-            // the wait — a retry whose tail was restored drops its shell here.
-            const activeRun = store.get(activeRunAtom);
-            if (
-                activeRun?.id !== run.id ||
-                (activeRun.status !== 'in_progress' && activeRun.status !== 'awaiting_deferred')
-            ) {
-                logger(`WS connect retry abandoned: run ${run.id} is no longer active`, 1);
-                set(wsReconnectingAtom, null);
-                // Release the flag this loop raised for the quiet retry. Nothing
-                // downstream clears it on this path, and a stuck flag leaves the
-                // composer blocked with no run to finish and no error to show.
-                set(isWSChatPendingAtom, false);
-                return;
-            }
-        }
+    // Every send/retry/resume lands here; stop if the client is already gone.
+    if (clientShutDown) {
+        logger('executeWSRequest: client is shutting down, not connecting', 1);
+        set(abandonActiveRunLocallyAtom);
+        return;
     }
 
-    set(wsReconnectingAtom, null);
-    const evidence = lastFailure instanceof AgentConnectionError
-        ? lastFailure.evidence
-        : baselineConnectionEvidence('opening', {
-              errorName: lastFailure instanceof Error ? lastFailure.name : 'UnknownError',
-          });
-    surfaceAndDiagnoseConnectionFailure(set, run.id, evidence, attemptsMade);
-    set(isWSChatPendingAtom, false);
+    // How many attempts this run's connection cost, once it has one.
+    let attemptsMade: number | null = null;
+
+    /**
+     * Whether a different run has taken over the state this function writes.
+     *
+     * A connect loop outlives its own run by up to one backoff, and the reconnect
+     * state and the pending flag are both connection-wide rather than per-run. So
+     * a run cancelled mid-backoff, followed straight away by another, leaves an
+     * older loop about to write over the newer run's state — clearing a reconnect
+     * it is in the middle of, or releasing a composer it is still holding.
+     */
+    const supersededByLiveRun = (): boolean => {
+        const activeRun = store.get(activeRunAtom);
+        return (
+            !!activeRun &&
+            activeRun.id !== run.id &&
+            (activeRun.status === 'in_progress' || activeRun.status === 'awaiting_deferred')
+        );
+    };
+
+    connectLoopsInFlight++;
+    const result = await connectWithRetry({
+        service: agentService,
+        request,
+        callbacks: createWSCallbacks(set, () => attemptsMade),
+        logLabel: `run ${run.id}`,
+        // Every attempt starts from a clean ready state.
+        onAttempt: () => set(isWSReadyAtom, false),
+        onRetrying: (progress) => {
+            if (supersededByLiveRun()) return;
+            if (!progress) {
+                set(wsReconnectingAtom, null);
+                return;
+            }
+            // The failed attempt's own close cleared the pending flag on its way
+            // out; restore it so the composer stays blocked while we quietly
+            // retry.
+            set(isWSChatPendingAtom, true);
+            set(wsReconnectingAtom, progress);
+        },
+        // An error already set by the onError callback must not be overwritten
+        // with a generic connection_error.
+        isAlreadyReported: () => {
+            const currentError = get(wsErrorAtom);
+            return !!currentError && currentError.type !== 'connection_error';
+        },
+        // The run may have been cancelled, replaced, or rolled back during the
+        // backoff wait — a retry whose tail was restored drops its shell here.
+        isStillWanted: () => {
+            const activeRun = store.get(activeRunAtom);
+            return (
+                activeRun?.id === run.id &&
+                (activeRun.status === 'in_progress' || activeRun.status === 'awaiting_deferred')
+            );
+        },
+    }).finally(() => {
+        connectLoopsInFlight--;
+    });
+
+    attemptsMade = result.attemptsMade;
+
+    if (result.kind === 'connected') return;
+
+    if (result.kind === 'abandoned') {
+        if (result.reason === 'already_reported') {
+            logger('WS connection error: Error already set by onError callback, not overwriting', 1);
+            // The onError that set this error may have dispatched an auto-retry
+            // whose commit is now in flight and owns the pending flag (see
+            // retryPendingRunIdAtom) — or a newer run may be holding it, which
+            // this loop has no business releasing.
+            if (!get(retryPendingRunIdAtom) && !supersededByLiveRun()) {
+                set(isWSChatPendingAtom, false);
+            }
+            return;
+        }
+        logger(`WS connect retry abandoned: run ${run.id} is no longer active`, 1);
+        // Release the flag the quiet retry raised. Nothing downstream clears it
+        // on this path, and a stuck flag leaves the composer blocked with no run
+        // to finish and no error to show. Unless the run that superseded this one
+        // is now holding the flag for itself, in which case releasing it would
+        // open the composer over a run that is still going.
+        if (!supersededByLiveRun()) set(isWSChatPendingAtom, false);
+        return;
+    }
+
+    surfaceAndDiagnoseConnectionFailure(set, run.id, result.evidence, result.attemptsMade);
+    // Guarded like the abandoned paths above, because this one is reachable with
+    // a newer run live too: an attempt can be in flight for twenty seconds, and a
+    // run that starts in that window has already raised the flag for itself
+    // before its own connect begins. Releasing it here would open the composer
+    // over that run and let a second send go out behind it. The error itself
+    // needs no such guard — it is filed against this run, and
+    // `surfaceAndDiagnoseConnectionFailure` drops it if that run is gone.
+    if (!supersededByLiveRun()) set(isWSChatPendingAtom, false);
 }
 
 /**
@@ -2795,10 +2871,10 @@ export const resumeFromRunAtom = atom(
 );
 
 /**
- * Close the WebSocket connection with proper cancellation.
- * Sends a cancel message to the backend before closing to ensure proper cleanup.
+ * Archive the active run as canceled and clear live-run UI state.
+ * Store-only — does not touch the socket.
  */
-export const closeWSConnectionAtom = atom(null, async (get, set) => {
+export const abandonActiveRunLocallyAtom = atom(null, (get, set) => {
     // Set pending to false immediately for better UI responsiveness
     set(isWSChatPendingAtom, false);
 
@@ -2806,12 +2882,14 @@ export const closeWSConnectionAtom = atom(null, async (get, set) => {
     set(clearAllPendingApprovalsAtom);
     set(clearAllPendingQuestionsAtom);
     set(clearAllPendingCreditConfirmationsAtom);
+    set(clearAllPendingBatchApprovalsAtom);
     set(clearApprovalResponseIntentsAtom);
     set(clearRunApprovalPolicyAtom);
 
-    // Mark active run as canceled if it exists
+    // Archive live runs (including deferred-approval). Error runs keep their
+    // slot so Retry still works.
     const activeRun = get(activeRunAtom);
-    if (activeRun && activeRun.status === 'in_progress') {
+    if (activeRun && isRunActive(activeRun)) {
         const canceledRun: AgentRun = {
             ...activeRun,
             status: 'canceled',
@@ -2822,14 +2900,74 @@ export const closeWSConnectionAtom = atom(null, async (get, set) => {
         set(activeRunAtom, null);
     }
 
-    // Clear streaming-done state (user canceled during post-processing)
+    // Clear streaming-done state (abandoned during post-processing)
     set(streamingDoneRunIdsAtom, new Set<string>());
+});
+
+/**
+ * User-initiated close: cancel on the backend, then close.
+ * Local bookkeeping is shared with shutdown via `abandonActiveRunLocallyAtom`.
+ */
+export const closeWSConnectionAtom = atom(null, async (_get, set) => {
+    set(abandonActiveRunLocallyAtom);
 
     // Send cancel message and close connection
     await agentService.cancel();
     set(isWSConnectedAtom, false);
     set(isWSReadyAtom, false);
 });
+
+/**
+ * Close because this client is going away (window close, quit, or plugin disable).
+ *
+ * Sends a 1000 close, not a cancel (cancel is billed as user-stop). Close is
+ * synchronous and happens first. Also aborts in-flight connect loops; if this
+ * bundle owns neither a socket nor a loop there is no live run of its own to
+ * abandon, so skip. Each main window evaluates its own copy of this bundle,
+ * so a window only ever closes the connection it opened.
+ *
+ * `reason` is logged server-side as the disconnect path.
+ */
+export const closeWSConnectionForShutdownAtom = atom(
+    null,
+    (
+        get,
+        set,
+        reason: string,
+        options?: { rememberInterruptedThread?: boolean },
+    ) => {
+        // Latch first: a send still preparing has nothing to close or abandon.
+        clientShutDown = true;
+        if (!agentService.isConnected() && connectLoopsInFlight === 0) return;
+        agentService.close(1000, reason);
+        if (options?.rememberInterruptedThread) rememberInterruptedThread(get);
+        set(abandonActiveRunLocallyAtom);
+    },
+);
+
+/**
+ * Persist the thread whose run this shutdown cut off, so the next session can
+ * offer to reopen it. Only a live run counts as interrupted — the socket also
+ * stays open for a moment around a run that already finished.
+ *
+ * The thread id is null until the backend assigns one during a new thread's
+ * first run; there is nothing to reopen in that window. The account is stamped
+ * on the record because the next session may start under a different one.
+ */
+function rememberInterruptedThread(get: Getter): void {
+    const activeRun = get(activeRunAtom);
+    if (!activeRun || !isRunActive(activeRun)) return;
+
+    const threadId = get(currentThreadIdAtom) || activeRun.thread_id;
+    const userId = get(userIdAtom);
+    if (!threadId || !userId) return;
+
+    saveInterruptedThread({
+        threadId,
+        userId,
+        threadName: get(currentThreadNameAtom),
+    });
+}
 
 /**
  * Clear the current thread and start fresh
@@ -2848,6 +2986,7 @@ export const clearThreadAtom = atom(null, (_get, set) => {
     // behind an unanswerable card (pending approvals are left as-is here).
     set(clearAllPendingQuestionsAtom);
     set(clearAllPendingCreditConfirmationsAtom);
+    set(clearAllPendingBatchApprovalsAtom);
     set(clearRunApprovalPolicyAtom);
 });
 
@@ -3015,5 +3154,34 @@ export const sendCreditConfirmationResponseAtom = atom(
             logger(`sendCreditConfirmationResponseAtom: Credit confirmation response for ${confirmationId} was not sent`, 1);
         }
         set(removePendingCreditConfirmationAtom, confirmationId);
+    }
+);
+
+/**
+ * Send the user's decision for a batch approval and retire the pending card.
+ *
+ * The card is removed even when the send fails: the decision can no longer
+ * reach the run, so leaving it up would strand the user on a card that can
+ * never be answered.
+ */
+export const sendBatchApprovalResponseAtom = atom(
+    null,
+    (_get, set, { approvalId, approved, mode, userInstructions }: {
+        approvalId: string;
+        approved: boolean;
+        mode: BatchApprovalMode;
+        userInstructions?: string | null;
+    }) => {
+        logger(`sendBatchApprovalResponseAtom: Sending batch approval response for ${approvalId}: ${approved} (${mode})`, 1);
+        const delivered = agentService.sendBatchApprovalResponse(
+            approvalId,
+            approved,
+            mode,
+            userInstructions,
+        );
+        if (!delivered) {
+            logger(`sendBatchApprovalResponseAtom: Batch approval response for ${approvalId} was not sent`, 1);
+        }
+        set(removePendingBatchApprovalAtom, approvalId);
     }
 );

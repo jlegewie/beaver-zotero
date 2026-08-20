@@ -200,7 +200,7 @@ describe('ProviderConnection', () => {
         });
 
         it('re-resolves the identity provider on a second connect attempt', async () => {
-            const provider = vi.fn<[], ClientIdentity>()
+            const provider = vi.fn<() => ClientIdentity>()
                 .mockReturnValueOnce({
                     frontendVersion: '0.22.5',
                     clientType: 'zotero-plugin',
@@ -227,6 +227,23 @@ describe('ProviderConnection', () => {
             expect(secondAuth.zotero_instance).toEqual({ local_user_key: 'second-install' });
 
             expect(provider).toHaveBeenCalledTimes(2);
+        });
+    });
+
+    it('replies with an error for an unmatched *_request so the backend does not time out', async () => {
+        const conn = new ProviderConnection('https://api.example.com', {});
+        const sent = installFakeSocket(conn);
+
+        await dispatchProviderMessage(conn, {
+            event: 'resolve_population_request',
+            request_id: 'req-1',
+        });
+
+        expect(JSON.parse(sent[0])).toMatchObject({
+            type: 'resolve_population',
+            request_id: 'req-1',
+            error: 'Unknown event type: resolve_population_request. Do not try this operation again.',
+            error_code: 'internal_error',
         });
     });
 });

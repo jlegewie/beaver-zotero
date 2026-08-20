@@ -2,8 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { AgentRunStatus, ToolCallPart, isUnsuccessfulToolReturn } from '@beaver/agent-core/agents/types';
 import { toolResultsMapAtom, getToolCallStatus } from '@beaver/agent-core/run-state/atoms';
-import { getToolCallLabel, getLabelEnrichmentNeeds, type ToolCallLabelEnrich } from '@beaver/agent-core/run-state/toolLabels';
-import { extractZoteroReferencesFromToolCall, parseArgs } from '@beaver/agent-core/run-state/toolCallRequest';
+import { getToolCallLabel, type ToolCallLabelEnrich } from '@beaver/agent-core/run-state/toolLabels';
 import {
     isToolResultView,
     getToolResultRenderableCount,
@@ -22,6 +21,7 @@ import {
     ViewIcon,
     Icon,
     PuzzleIcon,
+    HelpCircleIcon,
     FileViewIcon,
     GlobalSearchIcon,
     TextAlignLeftIcon,
@@ -37,9 +37,10 @@ import {
     HighlighterIcon,
     ChattingIcon,
     LayersIcon,
+    WrenchIcon,
 } from '../icons/icons';
 import { toolExpandedAtom, toggleToolExpandedAtom, setToolExpandedAtom } from '../../atoms/messageUIState';
-import { parseLibraryRef, resolveLibraryRef } from '../../../src/utils/libraryIdentity';
+import { resolveToolCallLabelEnrich } from '../../utils/toolCallLabelEnrich';
 
 type IconComponent = React.FC<React.SVGProps<SVGSVGElement>>;
 
@@ -105,24 +106,48 @@ const TOOL_ICONS: Record<string, IconComponent> = {
 
     // Read tool result
     read_file: TextAlignLeftIcon,
+    read_documentation: HelpCircleIcon,
     load_tool_results: LayersIcon,
     
     // Progressive disclosure tools
-    load_capability: PuzzleIcon,
-    search_tools: PuzzleIcon,
+    load_capability: WrenchIcon,
+    search_tools: WrenchIcon,
+
+    // Batch operations
+    batch_start: LayersIcon,
+    batch_resolve: LayersIcon,
 
     // User interaction
     ask_user_question: ChattingIcon,
 };
 
-/** Progressive disclosure tools whose returns are framework-internal and shouldn't be expandable. */
-const NON_EXPANDABLE_TOOLS = new Set(['read_file', 'load_capability', 'search_tools', 'load_tool_results']);
+/**
+ * Progressive disclosure tools whose returns are framework-internal and shouldn't
+ * be expandable. Their result is a file or an instruction blob written for the
+ * model, so expanding one shows raw text rather than anything a reader can use.
+ */
+const NON_EXPANDABLE_TOOLS = new Set([
+    'read_file',
+    'read_documentation',
+    'load_capability',
+    'search_tools',
+    'load_tool_results',
+    'batch_resolve',
+]);
+
+/**
+ * Tools whose expanded body exists only as a view model. Their raw return is
+ * framework-internal state written for the model (batch_start returns the
+ * whole batch ledger), so a call that predates the view — or one whose view
+ * could not be built — stays collapsed rather than showing that state.
+ */
+const VIEW_ONLY_EXPANDABLE_TOOLS = new Set(['batch_start']);
 
 /** Tools that support streaming argument preview */
 const STREAMING_PREVIEW_TOOLS = new Set(['create_note']);
 
 /**
- * Detect the type of file being read by the read_file tool.
+ * Detect the type of file being read by the file-reading tools.
  * Simplified version of detectReadFileType from toolLabels.ts
  */
 function detectReadFileType(path: string): 'tool_result' | 'skill' | 'skill_resource' | 'documentation' | 'unknown' {
@@ -163,8 +188,8 @@ function detectReadFileType(path: string): 'tool_result' | 'skill' | 'skill_reso
 function getToolIcon(part: ToolCallPart): IconComponent {
     const toolName = part.tool_name;
     
-    // Special handling for read_file - check file type
-    if (toolName === 'read_file') {
+    // Special handling for the file readers - check file type
+    if (toolName === 'read_file' || toolName === 'read_documentation') {
         let args: Record<string, unknown> | undefined;
         try {
             args = typeof part.args === 'string'
@@ -227,44 +252,9 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
     const [labelEnrich, setLabelEnrich] = useState<ToolCallLabelEnrich | null>(null);
     useEffect(() => {
         let cancelled = false;
-        const itemData = getHost().itemData;
-        const needs = getLabelEnrichmentNeeds(part, view);
-        if (!itemData || (!needs.itemName && !needs.scope)) {
-            setLabelEnrich(null);
-            return;
-        }
         (async () => {
-            const next: ToolCallLabelEnrich = {};
-            if (needs.itemName && itemData.resolveItemDisplay) {
-                const ref = extractZoteroReferencesFromToolCall(part)[0];
-                if (ref) {
-                    const display = await itemData.resolveItemDisplay(ref);
-                    if (display?.displayName) next.itemDisplayName = display.displayName;
-                }
-            }
-            if (needs.scope) {
-                const args = parseArgs(part);
-                const libParam = args.library as string | number | undefined;
-                // A portable library_ref ("u"/"g<groupID>") resolves directly to a local
-                // libraryID for collection scoping; a plain numeric-ID string still parses
-                // with parseInt. Library name resolution below passes libParam through raw.
-                const refParsed = typeof libParam === 'string' ? parseLibraryRef(libParam) : null;
-                const libId = typeof libParam === 'number'
-                    ? libParam
-                    : refParsed
-                        ? resolveLibraryRef({ library_ref: libParam }) ?? undefined
-                        : (typeof libParam === 'string' ? parseInt(libParam, 10) : undefined);
-                const collParam = (args.collection_key ?? args.collection ?? args.parent_collection) as string | undefined;
-                if (collParam && itemData.resolveCollectionName) {
-                    const name = await itemData.resolveCollectionName(collParam, Number.isNaN(libId as number) ? undefined : libId);
-                    if (!cancelled && name) next.collectionName = name;
-                }
-                if (libParam != null && itemData.resolveLibraryName) {
-                    const name = await itemData.resolveLibraryName(libParam);
-                    if (!cancelled && name) next.libraryName = name;
-                }
-            }
-            if (!cancelled) setLabelEnrich(Object.keys(next).length ? next : null);
+            const enrich = await resolveToolCallLabelEnrich(part, view);
+            if (!cancelled) setLabelEnrich(enrich);
         })();
         return () => { cancelled = true; };
     }, [part.tool_call_id, part.args, view]);
@@ -356,6 +346,7 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
         // If we can compute a count (search-like tools), block expansion for 0 results.
         (renderableCount === null || renderableCount > 0) &&
         !NON_EXPANDABLE_TOOLS.has(part.tool_name) &&
+        (!VIEW_ONLY_EXPANDABLE_TOOLS.has(part.tool_name) || view !== null) &&
         !isExtractionRejected &&
         !isExternalSearchRejected &&
         !showAgentActionView; // Don't allow expand toggle for agent action tools

@@ -54,7 +54,6 @@ export function buildBackgroundExtractPayload(kind: ProcessableKind): Background
         return {
             content_kind: 'pdf',
             maxPages: null,
-            maxFileSizeMB: 0,
             timeoutSeconds: 120,
         };
     }

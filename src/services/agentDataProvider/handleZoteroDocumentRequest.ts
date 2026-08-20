@@ -44,6 +44,7 @@ import {
     validateZoteroItemReference,
 } from './utils';
 import { EXTERNAL_LIBRARY_ID, resolveExternalFile } from '../externalFiles';
+import { effectiveMaxFileSizeMB } from '@beaver/agent-core/transport/attachmentLimits';
 import { withWorkerDiagnostics } from './workerDiagnostics';
 import type { ExternalFileRecord } from '../database';
 import { serializeAttachmentStub, serializeItemStub } from '../../utils/zoteroSerializers';
@@ -230,7 +231,9 @@ export async function handleZoteroDocumentRequest(
     request: WSZoteroDocumentRequest,
     options: ZoteroDocumentRequestOptions = {},
 ): Promise<WSZoteroDocumentResponse | PreparedJsonMessage> {
-    const { attachment, external_file_key, mode, max_pages, max_file_size_mb, request_id, timeout_seconds } = request;
+    // `max_file_size_mb` on the request is deliberately ignored: the file-size
+    // ceiling is a client-side preference (see attachmentLimits.ts).
+    const { attachment, external_file_key, mode, max_pages, request_id, timeout_seconds } = request;
 
     // Populated once the attachment resolves so post-resolution error responses
     // carry the same view-row metadata as success responses (best-effort:
@@ -337,7 +340,6 @@ export async function handleZoteroDocumentRequest(
         if (contentKind === 'text') {
             const source = await resolveAttachmentFileSource({
                 item: resolvedItem,
-                maxFileSizeMB: max_file_size_mb ?? 0,
                 localSizeStrategy: 'stat',
                 signal: timeout.signal,
                 throwIfTimedOut: timeout.throwIfTimedOut,
@@ -365,7 +367,6 @@ export async function handleZoteroDocumentRequest(
             const data = await loadAttachmentData({
                 item: resolvedItem,
                 source: source.source,
-                maxFileSizeMB: max_file_size_mb ?? 0,
                 onRemoteDownloadFailure: notifyRemoteDownloadFailure,
                 signal: timeout.signal,
                 throwIfTimedOut: timeout.throwIfTimedOut,
@@ -423,7 +424,6 @@ export async function handleZoteroDocumentRequest(
                     resolvedKey,
                     contentType,
                     maxPages: max_pages ?? null,
-                    maxFileSizeMB: max_file_size_mb ?? 0,
                     externalAbortSignal: timeout.signal,
                     onFileNotSyncedLocally: notifyRemoteFileNotSynced,
                 }),
@@ -461,7 +461,6 @@ export async function handleZoteroDocumentRequest(
                     resolvedKey,
                     contentType,
                     maxPages: max_pages ?? null,
-                    maxFileSizeMB: max_file_size_mb ?? 0,
                     externalAbortSignal: timeout.signal,
                     onFileNotSyncedLocally: notifyRemoteFileNotSynced,
                 }),
@@ -508,7 +507,6 @@ export async function handleZoteroDocumentRequest(
             contentType,
             mode,
             maxPages: max_pages ?? null,
-            maxFileSizeMB: max_file_size_mb ?? 0,
             timeoutSeconds: timeout_seconds ?? 0,
             workerName: 'hot',
             externalAbortSignal: timeout.signal,
@@ -581,7 +579,6 @@ export async function handleZoteroDocumentRequest(
                         payload: {
                             content_kind: 'pdf',
                             maxPages: max_pages ?? null,
-                            maxFileSizeMB: max_file_size_mb ?? 0,
                             timeoutSeconds: MAX_PDF_TIMEOUT_SECONDS,
                         },
                         now: Date.now(),
@@ -663,7 +660,7 @@ async function handleExternalFileDocumentRequest(
     ) => WSZoteroDocumentResponse,
     options: ZoteroDocumentRequestOptions = {},
 ): Promise<WSZoteroDocumentResponse | PreparedJsonMessage> {
-    const { mode, max_pages, max_file_size_mb, request_id, timeout_seconds } = request;
+    const { mode, max_pages, request_id, timeout_seconds } = request;
     const requestKey = `ext-${extKey}`;
 
     // Attach the served-file stub to post-resolution error responses too (it is
@@ -723,8 +720,8 @@ async function handleExternalFileDocumentRequest(
                 if (error instanceof TimeoutError) throw error;
                 return errorResponse(externalFileMissingMessage(extKey, record), 'file_missing', null, 'text');
             }
-            const maxMB = max_file_size_mb ?? 0;
-            if (maxMB > 0 && data.byteLength > maxMB * 1024 * 1024) {
+            const maxMB = effectiveMaxFileSizeMB();
+            if (data.byteLength > maxMB * 1024 * 1024) {
                 return errorResponse(
                     `External file '${requestKey}' is too large (${(data.byteLength / 1024 / 1024).toFixed(1)}MB > ${maxMB}MB).`,
                     'file_too_large',
@@ -754,7 +751,6 @@ async function handleExternalFileDocumentRequest(
                     resolvedKey: requestKey,
                     contentType: record.mimeType,
                     maxPages: max_pages ?? null,
-                    maxFileSizeMB: max_file_size_mb ?? 0,
                     externalAbortSignal: timeout.signal,
                 }),
                 timeout.signal,
@@ -788,7 +784,6 @@ async function handleExternalFileDocumentRequest(
             contentType: record.mimeType,
             mode,
             maxPages: max_pages ?? null,
-            maxFileSizeMB: max_file_size_mb ?? 0,
             timeoutSeconds: timeout_seconds ?? 0,
             workerName: 'hot',
             externalAbortSignal: timeout.signal,

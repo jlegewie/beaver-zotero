@@ -231,7 +231,7 @@ export async function handleZoteroAttachmentSearchRequest(
             );
         }
         if (isRemoteOnly) {
-            const exceeded = checkRemotePdfSize(pdfData, false, maxFileSizeMB);
+            const exceeded = checkRemotePdfSize(pdfData, false);
             if (exceeded) {
                 throwIfTimedOut('remote_file_too_large_response');
                 return errorResponse(

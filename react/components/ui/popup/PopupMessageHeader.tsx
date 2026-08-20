@@ -4,6 +4,7 @@ import IconButton from '@beaver/agent-ui/primitives/IconButton';
 
 interface PopupMessageHeaderProps {
     icon: React.ReactNode;
+    rightIcon?: React.ReactElement;
     title?: string;
     handleDismiss: () => void;
     fontColor?: string;
@@ -17,6 +18,7 @@ interface PopupMessageHeaderProps {
 
 const PopupMessageHeader: React.FC<PopupMessageHeaderProps> = ({
     icon,
+    rightIcon,
     title,
     count,
     buttonIcon,
@@ -37,7 +39,12 @@ const PopupMessageHeader: React.FC<PopupMessageHeaderProps> = ({
             <div className={`flex-1 ${titleClassName ?? 'text-base font-medium'} ${fontColor}`}>
                 {`${title} ${count ? `(${count})` : ''}`}
             </div>
-            <div className="display-flex flex-row gap-2 flex-shrink-0">
+            <div className="display-flex flex-row gap-2 items-start flex-shrink-0">
+                {rightIcon && (
+                    <div className="flex-shrink-0">
+                        {rightIcon}
+                    </div>
+                )}
                 {buttonIcon && buttonOnClick && (
                     <IconButton
                         variant="ghost"

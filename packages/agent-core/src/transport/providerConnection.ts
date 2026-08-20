@@ -25,6 +25,7 @@ import {
     resolveDefaultAgentDataProvider,
     PROVIDER_MUTATING_RUN_SYNC_PAUSE_OWNER,
     notifySyncPauseOwnerSettled,
+    unknownDataRequestErrorResponse,
 } from './agentDataDispatch';
 import { getWSAuthToken } from './agentService';
 import { WSAuthMessage, WSRequestReceivedAck } from '../protocol/agentProtocol';
@@ -424,6 +425,10 @@ export class ProviderConnection {
                 const entry = this.getDataProvider()[eventName];
                 if (!entry) {
                     logger(`ProviderConnection: Unknown event type: ${eventName}`, 1);
+                    const errorResponse = unknownDataRequestErrorResponse(event);
+                    if (errorResponse) {
+                        this.send(errorResponse);
+                    }
                     break;
                 }
                 logger(`ProviderConnection: Received ${eventName}`, 1);

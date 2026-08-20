@@ -118,7 +118,8 @@ function getViewLocationLabel(view: ToolResultView | null | undefined, toolName:
  * Parenthetical count suffix for a completed tool-call label, derived from the
  * view model. Per-tool wording (not a single number): read/view/read_note carry
  * their locator inline and get no suffix; search/list use "(N results/collections/
- * tags)"; attachment_search uses match count; lookup_work uses "(N found)".
+ * tags)"; attachment_search uses match count; lookup_work uses "(N found)";
+ * batch_operation carries the batch's population line, or how it stopped.
  * Returns null when there is nothing to append.
  */
 export function getToolResultLabelSuffix(
@@ -157,6 +158,14 @@ export function getToolResultLabelSuffix(
             }
             const n = view.references.length;
             return n ? ` (${plural(n, 'result')})` : null;
+        }
+        case 'batch_operation': {
+            // A batch that has ended says how; one still running says how big
+            // it is. Both strings are backend copy, appended verbatim.
+            if (view.status && view.status !== 'active' && view.status_label) {
+                return ` (${view.status_label})`;
+            }
+            return view.scope_primary ? ` (${view.scope_primary})` : null;
         }
         case 'user_question': {
             // The backend omits the default status — treat absent as answered.
@@ -229,6 +238,23 @@ function detectReadFileType(path: string): 'tool_result' | 'skill' | 'skill_reso
     }
     
     return 'unknown';
+}
+
+/**
+ * Display name for a skill file path (`/skills/{skill-name}/...`): the mapped
+ * label, else the directory name title-cased.
+ */
+function skillNameFromPath(path: string): string {
+    const skillKey = path.match(/\/skills\/([^/]+)/i)?.[1];
+    if (!skillKey) return 'skill';
+    return (
+        SKILL_NAME_LABELS[skillKey] ??
+        skillKey
+            .replace(/-/g, ' ')
+            .split(' ')
+            .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+            .join(' ')
+    );
 }
 
 /**
@@ -468,20 +494,29 @@ function computeMainLabel(
                     case 'tool_result':
                         return 'Retrieving previous results';
                     case 'skill':
-                    case 'skill_resource': {
-                        // Extract skill name from path: /skills/{skill-name}/...
-                        const skillMatch = path.match(/\/skills\/([^/]+)/i);
-                        const skillKey = skillMatch?.[1];
-                        const skillName = SKILL_NAME_LABELS[skillKey as string] 
-                            || skillKey?.replace(/-/g, ' ').split(' ').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ')
-                            || 'skill';
-                        return `Loading skill: ${truncate(skillName, 30)}`;
-                    }
+                    case 'skill_resource':
+                        return `Loading skill: ${truncate(skillNameFromPath(path), 30)}`;
                     case 'documentation':
                         return 'Reading documentation';
                     case 'unknown':
                     default:
                         return `${baseLabel}: ${truncate(path, 40)}`;
+                }
+            }
+            return baseLabel;
+        }
+
+        // The documentation reader also serves the skill files that markers in
+        // older threads ask to re-read, so those calls read as a skill load
+        // rather than as documentation. A documentation path wins: the skill
+        // test matches "/skills/" anywhere, which a docs page is allowed to
+        // contain.
+        case 'read_documentation': {
+            const path = args.path as string | undefined;
+            if (path && !/^\/?docs\//i.test(path.trim())) {
+                const fileType = detectReadFileType(path);
+                if (fileType === 'skill' || fileType === 'skill_resource') {
+                    return `Loading skill: ${truncate(skillNameFromPath(path), 30)}`;
                 }
             }
             return baseLabel;
@@ -786,9 +821,9 @@ function computeMainLabel(
             // args.id is the stable, persisted capability id (e.g. "zotero_annotations").
             const id = args.id as string | undefined;
             if (id) {
-                return `Loading skill: ${truncate(capabilityLabel(id), 30)}`;
+                return `Loading tools: ${truncate(capabilityLabel(id), 30)}`;
             }
-            return 'Loading skill';
+            return 'Loading tools';
         }
 
         case 'search_tools': {

@@ -64,7 +64,6 @@ function pdfPayload(maxPages: number | null): BackgroundJobPayload {
     return {
         content_kind: 'pdf',
         maxPages,
-        maxFileSizeMB: 25,
         timeoutSeconds: 120,
     };
 }
@@ -93,7 +92,6 @@ describe('background queue — payload parsing on read', () => {
         expect(job.payload).toEqual({
             content_kind: 'pdf',
             maxPages: 7,
-            maxFileSizeMB: 25,
             timeoutSeconds: 120,
         });
     });
@@ -111,7 +109,6 @@ describe('background queue — payload parsing on read', () => {
         expect(peek.jobs![0].payload).toEqual({
             content_kind: 'pdf',
             maxPages: null,
-            maxFileSizeMB: 25,
             timeoutSeconds: 120,
         });
     });
@@ -139,7 +136,7 @@ describe('background queue — payload parsing on read', () => {
             content_kind: 'pdf',
             payload_kind: 'structured',
             job_type: 'document_extract',
-            // Missing maxFileSizeMB and timeoutSeconds.
+            // Missing timeoutSeconds.
             payload: { content_kind: 'pdf', maxPages: null } as unknown as BackgroundJobPayload,
         });
         const peek = await backgroundPeek();
@@ -156,7 +153,6 @@ describe('background queue — payload parsing on read', () => {
             payload: {
                 content_kind: 'pdf',
                 maxPages: 'all',
-                maxFileSizeMB: 25,
                 timeoutSeconds: 120,
             } as unknown as BackgroundJobPayload,
         });

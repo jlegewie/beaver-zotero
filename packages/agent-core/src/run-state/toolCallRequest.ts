@@ -129,6 +129,7 @@ export const TOOL_BASE_LABELS: Record<string, string> = {
     search_in_attachments: 'Search in attachments',
     find_in_attachments: 'Find in attachments',
     read_file: 'Retrieving data',
+    read_documentation: 'Reading documentation',
     load_tool_results: 'Loading tool results',
     view_pages: 'Viewing pages',
     view_page_images: 'Viewing pages',
@@ -158,7 +159,11 @@ export const TOOL_BASE_LABELS: Record<string, string> = {
     external_search: 'Web search',
     lookup_work: 'Lookup work',
 
+    // Batch operations
+    batch_start: 'Batch operations',
+    batch_resolve: 'Batch operations',
+
     // Framework tools
-    load_capability: 'Loading skill',
+    load_capability: 'Loading tools',
     search_tools: 'Finding tools',
 };

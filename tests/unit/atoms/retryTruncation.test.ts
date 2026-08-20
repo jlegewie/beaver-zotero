@@ -474,6 +474,54 @@ describe('retry via synchronous truncation', () => {
             expect(request.retry_keep_run_ids).toBeUndefined();
         });
 
+        it('resumes a run the backend cut off, which is not an error run', async () => {
+            // How a shutdown-interrupted run comes back from the backend:
+            // status `canceled`, with the cause in `error.reason_code`.
+            store.set(threadRunsAtom, [makeRun('a'), makeRun('interrupted', {
+                status: 'canceled',
+                error: {
+                    type: 'canceled',
+                    message: 'The client closed the connection',
+                    reason_code: 'client_closed',
+                },
+            })]);
+
+            await store.set(resumeFromRunAtom, 'interrupted');
+
+            expect(truncateMock).not.toHaveBeenCalled();
+            expect(threadRunIds()).toEqual(['a', 'interrupted']);
+            const request = sentRequest();
+            expect(request.user_prompt.is_resume).toBe(true);
+            expect(request.user_prompt.resumes_run_id).toBe('interrupted');
+        });
+
+        it.each([
+            ['the user stopped it', 'client_cancel'],
+            ['nothing says why it ended', undefined],
+        ])('refuses to resume a canceled run when %s', async (_label, reasonCode) => {
+            store.set(threadRunsAtom, [makeRun('canceled', {
+                status: 'canceled',
+                error: reasonCode
+                    ? { type: 'canceled', message: 'Stopped', reason_code: reasonCode }
+                    : undefined,
+            })]);
+
+            await store.set(resumeFromRunAtom, 'canceled');
+
+            expect(connectMock).not.toHaveBeenCalled();
+        });
+
+        it('still refuses an error run the backend did not call resumable', async () => {
+            store.set(threadRunsAtom, [makeRun('failed', {
+                status: 'error',
+                error: { type: 'llm_error', message: 'boom' },
+            })]);
+
+            await store.set(resumeFromRunAtom, 'failed');
+
+            expect(connectMock).not.toHaveBeenCalled();
+        });
+
         it('a resume keeps the failed run and makes no POST', async () => {
             store.set(threadRunsAtom, [makeRun('a')]);
             store.set(activeRunAtom, makeRun('failed', {

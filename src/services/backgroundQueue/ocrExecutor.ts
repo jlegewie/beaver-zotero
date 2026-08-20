@@ -330,7 +330,6 @@ export class OcrExecutor implements JobExecutor {
         // `accessRemoteFiles` gate is already enforced by resolveAttachmentFileSource.
         const source = await resolveAttachmentFileSource({
             item: resolvedItem,
-            maxFileSizeMB: 0,
             localSizeStrategy: 'zotero-total',
         });
         this.throwIfLibraryUnavailable(record.libraryId, ctx);
@@ -442,7 +441,6 @@ export class OcrExecutor implements JobExecutor {
         const result = await loadAttachmentData({
             item,
             source,
-            maxFileSizeMB: 0,
             signal: ctx.externalAbortSignal,
             throwIfTimedOut: (phase) => {
                 if (ctx.externalAbortSignal.aborted) throw new ExternalAbortError(phase);

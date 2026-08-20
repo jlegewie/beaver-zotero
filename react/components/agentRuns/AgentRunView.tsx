@@ -1,7 +1,8 @@
 import React, { forwardRef, useMemo, useState, useCallback } from 'react';
 import { useAtomValue } from 'jotai';
-import { AgentRun, ModelResponse, ToolCallPart } from '@beaver/agent-core/agents/types';
-import { isAutoLoadingToolCall } from './ModelResponseView';
+import { AgentRun, ToolCallPart } from '@beaver/agent-core/agents/types';
+import { shouldShowRunStatus } from '@beaver/agent-core/run-state/runStatusVisibility';
+import { shouldOfferResume, wasRunContinued } from '@beaver/agent-core/run-state/runResumeHelpers';
 import { UserRequestView } from './UserRequestView';
 import { ModelMessagesView } from './ModelMessagesView';
 import { AgentRunFooter } from './AgentRunFooter';
@@ -9,8 +10,9 @@ import { SuggestionsView } from './SuggestionsView';
 import { RunErrorDisplay } from './RunErrorDisplay';
 import { RunWarningDisplay } from './RunWarningDisplay';
 import { RunResumeDisplay } from './RunResumeDisplay';
+import { RunInterruptedDisplay } from './RunInterruptedDisplay';
 import { threadWarningsAtom } from '../../atoms/warnings';
-import { getToolCallStatus, toolResultsMapAtom, resumedRunIdsAtom } from '@beaver/agent-core/run-state/atoms';
+import { toolResultsMapAtom, resumedRunIdsAtom } from '@beaver/agent-core/run-state/atoms';
 import { streamingDoneRunIdsAtom } from '../../atoms/agentRunAtoms';
 import { getHost } from '@beaver/agent-ui/host';
 
@@ -18,22 +20,6 @@ interface AgentRunViewProps {
     run: AgentRun;
     isLastRun: boolean;
 }
-
-/** Check if there's any visible content in the run's model messages */
-const hasVisibleContent = (run: AgentRun): boolean => {
-    if (run.model_messages.length === 0) return false;
-    
-    // Check the last message for visible content
-    const lastMessage = run.model_messages[run.model_messages.length - 1];
-    if (lastMessage.kind !== 'response') return false;
-    
-    const response = lastMessage as ModelResponse;
-    return response.parts.some(part =>
-        (part.part_kind === 'text' && part.content.trim() !== '') ||
-        (part.part_kind === 'thinking' && part.content.trim() !== '') ||
-        (part.part_kind === 'tool-call' && !isAutoLoadingToolCall(part))
-    );
-};
 
 /**
  * Container component for a single agent run.
@@ -49,30 +35,27 @@ export const AgentRunView = React.memo(forwardRef<HTMLDivElement, AgentRunViewPr
     const streamingDoneRunIds = useAtomValue(streamingDoneRunIdsAtom);
     const isPostProcessing = streamingDoneRunIds.has(run.id);
 
-    // Check if any tool calls are currently in progress
-    const hasInprogressToolcalls = useMemo(() => {
-        for (const message of run.model_messages) {
-            if (message.kind === 'response') {
-                for (const part of message.parts) {
-                    if (part.part_kind === 'tool-call') {
-                        if (getToolCallStatus(part.tool_call_id, resultsMap, run.status) === 'in_progress') {
-                            return true;
-                        }
-                    }
-                }
-            }
-        }
-        return false;
-    }, [run.model_messages, resultsMap]);
+    // A run a later run continued: its error card or resume offer and its
+    // footer give way to the continuation's, and it shows the subtle resume
+    // line instead. Covers a failed run and an interrupted one alike.
+    const wasResumed = wasRunContinued(run, resumedRunIds);
 
-    // Check if this error run was resumed (to hide error display)
-    const wasResumed = hasError && resumedRunIds.has(run.id);
+    // A run that was cut off (Beaver closed, connection dropped, server
+    // restarted) rather than finished or stopped by the user gets an offer to
+    // continue it.
+    const offerResume = shouldOfferResume(run, { isLastRun, resumedRunIds });
 
     // Don't show user message for resume runs (empty content)
     const showUserMessage = !run.user_prompt.is_resume || run.user_prompt.content.length > 0;
     
-    // Only show spinner when streaming AND no visible content yet AND no tool calls in progress
-    const showStatusIndicator = isLastRun && isStreaming && !hasVisibleContent(run) && !hasInprogressToolcalls;
+    // Only the newest run: further up the thread a run that is still working is
+    // one the conversation has moved past, and its gap is not what the reader is
+    // waiting on.
+    const runHasNothingToShow = useMemo(
+        () => shouldShowRunStatus(run, resultsMap),
+        [run, resultsMap],
+    );
+    const showStatusIndicator = isLastRun && runHasNothingToShow;
 
     // Show agent run footer
     const showAgentRunFooter =
@@ -133,6 +116,11 @@ export const AgentRunView = React.memo(forwardRef<HTMLDivElement, AgentRunViewPr
             {/* Error display (includes retry/resume buttons) - hide if run was resumed */}
             {hasError && run.error && !wasResumed && (
                 <RunErrorDisplay runId={run.id} error={run.error} isLastRun={isLastRun} />
+            )}
+
+            {/* Offer to continue a run that was cut off mid-response */}
+            {offerResume && (
+                <RunInterruptedDisplay runId={run.id} reasonCode={run.error?.reason_code} />
             )}
 
             {/* Footer with sources and action buttons (only for completed runs, or error runs that were resumed) */}

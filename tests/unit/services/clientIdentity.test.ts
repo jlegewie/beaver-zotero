@@ -32,7 +32,7 @@ describe('client identity provider registry', () => {
     it('calls the provider fresh on every resolution', async () => {
         const { setClientIdentityProvider, resolveClientIdentity } =
             await import('@beaver/agent-core/transport/clientIdentity');
-        const provider = vi.fn<[], ClientIdentity>(() => ({
+        const provider = vi.fn<() => ClientIdentity>(() => ({
             frontendVersion: '0.22.0',
             clientType: 'zotero-plugin',
             clientFeatures: [],

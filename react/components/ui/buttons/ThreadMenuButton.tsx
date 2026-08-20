@@ -7,6 +7,7 @@ import { copyToClipboard } from '../../../utils/clipboard';
 import { renderToMarkdown, renderToHTML, preprocessNoteContent } from '../../../utils/citationRenderers';
 import { getBeaverNoteFooterHTML } from '../../../utils/noteActions';
 import { extractThreadContent, ExtractThreadContentOptions } from '../../../utils/threadContent';
+import { resolveToolCallLabelEnrichMap } from '../../../utils/toolCallLabelEnrich';
 import { allRunsAtom, toolResultsMapAtom } from '@beaver/agent-core/run-state/atoms';
 import { currentThreadIdAtom, currentThreadNameAtom, newThreadAtom, recentThreadsAtom, ThreadData } from '../../../atoms/threads';
 import { citationMapAtom } from '@beaver/agent-core/citations/atoms';
@@ -51,24 +52,31 @@ const ThreadMenuButton: React.FC<ThreadMenuButtonProps> = ({
         return { threadId, threadName };
     };
 
-    const getThreadContent = (overrides?: Partial<ExtractThreadContentOptions>) => {
+    /**
+     * Tool-call labels need host-resolved library/collection names, which are
+     * resolved asynchronously — without them a list_* label falls back to the
+     * raw library ref ("u") instead of the library name.
+     */
+    const getThreadContent = async (overrides?: Partial<ExtractThreadContentOptions>) => {
         const { threadId, threadName } = getThreadMeta();
+        const enrichMap = await resolveToolCallLabelEnrichMap(runs, toolResultsMap);
         return extractThreadContent(runs, toolResultsMap, {
             threadId,
             threadName,
             includeRunLinks: true,
+            enrichMap,
             ...overrides,
         });
     };
 
     const handleCopyThread = async () => {
-        const content = getThreadContent();
+        const content = await getThreadContent();
         const formatted = renderToMarkdown(content);
         await copyToClipboard(formatted);
     };
 
     const handleSaveAsNote = async () => {
-        const content = getThreadContent({ includeRunLinks: false, userMessageAsBlockquote: true });
+        const content = await getThreadContent({ includeRunLinks: false, userMessageAsBlockquote: true });
         const renderContent = preprocessNoteContent(content);
         const renderContextData = await prepareCitationRenderContext(renderContent, {
             citationDataMap,
@@ -112,7 +120,7 @@ const ThreadMenuButton: React.FC<ThreadMenuButtonProps> = ({
     };
 
     const handleSaveAsChildNote = async () => {
-        const content = getThreadContent({ includeRunLinks: false, userMessageAsBlockquote: true });
+        const content = await getThreadContent({ includeRunLinks: false, userMessageAsBlockquote: true });
         const renderContent = preprocessNoteContent(content);
         const renderContextData = await prepareCitationRenderContext(renderContent, {
             citationDataMap,

@@ -278,7 +278,6 @@ export class FulltextUpsertExecutor implements JobExecutor {
         if (!item || safeIsInTrash(item) === true) return null;
         const source = await resolveAttachmentFileSource({
             item,
-            maxFileSizeMB: 0,
             localSizeStrategy: 'stat',
         });
         if (source.kind === 'error') return null;

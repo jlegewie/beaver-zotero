@@ -14,7 +14,6 @@ export interface IndexBackgroundJobMetadata {
 export interface PdfBackgroundJobPayload extends IndexBackgroundJobMetadata {
   content_kind: "pdf";
   maxPages: number | null;
-  maxFileSizeMB: number;
   timeoutSeconds: number;
 }
 
@@ -72,11 +71,7 @@ export function parseBackgroundJobPayload(
       const payload = parsed as Partial<PdfBackgroundJobPayload>;
       const maxPagesValid =
         payload.maxPages === null || typeof payload.maxPages === "number";
-      if (
-        !maxPagesValid ||
-        typeof payload.maxFileSizeMB !== "number" ||
-        typeof payload.timeoutSeconds !== "number"
-      ) {
+      if (!maxPagesValid || typeof payload.timeoutSeconds !== "number") {
         return null;
       }
       return payload as PdfBackgroundJobPayload;

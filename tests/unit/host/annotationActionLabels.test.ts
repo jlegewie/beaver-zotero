@@ -118,3 +118,31 @@ describe("hasFailedUndo", () => {
         ])).toBe(true);
     });
 });
+
+describe("completed action labels", () => {
+    it("puts the verb-only labels into the past tense", () => {
+        expect(getActionLabel("organize_items", {}, true)).toBe("Organized");
+        expect(getActionLabel("create_items", {}, true)).toBe("Imported");
+        expect(getActionLabel("create_note", {}, true)).toBe("Created Note");
+        expect(getActionLabel("edit_metadata", {}, true)).toBe("Edited");
+        expect(getActionLabel("edit_note_batch", {}, true)).toBe("Edited Note");
+        expect(getActionLabel("create_collection", {}, true)).toBe("Created Collection");
+        expect(getActionLabel("delete_annotations", deleteData(2), true)).toBe("Deleted 2 Annotations");
+        expect(getActionLabel("edit_annotations", editData(2), true)).toBe("Edited 2 Annotations");
+    });
+
+    it("leaves the labels alone where the verb lives in the title instead", () => {
+        // manage_tags / manage_collections put "Delete tag ...", "Rename ... → ..."
+        // in the title, so a past-tense label would contradict it.
+        expect(getActionLabel("manage_tags", { name: "x" }, true)).toBe("Tag");
+        expect(getActionLabel("manage_collections", { action: "delete" }, true)).toBe("Collection");
+        // Already a noun phrase.
+        expect(getActionLabel("create_highlight_annotations", { items: [1, 2, 3] }, true)).toBe("3 Highlights");
+    });
+
+    it("defaults to the imperative, so proposals are unaffected", () => {
+        expect(getActionLabel("organize_items", {})).toBe("Organize");
+        expect(getActionLabel("create_note", {})).toBe("Create Note");
+        expect(getActionLabel("delete_annotations", deleteData(2))).toBe("Delete 2 Annotations");
+    });
+});

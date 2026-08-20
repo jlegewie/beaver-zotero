@@ -181,7 +181,7 @@ export async function handleZoteroAttachmentImageRequest(
             );
         }
         if (isRemoteOnly) {
-            const exceeded = checkRemotePdfSize(imageBytes, false, maxFileSizeMB);
+            const exceeded = checkRemotePdfSize(imageBytes, false);
             if (exceeded) {
                 return errorResponse(
                     `The image file for ${imageKey} has a file size of ${exceeded.sizeMB.toFixed(1)}MB, which exceeds the ${exceeded.maxMB}MB limit.`,

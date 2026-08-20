@@ -38,6 +38,7 @@ import {
     // Library management tools
     handleZoteroSearchRequest,
     handleListItemsRequest,
+    handleResolvePopulationRequest,
     handleGetMetadataRequest,
     handleFindAnnotationsRequest,
     handleListLibrariesRequest,
@@ -181,6 +182,7 @@ import type {
     // Library management tools
     WSZoteroSearchRequest,
     WSListItemsRequest,
+    WSResolvePopulationRequest,
     WSGetMetadataRequest,
     WSFindAnnotationsRequest,
     WSListLibrariesRequest,
@@ -225,6 +227,7 @@ const ENDPOINT_PATHS = [
     // Library management tools
     '/beaver/library/search',
     '/beaver/library/list',
+    '/beaver/library/resolve-population',
     '/beaver/library/metadata',
     '/beaver/library/find-annotations',
     '/beaver/library/libraries',
@@ -519,7 +522,6 @@ async function handleAttachmentDocumentHttpRequest(request: any) {
         external_file_key: request.external_file_key,
         mode: request.mode ?? 'structured',
         max_pages: request.max_pages,
-        max_file_size_mb: request.max_file_size_mb,
         timeout_seconds: request.timeout_seconds,
     };
 
@@ -646,6 +648,42 @@ async function handleLibraryListHttpRequest(request: any) {
         collection_name: response.collection_name,
         error: response.error,
         error_code: response.error_code,
+    };
+}
+
+/**
+ * Population resolution over HTTP. The backend's localhost frontend posts here,
+ * so the accepted body and the returned shape must stay identical to the
+ * `resolve_population` wire request/response.
+ */
+async function handleResolvePopulationHttpRequest(request: any) {
+    const wsRequest: WSResolvePopulationRequest = {
+        event: 'resolve_population_request',
+        request_id: generateRequestId(),
+        library_id: request.library_id,
+        collection_key: request.collection_key ?? null,
+        recursive: request.recursive ?? true,
+        tag: request.tag ?? null,
+        unfiled: request.unfiled ?? false,
+        untagged: request.untagged ?? false,
+        conditions: request.conditions || [],
+        item_category: request.item_category === 'attachment' ? 'attachment' : 'regular',
+        has_attachments: request.has_attachments ?? null,
+        max_items: request.max_items ?? 1000,
+    };
+
+    const response = await handleResolvePopulationRequest(wsRequest);
+
+    return {
+        item_ids: response.item_ids,
+        total_count: response.total_count,
+        truncated: response.truncated,
+        // A dropped condition widens the population; the caller must not act on
+        // ids that came back with a warning.
+        warnings: response.warnings,
+        error: response.error,
+        error_code: response.error_code,
+        available_libraries: response.available_libraries,
     };
 }
 
@@ -920,6 +958,9 @@ function registerEndpoints(): boolean {
     Zotero.Server.Endpoints['/beaver/library/list'] = 
         createEndpoint(handleLibraryListHttpRequest);
     
+    Zotero.Server.Endpoints['/beaver/library/resolve-population'] =
+        createEndpoint(handleResolvePopulationHttpRequest);
+
     Zotero.Server.Endpoints['/beaver/library/metadata'] =
         createEndpoint(handleLibraryMetadataHttpRequest);
 

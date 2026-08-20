@@ -26,3 +26,15 @@ export type {
 
 export { buildActionPopup } from './actionPopup';
 export type { ActionPopupSource } from './actionPopup';
+
+export { default as AskUserQuestionCard } from './AskUserQuestionCard';
+export type { AskUserQuestionCardProps } from './AskUserQuestionCard';
+
+export { default as BatchApprovalCard } from './BatchApprovalCard';
+export type { BatchApprovalCardProps } from './BatchApprovalCard';
+
+export { default as CreditConfirmationCard, createCreditDecisionHandlers } from './CreditConfirmationCard';
+export type { CreditConfirmationCardProps, CreditDecisionHandlers } from './CreditConfirmationCard';
+
+export { selectComposerTakeover } from './composerTakeover';
+export type { ComposerTakeover, ComposerTakeoverInput } from './composerTakeover';

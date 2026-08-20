@@ -33,7 +33,10 @@ import {
     Icon,
     ArrowDownIcon,
     ArrowRightIcon,
+    ArrowUpRightIcon,
 } from '../../../../components/icons/icons';
+import { getZoteroItemReferenceFromAgentAction } from '../../../../agents/agentActions';
+import { getCurrentCollectionKeyForItem, revealSource } from '../../../../utils/sourceUtils';
 import Button from '@beaver/agent-ui/primitives/Button';
 import IconButton from '@beaver/agent-ui/primitives/IconButton';
 import Tooltip from '@beaver/agent-ui/primitives/Tooltip';
@@ -41,10 +44,20 @@ import Tooltip from '@beaver/agent-ui/primitives/Tooltip';
 interface ReviewActionRowProps {
     runId: string;
     row: ReviewRow;
+    /**
+     * Card the row belongs to. Part of the expansion key, so the same tool call
+     * expanded in the review card does not open in the completed card too.
+     */
+    expansionScope?: 'review' | 'completed';
     /** True while any card-level bulk operation runs — row buttons are disabled. */
     isBulkRunning?: boolean;
     /** Retains the row in the current card snapshot before its status changes. */
     onResolved?: (actionIds: string[]) => void;
+    /**
+     * Dismisses the row's card. Set only when the row *is* the whole card, so
+     * the dismiss belongs on the row's own control cluster.
+     */
+    onDismiss?: () => void;
     /** True when rendered inside the aggregate card; the parent draws the border/background. */
     inGroup?: boolean;
 }
@@ -60,8 +73,10 @@ const GHOST_BUTTON_STYLE: React.CSSProperties = { padding: '3px 6px' };
 export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
     runId,
     row,
+    expansionScope = 'review',
     isBulkRunning = false,
     onResolved,
+    onDismiss,
     inGroup = false,
 }) => {
     const [isProcessing, setIsProcessing] = useState(false);
@@ -75,7 +90,7 @@ export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
 
     // Expansion lives in the global panel state so it survives pane switches and
     // the separate window, like every other action card.
-    const expansionKey = `${runId}:review:${row.toolcallId}`;
+    const expansionKey = `${runId}:${expansionScope}:${row.toolcallId}`;
     const expansionState = useAtomValue(toolExpandedAtom);
     const setExpanded = useSetAtom(setToolExpandedAtom);
     const isExpanded = expansionState[expansionKey] ?? false;
@@ -175,12 +190,35 @@ export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
         }
     }, [isUndoRetry, handleUndo, handleApply]);
 
+    // Reveal is offered per row rather than by making the header text clickable,
+    // which already toggles the preview. Only a single-action row has one item to
+    // reveal; a multi-item create_items row does not.
+    const revealReference = row.actions.length === 1
+        ? getZoteroItemReferenceFromAgentAction(firstAction)
+        : null;
+
+    const handleReveal = useCallback(async () => {
+        if (!revealReference) return;
+        // Reveal within the current collection when the item belongs to it,
+        // instead of switching to the library root.
+        const collectionKey = await getCurrentCollectionKeyForItem(
+            revealReference.library_id,
+            revealReference.zotero_key,
+        );
+        revealSource(revealReference, collectionKey);
+    }, [revealReference]);
+
     const toggleExpanded = useCallback(
         () => setExpanded({ key: expansionKey, expanded: !isExpanded }),
         [expansionKey, isExpanded, setExpanded],
     );
 
-    const label = getActionLabel(row.actionType, firstAction.proposed_data);
+    // Past tense once the change is in the library, so the row does not read as a
+    // proposal ("Organize") for something that has already happened. An undone or
+    // rejected row keeps the imperative: its ✓ would apply it anew.
+    const isInEffect = row.actions.some((action) => action.status === 'applied'
+        || (action.status === 'error' && action.result_data != null));
+    const label = getActionLabel(row.actionType, firstAction.proposed_data, isInEffect);
     const title = getActionTitle(row.actionType, firstAction.proposed_data, itemTitle, row.actions);
     const previewData = buildPreviewData(row.actionType, null, firstAction);
 
@@ -188,7 +226,7 @@ export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
         ? 'display-flex flex-col min-w-0'
         : 'border-popup rounded-md display-flex flex-col min-w-0';
     const headerRowClassName = [
-        'display-flex flex-row items-start py-15 gap-1',
+        'display-flex flex-row items-center py-15 gap-1',
         inGroup ? '' : 'bg-senary',
         isExpanded ? 'border-bottom-quinary' : '',
     ].filter(Boolean).join(' ');
@@ -205,7 +243,7 @@ export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
                     onMouseEnter={() => setIsHovered(true)}
                     onMouseLeave={() => setIsHovered(false)}
                 >
-                    <div className="display-flex mt-015" style={{ flexShrink: 0 }}>
+                    <div className="display-flex items-center scale-11" style={{ flexShrink: 0 }}>
                         <Icon icon={headerIcon} className={!isHovered ? headerIconClassName : undefined} />
                     </div>
                     <div
@@ -226,7 +264,20 @@ export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
 
                 <div className="flex-1" />
 
-                <div className="display-flex flex-row items-center gap-1 mr-3 mt-010" style={{ flexShrink: 0 }}>
+                <div className="display-flex flex-row items-center gap-2 mr-3 mt-010" style={{ flexShrink: 0 }}>
+                    {revealReference && !isBusy && (
+                        <Tooltip content="Show in library" showArrow singleLine>
+                            <IconButton
+                                icon={ArrowUpRightIcon}
+                                variant="ghost-secondary"
+                                iconClassName="font-color-secondary scale-10"
+                                onClick={handleReveal}
+                                disabled={isDisabled}
+                                ariaLabel="Show in library"
+                            />
+                        </Tooltip>
+                    )}
+
                     {(config.showUndo || (isBusy && activeButton === 'undo')) && (
                         <Tooltip content={row.actionType === 'create_note' ? 'Delete' : 'Undo'} showArrow singleLine>
                             <IconButton
@@ -275,6 +326,17 @@ export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
                                 onClick={handleApply}
                                 disabled={isDisabled}
                                 loading={isBusy && activeButton === 'approve'}
+                            />
+                        </Tooltip>
+                    )}
+
+                    {onDismiss && !isBusy && (
+                        <Tooltip content="Dismiss" showArrow singleLine>
+                            <IconButton
+                                icon={CancelIcon}
+                                variant="ghost-secondary"
+                                onClick={onDismiss}
+                                ariaLabel="Dismiss"
                             />
                         </Tooltip>
                     )}

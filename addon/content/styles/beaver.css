@@ -576,19 +576,13 @@
     color: var(--fill-tertiary);
 }
 
-/* Compact numeric fields in SettingsRows. Hide the platform spinner so the
- * control matches other preference inputs. */
-[id^="beaver-pane-"] .preference-input[type="number"] {
-    appearance: textfield;
-    -moz-appearance: textfield;
+/* Compact numeric fields in SettingsRows. Keyed on a class rather than on
+ * [type="number"]: a field holding a number is not necessarily a number input,
+ * and the one here deliberately is not — see the credit limit, which needs an
+ * unparseable entry to survive to be rejected rather than be sanitized to the
+ * empty string that means "never ask". */
+[id^="beaver-pane-"] .preference-input-numeric {
     text-align: center;
-}
-
-[id^="beaver-pane-"] .preference-input[type="number"]::-webkit-inner-spin-button,
-[id^="beaver-pane-"] .preference-input[type="number"]::-webkit-outer-spin-button {
-    -webkit-appearance: none;
-    appearance: none;
-    margin: 0;
 }
 
 
