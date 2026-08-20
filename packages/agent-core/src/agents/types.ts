@@ -289,10 +289,19 @@ export interface AgentRun {
 
     /** Status */
     status: AgentRunStatus;
-    /** Error details when status is 'error' */
+    /**
+     * Error details when status is 'error', and the termination record the
+     * backend writes on a run it stopped (status 'canceled').
+     */
     error?: {
         type: string;
         message: string;
+        /**
+         * Why a 'canceled' run ended: the user's own stop ('client_cancel')
+         * versus a run that was cut off ('client_closed', 'connection_lost',
+         * 'server_shutdown'). See `isInterruptedRun`.
+         */
+        reason_code?: string;
         /** Client-generated, sanitized details that are safe to render to users. */
         user_facing_details?: string;
         /** Technical debugging information; never render directly. */

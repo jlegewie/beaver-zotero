@@ -120,7 +120,7 @@ describe('offering to reopen an interrupted chat', () => {
 
         expect(popup()).toMatchObject({
             type: 'info',
-            title: 'Chat interrupted',
+            title: 'Beaver chat was interrupted',
             expire: false,
         });
         expect(popup()?.text).toContain('Protein folding');

@@ -19,6 +19,46 @@ export function lingeringCompletedRun(activeRun: AgentRun | null): AgentRun | nu
     };
 }
 
+/**
+ * Termination causes the backend records on a run it stopped because the
+ * client went away, in `error.reason_code`. A user's own stop is
+ * `client_cancel` and is deliberately absent: that run ended on purpose.
+ */
+const INTERRUPTED_REASON_CODES = new Set([
+    'client_closed',
+    'connection_lost',
+    'server_shutdown',
+]);
+
+/**
+ * True when a run was cut off rather than finished or deliberately stopped.
+ *
+ * The backend stores such a run as `canceled` with the cause in
+ * `error.reason_code`, so its status alone cannot tell it apart from a run the
+ * user stopped. Only a cut-off run is worth offering to continue.
+ */
+export function isInterruptedRun(run: AgentRun | null | undefined): boolean {
+    if (!run || run.status !== 'canceled') return false;
+    const reasonCode = run.error?.reason_code;
+    return typeof reasonCode === 'string' && INTERRUPTED_REASON_CODES.has(reasonCode);
+}
+
+/**
+ * Whether to offer to continue this run.
+ *
+ * Only the newest run: continuing an older one would pick up from a point the
+ * conversation has already moved past. A run that has already been resumed is
+ * continued by the run that followed it.
+ */
+export function shouldOfferResume(
+    run: AgentRun,
+    options: { isLastRun: boolean; resumedRunIds: ReadonlySet<string> },
+): boolean {
+    if (!options.isLastRun) return false;
+    if (options.resumedRunIds.has(run.id)) return false;
+    return isInterruptedRun(run);
+}
+
 export function findRunForResume(
     threadRuns: AgentRun[],
     activeRun: AgentRun | null,

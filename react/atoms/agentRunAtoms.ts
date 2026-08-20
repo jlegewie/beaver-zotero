@@ -183,7 +183,7 @@ import { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import { createZoteroItemReference } from '../utils/zoteroReferences';
 import { markExternalReferenceImportedAtom } from './externalReferences';
 import type { CreateItemProposedData, CreateItemResultData } from '@beaver/agent-core/types/agentActions/items';
-import { appendRunIfMissing, findResumeChainRoot, findRunForResume, hasOnlyThinkingParts, lingeringCompletedRun, resolveErrorRunId, toRunError } from '@beaver/agent-core/run-state/runResumeHelpers';
+import { appendRunIfMissing, findResumeChainRoot, findRunForResume, hasOnlyThinkingParts, isInterruptedRun, lingeringCompletedRun, resolveErrorRunId, toRunError } from '@beaver/agent-core/run-state/runResumeHelpers';
 import { prewarmMuPDFWorker } from '../../src/beaver-extract';
 import { BeaverTemporaryAnnotations } from '../utils/annotationUtils';
 import { isRejectedItemValidation, itemValidationResultsAtom } from './itemValidation';
@@ -572,10 +572,14 @@ async function startResumeRun(
             return;
         }
 
-        if (
-            failedRun.status !== 'error' ||
-            (options.requireResumable && !failedRun.error?.is_resumable)
-        ) {
+        // Two shapes resume. A failed run carries the backend's own verdict in
+        // `is_resumable`, which the user-driven path insists on. A run that was
+        // cut off has no such flag — nothing failed, the client went away — so
+        // its termination cause is the signal instead.
+        const isResumableError =
+            failedRun.status === 'error'
+            && (!options.requireResumable || !!failedRun.error?.is_resumable);
+        if (!isResumableError && !isInterruptedRun(failedRun)) {
             logger(`${options.logPrefix}: Run ${failedRunId} is not resumable`, 1);
             return;
         }

@@ -6,7 +6,9 @@ import {
     findResumeChainRoot,
     findRunForResume,
     hasOnlyThinkingParts,
+    isInterruptedRun,
     lingeringCompletedRun,
+    shouldOfferResume,
     resolveErrorRunId,
     toRunError,
 } from '@beaver/agent-core/run-state/runResumeHelpers';
@@ -259,5 +261,91 @@ describe('runResumeHelpers', () => {
             is_resumable: false,
             has_beaver_fallback: true,
         });
+    });
+});
+
+describe('isInterruptedRun', () => {
+    /** A canceled run as the backend stores it, with the cause it recorded. */
+    function canceledRun(reasonCode?: string): AgentRun {
+        const run = makeRun('run-1', 'canceled');
+        run.error = reasonCode
+            ? { type: 'canceled', message: 'Ended', reason_code: reasonCode }
+            : undefined;
+        return run;
+    }
+
+    it.each([
+        ['the client closed the socket', 'client_closed'],
+        ['the connection died', 'connection_lost'],
+        ['the server restarted', 'server_shutdown'],
+    ])('counts a run cut off because %s', (_label, reasonCode) => {
+        expect(isInterruptedRun(canceledRun(reasonCode))).toBe(true);
+    });
+
+    it('does not count a run the user stopped', () => {
+        expect(isInterruptedRun(canceledRun('client_cancel'))).toBe(false);
+    });
+
+    it('does not count a canceled run that never said why it ended', () => {
+        expect(isInterruptedRun(canceledRun())).toBe(false);
+    });
+
+    it('does not count an unrecognized cause', () => {
+        expect(isInterruptedRun(canceledRun('something_new'))).toBe(false);
+    });
+
+    it.each(['completed', 'error', 'in_progress'] as const)(
+        'does not count a %s run whatever its error says',
+        (status) => {
+            const run = makeRun('run-1', status);
+            run.error = { type: 'canceled', message: 'Ended', reason_code: 'client_closed' };
+            expect(isInterruptedRun(run)).toBe(false);
+        },
+    );
+
+    it('counts nothing when there is no run', () => {
+        expect(isInterruptedRun(null)).toBe(false);
+        expect(isInterruptedRun(undefined)).toBe(false);
+    });
+});
+
+describe('shouldOfferResume', () => {
+    function interruptedRun(id = 'run-1'): AgentRun {
+        const run = makeRun(id, 'canceled');
+        run.error = { type: 'canceled', message: 'Ended', reason_code: 'client_closed' };
+        return run;
+    }
+
+    const noneResumed: ReadonlySet<string> = new Set<string>();
+
+    it('offers to continue the newest cut-off run', () => {
+        expect(shouldOfferResume(interruptedRun(), { isLastRun: true, resumedRunIds: noneResumed })).toBe(true);
+    });
+
+    it('says nothing about a cut-off run the conversation moved past', () => {
+        expect(shouldOfferResume(interruptedRun(), { isLastRun: false, resumedRunIds: noneResumed })).toBe(false);
+    });
+
+    it('stops offering once the run has been resumed', () => {
+        const run = interruptedRun();
+
+        expect(shouldOfferResume(run, {
+            isLastRun: true,
+            resumedRunIds: new Set([run.id]),
+        })).toBe(false);
+    });
+
+    it('says nothing about a run that ended normally', () => {
+        expect(shouldOfferResume(makeRun('run-1', 'completed'), {
+            isLastRun: true,
+            resumedRunIds: noneResumed,
+        })).toBe(false);
+    });
+
+    it('leaves a failed run to the error card', () => {
+        const run = makeRun('run-1', 'error');
+        run.error = { type: 'llm_error', message: 'boom', is_resumable: true };
+
+        expect(shouldOfferResume(run, { isLastRun: true, resumedRunIds: noneResumed })).toBe(false);
     });
 });

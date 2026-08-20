@@ -2,6 +2,7 @@ import React, { forwardRef, useMemo, useState, useCallback } from 'react';
 import { useAtomValue } from 'jotai';
 import { AgentRun, ToolCallPart } from '@beaver/agent-core/agents/types';
 import { shouldShowRunStatus } from '@beaver/agent-core/run-state/runStatusVisibility';
+import { shouldOfferResume } from '@beaver/agent-core/run-state/runResumeHelpers';
 import { UserRequestView } from './UserRequestView';
 import { ModelMessagesView } from './ModelMessagesView';
 import { AgentRunFooter } from './AgentRunFooter';
@@ -9,6 +10,7 @@ import { SuggestionsView } from './SuggestionsView';
 import { RunErrorDisplay } from './RunErrorDisplay';
 import { RunWarningDisplay } from './RunWarningDisplay';
 import { RunResumeDisplay } from './RunResumeDisplay';
+import { RunInterruptedDisplay } from './RunInterruptedDisplay';
 import { threadWarningsAtom } from '../../atoms/warnings';
 import { toolResultsMapAtom, resumedRunIdsAtom } from '@beaver/agent-core/run-state/atoms';
 import { streamingDoneRunIdsAtom } from '../../atoms/agentRunAtoms';
@@ -35,6 +37,11 @@ export const AgentRunView = React.memo(forwardRef<HTMLDivElement, AgentRunViewPr
 
     // Check if this error run was resumed (to hide error display)
     const wasResumed = hasError && resumedRunIds.has(run.id);
+
+    // A run that was cut off (Beaver closed, connection dropped, server
+    // restarted) rather than finished or stopped by the user gets an offer to
+    // continue it.
+    const offerResume = shouldOfferResume(run, { isLastRun, resumedRunIds });
 
     // Don't show user message for resume runs (empty content)
     const showUserMessage = !run.user_prompt.is_resume || run.user_prompt.content.length > 0;
@@ -107,6 +114,11 @@ export const AgentRunView = React.memo(forwardRef<HTMLDivElement, AgentRunViewPr
             {/* Error display (includes retry/resume buttons) - hide if run was resumed */}
             {hasError && run.error && !wasResumed && (
                 <RunErrorDisplay runId={run.id} error={run.error} isLastRun={isLastRun} />
+            )}
+
+            {/* Offer to continue a run that was cut off mid-response */}
+            {offerResume && (
+                <RunInterruptedDisplay runId={run.id} reasonCode={run.error?.reason_code} />
             )}
 
             {/* Footer with sources and action buttons (only for completed runs, or error runs that were resumed) */}
