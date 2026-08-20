@@ -4,8 +4,8 @@ import IconButton from '@beaver/agent-ui/primitives/IconButton';
 import { copyToClipboard } from '../../../utils/clipboard';
 
 interface CopyButtonProps {
-    /** Text content to copy */
-    content: string;
+    /** Text content to copy, or a provider resolved when the button is clicked */
+    content: string | (() => string | Promise<string>);
     /** Optional class name for styling */
     className?: string;
     /** Optional callback when copy is successful */
@@ -38,7 +38,8 @@ const CopyButton: React.FC<CopyButtonProps> = ({
     const handleCopy = async (e: React.MouseEvent) => {
         e.stopPropagation();
         
-        const formattedContent = formatContent(content);
+        const raw = typeof content === 'function' ? await content() : content;
+        const formattedContent = formatContent(raw);
         
         await copyToClipboard(formattedContent, {
             onSuccess: () => {

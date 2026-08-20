@@ -22,6 +22,7 @@ export { default as StarSolidIcon } from './StarSolidIcon';
 export { default as IdeaIcon } from './IdeaIcon';
 export { default as SettingsIcon } from './SettingsIcon';
 export { default as ToolsIcon } from './ToolsIcon';
+export { default as WrenchIcon } from './WrenchIcon';
 export { default as PictureInPictureIcon } from './PictureInPictureIcon';
 export { default as TaskDoneIcon } from './TaskDoneIcon';
 export { default as TaskDailyIcon } from './TaskDailyIcon';

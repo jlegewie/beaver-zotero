@@ -67,6 +67,7 @@ declare namespace _ZoteroTypes {
       "onboardingWelcomeShownAt": string;
       "versionUpdatePopupShownAt": string;
       "onboardingSignInTextShown": boolean;
+      "interruptedThread": string;
       "threadsClaimKey": string;
       "mcpServerEnabled": boolean;
       "mcpCreateNoteToolEnabled": boolean;
@@ -79,6 +80,7 @@ declare namespace _ZoteroTypes {
       "librarySuggestions": string;
       "librarySuggestionsGeneratedAt": string;
       "firstRunAssignments": string;
+      "maxAttachmentFileSizeMB": number;
     };
   }
 }

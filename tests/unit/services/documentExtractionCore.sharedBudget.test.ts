@@ -93,7 +93,6 @@ const runPdf = (overrides: Partial<ExtractAndCacheResolvedPdfArgs> = {}) =>
         contentType: 'application/pdf',
         mode: 'structured',
         maxPages: null,
-        maxFileSizeMB: 0,
         timeoutSeconds: 60,
         workerName: 'hot',
         ...overrides,

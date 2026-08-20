@@ -23,7 +23,6 @@ export async function loadPdfData(
     const result = await loadAttachmentData({
         item,
         source,
-        maxFileSizeMB: 0,
         skipSizeCheck: true,
         onRemoteDownloadFailure: onRemoteFailure,
     });
@@ -37,7 +36,6 @@ export async function loadPdfData(
 export function checkRemotePdfSize(
     data: Uint8Array,
     skipLimits?: boolean,
-    maxFileSizeMB?: number,
 ): { sizeMB: number; maxMB: number } | null {
-    return checkAttachmentDataSize(data, skipLimits, maxFileSizeMB);
+    return checkAttachmentDataSize(data, skipLimits);
 }

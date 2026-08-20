@@ -27,6 +27,7 @@ vi.mock('../../../react/atoms/profile', () => ({
 vi.mock('../../../src/services/agentDataProvider/utils', () => ({
     getCollectionByIdOrName: vi.fn(),
     validateLibraryAccess: vi.fn(),
+    resolveStoredTagName: vi.fn(),
     isLibrarySearchable: vi.fn(() => true),
     getSearchableLibraries: vi.fn(() => []),
     extractYear: vi.fn(() => null),
@@ -69,7 +70,7 @@ vi.mock('../../../src/utils/zoteroSerializers', async (importOriginal) => {
 });
 
 import { handleListItemsRequest } from '../../../src/services/agentDataProvider/handleListItemsRequest';
-import { getAttachmentInfoForItem, getCollectionByIdOrName, validateLibraryAccess } from '../../../src/services/agentDataProvider/utils';
+import { getAttachmentInfoForItem, getCollectionByIdOrName, resolveStoredTagName, validateLibraryAccess } from '../../../src/services/agentDataProvider/utils';
 
 type MockItem = Omit<
     Partial<Zotero.Item>,
@@ -120,10 +121,16 @@ function makeItem(overrides: Partial<MockItem> = {}): MockItem {
 describe('handleListItemsRequest', () => {
     const searchResults: number[][] = [];
     const itemsById = new Map<number, MockItem>();
+    const searches: { addCondition: ReturnType<typeof vi.fn>; search: ReturnType<typeof vi.fn> }[] = [];
+
+    /** Every ['field', 'operator', 'value'] the handler put on its search. */
+    const addedConditions = () =>
+        searches.flatMap(search => search.addCondition.mock.calls.map(call => call.slice(0, 3)));
 
     beforeEach(() => {
         vi.clearAllMocks();
         searchResults.length = 0;
+        searches.length = 0;
         itemsById.clear();
 
         (validateLibraryAccess as any).mockReturnValue({
@@ -147,10 +154,15 @@ describe('handleListItemsRequest', () => {
             annotations_count: item.isFileAttachment?.() ? item.getAnnotations?.().length ?? 0 : 0,
         } as any));
 
+        vi.mocked(resolveStoredTagName).mockResolvedValue({ found: true, name: 'to-read' });
+
         class MockSearch {
             libraryID = 1;
             addCondition = vi.fn();
             search = vi.fn(async () => searchResults.shift() ?? []);
+            constructor() {
+                searches.push(this);
+            }
         }
 
         (globalThis as any).Zotero.Search = MockSearch;
@@ -427,4 +439,90 @@ describe('handleListItemsRequest', () => {
             expect.objectContaining({ result_type: 'attachment', status: 'unreadable' })
         );
     });
+
+    describe('tag filter', () => {
+        it('searches the casing the library stores, not the one the caller sent', async () => {
+            const item = makeItem({ id: 1, key: 'ITEM1' });
+            itemsById.set(1, item);
+            searchResults.push([1]);
+
+            const response = await handleListItemsRequest({
+                type: 'list_items',
+                request_id: 'req-tag-casing',
+                library_id: 1,
+                tag: 'TO-READ',
+            } as any);
+
+            expect(response.error).toBeUndefined();
+            expect(resolveStoredTagName).toHaveBeenCalledWith(1, 'My Library', 'TO-READ');
+            expect(addedConditions()).toContainEqual(['tag', 'is', 'to-read']);
+            expect(addedConditions()).not.toContainEqual(['tag', 'is', 'TO-READ']);
+        });
+
+        it('keeps a collection child whose tag differs only in casing from the caller\'s', async () => {
+            // The primary search resolves to the stored casing; the child
+            // expansion compares tag names itself, so it has to resolve too or
+            // the child is dropped from a listing its parent matched.
+            const parent = makeItem({
+                id: 1,
+                key: 'PARENT',
+                itemType: 'journalArticle',
+                getNotes: vi.fn(() => [2]),
+                getAttachments: vi.fn(() => []),
+            });
+            const note = makeItem({
+                id: 2,
+                key: 'NOTE',
+                itemType: 'note',
+                parentItemID: parent.id,
+                isNote: vi.fn(() => true),
+                isRegularItem: vi.fn(() => false),
+                getDisplayTitle: vi.fn(() => 'Note'),
+                getTags: vi.fn(() => [{ tag: 'to-read' }]),
+            });
+            itemsById.set(parent.id, parent);
+            itemsById.set(note.id, note);
+            searchResults.push([parent.id], [parent.id]);
+
+            const response = await handleListItemsRequest({
+                event: 'list_items_request',
+                request_id: 'req-child-tag-casing',
+                library_id: 1,
+                collection_key: 'COLLECTION',
+                tag: 'TO-READ',
+                item_category: 'all',
+                recursive: true,
+                sort_by: 'dateModified',
+                sort_order: 'desc',
+                limit: 20,
+                offset: 0,
+            } as any);
+
+            expect(response.error).toBeUndefined();
+            expect(response.items).toContainEqual(
+                expect.objectContaining({ item_id: 'u-NOTE', result_type: 'note' })
+            );
+        });
+
+        it('reports tag_not_found rather than an empty list when the tag does not resolve', async () => {
+            vi.mocked(resolveStoredTagName).mockResolvedValue({
+                found: false,
+                error: 'Tag not found: "to-red" in library "My Library"',
+            });
+
+            const response = await handleListItemsRequest({
+                type: 'list_items',
+                request_id: 'req-tag-missing',
+                library_id: 1,
+                tag: 'to-red',
+            } as any);
+
+            expect(response.error_code).toBe('tag_not_found');
+            expect(response.error).toContain('to-red');
+            expect(response.items).toEqual([]);
+            expect(response.total_count).toBe(0);
+            expect(searches[0].search).not.toHaveBeenCalled();
+        });
+    });
+
 });

@@ -23,6 +23,7 @@ import type {
     CollectionListView,
     AttachmentSearchView,
     ExternalReferenceListView,
+    BatchOperationView,
 } from '@beaver/agent-core/run-state/toolResultViews';
 import type { ToolCallPart } from '@beaver/agent-core/agents/types';
 
@@ -42,6 +43,19 @@ const itemListView = (count: number): ItemListView => ({
     items: Array.from({ length: count }, (_, i) => ({
         kind: 'item' as const, library_id: 1, zotero_key: `K${i}`, display_name: `Item ${i}`,
     })),
+});
+
+const batchView = (overrides: Partial<BatchOperationView> = {}): BatchOperationView => ({
+    view_type: 'batch_operation',
+    tool_name: 'batch_start',
+    batch_id: 'b1',
+    title: 'Batch operation',
+    status: 'active',
+    status_label: '',
+    scope_primary: '23 items',
+    scope_secondary: 'in Methods',
+    goal: 'File into the matching subject collection',
+    ...overrides,
 });
 
 const annotationView = (sources: string[]): AnnotationListView => ({
@@ -163,6 +177,17 @@ describe('getToolResultLabelSuffix', () => {
         expect(getToolResultLabelSuffix(view, 'find_in_attachments')).toBe(' (4 matches)');
     });
 
+    it('carries the batch population line for a running batch', () => {
+        expect(getToolResultLabelSuffix(batchView(), 'batch_start')).toBe(' (23 items)');
+    });
+
+    it('says how an ended batch ended instead of how big it was', () => {
+        expect(getToolResultLabelSuffix(batchView({ status: 'cancelled', status_label: 'Declined' }), 'batch_start'))
+            .toBe(' (Declined)');
+        expect(getToolResultLabelSuffix(batchView({ status: 'completed', status_label: 'Completed' }), 'batch_start'))
+            .toBe(' (Completed)');
+    });
+
     it('returns a found count for lookup_work', () => {
         const view: ExternalReferenceListView = {
             view_type: 'external_reference_list', tool_name: 'lookup_work', references: [], found_count: 2,
@@ -175,6 +200,10 @@ describe('getToolResultRenderableCount (expansion gating)', () => {
     it('counts item-list rows, including zero (so empty results do not expand)', () => {
         expect(getToolResultRenderableCount(itemListView(3))).toBe(3);
         expect(getToolResultRenderableCount(itemListView(0))).toBe(0);
+    });
+
+    it('never gates a batch card on a count (it always has a goal to show)', () => {
+        expect(getToolResultRenderableCount(batchView())).toBeNull();
     });
 
     it('uses total_count for collection lists', () => {

@@ -934,7 +934,6 @@ export type BackgroundJobPayloadKind = 'structured' | 'markdown';
 export interface PdfBackgroundJobPayload {
     content_kind: 'pdf';
     maxPages: number | null;
-    maxFileSizeMB: number;
     timeoutSeconds: number;
 }
 

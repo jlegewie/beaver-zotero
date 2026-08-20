@@ -69,7 +69,6 @@ describe('extractAndCacheDocument timeout handling', () => {
             zoteroKey: 'ABCD1234',
             mode: 'structured',
             maxPages: null,
-            maxFileSizeMB: 0,
             timeoutSeconds: 0.01,
             workerName: 'background',
         });
@@ -100,7 +99,6 @@ describe('extractAndCacheDocument timeout handling', () => {
             zoteroKey: 'ABCD1234',
             mode: 'structured',
             maxPages: null,
-            maxFileSizeMB: 0,
             timeoutSeconds: 60,
             workerName: 'background',
             externalAbortSignal: external.signal,
@@ -136,7 +134,6 @@ describe('extractAndCacheDocument timeout handling', () => {
             contentType: 'application/pdf',
             mode: 'structured',
             maxPages: null,
-            maxFileSizeMB: 10,
             timeoutSeconds: 40,
             workerName: 'hot',
         });
@@ -179,7 +176,6 @@ describe('extractAndCacheDocument timeout handling', () => {
             contentType: 'application/pdf',
             mode: 'structured',
             maxPages: null,
-            maxFileSizeMB: 10,
             timeoutSeconds: 40,
             workerName: 'hot',
             externalAbortSignal: external.signal,
@@ -219,7 +215,6 @@ describe('extractAndCacheDocument timeout handling', () => {
             contentType: 'application/pdf',
             mode: 'structured',
             maxPages: null,
-            maxFileSizeMB: 10,
             timeoutSeconds: 40,
             workerName: 'hot',
             externalAbortSignal: external.signal,
@@ -272,7 +267,6 @@ describe('extractAndCacheDocument timeout handling', () => {
             contentType: 'application/pdf',
             mode: 'structured',
             maxPages: null,
-            maxFileSizeMB: 10,
             timeoutSeconds: 1,
             workerName: 'hot',
         });
@@ -326,7 +320,6 @@ describe('extractAndCacheDocument timeout handling', () => {
             contentType: 'application/pdf',
             mode: 'structured',
             maxPages: null,
-            maxFileSizeMB: 10,
             timeoutSeconds: 1,
             workerName: 'hot',
         });

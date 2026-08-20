@@ -520,7 +520,6 @@ async function loadRemoteData(attachment: Zotero.Item, filePath: string): Promis
     const result = await loadAttachmentData({
         item: attachment,
         source: { kind: 'remote', filePath, isRemoteOnly: true },
-        maxFileSizeMB: effectiveMaxFileSizeMB(),
     });
     if (result.kind === 'ok') {
         return result.data;

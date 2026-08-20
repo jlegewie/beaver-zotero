@@ -21,6 +21,7 @@ import { ItemStub } from '@beaver/agent-core/types/zotero';
 import { serializeNote, serializeItemStub } from '../../utils/zoteroSerializers';
 import { libraryRefForLibraryID, modelObjectId } from '../../utils/libraryIdentity';
 import { validateLibraryAccess, extractYear, formatCreatorsString, getAttachmentInfoForItem, degradedAttachmentRow, isReadableItemField, readItemField } from './utils';
+import { addSearchCondition } from './searchConditions';
 
 
 /**
@@ -172,51 +173,17 @@ export async function handleZoteroSearchRequest(
 
         // Add search conditions
         for (const condition of request.conditions) {
-            let operator = condition.operator;
-            let value = condition.value ?? '';
-            const originalOperator = operator;
-
-            // Map operator names if needed
-            const operatorMap: Record<string, string> = {
-                'is': 'is',
-                'isNot': 'isNot',
-                'contains': 'contains',
-                'doesNotContain': 'doesNotContain',
-                'beginsWith': 'beginsWith',
-                'isLessThan': 'isLessThan',
-                'isGreaterThan': 'isGreaterThan',
-                'isBefore': 'isBefore',
-                'isAfter': 'isAfter',
-                'isInTheLast': 'isInTheLast',
-            };
-
-            operator = operatorMap[operator] || operator;
-
-            // Handle search for empty fields (Zotero quirk)
-            // "field is empty" must be expressed as "field doesNotContain ''"
-            if (operator === 'is' && (value === null || value === undefined || value === '')) {
-                operator = 'doesNotContain';
-                value = '';
-            }
-
             const isScoped = scopeSearch !== null && isScopableCollectionCondition(condition);
-            const field = condition.field as _ZoteroTypes.Search.Conditions;
-            const searchOperator = operator as _ZoteroTypes.Search.Operator;
-            const searchValue = String(value);  // Ensure value is always a string
-
-            try {
-                if (isScoped) {
-                    scopeSearch!.addCondition(field, searchOperator, searchValue);
-                    scopedConditionCount++;
-                } else {
-                    search.addCondition(field, searchOperator, searchValue);
-                }
-            } catch (err) {
-                const msg = err instanceof Error ? err.message : String(err);
-                logger(`handleZoteroSearchRequest: Invalid condition ${condition.field} ${originalOperator}: ${msg}`, 1);
-                warnings.push(
-                    `Dropped condition field='${condition.field}' operator='${originalOperator}' value='${String(condition.value ?? '')}': ${msg}`
-                );
+            // Two calls rather than one call on a chosen target: forming the
+            // union of the two search types trips TS2589 ("type instantiation
+            // is excessively deep").
+            const added = isScoped
+                ? addSearchCondition(scopeSearch!, condition, warnings, 'handleZoteroSearchRequest')
+                : addSearchCondition(search, condition, warnings, 'handleZoteroSearchRequest');
+            // Only a condition Zotero accepted narrows the scope; see the
+            // scopedConditionCount guard below.
+            if (added && isScoped) {
+                scopedConditionCount++;
             }
         }
 
