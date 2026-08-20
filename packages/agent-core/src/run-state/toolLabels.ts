@@ -812,9 +812,9 @@ function computeMainLabel(
             // args.id is the stable, persisted capability id (e.g. "zotero_annotations").
             const id = args.id as string | undefined;
             if (id) {
-                return `Loading skill: ${truncate(capabilityLabel(id), 30)}`;
+                return `Loading tools: ${truncate(capabilityLabel(id), 30)}`;
             }
-            return 'Loading skill';
+            return 'Loading tools';
         }
 
         case 'search_tools': {

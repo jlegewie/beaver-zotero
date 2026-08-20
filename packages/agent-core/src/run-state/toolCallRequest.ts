@@ -164,6 +164,6 @@ export const TOOL_BASE_LABELS: Record<string, string> = {
     batch_resolve: 'Batch operations',
 
     // Framework tools
-    load_capability: 'Loading skill',
+    load_capability: 'Loading tools',
     search_tools: 'Finding tools',
 };
