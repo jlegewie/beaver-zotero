@@ -242,7 +242,7 @@ describe('ProviderConnection', () => {
         expect(JSON.parse(sent[0])).toMatchObject({
             type: 'resolve_population',
             request_id: 'req-1',
-            error: 'Unknown event type: resolve_population_request',
+            error: 'Unknown event type: resolve_population_request. Do not try this operation again.',
             error_code: 'internal_error',
         });
     });
