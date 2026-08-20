@@ -132,6 +132,8 @@ const NON_EXPANDABLE_TOOLS = new Set([
     'load_capability',
     'search_tools',
     'load_tool_results',
+    'batch_start',
+    'batch_resolve',
 ]);
 
 /** Tools that support streaming argument preview */
