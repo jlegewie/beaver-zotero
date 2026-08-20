@@ -268,13 +268,24 @@ export const clearRetainedReviewActionsForRunAtom = atom(
 // ---------------------------------------------------------------------------
 
 /**
- * Action ids written to Zotero during this app session.
+ * Action ids written to Zotero *by a live run* in this app session.
  *
- * The completed-changes card is scoped to this set rather than to the `applied`
- * status: a create_note action stays `applied` forever, so a status-driven card
- * would grow back onto the bottom of every thread the user ever reopens, while
- * the in-stream cards already carry that history. Recorded centrally in
- * `ackAgentActionsAtom`, the single funnel every apply path acknowledges through.
+ * The completed-changes card summarizes what a run changed on its own, so the
+ * set holds only the writes the run itself made — the ones the user approved
+ * while it was streaming and the ones an always-apply permission let it make
+ * without asking. Changes the user applies from the review card after the run
+ * ended are deliberately excluded: that card already shows them resolved, and
+ * repeating them below it would show the same tool call twice.
+ *
+ * Scoped to this set rather than to the `applied` status because a create_note
+ * action stays `applied` forever, so a status-driven card would grow back onto
+ * the bottom of every thread the user ever reopens, while the in-stream cards
+ * already carry that history.
+ *
+ * Recorded where a run's write completes: the WS handlers for backend-executed
+ * actions, and the client-side auto-apply paths (`autoApplyAnnotationAgentActions`,
+ * `autoCreateNoteAgentActions`). Not in `ackAgentActionsAtom` — that funnel also
+ * carries the post-run applies this set must not contain.
  *
  * Session-only on purpose, and deliberately not cleared by
  * `resetMessageUIStateAtom`: switching threads and coming back within one
@@ -282,7 +293,7 @@ export const clearRetainedReviewActionsForRunAtom = atom(
  */
 export const sessionAppliedActionIdsAtom = atom<ReadonlySet<string>>(new Set<string>());
 
-/** Record actions as applied in this session, making them completed-card material. */
+/** Record a live run's writes, making them completed-card material. */
 export const recordAppliedActionsAtom = atom(
     null,
     (get, set, actionIds: string[]) => {

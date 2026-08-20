@@ -44,8 +44,9 @@ export function useReviewRows(runId: string): ReviewRow[] {
 }
 
 /**
- * The rows of changes this run already wrote to Zotero in this session, for the
- * same reason `useReviewRows` is a hook.
+ * The rows of changes this run wrote to Zotero itself, for the same reason
+ * `useReviewRows` is a hook. Scoped to writes the run made while it was live —
+ * see `sessionAppliedActionIdsAtom`.
  */
 export function useCompletedRows(runId: string): ReviewRow[] {
     const getAgentActionsByRun = useAtomValue(getAgentActionsByRunAtom);

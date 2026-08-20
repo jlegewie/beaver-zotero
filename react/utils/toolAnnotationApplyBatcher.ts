@@ -5,6 +5,7 @@ import { logger } from '@beaver/agent-core/platform/logger';
 import { AnnotationResultData } from '@beaver/agent-core/types/agentActions/base';
 import { updateAgentActionsAtom, AgentAction, AgentActionUpdate, isAnnotationAgentAction } from '../agents/agentActions';
 import { applyAnnotation } from './annotationActions';
+import { recordAppliedActionsAtom } from '../atoms/messageUIState';
 
 const DEFAULT_FLUSH_TIMEOUT_MS = 250;
 const MAX_QUEUE_SIZE = 50;
@@ -207,6 +208,11 @@ export class ToolAnnotationApplyBatcher {
         if (ackErrorUpdates.length > 0) {
             store.set(updateAgentActionsAtom, ackErrorUpdates);
         }
+
+        // Annotations this run auto-applied belong in its completed-changes
+        // card. Keyed on the Zotero write, not the ack: an ack that failed left
+        // the annotation in the library all the same.
+        store.set(recordAppliedActionsAtom, Array.from(ackIndex.keys()));
 
         const backendUpdatePromises: Promise<void>[] = [];
 

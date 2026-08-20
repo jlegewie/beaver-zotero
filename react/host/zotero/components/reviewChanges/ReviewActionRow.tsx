@@ -226,7 +226,7 @@ export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
         ? 'display-flex flex-col min-w-0'
         : 'border-popup rounded-md display-flex flex-col min-w-0';
     const headerRowClassName = [
-        'display-flex flex-row items-start py-15 gap-1',
+        'display-flex flex-row items-center py-15 gap-1',
         inGroup ? '' : 'bg-senary',
         isExpanded ? 'border-bottom-quinary' : '',
     ].filter(Boolean).join(' ');
@@ -243,7 +243,7 @@ export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
                     onMouseEnter={() => setIsHovered(true)}
                     onMouseLeave={() => setIsHovered(false)}
                 >
-                    <div className="display-flex mt-015" style={{ flexShrink: 0 }}>
+                    <div className="display-flex scale-11" style={{ flexShrink: 0 }}>
                         <Icon icon={headerIcon} className={!isHovered ? headerIconClassName : undefined} />
                     </div>
                     <div
@@ -264,7 +264,7 @@ export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
 
                 <div className="flex-1" />
 
-                <div className="display-flex flex-row items-center gap-1 mr-3 mt-010" style={{ flexShrink: 0 }}>
+                <div className="display-flex flex-row items-center gap-2 mr-3 mt-010" style={{ flexShrink: 0 }}>
                     {revealReference && !isBusy && (
                         <Tooltip content="Show in library" showArrow singleLine>
                             <IconButton

@@ -4,7 +4,6 @@ import { isLibraryReferencePortable, resolveItemReference, resolveLibraryRef } f
 import { checkLibraryExcluded } from '../../src/services/agentDataProvider/utils';
 import { dismissDiffPreview } from '../utils/noteEditorDiffPreview';
 import { updateDiffPreviewForNote, diffPreviewNoteKeyAtom } from '../utils/diffPreviewCoordinator';
-import { recordAppliedActionsAtom } from '../atoms/messageUIState';
 import { agentActionsService, AckActionLink } from '@beaver/agent-core/transport/clients/agentActionsService';
 import { notifyApprovalRequest } from '../../src/services/systemNotifications';
 import type { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
@@ -343,9 +342,10 @@ export const updateAgentActionsAtom = atom(
 export const ackAgentActionsAtom = atom(
     null,
     async (_, set, runId: string, actionResultData: AckActionLink[]) => {
-        // Every path that reaches `applied` acknowledges here, so this is the one
-        // place the completed-changes card needs to learn about a write.
-        set(recordAppliedActionsAtom, actionResultData.map((result) => result.action_id));
+        // Note: this is not where the completed-changes card learns about a
+        // write. Both a run's own writes and the applies the user makes from
+        // the review card afterwards acknowledge here, and the card shows only
+        // the former — see `sessionAppliedActionIdsAtom`.
 
         // Frontend: Update UI state
         set(threadAgentActionsAtom, (prev: AgentAction[]) => {

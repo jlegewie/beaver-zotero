@@ -29,8 +29,8 @@ export interface BuildReviewRowsOptions {
     /** Actions resolved from this card that stay in its current session snapshot. */
     retainedActionIds?: ReadonlySet<string>;
     /**
-     * Action ids applied in this session (`sessionAppliedActionIdsAtom`). The
-     * only source for `'completed'` mode, which ignores the action status: an
+     * Action ids a live run wrote in this session (`sessionAppliedActionIdsAtom`).
+     * The only source for `'completed'` mode, which ignores the action status: an
      * action stays in the completed card once undone or re-applied, so the row
      * does not vanish out from under the click that changed it.
      */
@@ -72,9 +72,10 @@ export function isBulkApplicable(action: AgentAction): boolean {
  * tool call, the same unit the in-stream card renders.
  *
  * `'pending'` mode feeds the review card, `'completed'` mode the card of changes
- * already applied. The two are disjoint by construction: a completed row is only
- * offered once the review card has let go of it (`retainedActionIds`), so the
- * hand-off between the cards never shows the same tool call twice.
+ * the run itself wrote. The two are disjoint by construction: a completed row is
+ * only offered once the review card has let go of it (`retainedActionIds`), and
+ * the completed set holds no action the review card could have owned, since a
+ * run's own write is never pending.
  */
 export function buildReviewRows(
     actions: AgentAction[],

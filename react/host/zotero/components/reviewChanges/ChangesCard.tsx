@@ -266,7 +266,7 @@ export const ChangesCard: React.FC<ChangesCardProps> = ({ run, rows, mode = 'rev
     return (
         <div className="border-popup rounded-md display-flex flex-col min-w-0" style={exitStyle}>
             <div
-                className={`display-flex flex-row py-15 bg-senary items-start ${isExpanded ? 'border-bottom-quinary' : ''}`}
+                className={`display-flex flex-row py-15 bg-senary items-center ${isExpanded ? 'border-bottom-quinary' : ''}`}
             >
                 <button
                     type="button"
@@ -278,7 +278,7 @@ export const ChangesCard: React.FC<ChangesCardProps> = ({ run, rows, mode = 'rev
                     onMouseLeave={() => setIsHovered(false)}
                 >
                     <div className="display-flex flex-row ml-3 gap-2">
-                        <div className="flex-1 display-flex mt-010 font-color-primary">
+                        <div className="flex-1 display-flex font-color-primary scale-11">
                             <Icon icon={headerIcon} className={headerIconClassName} />
                         </div>
                         <div className="display-flex">
