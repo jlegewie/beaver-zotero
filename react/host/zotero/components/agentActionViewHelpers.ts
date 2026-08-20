@@ -20,6 +20,7 @@ import {
     EditIcon,
 } from '../../../components/icons/icons';
 import { truncateText } from '@beaver/agent-ui/utils/stringUtils';
+import { countEditAnnotationTargets } from './reviewChangeRows';
 
 export type ActionStatus = 'pending' | 'applied' | 'rejected' | 'undone' | 'error';
 
@@ -209,43 +210,29 @@ export function hasFailedUndo(actions: AgentAction[]): boolean {
 }
 
 /**
- * Annotations targeted by an edit_annotations action. A delete carries a flat
- * list; an edit carries them inside its per-group `edits` entries.
+ * Get human-readable label for the action.
  *
- * Both shapes are counted: an approved action carries resolved
- * `annotation_refs`, while streaming tool arguments still hold the model's
- * `annotation_ids`.
- */
-function countAnnotationTargets(value: any): number {
-    return value?.annotation_refs?.length ?? value?.annotation_ids?.length ?? 0;
-}
-
-function countEditAnnotationTargets(actionData?: Record<string, any>): number {
-    const flat = countAnnotationTargets(actionData);
-    if (flat) return flat;
-    return (actionData?.edits ?? []).reduce(
-        (sum: number, group: any) => sum + countAnnotationTargets(group),
-        0,
-    );
-}
-
-/**
- * Get human-readable label for the action
+ * `completed` switches the labels whose whole text is the verb into the past
+ * tense, for the surfaces that describe a change already made rather than one
+ * being proposed. The types left alone are the ones whose label is a noun
+ * ("3 Highlights") or whose verb lives in the title instead (manage_tags,
+ * manage_collections) — past-tensing those would fight the title.
  */
 export function getActionLabel(
     toolName: string,
     actionData?: Record<string, any>,
+    completed = false,
 ): string {
     switch (toolName) {
         case 'edit_metadata':
         case 'edit_item':
-            return 'Edit';
+            return completed ? 'Edited' : 'Edit';
         case 'edit_note':
-            return 'Note Edit';
+            return completed ? 'Edited Note' : 'Note Edit';
         case 'edit_note_batch':
-            return 'Note Edits';
+            return completed ? 'Edited Note' : 'Note Edits';
         case 'create_note':
-            return 'Create Note';
+            return completed ? 'Created Note' : 'Create Note';
         case 'create_highlight_annotations': {
             const count = actionData?.items?.length ?? 0;
             return count > 1
@@ -266,20 +253,21 @@ export function getActionLabel(
         case 'edit_annotations':
         case 'delete_annotations': {
             const count = countEditAnnotationTargets(actionData);
-            const verb = toolName === 'delete_annotations' || actionData?.operation === 'delete'
-                ? 'Delete'
-                : 'Edit';
+            const isDelete = toolName === 'delete_annotations' || actionData?.operation === 'delete';
+            const verb = isDelete
+                ? (completed ? 'Deleted' : 'Delete')
+                : (completed ? 'Edited' : 'Edit');
             return count > 1
                 ? `${verb} ${count} Annotations`
                 : `${verb} Annotation`;
         }
         case 'create_item':
         case 'create_items':
-            return 'Import';
+            return completed ? 'Imported' : 'Import';
         case 'create_collection':
-            return 'Create Collection';
+            return completed ? 'Created Collection' : 'Create Collection';
         case 'organize_items':
-            return 'Organize';
+            return completed ? 'Organized' : 'Organize';
         case 'manage_tags':
             return 'Tag';
         case 'manage_collections':

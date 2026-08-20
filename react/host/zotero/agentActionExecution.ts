@@ -121,6 +121,19 @@ async function undoWithOverwriteConfirmation(
     return result;
 }
 
+/**
+ * Whether an action still has a change in Zotero that an undo can reverse.
+ *
+ * `applied` is the ordinary case. An `error` that kept its `result_data` is a
+ * failed undo — the change is still in the library, and the surfaces offer
+ * "Retry Undo" for it, so it has to survive the filter that a retry passes
+ * through. A failed *apply* clears `result_data` and is correctly excluded.
+ */
+function isUndoable(action: AgentAction): boolean {
+    return action.status === 'applied'
+        || (action.status === 'error' && action.result_data != null);
+}
+
 function toFailures(actions: AgentAction[], error: string, errorDetails?: Record<string, any>): AgentActionFailure[] {
     return actions.map((action) => ({ actionId: action.id, error, errorDetails }));
 }
@@ -314,7 +327,9 @@ async function undoClaimedActions(set: Setter, actions: AgentAction[]): Promise<
             await dismissActiveEditNotePreview();
         }
         if (actionType === 'create_item') {
-            const actionsToUndo = actions.filter((candidate) => candidate.status === 'applied');
+            // Includes the actions whose undo failed earlier: a retry of a
+            // partially undone batch has nothing else left to work on.
+            const actionsToUndo = actions.filter(isUndoable);
             if (actionsToUndo.length === 0) return { undone, failed };
 
             const batchResult = await undoCreateItemActions(actionsToUndo);
@@ -370,9 +385,9 @@ async function undoClaimedActions(set: Setter, actions: AgentAction[]): Promise<
             error_name: error?.name,
             ...(error?.code ? { error_code: error.code } : {}),
         };
-        const appliedActions = actions.filter((candidate) => candidate.status === 'applied');
-        if (appliedActions.length > 0) {
-            set(setAgentActionsToErrorAtom, appliedActions.map((candidate) => candidate.id), errorMessage, errorDetails);
+        const undoableActions = actions.filter(isUndoable);
+        if (undoableActions.length > 0) {
+            set(setAgentActionsToErrorAtom, undoableActions.map((candidate) => candidate.id), errorMessage, errorDetails);
         }
         // Only a thrown failure sets fatalError — callers use it to point
         // Retry back at undo instead of re-applying. Per-action batch

@@ -264,6 +264,53 @@ export const clearRetainedReviewActionsForRunAtom = atom(
 );
 
 // ---------------------------------------------------------------------------
+// Applied changes session snapshot
+// ---------------------------------------------------------------------------
+
+/**
+ * Action ids written to Zotero during this app session.
+ *
+ * The completed-changes card is scoped to this set rather than to the `applied`
+ * status: a create_note action stays `applied` forever, so a status-driven card
+ * would grow back onto the bottom of every thread the user ever reopens, while
+ * the in-stream cards already carry that history. Recorded centrally in
+ * `ackAgentActionsAtom`, the single funnel every apply path acknowledges through.
+ *
+ * Session-only on purpose, and deliberately not cleared by
+ * `resetMessageUIStateAtom`: switching threads and coming back within one
+ * session should not drop what the user has not dismissed.
+ */
+export const sessionAppliedActionIdsAtom = atom<ReadonlySet<string>>(new Set<string>());
+
+/** Record actions as applied in this session, making them completed-card material. */
+export const recordAppliedActionsAtom = atom(
+    null,
+    (get, set, actionIds: string[]) => {
+        if (actionIds.length === 0) return;
+        const current = get(sessionAppliedActionIdsAtom);
+        const next = new Set(current);
+        for (const actionId of actionIds) next.add(actionId);
+        set(sessionAppliedActionIdsAtom, next);
+    },
+);
+
+/**
+ * Drop actions from the session snapshot, which is how the completed-changes
+ * card is dismissed. Nothing about the action records changes: the change stays
+ * applied in Zotero and in history — only this session's card forgets it.
+ */
+export const dismissAppliedActionsAtom = atom(
+    null,
+    (get, set, actionIds: string[]) => {
+        const current = get(sessionAppliedActionIdsAtom);
+        const next = new Set(current);
+        let removed = false;
+        for (const actionId of actionIds) removed = next.delete(actionId) || removed;
+        if (removed) set(sessionAppliedActionIdsAtom, next);
+    },
+);
+
+// ---------------------------------------------------------------------------
 // Note panels (button + visibility)
 // ---------------------------------------------------------------------------
 
