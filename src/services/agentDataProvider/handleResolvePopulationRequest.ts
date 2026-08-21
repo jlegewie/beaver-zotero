@@ -7,6 +7,14 @@
  * handler must never load or serialize items (that is what made the old
  * `list_items` paging loop cost O(library)), and the order it returns must be
  * deterministic.
+ *
+ * Filters are ANDed, except that `collection_keys` and `tags` are each an
+ * OR-group inside that AND: the population is the items in ANY of the
+ * collections that also carry ANY of the tags. An OR-group is expressed as a
+ * scope search (see `orGroupScope`) rather than as conditions on the main
+ * search, because Zotero's join mode is per-search — flipping the main search
+ * to 'any' would turn its item-type guards into always-true disjuncts and
+ * select the whole library.
  */
 
 import { logger } from '@beaver/agent-core/platform/logger';
@@ -137,8 +145,39 @@ function errorResponse(
 }
 
 /**
+ * A search matching the union of `values` under one condition name.
+ *
+ * `joinMode any` is safe here and nowhere else in this handler: the scope
+ * search carries nothing but this one group, so there is no ANDed guard for
+ * the OR to swallow. The caller intersects it into the population with
+ * `setScope`, which is what keeps the group ANDed with everything else.
+ *
+ * Returns null for an empty group — an unscoped search matches the whole
+ * library, so attaching one would widen the population instead of narrowing
+ * it.
+ */
+function orGroupScope(
+    libraryID: number,
+    condition: 'collection' | 'tag',
+    values: string[],
+): Zotero.Search | null {
+    if (values.length === 0) return null;
+
+    // Returned as `Zotero.Search`, not `ZoteroSearchWritable`: `setScope`
+    // takes the former, and checking the interface against it trips TS2589
+    // ("type instantiation is excessively deep") at the call site.
+    const scope = new Zotero.Search() as unknown as ZoteroSearchWritable;
+    scope.libraryID = libraryID;
+    scope.addCondition('joinMode', 'any', '');
+    for (const value of values) {
+        scope.addCondition(condition, 'is', value);
+    }
+    return scope as unknown as Zotero.Search;
+}
+
+/**
  * Handle resolve_population request from backend.
- * Runs one native Zotero search with every filter ANDed and returns ids only.
+ * Runs one native Zotero search with every filter group ANDed and returns ids only.
  */
 export async function handleResolvePopulationRequest(
     request: WSResolvePopulationRequest
@@ -173,67 +212,71 @@ export async function handleResolvePopulationRequest(
                 'invalid_request',
             );
         }
-        if (request.tag === '') {
+        const requestedTags = request.tags ?? [];
+        const requestedCollectionKeys = request.collection_keys ?? [];
+        if (requestedTags.some((tag) => !tag)) {
             return errorResponse(
                 request.request_id,
-                'tag was empty. Pass an exact tag name, or use untagged=true to select items with no tags.',
+                'tags contained an empty entry. Pass exact tag names, or use untagged=true to select items with no tags.',
                 'invalid_request',
             );
         }
-        if (request.collection_key === '') {
+        if (requestedCollectionKeys.some((key) => !key)) {
             return errorResponse(
                 request.request_id,
-                'collection_key was empty. Pass a collection key from list_collections, or omit it.',
+                'collection_keys contained an empty entry. Pass collection keys from list_collections, or omit the filter.',
                 'invalid_request',
             );
         }
 
-        // Resolve the collection scope. The wire always carries a BARE key;
-        // the backend has already down-converted a library-qualified one.
-        // The name is kept alongside the id: it is the only thing that turns
-        // the key back into something the approval card can show the user.
-        let collectionId: number | null = null;
-        let collectionName: string | null = null;
-        if (request.collection_key) {
-            const collection = Zotero.Collections.getByLibraryAndKey(library.libraryID, request.collection_key);
+        // Resolve the collection scope. The wire always carries BARE keys; the
+        // backend has already down-converted library-qualified ones. The names
+        // are kept alongside: they are the only thing that turns the keys back
+        // into something the approval card can show the user, and they are
+        // returned in the order the request named them.
+        //
+        // A key the library does not have fails the whole request. Zotero's
+        // own answer for an unknown collection is to match nothing, which the
+        // backend would read as "these filters select no items" and hand the
+        // model as a reason to change the filters rather than fix the key.
+        const collectionNames: string[] = [];
+        for (const key of requestedCollectionKeys) {
+            const collection = Zotero.Collections.getByLibraryAndKey(library.libraryID, key);
             if (!collection) {
                 return errorResponse(
                     request.request_id,
-                    `Collection not found: "${request.collection_key}" in library "${library.name}". `
+                    `Collection not found: "${key}" in library "${library.name}". `
                         + 'Use list_collections to get the collection key.',
                     'collection_not_found',
                 );
             }
-            collectionId = collection.id;
-            collectionName = collection.name;
+            collectionNames.push(collection.name);
         }
 
         // Warnings are surfaced to the backend so the agent can correct bad
         // conditions rather than mutate a silently-widened population.
         const warnings: string[] = [];
 
-        // One search, join mode 'all' — never add a `joinMode` condition. With
-        // 'any', the itemType conditions below become an always-true disjunct
-        // and the population becomes the whole library.
+        // Resolve every tag to the casing the library stores; unknown tags
+        // error instead of matching nothing, for the same reason as an unknown
+        // collection key.
+        const resolvedTags: string[] = [];
+        for (const tag of requestedTags) {
+            const resolved = await resolveStoredTagName(library.libraryID, library.name, tag);
+            if (!resolved.found) {
+                return errorResponse(request.request_id, resolved.error, 'tag_not_found');
+            }
+            resolvedTags.push(resolved.name);
+        }
+
+        // The main search, join mode 'all' — never add a `joinMode` condition
+        // here. With 'any', the itemType conditions below become an
+        // always-true disjunct and the population becomes the whole library.
+        // The OR-groups live in their own scope searches instead.
         const search = new Zotero.Search() as unknown as ZoteroSearchWritable;
         search.libraryID = library.libraryID;
 
-        if (collectionId !== null) {
-            search.addCondition('collectionID', 'is', String(collectionId));
-            // `recursive` only affects collection conditions.
-            if (request.recursive !== false) {
-                search.addCondition('recursive', 'true', '');
-            }
-        }
-
-        if (request.tag) {
-            // Resolve to stored casing; unknown tags error instead of matching nothing.
-            const resolvedTag = await resolveStoredTagName(library.libraryID, library.name, request.tag);
-            if (!resolvedTag.found) {
-                return errorResponse(request.request_id, resolvedTag.error, 'tag_not_found');
-            }
-            search.addCondition('tag', 'is', resolvedTag.name);
-        }
+        const recursive = request.recursive !== false;
 
         // Both predicates are native Zotero conditions; emulating them in the
         // backend is what this request exists to avoid.
@@ -246,6 +289,33 @@ export async function handleResolvePopulationRequest(
 
         for (const condition of request.conditions ?? []) {
             addSearchCondition(search, condition, warnings, 'handleResolvePopulationRequest');
+        }
+
+        // `recursive` only affects collection conditions, so this is a no-op
+        // unless one was given as a condition — and it must be added for those
+        // too, or a `collection` condition would match direct membership only
+        // while `collection_keys` recursed. Mirrors handleZoteroSearchRequest.
+        if (recursive) {
+            search.addCondition('recursive', 'true', '');
+        }
+
+        // The two OR-groups. A search carries ONE scope, and scopes must not be
+        // nested: Zotero 7 materializes an outer scope from `getSQL()`, which
+        // ignores that scope's own `_scope`, so the inner group is silently
+        // dropped — and a dropped group WIDENS the population to every item the
+        // outer group matched. (Zotero 10 added a branch that runs a nested
+        // scope properly, which is exactly why the bug is invisible there.) So
+        // one group becomes the scope and the other is intersected below.
+        const collectionScope = orGroupScope(library.libraryID, 'collection', requestedCollectionKeys);
+        if (collectionScope && recursive) {
+            // `recursive` is special, not a disjunct, so it stays ANDed even
+            // under joinMode 'any' — it applies to every collection in the group.
+            collectionScope.addCondition('recursive', 'true', '');
+        }
+        const tagScope = orGroupScope(library.libraryID, 'tag', resolvedTags);
+        const scope = collectionScope ?? tagScope;
+        if (scope) {
+            search.setScope(scope, true);
         }
 
         // Every filter above describes a bibliographic item, so the search
@@ -261,6 +331,16 @@ export async function handleResolvePopulationRequest(
         search.addCondition('noChildren', 'true', '');
 
         let itemIds = await search.search();
+
+        // The group that did not become the scope, intersected here. Running it
+        // as its own search costs one ids-only query and is what makes the two
+        // groups independent of how a given Zotero version materializes a
+        // nested scope. Intersecting can only narrow, which is the safe
+        // direction for a population about to be mutated.
+        if (collectionScope && tagScope && itemIds.length > 0) {
+            const tagged = new Set(await tagScope.search());
+            itemIds = itemIds.filter(id => tagged.has(id));
+        }
 
         // has_attachments, in SQL. This is the only filter that could
         // reintroduce an O(population) item load, so it must never become a
@@ -304,7 +384,7 @@ export async function handleResolvePopulationRequest(
                 total_count: totalCount,
                 truncated: totalCount > 0,
                 library_name: library.name,
-                collection_name: collectionName,
+                collection_names: collectionNames,
                 warnings: warnings.length ? warnings : undefined,
             };
         }
@@ -338,7 +418,7 @@ export async function handleResolvePopulationRequest(
             // Where the population lives, in the names the user gave those
             // places. The approval card states the location from these alone.
             library_name: library.name,
-            collection_name: collectionName,
+            collection_names: collectionNames,
             warnings: warnings.length ? warnings : undefined,
         };
     } catch (error) {
